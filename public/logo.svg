@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200" fill="none">
+  <!-- Arabic letter ح -->
+  <text x="150" y="105" dominant-baseline="central" text-anchor="middle"
+        font-family="'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif"
+        font-size="110" fill="#8B9DB5" direction="rtl">ح</text>
+  <!-- Orange dash -->
+  <rect x="122" y="122" width="56" height="6" rx="3" fill="#E25D2F"/>
+  <!-- Arabic tagline -->
+  <text x="150" y="158" dominant-baseline="central" text-anchor="middle"
+        font-family="'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif"
+        font-size="18" fill="#5A6B7B" direction="rtl" letter-spacing="0">مقهى و محمصة حقبة</text>
+  <!-- English tagline -->
+  <text x="150" y="182" dominant-baseline="central" text-anchor="middle"
+        font-family="'Helvetica Neue', Arial, sans-serif"
+        font-size="10" fill="#A0B0BF" letter-spacing="3">HIQBAH COFFEE ROASTERS</text>
+</svg>

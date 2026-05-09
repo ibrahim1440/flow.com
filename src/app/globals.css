@@ -1,26 +1,116 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Primary Palette */
+  --slate: #738995;
+  --slate-light: #8fa3ae;
+  --slate-dark: #5a6f7a;
+  --orange: #E25D2F;
+  --orange-light: #f0816060;
+  --orange-dark: #c44a20;
+  --cream: #F8E8DC;
+  --cream-dark: #f0d9c8;
+
+  /* Secondary Palette */
+  --charcoal: #282120;
+  --brown: #9F5F46;
+  --brown-light: #b87a60;
+  --white: #FFFFFF;
+
+  /* Semantic */
+  --background: #F8E8DC;
+  --foreground: #282120;
+  --card: #FFFFFF;
+  --card-hover: #FDFAF8;
+  --border: #e8d5c4;
+  --border-light: #f0e0d2;
+  --muted: #f5ede5;
+  --muted-foreground: #7a6b60;
+
+  /* Status */
+  --success: #22c55e;
+  --success-bg: #dcfce7;
+  --warning: #f59e0b;
+  --warning-bg: #fef3c7;
+  --danger: #ef4444;
+  --danger-bg: #fecaca;
+  --info: #738995;
+  --info-bg: #e8eef1;
+
+  /* Sidebar */
+  --sidebar: #282120;
+  --sidebar-hover: #3a3230;
+  --sidebar-active: #E25D2F;
+  --sidebar-text: rgba(255, 255, 255, 0.7);
+  --sidebar-text-active: #FFFFFF;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-card: var(--card);
+  --color-card-hover: var(--card-hover);
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-slate: var(--slate);
+  --color-slate-light: var(--slate-light);
+  --color-slate-dark: var(--slate-dark);
+  --color-orange: var(--orange);
+  --color-orange-light: var(--orange-light);
+  --color-orange-dark: var(--orange-dark);
+  --color-cream: var(--cream);
+  --color-cream-dark: var(--cream-dark);
+  --color-charcoal: var(--charcoal);
+  --color-brown: var(--brown);
+  --color-brown-light: var(--brown-light);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-text-active: var(--sidebar-text-active);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Tajawal", system-ui, -apple-system, sans-serif;
+  font-weight: 400;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Tajawal", system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-completed { background: var(--success-bg); color: #166534; }
+.status-pending { background: var(--warning-bg); color: #92400e; }
+.status-in-production { background: var(--info-bg); color: #415a66; }
+.status-delivered { background: var(--success-bg); color: #166534; }
+.status-partial { background: var(--warning-bg); color: #92400e; }
+.status-not-yet { background: var(--muted); color: var(--muted-foreground); }
+.status-paid { background: var(--success-bg); color: #166534; }
+.status-not-paid { background: var(--danger-bg); color: #991b1b; }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
 }
