@@ -1,11 +1,23 @@
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client.js";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { hashSync } from "bcryptjs";
 
 const url = process.env.DATABASE_URL || "file:./prisma/dev.db";
-const adapter = new PrismaLibSql({ url });
-const prisma = new PrismaClient({ adapter });
+
+function createClient() {
+  if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
+    const { Pool } = require("pg");
+    const { PrismaPg } = require("@prisma/adapter-pg");
+    return new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: url })) });
+  }
+  const path = require("path");
+  const { PrismaLibSql } = require("@prisma/adapter-libsql");
+  const resolved = url.startsWith("file:./") || url.startsWith("file:../")
+    ? `file:${path.resolve(url.slice(5))}` : url || `file:${path.resolve("prisma/dev.db")}`;
+  return new PrismaClient({ adapter: new PrismaLibSql({ url: resolved }) });
+}
+
+const prisma = createClient();
 
 async function main() {
   // Employees

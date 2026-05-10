@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { verifyToken, parsePermissions, hasModuleAccess, canEdit, hasSubPrivilege, type UserPayload, type Permissions } from "./auth";
+import { verifyToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, canEdit, hasSubPrivilege, type UserPayload, type Permissions } from "./auth";
 import { prisma } from "./db";
 
 export async function getUser(): Promise<UserPayload | null> {
@@ -21,7 +21,10 @@ export async function getUserWithPermissions(): Promise<(UserPayload & { permiss
 
   if (!employee) return null;
 
-  const permissions = parsePermissions(employee.permissions as string);
+  let permissions = parsePermissions(employee.permissions as string);
+  if (!permissions || Object.keys(permissions).length === 0) {
+    permissions = buildDefaultPermissions(user.role);
+  }
   return { ...user, permissions };
 }
 
