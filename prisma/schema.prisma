@@ -22,6 +22,7 @@ model Employee {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   qcRecords         QcRecord[]
+  cuppingScores     CuppingScore[]
 }
 
 model Customer {
@@ -50,8 +51,9 @@ model GreenBean {
   receivedDate  DateTime @default(now())
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  orderItems    OrderItem[]
-  roastingBatches RoastingBatch[]
+  orderItems        OrderItem[]
+  roastingBatches   RoastingBatch[]
+  cuppingSessions   CuppingSession[]
 }
 
 model Order {
@@ -124,6 +126,7 @@ model RoastingBatch {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   qcRecords           QcRecord[]
+  cuppingSessions     CuppingSession[]
 }
 
 model QcRecord {
@@ -159,6 +162,46 @@ model Delivery {
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model CuppingSession {
+  id          String         @id @default(cuid())
+  name        String
+  date        DateTime       @default(now())
+  status      String         @default("Open")
+  batchId     String?
+  greenBeanId String?
+  batch       RoastingBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  greenBean   GreenBean?     @relation(fields: [greenBeanId], references: [id], onDelete: SetNull)
+  scores      CuppingScore[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model CuppingScore {
+  id                String         @id @default(cuid())
+  sessionId         String
+  session           CuppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  employeeId        String?
+  employee          Employee?      @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  externalName      String?
+  fragranceAroma    Float          @default(7)
+  flavor            Float          @default(7)
+  aftertaste        Float          @default(7)
+  acidity           Float          @default(7)
+  body              Float          @default(7)
+  balance           Float          @default(7)
+  uniformity        Float          @default(10)
+  cleanCup          Float          @default(10)
+  sweetness         Float          @default(10)
+  overall           Float          @default(7)
+  defectCups        Int            @default(0)
+  defectType        String         @default("none")
+  finalScore        Float          @default(0)
+  notes             String?        @db.Text
+  flavorDescriptors String[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 }
 
 model SystemConfig {
