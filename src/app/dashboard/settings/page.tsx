@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Settings, Trash2, AlertTriangle, CheckCircle, AlertCircle, X, ShieldOff } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Settings, Trash2, AlertTriangle, CheckCircle, AlertCircle, X, ShieldOff, ImagePlus, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/app/dashboard/layout";
@@ -11,6 +11,71 @@ export default function SettingsPage() {
   const router = useRouter();
   const user = useUser();
 
+  // ── Logo state ───────────────────────────────────────────────────────────────
+  const [logoBase64, setLogoBase64] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoMsg, setLogoMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch("/api/settings/logo")
+      .then((r) => r.json())
+      .then((d) => setLogoBase64(d.logoBase64 ?? null))
+      .catch(() => {});
+  }, []);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) fileInputRef.current = e.target;
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoMsg({ ok: false, text: "File too large. Max size is 2MB." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setLogoUploading(true);
+      setLogoMsg(null);
+      try {
+        const res = await fetch("/api/settings/logo", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ logoBase64: base64 }),
+        });
+        if (!res.ok) throw new Error("Upload failed");
+        setLogoBase64(base64);
+        setLogoMsg({ ok: true, text: "Logo updated successfully." });
+      } catch {
+        setLogoMsg({ ok: false, text: "Failed to save logo. Try again." });
+      } finally {
+        setLogoUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleRemoveLogo() {
+    setLogoUploading(true);
+    setLogoMsg(null);
+    try {
+      const res = await fetch("/api/settings/logo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logoBase64: null }),
+      });
+      if (!res.ok) throw new Error();
+      setLogoBase64(null);
+      setLogoMsg({ ok: true, text: "Logo removed. Default logo restored." });
+    } catch {
+      setLogoMsg({ ok: false, text: "Failed to remove logo." });
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  // ── Reset state ──────────────────────────────────────────────────────────────
   const [modalOpen, setModalOpen] = useState(false);
   const [phrase, setPhrase] = useState("");
   const [pin, setPin] = useState("");
@@ -93,6 +158,63 @@ export default function SettingsPage() {
         </h1>
         <p className="text-brown text-sm mt-1">{t("settingsSubtitle")}</p>
       </div>
+
+      {/* Branding */}
+      <section className="bg-white rounded-2xl shadow-sm border border-border p-6">
+        <h2 className="text-base font-bold text-charcoal mb-1 flex items-center gap-2">
+          <ImagePlus size={18} className="text-orange" />
+          الشعار / Logo
+        </h2>
+        <p className="text-sm text-brown/60 mb-5">Upload a custom logo (PNG, JPG, SVG — max 2 MB).</p>
+
+        <div className="flex items-center gap-5 flex-wrap">
+          {/* Preview */}
+          <div className="w-20 h-20 rounded-xl border-2 border-dashed border-border bg-cream flex items-center justify-center overflow-hidden flex-shrink-0">
+            {logoBase64 ? (
+              <img src={logoBase64} alt="Logo" className="w-full h-full object-contain p-1" />
+            ) : (
+              <span className="text-[36px] leading-none" style={{ fontFamily: "'Scheherazade New','Amiri',serif", color: "#8B9DB5" }}>ح</span>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={logoUploading}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50"
+            >
+              {logoUploading ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
+              تعديل الشعار / Upload Logo
+            </button>
+            {logoBase64 && (
+              <button
+                onClick={handleRemoveLogo}
+                disabled={logoUploading}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-charcoal/60 hover:text-red-500 hover:border-red-300 transition-colors disabled:opacity-50"
+              >
+                <X size={14} />
+                Remove Logo
+              </button>
+            )}
+          </div>
+        </div>
+
+        {logoMsg && (
+          <div className={`mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
+            logoMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
+          }`}>
+            {logoMsg.ok ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
+            {logoMsg.text}
+          </div>
+        )}
+      </section>
 
       {/* Danger Zone */}
       <section className="bg-white rounded-2xl shadow-sm border border-red-200 p-6">

@@ -161,6 +161,11 @@ model Delivery {
   updatedAt     DateTime @updatedAt
 }
 
+model SystemConfig {
+  id         String  @id @default("singleton")
+  logoBase64 String? @db.Text
+}
+
 model CoffeeProduct {
   id            String   @id @default(cuid())
   productNameEn String

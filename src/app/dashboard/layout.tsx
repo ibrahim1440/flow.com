@@ -12,8 +12,10 @@ import { LanguageProvider, useI18n } from "@/lib/i18n/context";
 import type { Lang, TranslationKey } from "@/lib/i18n/translations";
 
 type User = { id: string; name: string; role: string; permissions: Permissions; preferredLanguage: Lang };
-const UserContext = createContext<User | null>(null);
-export const useUser = () => useContext(UserContext);
+type AppCtx = { user: User; logoBase64: string | null };
+const UserContext = createContext<AppCtx | null>(null);
+export const useUser = () => useContext(UserContext)?.user ?? null;
+export const useLogo = () => useContext(UserContext)?.logoBase64 ?? null;
 
 const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string }[] = [
   { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },
@@ -44,6 +46,7 @@ function SidebarNav({
   const pathname = usePathname();
   const { t } = useI18n();
   const router = useRouter();
+  const logoBase64 = useLogo();
 
   const filteredNav = NAV_ITEMS.filter((item) => {
     // Settings is strictly admin-only — double-guard beyond permissions
@@ -61,10 +64,16 @@ function SidebarNav({
       {/* Logo */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
         <div className="flex items-center gap-3">
-          {/* Icon: ح + orange dash */}
-          <div className="w-11 h-11 bg-white/10 rounded-xl flex flex-col items-center justify-center shadow-lg flex-shrink-0">
-            <span className="text-[22px] text-white/90 leading-none" style={{ fontFamily: "'Scheherazade New', 'Amiri', serif" }}>ح</span>
-            <span className="block w-4 h-[3px] rounded-full mt-0.5" style={{ backgroundColor: "#E25D2F" }} />
+          {/* Logo */}
+          <div className="w-11 h-11 bg-white/10 rounded-xl flex flex-col items-center justify-center shadow-lg flex-shrink-0 overflow-hidden">
+            {logoBase64 ? (
+              <img src={logoBase64} alt="Logo" className="w-full h-full object-contain p-1" />
+            ) : (
+              <>
+                <span className="text-[22px] text-white/90 leading-none" style={{ fontFamily: "'Scheherazade New', 'Amiri', serif" }}>ح</span>
+                <span className="block w-4 h-[3px] rounded-full mt-0.5" style={{ backgroundColor: "#E25D2F" }} />
+              </>
+            )}
           </div>
           <div>
             <h2 className="font-extrabold text-sm tracking-widest text-white">HIQBAH</h2>
@@ -192,16 +201,19 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
+    Promise.all([
+      fetch("/api/auth/me").then((r) => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetch("/api/settings/logo").then((r) => r.json()).catch(() => ({ logoBase64: null })),
+    ])
+      .then(([meData, logoData]) => {
+        setUser(meData.user);
+        setLogoBase64(logoData.logoBase64 ?? null);
       })
-      .then((data) => setUser(data.user))
       .catch(() => router.push("/login"))
       .finally(() => setLoading(false));
   }, [router]);
@@ -220,7 +232,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!user) return null;
 
   return (
-    <UserContext value={user}>
+    <UserContext value={{ user, logoBase64 }}>
       <LanguageProvider lang={user.preferredLanguage ?? "ar"}>
         <DashboardShell user={user}>{children}</DashboardShell>
       </LanguageProvider>

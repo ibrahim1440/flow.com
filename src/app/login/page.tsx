@@ -12,6 +12,7 @@ const PIN_AUTO_SUBMIT_LENGTH = 4;
 const PIN_MAX_LENGTH = 8;
 
 export default function LoginPage() {
+  const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("pin");
   const [pin, setPin] = useState("");
   const [username, setUsername] = useState("");
@@ -67,6 +68,14 @@ export default function LoginPage() {
     }
   }, [username, password, loading, router]);
 
+  // ── Fetch logo ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    fetch("/api/settings/logo")
+      .then((r) => r.json())
+      .then((d) => setLogoBase64(d.logoBase64 ?? null))
+      .catch(() => {});
+  }, []);
+
   // ── Auto-submit when PIN hits the magic length ────────────────────────────
   useEffect(() => {
     if (mode !== "pin" || pin.length !== PIN_AUTO_SUBMIT_LENGTH) return;
@@ -115,11 +124,17 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="text-center mb-7">
             <div className="flex flex-col items-center mb-3">
-              <span
-                className="text-[72px] leading-none"
-                style={{ fontFamily: "'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif", color: "#8B9DB5" }}
-              >ح</span>
-              <span className="block w-10 h-[5px] rounded-full mt-3" style={{ backgroundColor: "#E25D2F", transform: "rotate(-8deg)" }} />
+              {logoBase64 ? (
+                <img src={logoBase64} alt="Logo" className="w-20 h-20 object-contain mx-auto" />
+              ) : (
+                <>
+                  <span
+                    className="text-[72px] leading-none"
+                    style={{ fontFamily: "'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif", color: "#8B9DB5" }}
+                  >ح</span>
+                  <span className="block w-10 h-[5px] rounded-full mt-3" style={{ backgroundColor: "#E25D2F", transform: "rotate(-8deg)" }} />
+                </>
+              )}
             </div>
             <h1 className="text-lg font-bold text-charcoal/80" style={{ fontFamily: "'Scheherazade New', 'Amiri', serif" }}>مقهى و محمصة حقبة</h1>
             <p className="text-[11px] tracking-[3px] text-brown/50 mt-0.5 uppercase">HIQBAH COFFEE ROASTERS</p>
