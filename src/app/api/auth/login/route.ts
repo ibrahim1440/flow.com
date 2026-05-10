@@ -36,20 +36,28 @@ export async function POST(request: Request) {
     if (!pin) {
       return NextResponse.json({ error: "PIN required" }, { status: 400 });
     }
-    // Scan all active employees and bcrypt-compare — O(n) but fine for a small team
-    const all = await prisma.employee.findMany({ where: { active: true } });
-    employee = all.find((e) => compareSync(pin, e.pin)) ?? null;
+    // Scan all employees (including inactive) to give a precise error
+    const all = await prisma.employee.findMany();
+    const matched = all.find((e) => compareSync(pin, e.pin)) ?? null;
+    if (matched && !matched.active) {
+      return NextResponse.json({ error: "الحساب معطل، يرجى مراجعة الإدارة" }, { status: 403 });
+    }
+    employee = matched;
 
   } else if (method === "password") {
     if (!username || !password) {
       return NextResponse.json({ error: "Username and password required" }, { status: 400 });
     }
-    employee = await prisma.employee.findFirst({
-      where: { active: true, OR: [{ username }, { name: username }] },
+    const matched = await prisma.employee.findFirst({
+      where: { OR: [{ username }, { name: username }] },
     });
-    if (!employee || !employee.password || !compareSync(password, employee.password)) {
+    if (matched && !matched.active) {
+      return NextResponse.json({ error: "الحساب معطل، يرجى مراجعة الإدارة" }, { status: 403 });
+    }
+    if (!matched || !matched.password || !compareSync(password, matched.password)) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
+    employee = matched;
   } else {
     return NextResponse.json({ error: "Invalid login method" }, { status: 400 });
   }

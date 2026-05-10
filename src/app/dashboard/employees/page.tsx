@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Users, Plus, Shield, Pencil, Eye, EyeOff, Lock, Navigation } from "lucide-react";
+import { Users, Plus, Shield, Pencil, Eye, EyeOff, Lock, Navigation, Trash2, AlertTriangle } from "lucide-react";
 import {
   ROLE_LABELS, ALL_MODULES, MODULE_LABELS, MODULE_SUB_PRIVILEGES,
   buildDefaultPermissions, hasSubPrivilege, hasModuleAccess,
@@ -59,8 +59,16 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard" });
+  const [form, setForm] = useState({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true });
   const [permissions, setPermissions] = useState<Permissions>(buildDefaultPermissions("custom"));
+  const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  function showToast(ok: boolean, text: string) {
+    setToast({ ok, text });
+    setTimeout(() => setToast(null), 4000);
+  }
 
   useEffect(() => { loadEmployees(); }, []);
 
@@ -71,15 +79,17 @@ export default function EmployeesPage() {
 
   function openNew() {
     setEditingId(null);
-    setForm({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard" });
+    setForm({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true });
     setPermissions(buildDefaultPermissions("custom"));
+    setDeleteConfirm(false);
     setShowForm(true);
   }
 
   function openEdit(emp: Employee) {
     setEditingId(emp.id);
-    setForm({ name: emp.name, username: emp.username || "", pin: "", password: "", role: emp.role, defaultRoute: emp.defaultRoute || "/dashboard" });
+    setForm({ name: emp.name, username: emp.username || "", pin: "", password: "", role: emp.role, defaultRoute: emp.defaultRoute || "/dashboard", active: emp.active });
     setPermissions(parsePerms(emp.permissions));
+    setDeleteConfirm(false);
     setShowForm(true);
   }
 
@@ -129,27 +139,49 @@ export default function EmployeesPage() {
     e.preventDefault();
     const body: Record<string, unknown> = {
       name: form.name, username: form.username.trim().toLowerCase(),
-      role: form.role, permissions, defaultRoute: form.defaultRoute,
+      role: form.role, permissions, defaultRoute: form.defaultRoute, active: form.active,
     };
     if (!editingId) {
       body.pin = form.pin;
       if (form.password) body.password = form.password;
-      await fetch("/api/employees", {
+      const res = await fetch("/api/employees", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!res.ok) { const d = await res.json(); showToast(false, d.error ?? "Failed to create employee"); return; }
     } else {
       if (form.pin) body.pin = form.pin;
       if (form.password) body.password = form.password;
-      await fetch(`/api/employees/${editingId}`, {
+      const res = await fetch(`/api/employees/${editingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!res.ok) { const d = await res.json(); showToast(false, d.error ?? "Failed to update employee"); return; }
     }
     setShowForm(false);
+    showToast(true, editingId ? "Employee updated successfully." : "Employee created successfully.");
     loadEmployees();
+  }
+
+  async function handleDelete() {
+    if (!editingId) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/employees/${editingId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = await res.json();
+        showToast(false, d.error ?? "Failed to delete employee.");
+        setDeleteConfirm(false);
+        return;
+      }
+      setShowForm(false);
+      showToast(true, "Employee deleted successfully.");
+      loadEmployees();
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function countAccess(perms: Permissions) {
@@ -176,6 +208,12 @@ export default function EmployeesPage() {
 
   return (
     <div className="space-y-6">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed bottom-6 ltr:right-6 rtl:left-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-xl text-sm font-bold text-white transition-all ${toast.ok ? "bg-green-600" : "bg-red-600"}`}>
+          {toast.ok ? "✓" : "✕"} {toast.text}
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-extrabold text-charcoal">{t("employees")}</h1>
@@ -194,19 +232,26 @@ export default function EmployeesPage() {
           const perms = parsePerms(emp.permissions);
           const { edit, view } = countAccess(perms);
           return (
-            <div key={emp.id} className="bg-white rounded-2xl border border-border p-5 hover:shadow-lg hover:shadow-charcoal/5 hover:border-border-light transition-all duration-300 group">
+            <div key={emp.id} className={`bg-white rounded-2xl border p-5 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300 group ${emp.active ? "border-border hover:border-border-light" : "border-red-200 bg-red-50/30 opacity-70"}`}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-slate/10 rounded-xl flex items-center justify-center group-hover:bg-slate/15 transition-colors">
-                  <Shield size={20} className="text-slate" />
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${emp.active ? "bg-slate/10 group-hover:bg-slate/15" : "bg-red-100"}`}>
+                  <Shield size={20} className={emp.active ? "text-slate" : "text-red-400"} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-charcoal">{emp.name}</p>
                   {emp.username && (
                     <p className="text-[11px] text-brown/50 font-mono font-medium">@{emp.username}</p>
                   )}
-                  <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-cream text-brown mt-0.5">
-                    {ROLE_LABELS[emp.role] || emp.role}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-cream text-brown">
+                      {ROLE_LABELS[emp.role] || emp.role}
+                    </span>
+                    {!emp.active && (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-600 border border-red-200">
+                        غير نشط · Inactive
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {canEditPerms && (
                   <button onClick={() => openEdit(emp)}
@@ -289,6 +334,23 @@ export default function EmployeesPage() {
                     placeholder="For username+password login" autoComplete="new-password" />
                 </div>
               </div>
+
+              {/* Account Status (edit only) */}
+              {editingId && (
+                <div className="flex items-center justify-between px-4 py-3 rounded-xl border-2 border-border bg-cream/50">
+                  <div>
+                    <p className="text-sm font-bold text-charcoal">حالة الحساب · Account Status</p>
+                    <p className="text-xs text-brown/50 mt-0.5">{form.active ? "Active — employee can log in" : "Inactive — login blocked"}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
+                    className={`relative w-12 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${form.active ? "bg-green-500" : "bg-red-400"}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${form.active ? "translate-x-6" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+              )}
 
               {/* Default Landing Page */}
               <div>
@@ -394,7 +456,29 @@ export default function EmployeesPage() {
                 </div>
               </div>
 
+              {/* Delete confirmation inline */}
+              {editingId && deleteConfirm && (
+                <div className="flex items-center gap-3 p-4 rounded-xl border-2 border-red-200 bg-red-50">
+                  <AlertTriangle size={18} className="text-red-500 flex-shrink-0" />
+                  <p className="text-sm text-red-700 font-medium flex-1">Are you sure you want to permanently delete this employee?</p>
+                  <button type="button" onClick={handleDelete} disabled={deleting}
+                    className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
+                    {deleting ? "Deleting…" : "Yes, Delete"}
+                  </button>
+                  <button type="button" onClick={() => setDeleteConfirm(false)}
+                    className="px-3 py-1.5 rounded-lg border border-border text-xs font-bold text-brown hover:bg-cream transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-3">
+                {editingId && user?.role === "admin" && !deleteConfirm && (
+                  <button type="button" onClick={() => setDeleteConfirm(true)}
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-red-200 text-red-500 text-sm font-bold hover:bg-red-50 hover:border-red-400 transition-colors">
+                    <Trash2 size={16} /> حذف
+                  </button>
+                )}
                 <button type="submit"
                   className="flex-1 py-3 bg-orange text-white rounded-xl font-bold hover:bg-orange-dark transition-all duration-200 shadow-md shadow-orange/20 active:scale-[0.98]">
                   {editingId ? t("saveChanges") : t("createEmployee")}
