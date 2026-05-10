@@ -15,6 +15,7 @@ export const translations = {
   analytics:      { en: "Analytics",       ar: "التحليلات" },
   labels:         { en: "Labels",          ar: "الملصقات" },
   employees:      { en: "Employees",       ar: "الموظفون" },
+  cupping:        { en: "Cupping",         ar: "التذوق" },
   settings:       { en: "System Settings", ar: "إعدادات النظام" },
   profile:        { en: "My Profile",      ar: "ملفي الشخصي" },
   signOut:        { en: "Sign Out",        ar: "تسجيل الخروج" },

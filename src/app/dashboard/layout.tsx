@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
-  Settings, UserCircle,
+  Settings, UserCircle, FlaskConical,
 } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess, type Permissions } from "@/lib/auth";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
@@ -29,6 +29,7 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string }[
   { key: "analytics",  icon: TrendingUp,      href: "/dashboard/analytics" },
   { key: "labels",     icon: Tag,             href: "/dashboard/labels" },
   { key: "employees",  icon: Users,           href: "/dashboard/employees" },
+  { key: "cupping",    icon: FlaskConical,    href: "/dashboard/cupping" },
   { key: "settings",   icon: Settings,        href: "/dashboard/settings" },
 ];
 

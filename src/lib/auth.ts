@@ -49,6 +49,7 @@ export const ALL_MODULES = [
   "analytics",
   "labels",
   "employees",
+  "cupping",
   "settings",
 ] as const;
 
@@ -66,6 +67,7 @@ export const MODULE_LABELS: Record<string, string> = {
   analytics: "Analytics",
   labels: "Labels",
   employees: "Employees",
+  cupping: "Cupping",
   settings: "System Settings",
 };
 
@@ -140,7 +142,7 @@ export function buildDefaultPermissions(role: string): Permissions {
         dashboard: allEdit("dashboard"), inventory: allEdit("inventory"),
         orders: none(), production: none(), qc: none(),
         packaging: none(), dispatch: none(), history: none(),
-        analytics: none(), labels: none(), employees: none(), settings: none(),
+        analytics: none(), labels: none(), employees: none(), cupping: none(), settings: none(),
       };
     case "roasting":
       return {
@@ -148,21 +150,21 @@ export function buildDefaultPermissions(role: string): Permissions {
         orders: allView("orders"), production: allEdit("production"),
         qc: none(), packaging: allEdit("packaging"),
         dispatch: none(), history: none(), analytics: none(),
-        labels: none(), employees: none(), settings: none(),
+        labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),
       };
     case "qc":
       return {
         dashboard: allEdit("dashboard"), inventory: none(), orders: none(),
         production: none(), qc: allEdit("qc"), packaging: none(),
         dispatch: none(), history: none(), analytics: none(),
-        labels: none(), employees: none(), settings: none(),
+        labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),
       };
     case "dispatch":
       return {
         dashboard: allEdit("dashboard"), inventory: none(), orders: allView("orders"),
         production: none(), qc: none(), packaging: none(),
         dispatch: allEdit("dispatch"), history: none(), analytics: none(),
-        labels: allEdit("labels"), employees: none(), settings: none(),
+        labels: allEdit("labels"), employees: none(), cupping: none(), settings: none(),
       };
     default:
       return Object.fromEntries(ALL_MODULES.map((m) => [m, none()]));
