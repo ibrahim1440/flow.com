@@ -1,18 +1,25 @@
-import path from "path";
 import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 function createPrismaClient() {
-  const raw = process.env.DATABASE_URL ?? "";
-  // Resolve relative file: URLs to absolute so libSQL can find the file
-  const url = raw.startsWith("file:./") || raw.startsWith("file:../")
-    ? `file:${path.resolve(raw.slice(5))}`
-    : raw || `file:${path.resolve("prisma/dev.db")}`;
+  const url = process.env.DATABASE_URL ?? "";
 
-  // PrismaLibSql is a factory — pass the config object, not a pre-created client
-  const adapter = new PrismaLibSql({ url });
+  if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
+    const { Pool } = require("pg");
+    const { PrismaPg } = require("@prisma/adapter-pg");
+    const pool = new Pool({ connectionString: url });
+    const adapter = new PrismaPg(pool);
+    return new PrismaClient({ adapter });
+  }
+
+  // Local SQLite via libSQL
+  const path = require("path");
+  const { PrismaLibSql } = require("@prisma/adapter-libsql");
+  const resolvedUrl = url.startsWith("file:./") || url.startsWith("file:../")
+    ? `file:${path.resolve(url.slice(5))}`
+    : url || `file:${path.resolve("prisma/dev.db")}`;
+  const adapter = new PrismaLibSql({ url: resolvedUrl });
   return new PrismaClient({ adapter });
 }
 
