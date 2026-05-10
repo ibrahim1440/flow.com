@@ -2,11 +2,18 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 
-export async function GET() {
+export async function GET(request: Request) {
   const { error } = await requireModule("inventory");
   if (error) return error;
 
-  const beans = await prisma.greenBean.findMany({ orderBy: { createdAt: "desc" } });
+  const { searchParams } = new URL(request.url);
+  const all = searchParams.get("all") === "1";
+
+  const beans = await prisma.greenBean.findMany({
+    where: all ? undefined : { isActive: true },
+    orderBy: { createdAt: "desc" },
+  });
+
   return NextResponse.json(beans);
 }
 

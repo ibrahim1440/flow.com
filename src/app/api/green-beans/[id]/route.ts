@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+type Params = { params: Promise<{ id: string }> };
+
+export async function PUT(request: Request, { params }: Params) {
   const { error } = await requireSub("inventory", "adjust");
   if (error) return error;
 
@@ -12,11 +14,23 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   return NextResponse.json(bean);
 }
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(_request: Request, { params }: Params) {
   const { error } = await requireSub("inventory", "adjust");
   if (error) return error;
 
   const { id } = await params;
-  await prisma.greenBean.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+
+  try {
+    await prisma.greenBean.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    if (code === "P2003" || code === "P2014") {
+      return NextResponse.json(
+        { error: "Cannot delete this bean because it has roasting history. Please deactivate it instead." },
+        { status: 400 }
+      );
+    }
+    throw err;
+  }
 }

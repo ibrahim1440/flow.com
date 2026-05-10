@@ -41,13 +41,18 @@ model GreenBean {
   id            String   @id @default(cuid())
   serialNumber  String   @unique
   beanType      String
+  beanTypeAr    String?
   country       String
+  countryAr     String?
   region        String?
+  regionAr      String?
   variety       String?
   process       String?
+  processAr     String?
   altitude      String?
   location      String?
   quantityKg    Float    @default(0)
+  isActive      Boolean  @default(true)
   receivedDate  DateTime @default(now())
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

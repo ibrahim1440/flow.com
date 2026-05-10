@@ -185,6 +185,15 @@ export const translations = {
   noBeansFound:       { en: "No beans found",         ar: "لا توجد بيانات بن" },
   searchBeans:        { en: "Search beans...",        ar: "بحث في البن..." },
   varieties:          { en: "varieties",              ar: "أصناف" },
+  actions:            { en: "Actions",                ar: "الإجراءات" },
+  activate:           { en: "Activate",              ar: "تنشيط" },
+  editBeanStock:      { en: "Edit Bean Record",       ar: "تعديل سجل البن" },
+  confirmDeleteBean:  { en: "This bean has no roasting history and will be permanently deleted. Are you sure?", ar: "لا يوجد سجل تحميص لهذا البن وسيُحذف نهائياً. هل تريد المتابعة؟" },
+  translateToAr:      { en: "Translate to Arabic",   ar: "ترجمة إلى العربية" },
+  translating:        { en: "Translating…",           ar: "جاري الترجمة…" },
+  showInactive:       { en: "Show inactive",          ar: "إظهار غير النشطة" },
+  enFields:           { en: "English",                ar: "الإنجليزية" },
+  arFields:           { en: "Arabic",                 ar: "العربية" },
 
   // ── Orders page ───────────────────────────────────────────────────────
   newOrder:           { en: "New Order",              ar: "طلب جديد" },
