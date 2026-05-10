@@ -26,20 +26,29 @@ type FormState = {
   altitude: string; location: string; quantityKg: number;
 };
 
-const EMPTY_FORM: FormState = {
-  serialNumber: "", beanType: "", beanTypeAr: "", country: "", countryAr: "",
-  region: "", regionAr: "", variety: "", process: "", processAr: "",
-  altitude: "", location: "", quantityKg: 0,
-};
+function generateSerial() {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const rand = Math.floor(Math.random() * 900 + 100);
+  return `GB-${ymd}-${rand}`;
+}
 
-// ─── Auto-translate helper ────────────────────────────────────────────────────
+function emptyForm(): FormState {
+  return {
+    serialNumber: generateSerial(), beanType: "", beanTypeAr: "",
+    country: "", countryAr: "", region: "", regionAr: "",
+    variety: "", process: "", processAr: "", altitude: "", location: "", quantityKg: 0,
+  };
+}
 
-async function translateText(text: string): Promise<string | null> {
+// ─── Translate helper (bidirectional) ─────────────────────────────────────────
+
+async function callTranslate(text: string, target: "ar" | "en"): Promise<string | null> {
   if (!text.trim()) return null;
   const res = await fetch("/api/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, target: "ar" }),
+    body: JSON.stringify({ text, target }),
   });
   if (!res.ok) return null;
   const j = await res.json();
@@ -60,20 +69,28 @@ function BeanForm({
   const { t } = useI18n();
   const [form, setForm] = useState<FormState>(initial);
   const [translating, setTranslating] = useState<Record<string, boolean>>({});
+  const [formError, setFormError] = useState("");
 
   const set = (key: keyof FormState, val: string | number) =>
     setForm((p) => ({ ...p, [key]: val }));
 
-  async function handleTranslate(enKey: keyof FormState, arKey: keyof FormState) {
-    const text = form[enKey] as string;
+  async function translate(
+    sourceKey: keyof FormState,
+    targetKey: keyof FormState,
+    targetLang: "ar" | "en",
+  ) {
+    const text = form[sourceKey] as string;
     if (!text.trim()) return;
-    setTranslating((p) => ({ ...p, [arKey]: true }));
-    const result = await translateText(text);
-    setTranslating((p) => ({ ...p, [arKey]: false }));
-    if (result) set(arKey, result);
+    setTranslating((p) => ({ ...p, [targetKey]: true }));
+    const result = await callTranslate(text, targetLang);
+    setTranslating((p) => ({ ...p, [targetKey]: false }));
+    if (result) set(targetKey, result);
   }
 
-  const bilingualFields: { enKey: keyof FormState; arKey: keyof FormState; labelEn: string; labelAr: string; required?: boolean }[] = [
+  const bilingualFields: {
+    enKey: keyof FormState; arKey: keyof FormState;
+    labelEn: string; labelAr: string; required?: boolean;
+  }[] = [
     { enKey: "beanType", arKey: "beanTypeAr", labelEn: `${t("beanType")} (EN)`, labelAr: `${t("beanType")} (AR)`, required: true },
     { enKey: "country",  arKey: "countryAr",  labelEn: `${t("country")} (EN)`,  labelAr: `${t("country")} (AR)`,  required: true },
     { enKey: "region",   arKey: "regionAr",   labelEn: `${t("region")} (EN)`,   labelAr: `${t("region")} (AR)` },
@@ -82,7 +99,29 @@ function BeanForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setFormError("");
     await onSave(form);
+  }
+
+  function TranslateBtn({
+    sourceKey, targetKey, targetLang, disabled: extraDisabled,
+  }: {
+    sourceKey: keyof FormState; targetKey: keyof FormState;
+    targetLang: "ar" | "en"; disabled?: boolean;
+  }) {
+    const busy = translating[targetKey];
+    const hasSource = !!(form[sourceKey] as string)?.trim();
+    return (
+      <button
+        type="button"
+        title={targetLang === "ar" ? t("translateToAr") : "Translate to English"}
+        onClick={() => translate(sourceKey, targetKey, targetLang)}
+        disabled={busy || !hasSource || extraDisabled}
+        className="shrink-0 px-2 py-1.5 rounded-lg bg-orange/10 text-orange hover:bg-orange/20 disabled:opacity-25 transition-colors"
+      >
+        {busy ? <span className="text-[10px] font-bold px-0.5">…</span> : <Languages size={13} />}
+      </button>
+    );
   }
 
   return (
@@ -93,23 +132,38 @@ function BeanForm({
           <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors"><X size={20} /></button>
         </div>
 
+        {formError && (
+          <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 font-medium">
+            {formError}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Serial + Qty */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">{t("serialNumber")} *</label>
-              <input value={form.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} required
-                className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors" />
+              <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">
+                {t("serialNumber")}
+                <span className="ml-1 normal-case text-brown/40 font-normal">(auto-generated)</span>
+              </label>
+              <input
+                value={form.serialNumber}
+                onChange={(e) => set("serialNumber", e.target.value)}
+                placeholder="GB-20260511-142"
+                className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm font-mono transition-colors"
+              />
             </div>
             <div>
               <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">{t("quantityKg")} *</label>
-              <input type="number" step="0.01" value={form.quantityKg}
-                onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)} required
-                className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors" />
+              <input
+                type="number" step="0.01" min="0" value={form.quantityKg} required
+                onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)}
+                className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors"
+              />
             </div>
           </div>
 
-          {/* Bilingual fields */}
+          {/* Bilingual grid */}
           <div className="rounded-xl border border-border overflow-hidden">
             <div className="grid grid-cols-2 bg-cream text-xs font-extrabold text-brown/60 uppercase tracking-widest">
               <div className="px-4 py-2 border-r border-border">{t("enFields")}</div>
@@ -118,33 +172,31 @@ function BeanForm({
             <div className="divide-y divide-border">
               {bilingualFields.map(({ enKey, arKey, labelEn, labelAr, required }) => (
                 <div key={enKey} className="grid grid-cols-2">
+                  {/* EN column — button reads AR, fills EN */}
                   <div className="px-4 py-3 border-r border-border">
                     <label className="block text-xs font-bold text-charcoal mb-1.5">{labelEn}{required ? " *" : ""}</label>
                     <div className="flex gap-1.5">
-                      <input value={form[enKey] as string}
+                      <input
+                        value={form[enKey] as string}
                         onChange={(e) => set(enKey, e.target.value)}
                         required={required}
                         className="flex-1 min-w-0 px-2.5 py-1.5 text-sm border-2 border-border rounded-lg focus:border-orange focus:ring-1 focus:ring-orange/20 outline-none transition-colors"
                       />
-                      <button type="button"
-                        title={t("translateToAr")}
-                        onClick={() => handleTranslate(enKey, arKey)}
-                        disabled={translating[arKey] || !form[enKey]}
-                        className="shrink-0 px-2 py-1.5 rounded-lg bg-orange/10 text-orange hover:bg-orange/20 disabled:opacity-30 transition-colors"
-                      >
-                        {translating[arKey]
-                          ? <span className="text-[10px] font-bold">…</span>
-                          : <Languages size={13} />}
-                      </button>
+                      <TranslateBtn sourceKey={arKey} targetKey={enKey} targetLang="en" />
                     </div>
                   </div>
+                  {/* AR column — button reads EN, fills AR */}
                   <div className="px-4 py-3">
                     <label className="block text-xs font-bold text-charcoal mb-1.5 text-right" dir="rtl">{labelAr}</label>
-                    <input value={form[arKey] as string}
-                      onChange={(e) => set(arKey, e.target.value)}
-                      dir="rtl" placeholder="اختياري"
-                      className="w-full px-2.5 py-1.5 text-sm border-2 border-border rounded-lg focus:border-orange focus:ring-1 focus:ring-orange/20 outline-none transition-colors text-right"
-                    />
+                    <div className="flex gap-1.5">
+                      <TranslateBtn sourceKey={enKey} targetKey={arKey} targetLang="ar" />
+                      <input
+                        value={form[arKey] as string}
+                        onChange={(e) => set(arKey, e.target.value)}
+                        dir="rtl" placeholder="اختياري"
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-sm border-2 border-border rounded-lg focus:border-orange focus:ring-1 focus:ring-orange/20 outline-none transition-colors text-right"
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -160,9 +212,11 @@ function BeanForm({
             ].map(({ key, label }) => (
               <div key={key}>
                 <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">{label}</label>
-                <input value={(form as Record<string, string | number>)[key] as string}
+                <input
+                  value={(form as Record<string, string | number>)[key] as string}
                   onChange={(e) => set(key as keyof FormState, e.target.value)}
-                  className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors" />
+                  className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors"
+                />
               </div>
             ))}
           </div>
@@ -170,7 +224,7 @@ function BeanForm({
           <div className="flex gap-3 pt-1">
             <button type="submit" disabled={saving}
               className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 active:scale-[0.98] transition-all disabled:opacity-50">
-              {saving ? `${t("saving")}` : t("save")}
+              {saving ? t("saving") : t("save")}
             </button>
             <button type="button" onClick={onClose}
               className="flex-1 py-2.5 border-2 border-border rounded-xl text-sm font-bold text-brown hover:bg-gray-50 transition-colors">
@@ -261,7 +315,11 @@ export default function InventoryPage() {
       body: JSON.stringify(f),
     });
     setSaving(false);
-    if (!res.ok) { setErrorMsg("Failed to add bean"); return; }
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setErrorMsg(j.error || "Failed to add bean");
+      return;
+    }
     setAddOpen(false);
     loadBeans();
   }
@@ -276,7 +334,11 @@ export default function InventoryPage() {
       body: JSON.stringify(f),
     });
     setSaving(false);
-    if (!res.ok) { setErrorMsg("Failed to update bean"); return; }
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setErrorMsg(j.error || "Failed to update bean");
+      return;
+    }
     setEditTarget(null);
     loadBeans();
   }
@@ -331,7 +393,7 @@ export default function InventoryPage() {
       {addOpen && (
         <BeanForm
           title={t("registerNewStock")}
-          initial={EMPTY_FORM}
+          initial={emptyForm()}
           onSave={handleAdd}
           onClose={() => setAddOpen(false)}
           saving={saving}

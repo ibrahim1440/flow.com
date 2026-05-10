@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const lang = target ?? "ar";
+  const lang: string = target === "en" ? "en" : "ar";
 
   const res = await fetch(
     `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`,
