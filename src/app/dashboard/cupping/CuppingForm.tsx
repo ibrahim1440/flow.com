@@ -72,7 +72,7 @@ function ScoreSlider({
           {value.toFixed(2)}
         </span>
       </div>
-      <div className="relative h-2 rounded-full bg-gray-100">
+      <div className="relative h-2 rounded-full bg-gray-100" dir="ltr">
         <div
           className="absolute inset-y-0 left-0 rounded-full transition-all duration-75"
           style={{ width: `${pct}%`, backgroundColor: "#E25D2F" }}
@@ -89,7 +89,7 @@ function ScoreSlider({
           style={{ left: `calc(${pct}% - 8px)`, borderColor: "#E25D2F" }}
         />
       </div>
-      <div className="flex justify-between text-[10px] text-brown/40 font-medium select-none">
+      <div className="flex justify-between text-[10px] text-brown/40 font-medium select-none" dir="ltr">
         <span>6.00</span><span>7.00</span><span>8.00</span><span>9.00</span><span>10.00</span>
       </div>
     </div>
