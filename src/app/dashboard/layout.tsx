@@ -53,8 +53,8 @@ function SidebarNav({
 
   return (
     <aside
-      className={`fixed lg:static top-0 h-[100dvh] lg:h-auto z-[50] w-[260px] bg-sidebar text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0 flex flex-col ltr:left-0 rtl:right-0 overflow-y-auto ${
-        sidebarOpen ? "translate-x-0" : "ltr:-translate-x-full rtl:translate-x-full"
+      className={`fixed lg:static top-0 h-[100dvh] lg:h-auto z-[50] w-[260px] bg-sidebar text-white transform transition-transform duration-300 ease-in-out flex flex-col ltr:left-0 rtl:right-0 overflow-y-auto ${
+        sidebarOpen ? "translate-x-0" : "max-lg:ltr:-translate-x-full max-lg:rtl:translate-x-full"
       }`}
       style={{ WebkitOverflowScrolling: "touch" }}
     >
