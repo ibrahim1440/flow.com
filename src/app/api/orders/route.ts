@@ -39,71 +39,72 @@ export async function POST(request: Request) {
   const { error } = await requireSub("orders", "create");
   if (error) return error;
 
-  const { items, ...orderData } = await request.json();
+  try {
+    const { items, ...orderData } = await request.json();
 
-  const beanIds = [...new Set(
-    items
-      .filter((i: { greenBeanId?: string }) => i.greenBeanId)
-      .map((i: { greenBeanId: string }) => i.greenBeanId)
-  )] as string[];
+    const beanIds = [...new Set(
+      items
+        .filter((i: { greenBeanId?: string }) => i.greenBeanId)
+        .map((i: { greenBeanId: string }) => i.greenBeanId)
+    )] as string[];
 
-  if (beanIds.length > 0) {
-    const greenBeans = await prisma.greenBean.findMany({ where: { id: { in: beanIds } } });
-    const stockMap = new Map(greenBeans.map((b) => [b.id, b.quantityKg]));
+    if (beanIds.length > 0) {
+      const greenBeans = await prisma.greenBean.findMany({ where: { id: { in: beanIds } } });
+      const stockMap = new Map(greenBeans.map((b) => [b.id, b.quantityKg]));
 
-    const demandMap = new Map<string, number>();
-    for (const item of items as { greenBeanId?: string; quantityKg: number }[]) {
-      if (!item.greenBeanId) continue;
-      demandMap.set(item.greenBeanId, (demandMap.get(item.greenBeanId) || 0) + item.quantityKg);
-    }
+      const demandMap = new Map<string, number>();
+      for (const item of items as { greenBeanId?: string; quantityKg: number }[]) {
+        if (!item.greenBeanId) continue;
+        demandMap.set(item.greenBeanId, (demandMap.get(item.greenBeanId) || 0) + item.quantityKg);
+      }
 
-    const insufficient: string[] = [];
-    for (const [beanId, demand] of demandMap) {
-      const available = stockMap.get(beanId) ?? 0;
-      if (demand > available) {
-        const bean = greenBeans.find((b) => b.id === beanId);
-        insufficient.push(`${bean?.beanType ?? "Unknown"}: need ${demand}kg, available ${available}kg`);
+      const insufficient: string[] = [];
+      for (const [beanId, demand] of demandMap) {
+        const available = stockMap.get(beanId) ?? 0;
+        if (demand > available) {
+          const bean = greenBeans.find((b) => b.id === beanId);
+          insufficient.push(`${bean?.beanType ?? "Unknown"}: need ${demand}kg, available ${available}kg`);
+        }
+      }
+
+      if (insufficient.length > 0) {
+        return NextResponse.json(
+          { error: "Insufficient stock", details: insufficient },
+          { status: 400 }
+        );
       }
     }
 
-    if (insufficient.length > 0) {
-      return NextResponse.json(
-        { error: "Insufficient stock", details: insufficient },
-        { status: 400 }
-      );
-    }
-  }
-
-  let order;
-  try {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const lastOrder = await prisma.order.findFirst({ orderBy: { orderNumber: "desc" } });
-    const nextNumber = (lastOrder?.orderNumber || 0) + 1;
-    try {
-      order = await prisma.order.create({
-        data: {
-          ...orderData,
-          orderNumber: nextNumber,
-          items: {
-            create: items.map((item: { beanTypeName: string; quantityKg: number; greenBeanId?: string }) => ({
-              beanTypeName: item.beanTypeName,
-              quantityKg: item.quantityKg,
-              greenBeanId: item.greenBeanId || null,
-              remainingQty: item.quantityKg,
-            })),
+    let order;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const lastOrder = await prisma.order.findFirst({ orderBy: { orderNumber: "desc" } });
+      const nextNumber = (lastOrder?.orderNumber || 0) + 1;
+      try {
+        order = await prisma.order.create({
+          data: {
+            ...orderData,
+            orderNumber: nextNumber,
+            items: {
+              create: items.map((item: { beanTypeName: string; quantityKg: number; greenBeanId?: string }) => ({
+                beanTypeName: item.beanTypeName,
+                quantityKg: item.quantityKg,
+                greenBeanId: item.greenBeanId || null,
+                remainingQty: item.quantityKg,
+              })),
+            },
           },
-        },
-        include: { customer: true, items: true },
-      });
-      break;
-    } catch (e: unknown) {
-      const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : null;
-      if (code === "P2002" && attempt < 4) continue;
-      throw e;
+          include: { customer: true, items: true },
+        });
+        break;
+      } catch (e: unknown) {
+        const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : null;
+        if (code === "P2002" && attempt < 4) continue;
+        throw e;
+      }
     }
-  }
 
-  return NextResponse.json(order, { status: 201 });
+    if (!order) throw new Error("Order creation failed after retries.");
+    return NextResponse.json(order, { status: 201 });
   } catch (err) {
     return handlePrismaError(err);
   }

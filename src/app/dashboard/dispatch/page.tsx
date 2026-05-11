@@ -42,7 +42,33 @@ export default function DispatchPage() {
 
   async function loadData() {
     const [ordersRes, delRes] = await Promise.all([fetch("/api/orders"), fetch("/api/deliveries")]);
-    if (ordersRes.ok) setOrders(await ordersRes.json());
+    if (ordersRes.ok) {
+      const data = await ordersRes.json();
+      // TEMP DIAGNOSTIC — remove after fix
+      data.forEach((o: any) => o.items.forEach((i: any) => {
+        const packed = packagedKg(i.roastingBatches ?? []);
+        if (packed > 0 || i.productionStatus === "In Production") {
+          console.log("[DISPATCH DIAG]", {
+            orderNumber: o.orderNumber,
+            beanTypeName: i.beanTypeName,
+            quantityKg: i.quantityKg,
+            productionStatus: i.productionStatus,
+            deliveryStatus: i.deliveryStatus,
+            deliveredQty: i.deliveredQty,
+            packagedKg: packed,
+            batches: (i.roastingBatches ?? []).map((b: any) => ({
+              status: b.status,
+              bags3kg: b.bags3kg,
+              bags1kg: b.bags1kg,
+              bags250g: b.bags250g,
+              bags150g: b.bags150g,
+              samplesGrams: b.samplesGrams,
+            })),
+          });
+        }
+      }));
+      setOrders(data);
+    }
     if (delRes.ok) setDeliveries(await delRes.json());
   }
 
@@ -70,7 +96,10 @@ export default function DispatchPage() {
   }
 
   const readyItems = orders.flatMap((o: any) =>
-    o.items.filter((i: any) => i.productionStatus === "Completed" && i.deliveryStatus !== "Delivered")
+    o.items.filter((i: any) =>
+      i.deliveryStatus !== "Delivered" &&
+      packagedKg(i.roastingBatches) > i.deliveredQty
+    )
       .map((i: any) => ({ ...i, order: { orderNumber: o.orderNumber, customer: { name: o.customer?.name } } }))
   );
 
