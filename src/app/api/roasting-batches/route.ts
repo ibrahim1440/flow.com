@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 
-async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
+async function generateBatchNumber(): Promise<string> {
   const now = new Date();
-  // YYYYMMDD using UTC so it matches the stored createdAt timestamps
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
 
   const dayStart = new Date(now);
@@ -12,27 +11,21 @@ async function generateBatchNumber(greenBeanId: string | null | undefined): Prom
   const dayEnd = new Date(now);
   dayEnd.setUTCHours(23, 59, 59, 999);
 
-  // Scope the sequence to this green bean (per-bean per-day isolation).
-  // If no bean is linked, scope globally to the day as a fallback.
+  // Use the global max across ALL beans today — batchNumber is @unique, so
+  // per-bean-restarting sequences would collide and violate the constraint.
   const batches = await prisma.roastingBatch.findMany({
-    where: {
-      ...(greenBeanId ? { greenBeanId } : {}),
-      createdAt: { gte: dayStart, lte: dayEnd },
-    },
+    where: { createdAt: { gte: dayStart, lte: dayEnd } },
     select: { batchNumber: true },
   });
 
-  // Find the highest sequence already used today for this bean
   let maxSeq = 0;
   for (const b of batches) {
-    // batchNumber format: YYYYMMDD + 2-digit sequence (e.g. "2026051103")
     const suffix = b.batchNumber.slice(8);
     const num = parseInt(suffix, 10);
     if (!isNaN(num) && num > maxSeq) maxSeq = num;
   }
 
-  const seq = String(maxSeq + 1).padStart(2, "0");
-  return `${dateStr}${seq}`;
+  return `${dateStr}${String(maxSeq + 1).padStart(2, "0")}`;
 }
 
 export async function GET() {
@@ -69,7 +62,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const batchNumber = await generateBatchNumber(greenBeanId);
+  const batchNumber = await generateBatchNumber();
 
   const batch = await prisma.$transaction(async (tx) => {
     if (greenBeanId) {
