@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 
-async function generateBatchNumber(): Promise<string> {
+async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
 
@@ -11,21 +11,14 @@ async function generateBatchNumber(): Promise<string> {
   const dayEnd = new Date(now);
   dayEnd.setUTCHours(23, 59, 59, 999);
 
-  // Use the global max across ALL beans today — batchNumber is @unique, so
-  // per-bean-restarting sequences would collide and violate the constraint.
-  const batches = await prisma.roastingBatch.findMany({
-    where: { createdAt: { gte: dayStart, lte: dayEnd } },
-    select: { batchNumber: true },
+  const batchCount = await prisma.roastingBatch.count({
+    where: {
+      greenBeanId: greenBeanId ?? null,
+      createdAt: { gte: dayStart, lte: dayEnd },
+    },
   });
 
-  let maxSeq = 0;
-  for (const b of batches) {
-    const suffix = b.batchNumber.slice(8);
-    const num = parseInt(suffix, 10);
-    if (!isNaN(num) && num > maxSeq) maxSeq = num;
-  }
-
-  return `${dateStr}${String(maxSeq + 1).padStart(2, "0")}`;
+  return `${dateStr}${String(batchCount + 1).padStart(2, "0")}`;
 }
 
 export async function GET() {
@@ -62,7 +55,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const batchNumber = await generateBatchNumber();
+  const batchNumber = await generateBatchNumber(greenBeanId);
 
   const batch = await prisma.$transaction(async (tx) => {
     if (greenBeanId) {

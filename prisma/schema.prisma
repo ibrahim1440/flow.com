@@ -100,7 +100,7 @@ model RoastingBatch {
   id                  String   @id @default(cuid())
   orderItemId         String
   orderItem           OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  batchNumber         String   @unique
+  batchNumber         String
   date                DateTime @default(now())
   greenBeanId         String?
   greenBean           GreenBean? @relation(fields: [greenBeanId], references: [id])
@@ -132,6 +132,8 @@ model RoastingBatch {
   updatedAt           DateTime @updatedAt
   qcRecords           QcRecord[]
   cuppingSessions     CuppingSession[]
+
+  @@unique([greenBeanId, batchNumber])
 }
 
 model QcRecord {
