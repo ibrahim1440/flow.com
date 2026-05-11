@@ -28,11 +28,24 @@ export async function POST(request: Request) {
       const orderItem = await tx.orderItem.findUnique({ where: { id: orderItemId } });
       if (!orderItem) throw { _appCode: 404, message: "Order item not found" };
 
-      const maxDeliverable = orderItem.quantityKg - orderItem.deliveredQty;
-      if (quantityKg > maxDeliverable) {
+      // Guard: can only dispatch what is physically packaged, not just ordered
+      const packagedBatches = await tx.roastingBatch.findMany({
+        where: { orderItemId, status: { in: ["Packaged", "Partially Packaged"] } },
+        select: { bags3kg: true, bags1kg: true, bags250g: true, bags150g: true, samplesGrams: true },
+      });
+      const totalPackagedKg = +(packagedBatches.reduce((sum, b) =>
+        sum + b.bags3kg * 3 + b.bags1kg * 1 + b.bags250g * 0.25 + b.bags150g * 0.15 + b.samplesGrams / 1000,
+        0
+      ).toFixed(3));
+      const availableToDeliver = +(totalPackagedKg - orderItem.deliveredQty).toFixed(3);
+
+      if (availableToDeliver <= 0) {
+        throw { _appCode: 400, message: "No packaged product is available for delivery yet. Please complete packaging first." };
+      }
+      if (quantityKg > availableToDeliver) {
         throw {
           _appCode: 400,
-          message: `Cannot deliver ${quantityKg}kg. Maximum deliverable: ${maxDeliverable}kg`,
+          message: `Cannot deliver ${quantityKg}kg. Only ${availableToDeliver}kg is packaged and available.`,
         };
       }
 

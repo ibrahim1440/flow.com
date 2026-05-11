@@ -44,18 +44,18 @@ export async function DELETE(request: Request, { params }: Params) {
 
     // 2. Reverse order item production status
     if (batch.orderItem) {
-      const COUNTABLE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
-      const remainingBatches = batch.orderItem.roastingBatches.filter(
-        (b) => b.id !== id && COUNTABLE_STATUSES.includes(b.status)
+      const COMPLETION_STATUSES = ["Passed", "Partially Packaged", "Packaged", "Blended"];
+      const ACTIVE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
+      const remainingActive = batch.orderItem.roastingBatches.filter(
+        (b) => b.id !== id && ACTIVE_STATUSES.includes(b.status)
       );
-      const totalProduced = remainingBatches.reduce(
-        (sum, b) => sum + b.greenBeanQuantity,
-        0
-      );
+      const completionTotal = remainingActive
+        .filter(b => COMPLETION_STATUSES.includes(b.status))
+        .reduce((sum, b) => sum + b.greenBeanQuantity, 0);
       const newStatus =
-        remainingBatches.length === 0
+        remainingActive.length === 0
           ? "Pending"
-          : totalProduced >= batch.orderItem.quantityKg
+          : completionTotal >= batch.orderItem.quantityKg
           ? "Completed"
           : "In Production";
 

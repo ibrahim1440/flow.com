@@ -7,11 +7,24 @@ import { useUser } from "../layout";
 import { hasSubPrivilege } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n/context";
 
+type BatchSlim = {
+  status: string;
+  bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
+};
+
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
+  roastingBatches: BatchSlim[];
   order: { orderNumber: number; customer: { name: string } };
 };
+
+function packagedKg(batches: BatchSlim[]): number {
+  return +(batches
+    .filter(b => b.status === "Packaged" || b.status === "Partially Packaged")
+    .reduce((sum, b) => sum + b.bags3kg * 3 + b.bags1kg * 1 + b.bags250g * 0.25 + b.bags150g * 0.15 + b.samplesGrams / 1000, 0)
+    .toFixed(3));
+}
 
 export default function DispatchPage() {
   const { t } = useI18n();
@@ -35,8 +48,8 @@ export default function DispatchPage() {
 
   function startDelivery(item: OrderItem) {
     setSelectedItem(item);
-    const remaining = item.quantityKg - item.deliveredQty;
-    setForm({ quantityKg: remaining, deliveryType: remaining >= item.quantityKg ? "full" : "partial", notes: "" });
+    const available = Math.max(0, +(packagedKg(item.roastingBatches) - item.deliveredQty).toFixed(3));
+    setForm({ quantityKg: available, deliveryType: available >= item.quantityKg ? "full" : "partial", notes: "" });
     setShowForm(true);
   }
 
@@ -77,16 +90,20 @@ export default function DispatchPage() {
         ) : (
           <div className="space-y-2">
             {readyItems.map((item) => {
-              const remaining = item.quantityKg - item.deliveredQty;
+              const packed = packagedKg(item.roastingBatches);
+              const available = Math.max(0, +(packed - item.deliveredQty).toFixed(3));
               return (
                 <div key={item.id} className="bg-white rounded-2xl border border-border p-4 flex items-center justify-between">
                   <div>
                     <p className="font-semibold">#{item.order.orderNumber} — {item.order.customer.name}</p>
-                    <p className="text-sm text-brown font-medium">{item.beanTypeName} — {remaining}kg {t("remainingOfLabel")} {item.quantityKg}kg</p>
+                    <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg}kg {t("kgOrdered")}</p>
+                    <p className="text-xs text-brown/70 mt-0.5">
+                      {t("packaged")}: {packed}kg · {t("availableForDelivery")}: {available}kg
+                    </p>
                     {item.deliveredQty > 0 && (
                       <div className="mt-1">
                         <div className="w-48 bg-muted rounded-full h-1.5">
-                          <div className="bg-success h-1.5 rounded-full" style={{ width: `${(item.deliveredQty / item.quantityKg) * 100}%` }} />
+                          <div className="bg-success h-1.5 rounded-full" style={{ width: `${(item.deliveredQty / packed) * 100}%` }} />
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{item.deliveredQty}kg {t("deliveredKgLabel")}</p>
                       </div>
@@ -157,7 +174,9 @@ export default function DispatchPage() {
                 <input type="number" step="0.01" value={form.quantityKg}
                   onChange={(e) => setForm({ ...form, quantityKg: parseFloat(e.target.value) || 0 })}
                   className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
-                <p className="text-xs text-muted-foreground mt-1">{t("maxLabel")} {selectedItem.quantityKg - selectedItem.deliveredQty}kg</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("maxLabel")} {Math.max(0, +(packagedKg(selectedItem.roastingBatches) - selectedItem.deliveredQty).toFixed(3))}kg ({t("packaged")})
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-charcoal mb-1">{t("deliveryType")}</label>

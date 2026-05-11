@@ -64,7 +64,8 @@ export async function POST(request: Request) {
 
   const batchNumber = await generateBatchNumber(greenBeanId);
 
-  const COUNTABLE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
+  // Only QC-passed stages count toward order completion — Pending QC is NOT complete
+  const COMPLETION_STATUSES = ["Passed", "Partially Packaged", "Packaged", "Blended"];
 
   try {
   const batch = await prisma.$transaction(async (tx) => {
@@ -93,19 +94,20 @@ export async function POST(request: Request) {
 
     const orderItem = await tx.orderItem.findUnique({
       where: { id: orderItemId },
-      include: {
-        roastingBatches: {
-          where: { status: { in: COUNTABLE_STATUSES } },
-          select: { greenBeanQuantity: true },
-        },
-      },
+      select: { quantityKg: true },
     });
 
     if (orderItem) {
-      const totalProduced = orderItem.roastingBatches.reduce(
-        (sum, b) => sum + b.greenBeanQuantity, 0
-      );
-      const newStatus = totalProduced >= orderItem.quantityKg ? "Completed" : "In Production";
+      // Re-query all batches so the new "Pending QC" batch is visible
+      const allBatches = await tx.roastingBatch.findMany({
+        where: { orderItemId },
+        select: { status: true, greenBeanQuantity: true },
+      });
+      const completionTotal = allBatches
+        .filter(b => COMPLETION_STATUSES.includes(b.status))
+        .reduce((sum, b) => sum + b.greenBeanQuantity, 0);
+      // Always "In Production" when a new batch is created (it starts as Pending QC)
+      const newStatus = completionTotal >= orderItem.quantityKg ? "Completed" : "In Production";
       await tx.orderItem.update({
         where: { id: orderItemId },
         data: { productionStatus: newStatus },

@@ -270,6 +270,8 @@ export const translations = {
   deliveredKgLabel:   { en: "kg delivered",          ar: "كغ تم تسليمه" },
   remainingOfLabel:   { en: "kg remaining of",       ar: "كغ متبقي من" },
   maxLabel:           { en: "Max:",                  ar: "الحد الأقصى:" },
+  packaged:           { en: "Packaged",              ar: "مُعبَّأ" },
+  availableForDelivery: { en: "Available",           ar: "متاح للتسليم" },
   beanCol:            { en: "Bean",                  ar: "البن" },
   orderCol:           { en: "Order",                 ar: "الطلب" },
 
