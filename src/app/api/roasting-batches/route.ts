@@ -11,14 +11,15 @@ async function generateBatchNumber(greenBeanId: string | null | undefined): Prom
   const dayEnd = new Date(now);
   dayEnd.setUTCHours(23, 59, 59, 999);
 
-  const batchCount = await prisma.roastingBatch.count({
+  const existing = await prisma.roastingBatch.findMany({
     where: {
       greenBeanId: greenBeanId ?? null,
       createdAt: { gte: dayStart, lte: dayEnd },
     },
+    select: { id: true },
   });
 
-  return `${dateStr}${String(batchCount + 1).padStart(2, "0")}`;
+  return `${dateStr}${String(existing.length + 1).padStart(2, "0")}`;
 }
 
 export async function GET() {
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
     return tx.roastingBatch.create({
       data: {
         orderItemId,
-        greenBeanId,
+        greenBeanId: greenBeanId ?? null,
         greenBeanQuantity,
         roastedBeanQuantity: roastedBeanQuantity || 0,
         wasteQuantity: wasteQuantity || 0,
