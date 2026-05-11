@@ -2,24 +2,37 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 
-async function generateBatchNumber(): Promise<string> {
+async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
   const now = new Date();
-  const prefix = now.toISOString().slice(0, 10).replace(/-/g, "");
+  // YYYYMMDD using UTC so it matches the stored createdAt timestamps
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
 
-  const latest = await prisma.roastingBatch.findMany({
-    where: { batchNumber: { startsWith: prefix } },
+  const dayStart = new Date(now);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(now);
+  dayEnd.setUTCHours(23, 59, 59, 999);
+
+  // Scope the sequence to this green bean (per-bean per-day isolation).
+  // If no bean is linked, scope globally to the day as a fallback.
+  const batches = await prisma.roastingBatch.findMany({
+    where: {
+      ...(greenBeanId ? { greenBeanId } : {}),
+      createdAt: { gte: dayStart, lte: dayEnd },
+    },
     select: { batchNumber: true },
   });
 
+  // Find the highest sequence already used today for this bean
   let maxSeq = 0;
-  for (const b of latest) {
-    const suffix = b.batchNumber.slice(prefix.length, prefix.length + 2);
+  for (const b of batches) {
+    // batchNumber format: YYYYMMDD + 2-digit sequence (e.g. "2026051103")
+    const suffix = b.batchNumber.slice(8);
     const num = parseInt(suffix, 10);
     if (!isNaN(num) && num > maxSeq) maxSeq = num;
   }
 
   const seq = String(maxSeq + 1).padStart(2, "0");
-  return `${prefix}${seq}`;
+  return `${dateStr}${seq}`;
 }
 
 export async function GET() {
@@ -56,7 +69,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const batchNumber = await generateBatchNumber();
+  const batchNumber = await generateBatchNumber(greenBeanId);
 
   const batch = await prisma.$transaction(async (tx) => {
     if (greenBeanId) {
