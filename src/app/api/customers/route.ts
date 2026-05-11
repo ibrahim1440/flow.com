@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 export async function GET() {
   const { error } = await requireModule("orders");
@@ -17,7 +18,11 @@ export async function POST(request: Request) {
   const { error } = await requireSub("orders", "create");
   if (error) return error;
 
-  const data = await request.json();
-  const customer = await prisma.customer.create({ data });
-  return NextResponse.json(customer, { status: 201 });
+  try {
+    const data = await request.json();
+    const customer = await prisma.customer.create({ data });
+    return NextResponse.json(customer, { status: 201 });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

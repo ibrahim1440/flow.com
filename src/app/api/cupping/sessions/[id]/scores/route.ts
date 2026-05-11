@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -47,7 +48,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const data = await request.json();
 
-  const score = await prisma.cuppingScore.create({
+  try { const score = await prisma.cuppingScore.create({
     data: {
       sessionId: id,
       employeeId: user.id,
@@ -71,4 +72,5 @@ export async function POST(request: Request, { params }: Params) {
   });
 
   return NextResponse.json(score, { status: 201 });
+  } catch (err) { return handlePrismaError(err); }
 }

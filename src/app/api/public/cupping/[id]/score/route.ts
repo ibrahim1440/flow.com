@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,7 +32,7 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
 
-  const score = await prisma.cuppingScore.create({
+  try { const score = await prisma.cuppingScore.create({
     data: {
       sessionId: id,
       employeeId: null,
@@ -55,4 +56,5 @@ export async function POST(request: Request, { params }: Params) {
   });
 
   return NextResponse.json(score, { status: 201 });
+  } catch (err) { return handlePrismaError(err); }
 }

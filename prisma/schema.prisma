@@ -12,6 +12,7 @@ model Employee {
   name              String
   username          String?  @unique
   pin               String
+  pinHash           String?  @unique
   password          String?
   role              String   // admin, inventory, roasting, qc, dispatch, custom
   permissions       String   @default("{}")
@@ -134,6 +135,7 @@ model RoastingBatch {
   cuppingSessions     CuppingSession[]
 
   @@unique([greenBeanId, batchNumber])
+  @@index([greenBeanId, createdAt])
 }
 
 model QcRecord {

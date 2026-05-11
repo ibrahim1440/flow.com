@@ -84,7 +84,9 @@ export default function ProductionPage() {
 
   async function loadData() {
     const [ordersRes, beansRes, batchRes] = await Promise.all([
-      fetch("/api/orders"), fetch("/api/green-beans"), fetch("/api/roasting-batches"),
+      fetch("/api/orders?status=Pending,In+Production"),
+      fetch("/api/green-beans"),
+      fetch("/api/roasting-batches"),
     ]);
     if (ordersRes.ok) setOrders(await ordersRes.json());
     if (beansRes.ok) setBeans(await beansRes.json());

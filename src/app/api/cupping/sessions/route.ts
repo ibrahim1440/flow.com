@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 export async function GET() {
   const { error } = await requireAuth();
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Session name is required" }, { status: 400 });
   }
 
-  const session = await prisma.cuppingSession.create({
+  try { const session = await prisma.cuppingSession.create({
     data: {
       name: name.trim(),
       batchId: batchId || null,
@@ -46,4 +47,5 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json(session, { status: 201 });
+  } catch (err) { return handlePrismaError(err); }
 }

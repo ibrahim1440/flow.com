@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -44,6 +45,10 @@ export async function DELETE(_req: Request, { params }: Params) {
   }
 
   const { id } = await params;
-  await prisma.cuppingSession.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.cuppingSession.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

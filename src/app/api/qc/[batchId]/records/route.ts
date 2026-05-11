@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ batchId: string }> };
 
@@ -26,7 +27,7 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "You have already submitted a record for this batch" }, { status: 409 });
   }
 
-  const record = await prisma.qcRecord.create({
+  try { const record = await prisma.qcRecord.create({
     data: {
       batchId,
       employeeId: user.id,
@@ -46,4 +47,5 @@ export async function POST(request: Request, { params }: Params) {
   });
 
   return NextResponse.json(record, { status: 201 });
+  } catch (err) { return handlePrismaError(err); }
 }

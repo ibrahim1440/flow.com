@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ batchId: string; token: string }> };
 
@@ -44,7 +45,7 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Tester name is required" }, { status: 400 });
   }
 
-  const record = await prisma.qcRecord.create({
+  try { const record = await prisma.qcRecord.create({
     data: {
       batchId,
       isExternal: true,
@@ -62,4 +63,5 @@ export async function POST(request: Request, { params }: Params) {
   });
 
   return NextResponse.json({ id: record.id, decision: record.decision }, { status: 201 });
+  } catch (err) { return handlePrismaError(err); }
 }

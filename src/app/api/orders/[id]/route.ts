@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { error } = await requireSub("orders", "edit");
@@ -58,12 +59,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  const order = await prisma.order.update({
-    where: { id },
-    data: orderData,
-    include: { customer: true, items: true },
-  });
-  return NextResponse.json(order);
+  try {
+    const order = await prisma.order.update({
+      where: { id },
+      data: orderData,
+      include: { customer: true, items: true },
+    });
+    return NextResponse.json(order);
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -71,6 +76,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (error) return error;
 
   const { id } = await params;
-  await prisma.order.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.order.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

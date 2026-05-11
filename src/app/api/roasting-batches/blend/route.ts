@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { isValidTransition } from "@/lib/batch-transitions";
+import { handlePrismaError } from "@/lib/api-error";
 
 export async function POST(request: Request) {
   const { error } = await requireSub("production", "blend");
@@ -31,7 +33,7 @@ export async function POST(request: Request) {
 
   const commonStatus = batches[0].status;
 
-  if (commonStatus !== "Passed" && commonStatus !== "Pending QC") {
+  if (!isValidTransition(commonStatus, "Blended")) {
     return NextResponse.json(
       { error: `Cannot blend batches with status "${commonStatus}". Only "Pending QC" or "Passed" batches can be blended.` },
       { status: 400 }
@@ -53,31 +55,37 @@ export async function POST(request: Request) {
 
   const targetOrderItemId = orderItemId || batches[0].orderItemId;
 
-  const blendedBatch = await prisma.roastingBatch.create({
-    data: {
-      orderItemId: targetOrderItemId,
-      batchNumber: blendedBatchNumber,
-      greenBeanQuantity: greenTotal,
-      roastedBeanQuantity: roastedTotal,
-      wasteQuantity: wasteTotal,
-      status: commonStatus,
-      blendTiming,
-      roastProfile: batches.map((b) => b.roastProfile).filter(Boolean).join(" + ") || null,
-    },
-  });
+  try {
+  const result = await prisma.$transaction(async (tx) => {
+    const blendedBatch = await tx.roastingBatch.create({
+      data: {
+        orderItemId: targetOrderItemId,
+        batchNumber: blendedBatchNumber,
+        greenBeanQuantity: greenTotal,
+        roastedBeanQuantity: roastedTotal,
+        wasteQuantity: wasteTotal,
+        status: commonStatus,
+        blendTiming,
+        roastProfile: batches.map((b) => b.roastProfile).filter(Boolean).join(" + ") || null,
+      },
+    });
 
-  await prisma.roastingBatch.updateMany({
-    where: { id: { in: batchIds } },
-    data: { status: "Blended", parentBatchId: blendedBatch.id },
-  });
+    await tx.roastingBatch.updateMany({
+      where: { id: { in: batchIds } },
+      data: { status: "Blended", parentBatchId: blendedBatch.id },
+    });
 
-  const result = await prisma.roastingBatch.findUnique({
-    where: { id: blendedBatch.id },
-    include: {
-      childBatches: { select: { id: true, batchNumber: true, roastedBeanQuantity: true } },
-      orderItem: { include: { order: { include: { customer: true } } } },
-    },
+    return tx.roastingBatch.findUnique({
+      where: { id: blendedBatch.id },
+      include: {
+        childBatches: { select: { id: true, batchNumber: true, roastedBeanQuantity: true } },
+        orderItem: { include: { order: { include: { customer: true } } } },
+      },
+    });
   });
 
   return NextResponse.json(result, { status: 201 });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

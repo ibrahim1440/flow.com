@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 export async function GET(request: Request) {
   const { error } = await requireModule("orders");
@@ -12,7 +13,10 @@ export async function GET(request: Request) {
 
   const where: Record<string, unknown> = {};
   if (customerId) where.customerId = customerId;
-  if (status) where.items = { some: { productionStatus: status } };
+  if (status) {
+    const statusList = status.split(",");
+    where.items = { some: { productionStatus: statusList.length === 1 ? status : { in: statusList } } };
+  }
 
   const orders = await prisma.order.findMany({
     where,
@@ -70,24 +74,37 @@ export async function POST(request: Request) {
     }
   }
 
-  const lastOrder = await prisma.order.findFirst({ orderBy: { orderNumber: "desc" } });
-  const nextNumber = (lastOrder?.orderNumber || 0) + 1;
-
-  const order = await prisma.order.create({
-    data: {
-      ...orderData,
-      orderNumber: nextNumber,
-      items: {
-        create: items.map((item: { beanTypeName: string; quantityKg: number; greenBeanId?: string }) => ({
-          beanTypeName: item.beanTypeName,
-          quantityKg: item.quantityKg,
-          greenBeanId: item.greenBeanId || null,
-          remainingQty: item.quantityKg,
-        })),
-      },
-    },
-    include: { customer: true, items: true },
-  });
+  let order;
+  try {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const lastOrder = await prisma.order.findFirst({ orderBy: { orderNumber: "desc" } });
+    const nextNumber = (lastOrder?.orderNumber || 0) + 1;
+    try {
+      order = await prisma.order.create({
+        data: {
+          ...orderData,
+          orderNumber: nextNumber,
+          items: {
+            create: items.map((item: { beanTypeName: string; quantityKg: number; greenBeanId?: string }) => ({
+              beanTypeName: item.beanTypeName,
+              quantityKg: item.quantityKg,
+              greenBeanId: item.greenBeanId || null,
+              remainingQty: item.quantityKg,
+            })),
+          },
+        },
+        include: { customer: true, items: true },
+      });
+      break;
+    } catch (e: unknown) {
+      const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : null;
+      if (code === "P2002" && attempt < 4) continue;
+      throw e;
+    }
+  }
 
   return NextResponse.json(order, { status: 201 });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

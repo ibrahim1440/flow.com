@@ -40,11 +40,8 @@ export default function PackagingPage() {
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
-    const res = await fetch("/api/roasting-batches");
-    if (res.ok) {
-      const all = await res.json();
-      setBatches(all.filter((b: Batch) => b.status === "Passed" || b.status === "Partially Packaged"));
-    }
+    const res = await fetch("/api/roasting-batches?statuses=Passed,Partially+Packaged");
+    if (res.ok) setBatches(await res.json());
     setLoading(false);
   }
 

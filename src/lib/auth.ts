@@ -191,9 +191,7 @@ export function canViewOnly(permissions: Permissions, module: string): boolean {
 export function hasSubPrivilege(permissions: Permissions, module: string, subKey: string): boolean {
   const perm = permissions[module];
   if (!perm || perm.access === "none") return false;
-  if (perm.access === "edit" && (!perm.sub || perm.sub[subKey] === undefined)) return true;
-  if (perm.access === "view" && (!perm.sub || perm.sub[subKey] === undefined)) return false;
-  return !!perm.sub?.[subKey];
+  return perm.sub?.[subKey] === true;
 }
 
 export function parsePermissions(raw: string | Permissions): Permissions {

@@ -1,20 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { hashSync, compareSync } from "bcryptjs";
+import { hashSync } from "bcryptjs";
+import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
   defaultRoute: true, active: true, createdAt: true,
 } as const;
 
-/** Check if any OTHER employee already uses this plaintext PIN. */
+function sha256Pin(pin: string): string {
+  return createHash("sha256").update(pin).digest("hex");
+}
+
+/** O(1) DB-level PIN uniqueness check via deterministic SHA-256 hash. */
 async function isPinTaken(plainPin: string, excludeId?: string): Promise<boolean> {
-  const all = await prisma.employee.findMany({
-    where: excludeId ? { id: { not: excludeId } } : undefined,
-    select: { pin: true },
+  const existing = await prisma.employee.findFirst({
+    where: {
+      pinHash: sha256Pin(plainPin),
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true },
   });
-  return all.some((e) => compareSync(plainPin, e.pin));
+  return existing !== null;
 }
 
 export async function GET() {
@@ -41,17 +50,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "This PIN is already assigned to another employee. Please choose a unique PIN." }, { status: 409 });
   }
 
-  const employee = await prisma.employee.create({
-    data: {
-      name,
-      username,
-      pin: hashSync(pin, 10),
-      role,
-      permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
-      defaultRoute: defaultRoute || "/dashboard",
-      ...(password ? { password: hashSync(password, 10) } : {}),
-    },
-    select: SELECT_FULL,
-  });
-  return NextResponse.json(employee, { status: 201 });
+  try {
+    const employee = await prisma.employee.create({
+      data: {
+        name,
+        username,
+        pin: hashSync(pin, 10),
+        pinHash: sha256Pin(pin),
+        role,
+        permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
+        defaultRoute: defaultRoute || "/dashboard",
+        ...(password ? { password: hashSync(password, 10) } : {}),
+      },
+      select: SELECT_FULL,
+    });
+    return NextResponse.json(employee, { status: 201 });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

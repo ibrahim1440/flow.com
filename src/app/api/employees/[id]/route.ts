@@ -1,19 +1,25 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { hashSync, compareSync } from "bcryptjs";
+import { hashSync } from "bcryptjs";
+import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
   defaultRoute: true, active: true, createdAt: true,
 } as const;
 
+function sha256Pin(pin: string): string {
+  return createHash("sha256").update(pin).digest("hex");
+}
+
 async function isPinTaken(plainPin: string, excludeId: string): Promise<boolean> {
-  const all = await prisma.employee.findMany({
-    where: { id: { not: excludeId } },
-    select: { pin: true },
+  const existing = await prisma.employee.findFirst({
+    where: { pinHash: sha256Pin(plainPin), id: { not: excludeId } },
+    select: { id: true },
   });
-  return all.some((e) => compareSync(plainPin, e.pin));
+  return existing !== null;
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -34,16 +40,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (username !== undefined) data.username = username;
   data.permissions = typeof permissions === "string" ? permissions : JSON.stringify(permissions || {});
   if (defaultRoute !== undefined) data.defaultRoute = defaultRoute;
-  if (pin) data.pin = hashSync(pin, 10);
+  if (pin) { data.pin = hashSync(pin, 10); data.pinHash = sha256Pin(pin); }
   if (password) data.password = hashSync(password, 10);
   if (active !== undefined) data.active = active;
 
-  const employee = await prisma.employee.update({
-    where: { id },
-    data,
-    select: SELECT_FULL,
-  });
-  return NextResponse.json(employee);
+  try {
+    const employee = await prisma.employee.update({ where: { id }, data, select: SELECT_FULL });
+    return NextResponse.json(employee);
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {

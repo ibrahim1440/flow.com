@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 export async function GET() {
   const { error } = await requireModule("dispatch");
@@ -22,35 +23,40 @@ export async function POST(request: Request) {
   const data = await request.json();
   const { orderItemId, quantityKg, deliveryType, notes } = data;
 
-  const orderItem = await prisma.orderItem.findUnique({ where: { id: orderItemId } });
-  if (!orderItem) {
-    return NextResponse.json({ error: "Order item not found" }, { status: 404 });
+  try {
+    const delivery = await prisma.$transaction(async (tx) => {
+      const orderItem = await tx.orderItem.findUnique({ where: { id: orderItemId } });
+      if (!orderItem) throw { _appCode: 404, message: "Order item not found" };
+
+      const maxDeliverable = orderItem.quantityKg - orderItem.deliveredQty;
+      if (quantityKg > maxDeliverable) {
+        throw {
+          _appCode: 400,
+          message: `Cannot deliver ${quantityKg}kg. Maximum deliverable: ${maxDeliverable}kg`,
+        };
+      }
+
+      const newDelivered = orderItem.deliveredQty + quantityKg;
+      const newRemaining = orderItem.quantityKg - newDelivered;
+      const newStatus = newRemaining <= 0 ? "Delivered" : "Partial Delivered";
+
+      const [newDelivery] = await Promise.all([
+        tx.delivery.create({ data: { orderItemId, quantityKg, deliveryType, notes } }),
+        tx.orderItem.update({
+          where: { id: orderItemId },
+          data: { deliveredQty: newDelivered, remainingQty: newRemaining, deliveryStatus: newStatus },
+        }),
+      ]);
+
+      return newDelivery;
+    });
+
+    return NextResponse.json(delivery, { status: 201 });
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
+    }
+    return handlePrismaError(err);
   }
-
-  const maxDeliverable = orderItem.quantityKg - orderItem.deliveredQty;
-  if (quantityKg > maxDeliverable) {
-    return NextResponse.json(
-      { error: `Cannot deliver ${quantityKg}kg. Maximum deliverable: ${maxDeliverable}kg` },
-      { status: 400 }
-    );
-  }
-
-  const delivery = await prisma.delivery.create({
-    data: { orderItemId, quantityKg, deliveryType, notes },
-  });
-
-  const newDelivered = orderItem.deliveredQty + quantityKg;
-  const newRemaining = orderItem.quantityKg - newDelivered;
-  const newStatus = newRemaining <= 0 ? "Delivered" : "Partial Delivered";
-
-  await prisma.orderItem.update({
-    where: { id: orderItemId },
-    data: {
-      deliveredQty: newDelivered,
-      remainingQty: newRemaining,
-      deliveryStatus: newStatus,
-    },
-  });
-
-  return NextResponse.json(delivery, { status: 201 });
 }

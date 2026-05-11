@@ -75,7 +75,9 @@ export default function QCPage() {
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
 
-  const [batches, setBatches] = useState<Batch[]>([]);
+  const [backlogBatches, setBacklogBatches] = useState<Batch[]>([]);
+  const [historyBatches, setHistoryBatches] = useState<Batch[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [records, setRecords] = useState<LegacyRecord[]>([]);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"backlog" | "history">("backlog");
@@ -96,16 +98,25 @@ export default function QCPage() {
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadBacklog = useCallback(async () => {
     const [batchRes, qcRes] = await Promise.all([
-      fetch("/api/roasting-batches"),
+      fetch("/api/roasting-batches?statuses=Pending+QC"),
       fetch("/api/qc-records"),
     ]);
-    if (batchRes.ok) setBatches(await batchRes.json());
+    if (batchRes.ok) setBacklogBatches(await batchRes.json());
     if (qcRes.ok) setRecords(await qcRes.json());
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const loadHistory = useCallback(async () => {
+    const res = await fetch("/api/roasting-batches?statuses=Passed,Rejected,Blended");
+    if (res.ok) { setHistoryBatches(await res.json()); setHistoryLoaded(true); }
+  }, []);
+
+  useEffect(() => { loadBacklog(); }, [loadBacklog]);
+
+  useEffect(() => {
+    if (tab === "history" && !historyLoaded) loadHistory();
+  }, [tab, historyLoaded, loadHistory]);
 
   function startQcForBatch(batch: Batch) {
     setForm({
@@ -142,7 +153,7 @@ export default function QCPage() {
       toast.success(t("saveRecord"));
       setShowForm(false);
       setForm(BLANK_FORM);
-      loadData();
+      loadBacklog();
     } finally {
       setSubmitting(false);
     }
@@ -159,7 +170,7 @@ export default function QCPage() {
     } else {
       toast.success("Batch cancelled");
       setCancelBatch(null);
-      loadData();
+      loadBacklog();
     }
   }
 
@@ -171,7 +182,8 @@ export default function QCPage() {
       if (!res.ok) { toast.error(data.error || t("error")); return; }
       toast.success(`${data.status}: ${data.acceptCount}/${data.total} ${t("accepted")}`);
       setConfirmFinalizeId(null);
-      loadData();
+      loadBacklog();
+      if (historyLoaded) loadHistory();
     } finally {
       setFinalizing(false);
     }
@@ -211,8 +223,6 @@ export default function QCPage() {
     toast.success(t("copyLink"));
   }
 
-  const backlogBatches = batches.filter((b) => b.status === "Pending QC");
-  const historyBatches = batches.filter((b) => b.status === "Passed" || b.status === "Rejected" || b.status === "Blended");
   const onProfileCount = records.filter((r) => r.decision === "Accept" || r.onProfile).length;
   const offProfileCount = records.filter((r) => r.decision === "Reject" || (!r.decision && !r.onProfile)).length;
   const filtered = records.filter((r) =>

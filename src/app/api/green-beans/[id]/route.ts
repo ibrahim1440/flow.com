@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -9,9 +10,13 @@ export async function PUT(request: Request, { params }: Params) {
   if (error) return error;
 
   const { id } = await params;
-  const data = await request.json();
-  const bean = await prisma.greenBean.update({ where: { id }, data });
-  return NextResponse.json(bean);
+  try {
+    const data = await request.json();
+    const bean = await prisma.greenBean.update({ where: { id }, data });
+    return NextResponse.json(bean);
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }
 
 export async function DELETE(_request: Request, { params }: Params) {

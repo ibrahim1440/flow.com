@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { hasSubPrivilege } from "@/lib/auth";
+import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,7 +25,6 @@ export async function DELETE(request: Request, { params }: Params) {
 
   // Restocking after roasting requires the inventory.override permission
   if (restock && batch.greenBeanId) {
-    const { hasSubPrivilege } = await import("@/lib/auth");
     if (!hasSubPrivilege(user!.permissions, "inventory", "override")) {
       return NextResponse.json(
         { error: "You do not have permission to override inventory" },
@@ -32,7 +33,7 @@ export async function DELETE(request: Request, { params }: Params) {
     }
   }
 
-  await prisma.$transaction(async (tx) => {
+  try { await prisma.$transaction(async (tx) => {
     // 1. Restock green beans if requested
     if (restock && batch.greenBeanId && batch.greenBeanQuantity > 0) {
       await tx.greenBean.update({
@@ -43,8 +44,9 @@ export async function DELETE(request: Request, { params }: Params) {
 
     // 2. Reverse order item production status
     if (batch.orderItem) {
+      const COUNTABLE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
       const remainingBatches = batch.orderItem.roastingBatches.filter(
-        (b) => b.id !== id
+        (b) => b.id !== id && COUNTABLE_STATUSES.includes(b.status)
       );
       const totalProduced = remainingBatches.reduce(
         (sum, b) => sum + b.greenBeanQuantity,
@@ -68,4 +70,5 @@ export async function DELETE(request: Request, { params }: Params) {
   });
 
   return NextResponse.json({ success: true });
+  } catch (err) { return handlePrismaError(err); }
 }

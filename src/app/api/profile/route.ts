@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { compareSync, hashSync } from "bcryptjs";
+import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
 import { signToken, parsePermissions, buildDefaultPermissions } from "@/lib/auth";
+import { handlePrismaError } from "@/lib/api-error";
+
+const sha256Pin = (pin: string) => createHash("sha256").update(pin).digest("hex");
 
 // GET — fetch current user's profile details (phone, language)
 export async function GET() {
@@ -98,20 +102,21 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Current PIN is incorrect" }, { status: 401 });
   }
 
-  // Ensure new PIN isn't already assigned to someone else
-  const all = await prisma.employee.findMany({
-    where: { id: { not: user.id }, active: true },
-    select: { pin: true },
+  const taken = await prisma.employee.findFirst({
+    where: { pinHash: sha256Pin(newPin), id: { not: user.id } },
+    select: { id: true },
   });
-  const taken = all.some((e) => compareSync(newPin, e.pin));
   if (taken) {
     return NextResponse.json({ error: "This PIN is already in use by another employee" }, { status: 409 });
   }
 
-  await prisma.employee.update({
-    where: { id: user.id },
-    data: { pin: hashSync(newPin, 10) },
-  });
-
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.employee.update({
+      where: { id: user.id },
+      data: { pin: hashSync(newPin, 10), pinHash: sha256Pin(newPin) },
+    });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
 
 async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
   const now = new Date();
@@ -22,11 +23,16 @@ async function generateBatchNumber(greenBeanId: string | null | undefined): Prom
   return `${dateStr}${String(existing.length + 1).padStart(2, "0")}`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const { error } = await requireModule("production");
   if (error) return error;
 
+  const { searchParams } = new URL(request.url);
+  const statusParam = searchParams.get("statuses");
+  const where = statusParam ? { status: { in: statusParam.split(",") } } : undefined;
+
   const batches = await prisma.roastingBatch.findMany({
+    where,
     orderBy: { date: "desc" },
     include: {
       orderItem: { include: { order: { include: { customer: true } } } },
@@ -58,6 +64,9 @@ export async function POST(request: Request) {
 
   const batchNumber = await generateBatchNumber(greenBeanId);
 
+  const COUNTABLE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
+
+  try {
   const batch = await prisma.$transaction(async (tx) => {
     if (greenBeanId) {
       await tx.greenBean.update({
@@ -67,7 +76,7 @@ export async function POST(request: Request) {
     }
 
     const qcDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    return tx.roastingBatch.create({
+    const newBatch = await tx.roastingBatch.create({
       data: {
         orderItemId,
         greenBeanId: greenBeanId ?? null,
@@ -81,23 +90,33 @@ export async function POST(request: Request) {
       },
       include: { orderItem: true, greenBean: true },
     });
-  });
 
-  const orderItem = await prisma.orderItem.findUnique({
-    where: { id: orderItemId },
-    include: { roastingBatches: true },
-  });
-
-  if (orderItem) {
-    const totalProduced = orderItem.roastingBatches.reduce(
-      (sum: number, b: { greenBeanQuantity: number }) => sum + b.greenBeanQuantity, 0
-    );
-    const newStatus = totalProduced >= orderItem.quantityKg ? "Completed" : "In Production";
-    await prisma.orderItem.update({
+    const orderItem = await tx.orderItem.findUnique({
       where: { id: orderItemId },
-      data: { productionStatus: newStatus },
+      include: {
+        roastingBatches: {
+          where: { status: { in: COUNTABLE_STATUSES } },
+          select: { greenBeanQuantity: true },
+        },
+      },
     });
-  }
+
+    if (orderItem) {
+      const totalProduced = orderItem.roastingBatches.reduce(
+        (sum, b) => sum + b.greenBeanQuantity, 0
+      );
+      const newStatus = totalProduced >= orderItem.quantityKg ? "Completed" : "In Production";
+      await tx.orderItem.update({
+        where: { id: orderItemId },
+        data: { productionStatus: newStatus },
+      });
+    }
+
+    return newBatch;
+  });
 
   return NextResponse.json(batch, { status: 201 });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }
