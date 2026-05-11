@@ -75,6 +75,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   inventory: [
     { key: "receive", label: "Receive new beans" },
     { key: "adjust", label: "Edit / adjust stock" },
+    { key: "override", label: "Override inventory (force restock cancelled batches)" },
   ],
   orders: [
     { key: "create", label: "Create new orders" },
@@ -85,6 +86,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "start_batch", label: "Start / continue roasting" },
     { key: "blend", label: "Blend batches" },
     { key: "view_history", label: "View completed batches" },
+    { key: "cancel_batch", label: "Cancel / delete batches" },
   ],
   qc: [
     { key: "create_record", label: "Submit QC records" },

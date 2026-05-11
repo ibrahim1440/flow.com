@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ClipboardCheck, Plus, Search, CheckCircle2, XCircle, Eye, Merge,
-  Users, Link2, AlertTriangle, Clock, Loader2,
+  Users, Link2, AlertTriangle, Clock, Loader2, Trash2,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../layout";
@@ -72,6 +72,8 @@ export default function QCPage() {
   const { t } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "qc", "create_record");
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "qc", "manage");
+  const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
+  const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
 
   const [batches, setBatches] = useState<Batch[]>([]);
   const [records, setRecords] = useState<LegacyRecord[]>([]);
@@ -91,6 +93,8 @@ export default function QCPage() {
   // Invite link modal
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [generatingInvite, setGeneratingInvite] = useState<string | null>(null);
+  const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const loadData = useCallback(async () => {
     const [batchRes, qcRes] = await Promise.all([
@@ -141,6 +145,21 @@ export default function QCPage() {
       loadData();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleCancelBatch(restock: boolean) {
+    if (!cancelBatch) return;
+    setCancelling(true);
+    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, { method: "DELETE" });
+    setCancelling(false);
+    if (!res.ok) {
+      try { const d = await res.json(); toast.error(d.error || "Failed to cancel batch"); }
+      catch { toast.error("Failed to cancel batch"); }
+    } else {
+      toast.success("Batch cancelled");
+      setCancelBatch(null);
+      loadData();
     }
   }
 
@@ -315,10 +334,18 @@ export default function QCPage() {
                           {batch.roastedBeanQuantity}kg {t("roastedLabel")}{batch.roastProfile ? ` · ${batch.roastProfile}` : ""}
                         </p>
                       </div>
-                      <button onClick={() => setExpandedId(isExpanded ? null : batch.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex-shrink-0 ${isExpanded ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:bg-cream"}`}>
-                        <Eye size={12} /> {isExpanded ? t("collapse") : t("panel")}
-                      </button>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {canCancelBatch && (
+                          <button onClick={() => setCancelBatch(batch)}
+                            className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                        <button onClick={() => setExpandedId(isExpanded ? null : batch.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isExpanded ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:bg-cream"}`}>
+                          <Eye size={12} /> {isExpanded ? t("collapse") : t("panel")}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Tester summary bar */}
@@ -706,6 +733,61 @@ export default function QCPage() {
           </div>
         </div>
       )}
+
+      {/* Cancel Batch Modal */}
+      {cancelBatch && (() => {
+        const isPendingQc = cancelBatch.status === "Pending QC";
+        const hasBean = !!cancelBatch.greenBean;
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !cancelling && setCancelBatch(null)}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={20} className="text-red-600" /></div>
+                <div>
+                  <h2 className="font-extrabold text-charcoal">{t("cancelBatchTitle")}</h2>
+                  <p className="text-sm text-brown font-mono">{cancelBatch.batchNumber}</p>
+                </div>
+              </div>
+              {isPendingQc ? (
+                <>
+                  <p className="text-sm text-brown mb-5">{t("cancelBatchMsgPre")}</p>
+                  <div className="flex gap-3">
+                    <button onClick={() => handleCancelBatch(true)} disabled={cancelling}
+                      className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 active:scale-[0.98] transition-all">
+                      {cancelling ? "…" : t("cancelConfirmRestock")}
+                    </button>
+                    <button onClick={() => setCancelBatch(null)} disabled={cancelling}
+                      className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                      {t("cancel")}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-brown mb-5">{t("cancelBatchMsgPost")}</p>
+                  <div className="flex flex-col gap-2">
+                    <button onClick={() => handleCancelBatch(false)} disabled={cancelling}
+                      className="w-full py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all">
+                      {cancelling ? "…" : t("cancelMarkWasted")}
+                    </button>
+                    {hasBean && (
+                      <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory}
+                        title={!canOverrideInventory ? t("noOverridePermission") : undefined}
+                        className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
+                        {cancelling ? "…" : t("cancelRestock")}
+                      </button>
+                    )}
+                    <button onClick={() => setCancelBatch(null)} disabled={cancelling}
+                      className="w-full py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                      {t("cancel")}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

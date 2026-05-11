@@ -161,7 +161,16 @@ export const translations = {
   cannotMixStatuses:  { en: "Cannot mix \"Pending QC\" and \"Passed\" batches in the same blend.", ar: "لا يمكن دمج دفعات \"في انتظار الجودة\" مع دفعات \"ناجح\"." },
   batchCreated:       { en: "Roasting batch created!", ar: "تم إنشاء دفعة التحميص!" },
   batchesBlended:     { en: "Batches blended!",       ar: "تم دمج الدفعات!" },
+  batchCancelled:     { en: "Batch cancelled.",        ar: "تم إلغاء الدفعة." },
+  cancelFailed:       { en: "Failed to cancel batch.", ar: "فشل إلغاء الدفعة." },
   insufficientStock:  { en: "Insufficient stock! Available:", ar: "مخزون غير كافٍ! المتاح:" },
+  cancelBatchTitle:      { en: "Cancel Batch",           ar: "إلغاء الدفعة" },
+  cancelBatchMsgPre:     { en: "Are you sure you want to delete this batch? The allocated green beans will be returned to inventory automatically.", ar: "هل أنت متأكد من حذف هذه الدفعة؟ سيتم إعادة البن الأخضر المخصص إلى المخزون تلقائياً." },
+  cancelBatchMsgPost:    { en: "This batch has already been processed. Do you want to restock the green beans or mark them as consumed?", ar: "هذه الدفعة قد تمت معالجتها. هل تريد إعادة البن الأخضر إلى المخزون أم تسجيله كمستهلك؟" },
+  cancelConfirmRestock:  { en: "Confirm Delete & Restock", ar: "تأكيد الحذف وإعادة المخزون" },
+  cancelMarkWasted:      { en: "Delete & Mark as Wasted (No Restock)", ar: "حذف وتسجيل كهدر (بدون إعادة مخزون)" },
+  cancelRestock:         { en: "Delete & Restock Green Beans", ar: "حذف وإعادة البن الأخضر" },
+  noOverridePermission:  { en: "You need inventory.override permission to restock", ar: "تحتاج صلاحية تجاوز المخزون لإعادة الكميات" },
   kgOrdered:          { en: "kg ordered",             ar: "كغ مطلوبة" },
 
   // ── Inventory page ────────────────────────────────────────────────────
