@@ -325,6 +325,20 @@ export const translations = {
   // ── Dashboard page ───────────────────────────────────────────────────────
   noDashboardAccess:  { en: "No dashboard access",  ar: "لا يوجد وصول للوحة التحكم" },
   useSidebar:         { en: "Use the sidebar to navigate to your assigned modules.", ar: "استخدم القائمة الجانبية للتنقل إلى الوحدات المخصصة لك." },
+  today:              { en: "Today",                ar: "اليوم" },
+  thisWeek:           { en: "This Week",            ar: "هذا الأسبوع" },
+  thisMonth:          { en: "This Month",           ar: "هذا الشهر" },
+  allTime:            { en: "All Time",             ar: "كل الوقت" },
+  totalRoastedCoffee: { en: "Total Roasted Coffee", ar: "الكمية المحمصة" },
+  shrinkagePct:       { en: "Shrinkage / Waste %",  ar: "نسبة الهدر" },
+  ordersPipelineLabel:{ en: "Orders Pipeline",      ar: "حالة الطلبات" },
+  activeCustomers:    { en: "Active Customers",     ar: "العملاء النشطون" },
+  inventoryAlertsTitle: { en: "Inventory Alerts",   ar: "تنبيهات المخزون" },
+  recentActiveOrders: { en: "Recent Active Orders", ar: "أحدث الطلبات المفتوحة" },
+  readyToDispatch:    { en: "Ready to Dispatch",    ar: "جاهز للشحن" },
+  noInventoryAlerts:  { en: "All stock levels are healthy", ar: "جميع مستويات المخزون جيدة" },
+  noActiveOrders:     { en: "No active orders",     ar: "لا توجد طلبات نشطة" },
+  kgUnit:             { en: "kg",                   ar: "كغ" },
 
   // ── QC page ───────────────────────────────────────────────────────────────
   panelCupping:       { en: "Panel Cupping",         ar: "جلسة تذوق جماعية" },
