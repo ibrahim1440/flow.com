@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Box, Package, Trash2 } from "lucide-react";
+import { Box, Package, Trash2, CalendarDays } from "lucide-react";
+import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../layout";
@@ -12,6 +13,8 @@ type Batch = {
   greenBeanQuantity: number; roastedBeanQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
+  parentBatchId: string | null;
+  parentBatch: { id: string; batchNumber: string } | null;
   greenBean: { beanType: string } | null;
   orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
 };
@@ -24,6 +27,7 @@ export default function PackagingPage() {
   const user = useUser();
   const { t } = useI18n();
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
+  const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
 
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -32,6 +36,7 @@ export default function PackagingPage() {
   const [success, setSuccess] = useState("");
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
@@ -130,6 +135,15 @@ export default function PackagingPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
+                      {canEditDate && (
+                        <button
+                          onClick={() => setEditDateBatch(batch)}
+                          className="p-1 rounded-lg text-brown/40 hover:text-orange hover:bg-orange/10 transition-colors"
+                          title={t("editDateBtn")}
+                        >
+                          <CalendarDays size={13} />
+                        </button>
+                      )}
                       <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${batch.status === "Partially Packaged" ? "bg-amber-100 text-amber-800" : "bg-info-bg text-slate"}`}>
                         {batch.status === "Partially Packaged" ? t("statusPartiallyPkg") : t("statusPassed")}
                       </span>
@@ -302,6 +316,29 @@ export default function PackagingPage() {
           </div>
         );
       })()}
+
+      {/* Edit Date Modal */}
+      {editDateBatch && (
+        <EditDateModal
+          batch={editDateBatch}
+          onClose={() => setEditDateBatch(null)}
+          onSuccess={({ newBatchNumber, parentBatchId, newParentBatchNumber }) => {
+            setBatches((prev) =>
+              prev.map((b) => {
+                if (b.id === editDateBatch.id) return { ...b, batchNumber: newBatchNumber };
+                if (parentBatchId && b.id === parentBatchId && newParentBatchNumber)
+                  return { ...b, batchNumber: newParentBatchNumber };
+                return b;
+              })
+            );
+            const msg = newParentBatchNumber
+              ? `${t("dateUpdatedMsg")} ${newBatchNumber}. ${t("blendAlsoUpdated")}`
+              : `${t("dateUpdatedMsg")} ${newBatchNumber}`;
+            setSuccess(msg);
+            setEditDateBatch(null);
+          }}
+        />
+      )}
     </div>
   );
 }

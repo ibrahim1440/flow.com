@@ -87,6 +87,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "blend", label: "Blend batches" },
     { key: "view_history", label: "View completed batches" },
     { key: "cancel_batch", label: "Cancel / delete batches" },
+    { key: "edit_date", label: "Edit batch date (retroactive)" },
   ],
   qc: [
     { key: "create_record", label: "Submit QC records" },

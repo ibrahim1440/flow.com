@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ClipboardCheck, Plus, Search, CheckCircle2, XCircle, Eye, Merge,
-  Users, Link2, AlertTriangle, Clock, Loader2, Trash2,
+  Users, Link2, AlertTriangle, Clock, Loader2, Trash2, CalendarDays,
 } from "lucide-react";
+import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../layout";
 import { hasSubPrivilege } from "@/lib/auth";
@@ -73,6 +74,7 @@ export default function QCPage() {
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "qc", "create_record");
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "qc", "manage");
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
+  const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
 
   const [backlogBatches, setBacklogBatches] = useState<Batch[]>([]);
@@ -97,6 +99,7 @@ export default function QCPage() {
   const [generatingInvite, setGeneratingInvite] = useState<string | null>(null);
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
 
   const loadBacklog = useCallback(async () => {
     const [batchRes, qcRes] = await Promise.all([
@@ -322,6 +325,15 @@ export default function QCPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-bold text-charcoal font-mono text-sm">{batch.batchNumber}</p>
+                          {canEditDate && (
+                            <button
+                              onClick={() => setEditDateBatch(batch)}
+                              className="p-1 rounded-lg text-brown/40 hover:text-orange hover:bg-orange/10 transition-colors"
+                              title={t("editDateBtn")}
+                            >
+                              <CalendarDays size={12} />
+                            </button>
+                          )}
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-warning-bg text-yellow-800">
                             {t("statusPendingQc")}
                           </span>
@@ -798,6 +810,29 @@ export default function QCPage() {
           </div>
         );
       })()}
+
+      {/* Edit Date Modal */}
+      {editDateBatch && (
+        <EditDateModal
+          batch={editDateBatch}
+          onClose={() => setEditDateBatch(null)}
+          onSuccess={({ newBatchNumber, parentBatchId, newParentBatchNumber }) => {
+            setBacklogBatches((prev) =>
+              prev.map((b) => {
+                if (b.id === editDateBatch.id) return { ...b, batchNumber: newBatchNumber };
+                if (parentBatchId && b.id === parentBatchId && newParentBatchNumber)
+                  return { ...b, batchNumber: newParentBatchNumber };
+                return b;
+              })
+            );
+            const msg = newParentBatchNumber
+              ? `${t("dateUpdatedMsg")} ${newBatchNumber}. ${t("blendAlsoUpdated")}`
+              : `${t("dateUpdatedMsg")} ${newBatchNumber}`;
+            toast.success(msg);
+            setEditDateBatch(null);
+          }}
+        />
+      )}
     </div>
   );
 }

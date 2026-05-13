@@ -339,6 +339,15 @@ export const translations = {
   noInventoryAlerts:  { en: "All stock levels are healthy", ar: "جميع مستويات المخزون جيدة" },
   noActiveOrders:     { en: "No active orders",     ar: "لا توجد طلبات نشطة" },
   kgUnit:             { en: "kg",                   ar: "كغ" },
+  editBatchDate:      { en: "Edit Batch Date",       ar: "تعديل تاريخ الدفعة" },
+  newRoastDate:       { en: "New Roast Date",        ar: "تاريخ التحميص الجديد" },
+  editDateBtn:        { en: "Edit Date",             ar: "تعديل التاريخ" },
+  blendCascadeQuestion: { en: "This batch is part of Blend", ar: "هذه الدفعة جزء من خلطة" },
+  blendCascadePrompt: { en: "Its new date is later than the Blend's. Update the Blend's date and S/N to match?", ar: "تاريخه الجديد أحدث من تاريخ الخلطة. هل تريد تحديث تاريخ الخلطة والرقم التسلسلي ليتوافق؟" },
+  updateBlendToo:     { en: "Update Blend Too",      ar: "تحديث الخلطة أيضاً" },
+  skipBlendUpdate:    { en: "Keep Blend Date",       ar: "الإبقاء على تاريخ الخلطة" },
+  dateUpdatedMsg:     { en: "Date updated. New S/N:", ar: "تم تحديث التاريخ. الرقم التسلسلي الجديد:" },
+  blendAlsoUpdated:   { en: "Linked blend updated automatically.", ar: "تم تحديث الخلطة المرتبطة تلقائياً." },
 
   // ── QC page ───────────────────────────────────────────────────────────────
   panelCupping:       { en: "Panel Cupping",         ar: "جلسة تذوق جماعية" },

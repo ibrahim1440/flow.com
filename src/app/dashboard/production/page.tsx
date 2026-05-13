@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Factory, AlertTriangle, CheckCircle, Merge, Box, FileText, FileSpreadsheet, Trash2 } from "lucide-react";
+import { Factory, AlertTriangle, CheckCircle, Merge, Box, FileText, FileSpreadsheet, Trash2, CalendarDays } from "lucide-react";
+import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import { formatDate } from "@/lib/utils";
 import { exportBatchesPDF, exportBatchesExcel, type BatchExportRow } from "@/lib/export";
 import { useUser } from "../layout";
@@ -14,6 +15,8 @@ type Batch = {
   greenBeanQuantity: number; roastedBeanQuantity: number; wasteQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
+  parentBatchId: string | null;
+  parentBatch: { id: string; batchNumber: string } | null;
   greenBean: { beanType: string } | null;
   orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
   qcRecords: { id: string; onProfile: boolean }[];
@@ -54,6 +57,7 @@ export default function ProductionPage() {
   const canStartBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "start_batch");
   const canBlend = hasSubPrivilege(user?.permissions ?? {}, "production", "blend");
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
+  const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
 
   const [orders, setOrders] = useState<{ items: OrderItem[] }[]>([]);
@@ -79,6 +83,9 @@ export default function ProductionPage() {
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+
+  // Edit date modal
+  const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -325,6 +332,15 @@ export default function ProductionPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
+                      {canEditDate && (
+                        <button
+                          onClick={() => setEditDateBatch(batch)}
+                          className="p-1 rounded-lg text-brown/40 hover:text-orange hover:bg-orange/10 transition-colors"
+                          title={t("editDateBtn")}
+                        >
+                          <CalendarDays size={13} />
+                        </button>
+                      )}
                       <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${STATUS_STYLES[batch.status] || "bg-gray-100 text-gray-600"}`}>
                         {statusLabel(batch.status, t)}
                       </span>
@@ -568,6 +584,29 @@ export default function ProductionPage() {
           </div>
         );
       })()}
+
+      {/* Edit Date Modal */}
+      {editDateBatch && (
+        <EditDateModal
+          batch={editDateBatch}
+          onClose={() => setEditDateBatch(null)}
+          onSuccess={({ newBatchNumber, parentBatchId, newParentBatchNumber }) => {
+            setBatches((prev) =>
+              prev.map((b) => {
+                if (b.id === editDateBatch.id) return { ...b, batchNumber: newBatchNumber };
+                if (parentBatchId && b.id === parentBatchId && newParentBatchNumber)
+                  return { ...b, batchNumber: newParentBatchNumber };
+                return b;
+              })
+            );
+            const msg = newParentBatchNumber
+              ? `${t("dateUpdatedMsg")} ${newBatchNumber}. ${t("blendAlsoUpdated")}`
+              : `${t("dateUpdatedMsg")} ${newBatchNumber}`;
+            setSuccess(msg);
+            setEditDateBatch(null);
+          }}
+        />
+      )}
     </div>
   );
 }
