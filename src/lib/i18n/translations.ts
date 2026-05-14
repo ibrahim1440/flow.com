@@ -410,6 +410,20 @@ export const translations = {
   allOrders:          { en: "All Orders",             ar: "جميع الطلبات" },
   clearFilters:       { en: "Clear",                  ar: "مسح" },
   filterResults:      { en: "of",                     ar: "من" },
+
+  // ── Bulk Finalize ─────────────────────────────────────────────────────────
+  bulkFinalize:       { en: "Bulk Finalize",          ar: "إنهاء الجودة للدفعات المحددة" },
+  bulkFinalizeCount:  { en: "batches selected",       ar: "دفعات محددة" },
+  selectAll:          { en: "Select All",             ar: "تحديد الكل" },
+  deselectAll:        { en: "Deselect All",           ar: "إلغاء التحديد" },
+  bulkWarningTitle:   { en: "Warning: Low Tester Count", ar: "تحذير: عدد مختبرين غير كافٍ" },
+  bulkWarningMsg:     { en: "Some selected batches have 1 or 0 testers. Panel QC is most reliable with 2 or more testers. Proceed anyway?", ar: "بعض الدفعات المحددة تم تقييمها بواسطة مختبر واحد فقط أو لم تُقيَّم بعد. الجودة أكثر موثوقية مع مختبرَين أو أكثر. هل تريد المتابعة؟" },
+  bulkOutcomeLabel:   { en: "Outcome for all selected batches", ar: "النتيجة لجميع الدفعات المحددة" },
+  bulkFinalizeTitle:  { en: "Bulk Finalize QC",       ar: "إنهاء جودة الدفعات" },
+  bulkFinalizing:     { en: "Finalizing…",            ar: "جاري الإنهاء…" },
+  bulkPassAll:        { en: "Pass All",               ar: "قبول الجميع" },
+  bulkFailAll:        { en: "Fail All",               ar: "رفض الجميع" },
+  bulkDone:           { en: "QC finalized for {n} batches", ar: "تم إنهاء جودة {n} دفعة" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;

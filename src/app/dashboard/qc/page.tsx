@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ClipboardCheck, Plus, Search, CheckCircle2, XCircle, Eye, Merge,
-  Users, Link2, AlertTriangle, Clock, Loader2, Trash2, CalendarDays,
+  Users, Link2, AlertTriangle, Clock, Loader2, Trash2, CalendarDays, CheckSquare,
 } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
@@ -107,6 +107,13 @@ export default function QCPage() {
   const [cancelling, setCancelling] = useState(false);
   const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
 
+  // Bulk finalize
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkWarning, setShowBulkWarning] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkOutcome, setBulkOutcome] = useState<"Passed" | "Rejected">("Passed");
+  const [isBulkFinalizing, setIsBulkFinalizing] = useState(false);
+
   const loadBacklog = useCallback(async () => {
     const [batchRes, qcRes] = await Promise.all([
       fetch("/api/roasting-batches?statuses=Pending+QC"),
@@ -195,6 +202,45 @@ export default function QCPage() {
       if (historyLoaded) loadHistory();
     } finally {
       setFinalizing(false);
+    }
+  }
+
+  function toggleBatch(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function handleBulkFinalizeClick() {
+    const selected = filteredBacklog.filter((b) => selectedIds.has(b.id));
+    const hasLowTesters = selected.some((b) => b.qcRecords.length <= 1);
+    if (hasLowTesters) {
+      setShowBulkWarning(true);
+    } else {
+      setShowBulkModal(true);
+    }
+  }
+
+  async function executeBulkFinalize() {
+    setIsBulkFinalizing(true);
+    try {
+      const res = await fetch("/api/qc-records/bulk-finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchIds: Array.from(selectedIds), outcome: bulkOutcome }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || t("error")); return; }
+      toast.success(t("bulkDone").replace("{n}", String(data.finalized)));
+      setSelectedIds(new Set());
+      setShowBulkModal(false);
+      setShowBulkWarning(false);
+      loadBacklog();
+      if (historyLoaded) loadHistory();
+    } finally {
+      setIsBulkFinalizing(false);
     }
   }
 
@@ -343,12 +389,41 @@ export default function QCPage() {
       {tab === "backlog" && (
         <div className="space-y-4">
           {backlogBatches.length > 0 && (
-            <WorkflowFilterBar
-              searchQuery={backlogSearch} onSearchChange={setBacklogSearch}
-              beanOptions={backlogBeanOptions} selectedBean={backlogBean} onBeanChange={setBacklogBean}
-              orderOptions={backlogOrderOptions} selectedOrder={backlogOrder} onOrderChange={setBacklogOrder}
-              resultCount={filteredBacklog.length} totalCount={backlogBatches.length}
-            />
+            <div className="space-y-2">
+              <WorkflowFilterBar
+                searchQuery={backlogSearch} onSearchChange={setBacklogSearch}
+                beanOptions={backlogBeanOptions} selectedBean={backlogBean} onBeanChange={setBacklogBean}
+                orderOptions={backlogOrderOptions} selectedOrder={backlogOrder} onOrderChange={setBacklogOrder}
+                resultCount={filteredBacklog.length} totalCount={backlogBatches.length}
+              />
+              {/* Select All + Bulk Finalize row */}
+              {canManage && filteredBacklog.length > 0 && (
+                <div className="flex items-center justify-between px-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-medium text-brown">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-orange rounded"
+                      checked={filteredBacklog.length > 0 && filteredBacklog.every((b) => selectedIds.has(b.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedIds(new Set(filteredBacklog.map((b) => b.id)));
+                        else setSelectedIds(new Set());
+                      }}
+                    />
+                    {filteredBacklog.every((b) => selectedIds.has(b.id)) && filteredBacklog.length > 0
+                      ? t("deselectAll") : t("selectAll")}
+                  </label>
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={handleBulkFinalizeClick}
+                      className="flex items-center gap-2 px-4 py-2 bg-charcoal text-white rounded-xl text-sm font-bold hover:bg-charcoal/80 shadow-md active:scale-[0.98] transition-all"
+                    >
+                      <CheckSquare size={15} />
+                      {t("bulkFinalize")} ({selectedIds.size})
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           {filteredBacklog.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl border border-border text-brown/40">
@@ -372,6 +447,14 @@ export default function QCPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
+                          {canManage && (
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 accent-orange rounded flex-shrink-0 cursor-pointer"
+                              checked={selectedIds.has(batch.id)}
+                              onChange={() => toggleBatch(batch.id)}
+                            />
+                          )}
                           <p className="font-bold text-charcoal font-mono text-sm">{batch.batchNumber}</p>
                           {canEditDate && (
                             <button
@@ -858,6 +941,81 @@ export default function QCPage() {
           </div>
         );
       })()}
+
+      {/* Bulk Finalize — Low-Tester Warning Modal */}
+      {showBulkWarning && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={20} className="text-amber-600" />
+              </div>
+              <div>
+                <h2 className="font-extrabold text-charcoal">{t("bulkWarningTitle")}</h2>
+                <p className="text-xs text-brown/60">{selectedIds.size} {t("bulkFinalizeCount")}</p>
+              </div>
+            </div>
+            <p className="text-sm text-brown mb-6">{t("bulkWarningMsg")}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowBulkWarning(false); setShowBulkModal(true); }}
+                className="flex-1 py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 active:scale-[0.98] transition-all"
+              >
+                {t("finalizeAnyway")}
+              </button>
+              <button
+                onClick={() => setShowBulkWarning(false)}
+                className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors"
+              >
+                {t("cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Finalize — Outcome Modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h2 className="font-extrabold text-charcoal mb-1">{t("bulkFinalizeTitle")}</h2>
+            <p className="text-xs text-brown/60 mb-5">{selectedIds.size} {t("bulkFinalizeCount")}</p>
+            <p className="text-sm font-semibold text-charcoal mb-3">{t("bulkOutcomeLabel")}</p>
+            <div className="flex gap-3 mb-6">
+              <button
+                onClick={() => setBulkOutcome("Passed")}
+                className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all ${bulkOutcome === "Passed" ? "bg-green-600 text-white border-green-600" : "bg-white text-green-700 border-green-300 hover:bg-green-50"}`}
+              >
+                <CheckCircle2 size={16} className="inline ltr:mr-1.5 rtl:ml-1.5" />
+                {t("bulkPassAll")}
+              </button>
+              <button
+                onClick={() => setBulkOutcome("Rejected")}
+                className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all ${bulkOutcome === "Rejected" ? "bg-red-600 text-white border-red-600" : "bg-white text-red-600 border-red-300 hover:bg-red-50"}`}
+              >
+                <XCircle size={16} className="inline ltr:mr-1.5 rtl:ml-1.5" />
+                {t("bulkFailAll")}
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={executeBulkFinalize}
+                disabled={isBulkFinalizing}
+                className="flex-1 py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                {isBulkFinalizing ? <><Loader2 size={16} className="animate-spin" />{t("bulkFinalizing")}</> : t("confirm")}
+              </button>
+              <button
+                onClick={() => setShowBulkModal(false)}
+                disabled={isBulkFinalizing}
+                className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors"
+              >
+                {t("cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Date Modal */}
       {editDateBatch && (
