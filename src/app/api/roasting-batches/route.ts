@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 
 async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
@@ -24,7 +24,8 @@ async function generateBatchNumber(greenBeanId: string | null | undefined): Prom
 }
 
 export async function GET(request: Request) {
-  const { error } = await requireModule("production");
+  // QC and Packaging workers need to read batches for their own workflow stages
+  const { error } = await requireAnyModule("production", "qc", "packaging");
   if (error) return error;
 
   const { searchParams } = new URL(request.url);
@@ -101,11 +102,11 @@ export async function POST(request: Request) {
       // Re-query all batches so the new "Pending QC" batch is visible
       const allBatches = await tx.roastingBatch.findMany({
         where: { orderItemId },
-        select: { status: true, greenBeanQuantity: true },
+        select: { status: true, roastedBeanQuantity: true, greenBeanQuantity: true },
       });
       const completionTotal = allBatches
         .filter(b => COMPLETION_STATUSES.includes(b.status))
-        .reduce((sum, b) => sum + b.greenBeanQuantity, 0);
+        .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
       // Always "In Production" when a new batch is created (it starts as Pending QC)
       const newStatus = completionTotal >= orderItem.quantityKg ? "Completed" : "In Production";
       await tx.orderItem.update({

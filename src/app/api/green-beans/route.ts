@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireAnyModule, requireSub } from "@/lib/auth-server";
 
 export async function GET(request: Request) {
-  const { error } = await requireModule("inventory");
+  // Production workers need to see bean names and stock when creating roasting batches
+  const { error } = await requireAnyModule("inventory", "production");
   if (error) return error;
 
   const { searchParams } = new URL(request.url);

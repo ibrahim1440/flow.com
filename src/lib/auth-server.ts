@@ -68,3 +68,14 @@ export async function requireSub(module: string, subKey: string) {
   }
   return { user, error: null };
 }
+
+// Read-only cross-module access: grants access when the user has ANY of the
+// listed modules. Used so workflow stages can read relational data (bean names,
+// order details, batch records) without needing permissions on the source module.
+export async function requireAnyModule(...modules: string[]) {
+  const { user, error } = await requireAuth();
+  if (error) return { user: null as never, error };
+  const allowed = modules.some((m) => hasModuleAccess(user.permissions, m));
+  if (!allowed) return { user: null as never, error: forbidden() };
+  return { user, error: null };
+}
