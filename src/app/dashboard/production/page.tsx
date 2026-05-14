@@ -293,9 +293,24 @@ export default function ProductionPage() {
                           <div className="bg-orange h-2 rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
                         </div>
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {item.roastingBatches.map((b) => (
-                            <span key={b.batchNumber} className="px-2 py-0.5 bg-cream text-brown rounded-lg text-xs font-mono">{b.batchNumber}</span>
-                          ))}
+                          {item.roastingBatches.map((b) => {
+                            const fullBatch = canEditDate
+                              ? batches.find((x) => x.batchNumber === b.batchNumber)
+                              : undefined;
+                            return fullBatch ? (
+                              <button
+                                key={b.batchNumber}
+                                onClick={() => setEditDateBatch(fullBatch)}
+                                className="flex items-center gap-1 px-2 py-0.5 bg-cream text-brown rounded-lg text-xs font-mono hover:bg-orange/10 hover:text-orange transition-colors"
+                                title={t("editDateBtn")}
+                              >
+                                {b.batchNumber}
+                                <CalendarDays size={9} className="opacity-50" />
+                              </button>
+                            ) : (
+                              <span key={b.batchNumber} className="px-2 py-0.5 bg-cream text-brown rounded-lg text-xs font-mono">{b.batchNumber}</span>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
