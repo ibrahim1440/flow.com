@@ -192,7 +192,11 @@ export function canViewOnly(permissions: Permissions, module: string): boolean {
 export function hasSubPrivilege(permissions: Permissions, module: string, subKey: string): boolean {
   const perm = permissions[module];
   if (!perm || perm.access === "none") return false;
-  return perm.sub?.[subKey] === true;
+  // If the sub-key was added after the user's permissions were last saved,
+  // it won't exist in the stored object. Fall back to module-level edit access
+  // so new privileges are automatically granted to anyone with full module edit.
+  if (perm.sub === undefined || !(subKey in perm.sub)) return perm.access === "edit";
+  return perm.sub[subKey] === true;
 }
 
 export function parsePermissions(raw: string | Permissions): Permissions {
