@@ -51,7 +51,7 @@ export async function DELETE(request: Request, { params }: Params) {
       );
       const completionTotal = remainingActive
         .filter(b => COMPLETION_STATUSES.includes(b.status))
-        .reduce((sum, b) => sum + b.greenBeanQuantity, 0);
+        .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
       const newStatus =
         remainingActive.length === 0
           ? "Pending"

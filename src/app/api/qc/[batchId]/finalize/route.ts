@@ -51,12 +51,12 @@ export async function POST(_request: Request, { params }: Params) {
       if (orderItem) {
         const allBatches = await tx.roastingBatch.findMany({
           where: { orderItemId: batch.orderItemId },
-          select: { status: true, greenBeanQuantity: true },
+          select: { status: true, roastedBeanQuantity: true, greenBeanQuantity: true },
         });
         const hasActive = allBatches.some(b => ACTIVE_STATUSES.includes(b.status));
         const completionTotal = allBatches
           .filter(b => COMPLETION_STATUSES.includes(b.status))
-          .reduce((sum, b) => sum + b.greenBeanQuantity, 0);
+          .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
         const itemStatus = !hasActive
           ? "Pending"
           : completionTotal >= orderItem.quantityKg

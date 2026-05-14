@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Box, Package, Trash2, CalendarDays } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
+import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../layout";
@@ -37,6 +38,11 @@ export default function PackagingPage() {
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
+
+  // Filter state
+  const [filterSearch, setFilterSearch] = useState("");
+  const [filterBean, setFilterBean] = useState("");
+  const [filterOrder, setFilterOrder] = useState("");
 
   const [showForm, setShowForm] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
@@ -94,6 +100,40 @@ export default function PackagingPage() {
     loadData();
   }
 
+  const beanOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const b of batches) {
+      const v = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: v, value: v }); }
+    }
+    return opts;
+  }, [batches]);
+
+  const orderOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const b of batches) {
+      const v = String(b.orderItem.order.orderNumber);
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${b.orderItem.order.customer.name}`, value: v }); }
+    }
+    return opts;
+  }, [batches]);
+
+  const filteredBatches = useMemo(() => {
+    const q = filterSearch.toLowerCase();
+    return batches.filter((b) => {
+      const beanType = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      if (filterBean && beanType !== filterBean) return false;
+      if (filterOrder && String(b.orderItem.order.orderNumber) !== filterOrder) return false;
+      if (q) {
+        const haystack = `${b.batchNumber} ${b.orderItem.order.orderNumber} ${b.orderItem.order.customer.name} ${beanType}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [batches, filterSearch, filterBean, filterOrder]);
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin" /></div>;
   }
@@ -116,7 +156,16 @@ export default function PackagingPage() {
         </div>
       )}
 
-      {batches.length === 0 ? (
+      {batches.length > 0 && (
+        <WorkflowFilterBar
+          searchQuery={filterSearch} onSearchChange={setFilterSearch}
+          beanOptions={beanOptions} selectedBean={filterBean} onBeanChange={setFilterBean}
+          orderOptions={orderOptions} selectedOrder={filterOrder} onOrderChange={setFilterOrder}
+          resultCount={filteredBatches.length} totalCount={batches.length}
+        />
+      )}
+
+      {filteredBatches.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-2xl border border-border text-brown/40">
           <Box size={40} className="mx-auto mb-3 opacity-50" />
           <p className="font-semibold text-lg">{t("noBatchesToPackage")}</p>
@@ -124,7 +173,7 @@ export default function PackagingPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {batches.map((batch) => {
+          {filteredBatches.map((batch) => {
             const packed = packagedKg(batch);
             const total = batch.roastedBeanQuantity;
             const pct = total > 0 ? Math.min((packed / total) * 100, 100) : 0;

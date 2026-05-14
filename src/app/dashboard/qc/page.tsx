@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ClipboardCheck, Plus, Search, CheckCircle2, XCircle, Eye, Merge,
   Users, Link2, AlertTriangle, Clock, Loader2, Trash2, CalendarDays,
 } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
+import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../layout";
 import { hasSubPrivilege } from "@/lib/auth";
@@ -83,6 +84,11 @@ export default function QCPage() {
   const [records, setRecords] = useState<LegacyRecord[]>([]);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"backlog" | "history">("backlog");
+
+  // Backlog filter state
+  const [backlogSearch, setBacklogSearch] = useState("");
+  const [backlogBean, setBacklogBean] = useState("");
+  const [backlogOrder, setBacklogOrder] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Panel submission form
@@ -233,6 +239,40 @@ export default function QCPage() {
   );
   const now = new Date();
 
+  const backlogBeanOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const b of backlogBatches) {
+      const v = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: v, value: v }); }
+    }
+    return opts;
+  }, [backlogBatches]);
+
+  const backlogOrderOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const b of backlogBatches) {
+      const v = String(b.orderItem.order.orderNumber);
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${b.orderItem.order.customer.name}`, value: v }); }
+    }
+    return opts;
+  }, [backlogBatches]);
+
+  const filteredBacklog = useMemo(() => {
+    const q = backlogSearch.toLowerCase();
+    return backlogBatches.filter((b) => {
+      const beanType = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      if (backlogBean && beanType !== backlogBean) return false;
+      if (backlogOrder && String(b.orderItem.order.orderNumber) !== backlogOrder) return false;
+      if (q) {
+        const haystack = `${b.batchNumber} ${b.orderItem.order.orderNumber} ${b.orderItem.order.customer.name} ${beanType}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [backlogBatches, backlogSearch, backlogBean, backlogOrder]);
+
   function deadlineDisplay(deadline: string | null) {
     if (!deadline) return null;
     const d = new Date(deadline);
@@ -302,7 +342,15 @@ export default function QCPage() {
       {/* Tab 1: QC Backlog */}
       {tab === "backlog" && (
         <div className="space-y-4">
-          {backlogBatches.length === 0 ? (
+          {backlogBatches.length > 0 && (
+            <WorkflowFilterBar
+              searchQuery={backlogSearch} onSearchChange={setBacklogSearch}
+              beanOptions={backlogBeanOptions} selectedBean={backlogBean} onBeanChange={setBacklogBean}
+              orderOptions={backlogOrderOptions} selectedOrder={backlogOrder} onOrderChange={setBacklogOrder}
+              resultCount={filteredBacklog.length} totalCount={backlogBatches.length}
+            />
+          )}
+          {filteredBacklog.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl border border-border text-brown/40">
               <ClipboardCheck size={40} className="mx-auto mb-3 opacity-50" />
               <p className="font-semibold text-lg">{t("noBatchesAwaitingQc")}</p>
@@ -310,7 +358,7 @@ export default function QCPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {backlogBatches.map((batch) => {
+              {filteredBacklog.map((batch) => {
                 const dl = deadlineDisplay(batch.qcDeadline);
                 const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
                 const rejectCount = batch.qcRecords.filter((r) => r.decision === "Reject").length;

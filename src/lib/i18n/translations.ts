@@ -403,6 +403,13 @@ export const translations = {
   copyLink:           { en: "Copy Link",             ar: "نسخ الرابط" },
   close:              { en: "Close",                 ar: "إغلاق" },
   searchQcRecords:    { en: "Search QC records...",  ar: "بحث في سجلات الجودة..." },
+
+  // ── Workflow Filter Bar ───────────────────────────────────────────────────
+  searchWorkflow:     { en: "Search S/N, customer, order…", ar: "بحث بالرقم التسلسلي، العميل، الطلب…" },
+  allBeans:           { en: "All Beans",              ar: "جميع الأصناف" },
+  allOrders:          { en: "All Orders",             ar: "جميع الطلبات" },
+  clearFilters:       { en: "Clear",                  ar: "مسح" },
+  filterResults:      { en: "of",                     ar: "من" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;

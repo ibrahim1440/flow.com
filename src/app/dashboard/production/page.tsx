@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Factory, AlertTriangle, CheckCircle, Merge, Box, FileText, FileSpreadsheet, Trash2, CalendarDays } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
+import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { exportBatchesPDF, exportBatchesExcel, type BatchExportRow } from "@/lib/export";
 import { useUser } from "../layout";
@@ -79,6 +80,11 @@ export default function ProductionPage() {
 
   // Tab
   const [tab, setTab] = useState<"pending" | "batches">("pending");
+
+  // Pending tab filter state
+  const [pendingSearch, setPendingSearch] = useState("");
+  const [pendingBean, setPendingBean] = useState("");
+  const [pendingOrder, setPendingOrder] = useState("");
 
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
@@ -201,6 +207,39 @@ export default function ProductionPage() {
       .map((i: any) => ({ ...i, order: { orderNumber: o.orderNumber, customer: { name: o.customer?.name } } }))
   );
 
+  const pendingBeanOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const item of pendingItems) {
+      const v = item.beanTypeName;
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: v, value: v }); }
+    }
+    return opts;
+  }, [pendingItems]);
+
+  const pendingOrderOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const item of pendingItems) {
+      const v = String(item.order.orderNumber);
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${item.order.customer.name}`, value: v }); }
+    }
+    return opts;
+  }, [pendingItems]);
+
+  const filteredPending = useMemo(() => {
+    const q = pendingSearch.toLowerCase();
+    return pendingItems.filter((item: OrderItem) => {
+      if (pendingBean && item.beanTypeName !== pendingBean) return false;
+      if (pendingOrder && String(item.order.orderNumber) !== pendingOrder) return false;
+      if (q) {
+        const haystack = `${item.order.orderNumber} ${item.order.customer.name} ${item.beanTypeName}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [pendingItems, pendingSearch, pendingBean, pendingOrder]);
+
   const passedBatches = batches.filter((b) => b.status === "Passed");
   const pendingQcBatches = batches.filter((b) => b.status === "Pending QC");
   const blendableBatches = batches.filter((b) => b.status === "Passed" || b.status === "Pending QC");
@@ -258,14 +297,22 @@ export default function ProductionPage() {
       </div>
 
       {tab === "pending" && (
-        <div>
-          {pendingItems.length === 0 ? (
+        <div className="space-y-3">
+          {pendingItems.length > 0 && (
+            <WorkflowFilterBar
+              searchQuery={pendingSearch} onSearchChange={setPendingSearch}
+              beanOptions={pendingBeanOptions} selectedBean={pendingBean} onBeanChange={setPendingBean}
+              orderOptions={pendingOrderOptions} selectedOrder={pendingOrder} onOrderChange={setPendingOrder}
+              resultCount={filteredPending.length} totalCount={pendingItems.length}
+            />
+          )}
+          {filteredPending.length === 0 ? (
             <div className="text-center py-8 bg-white rounded-2xl border border-border text-brown/40">
               <Factory size={32} className="mx-auto mb-2 opacity-50" /><p className="font-semibold">{t("noPendingItems")}</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {pendingItems.map((item: OrderItem) => {
+              {filteredPending.map((item: OrderItem) => {
                 const produced = item.roastingBatches.reduce((s: number, b) => s + b.greenBeanQuantity, 0);
                 const remaining = item.quantityKg - produced;
                 const progress = item.quantityKg > 0 ? (produced / item.quantityKg) * 100 : 0;

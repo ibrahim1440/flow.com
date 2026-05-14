@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Truck, Plus, Search } from "lucide-react";
+import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../layout";
 import { hasSubPrivilege } from "@/lib/auth";
@@ -31,6 +32,9 @@ export default function DispatchPage() {
   const [orders, setOrders] = useState<{ items: OrderItem[] }[]>([]);
   const [deliveries, setDeliveries] = useState<{ id: string; date: string; quantityKg: number; deliveryType: string; orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } } }[]>([]);
   const [search, setSearch] = useState("");
+  const [readySearch, setReadySearch] = useState("");
+  const [readyBean, setReadyBean] = useState("");
+  const [readyOrder, setReadyOrder] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const [form, setForm] = useState({ quantityKg: 0, deliveryType: "full", notes: "" });
@@ -103,6 +107,39 @@ export default function DispatchPage() {
       .map((i: any) => ({ ...i, order: { orderNumber: o.orderNumber, customer: { name: o.customer?.name } } }))
   );
 
+  const readyBeanOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const item of readyItems) {
+      const v = item.beanTypeName;
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: v, value: v }); }
+    }
+    return opts;
+  }, [readyItems]);
+
+  const readyOrderOptions = useMemo<FilterOption[]>(() => {
+    const seen = new Set<string>();
+    const opts: FilterOption[] = [];
+    for (const item of readyItems) {
+      const v = String(item.order.orderNumber);
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${item.order.customer.name}`, value: v }); }
+    }
+    return opts;
+  }, [readyItems]);
+
+  const filteredReadyItems = useMemo(() => {
+    const q = readySearch.toLowerCase();
+    return readyItems.filter((item: OrderItem) => {
+      if (readyBean && item.beanTypeName !== readyBean) return false;
+      if (readyOrder && String(item.order.orderNumber) !== readyOrder) return false;
+      if (q) {
+        const haystack = `${item.order.orderNumber} ${item.order.customer.name} ${item.beanTypeName}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [readyItems, readySearch, readyBean, readyOrder]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -112,13 +149,23 @@ export default function DispatchPage() {
 
       <div>
         <h2 className="font-semibold text-charcoal mb-3">{t("readyForDelivery")}</h2>
-        {readyItems.length === 0 ? (
+        {readyItems.length > 0 && (
+          <div className="mb-3">
+            <WorkflowFilterBar
+              searchQuery={readySearch} onSearchChange={setReadySearch}
+              beanOptions={readyBeanOptions} selectedBean={readyBean} onBeanChange={setReadyBean}
+              orderOptions={readyOrderOptions} selectedOrder={readyOrder} onOrderChange={setReadyOrder}
+              resultCount={filteredReadyItems.length} totalCount={readyItems.length}
+            />
+          </div>
+        )}
+        {filteredReadyItems.length === 0 ? (
           <div className="text-center py-8 bg-white rounded-2xl border border-border text-muted-foreground">
             <Truck size={32} className="mx-auto mb-2" /><p>{t("noItemsDelivery")}</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {readyItems.map((item) => {
+            {filteredReadyItems.map((item) => {
               const packed = packagedKg(item.roastingBatches);
               const available = Math.max(0, +(packed - item.deliveredQty).toFixed(3));
               return (
