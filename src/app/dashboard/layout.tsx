@@ -57,7 +57,7 @@ function SidebarNav({
 
   return (
     <aside
-      className={`fixed lg:static top-0 h-[100dvh] lg:h-auto z-[50] w-[260px] bg-sidebar text-white transform transition-transform duration-300 ease-in-out flex flex-col ltr:left-0 rtl:right-0 overflow-y-auto ${
+      className={`fixed lg:static top-0 h-[100dvh] z-[50] w-[260px] bg-sidebar text-white transform transition-transform duration-300 ease-in-out flex flex-col ltr:left-0 rtl:right-0 overflow-y-auto ${
         sidebarOpen ? "translate-x-0" : "max-lg:ltr:-translate-x-full max-lg:rtl:translate-x-full"
       }`}
       style={{ WebkitOverflowScrolling: "touch" }}
@@ -158,7 +158,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   }
 
   return (
-    <div className="min-h-screen flex bg-cream">
+    <div className="h-screen overflow-hidden flex bg-cream">
       {sidebarOpen && (
         <div
           className="fixed inset-x-0 top-0 h-[100dvh] bg-black/40 z-40 lg:hidden"
@@ -173,8 +173,8 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
         onLogout={handleLogout}
       />
 
-      <div className="flex-1 flex flex-col min-h-screen">
-        <header className="bg-white/80 backdrop-blur-md border-b border-border px-5 py-3.5 flex items-center gap-4 sticky top-0 z-30">
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="bg-white/80 backdrop-blur-md border-b border-border px-5 py-3.5 flex items-center gap-4 z-30 flex-shrink-0">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
@@ -194,7 +194,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
           </div>
         </header>
 
-        <main className="flex-1 p-5 lg:p-7 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-y-auto p-5 lg:p-7">{children}</main>
       </div>
     </div>
   );
