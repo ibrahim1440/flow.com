@@ -2,44 +2,59 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { FlaskConical, Plus, Users, Lock, LockOpen, ChevronRight, Trash2, X, Link2, Check, QrCode } from "lucide-react";
+import {
+  FlaskConical, Plus, Users, Lock, LockOpen, ChevronRight, Trash2, X,
+  Link2, Check, QrCode, Coffee, History, ClipboardList, CheckSquare, Square,
+} from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useUser } from "@/app/dashboard/layout";
+
+type SessionBatch = {
+  id: string;
+  order: number;
+  batch: {
+    batchNumber: string;
+    roastProfile: string | null;
+    greenBean: { beanType: string; serialNumber: string } | null;
+    orderItem: { beanTypeName: string };
+  };
+};
 
 type Session = {
   id: string;
   name: string;
   date: string;
   status: "Open" | "Closed";
+  sessionToken: string | null;
   batchId: string | null;
   greenBeanId: string | null;
   batch: { batchNumber: string } | null;
   greenBean: { serialNumber: string; beanType: string } | null;
+  sessionBatches: SessionBatch[];
   _count: { scores: number };
 };
 
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-        status === "Open"
-          ? "bg-green-100 text-green-700"
-          : "bg-gray-100 text-gray-500"
-      }`}
-    >
-      {status === "Open" ? <LockOpen size={10} /> : <Lock size={10} />}
-      {status}
-    </span>
-  );
-}
+type AvailableBatch = {
+  id: string;
+  batchNumber: string;
+  status: string;
+  roastProfile: string | null;
+  greenBean: { beanType: string; serialNumber: string } | null;
+  orderItem: { beanTypeName: string; order: { orderNumber: number } };
+};
 
-function InviteModal({ sessionId, sessionName, onClose }: { sessionId: string; sessionName: string; onClose: () => void }) {
+// ── Invite Modal ──────────────────────────────────────────────────────────────
+
+function InviteModal({ session, onClose }: { session: Session; onClose: () => void }) {
   const [origin, setOrigin] = useState("");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => { setOrigin(window.location.origin); }, []);
 
-  const guestUrl = `${origin}/guest-cupping/${sessionId}`;
+  const isMulti = session.sessionBatches.length > 0;
+  const guestUrl = isMulti
+    ? `${origin}/guest-cupping/session/${session.sessionToken}`
+    : `${origin}/guest-cupping/${session.id}`;
 
   async function handleCopy() {
     await navigator.clipboard.writeText(guestUrl);
@@ -53,27 +68,25 @@ function InviteModal({ sessionId, sessionName, onClose }: { sessionId: string; s
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-extrabold text-charcoal text-lg">Invite Guests</h2>
-            <p className="text-xs text-brown/50 mt-0.5 truncate max-w-[200px]">{sessionName}</p>
+            <p className="text-xs text-brown/50 mt-0.5 truncate max-w-[220px]">{session.name}</p>
           </div>
           <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors">
             <X size={20} />
           </button>
         </div>
 
-        {/* QR Code */}
-        {origin && (
-          <div className="flex justify-center p-4 bg-cream rounded-xl border border-border">
-            <QRCodeSVG
-              value={guestUrl}
-              size={180}
-              bgColor="#FAF6F0"
-              fgColor="#2C1A0E"
-              level="M"
-            />
+        {isMulti && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 font-medium">
+            🔒 Blind session — guests see <strong>Cup 1, Cup 2…</strong> only, not bean names.
           </div>
         )}
 
-        {/* URL + Copy */}
+        {origin && (
+          <div className="flex justify-center p-4 bg-cream rounded-xl border border-border">
+            <QRCodeSVG value={guestUrl} size={180} bgColor="#FAF6F0" fgColor="#2C1A0E" level="M" />
+          </div>
+        )}
+
         <div className="space-y-2">
           <p className="text-xs font-bold text-brown/50 uppercase tracking-wide">Guest Link</p>
           <div className="flex gap-2">
@@ -83,22 +96,19 @@ function InviteModal({ sessionId, sessionName, onClose }: { sessionId: string; s
             <button
               onClick={handleCopy}
               className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                copied
-                  ? "bg-green-500 text-white"
-                  : "bg-charcoal text-white hover:bg-charcoal/80"
+                copied ? "bg-green-500 text-white" : "bg-charcoal text-white hover:bg-charcoal/80"
               }`}
             >
               {copied ? <><Check size={13} /> Copied!</> : <><Link2 size={13} /> Copy</>}
             </button>
           </div>
-          <p className="text-[10px] text-brown/40">
-            Guests can scan the QR code or open this link on their phone to score without an account.
-          </p>
         </div>
       </div>
     </div>
   );
 }
+
+// ── Session Card ──────────────────────────────────────────────────────────────
 
 function SessionCard({
   session,
@@ -116,34 +126,45 @@ function SessionCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
 
-  async function handleClose() {
-    setClosing(true);
-    await onClose(session.id);
-    setClosing(false);
-  }
+  const isMulti = session.sessionBatches.length > 0;
 
   return (
     <>
-      {showInvite && (
-        <InviteModal
-          sessionId={session.id}
-          sessionName={session.name}
-          onClose={() => setShowInvite(false)}
-        />
-      )}
-
+      {showInvite && <InviteModal session={session} onClose={() => setShowInvite(false)} />}
       <div className="bg-white rounded-2xl border border-border p-5 hover:shadow-sm transition-shadow">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-extrabold text-charcoal truncate">{session.name}</h3>
-              <StatusBadge status={session.status} />
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                session.status === "Open" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+              }`}>
+                {session.status === "Open" ? <LockOpen size={10} /> : <Lock size={10} />}
+                {session.status}
+              </span>
+              {isMulti && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
+                  🔒 Blind · {session.sessionBatches.length} cups
+                </span>
+              )}
             </div>
-            <div className="mt-1 space-y-0.5 text-xs text-brown/60">
-              <p>{new Date(session.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
-              {session.batch && <p>Batch: <span className="font-medium text-charcoal">{session.batch.batchNumber}</span></p>}
-              {session.greenBean && <p>Bean: <span className="font-medium text-charcoal">{session.greenBean.beanType} #{session.greenBean.serialNumber}</span></p>}
-            </div>
+            <p className="text-xs text-brown/50 mt-1">
+              {new Date(session.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+            </p>
+            {isMulti ? (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {session.sessionBatches.map((sb, i) => (
+                  <span key={sb.id} className="px-1.5 py-0.5 bg-cream border border-border rounded text-[10px] font-mono text-brown/60">
+                    Cup {i + 1}: {sb.batch.batchNumber}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <>
+                {session.batch && <p className="text-xs text-brown/60 mt-0.5">Batch: <span className="font-medium text-charcoal">{session.batch.batchNumber}</span></p>}
+                {session.greenBean && <p className="text-xs text-brown/60 mt-0.5">Bean: <span className="font-medium text-charcoal">{session.greenBean.beanType} #{session.greenBean.serialNumber}</span></p>}
+              </>
+            )}
           </div>
           <div className="flex items-center gap-1.5 text-brown/50 shrink-0">
             <Users size={13} />
@@ -156,7 +177,7 @@ function SessionCard({
             onClick={() => router.push(`/dashboard/cupping/${session.id}`)}
             className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors"
           >
-            {session.status === "Open" ? "Score This Session" : "View Results"}
+            {session.status === "Open" ? "Score / Manage" : "View Results"}
             <ChevronRight size={14} />
           </button>
 
@@ -172,7 +193,7 @@ function SessionCard({
 
           {isAdmin && session.status === "Open" && (
             <button
-              onClick={handleClose}
+              onClick={async () => { setClosing(true); await onClose(session.id); setClosing(false); }}
               disabled={closing}
               className="px-4 py-2.5 rounded-xl bg-charcoal text-white text-sm font-bold hover:bg-charcoal/80 transition-colors disabled:opacity-50"
             >
@@ -183,22 +204,11 @@ function SessionCard({
           {isAdmin && (
             confirmDelete ? (
               <div className="flex gap-1">
-                <button
-                  onClick={() => onDelete(session.id)}
-                  className="px-3 py-2 rounded-xl bg-red-500 text-white text-xs font-bold"
-                >Confirm</button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="px-3 py-2 rounded-xl border border-border text-xs font-bold"
-                >
-                  <X size={12} />
-                </button>
+                <button onClick={() => onDelete(session.id)} className="px-3 py-2 rounded-xl bg-red-500 text-white text-xs font-bold">Confirm</button>
+                <button onClick={() => setConfirmDelete(false)} className="px-3 py-2 rounded-xl border border-border text-xs font-bold"><X size={12} /></button>
               </div>
             ) : (
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="p-2.5 rounded-xl border border-border text-brown/40 hover:text-red-500 hover:border-red-200 transition-colors"
-              >
+              <button onClick={() => setConfirmDelete(true)} className="p-2.5 rounded-xl border border-border text-brown/40 hover:text-red-500 hover:border-red-200 transition-colors">
                 <Trash2 size={15} />
               </button>
             )
@@ -209,20 +219,45 @@ function SessionCard({
   );
 }
 
+// ── New Session Modal ─────────────────────────────────────────────────────────
+
 function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClose: () => void }) {
   const [name, setName] = useState("");
+  const [batches, setBatches] = useState<AvailableBatch[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingBatches, setLoadingBatches] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    fetch("/api/roasting-batches?statuses=Pending+QC,Passed")
+      .then((r) => r.json())
+      .then((data: AvailableBatch[]) => setBatches(data))
+      .catch(() => {})
+      .finally(() => setLoadingBatches(false));
+  }, []);
+
+  function toggleBatch(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) { setError("Name is required"); return; }
+    if (!name.trim()) { setError("Session name is required"); return; }
     setSaving(true);
     setError("");
+
+    const body: Record<string, unknown> = { name };
+    if (selectedIds.size > 0) body.batchIds = Array.from(selectedIds);
+
     const res = await fetch("/api/cupping/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const j = await res.json();
@@ -235,41 +270,75 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between shrink-0">
           <h2 className="font-extrabold text-charcoal text-lg">New Cupping Session</h2>
-          <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors">
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors"><X size={20} /></button>
         </div>
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-              Session Name
-            </label>
+
+        <form onSubmit={handleCreate} className="flex flex-col gap-4 overflow-hidden">
+          <div className="shrink-0">
+            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">Session Name *</label>
             <input
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Ethiopia Yirgacheffe — Blind Trial"
+              placeholder="e.g. Ethiopia Blind Trial — May 2025"
               className="w-full px-4 py-2.5 rounded-xl border-2 border-border bg-cream text-charcoal text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
             />
           </div>
-          {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border-2 border-border text-sm font-bold text-brown hover:bg-gray-50 transition-colors"
-            >
+
+          {/* Batch selector */}
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <label className="text-xs font-bold text-brown uppercase tracking-wide">
+                Select Batches for Blind Tasting
+              </label>
+              {selectedIds.size > 0 && (
+                <span className="text-xs font-bold text-orange">{selectedIds.size} selected</span>
+              )}
+            </div>
+            {loadingBatches ? (
+              <p className="text-xs text-brown/40 py-4 text-center">Loading batches…</p>
+            ) : batches.length === 0 ? (
+              <p className="text-xs text-brown/40 py-4 text-center">No eligible batches found.</p>
+            ) : (
+              <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
+                {batches.map((b) => {
+                  const checked = selectedIds.has(b.id);
+                  const label = b.greenBean?.beanType || b.orderItem.beanTypeName;
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => toggleBatch(b.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
+                        checked ? "border-orange bg-orange/5" : "border-border hover:border-orange/30"
+                      }`}
+                    >
+                      {checked ? <CheckSquare size={16} className="text-orange shrink-0" /> : <Square size={16} className="text-brown/30 shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-charcoal truncate">{label}</p>
+                        <p className="text-[10px] font-mono text-brown/50">{b.batchNumber} · {b.status}{b.roastProfile ? ` · ${b.roastProfile}` : ""}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {selectedIds.size === 0 && (
+              <p className="text-[10px] text-brown/40 mt-1.5 shrink-0">Leave unselected to create a single-cup session (use the old invite link).</p>
+            )}
+          </div>
+
+          {error && <p className="text-xs text-red-500 font-medium shrink-0">{error}</p>}
+
+          <div className="flex gap-2 shrink-0">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-border text-sm font-bold text-brown hover:bg-gray-50 transition-colors">
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50"
-            >
-              {saving ? "Creating…" : "Create Session"}
+            <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50">
+              {saving ? "Creating…" : selectedIds.size > 0 ? `Create Blind Session (${selectedIds.size} cups)` : "Create Session"}
             </button>
           </div>
         </form>
@@ -278,11 +347,14 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
   );
 }
 
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function CuppingPage() {
   const user = useUser();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [tab, setTab] = useState<"active" | "history">("active");
 
   const isAdmin = user?.role === "admin";
 
@@ -305,11 +377,11 @@ export default function CuppingPage() {
     if (res.ok) setSessions((p) => p.filter((s) => s.id !== id));
   }
 
-  const open = sessions.filter((s) => s.status === "Open");
-  const closed = sessions.filter((s) => s.status === "Closed");
+  const activeSessions = sessions.filter((s) => s.status === "Open");
+  const historySessions = sessions.filter((s) => s.status === "Closed");
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="max-w-2xl mx-auto space-y-6">
       {showModal && (
         <NewSessionModal
           onCreated={() => { setShowModal(false); fetchSessions(); }}
@@ -317,6 +389,7 @@ export default function CuppingPage() {
         />
       )}
 
+      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-3">
@@ -336,36 +409,68 @@ export default function CuppingPage() {
         )}
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setTab("active")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+            tab === "active" ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:border-slate-300"
+          }`}
+        >
+          <ClipboardList size={15} />
+          قائمة التقييم النشطة
+          {activeSessions.length > 0 && (
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${tab === "active" ? "bg-white/20 text-white" : "bg-orange/10 text-orange"}`}>
+              {activeSessions.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab("history")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+            tab === "history" ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:border-slate-300"
+          }`}
+        >
+          <History size={15} />
+          سجل التذوق
+          {historySessions.length > 0 && (
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${tab === "history" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"}`}>
+              {historySessions.length}
+            </span>
+          )}
+        </button>
+      </div>
+
       {loading ? (
         <div className="text-center py-16 text-brown/40 text-sm">Loading sessions…</div>
-      ) : sessions.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-border">
-          <FlaskConical size={36} className="text-orange/30 mx-auto mb-3" />
-          <p className="font-bold text-charcoal">No sessions yet</p>
-          {isAdmin && (
-            <p className="text-sm text-brown/50 mt-1">Create a session and invite the team to score.</p>
-          )}
-        </div>
+      ) : tab === "active" ? (
+        activeSessions.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-border">
+            <Coffee size={36} className="text-orange/30 mx-auto mb-3" />
+            <p className="font-bold text-charcoal">No active sessions</p>
+            {isAdmin && <p className="text-sm text-brown/50 mt-1">Create a session and invite the team to score.</p>}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {activeSessions.map((s) => (
+              <SessionCard key={s.id} session={s} isAdmin={isAdmin} onClose={handleClose} onDelete={handleDelete} />
+            ))}
+          </div>
+        )
       ) : (
-        <>
-          {open.length > 0 && (
-            <section className="space-y-3">
-              <h2 className="text-xs font-extrabold text-brown/50 uppercase tracking-widest">Open Sessions</h2>
-              {open.map((s) => (
-                <SessionCard key={s.id} session={s} isAdmin={isAdmin} onClose={handleClose} onDelete={handleDelete} />
-              ))}
-            </section>
-          )}
-
-          {closed.length > 0 && (
-            <section className="space-y-3">
-              <h2 className="text-xs font-extrabold text-brown/50 uppercase tracking-widest">Closed Sessions</h2>
-              {closed.map((s) => (
-                <SessionCard key={s.id} session={s} isAdmin={isAdmin} onClose={handleClose} onDelete={handleDelete} />
-              ))}
-            </section>
-          )}
-        </>
+        historySessions.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-border">
+            <History size={36} className="text-brown/20 mx-auto mb-3" />
+            <p className="font-bold text-charcoal">No completed sessions yet</p>
+            <p className="text-sm text-brown/50 mt-1">Closed sessions with their results will appear here.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {historySessions.map((s) => (
+              <SessionCard key={s.id} session={s} isAdmin={isAdmin} onClose={handleClose} onDelete={handleDelete} />
+            ))}
+          </div>
+        )
       )}
     </div>
   );

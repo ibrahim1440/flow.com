@@ -1,7 +1,27 @@
 import { NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+
+const SESSION_INCLUDE = {
+  _count: { select: { scores: true } },
+  batch: { select: { batchNumber: true } },
+  greenBean: { select: { serialNumber: true, beanType: true } },
+  sessionBatches: {
+    orderBy: { order: "asc" as const },
+    include: {
+      batch: {
+        select: {
+          batchNumber: true,
+          roastProfile: true,
+          greenBean: { select: { beanType: true, serialNumber: true } },
+          orderItem: { select: { beanTypeName: true } },
+        },
+      },
+    },
+  },
+};
 
 export async function GET() {
   const { error } = await requireAuth();
@@ -9,11 +29,7 @@ export async function GET() {
 
   const sessions = await prisma.cuppingSession.findMany({
     orderBy: { createdAt: "desc" },
-    include: {
-      _count: { select: { scores: true } },
-      batch: { select: { batchNumber: true } },
-      greenBean: { select: { serialNumber: true, beanType: true } },
-    },
+    include: SESSION_INCLUDE,
   });
 
   return NextResponse.json(sessions);
@@ -27,25 +43,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 
-  const { name, batchId, greenBeanId } = await request.json();
+  const { name, batchId, greenBeanId, batchIds } = await request.json();
 
   if (!name?.trim()) {
     return NextResponse.json({ error: "Session name is required" }, { status: 400 });
   }
 
-  try { const session = await prisma.cuppingSession.create({
-    data: {
-      name: name.trim(),
-      batchId: batchId || null,
-      greenBeanId: greenBeanId || null,
-    },
-    include: {
-      _count: { select: { scores: true } },
-      batch: { select: { batchNumber: true } },
-      greenBean: { select: { serialNumber: true, beanType: true } },
-    },
-  });
+  // Multi-batch session: generate a public token
+  const isMulti = Array.isArray(batchIds) && batchIds.length > 0;
+  const sessionToken = isMulti ? randomBytes(8).toString("hex") : null;
 
-  return NextResponse.json(session, { status: 201 });
+  try {
+    const session = await prisma.cuppingSession.create({
+      data: {
+        name: name.trim(),
+        batchId: batchId || null,
+        greenBeanId: greenBeanId || null,
+        sessionToken,
+        sessionBatches: isMulti ? {
+          create: (batchIds as string[]).map((bid, idx) => ({
+            batchId: bid,
+            order: idx,
+          })),
+        } : undefined,
+      },
+      include: SESSION_INCLUDE,
+    });
+
+    return NextResponse.json(session, { status: 201 });
   } catch (err) { return handlePrismaError(err); }
 }

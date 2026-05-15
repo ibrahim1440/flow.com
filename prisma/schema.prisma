@@ -131,10 +131,11 @@ model RoastingBatch {
   qcToken             String?  @unique
   qcClosedById        String?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  qcRecords           QcRecord[]
-  cuppingSessions     CuppingSession[]
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  qcRecords              QcRecord[]
+  cuppingSessions        CuppingSession[]
+  cuppingSessionBatches  CuppingSessionBatch[]
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
@@ -178,43 +179,60 @@ model Delivery {
 }
 
 model CuppingSession {
-  id          String         @id @default(cuid())
-  name        String
-  date        DateTime       @default(now())
-  status      String         @default("Open")
-  batchId     String?
-  greenBeanId String?
-  batch       RoastingBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
-  greenBean   GreenBean?     @relation(fields: [greenBeanId], references: [id], onDelete: SetNull)
-  scores      CuppingScore[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id             String                @id @default(cuid())
+  name           String
+  date           DateTime              @default(now())
+  status         String                @default("Open")
+  sessionToken   String?               @unique
+  batchId        String?
+  greenBeanId    String?
+  batch          RoastingBatch?        @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  greenBean      GreenBean?            @relation(fields: [greenBeanId], references: [id], onDelete: SetNull)
+  sessionBatches CuppingSessionBatch[]
+  scores         CuppingScore[]
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+}
+
+model CuppingSessionBatch {
+  id        String         @id @default(cuid())
+  sessionId String
+  session   CuppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  batchId   String
+  batch     RoastingBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  order     Int            @default(0)
+  scores    CuppingScore[]
+  createdAt DateTime       @default(now())
+
+  @@unique([sessionId, batchId])
 }
 
 model CuppingScore {
-  id                String         @id @default(cuid())
-  sessionId         String
-  session           CuppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  employeeId        String?
-  employee          Employee?      @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  externalName      String?
-  fragranceAroma    Float          @default(7)
-  flavor            Float          @default(7)
-  aftertaste        Float          @default(7)
-  acidity           Float          @default(7)
-  body              Float          @default(7)
-  balance           Float          @default(7)
-  uniformity        Float          @default(10)
-  cleanCup          Float          @default(10)
-  sweetness         Float          @default(10)
-  overall           Float          @default(7)
-  defectCups        Int            @default(0)
-  defectType        String         @default("none")
-  finalScore        Float          @default(0)
-  notes             String?        @db.Text
-  flavorDescriptors String[]
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  id                 String               @id @default(cuid())
+  sessionId          String
+  session            CuppingSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionBatchId     String?
+  sessionBatch       CuppingSessionBatch? @relation(fields: [sessionBatchId], references: [id], onDelete: SetNull)
+  employeeId         String?
+  employee           Employee?            @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  externalName       String?
+  fragranceAroma     Float                @default(7)
+  flavor             Float                @default(7)
+  aftertaste         Float                @default(7)
+  acidity            Float                @default(7)
+  body               Float                @default(7)
+  balance            Float                @default(7)
+  uniformity         Float                @default(10)
+  cleanCup           Float                @default(10)
+  sweetness          Float                @default(10)
+  overall            Float                @default(7)
+  defectCups         Int                  @default(0)
+  defectType         String               @default("none")
+  finalScore         Float                @default(0)
+  notes              String?              @db.Text
+  flavorDescriptors  String[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 }
 
 model SystemConfig {

@@ -16,6 +16,18 @@ export async function GET(_req: Request, { params }: Params) {
     include: {
       batch: { select: { batchNumber: true } },
       greenBean: { select: { serialNumber: true, beanType: true } },
+      sessionBatches: {
+        orderBy: { order: "asc" },
+        include: {
+          batch: {
+            select: {
+              batchNumber: true, roastProfile: true,
+              greenBean: { select: { beanType: true, serialNumber: true } },
+              orderItem: { select: { beanTypeName: true } },
+            },
+          },
+        },
+      },
       scores: {
         include: { employee: { select: { id: true, name: true } } },
         orderBy: { createdAt: "asc" },
