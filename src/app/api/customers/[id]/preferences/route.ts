@@ -15,6 +15,9 @@ export async function POST(
     const VALID_USAGE = ["ESPRESSO", "FILTER", "BOTH"];
     const body = await request.json() as {
       greenBeanId: string; profileName: string; usageType?: string; notes?: string;
+      targetColorWhole?: number | null; targetToleranceWhole?: number | null;
+      targetColorGround?: number | null; targetToleranceGround?: number | null;
+      targetDeltaMin?: number | null; targetDeltaMax?: number | null;
     };
     if (!body.greenBeanId) {
       return NextResponse.json({ error: "greenBeanId is required" }, { status: 400 });
@@ -23,6 +26,14 @@ export async function POST(
       return NextResponse.json({ error: "profileName is required" }, { status: 400 });
     }
     const usageType = body.usageType && VALID_USAGE.includes(body.usageType) ? body.usageType : "BOTH";
+    const targets = {
+      targetColorWhole:      body.targetColorWhole      ?? null,
+      targetToleranceWhole:  body.targetToleranceWhole  ?? null,
+      targetColorGround:     body.targetColorGround     ?? null,
+      targetToleranceGround: body.targetToleranceGround ?? null,
+      targetDeltaMin:        body.targetDeltaMin        ?? null,
+      targetDeltaMax:        body.targetDeltaMax        ?? null,
+    };
 
     const pref = await prisma.customerRoastPreference.upsert({
       where: { customerId_greenBeanId: { customerId, greenBeanId: body.greenBeanId } },
@@ -32,11 +43,13 @@ export async function POST(
         profileName: body.profileName.trim(),
         usageType,
         notes: body.notes?.trim() || null,
+        ...targets,
       },
       update: {
         profileName: body.profileName.trim(),
         usageType,
         notes: body.notes?.trim() || null,
+        ...targets,
       },
       include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },
     });

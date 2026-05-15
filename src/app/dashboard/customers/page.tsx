@@ -20,6 +20,12 @@ type RoastPreference = {
   usageType: UsageType;
   notes: string | null;
   greenBean: GreenBeanSlim;
+  targetColorWhole:      number | null;
+  targetToleranceWhole:  number | null;
+  targetColorGround:     number | null;
+  targetToleranceGround: number | null;
+  targetDeltaMin:        number | null;
+  targetDeltaMax:        number | null;
 };
 
 type Customer = {
@@ -60,7 +66,12 @@ export default function CustomersPage() {
   // Profile form
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [editingPref, setEditingPref] = useState<RoastPreference | null>(null);
-  const [profileForm, setProfileForm] = useState({ greenBeanId: "", profileName: "", usageType: "BOTH" as UsageType, notes: "" });
+  const [profileForm, setProfileForm] = useState({
+    greenBeanId: "", profileName: "", usageType: "BOTH" as UsageType, notes: "",
+    targetColorWhole: "", targetToleranceWhole: "",
+    targetColorGround: "", targetToleranceGround: "",
+    targetDeltaMin: "", targetDeltaMax: "",
+  });
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Toast messages
@@ -138,15 +149,33 @@ export default function CustomersPage() {
   }
 
   // ── Profile CRUD ───────────────────────────────────────────────────────────
+  const BLANK_PROFILE_FORM = {
+    greenBeanId: "", profileName: "", usageType: "BOTH" as UsageType, notes: "",
+    targetColorWhole: "", targetToleranceWhole: "",
+    targetColorGround: "", targetToleranceGround: "",
+    targetDeltaMin: "", targetDeltaMax: "",
+  };
+
   function openAddProfile() {
     setEditingPref(null);
-    setProfileForm({ greenBeanId: "", profileName: "", usageType: "BOTH", notes: "" });
+    setProfileForm(BLANK_PROFILE_FORM);
     setShowProfileForm(true);
   }
 
   function openEditProfile(pref: RoastPreference) {
     setEditingPref(pref);
-    setProfileForm({ greenBeanId: pref.greenBeanId, profileName: pref.profileName, usageType: pref.usageType ?? "BOTH", notes: pref.notes ?? "" });
+    setProfileForm({
+      greenBeanId: pref.greenBeanId,
+      profileName: pref.profileName,
+      usageType: pref.usageType ?? "BOTH",
+      notes: pref.notes ?? "",
+      targetColorWhole:      pref.targetColorWhole      != null ? String(pref.targetColorWhole)      : "",
+      targetToleranceWhole:  pref.targetToleranceWhole  != null ? String(pref.targetToleranceWhole)  : "",
+      targetColorGround:     pref.targetColorGround     != null ? String(pref.targetColorGround)     : "",
+      targetToleranceGround: pref.targetToleranceGround != null ? String(pref.targetToleranceGround) : "",
+      targetDeltaMin:        pref.targetDeltaMin        != null ? String(pref.targetDeltaMin)        : "",
+      targetDeltaMax:        pref.targetDeltaMax        != null ? String(pref.targetDeltaMax)        : "",
+    });
     setShowProfileForm(true);
   }
 
@@ -155,18 +184,28 @@ export default function CustomersPage() {
     if (!selected) return;
     setSavingProfile(true);
 
+    const toFloat = (v: string) => v.trim() !== "" ? parseFloat(v) : null;
+    const targetPayload = {
+      targetColorWhole:      toFloat(profileForm.targetColorWhole),
+      targetToleranceWhole:  toFloat(profileForm.targetToleranceWhole),
+      targetColorGround:     toFloat(profileForm.targetColorGround),
+      targetToleranceGround: toFloat(profileForm.targetToleranceGround),
+      targetDeltaMin:        toFloat(profileForm.targetDeltaMin),
+      targetDeltaMax:        toFloat(profileForm.targetDeltaMax),
+    };
+
     let res: Response;
     if (editingPref) {
       res = await fetch(`/api/customers/${selected.id}/preferences/${editingPref.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileName: profileForm.profileName, usageType: profileForm.usageType, notes: profileForm.notes }),
+        body: JSON.stringify({ profileName: profileForm.profileName, usageType: profileForm.usageType, notes: profileForm.notes, ...targetPayload }),
       });
     } else {
       res = await fetch(`/api/customers/${selected.id}/preferences`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(profileForm),
+        body: JSON.stringify({ ...profileForm, ...targetPayload }),
       });
     }
 
@@ -386,6 +425,19 @@ export default function CustomersPage() {
                               </span>
                             </div>
                             {pref.notes && <p className="text-xs text-brown/60 mt-0.5">{pref.notes}</p>}
+                            {(pref.targetColorWhole != null || pref.targetColorGround != null) && (
+                              <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono text-amber-800/70">
+                                {pref.targetColorWhole != null && (
+                                  <span>Whole: {pref.targetColorWhole}{pref.targetToleranceWhole != null ? ` ±${pref.targetToleranceWhole}` : ""}</span>
+                                )}
+                                {pref.targetColorGround != null && (
+                                  <span>Ground: {pref.targetColorGround}{pref.targetToleranceGround != null ? ` ±${pref.targetToleranceGround}` : ""}</span>
+                                )}
+                                {(pref.targetDeltaMin != null || pref.targetDeltaMax != null) && (
+                                  <span className="col-span-2">Δ: {pref.targetDeltaMin ?? "?"} – {pref.targetDeltaMax ?? "?"}</span>
+                                )}
+                              </div>
+                            )}
                           </div>
                           {canManage && (
                             <div className="flex gap-1 flex-shrink-0">
@@ -513,6 +565,56 @@ export default function CustomersPage() {
                   onChange={(e) => setProfileForm({ ...profileForm, notes: e.target.value })}
                   rows={2} className={INPUT_CLS} />
               </div>
+
+              {/* Roast Standards */}
+              <div className="border-t border-border pt-3">
+                <p className="text-xs font-extrabold text-charcoal/60 uppercase tracking-widest mb-2">{t("roastStandards")}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-charcoal mb-1">{t("colorWholeLabel")}</label>
+                    <input type="number" step="0.1" min="0" max="100"
+                      value={profileForm.targetColorWhole}
+                      onChange={(e) => setProfileForm({ ...profileForm, targetColorWhole: e.target.value })}
+                      placeholder="e.g. 68" className={INPUT_CLS} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-charcoal mb-1">{t("toleranceLabel")} (Whole)</label>
+                    <input type="number" step="0.1" min="0"
+                      value={profileForm.targetToleranceWhole}
+                      onChange={(e) => setProfileForm({ ...profileForm, targetToleranceWhole: e.target.value })}
+                      placeholder="e.g. 2" className={INPUT_CLS} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-charcoal mb-1">{t("colorGroundLabel")}</label>
+                    <input type="number" step="0.1" min="0" max="100"
+                      value={profileForm.targetColorGround}
+                      onChange={(e) => setProfileForm({ ...profileForm, targetColorGround: e.target.value })}
+                      placeholder="e.g. 74" className={INPUT_CLS} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-charcoal mb-1">{t("toleranceLabel")} (Ground)</label>
+                    <input type="number" step="0.1" min="0"
+                      value={profileForm.targetToleranceGround}
+                      onChange={(e) => setProfileForm({ ...profileForm, targetToleranceGround: e.target.value })}
+                      placeholder="e.g. 2" className={INPUT_CLS} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-charcoal mb-1">{t("deltaRangeLabel")} Min</label>
+                    <input type="number" step="0.1" min="0"
+                      value={profileForm.targetDeltaMin}
+                      onChange={(e) => setProfileForm({ ...profileForm, targetDeltaMin: e.target.value })}
+                      placeholder="e.g. 4" className={INPUT_CLS} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-charcoal mb-1">{t("deltaRangeLabel")} Max</label>
+                    <input type="number" step="0.1" min="0"
+                      value={profileForm.targetDeltaMax}
+                      onChange={(e) => setProfileForm({ ...profileForm, targetDeltaMax: e.target.value })}
+                      placeholder="e.g. 8" className={INPUT_CLS} />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-1">
                 <button type="submit" disabled={savingProfile}
                   className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all disabled:opacity-60">

@@ -14,12 +14,26 @@ import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import toast from "react-hot-toast";
 
+type CustomerPref = {
+  id: string;
+  greenBeanId: string;
+  profileName: string;
+  targetColorWhole:      number | null;
+  targetToleranceWhole:  number | null;
+  targetColorGround:     number | null;
+  targetToleranceGround: number | null;
+  targetDeltaMin:        number | null;
+  targetDeltaMax:        number | null;
+};
+
 type TesterRecord = {
   id: string;
   testerName: string | null;
   isExternal: boolean;
   decision: string;
   color: number | null;
+  colorWhole: number | null;
+  colorGround: number | null;
   remarks: string | null;
   underDeveloped: boolean;
   overDeveloped: boolean;
@@ -39,7 +53,11 @@ type Batch = {
   parentBatchId: string | null;
   qcDeadline: string | null;
   qcToken: string | null;
-  orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
+  orderItem: {
+    beanTypeName: string;
+    greenBeanId: string | null;
+    order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
+  };
   greenBean: { beanType: string; process: string } | null;
   qcRecords: TesterRecord[];
   childBatches: { id: string; batchNumber: string }[];
@@ -63,10 +81,92 @@ type LegacyRecord = {
   employee: { id: string; name: string } | null;
 };
 
+function AgtronTable({
+  records, pref, t,
+}: {
+  records: TesterRecord[];
+  pref: CustomerPref | null;
+  t: (k: TranslationKey) => string;
+}) {
+  const passCheck = (actual: number | null, target: number | null, tol: number | null) => {
+    if (actual == null || target == null || tol == null) return null;
+    return Math.abs(actual - target) <= tol;
+  };
+
+  return (
+    <div className="mt-2 border border-orange/20 rounded-xl overflow-hidden">
+      <p className="text-[10px] font-extrabold text-orange/70 uppercase tracking-widest px-3 py-1.5 bg-orange/5">
+        {t("agtronResults")}{pref ? ` · ${pref.profileName}` : ""}
+      </p>
+      <table className="w-full text-[11px]">
+        <thead className="bg-cream">
+          <tr>
+            <th className="text-start px-2.5 py-1.5 font-bold text-charcoal">{t("tester")}</th>
+            <th className="text-center px-2.5 py-1.5 font-bold text-charcoal">{t("colorWholeLabel")}</th>
+            <th className="text-center px-2.5 py-1.5 font-bold text-charcoal">{t("colorGroundLabel")}</th>
+            <th className="text-center px-2.5 py-1.5 font-bold text-charcoal">{t("colorDeltaLabel")}</th>
+          </tr>
+          {pref && (pref.targetColorWhole != null || pref.targetColorGround != null) && (
+            <tr className="bg-orange/5">
+              <td className="px-2.5 py-1 text-orange/70 font-bold">{t("targetHint")}</td>
+              <td className="text-center px-2.5 py-1 text-orange/70 font-mono">
+                {pref.targetColorWhole ?? "—"}{pref.targetToleranceWhole != null ? ` ±${pref.targetToleranceWhole}` : ""}
+              </td>
+              <td className="text-center px-2.5 py-1 text-orange/70 font-mono">
+                {pref.targetColorGround ?? "—"}{pref.targetToleranceGround != null ? ` ±${pref.targetToleranceGround}` : ""}
+              </td>
+              <td className="text-center px-2.5 py-1 text-orange/70 font-mono">
+                {(pref.targetDeltaMin != null && pref.targetDeltaMax != null) ? `${pref.targetDeltaMin}–${pref.targetDeltaMax}` : "—"}
+              </td>
+            </tr>
+          )}
+        </thead>
+        <tbody className="divide-y divide-border">
+          {records.map((r) => {
+            const delta = (r.colorWhole != null && r.colorGround != null)
+              ? Math.abs(r.colorGround - r.colorWhole) : null;
+            const wholePass  = pref ? passCheck(r.colorWhole,  pref.targetColorWhole,  pref.targetToleranceWhole)  : null;
+            const groundPass = pref ? passCheck(r.colorGround, pref.targetColorGround, pref.targetToleranceGround) : null;
+            const deltaPass  = pref && delta != null && pref.targetDeltaMin != null && pref.targetDeltaMax != null
+              ? (delta >= pref.targetDeltaMin && delta <= pref.targetDeltaMax) : null;
+            if (r.colorWhole == null && r.colorGround == null) return null;
+            const badge = (pass: boolean | null) => pass === true
+              ? <span className="text-[9px] font-bold text-green-600 bg-green-50 px-1 rounded-full">{t("passLabel")}</span>
+              : pass === false
+              ? <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1 rounded-full">{t("failLabel")}</span>
+              : null;
+            return (
+              <tr key={r.id} className="bg-white/60">
+                <td className="px-2.5 py-1.5 font-semibold text-charcoal truncate max-w-[80px]">
+                  {r.testerName || r.employee?.name || "—"}
+                </td>
+                <td className="text-center px-2.5 py-1.5">
+                  <span className="font-mono">{r.colorWhole ?? "—"}</span>
+                  <span className="ltr:ml-1 rtl:mr-1">{badge(wholePass)}</span>
+                </td>
+                <td className="text-center px-2.5 py-1.5">
+                  <span className="font-mono">{r.colorGround ?? "—"}</span>
+                  <span className="ltr:ml-1 rtl:mr-1">{badge(groundPass)}</span>
+                </td>
+                <td className="text-center px-2.5 py-1.5">
+                  <span className="font-mono font-bold text-orange">{delta != null ? delta.toFixed(1) : "—"}</span>
+                  <span className="ltr:ml-1 rtl:mr-1">{badge(deltaPass)}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const BLANK_FORM = {
   batchId: "", coffeeOrigin: "", processing: "", serialNumber: "",
   decision: "" as "Accept" | "Reject" | "",
-  underDeveloped: false, overDeveloped: false, color: "", remarks: "",
+  underDeveloped: false, overDeveloped: false,
+  color: "", colorWhole: "", colorGround: "",
+  remarks: "",
 };
 
 export default function QCPage() {
@@ -159,6 +259,8 @@ export default function QCPage() {
           processing: form.processing,
           serialNumber: form.serialNumber,
           color: form.color || null,
+          colorWhole:  form.colorWhole  ? form.colorWhole  : null,
+          colorGround: form.colorGround ? form.colorGround : null,
           remarks: form.remarks || null,
           underDeveloped: form.underDeveloped,
           overDeveloped: form.overDeveloped,
@@ -553,31 +655,41 @@ export default function QCPage() {
                     </div>
 
                     {/* Expanded tester list */}
-                    {isExpanded && total > 0 && (
-                      <div className="mt-3 pt-3 border-t border-amber-200/60 space-y-1.5">
-                        <p className="text-xs font-bold text-charcoal mb-2">{t("testerRecords")}</p>
-                        {batch.qcRecords.map((r) => (
-                          <div key={r.id} className="flex items-center justify-between bg-white/70 rounded-lg px-3 py-2">
-                            <div>
-                              <span className="text-xs font-semibold text-charcoal">
-                                {r.testerName || r.employee?.name || "—"}
-                                {r.isExternal && (
-                                  <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full">
-                                    {t("guestBadge")}
-                                  </span>
-                                )}
+                    {isExpanded && total > 0 && (() => {
+                      const batchGbId = batch.orderItem.greenBeanId;
+                      const batchPref = batch.orderItem.order.customer.roastPreferences.find(
+                        (p) => p.greenBeanId === batchGbId
+                      ) ?? null;
+                      const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
+                      return (
+                        <div className="mt-3 pt-3 border-t border-amber-200/60 space-y-1.5">
+                          <p className="text-xs font-bold text-charcoal mb-2">{t("testerRecords")}</p>
+                          {batch.qcRecords.map((r) => (
+                            <div key={r.id} className="flex items-center justify-between bg-white/70 rounded-lg px-3 py-2">
+                              <div>
+                                <span className="text-xs font-semibold text-charcoal">
+                                  {r.testerName || r.employee?.name || "—"}
+                                  {r.isExternal && (
+                                    <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full">
+                                      {t("guestBadge")}
+                                    </span>
+                                  )}
+                                </span>
+                                {r.color && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50">{t("colorLabel")} {r.color}</span>}
+                                {r.remarks && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50 truncate max-w-[120px] inline-block">{r.remarks}</span>}
+                              </div>
+                              <span className={`flex items-center gap-1 text-xs font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
+                                {r.decision === "Accept" ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                                {r.decision === "Accept" ? t("accept") : t("reject")}
                               </span>
-                              {r.color && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50">{t("colorLabel")} {r.color}</span>}
-                              {r.remarks && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50 truncate max-w-[120px] inline-block">{r.remarks}</span>}
                             </div>
-                            <span className={`flex items-center gap-1 text-xs font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
-                              {r.decision === "Accept" ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                              {r.decision === "Accept" ? t("accept") : t("reject")}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                          {hasAgtron && (
+                            <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />
+                          )}
+                        </div>
+                      );
+                    })()}
                     {isExpanded && total === 0 && (
                       <div className="mt-3 pt-3 border-t border-amber-200/60 text-center text-xs text-brown/50 py-2">
                         {t("noTesterRecords")}
@@ -708,26 +820,34 @@ export default function QCPage() {
                           <span className="font-bold">{t("sourceBatches")}:</span> {batch.childBatches.map((c) => c.batchNumber).join(", ")}
                         </p>
                       )}
-                      {batch.qcRecords.length > 0 && (
-                        <div className="mt-2">
-                          <p className="text-xs font-bold text-charcoal mb-1">{t("testerRecords")}:</p>
-                          {batch.qcRecords.map((r) => (
-                            <div key={r.id} className="text-xs text-brown bg-white/50 rounded-lg px-2 py-1.5 mb-1 flex items-center justify-between">
-                              <span className="font-semibold">
-                                {r.testerName || r.employee?.name || "—"}
-                                {r.isExternal && (
-                                  <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600">
-                                    ({t("guestBadge")})
-                                  </span>
-                                )}
-                              </span>
-                              <span className={`font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
-                                {r.decision === "Accept" ? t("accept") : t("reject")}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {batch.qcRecords.length > 0 && (() => {
+                        const batchGbId = batch.orderItem.greenBeanId;
+                        const batchPref = batch.orderItem.order.customer.roastPreferences.find(
+                          (p) => p.greenBeanId === batchGbId
+                        ) ?? null;
+                        const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
+                        return (
+                          <div className="mt-2">
+                            <p className="text-xs font-bold text-charcoal mb-1">{t("testerRecords")}:</p>
+                            {batch.qcRecords.map((r) => (
+                              <div key={r.id} className="text-xs text-brown bg-white/50 rounded-lg px-2 py-1.5 mb-1 flex items-center justify-between">
+                                <span className="font-semibold">
+                                  {r.testerName || r.employee?.name || "—"}
+                                  {r.isExternal && (
+                                    <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600">
+                                      ({t("guestBadge")})
+                                    </span>
+                                  )}
+                                </span>
+                                <span className={`font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
+                                  {r.decision === "Accept" ? t("accept") : t("reject")}
+                                </span>
+                              </div>
+                            ))}
+                            {hasAgtron && <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />}
+                          </div>
+                        );
+                      })()}
                       {isBlended && (
                         <p className="text-xs text-purple-700 font-bold mt-1">{t("blendedNoQcNeeded")}</p>
                       )}
@@ -777,18 +897,88 @@ export default function QCPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-charcoal mb-1">{t("serialNumberShort")} ({t("roastingBatchLabel")})</label>
-                  <input type="text" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
-                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-charcoal mb-1">{t("colorAgtron")}</label>
-                  <input type="number" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })}
-                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" placeholder="e.g., 65" />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">{t("serialNumberShort")} ({t("roastingBatchLabel")})</label>
+                <input type="text" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
+                  className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
               </div>
+              {/* Agtron Color Inputs */}
+              {(() => {
+                const selBatch = backlogBatches.find((b) => b.id === form.batchId);
+                const batchGreenBeanId = selBatch?.orderItem.greenBeanId ?? null;
+                const pref = selBatch?.orderItem.order.customer.roastPreferences.find(
+                  (p) => p.greenBeanId === batchGreenBeanId
+                ) ?? null;
+                const whole = parseFloat(form.colorWhole);
+                const ground = parseFloat(form.colorGround);
+                const delta = (!isNaN(whole) && !isNaN(ground)) ? Math.abs(ground - whole) : null;
+
+                const passCheck = (actual: number | null, target: number | null, tol: number | null) => {
+                  if (actual == null || target == null || tol == null) return null;
+                  return Math.abs(actual - target) <= tol;
+                };
+                const wholePass  = pref ? passCheck(!isNaN(whole) ? whole : null,  pref.targetColorWhole,  pref.targetToleranceWhole)  : null;
+                const groundPass = pref ? passCheck(!isNaN(ground) ? ground : null, pref.targetColorGround, pref.targetToleranceGround) : null;
+                const deltaPass  = pref && delta != null && pref.targetDeltaMin != null && pref.targetDeltaMax != null
+                  ? (delta >= pref.targetDeltaMin && delta <= pref.targetDeltaMax) : null;
+
+                return (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-charcoal mb-1">{t("colorWholeLabel")}</label>
+                        <input type="number" step="0.1" min="0" max="100"
+                          value={form.colorWhole} onChange={(e) => setForm({ ...form, colorWhole: e.target.value })}
+                          className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" placeholder="e.g. 68" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-charcoal mb-1">{t("colorGroundLabel")}</label>
+                        <input type="number" step="0.1" min="0" max="100"
+                          value={form.colorGround} onChange={(e) => setForm({ ...form, colorGround: e.target.value })}
+                          className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" placeholder="e.g. 74" />
+                      </div>
+                    </div>
+                    {delta != null && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-cream rounded-xl text-sm font-semibold text-charcoal">
+                        <span className="text-brown/60">{t("colorDeltaLabel")}:</span>
+                        <span className="font-mono font-bold text-orange">{delta.toFixed(1)}</span>
+                        {deltaPass === true && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">{t("passLabel")}</span>}
+                        {deltaPass === false && <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">{t("failLabel")}</span>}
+                        {pref && pref.targetDeltaMin != null && pref.targetDeltaMax != null && (
+                          <span className="text-xs text-brown/50">{t("targetHint")}: {pref.targetDeltaMin}–{pref.targetDeltaMax}</span>
+                        )}
+                      </div>
+                    )}
+                    {pref && (wholePass != null || groundPass != null) && (
+                      <div className="border border-orange/20 rounded-xl p-3 bg-orange/5">
+                        <p className="text-[10px] font-extrabold text-orange/70 uppercase tracking-widest mb-2">{t("liveTargets")}: {pref.profileName}</p>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {wholePass != null && (
+                            <div className={`rounded-lg px-2.5 py-2 flex items-center justify-between ${wholePass ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                              <span className="font-medium text-charcoal">{t("colorWholeLabel")}</span>
+                              <div className="text-end">
+                                <p className="font-bold font-mono">{whole.toFixed(1)}</p>
+                                <p className="text-[10px] text-brown/50">{t("targetHint")}: {pref.targetColorWhole} ±{pref.targetToleranceWhole}</p>
+                                <span className={`text-[10px] font-bold ${wholePass ? "text-green-600" : "text-red-600"}`}>{wholePass ? t("passLabel") : t("failLabel")}</span>
+                              </div>
+                            </div>
+                          )}
+                          {groundPass != null && (
+                            <div className={`rounded-lg px-2.5 py-2 flex items-center justify-between ${groundPass ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                              <span className="font-medium text-charcoal">{t("colorGroundLabel")}</span>
+                              <div className="text-end">
+                                <p className="font-bold font-mono">{ground.toFixed(1)}</p>
+                                <p className="text-[10px] text-brown/50">{t("targetHint")}: {pref.targetColorGround} ±{pref.targetToleranceGround}</p>
+                                <span className={`text-[10px] font-bold ${groundPass ? "text-green-600" : "text-red-600"}`}>{groundPass ? t("passLabel") : t("failLabel")}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div>
                 <label className="block text-sm font-medium text-charcoal mb-2">{t("verdict")} *</label>
                 <div className="grid grid-cols-2 gap-3">

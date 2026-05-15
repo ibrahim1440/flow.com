@@ -13,7 +13,12 @@ export async function PUT(
   const VALID_USAGE = ["ESPRESSO", "FILTER", "BOTH"];
   const { prefId } = await params;
   try {
-    const body = await request.json() as { profileName?: string; usageType?: string; notes?: string };
+    const body = await request.json() as {
+      profileName?: string; usageType?: string; notes?: string;
+      targetColorWhole?: number | null; targetToleranceWhole?: number | null;
+      targetColorGround?: number | null; targetToleranceGround?: number | null;
+      targetDeltaMin?: number | null; targetDeltaMax?: number | null;
+    };
     if (body.profileName !== undefined && !body.profileName.trim()) {
       return NextResponse.json({ error: "profileName cannot be empty" }, { status: 400 });
     }
@@ -27,6 +32,12 @@ export async function PUT(
         ...(body.profileName !== undefined && { profileName: body.profileName.trim() }),
         ...(body.usageType !== undefined && { usageType: body.usageType }),
         ...(body.notes !== undefined && { notes: body.notes.trim() || null }),
+        ...("targetColorWhole"      in body && { targetColorWhole:      body.targetColorWhole      ?? null }),
+        ...("targetToleranceWhole"  in body && { targetToleranceWhole:  body.targetToleranceWhole  ?? null }),
+        ...("targetColorGround"     in body && { targetColorGround:     body.targetColorGround     ?? null }),
+        ...("targetToleranceGround" in body && { targetToleranceGround: body.targetToleranceGround ?? null }),
+        ...("targetDeltaMin"        in body && { targetDeltaMin:        body.targetDeltaMin        ?? null }),
+        ...("targetDeltaMax"        in body && { targetDeltaMax:        body.targetDeltaMax        ?? null }),
       },
       include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },
     });

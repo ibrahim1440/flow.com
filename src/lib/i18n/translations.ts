@@ -457,6 +457,19 @@ export const translations = {
   usageEspresso:         { en: "Espresso",                  ar: "اسبريسو" },
   usageFilter:           { en: "Filter",                    ar: "مقطرة" },
   usageBoth:             { en: "Espresso & Filter",         ar: "إسبريسو ومقطرة" },
+  // Agtron QC targets
+  roastStandards:        { en: "Roast Standards",           ar: "معايير التحميص" },
+  colorWholeLabel:       { en: "Whole Bean Color",          ar: "لون الحبة الكاملة" },
+  colorGroundLabel:      { en: "Ground Color",              ar: "لون المطحون" },
+  colorDeltaLabel:       { en: "Delta (Ground − Whole)",    ar: "الفارق (مطحون − كامل)" },
+  toleranceLabel:        { en: "Tolerance ±",               ar: "هامش الخطأ ±" },
+  deltaRangeLabel:       { en: "Delta Range",               ar: "نطاق الفارق" },
+  liveTargets:           { en: "Live vs. Target",           ar: "مقارنة مباشرة بالهدف" },
+  agtronResults:         { en: "Agtron Results",            ar: "نتائج أجترون" },
+  passLabel:             { en: "PASS",                      ar: "مقبول" },
+  failLabel:             { en: "FAIL",                      ar: "مرفوض" },
+  noTarget:              { en: "No target set",             ar: "لم يُحدَّد هدف" },
+  targetHint:            { en: "Target",                    ar: "الهدف" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;

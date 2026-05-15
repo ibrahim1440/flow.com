@@ -10,7 +10,7 @@ export async function POST(request: Request, { params }: Params) {
   if (error) return error;
 
   const { batchId } = await params;
-  const { decision, color, remarks, underDeveloped, overDeveloped, coffeeOrigin, processing, serialNumber } =
+  const { decision, color, colorWhole, colorGround, remarks, underDeveloped, overDeveloped, coffeeOrigin, processing, serialNumber } =
     await request.json();
 
   const batch = await prisma.roastingBatch.findUnique({ where: { id: batchId } });
@@ -40,7 +40,9 @@ export async function POST(request: Request, { params }: Params) {
       onProfile: decision !== "Reject",
       underDeveloped: underDeveloped ?? false,
       overDeveloped: overDeveloped ?? false,
-      color: color ? parseInt(color) : null,
+      color:       color       ? parseInt(color)       : null,
+      colorWhole:  colorWhole  ? parseFloat(colorWhole)  : null,
+      colorGround: colorGround ? parseFloat(colorGround) : null,
       remarks: remarks || null,
     },
     include: { employee: { select: { id: true, name: true } } },

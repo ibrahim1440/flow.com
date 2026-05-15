@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     where,
     orderBy: { date: "desc" },
     include: {
-      orderItem: { include: { order: { include: { customer: true } } } },
+      orderItem: { include: { order: { include: { customer: { include: { roastPreferences: true } } } } } },
       greenBean: true,
       qcRecords: { include: { employee: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" as const } },
       childBatches: { select: { id: true, batchNumber: true } },
