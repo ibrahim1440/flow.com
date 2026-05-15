@@ -7,21 +7,27 @@ type Params = { params: Promise<{ token: string }> };
 export async function GET(_req: Request, { params }: Params) {
   const { token } = await params;
 
+  // Use include (not top-level select) so Prisma returns ALL related
+  // sessionBatches rows — mixing select+orderBy on a nested relation
+  // inside a parent select can cause only the first row to be returned.
   const session = await prisma.cuppingSession.findUnique({
     where: { sessionToken: token },
-    select: {
-      id: true,
-      name: true,
-      status: true,
+    include: {
       sessionBatches: {
         orderBy: { order: "asc" },
-        select: { id: true, order: true }, // intentionally blind — no bean/batch details
       },
     },
   });
 
   if (!session) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(session);
+
+  // Blind projection — guests see only id and order, no bean/batch names
+  return NextResponse.json({
+    id: session.id,
+    name: session.name,
+    status: session.status,
+    sessionBatches: session.sessionBatches.map(({ id, order }) => ({ id, order })),
+  });
 }
 
 export async function POST(request: Request, { params }: Params) {
