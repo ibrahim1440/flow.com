@@ -13,6 +13,7 @@ const PIN_MAX_LENGTH = 8;
 
 export default function LoginPage() {
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
+  const [logoLoading, setLogoLoading] = useState(true);
   const [mode, setMode] = useState<Mode>("pin");
   const [pin, setPin] = useState("");
   const [username, setUsername] = useState("");
@@ -73,7 +74,8 @@ export default function LoginPage() {
     fetch("/api/settings/logo")
       .then((r) => r.json())
       .then((d) => setLogoBase64(d.logoBase64 ?? null))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLogoLoading(false));
   }, []);
 
   // ── Auto-submit when PIN hits the magic length ────────────────────────────
@@ -124,7 +126,9 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="text-center mb-7">
             <div className="flex flex-col items-center mb-3">
-              {logoBase64 ? (
+              {logoLoading ? (
+                <div className="w-20 h-20" />
+              ) : logoBase64 ? (
                 <img src={logoBase64} alt="Logo" className="w-20 h-20 object-contain mx-auto" />
               ) : (
                 <>

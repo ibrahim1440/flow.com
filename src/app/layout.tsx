@@ -6,6 +6,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Hiqbah Coffee | محمصة حِقبة",
   description: "Internal production management system for Hiqbah Coffee Roasters",
+  icons: {
+    icon: "/logo.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
