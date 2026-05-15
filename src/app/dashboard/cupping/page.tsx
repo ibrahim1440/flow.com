@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   FlaskConical, Plus, Users, Lock, LockOpen, ChevronRight, Trash2, X,
   Link2, Check, QrCode, Coffee, History, ClipboardList, CheckSquare, Square,
-  PackagePlus, GripVertical,
+  PackagePlus,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useUser } from "@/app/dashboard/layout";
@@ -238,8 +238,8 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
   const [loadingBatches, setLoadingBatches] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [inputTab, setInputTab] = useState<"batches" | "external">("batches");
 
-  // External sample inputs
   const [extName, setExtName] = useState("");
   const [extSupplier, setExtSupplier] = useState("");
   const [externalSamples, setExternalSamples] = useState<{ externalSampleName: string; externalSupplierName: string }[]>([]);
@@ -282,7 +282,6 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
     setSaving(true);
     setError("");
 
-    // Build ordered items: internal batches first, then external samples
     const items: SessionItem[] = [
       ...[...selectedIds].map((id) => {
         const b = batches.find((x) => x.id === id)!;
@@ -325,16 +324,19 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between shrink-0">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
+
+        {/* Fixed header */}
+        <div className="flex items-center justify-between px-6 pt-6 pb-0 shrink-0">
           <h2 className="font-extrabold text-charcoal text-lg">New Cupping Session</h2>
           <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors"><X size={20} /></button>
         </div>
 
-        <form onSubmit={handleCreate} className="flex flex-col gap-4 overflow-hidden min-h-0">
-          {/* Name */}
+        <form onSubmit={handleCreate} className="flex flex-col flex-1 overflow-hidden min-h-0 px-6 pt-4 pb-6 gap-4">
+
+          {/* Session name */}
           <div className="shrink-0">
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">Session Name *</label>
+            <label className="block text-xs font-bold text-brown/70 uppercase tracking-wide mb-1.5">* Session Name</label>
             <input
               autoFocus
               value={name}
@@ -344,21 +346,85 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
             />
           </div>
 
-          {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-1">
-
-            {/* Internal batch selector */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-bold text-brown uppercase tracking-wide">Internal Batches</label>
-                {selectedIds.size > 0 && <span className="text-xs font-bold text-orange">{selectedIds.size} selected</span>}
-              </div>
-              {loadingBatches ? (
-                <p className="text-xs text-brown/40 py-4 text-center">Loading batches…</p>
-              ) : batches.length === 0 ? (
-                <p className="text-xs text-brown/40 py-3 text-center">No eligible batches found.</p>
+          {/* Cart — always visible */}
+          <div className="shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-bold text-brown/50 uppercase tracking-wide">الأكواب المحددة — Selected Cups</p>
+              {totalItems > 0 && (
+                <span className="text-xs font-extrabold text-orange">{totalItems} cup{totalItems !== 1 ? "s" : ""}</span>
+              )}
+            </div>
+            <div className={`min-h-[46px] px-3 py-2 rounded-xl border-2 transition-colors ${
+              totalItems > 0 ? "border-orange/30 bg-orange/5" : "border-dashed border-border bg-cream/40"
+            }`}>
+              {totalItems === 0 ? (
+                <p className="text-xs text-brown/25 py-1.5 text-center select-none">
+                  No cups selected yet — لم يتم اختيار أكواب بعد
+                </p>
               ) : (
-                <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {[...selectedIds].map((id, i) => {
+                    const b = batches.find((x) => x.id === id);
+                    const label = b ? (b.greenBean?.beanType || b.orderItem.beanTypeName) : "Batch";
+                    const sub = b?.batchNumber ?? "";
+                    return (
+                      <span key={id} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-orange/10 border border-orange/25 text-xs font-bold text-orange">
+                        <span className="text-orange/40 text-[10px] font-mono tabular-nums">{i + 1}.</span>
+                        <span className="truncate max-w-[72px]">{label}</span>
+                        {sub && <span className="text-orange/40 font-mono text-[10px]">#{sub}</span>}
+                        <button type="button" onClick={() => toggleBatch(id)} className="ml-0.5 text-orange/40 hover:text-red-500 transition-colors leading-none">
+                          <X size={11} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                  {externalSamples.map((s, i) => (
+                    <span key={`ext-${i}`} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-amber-100 border border-amber-300 text-xs font-bold text-amber-800">
+                      <span className="text-amber-500 text-[10px] font-mono tabular-nums">{selectedIds.size + i + 1}.</span>
+                      <span className="truncate max-w-[72px]">{s.externalSampleName}</span>
+                      <button type="button" onClick={() => removeExternalSample(i)} className="ml-0.5 text-amber-400 hover:text-red-500 transition-colors leading-none">
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Tab switcher */}
+          <div className="shrink-0 flex gap-1 p-1 bg-cream rounded-xl border border-border">
+            <button
+              type="button"
+              onClick={() => setInputTab("batches")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold transition-all ${
+                inputTab === "batches" ? "bg-white shadow-sm text-charcoal" : "text-brown/50 hover:text-charcoal"
+              }`}
+            >
+              <ClipboardList size={14} />
+              حمصات مسجلة
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputTab("external")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-bold transition-all ${
+                inputTab === "external" ? "bg-white shadow-sm text-charcoal" : "text-brown/50 hover:text-charcoal"
+              }`}
+            >
+              <PackagePlus size={14} />
+              عينة جديدة / خارجية
+            </button>
+          </div>
+
+          {/* Tab content — scrollable */}
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {inputTab === "batches" ? (
+              loadingBatches ? (
+                <p className="text-xs text-brown/40 py-8 text-center">Loading batches…</p>
+              ) : batches.length === 0 ? (
+                <p className="text-xs text-brown/40 py-8 text-center">No eligible batches found.</p>
+              ) : (
+                <div className="space-y-1.5 pr-0.5">
                   {batches.map((b) => {
                     const checked = selectedIds.has(b.id);
                     const label = b.greenBean?.beanType || b.orderItem.beanTypeName;
@@ -371,81 +437,73 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
                           checked ? "border-orange bg-orange/5" : "border-border hover:border-orange/30"
                         }`}
                       >
-                        {checked ? <CheckSquare size={16} className="text-orange shrink-0" /> : <Square size={16} className="text-brown/30 shrink-0" />}
+                        {checked
+                          ? <CheckSquare size={16} className="text-orange shrink-0" />
+                          : <Square size={16} className="text-brown/30 shrink-0" />}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-charcoal truncate">{label}</p>
-                          <p className="text-[10px] font-mono text-brown/50">{b.batchNumber} · {b.status}{b.roastProfile ? ` · ${b.roastProfile}` : ""}</p>
+                          <p className="text-[10px] font-mono text-brown/50">
+                            {b.batchNumber} · {b.status}{b.roastProfile ? ` · ${b.roastProfile}` : ""}
+                          </p>
                         </div>
                       </button>
                     );
                   })}
                 </div>
-              )}
-            </div>
-
-            {/* External sample section */}
-            <div className="border-t border-border pt-4">
-              <p className="text-xs font-bold text-brown uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                <PackagePlus size={13} />
-                إضافة عينة خارجية — Add External Sample
-              </p>
-              <div className="space-y-2">
+              )
+            ) : (
+              <div className="space-y-2.5 pr-0.5 pt-1">
                 <input
                   type="text"
                   value={extName}
                   onChange={(e) => setExtName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExternalSample(); }}}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExternalSample(); } }}
                   placeholder="Sample Name — اسم العينة *"
-                  className="w-full px-3 py-2 rounded-xl border-2 border-border bg-cream text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
+                  className="w-full px-3 py-2.5 rounded-xl border-2 border-border bg-cream text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
                 />
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={extSupplier}
-                    onChange={(e) => setExtSupplier(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExternalSample(); }}}
-                    placeholder="Supplier — المورد (optional)"
-                    className="flex-1 px-3 py-2 rounded-xl border-2 border-border bg-cream text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
-                  />
-                  <button
-                    type="button"
-                    onClick={addExternalSample}
-                    disabled={!extName.trim()}
-                    className="px-4 py-2 rounded-xl bg-charcoal text-white text-sm font-bold hover:bg-charcoal/80 transition-colors disabled:opacity-40"
-                  >
-                    Add
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  value={extSupplier}
+                  onChange={(e) => setExtSupplier(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExternalSample(); } }}
+                  placeholder="Supplier — المورد (optional)"
+                  className="w-full px-3 py-2.5 rounded-xl border-2 border-border bg-cream text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={addExternalSample}
+                  disabled={!extName.trim()}
+                  className="w-full py-2.5 rounded-xl bg-charcoal text-white text-sm font-bold hover:bg-charcoal/80 transition-colors disabled:opacity-40"
+                >
+                  + إضافة العينة — Add Sample
+                </button>
+                {externalSamples.length === 0 && (
+                  <p className="text-xs text-brown/30 text-center pt-4 pb-2">
+                    Enter a name above and press Add.<br />
+                    Added samples appear in the cup list above.
+                  </p>
+                )}
               </div>
-
-              {/* Added external samples */}
-              {externalSamples.length > 0 && (
-                <div className="mt-2 space-y-1.5">
-                  {externalSamples.map((s, i) => (
-                    <div key={i} className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
-                      <GripVertical size={13} className="text-amber-400 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-amber-800 truncate">{s.externalSampleName}</p>
-                        {s.externalSupplierName && <p className="text-[10px] text-amber-600">{s.externalSupplierName}</p>}
-                      </div>
-                      <button type="button" onClick={() => removeExternalSample(i)} className="text-amber-400 hover:text-red-500 transition-colors">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
 
           {error && <p className="text-xs text-red-500 font-medium shrink-0">{error}</p>}
 
-          <div className="flex gap-2 shrink-0">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border-2 border-border text-sm font-bold text-brown hover:bg-gray-50 transition-colors">
+          {/* Fixed footer */}
+          <div className="flex gap-2 shrink-0 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border-2 border-border text-sm font-bold text-brown hover:bg-gray-50 transition-colors"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50">
-              {saving ? "Creating…" : totalItems > 0 ? `Create Blind Session (${totalItems} cups)` : "Create Session"}
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Creating…" : totalItems > 0 ? `إنشاء الجلسة (${totalItems} أكواب)` : "إنشاء الجلسة"}
             </button>
           </div>
         </form>
