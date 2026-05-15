@@ -11,10 +11,13 @@ import { useI18n } from "@/lib/i18n/context";
 
 type GreenBeanSlim = { id: string; beanType: string; serialNumber: string };
 
+type UsageType = "ESPRESSO" | "FILTER" | "BOTH";
+
 type RoastPreference = {
   id: string;
   greenBeanId: string;
   profileName: string;
+  usageType: UsageType;
   notes: string | null;
   greenBean: GreenBeanSlim;
 };
@@ -57,7 +60,7 @@ export default function CustomersPage() {
   // Profile form
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [editingPref, setEditingPref] = useState<RoastPreference | null>(null);
-  const [profileForm, setProfileForm] = useState({ greenBeanId: "", profileName: "", notes: "" });
+  const [profileForm, setProfileForm] = useState({ greenBeanId: "", profileName: "", usageType: "BOTH" as UsageType, notes: "" });
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Toast messages
@@ -137,13 +140,13 @@ export default function CustomersPage() {
   // ── Profile CRUD ───────────────────────────────────────────────────────────
   function openAddProfile() {
     setEditingPref(null);
-    setProfileForm({ greenBeanId: "", profileName: "", notes: "" });
+    setProfileForm({ greenBeanId: "", profileName: "", usageType: "BOTH", notes: "" });
     setShowProfileForm(true);
   }
 
   function openEditProfile(pref: RoastPreference) {
     setEditingPref(pref);
-    setProfileForm({ greenBeanId: pref.greenBeanId, profileName: pref.profileName, notes: pref.notes ?? "" });
+    setProfileForm({ greenBeanId: pref.greenBeanId, profileName: pref.profileName, usageType: pref.usageType ?? "BOTH", notes: pref.notes ?? "" });
     setShowProfileForm(true);
   }
 
@@ -157,7 +160,7 @@ export default function CustomersPage() {
       res = await fetch(`/api/customers/${selected.id}/preferences/${editingPref.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileName: profileForm.profileName, notes: profileForm.notes }),
+        body: JSON.stringify({ profileName: profileForm.profileName, usageType: profileForm.usageType, notes: profileForm.notes }),
       });
     } else {
       res = await fetch(`/api/customers/${selected.id}/preferences`, {
@@ -372,7 +375,16 @@ export default function CustomersPage() {
                               <p className="text-xs text-amber-700 font-bold truncate">{pref.greenBean.beanType}</p>
                               <span className="text-xs text-amber-500 font-mono">({pref.greenBean.serialNumber})</span>
                             </div>
-                            <p className="text-sm font-bold text-charcoal">{pref.profileName}</p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-sm font-bold text-charcoal">{pref.profileName}</p>
+                              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                pref.usageType === "ESPRESSO" ? "bg-orange/15 text-orange-700" :
+                                pref.usageType === "FILTER"   ? "bg-blue-100 text-blue-700" :
+                                "bg-purple-100 text-purple-700"
+                              }`}>
+                                {pref.usageType === "ESPRESSO" ? t("usageEspresso") : pref.usageType === "FILTER" ? t("usageFilter") : t("usageBoth")}
+                              </span>
+                            </div>
                             {pref.notes && <p className="text-xs text-brown/60 mt-0.5">{pref.notes}</p>}
                           </div>
                           {canManage && (
@@ -484,6 +496,16 @@ export default function CustomersPage() {
                   onChange={(e) => setProfileForm({ ...profileForm, profileName: e.target.value })}
                   placeholder="e.g. Dark-Gua-02"
                   className={INPUT_CLS} />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-charcoal mb-1">{t("usageTypeLabel")} *</label>
+                <select required value={profileForm.usageType}
+                  onChange={(e) => setProfileForm({ ...profileForm, usageType: e.target.value as UsageType })}
+                  className={INPUT_CLS}>
+                  <option value="ESPRESSO">{t("usageEspresso")}</option>
+                  <option value="FILTER">{t("usageFilter")}</option>
+                  <option value="BOTH">{t("usageBoth")}</option>
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1">{t("profileNotesLabel")}</label>

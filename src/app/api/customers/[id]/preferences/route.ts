@@ -12,8 +12,9 @@ export async function POST(
 
   const { id: customerId } = await params;
   try {
+    const VALID_USAGE = ["ESPRESSO", "FILTER", "BOTH"];
     const body = await request.json() as {
-      greenBeanId: string; profileName: string; notes?: string;
+      greenBeanId: string; profileName: string; usageType?: string; notes?: string;
     };
     if (!body.greenBeanId) {
       return NextResponse.json({ error: "greenBeanId is required" }, { status: 400 });
@@ -21,6 +22,7 @@ export async function POST(
     if (!body.profileName?.trim()) {
       return NextResponse.json({ error: "profileName is required" }, { status: 400 });
     }
+    const usageType = body.usageType && VALID_USAGE.includes(body.usageType) ? body.usageType : "BOTH";
 
     const pref = await prisma.customerRoastPreference.upsert({
       where: { customerId_greenBeanId: { customerId, greenBeanId: body.greenBeanId } },
@@ -28,10 +30,12 @@ export async function POST(
         customerId,
         greenBeanId: body.greenBeanId,
         profileName: body.profileName.trim(),
+        usageType,
         notes: body.notes?.trim() || null,
       },
       update: {
         profileName: body.profileName.trim(),
+        usageType,
         notes: body.notes?.trim() || null,
       },
       include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },

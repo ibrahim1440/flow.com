@@ -24,7 +24,7 @@ type Batch = {
   childBatches: { id: string; batchNumber: string }[];
 };
 
-type CustomerPref = { id: string; greenBeanId: string; profileName: string };
+type CustomerPref = { id: string; greenBeanId: string; profileName: string; usageType?: string };
 
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
@@ -371,6 +371,14 @@ export default function ProductionPage() {
                               {displayProfile ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
                                   ⭐ {t("customerPrefBadge")}: {displayProfile}
+                                  {pref?.usageType && pref.usageType !== "BOTH" && (
+                                    <span className="opacity-70">
+                                      ({pref.usageType === "ESPRESSO" ? t("usageEspresso") : t("usageFilter")})
+                                    </span>
+                                  )}
+                                  {pref?.usageType === "BOTH" && (
+                                    <span className="opacity-70">({t("usageBoth")})</span>
+                                  )}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">

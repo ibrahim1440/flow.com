@@ -453,6 +453,10 @@ export const translations = {
   overrideProfile:       { en: "Override profile…",         ar: "تجاوز المسار…" },
   searchCustomers:       { en: "Search customers…",         ar: "بحث في العملاء…" },
   selectBeanLabel:       { en: "Select bean…",              ar: "اختر الصنف…" },
+  usageTypeLabel:        { en: "Usage Type",                ar: "نوع الاستخدام" },
+  usageEspresso:         { en: "Espresso",                  ar: "اسبريسو" },
+  usageFilter:           { en: "Filter",                    ar: "مقطرة" },
+  usageBoth:             { en: "Espresso & Filter",         ar: "إسبريسو ومقطرة" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;

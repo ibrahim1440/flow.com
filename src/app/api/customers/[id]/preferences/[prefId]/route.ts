@@ -10,17 +10,22 @@ export async function PUT(
   const { error } = await requireSub("customers", "manage");
   if (error) return error;
 
+  const VALID_USAGE = ["ESPRESSO", "FILTER", "BOTH"];
   const { prefId } = await params;
   try {
-    const body = await request.json() as { profileName?: string; notes?: string };
+    const body = await request.json() as { profileName?: string; usageType?: string; notes?: string };
     if (body.profileName !== undefined && !body.profileName.trim()) {
       return NextResponse.json({ error: "profileName cannot be empty" }, { status: 400 });
+    }
+    if (body.usageType !== undefined && !VALID_USAGE.includes(body.usageType)) {
+      return NextResponse.json({ error: "usageType must be ESPRESSO, FILTER, or BOTH" }, { status: 400 });
     }
 
     const pref = await prisma.customerRoastPreference.update({
       where: { id: prefId },
       data: {
         ...(body.profileName !== undefined && { profileName: body.profileName.trim() }),
+        ...(body.usageType !== undefined && { usageType: body.usageType }),
         ...(body.notes !== undefined && { notes: body.notes.trim() || null }),
       },
       include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },

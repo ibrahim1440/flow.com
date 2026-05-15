@@ -227,6 +227,7 @@ model CustomerRoastPreference {
   greenBeanId String
   greenBean   GreenBean @relation(fields: [greenBeanId], references: [id], onDelete: Cascade)
   profileName String
+  usageType   String    @default("BOTH")
   notes       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
