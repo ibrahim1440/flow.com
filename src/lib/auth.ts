@@ -51,6 +51,7 @@ export const ALL_MODULES = [
   "employees",
   "cupping",
   "settings",
+  "customers",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -69,6 +70,7 @@ export const MODULE_LABELS: Record<string, string> = {
   employees: "Employees",
   cupping: "Cupping",
   settings: "System Settings",
+  customers: "Customers / CRM",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -108,6 +110,9 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   settings: [
     { key: "reset", label: "Factory reset (wipe all data)" },
   ],
+  customers: [
+    { key: "manage", label: "Manage customer roast preferences" },
+  ],
 };
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -146,6 +151,7 @@ export function buildDefaultPermissions(role: string): Permissions {
         orders: none(), production: none(), qc: none(),
         packaging: none(), dispatch: none(), history: none(),
         analytics: none(), labels: none(), employees: none(), cupping: none(), settings: none(),
+        customers: none(),
       };
     case "roasting":
       return {
@@ -154,6 +160,7 @@ export function buildDefaultPermissions(role: string): Permissions {
         qc: none(), packaging: allEdit("packaging"),
         dispatch: none(), history: none(), analytics: none(),
         labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),
+        customers: none(),
       };
     case "qc":
       return {
@@ -161,6 +168,7 @@ export function buildDefaultPermissions(role: string): Permissions {
         production: none(), qc: allEdit("qc"), packaging: none(),
         dispatch: none(), history: none(), analytics: none(),
         labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),
+        customers: none(),
       };
     case "dispatch":
       return {
@@ -168,6 +176,7 @@ export function buildDefaultPermissions(role: string): Permissions {
         production: none(), qc: none(), packaging: none(),
         dispatch: allEdit("dispatch"), history: none(), analytics: none(),
         labels: allEdit("labels"), employees: none(), cupping: none(), settings: none(),
+        customers: none(),
       };
     default:
       return Object.fromEntries(ALL_MODULES.map((m) => [m, none()]));

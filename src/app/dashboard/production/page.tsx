@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Factory, AlertTriangle, CheckCircle, Merge, Box, FileText, FileSpreadsheet, Trash2, CalendarDays } from "lucide-react";
+import { Factory, AlertTriangle, CheckCircle, Merge, Box, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
@@ -24,10 +24,12 @@ type Batch = {
   childBatches: { id: string; batchNumber: string }[];
 };
 
+type CustomerPref = { id: string; greenBeanId: string; profileName: string };
+
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
   greenBeanId: string | null; greenBean: { id: string; beanType: string; quantityKg: number } | null;
-  order: { orderNumber: number; customer: { name: string } };
+  order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number }[];
 };
 
@@ -74,6 +76,10 @@ export default function ProductionPage() {
     greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "",
   });
 
+  // Profile overrides (keyed by orderItemId) — local state for per-session profile hints
+  const [profileOverrides, setProfileOverrides] = useState<Record<string, string>>({});
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+
   // Blend form
   const [showBlendForm, setShowBlendForm] = useState(false);
   const [blendSelected, setBlendSelected] = useState<Set<string>>(new Set());
@@ -110,7 +116,9 @@ export default function ProductionPage() {
     setSelectedItem(item);
     const produced = item.roastingBatches.reduce((s: number, b) => s + b.greenBeanQuantity, 0);
     const remaining = item.quantityKg - produced;
-    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: remaining, roastedBeanQuantity: 0, roastProfile: "" });
+    const pref = item.order.customer.roastPreferences?.find((p) => p.greenBeanId === item.greenBeanId);
+    const profileHint = profileOverrides[item.id] ?? pref?.profileName ?? "";
+    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: remaining, roastedBeanQuantity: 0, roastProfile: profileHint });
     setError(""); setSuccess("");
     setShowRoastForm(true);
   }
@@ -204,7 +212,16 @@ export default function ProductionPage() {
 
   const pendingItems = orders.flatMap((o: any) =>
     o.items.filter((i: any) => i.productionStatus !== "Completed" && i.productionStatus !== "Order cancelled")
-      .map((i: any) => ({ ...i, order: { orderNumber: o.orderNumber, customer: { name: o.customer?.name } } }))
+      .map((i: any) => ({
+        ...i,
+        order: {
+          orderNumber: o.orderNumber,
+          customer: {
+            name: o.customer?.name,
+            roastPreferences: o.customer?.roastPreferences ?? [],
+          },
+        },
+      }))
   );
 
   const pendingBeanOptions = useMemo<FilterOption[]>(() => {
@@ -322,6 +339,54 @@ export default function ProductionPage() {
                       <div>
                         <p className="font-bold text-charcoal">#{item.order.orderNumber} — {item.order.customer.name}</p>
                         <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg}kg {t("kgOrdered")}</p>
+                        {/* Customer roast profile badge */}
+                        {editingProfileId === item.id ? (
+                          <div className="flex items-center gap-2 mt-1">
+                            <input
+                              type="text"
+                              placeholder={t("overrideProfile")}
+                              defaultValue={profileOverrides[item.id] ?? item.order.customer.roastPreferences?.find((p: CustomerPref) => p.greenBeanId === item.greenBeanId)?.profileName ?? ""}
+                              autoFocus
+                              className="text-xs px-2 py-1 border border-orange rounded-lg focus:ring-2 focus:ring-orange/20 outline-none w-40"
+                              onBlur={(e) => {
+                                const val = e.target.value.trim();
+                                setProfileOverrides((prev) => ({ ...prev, [item.id]: val }));
+                                setEditingProfileId(null);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const val = (e.target as HTMLInputElement).value.trim();
+                                  setProfileOverrides((prev) => ({ ...prev, [item.id]: val }));
+                                  setEditingProfileId(null);
+                                }
+                                if (e.key === "Escape") setEditingProfileId(null);
+                              }}
+                            />
+                          </div>
+                        ) : (() => {
+                          const pref = item.order.customer.roastPreferences?.find((p: CustomerPref) => p.greenBeanId === item.greenBeanId);
+                          const displayProfile = profileOverrides[item.id] ?? pref?.profileName ?? null;
+                          return (
+                            <div className="flex items-center gap-1.5 mt-1">
+                              {displayProfile ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                  ⭐ {t("customerPrefBadge")}: {displayProfile}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">
+                                  {t("standardBadge")}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => setEditingProfileId(item.id)}
+                                className="p-0.5 rounded text-brown/30 hover:text-orange transition-colors"
+                                title={t("overrideProfile")}
+                              >
+                                <Pencil size={11} />
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </div>
                       {canStartBatch && (
                         <button onClick={() => startProduction(item)}

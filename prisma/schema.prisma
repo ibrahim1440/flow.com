@@ -27,15 +27,16 @@ model Employee {
 }
 
 model Customer {
-  id          String   @id @default(cuid())
-  name        String
-  nameAr      String?
-  phone       String?
-  email       String?
-  address     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  orders      Order[]
+  id               String                    @id @default(cuid())
+  name             String
+  nameAr           String?
+  phone            String?
+  email            String?
+  address          String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  orders           Order[]
+  roastPreferences CustomerRoastPreference[]
 }
 
 model GreenBean {
@@ -60,6 +61,7 @@ model GreenBean {
   orderItems        OrderItem[]
   roastingBatches   RoastingBatch[]
   cuppingSessions   CuppingSession[]
+  roastPreferences  CustomerRoastPreference[]
 }
 
 model Order {
@@ -216,6 +218,20 @@ model CuppingScore {
 model SystemConfig {
   id         String  @id @default("singleton")
   logoBase64 String? @db.Text
+}
+
+model CustomerRoastPreference {
+  id          String    @id @default(cuid())
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  greenBeanId String
+  greenBean   GreenBean @relation(fields: [greenBeanId], references: [id], onDelete: Cascade)
+  profileName String
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([customerId, greenBeanId])
 }
 
 model CoffeeProduct {

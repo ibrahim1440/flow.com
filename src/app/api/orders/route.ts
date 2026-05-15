@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     where,
     orderBy: { createdAt: "desc" },
     include: {
-      customer: true,
+      customer: { include: { roastPreferences: true } },
       items: {
         include: {
           roastingBatches: { include: { qcRecords: true } },
