@@ -15,6 +15,7 @@ import { useUser } from "@/app/dashboard/layout";
 type Score = {
   id: string;
   sessionId: string;
+  sessionBatchId: string | null;
   employeeId: string | null;
   externalName: string | null;
   employee: { id: string; name: string } | null;
@@ -27,6 +28,20 @@ type Score = {
   flavorDescriptors: string[];
 };
 
+type SessionBatch = {
+  id: string;
+  order: number;
+  isExternalSample: boolean;
+  externalSampleName: string | null;
+  externalSupplierName: string | null;
+  batch: {
+    batchNumber: string;
+    roastProfile: string | null;
+    greenBean: { beanType: string; serialNumber: string } | null;
+    orderItem: { beanTypeName: string } | null;
+  } | null;
+};
+
 type Session = {
   id: string;
   name: string;
@@ -35,6 +50,7 @@ type Session = {
   blind: boolean;
   batch: { batchNumber: string } | null;
   greenBean: { serialNumber: string; beanType: string } | null;
+  sessionBatches: SessionBatch[];
   scores: Score[];
 };
 
@@ -96,8 +112,31 @@ function ScoreTable({ scores }: { scores: Score[] }) {
   );
 }
 
-function ResultsView({ session }: { session: Session }) {
-  const scores = session.scores;
+function CupIdentityBadge({ sb }: { sb: SessionBatch }) {
+  if (sb.isExternalSample) {
+    return (
+      <div className="space-y-0.5">
+        <p className="text-sm font-extrabold text-charcoal">{sb.externalSampleName ?? "External Sample"}</p>
+        {sb.externalSupplierName && (
+          <p className="text-xs text-brown/60">{sb.externalSupplierName} · <span className="text-amber-600 font-bold">عينة مورد</span></p>
+        )}
+        {!sb.externalSupplierName && (
+          <p className="text-xs text-amber-600 font-bold">عينة مورد</p>
+        )}
+      </div>
+    );
+  }
+  const beanType = sb.batch?.greenBean?.beanType ?? sb.batch?.orderItem?.beanTypeName ?? "Unknown";
+  const batchNumber = sb.batch?.batchNumber ?? "—";
+  return (
+    <div className="space-y-0.5">
+      <p className="text-sm font-extrabold text-charcoal">{beanType}</p>
+      <p className="text-xs text-brown/60">Batch {batchNumber}</p>
+    </div>
+  );
+}
+
+function AggregateResults({ scores }: { scores: Score[] }) {
   const allDescriptors = scores.flatMap((s) => s.flavorDescriptors);
   const descriptorCount = allDescriptors.reduce<Record<string, number>>((acc, d) => {
     acc[d] = (acc[d] ?? 0) + 1;
@@ -114,7 +153,6 @@ function ResultsView({ session }: { session: Session }) {
 
   return (
     <div className="space-y-6">
-      {/* Radar Chart */}
       <section className="bg-white rounded-2xl border border-border p-5">
         <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide mb-4">
           Average Sensory Profile
@@ -122,24 +160,9 @@ function ResultsView({ session }: { session: Session }) {
         <ResponsiveContainer width="100%" height={280}>
           <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
             <PolarGrid stroke="#e5e7eb" />
-            <PolarAngleAxis
-              dataKey="attribute"
-              tick={{ fontSize: 11, fill: "#6b4c2a", fontWeight: 600 }}
-            />
-            <PolarRadiusAxis
-              angle={90}
-              domain={[6, 10]}
-              tickCount={5}
-              tick={{ fontSize: 9, fill: "#9ca3af" }}
-            />
-            <Radar
-              name="Average"
-              dataKey="average"
-              stroke="#E25D2F"
-              fill="#E25D2F"
-              fillOpacity={0.25}
-              strokeWidth={2}
-            />
+            <PolarAngleAxis dataKey="attribute" tick={{ fontSize: 11, fill: "#6b4c2a", fontWeight: 600 }} />
+            <PolarRadiusAxis angle={90} domain={[6, 10]} tickCount={5} tick={{ fontSize: 9, fill: "#9ca3af" }} />
+            <Radar name="Average" dataKey="average" stroke="#E25D2F" fill="#E25D2F" fillOpacity={0.25} strokeWidth={2} />
             <Tooltip
               formatter={(v) => [typeof v === "number" ? v.toFixed(2) : v, "Avg Score"]}
               contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}
@@ -148,7 +171,6 @@ function ResultsView({ session }: { session: Session }) {
         </ResponsiveContainer>
       </section>
 
-      {/* Score Table */}
       <section className="bg-white rounded-2xl border border-border p-5">
         <div className="flex items-center gap-2 mb-4">
           <Users size={16} className="text-orange" />
@@ -159,7 +181,6 @@ function ResultsView({ session }: { session: Session }) {
         <ScoreTable scores={scores} />
       </section>
 
-      {/* Flavor Descriptors Cloud */}
       {topDescriptors.length > 0 && (
         <section className="bg-white rounded-2xl border border-border p-5">
           <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide mb-3">
@@ -183,7 +204,6 @@ function ResultsView({ session }: { session: Session }) {
         </section>
       )}
 
-      {/* Detailed Attribute Breakdown */}
       <section className="bg-white rounded-2xl border border-border p-5">
         <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide mb-4">
           Attribute Averages
@@ -222,6 +242,74 @@ function ResultsView({ session }: { session: Session }) {
           })}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ResultsView({ session }: { session: Session }) {
+  const scores = session.scores;
+  const isMultiCup = session.sessionBatches.length > 0;
+
+  if (!isMultiCup) {
+    return <AggregateResults scores={scores} />;
+  }
+
+  // Multi-cup blind session — show per-cup reveal then aggregate
+  return (
+    <div className="space-y-6">
+      {/* Per-cup unblinded breakdown */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide px-1">
+          Cup Reveal — كشف الهوية
+        </h3>
+        {session.sessionBatches.map((sb, i) => {
+          const cupScores = scores.filter((s) => s.sessionBatchId === sb.id);
+          const cupAvg = cupScores.length > 0
+            ? cupScores.reduce((a, s) => a + s.finalScore, 0) / cupScores.length
+            : null;
+          return (
+            <div key={sb.id} className="bg-white rounded-2xl border border-border overflow-hidden">
+              {/* Cup header */}
+              <div className="flex items-center gap-4 px-5 py-4 border-b border-border bg-cream/50">
+                <div className="w-10 h-10 rounded-xl bg-orange/10 flex items-center justify-center shrink-0 font-extrabold text-lg text-orange">
+                  {i + 1}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-brown/40 uppercase tracking-widest mb-0.5">
+                    Cup {i + 1} · كوب {i + 1}
+                  </p>
+                  <CupIdentityBadge sb={sb} />
+                </div>
+                {cupAvg !== null && (
+                  <div className="text-right shrink-0">
+                    <p className="text-[10px] text-brown/40 font-bold uppercase tracking-wide">Avg</p>
+                    <p className="text-2xl font-black text-orange tabular-nums">{cupAvg.toFixed(2)}</p>
+                  </div>
+                )}
+                {cupAvg === null && (
+                  <p className="text-xs text-brown/30 font-medium shrink-0">No scores</p>
+                )}
+              </div>
+              {/* Cup scores */}
+              {cupScores.length > 0 && (
+                <div className="px-5 py-3">
+                  <ScoreTable scores={cupScores} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
+
+      {/* Overall aggregate view */}
+      {scores.length > 0 && (
+        <div>
+          <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide px-1 mb-3">
+            Overall Panel Summary
+          </h3>
+          <AggregateResults scores={scores} />
+        </div>
+      )}
     </div>
   );
 }

@@ -195,16 +195,17 @@ model CuppingSession {
 }
 
 model CuppingSessionBatch {
-  id        String         @id @default(cuid())
-  sessionId String
-  session   CuppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  batchId   String
-  batch     RoastingBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  order     Int            @default(0)
-  scores    CuppingScore[]
-  createdAt DateTime       @default(now())
-
-  @@unique([sessionId, batchId])
+  id                   String         @id @default(cuid())
+  sessionId            String
+  session              CuppingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  batchId              String?
+  batch                RoastingBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  isExternalSample     Boolean        @default(false)
+  externalSampleName   String?
+  externalSupplierName String?
+  order                Int            @default(0)
+  scores               CuppingScore[]
+  createdAt            DateTime       @default(now())
 }
 
 model CuppingScore {

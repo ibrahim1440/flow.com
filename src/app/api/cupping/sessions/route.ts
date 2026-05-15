@@ -23,6 +23,10 @@ const SESSION_INCLUDE = {
   },
 };
 
+type SessionItem =
+  | { batchId: string }
+  | { isExternalSample: true; externalSampleName: string; externalSupplierName?: string };
+
 export async function GET() {
   const { error } = await requireAuth();
   if (error) return error;
@@ -43,14 +47,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 
-  const { name, batchId, greenBeanId, batchIds } = await request.json();
+  const { name, batchId, greenBeanId, items } = await request.json() as {
+    name?: string;
+    batchId?: string;
+    greenBeanId?: string;
+    items?: SessionItem[];
+  };
 
   if (!name?.trim()) {
     return NextResponse.json({ error: "Session name is required" }, { status: 400 });
   }
 
-  // Multi-batch session: generate a public token
-  const isMulti = Array.isArray(batchIds) && batchIds.length > 0;
+  const isMulti = Array.isArray(items) && items.length > 0;
   const sessionToken = isMulti ? randomBytes(8).toString("hex") : null;
 
   try {
@@ -61,10 +69,17 @@ export async function POST(request: Request) {
         greenBeanId: greenBeanId || null,
         sessionToken,
         sessionBatches: isMulti ? {
-          create: (batchIds as string[]).map((bid, idx) => ({
-            batchId: bid,
-            order: idx,
-          })),
+          create: (items as SessionItem[]).map((item, idx) => {
+            if ("isExternalSample" in item && item.isExternalSample) {
+              return {
+                order: idx,
+                isExternalSample: true,
+                externalSampleName: item.externalSampleName,
+                externalSupplierName: item.externalSupplierName || null,
+              };
+            }
+            return { order: idx, batchId: (item as { batchId: string }).batchId };
+          }),
         } : undefined,
       },
       include: SESSION_INCLUDE,

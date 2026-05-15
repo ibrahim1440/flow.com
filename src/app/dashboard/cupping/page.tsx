@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   FlaskConical, Plus, Users, Lock, LockOpen, ChevronRight, Trash2, X,
   Link2, Check, QrCode, Coffee, History, ClipboardList, CheckSquare, Square,
+  PackagePlus, GripVertical,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useUser } from "@/app/dashboard/layout";
@@ -12,13 +13,20 @@ import { useUser } from "@/app/dashboard/layout";
 type SessionBatch = {
   id: string;
   order: number;
+  isExternalSample: boolean;
+  externalSampleName: string | null;
+  externalSupplierName: string | null;
   batch: {
     batchNumber: string;
     roastProfile: string | null;
     greenBean: { beanType: string; serialNumber: string } | null;
     orderItem: { beanTypeName: string };
-  };
+  } | null;
 };
+
+type SessionItem =
+  | { type: "batch"; batchId: string; label: string; sub: string }
+  | { type: "external"; externalSampleName: string; externalSupplierName: string; label: string };
 
 type Session = {
   id: string;
@@ -155,7 +163,9 @@ function SessionCard({
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {session.sessionBatches.map((sb, i) => (
                   <span key={sb.id} className="px-1.5 py-0.5 bg-cream border border-border rounded text-[10px] font-mono text-brown/60">
-                    Cup {i + 1}: {sb.batch.batchNumber}
+                    {sb.isExternalSample
+                      ? `Cup ${i + 1}: ${sb.externalSampleName ?? "External"}`
+                      : `Cup ${i + 1}: ${sb.batch?.batchNumber ?? "—"}`}
                   </span>
                 ))}
               </div>
@@ -229,6 +239,11 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // External sample inputs
+  const [extName, setExtName] = useState("");
+  const [extSupplier, setExtSupplier] = useState("");
+  const [externalSamples, setExternalSamples] = useState<{ externalSampleName: string; externalSupplierName: string }[]>([]);
+
   useEffect(() => {
     fetch("/api/roasting-batches?statuses=Pending+QC,Passed")
       .then((r) => r.json())
@@ -245,14 +260,54 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
     });
   }
 
+  function addExternalSample() {
+    if (!extName.trim()) return;
+    setExternalSamples((prev) => [
+      ...prev,
+      { externalSampleName: extName.trim(), externalSupplierName: extSupplier.trim() },
+    ]);
+    setExtName("");
+    setExtSupplier("");
+  }
+
+  function removeExternalSample(idx: number) {
+    setExternalSamples((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  const totalItems = selectedIds.size + externalSamples.length;
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError("Session name is required"); return; }
     setSaving(true);
     setError("");
 
+    // Build ordered items: internal batches first, then external samples
+    const items: SessionItem[] = [
+      ...[...selectedIds].map((id) => {
+        const b = batches.find((x) => x.id === id)!;
+        return {
+          type: "batch" as const,
+          batchId: id,
+          label: b.greenBean?.beanType || b.orderItem.beanTypeName,
+          sub: b.batchNumber,
+        };
+      }),
+      ...externalSamples.map((s) => ({
+        type: "external" as const,
+        ...s,
+        label: s.externalSampleName,
+      })),
+    ];
+
     const body: Record<string, unknown> = { name };
-    if (selectedIds.size > 0) body.batchIds = Array.from(selectedIds);
+    if (items.length > 0) {
+      body.items = items.map((item) =>
+        item.type === "batch"
+          ? { batchId: item.batchId }
+          : { isExternalSample: true, externalSampleName: item.externalSampleName, externalSupplierName: item.externalSupplierName }
+      );
+    }
 
     const res = await fetch("/api/cupping/sessions", {
       method: "POST",
@@ -276,7 +331,8 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
           <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors"><X size={20} /></button>
         </div>
 
-        <form onSubmit={handleCreate} className="flex flex-col gap-4 overflow-hidden">
+        <form onSubmit={handleCreate} className="flex flex-col gap-4 overflow-hidden min-h-0">
+          {/* Name */}
           <div className="shrink-0">
             <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">Session Name *</label>
             <input
@@ -288,47 +344,98 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
             />
           </div>
 
-          {/* Batch selector */}
-          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-            <div className="flex items-center justify-between mb-2 shrink-0">
-              <label className="text-xs font-bold text-brown uppercase tracking-wide">
-                Select Batches for Blind Tasting
-              </label>
-              {selectedIds.size > 0 && (
-                <span className="text-xs font-bold text-orange">{selectedIds.size} selected</span>
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-1">
+
+            {/* Internal batch selector */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-brown uppercase tracking-wide">Internal Batches</label>
+                {selectedIds.size > 0 && <span className="text-xs font-bold text-orange">{selectedIds.size} selected</span>}
+              </div>
+              {loadingBatches ? (
+                <p className="text-xs text-brown/40 py-4 text-center">Loading batches…</p>
+              ) : batches.length === 0 ? (
+                <p className="text-xs text-brown/40 py-3 text-center">No eligible batches found.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {batches.map((b) => {
+                    const checked = selectedIds.has(b.id);
+                    const label = b.greenBean?.beanType || b.orderItem.beanTypeName;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => toggleBatch(b.id)}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
+                          checked ? "border-orange bg-orange/5" : "border-border hover:border-orange/30"
+                        }`}
+                      >
+                        {checked ? <CheckSquare size={16} className="text-orange shrink-0" /> : <Square size={16} className="text-brown/30 shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-charcoal truncate">{label}</p>
+                          <p className="text-[10px] font-mono text-brown/50">{b.batchNumber} · {b.status}{b.roastProfile ? ` · ${b.roastProfile}` : ""}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
-            {loadingBatches ? (
-              <p className="text-xs text-brown/40 py-4 text-center">Loading batches…</p>
-            ) : batches.length === 0 ? (
-              <p className="text-xs text-brown/40 py-4 text-center">No eligible batches found.</p>
-            ) : (
-              <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
-                {batches.map((b) => {
-                  const checked = selectedIds.has(b.id);
-                  const label = b.greenBean?.beanType || b.orderItem.beanTypeName;
-                  return (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => toggleBatch(b.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
-                        checked ? "border-orange bg-orange/5" : "border-border hover:border-orange/30"
-                      }`}
-                    >
-                      {checked ? <CheckSquare size={16} className="text-orange shrink-0" /> : <Square size={16} className="text-brown/30 shrink-0" />}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-charcoal truncate">{label}</p>
-                        <p className="text-[10px] font-mono text-brown/50">{b.batchNumber} · {b.status}{b.roastProfile ? ` · ${b.roastProfile}` : ""}</p>
-                      </div>
-                    </button>
-                  );
-                })}
+
+            {/* External sample section */}
+            <div className="border-t border-border pt-4">
+              <p className="text-xs font-bold text-brown uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <PackagePlus size={13} />
+                إضافة عينة خارجية — Add External Sample
+              </p>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={extName}
+                  onChange={(e) => setExtName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExternalSample(); }}}
+                  placeholder="Sample Name — اسم العينة *"
+                  className="w-full px-3 py-2 rounded-xl border-2 border-border bg-cream text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
+                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={extSupplier}
+                    onChange={(e) => setExtSupplier(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExternalSample(); }}}
+                    placeholder="Supplier — المورد (optional)"
+                    className="flex-1 px-3 py-2 rounded-xl border-2 border-border bg-cream text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={addExternalSample}
+                    disabled={!extName.trim()}
+                    className="px-4 py-2 rounded-xl bg-charcoal text-white text-sm font-bold hover:bg-charcoal/80 transition-colors disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                </div>
               </div>
-            )}
-            {selectedIds.size === 0 && (
-              <p className="text-[10px] text-brown/40 mt-1.5 shrink-0">Leave unselected to create a single-cup session (use the old invite link).</p>
-            )}
+
+              {/* Added external samples */}
+              {externalSamples.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {externalSamples.map((s, i) => (
+                    <div key={i} className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+                      <GripVertical size={13} className="text-amber-400 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-amber-800 truncate">{s.externalSampleName}</p>
+                        {s.externalSupplierName && <p className="text-[10px] text-amber-600">{s.externalSupplierName}</p>}
+                      </div>
+                      <button type="button" onClick={() => removeExternalSample(i)} className="text-amber-400 hover:text-red-500 transition-colors">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {error && <p className="text-xs text-red-500 font-medium shrink-0">{error}</p>}
@@ -338,7 +445,7 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
               Cancel
             </button>
             <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50">
-              {saving ? "Creating…" : selectedIds.size > 0 ? `Create Blind Session (${selectedIds.size} cups)` : "Create Session"}
+              {saving ? "Creating…" : totalItems > 0 ? `Create Blind Session (${totalItems} cups)` : "Create Session"}
             </button>
           </div>
         </form>
