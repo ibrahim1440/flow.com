@@ -39,18 +39,24 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Session is closed" }, { status: 409 });
   }
 
+  const data = await request.json();
+  const sessionBatchId: string | null = data.sessionBatchId ?? null;
+
+  // For multi-cup sessions the duplicate check is per-cup (sessionBatchId);
+  // for legacy single-cup sessions it's per-session.
   const existing = await prisma.cuppingScore.findFirst({
-    where: { sessionId: id, employeeId: user.id },
+    where: sessionBatchId
+      ? { sessionId: id, employeeId: user.id, sessionBatchId }
+      : { sessionId: id, employeeId: user.id, sessionBatchId: null },
   });
   if (existing) {
-    return NextResponse.json({ error: "You have already scored this session" }, { status: 409 });
+    return NextResponse.json({ error: "You have already scored this cup" }, { status: 409 });
   }
-
-  const data = await request.json();
 
   try { const score = await prisma.cuppingScore.create({
     data: {
       sessionId: id,
+      sessionBatchId,
       employeeId: user.id,
       fragranceAroma: data.fragranceAroma,
       flavor: data.flavor,

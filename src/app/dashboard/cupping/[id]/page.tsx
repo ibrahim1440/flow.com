@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ChevronLeft, FlaskConical, CheckCircle, Clock, Lock, LockOpen, Users,
+  ChevronLeft, ChevronRight, FlaskConical, CheckCircle, Clock, Lock, LockOpen, Users,
 } from "lucide-react";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -323,6 +323,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // null = cup-picker list; a sessionBatch id = scoring that cup
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
 
   const fetchSession = useCallback(async () => {
     const res = await fetch(`/api/cupping/sessions/${id}`);
@@ -335,10 +337,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   async function handleSubmit(data: CuppingFormData) {
     setSubmitting(true);
     setSubmitError("");
+    const body = activeBatchId ? { ...data, sessionBatchId: activeBatchId } : data;
     const res = await fetch(`/api/cupping/sessions/${id}/scores`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const j = await res.json();
@@ -346,6 +349,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setSubmitting(false);
       return;
     }
+    setActiveBatchId(null);
     await fetchSession();
     setSubmitting(false);
   }
@@ -369,82 +373,208 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     );
   }
 
-  const myScore = session.scores.find((s) => s.employeeId === user?.id) ?? null;
-  const hasScored = !!myScore;
   const isClosed = session.status === "Closed";
+  const isMultiCup = session.sessionBatches.length > 0;
+  // scores in blind (Open) mode are already filtered to the current user's own
+  const myScores = session.scores.filter((s) => s.employeeId === user?.id);
+  const scoredBatchIds = new Set(myScores.map((s) => s.sessionBatchId).filter(Boolean) as string[]);
+  const hasAllScored = isMultiCup
+    ? session.sessionBatches.every((sb) => scoredBatchIds.has(sb.id))
+    : myScores.length > 0;
 
-  return (
-    <div className="max-w-xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <button
-          onClick={() => router.push("/dashboard/cupping")}
-          className="flex items-center gap-1.5 text-sm font-bold text-brown/60 hover:text-charcoal transition-colors mb-3"
-        >
-          <ChevronLeft size={16} />
-          All Sessions
-        </button>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-3">
-              <FlaskConical className="text-orange shrink-0" size={26} />
-              {session.name}
-            </h1>
-            <div className="flex items-center gap-3 mt-1 text-xs text-brown/50 flex-wrap">
-              <span>{new Date(session.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
-              {session.batch && <span>Batch: {session.batch.batchNumber}</span>}
-              {session.greenBean && <span>{session.greenBean.beanType} #{session.greenBean.serialNumber}</span>}
-            </div>
+  // The cup currently being scored (for label in the form header)
+  const activeCupIndex = session.sessionBatches.findIndex((sb) => sb.id === activeBatchId);
+
+  const sessionHeader = (
+    <div>
+      <button
+        onClick={() => {
+          if (activeBatchId) { setActiveBatchId(null); return; }
+          router.push("/dashboard/cupping");
+        }}
+        className="flex items-center gap-1.5 text-sm font-bold text-brown/60 hover:text-charcoal transition-colors mb-3"
+      >
+        <ChevronLeft size={16} />
+        {activeBatchId ? "All Cups" : "All Sessions"}
+      </button>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-3">
+            <FlaskConical className="text-orange shrink-0" size={26} />
+            {session.name}
+          </h1>
+          <div className="flex items-center gap-3 mt-1 text-xs text-brown/50 flex-wrap">
+            <span>{new Date(session.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+            {session.batch && <span>Batch: {session.batch.batchNumber}</span>}
+            {session.greenBean && <span>{session.greenBean.beanType} #{session.greenBean.serialNumber}</span>}
+            {isMultiCup && activeBatchId && (
+              <span className="font-bold text-orange">
+                Cup {activeCupIndex + 1} of {session.sessionBatches.length}
+              </span>
+            )}
           </div>
-          <span
-            className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
-              isClosed ? "bg-gray-100 text-gray-500" : "bg-green-100 text-green-700"
-            }`}
-          >
-            {isClosed ? <Lock size={10} /> : <LockOpen size={10} />}
-            {session.status}
-          </span>
         </div>
+        <span className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+          isClosed ? "bg-gray-100 text-gray-500" : "bg-green-100 text-green-700"
+        }`}>
+          {isClosed ? <Lock size={10} /> : <LockOpen size={10} />}
+          {session.status}
+        </span>
       </div>
+    </div>
+  );
 
-      {/* Content */}
-      {isClosed ? (
-        session.scores.length === 0 ? (
+  // ── Closed session ────────────────────────────────────────────────────────
+  if (isClosed) {
+    return (
+      <div className="max-w-xl mx-auto space-y-6">
+        {sessionHeader}
+        {session.scores.length === 0 ? (
           <div className="bg-white rounded-2xl border border-border p-8 text-center">
             <p className="text-brown/50 text-sm">No scores were submitted for this session.</p>
           </div>
         ) : (
           <ResultsView session={session} />
-        )
-      ) : hasScored ? (
+        )}
+      </div>
+    );
+  }
+
+  // ── Open, single-cup: all scored ─────────────────────────────────────────
+  if (!isMultiCup && hasAllScored) {
+    const myScore = myScores[0]!;
+    return (
+      <div className="max-w-xl mx-auto space-y-6">
+        {sessionHeader}
         <div className="bg-white rounded-2xl border border-green-200 p-8 text-center space-y-3">
           <CheckCircle size={40} className="text-green-500 mx-auto" />
           <p className="text-xl font-extrabold text-charcoal">Score Submitted</p>
-          <p className="text-5xl font-black text-green-600">{myScore!.finalScore.toFixed(2)}</p>
-          {myScore!.flavorDescriptors.length > 0 && (
+          <p className="text-5xl font-black text-green-600">{myScore.finalScore.toFixed(2)}</p>
+          {myScore.flavorDescriptors.length > 0 && (
             <p className="text-sm text-brown/60">
-              Descriptors: <strong className="text-charcoal">{myScore!.flavorDescriptors.join(", ")}</strong>
+              Descriptors: <strong className="text-charcoal">{myScore.flavorDescriptors.join(", ")}</strong>
             </p>
           )}
           <div className="flex items-center justify-center gap-2 pt-2 text-sm text-brown/50">
             <Clock size={14} />
-            <span>Waiting for admin to close the session and reveal all scores</span>
+            <span>Waiting for the session to be closed and scores revealed</span>
           </div>
         </div>
-      ) : (
+      </div>
+    );
+  }
+
+  // ── Open, single-cup: not yet scored ─────────────────────────────────────
+  if (!isMultiCup) {
+    return (
+      <div className="max-w-xl mx-auto space-y-6">
+        {sessionHeader}
         <div className="space-y-4">
           {submitError && (
             <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600 font-medium">
               {submitError}
             </div>
           )}
-          <CuppingForm
-            onSubmit={handleSubmit}
-            submitting={submitting}
-            submitLabel="Submit My Score"
-          />
+          <CuppingForm onSubmit={handleSubmit} submitting={submitting} submitLabel="Submit My Score" />
         </div>
-      )}
+      </div>
+    );
+  }
+
+  // ── Open, multi-cup: all cups scored ─────────────────────────────────────
+  if (hasAllScored) {
+    return (
+      <div className="max-w-xl mx-auto space-y-6">
+        {sessionHeader}
+        <div className="bg-white rounded-2xl border border-green-200 p-6 space-y-4">
+          <div className="text-center space-y-2">
+            <CheckCircle size={40} className="text-green-500 mx-auto" />
+            <p className="text-xl font-extrabold text-charcoal">All Cups Scored!</p>
+            <p className="text-sm text-brown/50">Waiting for the session to be closed and scores revealed.</p>
+          </div>
+          <div className="space-y-2 pt-2">
+            {session.sessionBatches.map((sb, i) => {
+              const cupScore = myScores.find((s) => s.sessionBatchId === sb.id);
+              return (
+                <div key={sb.id} className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                  <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                    <CheckCircle size={16} className="text-green-600" />
+                  </div>
+                  <p className="flex-1 text-sm font-bold text-green-800">Cup {i + 1} — كوب {i + 1}</p>
+                  {cupScore && (
+                    <span className="text-lg font-black text-green-700 tabular-nums">{cupScore.finalScore.toFixed(2)}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Open, multi-cup: scoring a specific cup ───────────────────────────────
+  if (activeBatchId) {
+    return (
+      <div className="max-w-xl mx-auto space-y-6">
+        {sessionHeader}
+        {submitError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600 font-medium">
+            {submitError}
+          </div>
+        )}
+        <CuppingForm
+          onSubmit={handleSubmit}
+          submitting={submitting}
+          submitLabel={`Submit Cup ${activeCupIndex + 1} Score →`}
+        />
+      </div>
+    );
+  }
+
+  // ── Open, multi-cup: cup picker ───────────────────────────────────────────
+  const remaining = session.sessionBatches.filter((sb) => !scoredBatchIds.has(sb.id));
+  return (
+    <div className="max-w-xl mx-auto space-y-6">
+      {sessionHeader}
+      <div className="space-y-2">
+        <p className="text-sm font-bold text-charcoal">
+          {scoredBatchIds.size > 0
+            ? `${remaining.length} cup${remaining.length !== 1 ? "s" : ""} remaining — أكواب متبقية`
+            : "Select a cup to begin scoring — اختر كوبًا للبدء"}
+        </p>
+        {session.sessionBatches.map((sb, i) => {
+          const done = scoredBatchIds.has(sb.id);
+          const cupScore = myScores.find((s) => s.sessionBatchId === sb.id);
+          return (
+            <button
+              key={sb.id}
+              onClick={() => !done && setActiveBatchId(sb.id)}
+              disabled={done}
+              className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left ${
+                done
+                  ? "border-green-200 bg-green-50 opacity-80 cursor-default"
+                  : "border-border bg-white hover:border-orange hover:shadow-md active:scale-[0.99]"
+              }`}
+            >
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 font-extrabold text-lg ${
+                done ? "bg-green-100 text-green-600" : "bg-orange/10 text-orange"
+              }`}>
+                {done ? <CheckCircle size={22} /> : i + 1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`font-extrabold ${done ? "text-green-700" : "text-charcoal"}`}>
+                  كوب {i + 1} — Cup {i + 1}
+                </p>
+                <p className="text-xs text-brown/50 mt-0.5">
+                  {done ? `✓ Scored — ${cupScore?.finalScore.toFixed(2) ?? ""}` : "Tap to score this cup"}
+                </p>
+              </div>
+              {!done && <ChevronRight size={18} className="text-brown/30 shrink-0" />}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

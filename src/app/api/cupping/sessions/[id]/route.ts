@@ -39,10 +39,11 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Blind mode: while Open, only return the current user's own score
+  // Blind mode: while Open, only return the current user's own scores
+  // (filter, not find — multi-cup sessions produce one score per cup)
   if (session.status === "Open") {
-    const myScore = session.scores.find((s) => s.employeeId === user.id) ?? null;
-    return NextResponse.json({ ...session, scores: myScore ? [myScore] : [], blind: true });
+    const myScores = session.scores.filter((s) => s.employeeId === user.id);
+    return NextResponse.json({ ...session, scores: myScores, blind: true });
   }
 
   return NextResponse.json({ ...session, blind: false });
