@@ -557,6 +557,30 @@ export const translations = {
   matchingProduct:       { en: "Matching product",          ar: "مطابق للطلب" },
   otherAvailableLots:    { en: "Other available lots",      ar: "لوتات أخرى متاحة" },
   lotAvailableKg:        { en: "Available",                 ar: "متاح" },
+
+  // ── Executive Analytics Dashboard ─────────────────────────────────────────
+  execDashTitle:         { en: "Executive Dashboard",              ar: "لوحة القيادة التنفيذية" },
+  execDashSubtitle:      { en: "Operational performance at a glance", ar: "مؤشرات الأداء التشغيلية" },
+  refreshData:           { en: "Refresh",                          ar: "تحديث" },
+  lastUpdated:           { en: "Updated",                          ar: "آخر تحديث" },
+  productionThisMonth:   { en: "Production This Month",            ar: "إنتاج الشهر الحالي" },
+  vsLastMonth:           { en: "vs last month",                    ar: "مقارنة بالشهر الماضي" },
+  batchesCount:          { en: "batches",                          ar: "دفعة" },
+  avgRoastLoss:          { en: "Avg. Roast Loss",                  ar: "متوسط هدر التحميص" },
+  last30Days:            { en: "Last 30 days",                     ar: "آخر 30 يوم" },
+  qcPassRateLabel:       { en: "QC Pass Rate",                     ar: "معدل نجاح الجودة" },
+  qcRecordsCount:        { en: "records",                          ar: "نموذج" },
+  inventoryWeightLabel:  { en: "Inventory Weight",                 ar: "وزن المخزون" },
+  rawLabel:              { en: "Raw",                              ar: "خام" },
+  finishedLabel:         { en: "Finished",                         ar: "تام" },
+  weeklyProdChart:       { en: "Weekly Production — last 8 weeks", ar: "الإنتاج الأسبوعي — آخر 8 أسابيع" },
+  qcBreakdownChart:      { en: "QC Results — last 30 days",        ar: "نتائج الجودة — آخر 30 يوم" },
+  roastedInput:          { en: "Roasted (kg)",                     ar: "محمص (كغ)" },
+  greenInput:            { en: "Green Input (kg)",                 ar: "بن أخضر (كغ)" },
+  noChartData:           { en: "Not enough data yet",              ar: "لا توجد بيانات كافية بعد" },
+  pipelineTitle:         { en: "Production Pipeline",              ar: "خط سير الإنتاج" },
+  readyDispatch:         { en: "Ready to Dispatch",                ar: "جاهز للشحن" },
+  activeOrdersTitle:     { en: "Active Orders",                    ar: "الطلبات النشطة" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;
