@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 
 export async function GET() {
   const { error } = await requireModule("dispatch");
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
   if (error) return error;
 
   const data = await request.json();
-  const { orderItemId, quantityKg, deliveryType, notes } = data;
+  const { orderItemId, quantityKg, deliveryType, notes, finishedGoodsLotId } = data;
 
   try {
     const delivery = await prisma.$transaction(async (tx) => {
@@ -49,17 +50,64 @@ export async function POST(request: Request) {
         };
       }
 
-      const newDelivered = orderItem.deliveredQty + quantityKg;
-      const newRemaining = orderItem.quantityKg - newDelivered;
-      const newStatus = newRemaining <= 0 ? "Delivered" : "Partial Delivered";
+      // Validate FGL upfront (fail-fast, before any writes) if lot is provided
+      let lotAvailableQty: number | null = null;
+      if (finishedGoodsLotId) {
+        const lot = await tx.finishedGoodsLot.findUnique({
+          where: { id: finishedGoodsLotId },
+          select: { availableQty: true },
+        });
+        if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
+        if (lot.availableQty < quantityKg) {
+          throw {
+            _appCode: 400,
+            message: `Insufficient finished goods. Lot has ${lot.availableQty}kg available, requested ${quantityKg}kg.`,
+          };
+        }
+        lotAvailableQty = lot.availableQty;
+      }
 
-      const [newDelivery] = await Promise.all([
-        tx.delivery.create({ data: { orderItemId, quantityKg, deliveryType, notes } }),
-        tx.orderItem.update({
-          where: { id: orderItemId },
-          data: { deliveredQty: newDelivered, remainingQty: newRemaining, deliveryStatus: newStatus },
-        }),
-      ]);
+      // 1. Create delivery record — needed first so its ID is available for the ledger
+      const newDelivery = await tx.delivery.create({
+        data: { orderItemId, quantityKg, deliveryType, notes },
+      });
+
+      // 2. Update delivery tracking on the order item
+      const newDelivered = orderItem.deliveredQty + quantityKg;
+      const newDeliveryStatus = orderItem.quantityKg - newDelivered <= 0 ? "Delivered" : "Partial Delivered";
+      await tx.orderItem.update({
+        where: { id: orderItemId },
+        data: { deliveredQty: newDelivered, deliveryStatus: newDeliveryStatus },
+      });
+
+      // 3. FGL deduction + ledger movement (only when lot is linked)
+      if (finishedGoodsLotId && lotAvailableQty !== null) {
+        const newAvailableQty = +(lotAvailableQty - quantityKg).toFixed(3);
+        const newLotStatus = newAvailableQty <= 0 ? "SHIPPED" : "AVAILABLE";
+
+        await tx.finishedGoodsLot.update({
+          where: { id: finishedGoodsLotId },
+          data: { availableQty: newAvailableQty, status: newLotStatus },
+        });
+
+        await tx.inventoryMovement.create({
+          data: {
+            type: "OUT",
+            category: "FINISHED_GOODS",
+            referenceEntityId: finishedGoodsLotId,
+            quantityChanged: -quantityKg,
+            previousQuantity: lotAvailableQty,
+            newQuantity: newAvailableQty,
+            sourceDocType: "DELIVERY",
+            sourceDocId: newDelivery.id,
+            userId: null,
+            notes: null,
+          },
+        });
+      }
+
+      // 4. Recalculate productionStatus + remainingQty (reads the new deliveredQty committed above)
+      await recalcOrderItemStatus(orderItemId, tx);
 
       return newDelivery;
     });
