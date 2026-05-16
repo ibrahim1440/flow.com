@@ -50,7 +50,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireSub("production", "start_batch");
+  const { error, user } = await requireSub("production", "start_batch");
   if (error) return error;
 
   const data = await request.json();
@@ -70,7 +70,15 @@ export async function POST(request: Request) {
 
   try {
   const batch = await prisma.$transaction(async (tx) => {
+    let previousQuantity: number | null = null;
+
     if (greenBeanId) {
+      const bean = await tx.greenBean.findUnique({
+        where: { id: greenBeanId },
+        select: { quantityKg: true },
+      });
+      previousQuantity = bean!.quantityKg;
+
       await tx.greenBean.update({
         where: { id: greenBeanId },
         data: { quantityKg: { decrement: greenBeanQuantity } },
@@ -92,6 +100,23 @@ export async function POST(request: Request) {
       },
       include: { orderItem: true, greenBean: true },
     });
+
+    if (greenBeanId && previousQuantity !== null) {
+      await tx.inventoryMovement.create({
+        data: {
+          type: "OUT",
+          category: "RAW_MATERIAL",
+          referenceEntityId: greenBeanId,
+          quantityChanged: -greenBeanQuantity,
+          previousQuantity,
+          newQuantity: previousQuantity - greenBeanQuantity,
+          sourceDocType: "ROASTING_BATCH",
+          sourceDocId: newBatch.id,
+          userId: user.id,
+          notes: null,
+        },
+      });
+    }
 
     await recalcOrderItemStatus(orderItemId, tx);
 

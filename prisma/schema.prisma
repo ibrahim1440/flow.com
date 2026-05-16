@@ -87,6 +87,8 @@ model OrderItem {
   order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   greenBeanId      String?
   greenBean        GreenBean?      @relation(fields: [greenBeanId], references: [id])
+  productId        String?
+  product          CoffeeProduct?  @relation(fields: [productId], references: [id])
   beanTypeName     String
   quantityKg       Float
   productionStatus String          @default("Pending") // Pending, In Production, Completed, Order cancelled
@@ -100,18 +102,20 @@ model OrderItem {
 }
 
 model RoastingBatch {
-  id                  String     @id @default(cuid())
+  id                  String         @id @default(cuid())
   orderItemId         String
-  orderItem           OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItem           OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   batchNumber         String
-  date                DateTime   @default(now())
+  date                DateTime       @default(now())
   greenBeanId         String?
-  greenBean           GreenBean? @relation(fields: [greenBeanId], references: [id])
+  greenBean           GreenBean?     @relation(fields: [greenBeanId], references: [id])
+  productId           String?
+  product             CoffeeProduct? @relation(fields: [productId], references: [id])
   greenBeanQuantity   Float
-  roastedBeanQuantity Float      @default(0)
-  wasteQuantity       Float      @default(0)
+  roastedBeanQuantity Float          @default(0)
+  wasteQuantity       Float          @default(0)
   roastProfile        String?
-  status              String     @default("Pending QC")
+  status              String         @default("Pending QC")
 
   // Packaging (filled post-QC)
   bags3kg      Int   @default(0)
@@ -296,6 +300,8 @@ model CoffeeProduct {
   roastPathAr       String?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
+  orderItems        OrderItem[]
+  roastingBatches   RoastingBatch[]
   finishedGoodsLots FinishedGoodsLot[]
 }
 

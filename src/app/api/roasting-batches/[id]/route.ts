@@ -37,9 +37,30 @@ export async function DELETE(request: Request, { params }: Params) {
   try { await prisma.$transaction(async (tx) => {
     // 1. Restock green beans if requested
     if (restock && batch.greenBeanId && batch.greenBeanQuantity > 0) {
+      const bean = await tx.greenBean.findUnique({
+        where: { id: batch.greenBeanId },
+        select: { quantityKg: true },
+      });
+      const previousQuantity = bean!.quantityKg;
+
       await tx.greenBean.update({
         where: { id: batch.greenBeanId },
         data: { quantityKg: { increment: batch.greenBeanQuantity } },
+      });
+
+      await tx.inventoryMovement.create({
+        data: {
+          type: "IN",
+          category: "RAW_MATERIAL",
+          referenceEntityId: batch.greenBeanId,
+          quantityChanged: batch.greenBeanQuantity,
+          previousQuantity,
+          newQuantity: previousQuantity + batch.greenBeanQuantity,
+          sourceDocType: "ROASTING_BATCH",
+          sourceDocId: id,
+          userId: user!.id,
+          notes: "Batch Cancellation Restock",
+        },
       });
     }
 
