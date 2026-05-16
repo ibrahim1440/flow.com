@@ -33,7 +33,7 @@ type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
   greenBeanId: string | null; greenBean: { id: string; beanType: string; quantityKg: number } | null;
   order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
-  roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number }[];
+  roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; isBlend: boolean }[];
 };
 
 type GreenBean = { id: string; beanType: string; quantityKg: number; serialNumber: string };
@@ -95,6 +95,9 @@ export default function ProductionPage() {
   const [pendingBean, setPendingBean] = useState("");
   const [pendingOrder, setPendingOrder] = useState("");
 
+  // Overproduction confirmation
+  const [overproductionExcess, setOverproductionExcess] = useState<number | null>(null);
+
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -117,7 +120,7 @@ export default function ProductionPage() {
 
   function startProduction(item: OrderItem) {
     setSelectedItem(item);
-    const produced = item.roastingBatches.reduce((s: number, b) => s + b.greenBeanQuantity, 0);
+    const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.greenBeanQuantity, 0);
     const remaining = item.quantityKg - produced;
     const pref = item.order.customer.roastPreferences?.find((p) => p.greenBeanId === item.greenBeanId);
     const profileHint = profileOverrides[item.id] ?? pref?.profileName ?? "";
@@ -126,7 +129,7 @@ export default function ProductionPage() {
     setShowRoastForm(true);
   }
 
-  async function handleRoastSubmit(e: React.FormEvent) {
+  async function handleRoastSubmit(e: React.FormEvent, forceSubmit = false) {
     e.preventDefault();
     setError("");
 
@@ -134,6 +137,17 @@ export default function ProductionPage() {
       const bean = beans.find((b) => b.id === roastForm.greenBeanId);
       if (bean && bean.quantityKg < roastForm.greenBeanQuantity) {
         setError(`${t("insufficientStock")} ${bean.quantityKg}kg`);
+        return;
+      }
+    }
+
+    if (!forceSubmit && selectedItem) {
+      const alreadyGreen = selectedItem.roastingBatches
+        .filter((b) => !b.isBlend)
+        .reduce((s, b) => s + b.greenBeanQuantity, 0);
+      const excess = +(alreadyGreen + roastForm.greenBeanQuantity - selectedItem.quantityKg).toFixed(2);
+      if (excess > 0) {
+        setOverproductionExcess(excess);
         return;
       }
     }
@@ -333,7 +347,7 @@ export default function ProductionPage() {
           ) : (
             <div className="space-y-3">
               {filteredPending.map((item: OrderItem) => {
-                const produced = item.roastingBatches.reduce((s: number, b) => s + b.greenBeanQuantity, 0);
+                const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.greenBeanQuantity, 0);
                 const remaining = item.quantityKg - produced;
                 const progress = item.quantityKg > 0 ? (produced / item.quantityKg) * 100 : 0;
                 return (
@@ -541,6 +555,51 @@ export default function ProductionPage() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* Overproduction Confirmation Modal */}
+      {overproductionExcess !== null && selectedItem && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="p-2 bg-amber-100 rounded-xl shrink-0">
+                <span className="text-2xl">⚠️</span>
+              </div>
+              <div>
+                <h3 className="font-extrabold text-charcoal text-base">{t("overprodWarnTitle")}</h3>
+                <p className="text-sm text-brown mt-1">
+                  {t("overprodWarnBody")}{" "}
+                  <span className="font-bold text-amber-700">+{overproductionExcess}kg</span>
+                  {". "}
+                  {t("overprodWarnConfirm")}
+                </p>
+                <p className="text-xs text-brown/60 mt-2">
+                  {t("requiredQtyLabel")}: {selectedItem.quantityKg}kg — {t("totalProducedLabel")}: {+(
+                    selectedItem.roastingBatches.filter((b) => !b.isBlend).reduce((s, b) => s + b.greenBeanQuantity, 0) +
+                    roastForm.greenBeanQuantity
+                  ).toFixed(2)}kg
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={(e) => {
+                  setOverproductionExcess(null);
+                  // Re-fire submit bypassing the guard
+                  const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+                  handleRoastSubmit(fakeEvent, true);
+                }}
+                className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 active:scale-[0.98] transition-all shadow-md">
+                {t("addAsSurplus")}
+              </button>
+              <button
+                onClick={() => setOverproductionExcess(null)}
+                className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                {t("cancel")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

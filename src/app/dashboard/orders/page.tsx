@@ -8,10 +8,18 @@ import { hasSubPrivilege } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 
+const COMPLETION_STATUSES = new Set(["Passed", "Partially Packaged", "Packaged", "Blended"]);
+
+function itemCompletionTotal(item: OrderItem): number {
+  return item.roastingBatches
+    .filter((b) => COMPLETION_STATUSES.has(b.status) && !b.isBlend)
+    .reduce((s, b) => s + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
+}
+
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
-  roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number }[];
+  roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; status: string; isBlend: boolean }[];
   deliveries: { date: string; quantityKg: number; deliveryType: string }[];
 };
 
@@ -438,16 +446,40 @@ export default function OrdersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {order.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-3 py-2">{item.beanTypeName}</td>
-                        <td className="px-3 py-2 text-end font-medium">{item.quantityKg}</td>
-                        <td className="px-3 py-2 text-center"><StatusBadge status={item.productionStatus} /></td>
-                        <td className="px-3 py-2 text-center"><StatusBadge status={item.deliveryStatus} /></td>
-                        <td className="px-3 py-2 text-end">{item.deliveredQty}</td>
-                        <td className="px-3 py-2 text-end">{item.remainingQty}</td>
-                      </tr>
-                    ))}
+                    {order.items.map((item) => {
+                      const completionTotal = itemCompletionTotal(item);
+                      const surplus = +(completionTotal - item.quantityKg).toFixed(2);
+                      const isOverproduced = surplus > 1;
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-3 py-2">{item.beanTypeName}</td>
+                          <td className="px-3 py-2 text-end font-medium">{item.quantityKg}</td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <StatusBadge status={item.productionStatus} />
+                              {isOverproduced && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                  ⚠️ {t("overproduced")}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-center"><StatusBadge status={item.deliveryStatus} /></td>
+                          <td className="px-3 py-2 text-end">{item.deliveredQty}</td>
+                          <td className="px-3 py-2 text-end">
+                            {isOverproduced ? (
+                              <div className="flex flex-col items-end gap-0.5">
+                                <span className="font-bold text-amber-700">+{surplus}kg</span>
+                                <span className="text-[10px] text-amber-600 font-semibold">{t("surplusToInventory")}</span>
+                                <span className="text-[10px] text-brown/50">{t("totalProducedLabel")}: {completionTotal.toFixed(2)}kg — {t("requiredQtyLabel")}: {item.quantityKg}kg</span>
+                              </div>
+                            ) : (
+                              item.remainingQty
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 {order.items.some((i) => i.roastingBatches.length > 0) && (
