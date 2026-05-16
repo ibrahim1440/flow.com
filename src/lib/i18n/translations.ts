@@ -548,6 +548,15 @@ export const translations = {
   statusShipped:         { en: "Shipped",                   ar: "مشحون" },
   noLedgerMovements:     { en: "No movements recorded yet", ar: "لا توجد حركات مسجلة بعد" },
   productName:           { en: "Product",                  ar: "المنتج" },
+
+  // ── Delivery traceability ─────────────────────────────────────────────────
+  selectBatchLot:        { en: "Batch No. / Finished Goods Lot", ar: "رقم اللوت / المخزون التام" },
+  noLotsAvailable:       { en: "No available lots — ensure packaging is linked to a product", ar: "لا توجد لوتات متاحة — تأكد من ربط التعبئة بمنتج" },
+  fglDeductionNote:      { en: "Quantity will be automatically deducted from finished goods inventory.", ar: "سيتم خصم هذه الكمية تلقائياً من المخزون التام." },
+  lotExceedsWarn:        { en: "Qty exceeds available in this lot", ar: "الكمية تتجاوز المتاح في هذا اللوت" },
+  matchingProduct:       { en: "Matching product",          ar: "مطابق للطلب" },
+  otherAvailableLots:    { en: "Other available lots",      ar: "لوتات أخرى متاحة" },
+  lotAvailableKg:        { en: "Available",                 ar: "متاح" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;
