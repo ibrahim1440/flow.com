@@ -45,6 +45,15 @@ export async function PUT(
       newSamplesGrams / 1000
     ).toFixed(3);
 
+    // Weight of only the bags submitted in THIS request — used for the ledger delta
+    const deltaKg = +(
+      (bags3kg || 0) * 3 +
+      (bags1kg || 0) * 1 +
+      (bags250g || 0) * 0.25 +
+      (bags150g || 0) * 0.15 +
+      (samplesGrams || 0) / 1000
+    ).toFixed(3);
+
     if (totalPackagedKg > batch.roastedBeanQuantity + MARGIN) {
       return NextResponse.json(
         { error: `Total packaged weight (${totalPackagedKg}kg) would exceed roasted quantity (${batch.roastedBeanQuantity}kg).` },
@@ -62,12 +71,51 @@ export async function PUT(
       );
     }
 
-    const updated = await prisma.roastingBatch.update({
-      where: { id },
-      data: {
-        bags3kg: newBags3kg, bags1kg: newBags1kg, bags250g: newBags250g,
-        bags150g: newBags150g, samplesGrams: newSamplesGrams, status: newStatus,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedBatch = await tx.roastingBatch.update({
+        where: { id },
+        data: {
+          bags3kg: newBags3kg, bags1kg: newBags1kg, bags250g: newBags250g,
+          bags150g: newBags150g, samplesGrams: newSamplesGrams, status: newStatus,
+        },
+      });
+
+      if (batch.productId) {
+        const lot = await tx.finishedGoodsLot.upsert({
+          where: { roastingBatchId: batch.id },
+          create: {
+            productId: batch.productId,
+            batchNumber: batch.batchNumber,
+            roastingBatchId: batch.id,
+            quantityKg: batch.roastedBeanQuantity,
+            availableQty: totalPackagedKg,
+            status: "AVAILABLE",
+          },
+          update: {
+            availableQty: totalPackagedKg,
+          },
+        });
+
+        await tx.inventoryMovement.create({
+          data: {
+            type: "IN",
+            category: "FINISHED_GOODS",
+            referenceEntityId: lot.id,
+            quantityChanged: deltaKg,
+            // previousQuantity is totalPackagedKg - deltaKg:
+            //   first run  → totalPackaged == delta → previous = 0
+            //   subsequent → previous = accumulated total before this run
+            previousQuantity: +(totalPackagedKg - deltaKg).toFixed(3),
+            newQuantity: totalPackagedKg,
+            sourceDocType: "PACKING",
+            sourceDocId: batch.id,
+            userId: null,
+            notes: null,
+          },
+        });
+      }
+
+      return updatedBatch;
     });
 
     return NextResponse.json(updated);

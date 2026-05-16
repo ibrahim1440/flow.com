@@ -357,6 +357,7 @@ enum SourceDocType {
   DELIVERY
   BLEND
   MANUAL_ADJUSTMENT
+  PACKING
 }
 
 model InventoryMovement {
@@ -387,7 +388,7 @@ model FinishedGoodsLot {
   productId       String
   product         CoffeeProduct  @relation(fields: [productId], references: [id])
   batchNumber     String         @unique
-  roastingBatchId String?
+  roastingBatchId String?        @unique
   roastingBatch   RoastingBatch? @relation(fields: [roastingBatchId], references: [id])
   quantityKg      Float
   availableQty    Float
