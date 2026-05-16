@@ -11,8 +11,32 @@ export async function PUT(request: Request, { params }: Params) {
 
   const { id } = await params;
   try {
-    const data = await request.json();
-    const bean = await prisma.greenBean.update({ where: { id }, data });
+    const body = await request.json();
+
+    if ("quantityKg" in body) {
+      return NextResponse.json(
+        { error: "Inventory quantities cannot be modified directly. Please use the Inventory Adjustment or Purchase APIs." },
+        { status: 400 }
+      );
+    }
+
+    const {
+      serialNumber, beanType, beanTypeAr,
+      country, countryAr, region, regionAr,
+      variety, process, processAr,
+      altitude, location, isActive, receivedDate,
+    } = body;
+
+    const bean = await prisma.greenBean.update({
+      where: { id },
+      data: {
+        serialNumber, beanType, beanTypeAr,
+        country, countryAr, region, regionAr,
+        variety, process, processAr,
+        altitude, location, isActive,
+        receivedDate: receivedDate ? new Date(receivedDate) : undefined,
+      },
+    });
     return NextResponse.json(bean);
   } catch (err) {
     return handlePrismaError(err);
