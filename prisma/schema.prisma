@@ -8,20 +8,20 @@ datasource db {
 }
 
 model Employee {
-  id                String   @id @default(cuid())
+  id                String         @id @default(cuid())
   name              String
-  username          String?  @unique
+  username          String?        @unique
   pin               String
-  pinHash           String?  @unique
+  pinHash           String?        @unique
   password          String?
-  role              String   // admin, inventory, roasting, qc, dispatch, custom
-  permissions       String   @default("{}")
-  defaultRoute      String   @default("/dashboard")
-  active            Boolean  @default(true)
+  role              String // admin, inventory, roasting, qc, dispatch, custom
+  permissions       String         @default("{}")
+  defaultRoute      String         @default("/dashboard")
+  active            Boolean        @default(true)
   phoneNumber       String?
-  preferredLanguage String   @default("ar")  // "ar" | "en"
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  preferredLanguage String         @default("ar") // "ar" | "en"
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   qcRecords         QcRecord[]
   cuppingScores     CuppingScore[]
 }
@@ -40,105 +40,106 @@ model Customer {
 }
 
 model GreenBean {
-  id            String   @id @default(cuid())
-  serialNumber  String   @unique
-  beanType      String
-  beanTypeAr    String?
-  country       String
-  countryAr     String?
-  region        String?
-  regionAr      String?
-  variety       String?
-  process       String?
-  processAr     String?
-  altitude      String?
-  location      String?
-  quantityKg    Float    @default(0)
-  isActive      Boolean  @default(true)
-  receivedDate  DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  orderItems        OrderItem[]
-  roastingBatches   RoastingBatch[]
-  cuppingSessions   CuppingSession[]
-  roastPreferences  CustomerRoastPreference[]
+  id               String                    @id @default(cuid())
+  serialNumber     String                    @unique
+  beanType         String
+  beanTypeAr       String?
+  country          String
+  countryAr        String?
+  region           String?
+  regionAr         String?
+  variety          String?
+  process          String?
+  processAr        String?
+  altitude         String?
+  location         String?
+  quantityKg       Float                     @default(0)
+  isActive         Boolean                   @default(true)
+  receivedDate     DateTime                  @default(now())
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  orderItems       OrderItem[]
+  roastingBatches  RoastingBatch[]
+  cuppingSessions  CuppingSession[]
+  roastPreferences CustomerRoastPreference[]
 }
 
 model Order {
-  id                    String   @id @default(cuid())
-  orderNumber           Int      @unique
-  customerId            String
-  customer              Customer @relation(fields: [customerId], references: [id])
-  quotationNumber       String?
-  quotationSentDate     DateTime?
-  approvalStatus        String   @default("Pending") // Pending, Yes, No
-  approvalDate          DateTime?
-  paymentStatus         String   @default("Not Paid") // Paid, Not Paid, Partial Paid
-  vatInvoiceStatus      String   @default("Not Yet") // Sent, Not Yet, Not Paid
-  notes                 String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  items                 OrderItem[]
+  id                String      @id @default(cuid())
+  orderNumber       Int         @unique
+  customerId        String
+  customer          Customer    @relation(fields: [customerId], references: [id])
+  quotationNumber   String?
+  quotationSentDate DateTime?
+  approvalStatus    String      @default("Pending") // Pending, Yes, No
+  approvalDate      DateTime?
+  paymentStatus     String      @default("Not Paid") // Paid, Not Paid, Partial Paid
+  vatInvoiceStatus  String      @default("Not Yet") // Sent, Not Yet, Not Paid
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  items             OrderItem[]
 }
 
 model OrderItem {
-  id                String   @id @default(cuid())
-  orderId           String
-  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  greenBeanId       String?
-  greenBean         GreenBean? @relation(fields: [greenBeanId], references: [id])
-  beanTypeName      String
-  quantityKg        Float
-  productionStatus  String   @default("Pending") // Pending, In Production, Completed, Order cancelled
-  deliveryStatus    String   @default("Not Yet") // Not Yet, Partial Delivered, Delivered
-  deliveredQty      Float    @default(0)
-  remainingQty      Float    @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  roastingBatches   RoastingBatch[]
-  deliveries        Delivery[]
+  id               String          @id @default(cuid())
+  orderId          String
+  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  greenBeanId      String?
+  greenBean        GreenBean?      @relation(fields: [greenBeanId], references: [id])
+  beanTypeName     String
+  quantityKg       Float
+  productionStatus String          @default("Pending") // Pending, In Production, Completed, Order cancelled
+  deliveryStatus   String          @default("Not Yet") // Not Yet, Partial Delivered, Delivered
+  deliveredQty     Float           @default(0)
+  remainingQty     Float           @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  roastingBatches  RoastingBatch[]
+  deliveries       Delivery[]
 }
 
 model RoastingBatch {
-  id                  String   @id @default(cuid())
+  id                  String     @id @default(cuid())
   orderItemId         String
-  orderItem           OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItem           OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   batchNumber         String
-  date                DateTime @default(now())
+  date                DateTime   @default(now())
   greenBeanId         String?
   greenBean           GreenBean? @relation(fields: [greenBeanId], references: [id])
   greenBeanQuantity   Float
-  roastedBeanQuantity Float    @default(0)
-  wasteQuantity       Float    @default(0)
+  roastedBeanQuantity Float      @default(0)
+  wasteQuantity       Float      @default(0)
   roastProfile        String?
-  status              String   @default("Pending QC")
+  status              String     @default("Pending QC")
 
   // Packaging (filled post-QC)
-  bags3kg             Int      @default(0)
-  bags1kg             Int      @default(0)
-  bags250g            Int      @default(0)
-  bags150g            Int      @default(0)
-  samplesGrams        Float    @default(0)
+  bags3kg      Int   @default(0)
+  bags1kg      Int   @default(0)
+  bags250g     Int   @default(0)
+  bags150g     Int   @default(0)
+  samplesGrams Float @default(0)
 
   // Blending lineage
-  isBlend             Boolean  @default(false)  // true = this is a blend output, NOT new production
-  blendTiming         String?
-  parentBatchId       String?
-  parentBatch         RoastingBatch? @relation("BlendLineage", fields: [parentBatchId], references: [id])
-  childBatches        RoastingBatch[] @relation("BlendLineage")
+  isBlend       Boolean         @default(false) // true = this is a blend output, NOT new production
+  blendTiming   String?
+  parentBatchId String?
+  parentBatch   RoastingBatch?  @relation("BlendLineage", fields: [parentBatchId], references: [id])
+  childBatches  RoastingBatch[] @relation("BlendLineage")
 
   // Multi-tester QC panel
-  qcDeadline          DateTime?
-  qcToken             String?  @unique
-  qcClosedById        String?
+  qcDeadline   DateTime?
+  qcToken      String?   @unique
+  qcClosedById String?
 
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  qcRecords              QcRecord[]
-  cuppingSessions        CuppingSession[]
-  cuppingSessionBatches  CuppingSessionBatch[]
-  blendInputs            BlendIngredient[] @relation("BlendTarget")
-  blendOutputs           BlendIngredient[] @relation("BlendSource")
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  qcRecords             QcRecord[]
+  cuppingSessions       CuppingSession[]
+  cuppingSessionBatches CuppingSessionBatch[]
+  blendInputs           BlendIngredient[]     @relation("BlendTarget")
+  blendOutputs          BlendIngredient[]     @relation("BlendSource")
+  finishedGoodsLots     FinishedGoodsLot[]
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
@@ -155,40 +156,40 @@ model BlendIngredient {
 }
 
 model QcRecord {
-  id              String   @id @default(cuid())
-  batchId         String
-  batch           RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  date            DateTime @default(now())
-  coffeeOrigin    String
-  processing      String
-  serialNumber    String
-  onProfile       Boolean  @default(false)
-  underDeveloped  Boolean  @default(false)
-  overDeveloped   Boolean  @default(false)
-  color           Int?
-  colorWhole      Float?
-  colorGround     Float?
-  remarks         String?
+  id             String        @id @default(cuid())
+  batchId        String
+  batch          RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  date           DateTime      @default(now())
+  coffeeOrigin   String
+  processing     String
+  serialNumber   String
+  onProfile      Boolean       @default(false)
+  underDeveloped Boolean       @default(false)
+  overDeveloped  Boolean       @default(false)
+  color          Int?
+  colorWhole     Float?
+  colorGround    Float?
+  remarks        String?
   // Multi-tester panel fields
-  employeeId      String?
-  employee        Employee? @relation(fields: [employeeId], references: [id])
-  isExternal      Boolean  @default(false)
-  testerName      String?
-  decision        String   @default("Accept")  // "Accept" or "Reject"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  employeeId     String?
+  employee       Employee?     @relation(fields: [employeeId], references: [id])
+  isExternal     Boolean       @default(false)
+  testerName     String?
+  decision       String        @default("Accept") // "Accept" or "Reject"
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 model Delivery {
-  id            String   @id @default(cuid())
-  orderItemId   String
-  orderItem     OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  date          DateTime @default(now())
-  quantityKg    Float
-  deliveryType  String   // full, partial
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  orderItemId  String
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  date         DateTime  @default(now())
+  quantityKg   Float
+  deliveryType String // full, partial
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model CuppingSession {
@@ -222,31 +223,31 @@ model CuppingSessionBatch {
 }
 
 model CuppingScore {
-  id                 String               @id @default(cuid())
-  sessionId          String
-  session            CuppingSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionBatchId     String?
-  sessionBatch       CuppingSessionBatch? @relation(fields: [sessionBatchId], references: [id], onDelete: SetNull)
-  employeeId         String?
-  employee           Employee?            @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  externalName       String?
-  fragranceAroma     Float                @default(7)
-  flavor             Float                @default(7)
-  aftertaste         Float                @default(7)
-  acidity            Float                @default(7)
-  body               Float                @default(7)
-  balance            Float                @default(7)
-  uniformity         Float                @default(10)
-  cleanCup           Float                @default(10)
-  sweetness          Float                @default(10)
-  overall            Float                @default(7)
-  defectCups         Int                  @default(0)
-  defectType         String               @default("none")
-  finalScore         Float                @default(0)
-  notes              String?              @db.Text
-  flavorDescriptors  String[]
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  id                String               @id @default(cuid())
+  sessionId         String
+  session           CuppingSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionBatchId    String?
+  sessionBatch      CuppingSessionBatch? @relation(fields: [sessionBatchId], references: [id], onDelete: SetNull)
+  employeeId        String?
+  employee          Employee?            @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  externalName      String?
+  fragranceAroma    Float                @default(7)
+  flavor            Float                @default(7)
+  aftertaste        Float                @default(7)
+  acidity           Float                @default(7)
+  body              Float                @default(7)
+  balance           Float                @default(7)
+  uniformity        Float                @default(10)
+  cleanCup          Float                @default(10)
+  sweetness         Float                @default(10)
+  overall           Float                @default(7)
+  defectCups        Int                  @default(0)
+  defectType        String               @default("none")
+  finalScore        Float                @default(0)
+  notes             String?              @db.Text
+  flavorDescriptors String[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 }
 
 model SystemConfig {
@@ -255,44 +256,135 @@ model SystemConfig {
 }
 
 model CustomerRoastPreference {
-  id          String    @id @default(cuid())
-  customerId  String
-  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  greenBeanId String
-  greenBean   GreenBean @relation(fields: [greenBeanId], references: [id], onDelete: Cascade)
-  profileName          String
-  usageType            String    @default("BOTH")
-  notes                String?
+  id                    String    @id @default(cuid())
+  customerId            String
+  customer              Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  greenBeanId           String
+  greenBean             GreenBean @relation(fields: [greenBeanId], references: [id], onDelete: Cascade)
+  profileName           String
+  usageType             String    @default("BOTH")
+  notes                 String?
   // Agtron color targets
-  targetColorWhole     Float?
-  targetToleranceWhole Float?
-  targetColorGround    Float?
+  targetColorWhole      Float?
+  targetToleranceWhole  Float?
+  targetColorGround     Float?
   targetToleranceGround Float?
-  targetDeltaMin       Float?
-  targetDeltaMax       Float?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  targetDeltaMin        Float?
+  targetDeltaMax        Float?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@unique([customerId, greenBeanId])
 }
 
 model CoffeeProduct {
-  id            String   @id @default(cuid())
-  productNameEn String
-  productNameAr String?
-  countryEn     String
-  countryAr     String?
-  regionEn      String?
-  regionAr      String?
-  varietyEn     String?
-  varietyAr     String?
-  processEn     String?
-  processAr     String?
-  altitude      String?
-  cupNotesEn    String?
-  cupNotesAr    String?
-  roastPathEn   String?
-  roastPathAr   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String             @id @default(cuid())
+  productNameEn     String
+  productNameAr     String?
+  countryEn         String
+  countryAr         String?
+  regionEn          String?
+  regionAr          String?
+  varietyEn         String?
+  varietyAr         String?
+  processEn         String?
+  processAr         String?
+  altitude          String?
+  cupNotesEn        String?
+  cupNotesAr        String?
+  roastPathEn       String?
+  roastPathAr       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  finishedGoodsLots FinishedGoodsLot[]
+}
+
+// ─── Procurement ─────────────────────────────────────────────────────────────
+
+enum PurchaseType {
+  GREEN_BEAN
+  PACKAGING
+  EQUIPMENT
+  OTHER
+}
+
+model Supplier {
+  id        String           @id @default(cuid())
+  name      String
+  contact   String?
+  createdAt DateTime         @default(now())
+  purchases PurchaseRecord[]
+}
+
+model PurchaseRecord {
+  id           String       @id @default(cuid())
+  supplierId   String
+  supplier     Supplier     @relation(fields: [supplierId], references: [id])
+  type         PurchaseType
+  itemId       String?
+  quantity     Float
+  costPerUnit  Float
+  totalCost    Float
+  purchaseDate DateTime
+  notes        String?
+  userId       String?
+  createdAt    DateTime     @default(now())
+}
+
+// ─── Inventory Ledger ─────────────────────────────────────────────────────────
+
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  LOSS
+}
+
+enum InventoryCategory {
+  RAW_MATERIAL
+  FINISHED_GOODS
+}
+
+enum SourceDocType {
+  PURCHASE
+  ROASTING_BATCH
+  DELIVERY
+  BLEND
+  MANUAL_ADJUSTMENT
+}
+
+model InventoryMovement {
+  id                String            @id @default(cuid())
+  type              MovementType
+  category          InventoryCategory
+  referenceEntityId String?
+  quantityChanged   Float
+  previousQuantity  Float
+  newQuantity       Float
+  sourceDocType     SourceDocType
+  sourceDocId       String?
+  userId            String?
+  timestamp         DateTime          @default(now())
+  notes             String?
+}
+
+// ─── Finished Goods ───────────────────────────────────────────────────────────
+
+enum LotStatus {
+  AVAILABLE
+  RESERVED
+  SHIPPED
+}
+
+model FinishedGoodsLot {
+  id              String         @id @default(cuid())
+  productId       String
+  product         CoffeeProduct  @relation(fields: [productId], references: [id])
+  batchNumber     String         @unique
+  roastingBatchId String?
+  roastingBatch   RoastingBatch? @relation(fields: [roastingBatchId], references: [id])
+  quantityKg      Float
+  availableQty    Float
+  status          LotStatus      @default(AVAILABLE)
+  createdAt       DateTime       @default(now())
 }

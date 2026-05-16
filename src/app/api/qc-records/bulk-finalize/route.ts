@@ -3,9 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
-
-const COMPLETION_STATUSES = ["Passed", "Partially Packaged", "Packaged", "Blended"];
-const ACTIVE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 
 export async function POST(request: Request) {
   const { user, error } = await requireSub("qc", "manage");
@@ -43,40 +41,13 @@ export async function POST(request: Request) {
     const orderItemIds = [...new Set(batches.map((b) => b.orderItemId))];
 
     await prisma.$transaction(async (tx) => {
-      // 1. Update all batch statuses
       await tx.roastingBatch.updateMany({
         where: { id: { in: batchIds } },
         data: { status: outcome, qcClosedById: user.id },
       });
 
-      // 2. Recalculate productionStatus for each affected order item
       for (const orderItemId of orderItemIds) {
-        const orderItem = await tx.orderItem.findUnique({
-          where: { id: orderItemId },
-          select: { quantityKg: true },
-        });
-        if (!orderItem) continue;
-
-        const allBatches = await tx.roastingBatch.findMany({
-          where: { orderItemId },
-          select: { status: true, roastedBeanQuantity: true, greenBeanQuantity: true },
-        });
-
-        const hasActive = allBatches.some((b) => ACTIVE_STATUSES.includes(b.status));
-        const completionTotal = allBatches
-          .filter((b) => COMPLETION_STATUSES.includes(b.status))
-          .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
-
-        const itemStatus = !hasActive
-          ? "Pending"
-          : completionTotal >= orderItem.quantityKg
-          ? "Completed"
-          : "In Production";
-
-        await tx.orderItem.update({
-          where: { id: orderItemId },
-          data: { productionStatus: itemStatus },
-        });
+        await recalcOrderItemStatus(orderItemId, tx);
       }
     });
 

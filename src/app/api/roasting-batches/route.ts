@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 
 async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
   const now = new Date();
@@ -67,9 +68,6 @@ export async function POST(request: Request) {
 
   const batchNumber = await generateBatchNumber(greenBeanId);
 
-  // Only QC-passed stages count toward order completion — Pending QC is NOT complete
-  const COMPLETION_STATUSES = ["Passed", "Partially Packaged", "Packaged", "Blended"];
-
   try {
   const batch = await prisma.$transaction(async (tx) => {
     if (greenBeanId) {
@@ -95,27 +93,7 @@ export async function POST(request: Request) {
       include: { orderItem: true, greenBean: true },
     });
 
-    const orderItem = await tx.orderItem.findUnique({
-      where: { id: orderItemId },
-      select: { quantityKg: true },
-    });
-
-    if (orderItem) {
-      // Re-query all batches so the new "Pending QC" batch is visible
-      const allBatches = await tx.roastingBatch.findMany({
-        where: { orderItemId },
-        select: { status: true, roastedBeanQuantity: true, greenBeanQuantity: true, isBlend: true },
-      });
-      const completionTotal = allBatches
-        .filter(b => COMPLETION_STATUSES.includes(b.status) && !b.isBlend)
-        .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
-      // Always "In Production" when a new batch is created (it starts as Pending QC)
-      const newStatus = completionTotal >= orderItem.quantityKg ? "Completed" : "In Production";
-      await tx.orderItem.update({
-        where: { id: orderItemId },
-        data: { productionStatus: newStatus },
-      });
-    }
+    await recalcOrderItemStatus(orderItemId, tx);
 
     return newBatch;
   });

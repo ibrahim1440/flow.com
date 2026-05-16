@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,7 +17,7 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const batch = await prisma.roastingBatch.findUnique({
     where: { id },
-    include: { orderItem: { include: { roastingBatches: { select: { id: true, status: true, roastedBeanQuantity: true, greenBeanQuantity: true, isBlend: true } } } } },
+    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true },
   });
 
   if (!batch) {
@@ -42,31 +43,11 @@ export async function DELETE(request: Request, { params }: Params) {
       });
     }
 
-    // 2. Reverse order item production status
-    if (batch.orderItem) {
-      const COMPLETION_STATUSES = ["Passed", "Partially Packaged", "Packaged", "Blended"];
-      const ACTIVE_STATUSES = ["Pending QC", "Passed", "Partially Packaged", "Packaged", "Blended"];
-      const remainingActive = batch.orderItem.roastingBatches.filter(
-        (b) => b.id !== id && ACTIVE_STATUSES.includes(b.status)
-      );
-      const completionTotal = remainingActive
-        .filter(b => COMPLETION_STATUSES.includes(b.status) && !b.isBlend)
-        .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
-      const newStatus =
-        remainingActive.length === 0
-          ? "Pending"
-          : completionTotal >= batch.orderItem.quantityKg
-          ? "Completed"
-          : "In Production";
-
-      await tx.orderItem.update({
-        where: { id: batch.orderItemId },
-        data: { productionStatus: newStatus },
-      });
-    }
-
-    // 3. Delete batch (QcRecords cascade via schema onDelete: Cascade)
+    // 2. Delete batch (QcRecords cascade via schema onDelete: Cascade)
     await tx.roastingBatch.delete({ where: { id } });
+
+    // 3. Recalculate order item status after deletion (service re-queries the DB)
+    await recalcOrderItemStatus(batch.orderItemId, tx);
   });
 
   return NextResponse.json({ success: true });
