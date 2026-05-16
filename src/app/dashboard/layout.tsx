@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
-  Settings, UserCircle, FlaskConical, Users2,
+  Settings, UserCircle, FlaskConical, Users2, ShoppingBag,
 } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess, type Permissions } from "@/lib/auth";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
@@ -17,9 +17,10 @@ const UserContext = createContext<AppCtx | null>(null);
 export const useUser = () => useContext(UserContext)?.user ?? null;
 export const useLogo = () => useContext(UserContext)?.logoBase64 ?? null;
 
-const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string }[] = [
+const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; module?: string }[] = [
   { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },
   { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
+  { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
   { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
   { key: "production", icon: Factory,         href: "/dashboard/production" },
   { key: "qc",         icon: ClipboardCheck,  href: "/dashboard/qc" },
@@ -53,7 +54,8 @@ function SidebarNav({
   const filteredNav = NAV_ITEMS.filter((item) => {
     // Settings is strictly admin-only — double-guard beyond permissions
     if (item.key === "settings" && user.role !== "admin") return false;
-    return hasModuleAccess(user.permissions, item.key as string);
+    // `module` lets a nav item piggyback on a different permission key (e.g. purchases → inventory)
+    return hasModuleAccess(user.permissions, item.module ?? (item.key as string));
   });
 
   return (

@@ -480,6 +480,32 @@ export const translations = {
   failLabel:             { en: "FAIL",                      ar: "مرفوض" },
   noTarget:              { en: "No target set",             ar: "لم يُحدَّد هدف" },
   targetHint:            { en: "Target",                    ar: "الهدف" },
+
+  // ── Purchases ──────────────────────────────────────────────────────────────
+  purchases:             { en: "Purchases",                 ar: "المشتريات" },
+  purchasesTitle:        { en: "Purchases",                 ar: "المشتريات" },
+  purchasesSubtitle:     { en: "Raw material procurement ledger", ar: "سجل مشتريات المواد الخام" },
+  addPurchase:           { en: "Add New Purchase",          ar: "إضافة مشتريات جديدة" },
+  supplier:              { en: "Supplier",                  ar: "المورد" },
+  supplierName:          { en: "Supplier Name",             ar: "اسم المورد" },
+  supplierContact:       { en: "Contact / Phone",           ar: "التواصل / الهاتف" },
+  addNewSupplier:        { en: "Add new supplier…",         ar: "إضافة مورد جديد…" },
+  selectSupplier:        { en: "Select supplier…",          ar: "اختر المورد…" },
+  selectItem:            { en: "Select green bean…",        ar: "اختر صنف البن…" },
+  costPerUnit:           { en: "Cost per kg (SAR)",         ar: "سعر الكيلو (ريال)" },
+  totalCost:             { en: "Total Cost (SAR)",          ar: "التكلفة الإجمالية (ريال)" },
+  purchaseDate:          { en: "Purchase Date",             ar: "تاريخ الشراء" },
+  purchaseType:          { en: "Purchase Type",             ar: "نوع الشراء" },
+  greenBeanPurchase:     { en: "Green Bean",                ar: "بن أخضر" },
+  purchaseAdded:         { en: "Purchase recorded successfully", ar: "تم تسجيل الشراء بنجاح" },
+  purchaseFailed:        { en: "Failed to record purchase", ar: "فشل تسجيل الشراء" },
+  supplierCreated:       { en: "Supplier created",          ar: "تم إنشاء المورد" },
+  noPurchases:           { en: "No purchases recorded yet", ar: "لا توجد مشتريات مسجلة بعد" },
+  searchPurchases:       { en: "Search purchases…",         ar: "بحث في المشتريات…" },
+  totalSpend:            { en: "Total Spend",               ar: "إجمالي الإنفاق" },
+  totalReceived:         { en: "Total Received",            ar: "إجمالي المستلم" },
+  suppliersCount:        { en: "Suppliers",                 ar: "الموردون" },
+  newSupplierSection:    { en: "New Supplier Details",      ar: "بيانات المورد الجديد" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;
