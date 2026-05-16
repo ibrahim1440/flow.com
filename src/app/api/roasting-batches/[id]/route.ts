@@ -16,7 +16,7 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const batch = await prisma.roastingBatch.findUnique({
     where: { id },
-    include: { orderItem: { include: { roastingBatches: true } } },
+    include: { orderItem: { include: { roastingBatches: { select: { id: true, status: true, roastedBeanQuantity: true, greenBeanQuantity: true, isBlend: true } } } } },
   });
 
   if (!batch) {
@@ -50,7 +50,7 @@ export async function DELETE(request: Request, { params }: Params) {
         (b) => b.id !== id && ACTIVE_STATUSES.includes(b.status)
       );
       const completionTotal = remainingActive
-        .filter(b => COMPLETION_STATUSES.includes(b.status))
+        .filter(b => COMPLETION_STATUSES.includes(b.status) && !b.isBlend)
         .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
       const newStatus =
         remainingActive.length === 0

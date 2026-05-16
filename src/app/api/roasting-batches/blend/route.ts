@@ -22,6 +22,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "One or more batches not found" }, { status: 404 });
   }
 
+  if (batches.some((b) => b.isBlend)) {
+    return NextResponse.json({ error: "Cannot blend a batch that is already a blend output" }, { status: 400 });
+  }
+
   const statuses = new Set(batches.map((b) => b.status));
 
   if (statuses.size > 1) {
@@ -65,6 +69,7 @@ export async function POST(request: Request) {
         roastedBeanQuantity: roastedTotal,
         wasteQuantity: wasteTotal,
         status: commonStatus,
+        isBlend: true,
         blendTiming,
         roastProfile: batches.map((b) => b.roastProfile).filter(Boolean).join(" + ") || null,
       },
@@ -75,10 +80,19 @@ export async function POST(request: Request) {
       data: { status: "Blended", parentBatchId: blendedBatch.id },
     });
 
+    await tx.blendIngredient.createMany({
+      data: batchIds.map((sourceBatchId: string) => ({
+        sourceBatchId,
+        targetBlendBatchId: blendedBatch.id,
+        quantityUsed: batches.find((b) => b.id === sourceBatchId)!.roastedBeanQuantity,
+      })),
+    });
+
     return tx.roastingBatch.findUnique({
       where: { id: blendedBatch.id },
       include: {
         childBatches: { select: { id: true, batchNumber: true, roastedBeanQuantity: true } },
+        blendInputs: { select: { id: true, sourceBatchId: true, quantityUsed: true } },
         orderItem: { include: { order: { include: { customer: true } } } },
       },
     });

@@ -49,6 +49,7 @@ export async function GET(request: Request) {
       where: {
         ...(dateFilter ? { createdAt: dateFilter } : {}),
         roastedBeanQuantity: { gt: 0 },
+        isBlend: false,
       },
       _sum: {
         roastedBeanQuantity: true,

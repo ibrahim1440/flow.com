@@ -41,6 +41,8 @@ export async function GET(request: Request) {
       qcRecords: { include: { employee: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" as const } },
       childBatches: { select: { id: true, batchNumber: true } },
       parentBatch: { select: { id: true, batchNumber: true } },
+      blendInputs: { select: { id: true, sourceBatchId: true, quantityUsed: true, sourceBatch: { select: { batchNumber: true } } } },
+      blendOutputs: { select: { id: true, targetBlendBatchId: true, quantityUsed: true, targetBlendBatch: { select: { batchNumber: true } } } },
     },
   });
   return NextResponse.json(batches);
@@ -102,10 +104,10 @@ export async function POST(request: Request) {
       // Re-query all batches so the new "Pending QC" batch is visible
       const allBatches = await tx.roastingBatch.findMany({
         where: { orderItemId },
-        select: { status: true, roastedBeanQuantity: true, greenBeanQuantity: true },
+        select: { status: true, roastedBeanQuantity: true, greenBeanQuantity: true, isBlend: true },
       });
       const completionTotal = allBatches
-        .filter(b => COMPLETION_STATUSES.includes(b.status))
+        .filter(b => COMPLETION_STATUSES.includes(b.status) && !b.isBlend)
         .reduce((sum, b) => sum + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
       // Always "In Production" when a new batch is created (it starts as Pending QC)
       const newStatus = completionTotal >= orderItem.quantityKg ? "Completed" : "In Production";

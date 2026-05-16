@@ -121,6 +121,7 @@ model RoastingBatch {
   samplesGrams        Float    @default(0)
 
   // Blending lineage
+  isBlend             Boolean  @default(false)  // true = this is a blend output, NOT new production
   blendTiming         String?
   parentBatchId       String?
   parentBatch         RoastingBatch? @relation("BlendLineage", fields: [parentBatchId], references: [id])
@@ -136,9 +137,21 @@ model RoastingBatch {
   qcRecords              QcRecord[]
   cuppingSessions        CuppingSession[]
   cuppingSessionBatches  CuppingSessionBatch[]
+  blendInputs            BlendIngredient[] @relation("BlendTarget")
+  blendOutputs           BlendIngredient[] @relation("BlendSource")
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
+}
+
+model BlendIngredient {
+  id                 String        @id @default(cuid())
+  sourceBatchId      String
+  sourceBatch        RoastingBatch @relation("BlendSource", fields: [sourceBatchId], references: [id], onDelete: Cascade)
+  targetBlendBatchId String
+  targetBlendBatch   RoastingBatch @relation("BlendTarget", fields: [targetBlendBatchId], references: [id], onDelete: Cascade)
+  quantityUsed       Float
+  createdAt          DateTime      @default(now())
 }
 
 model QcRecord {

@@ -157,6 +157,8 @@ export const translations = {
   blendBeforeQc:      { en: "Before QC",              ar: "قبل الجودة" },
   blendAfterQc:       { en: "After QC",               ar: "بعد الجودة" },
   sourceBatches:      { en: "Source batches",         ar: "الدفعات المصدر" },
+  usedInBlend:        { en: "Used in blend",          ar: "مستخدم في المزيج" },
+  blendSources:       { en: "Sources",                ar: "المصادر" },
   roastedExceedsGreen:{ en: "Roasted quantity exceeds green bean quantity!", ar: "كمية المحمص تتجاوز كمية البن الأخضر!" },
   cannotMixStatuses:  { en: "Cannot mix \"Pending QC\" and \"Passed\" batches in the same blend.", ar: "لا يمكن دمج دفعات \"في انتظار الجودة\" مع دفعات \"ناجح\"." },
   batchCreated:       { en: "Roasting batch created!", ar: "تم إنشاء دفعة التحميص!" },

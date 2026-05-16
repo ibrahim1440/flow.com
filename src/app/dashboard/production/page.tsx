@@ -15,6 +15,7 @@ type Batch = {
   id: string; batchNumber: string; date: string; status: string;
   greenBeanQuantity: number; roastedBeanQuantity: number; wasteQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
+  isBlend: boolean;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
   parentBatchId: string | null;
   parentBatch: { id: string; batchNumber: string } | null;
@@ -22,6 +23,8 @@ type Batch = {
   orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
   qcRecords: { id: string; onProfile: boolean }[];
   childBatches: { id: string; batchNumber: string }[];
+  blendInputs: { id: string; sourceBatchId: string; quantityUsed: number; sourceBatch: { batchNumber: string } }[];
+  blendOutputs: { id: string; targetBlendBatchId: string; quantityUsed: number; targetBlendBatch: { batchNumber: string } }[];
 };
 
 type CustomerPref = { id: string; greenBeanId: string; profileName: string; usageType?: string };
@@ -259,7 +262,7 @@ export default function ProductionPage() {
 
   const passedBatches = batches.filter((b) => b.status === "Passed");
   const pendingQcBatches = batches.filter((b) => b.status === "Pending QC");
-  const blendableBatches = batches.filter((b) => b.status === "Passed" || b.status === "Pending QC");
+  const blendableBatches = batches.filter((b) => (b.status === "Passed" || b.status === "Pending QC") && !b.isBlend);
 
   function toExportRows(list: Batch[]): BatchExportRow[] {
     return list.map((b) => ({
@@ -465,7 +468,7 @@ export default function ProductionPage() {
               <div key={batch.id} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
                 <div className="flex items-center justify-between mb-2">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
                       {canEditDate && (
                         <button
@@ -479,6 +482,11 @@ export default function ProductionPage() {
                       <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${STATUS_STYLES[batch.status] || "bg-gray-100 text-gray-600"}`}>
                         {statusLabel(batch.status, t)}
                       </span>
+                      {batch.isBlend && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                          مزيج
+                        </span>
+                      )}
                       {batch.blendTiming && (
                         <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${batch.blendTiming === "Before QC" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
                           {t("blendedLabel")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}
@@ -514,6 +522,20 @@ export default function ProductionPage() {
                 {batch.childBatches.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-border">
                     <p className="text-xs text-brown/50">{t("sourceBatches")}: {batch.childBatches.map((c) => c.batchNumber).join(", ")}</p>
+                  </div>
+                )}
+                {batch.blendOutputs.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-border">
+                    <p className="text-xs text-violet-600 font-medium">
+                      → {t("usedInBlend")}: {batch.blendOutputs.map((o) => o.targetBlendBatch.batchNumber).join(", ")}
+                    </p>
+                  </div>
+                )}
+                {batch.isBlend && batch.blendInputs.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-border">
+                    <p className="text-xs text-violet-600/70">
+                      {t("blendSources")}: {batch.blendInputs.map((inp) => `${inp.sourceBatch.batchNumber} (${inp.quantityUsed}kg)`).join(" + ")}
+                    </p>
                   </div>
                 )}
               </div>
