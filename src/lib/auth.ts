@@ -1,8 +1,35 @@
 import { SignJWT, jwtVerify } from "jose";
 
-const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "hiqbah-fallback-secret"
-);
+const BLOCKED_SECRETS = new Set([
+  "hiqbah-fallback-secret",
+  "replace-this-with-a-strong-random-secret-min-32-chars",
+  "secret",
+  "password",
+  "changeme",
+  "development",
+  "test",
+]);
+
+const rawSecret = process.env.JWT_SECRET;
+if (!rawSecret) {
+  throw new Error(
+    "JWT_SECRET environment variable is not set. " +
+    "Add a strong random value (minimum 32 characters) to your .env file or deployment environment."
+  );
+}
+if (rawSecret.length < 32) {
+  throw new Error(
+    `JWT_SECRET is too short (${rawSecret.length} characters). Minimum length is 32 characters.`
+  );
+}
+if (BLOCKED_SECRETS.has(rawSecret.toLowerCase().trim())) {
+  throw new Error(
+    "JWT_SECRET is set to a known weak or placeholder value. " +
+    "Generate a strong random secret before starting the server."
+  );
+}
+
+const secret = new TextEncoder().encode(rawSecret);
 
 export type AccessLevel = "none" | "view" | "edit";
 
