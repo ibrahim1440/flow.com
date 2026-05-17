@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
 type Params = { params: Promise<{ batchId: string }> };
 
@@ -40,6 +41,10 @@ export async function POST(_request: Request, { params }: Params) {
       });
 
       await recalcOrderItemStatus(batch.orderItemId, tx);
+
+      if (batch.productionOrderId) {
+        await recalcProductionOrderStatus(batch.productionOrderId, tx);
+      }
     });
 
     return NextResponse.json({ status: newBatchStatus, total, acceptCount, rejectCount: total - acceptCount });

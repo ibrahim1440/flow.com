@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
 const MARGIN = 0.1;
 
@@ -113,6 +114,10 @@ export async function PUT(
             notes: null,
           },
         });
+      }
+
+      if (batch.productionOrderId) {
+        await recalcProductionOrderStatus(batch.productionOrderId, tx);
       }
 
       return updatedBatch;

@@ -443,6 +443,7 @@ model ProductionOrder {
   targetWeightKg      Float
   expectedGreenBeanKg Float
   status              ProductionOrderStatus @default(PENDING)
+  surplusHandled      Boolean               @default(false)
   sourceOrderItemId   String?
   sourceOrderItem     OrderItem?            @relation(fields: [sourceOrderItemId], references: [id])
   greenBeanId         String?

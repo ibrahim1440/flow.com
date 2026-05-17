@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
 async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
   const now = new Date();
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   if (error) return error;
 
   const data = await request.json();
-  const { orderItemId, greenBeanId, greenBeanQuantity, roastedBeanQuantity, wasteQuantity, roastProfile } = data;
+  const { orderItemId, greenBeanId, greenBeanQuantity, roastedBeanQuantity, wasteQuantity, roastProfile, productionOrderId } = data;
 
   if (greenBeanId) {
     const bean = await prisma.greenBean.findUnique({ where: { id: greenBeanId } });
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
         batchNumber,
         status: "Pending QC",
         qcDeadline,
+        productionOrderId: productionOrderId ?? null,
       },
       include: { orderItem: true, greenBean: true },
     });
@@ -119,6 +121,10 @@ export async function POST(request: Request) {
     }
 
     await recalcOrderItemStatus(orderItemId, tx);
+
+    if (newBatch.productionOrderId) {
+      await recalcProductionOrderStatus(newBatch.productionOrderId, tx);
+    }
 
     return newBatch;
   });
