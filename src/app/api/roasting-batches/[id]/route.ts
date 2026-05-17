@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -17,7 +18,7 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const batch = await prisma.roastingBatch.findUnique({
     where: { id },
-    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true },
+    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, productionOrderId: true },
   });
 
   if (!batch) {
@@ -67,8 +68,12 @@ export async function DELETE(request: Request, { params }: Params) {
     // 2. Delete batch (QcRecords cascade via schema onDelete: Cascade)
     await tx.roastingBatch.delete({ where: { id } });
 
-    // 3. Recalculate order item status after deletion (service re-queries the DB)
+    // 3. Recalculate order item and production order status after deletion.
     await recalcOrderItemStatus(batch.orderItemId, tx);
+
+    if (batch.productionOrderId) {
+      await recalcProductionOrderStatus(batch.productionOrderId, tx);
+    }
   });
 
   return NextResponse.json({ success: true });

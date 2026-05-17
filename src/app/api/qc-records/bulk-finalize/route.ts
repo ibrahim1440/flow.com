@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
 export async function POST(request: Request) {
   const { user, error } = await requireSub("qc", "manage");
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
     // Load all batches upfront to validate transitions before opening the transaction
     const batches = await prisma.roastingBatch.findMany({
       where: { id: { in: batchIds } },
-      select: { id: true, status: true, orderItemId: true },
+      select: { id: true, status: true, orderItemId: true, productionOrderId: true },
     });
 
     if (batches.length !== batchIds.length) {
@@ -37,8 +38,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Collect unique orderItemIds so we recalculate each only once
+    // Collect unique IDs to recalculate each affected entity only once.
     const orderItemIds = [...new Set(batches.map((b) => b.orderItemId))];
+    const productionOrderIds = [
+      ...new Set(batches.map((b) => b.productionOrderId).filter((id): id is string => id !== null)),
+    ];
 
     await prisma.$transaction(async (tx) => {
       await tx.roastingBatch.updateMany({
@@ -48,6 +52,10 @@ export async function POST(request: Request) {
 
       for (const orderItemId of orderItemIds) {
         await recalcOrderItemStatus(orderItemId, tx);
+      }
+
+      for (const productionOrderId of productionOrderIds) {
+        await recalcProductionOrderStatus(productionOrderId, tx);
       }
     });
 

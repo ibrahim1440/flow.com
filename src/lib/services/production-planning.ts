@@ -24,8 +24,9 @@ export async function recalcProductionOrderStatus(
     select: { targetWeightKg: true, status: true },
   });
 
-  // Terminal states — nothing to do.
-  if (!order || order.status === "CANCELLED" || order.status === "COMPLETED") return;
+  // CANCELLED is the only truly terminal state — a cancelled order is an
+  // intentional administrative act and must never be auto-reopened by recalc.
+  if (!order || order.status === "CANCELLED") return;
 
   const agg = await tx.roastingBatch.aggregate({
     where: {
@@ -37,21 +38,26 @@ export async function recalcProductionOrderStatus(
 
   const totalRoasted = agg._sum.roastedBeanQuantity ?? 0;
 
-  let nextStatus: "IN_PRODUCTION" | "COMPLETED" | null = null;
+  // Derive target status purely from current roasted weight — no current-status
+  // bias so backward transitions (e.g., COMPLETED → IN_PRODUCTION after a late
+  // QC rejection or batch deletion) happen automatically.
+  let nextStatus: "PENDING" | "IN_PRODUCTION" | "COMPLETED";
 
   if (totalRoasted >= order.targetWeightKg) {
     nextStatus = "COMPLETED";
-  } else if (order.status === "PENDING" && totalRoasted > 0) {
-    // At least one batch has contributing output — move off PENDING.
+  } else if (totalRoasted > 0) {
     nextStatus = "IN_PRODUCTION";
+  } else {
+    nextStatus = "PENDING";
   }
 
-  if (nextStatus) {
-    await tx.productionOrder.update({
-      where: { id: productionOrderId },
-      data: { status: nextStatus },
-    });
-  }
+  // Skip the write when nothing changes.
+  if (nextStatus === order.status) return;
+
+  await tx.productionOrder.update({
+    where: { id: productionOrderId },
+    data: { status: nextStatus },
+  });
 }
 
 /**
