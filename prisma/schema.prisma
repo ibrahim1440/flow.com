@@ -62,6 +62,8 @@ model GreenBean {
   roastingBatches  RoastingBatch[]
   cuppingSessions  CuppingSession[]
   roastPreferences CustomerRoastPreference[]
+  coffeeProducts   CoffeeProduct[]
+  productionOrders ProductionOrder[]
 }
 
 model Order {
@@ -288,28 +290,31 @@ model CustomerRoastPreference {
 }
 
 model CoffeeProduct {
-  id                String             @id @default(cuid())
-  productNameEn     String
-  productNameAr     String?
-  countryEn         String
-  countryAr         String?
-  regionEn          String?
-  regionAr          String?
-  varietyEn         String?
-  varietyAr         String?
-  processEn         String?
-  processAr         String?
-  altitude          String?
-  cupNotesEn        String?
-  cupNotesAr        String?
-  roastPathEn       String?
-  roastPathAr       String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  orderItems        OrderItem[]
-  roastingBatches   RoastingBatch[]
-  finishedGoodsLots FinishedGoodsLot[]
-  productSkus       ProductSKU[]
+  id                 String             @id @default(cuid())
+  productNameEn      String
+  productNameAr      String?
+  countryEn          String
+  countryAr          String?
+  regionEn           String?
+  regionAr           String?
+  varietyEn          String?
+  varietyAr          String?
+  processEn          String?
+  processAr          String?
+  altitude           String?
+  cupNotesEn         String?
+  cupNotesAr         String?
+  roastPathEn        String?
+  roastPathAr        String?
+  defaultGreenBeanId String?
+  defaultGreenBean   GreenBean?         @relation(fields: [defaultGreenBeanId], references: [id])
+  expectedRoastLoss  Float              @default(15.0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  orderItems         OrderItem[]
+  roastingBatches    RoastingBatch[]
+  finishedGoodsLots  FinishedGoodsLot[]
+  productSkus        ProductSKU[]
 }
 
 // ─── Procurement ─────────────────────────────────────────────────────────────
@@ -420,6 +425,7 @@ model ProductSKU {
   product           CoffeeProduct      @relation(fields: [productId], references: [id])
   skuCode           String             @unique
   weightGrams       Float
+  isBulk            Boolean            @default(false)
   price             Float              @default(0)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -439,6 +445,8 @@ model ProductionOrder {
   status              ProductionOrderStatus @default(PENDING)
   sourceOrderItemId   String?
   sourceOrderItem     OrderItem?            @relation(fields: [sourceOrderItemId], references: [id])
+  greenBeanId         String?
+  greenBean           GreenBean?            @relation(fields: [greenBeanId], references: [id])
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   roastingBatches     RoastingBatch[]
