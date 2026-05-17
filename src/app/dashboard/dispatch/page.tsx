@@ -188,9 +188,12 @@ export default function DispatchPage() {
   }, [readyItems, readySearch, readyBean, readyOrder]);
 
   // ── Lot selection derived state ───────────────────────────────────────────
-  const selectedLot     = lots.find((l) => l.id === lotId) ?? null;
-  const lotExceedsQty   = selectedLot !== null && form.quantityKg > selectedLot.availableQty;
-  const canSubmit       = !!lotId && !lotExceedsQty && !submitting;
+  const selectedLot   = lots.find((l) => l.id === lotId) ?? null;
+  const lotExceedsQty = selectedLot !== null && form.quantityKg > selectedLot.availableQty;
+  // Legacy mode: no lots exist for this item (WIP batches without a product link).
+  // Backend accepts finishedGoodsLotId: null safely, so we allow submit without a lot.
+  const isLegacyMode  = !lotsLoading && lots.length === 0;
+  const canSubmit     = (isLegacyMode || (!!lotId && !lotExceedsQty)) && !submitting;
 
   // Split lots: matching product first, others below (using optgroup)
   const matchingLots = selectedItem?.productId
@@ -354,7 +357,7 @@ export default function DispatchPage() {
               {/* ── Lot selector ── */}
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1.5">
-                  {t("selectBatchLot")} *
+                  {t("selectBatchLot")}{!isLegacyMode && " *"}
                 </label>
 
                 {lotsLoading ? (
@@ -363,9 +366,12 @@ export default function DispatchPage() {
                     <span>جارٍ تحميل اللوتات…</span>
                   </div>
                 ) : lots.length === 0 ? (
-                  <div className="flex items-start gap-2 px-3 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-                    <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-500" />
-                    <span>{t("noLotsAvailable")}</span>
+                  <div className="space-y-1.5">
+                    <div className="flex items-start gap-2 px-3 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+                      <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-500" />
+                      <span>{t("noLotsAvailable")}</span>
+                    </div>
+                    <p className="text-xs text-brown/50 px-1">يمكن المتابعة بدون ربط لوت (تسليم إرثي).</p>
                   </div>
                 ) : (
                   <select
@@ -488,7 +494,7 @@ export default function DispatchPage() {
                   disabled={!canSubmit}
                   className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 shadow-md shadow-orange/20 active:scale-[0.98] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
                 >
-                  {submitting ? "…" : t("confirmDelivery")}
+                  {submitting ? "…" : isLegacyMode ? `${t("confirmDelivery")} (بدون لوت)` : t("confirmDelivery")}
                 </button>
                 <button
                   type="button"
