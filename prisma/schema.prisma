@@ -82,23 +82,26 @@ model Order {
 }
 
 model OrderItem {
-  id               String          @id @default(cuid())
+  id               String            @id @default(cuid())
   orderId          String
-  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   greenBeanId      String?
-  greenBean        GreenBean?      @relation(fields: [greenBeanId], references: [id])
+  greenBean        GreenBean?        @relation(fields: [greenBeanId], references: [id])
   productId        String?
-  product          CoffeeProduct?  @relation(fields: [productId], references: [id])
+  product          CoffeeProduct?    @relation(fields: [productId], references: [id])
+  productSkuId     String?
+  productSku       ProductSKU?       @relation(fields: [productSkuId], references: [id])
   beanTypeName     String
   quantityKg       Float
-  productionStatus String          @default("Pending") // Pending, In Production, Completed, Order cancelled
-  deliveryStatus   String          @default("Not Yet") // Not Yet, Partial Delivered, Delivered
-  deliveredQty     Float           @default(0)
-  remainingQty     Float           @default(0)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  productionStatus String            @default("Pending") // Pending, In Production, Completed, Order cancelled
+  deliveryStatus   String            @default("Not Yet") // Not Yet, Partial Delivered, Delivered
+  deliveredQty     Float             @default(0)
+  remainingQty     Float             @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   roastingBatches  RoastingBatch[]
   deliveries       Delivery[]
+  productionOrders ProductionOrder[]
 }
 
 model RoastingBatch {
@@ -135,6 +138,9 @@ model RoastingBatch {
   qcDeadline   DateTime?
   qcToken      String?   @unique
   qcClosedById String?
+
+  productionOrderId String?
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
 
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -303,6 +309,7 @@ model CoffeeProduct {
   orderItems        OrderItem[]
   roastingBatches   RoastingBatch[]
   finishedGoodsLots FinishedGoodsLot[]
+  productSkus       ProductSKU[]
 }
 
 // ─── Procurement ─────────────────────────────────────────────────────────────
@@ -387,6 +394,8 @@ model FinishedGoodsLot {
   id              String         @id @default(cuid())
   productId       String
   product         CoffeeProduct  @relation(fields: [productId], references: [id])
+  productSkuId    String?
+  productSku      ProductSKU?    @relation(fields: [productSkuId], references: [id])
   batchNumber     String         @unique
   roastingBatchId String?        @unique
   roastingBatch   RoastingBatch? @relation(fields: [roastingBatchId], references: [id])
@@ -394,4 +403,43 @@ model FinishedGoodsLot {
   availableQty    Float
   status          LotStatus      @default(AVAILABLE)
   createdAt       DateTime       @default(now())
+}
+
+// ─── Product Catalog & Production Planning ────────────────────────────────────
+
+enum ProductionOrderStatus {
+  PENDING
+  IN_PRODUCTION
+  COMPLETED
+  CANCELLED
+}
+
+model ProductSKU {
+  id                String             @id @default(cuid())
+  productId         String
+  product           CoffeeProduct      @relation(fields: [productId], references: [id])
+  skuCode           String             @unique
+  weightGrams       Float
+  price             Float              @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  orderItems        OrderItem[]
+  finishedGoodsLots FinishedGoodsLot[]
+  productionOrders  ProductionOrder[]
+}
+
+model ProductionOrder {
+  id                  String                @id @default(cuid())
+  productionNumber    String                @unique
+  productSkuId        String
+  productSku          ProductSKU            @relation(fields: [productSkuId], references: [id])
+  targetUnits         Int
+  targetWeightKg      Float
+  expectedGreenBeanKg Float
+  status              ProductionOrderStatus @default(PENDING)
+  sourceOrderItemId   String?
+  sourceOrderItem     OrderItem?            @relation(fields: [sourceOrderItemId], references: [id])
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  roastingBatches     RoastingBatch[]
 }
