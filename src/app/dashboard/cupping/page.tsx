@@ -8,7 +8,7 @@ import {
   PackagePlus,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useUser } from "@/app/dashboard/layout";
+import { useUser } from "@/app/dashboard/user-context";
 
 type SessionBatch = {
   id: string;

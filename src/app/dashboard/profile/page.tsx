@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { UserCircle, Phone, Globe, Lock, CheckCircle, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
-import { useUser } from "@/app/dashboard/layout";
+import { useUser } from "@/app/dashboard/user-context";
 
 export default function ProfilePage() {
   const { t, lang } = useI18n();

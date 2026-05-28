@@ -6,8 +6,8 @@ import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;

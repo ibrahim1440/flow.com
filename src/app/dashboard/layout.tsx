@@ -1,21 +1,16 @@
 "use client";
 
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
   Settings, UserCircle, FlaskConical, Users2, ShoppingBag,
 } from "lucide-react";
-import { ROLE_LABELS, hasModuleAccess, type Permissions } from "@/lib/auth";
+import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
-import type { Lang, TranslationKey } from "@/lib/i18n/translations";
-
-type User = { id: string; name: string; role: string; permissions: Permissions; preferredLanguage: Lang };
-type AppCtx = { user: User; logoBase64: string | null };
-const UserContext = createContext<AppCtx | null>(null);
-export const useUser = () => useContext(UserContext)?.user ?? null;
-export const useLogo = () => useContext(UserContext)?.logoBase64 ?? null;
+import type { TranslationKey } from "@/lib/i18n/translations";
+import { UserContext, useLogo, type User } from "./user-context";
 
 const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; module?: string }[] = [
   { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },

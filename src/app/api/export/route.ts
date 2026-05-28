@@ -16,24 +16,29 @@ export async function GET(request: Request) {
       data = await prisma.order.findMany({
         include: { customer: true, items: { include: { roastingBatches: true, deliveries: true } } },
         orderBy: { createdAt: "desc" },
+        take: 1000,
       });
       break;
     case "production":
       data = await prisma.roastingBatch.findMany({
+        where: { isBlend: false },
         include: { orderItem: { include: { order: { include: { customer: true } } } }, greenBean: true },
         orderBy: { date: "desc" },
+        take: 1000,
       });
       break;
     case "qc":
       data = await prisma.qcRecord.findMany({
         include: { batch: { include: { orderItem: { include: { order: { include: { customer: true } } } } } } },
         orderBy: { date: "desc" },
+        take: 1000,
       });
       break;
     case "deliveries":
       data = await prisma.delivery.findMany({
         include: { orderItem: { include: { order: { include: { customer: true } } } } },
         orderBy: { date: "desc" },
+        take: 1000,
       });
       break;
     case "inventory":

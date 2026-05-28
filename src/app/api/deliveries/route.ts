@@ -10,6 +10,7 @@ export async function GET() {
 
   const deliveries = await prisma.delivery.findMany({
     orderBy: { date: "desc" },
+    take: 500,
     include: {
       orderItem: { include: { order: { include: { customer: true } } } },
     },
@@ -18,11 +19,18 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireSub("dispatch", "mark_delivered");
+  const { error, user } = await requireSub("dispatch", "mark_delivered");
   if (error) return error;
 
   const data = await request.json();
   const { orderItemId, quantityKg, deliveryType, notes, finishedGoodsLotId } = data;
+
+  if (!finishedGoodsLotId) {
+    return NextResponse.json(
+      { error: "A finished goods lot is required for all deliveries." },
+      { status: 400 }
+    );
+  }
 
   try {
     const delivery = await prisma.$transaction(async (tx) => {
@@ -50,21 +58,14 @@ export async function POST(request: Request) {
         };
       }
 
-      // Validate FGL upfront (fail-fast, before any writes) if lot is provided
-      let lotAvailableQty: number | null = null;
+      // Validate FGL existence upfront (fail-fast, before any writes). Quantity is NOT read here;
+      // it is checked atomically in the conditional update below.
       if (finishedGoodsLotId) {
         const lot = await tx.finishedGoodsLot.findUnique({
           where: { id: finishedGoodsLotId },
-          select: { availableQty: true },
+          select: { id: true },
         });
         if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
-        if (lot.availableQty < quantityKg) {
-          throw {
-            _appCode: 400,
-            message: `Insufficient finished goods. Lot has ${lot.availableQty}kg available, requested ${quantityKg}kg.`,
-          };
-        }
-        lotAvailableQty = lot.availableQty;
       }
 
       // 1. Create delivery record — needed first so its ID is available for the ledger
@@ -73,21 +74,41 @@ export async function POST(request: Request) {
       });
 
       // 2. Update delivery tracking on the order item
-      const newDelivered = orderItem.deliveredQty + quantityKg;
-      const newDeliveryStatus = orderItem.quantityKg - newDelivered <= 0 ? "Delivered" : "Partial Delivered";
+      const updatedItem = await tx.orderItem.update({
+        where: { id: orderItemId },
+        data: { deliveredQty: { increment: quantityKg } },
+        select: { deliveredQty: true, quantityKg: true },
+      });
+      const newDeliveryStatus = updatedItem.quantityKg - updatedItem.deliveredQty <= 0
+        ? "Delivered"
+        : "Partial Delivered";
       await tx.orderItem.update({
         where: { id: orderItemId },
-        data: { deliveredQty: newDelivered, deliveryStatus: newDeliveryStatus },
+        data: { deliveryStatus: newDeliveryStatus },
       });
 
       // 3. FGL deduction + ledger movement (only when lot is linked)
-      if (finishedGoodsLotId && lotAvailableQty !== null) {
-        const newAvailableQty = +(lotAvailableQty - quantityKg).toFixed(3);
-        const newLotStatus = newAvailableQty <= 0 ? "SHIPPED" : "AVAILABLE";
+      if (finishedGoodsLotId) {
+        // WHERE availableQty >= quantityKg is evaluated atomically at write time by the database.
+        const updated = await tx.finishedGoodsLot.updateMany({
+          where: { id: finishedGoodsLotId, availableQty: { gte: quantityKg } },
+          data: { availableQty: { decrement: quantityKg } },
+        });
+        if (updated.count === 0) {
+          throw { _appCode: 409, message: "Insufficient finished goods lot quantity." };
+        }
+
+        const updatedLot = await tx.finishedGoodsLot.findUnique({
+          where: { id: finishedGoodsLotId },
+          select: { availableQty: true },
+        });
+        const newQuantity = updatedLot!.availableQty;
+        const previousQuantity = newQuantity + quantityKg;
+        const newLotStatus = newQuantity <= 0 ? "SHIPPED" : "AVAILABLE";
 
         await tx.finishedGoodsLot.update({
           where: { id: finishedGoodsLotId },
-          data: { availableQty: newAvailableQty, status: newLotStatus },
+          data: { status: newLotStatus },
         });
 
         await tx.inventoryMovement.create({
@@ -96,11 +117,11 @@ export async function POST(request: Request) {
             category: "FINISHED_GOODS",
             referenceEntityId: finishedGoodsLotId,
             quantityChanged: -quantityKg,
-            previousQuantity: lotAvailableQty,
-            newQuantity: newAvailableQty,
+            previousQuantity,
+            newQuantity,
             sourceDocType: "DELIVERY",
             sourceDocId: newDelivery.id,
-            userId: null,
+            userId: user.id,
             notes: null,
           },
         });

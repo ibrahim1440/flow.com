@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth-server";
+import { requireModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 
 const SESSION_INCLUDE = {
@@ -28,7 +28,7 @@ type SessionItem =
   | { isExternalSample: true; externalSampleName: string; externalSupplierName?: string };
 
 export async function GET() {
-  const { error } = await requireAuth();
+  const { error } = await requireModule("cupping");
   if (error) return error;
 
   const sessions = await prisma.cuppingSession.findMany({
@@ -40,12 +40,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { user, error } = await requireAuth();
+  const { error } = await requireEdit("cupping");
   if (error) return error;
-
-  if (user.role !== "admin") {
-    return NextResponse.json({ error: "Admin only" }, { status: 403 });
-  }
 
   const { name, batchId, greenBeanId, items } = await request.json() as {
     name?: string;

@@ -6,8 +6,8 @@ import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { exportBatchesPDF, exportBatchesExcel, type BatchExportRow } from "@/lib/export";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import { type TranslationKey } from "@/lib/i18n/translations";
 

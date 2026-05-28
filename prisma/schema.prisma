@@ -137,9 +137,10 @@ model RoastingBatch {
   childBatches  RoastingBatch[] @relation("BlendLineage")
 
   // Multi-tester QC panel
-  qcDeadline   DateTime?
-  qcToken      String?   @unique
-  qcClosedById String?
+  qcDeadline            DateTime?
+  qcToken               String?   @unique
+  qcClosedById          String?
+  qcFinalDecisionReason String?
 
   productionOrderId String?
   productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
@@ -451,4 +452,24 @@ model ProductionOrder {
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   roastingBatches     RoastingBatch[]
+}
+
+model LoginAttempt {
+  id             String   @id @default(cuid())
+  ipHash         String
+  identifierHash String
+  createdAt      DateTime @default(now())
+
+  @@index([ipHash, createdAt])
+  @@index([ipHash, identifierHash, createdAt])
+}
+
+model RateLimit {
+  id        String   @id @default(cuid())
+  scope     String
+  keyHash   String
+  createdAt DateTime @default(now())
+
+  @@index([scope, keyHash, createdAt])
+  @@index([createdAt])
 }

@@ -52,14 +52,14 @@ export async function DELETE(_request: Request, { params }: Params) {
   try {
     await prisma.greenBean.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (err: unknown) {
+  } catch (err) {
     const code = (err as { code?: string })?.code;
     if (code === "P2003" || code === "P2014") {
       return NextResponse.json(
         { error: "Cannot delete this bean because it has roasting history. Please deactivate it instead." },
-        { status: 400 }
+        { status: 409 }
       );
     }
-    throw err;
+    return handlePrismaError(err);
   }
 }

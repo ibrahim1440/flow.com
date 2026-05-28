@@ -10,7 +10,11 @@ export async function POST(request: Request) {
   const { user, error } = await requireSub("qc", "manage");
   if (error) return error;
 
-  const { batchIds, outcome } = await request.json() as { batchIds: string[]; outcome: "Passed" | "Rejected" };
+  const { batchIds, outcome, finalDecisionReason } = await request.json() as {
+    batchIds: string[];
+    outcome: "Passed" | "Rejected";
+    finalDecisionReason?: string;
+  };
 
   if (!Array.isArray(batchIds) || batchIds.length === 0)
     return NextResponse.json({ error: "batchIds must be a non-empty array" }, { status: 400 });
@@ -21,7 +25,13 @@ export async function POST(request: Request) {
     // Load all batches upfront to validate transitions before opening the transaction
     const batches = await prisma.roastingBatch.findMany({
       where: { id: { in: batchIds } },
-      select: { id: true, status: true, orderItemId: true, productionOrderId: true },
+      select: {
+        id: true,
+        status: true,
+        orderItemId: true,
+        productionOrderId: true,
+        qcRecords: { select: { decision: true } },
+      },
     });
 
     if (batches.length !== batchIds.length) {
@@ -38,6 +48,26 @@ export async function POST(request: Request) {
       );
     }
 
+    if (outcome === "Passed") {
+      const noAccept = batches.filter((b) => !b.qcRecords.some((r) => r.decision === "Accept"));
+      if (noAccept.length > 0) {
+        return NextResponse.json(
+          { error: "Cannot pass a batch without at least one accepted QC record.", batchIds: noAccept.map((b) => b.id) },
+          { status: 409 }
+        );
+      }
+
+      const hasAnyReject = batches.some((b) => b.qcRecords.some((r) => r.decision === "Reject"));
+      if (hasAnyReject) {
+        if (!finalDecisionReason?.trim()) {
+          return NextResponse.json(
+            { error: "Final decision reason is required when passing a batch with rejected QC records." },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     // Collect unique IDs to recalculate each affected entity only once.
     const orderItemIds = [...new Set(batches.map((b) => b.orderItemId))];
     const productionOrderIds = [
@@ -47,7 +77,12 @@ export async function POST(request: Request) {
     await prisma.$transaction(async (tx) => {
       await tx.roastingBatch.updateMany({
         where: { id: { in: batchIds } },
-        data: { status: outcome, qcClosedById: user.id },
+        data: {
+          status: outcome,
+          qcClosedById: user.id,
+          qcToken: null,
+          qcFinalDecisionReason: finalDecisionReason?.trim() || null,
+        },
       });
 
       for (const orderItemId of orderItemIds) {

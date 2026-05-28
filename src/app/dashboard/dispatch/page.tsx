@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo } from "react";
 import { Truck, Search, AlertTriangle, Info, Layers } from "lucide-react";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -190,10 +190,7 @@ export default function DispatchPage() {
   // ── Lot selection derived state ───────────────────────────────────────────
   const selectedLot   = lots.find((l) => l.id === lotId) ?? null;
   const lotExceedsQty = selectedLot !== null && form.quantityKg > selectedLot.availableQty;
-  // Legacy mode: no lots exist for this item (WIP batches without a product link).
-  // Backend accepts finishedGoodsLotId: null safely, so we allow submit without a lot.
-  const isLegacyMode  = !lotsLoading && lots.length === 0;
-  const canSubmit     = (isLegacyMode || (!!lotId && !lotExceedsQty)) && !submitting;
+  const canSubmit = !!lotId && !lotExceedsQty && !submitting;
 
   // Split lots: matching product first, others below (using optgroup)
   const matchingLots = selectedItem?.productId
@@ -357,7 +354,7 @@ export default function DispatchPage() {
               {/* ── Lot selector ── */}
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1.5">
-                  {t("selectBatchLot")}{!isLegacyMode && " *"}
+                  {t("selectBatchLot")} *
                 </label>
 
                 {lotsLoading ? (
@@ -371,7 +368,6 @@ export default function DispatchPage() {
                       <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-500" />
                       <span>{t("noLotsAvailable")}</span>
                     </div>
-                    <p className="text-xs text-brown/50 px-1">يمكن المتابعة بدون ربط لوت (تسليم إرثي).</p>
                   </div>
                 ) : (
                   <select
@@ -494,7 +490,7 @@ export default function DispatchPage() {
                   disabled={!canSubmit}
                   className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 shadow-md shadow-orange/20 active:scale-[0.98] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
                 >
-                  {submitting ? "…" : isLegacyMode ? `${t("confirmDelivery")} (بدون لوت)` : t("confirmDelivery")}
+                  {submitting ? "…" : t("confirmDelivery")}
                 </button>
                 <button
                   type="button"

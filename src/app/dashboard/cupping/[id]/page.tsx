@@ -10,7 +10,7 @@ import {
   ResponsiveContainer, Tooltip,
 } from "recharts";
 import CuppingForm, { type CuppingFormData } from "@/app/dashboard/cupping/CuppingForm";
-import { useUser } from "@/app/dashboard/layout";
+import { useUser } from "@/app/dashboard/user-context";
 
 type Score = {
   id: string;

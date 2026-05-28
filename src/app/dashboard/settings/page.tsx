@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { Settings, Trash2, AlertTriangle, CheckCircle, AlertCircle, X, ShieldOff, ImagePlus, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useRouter } from "next/navigation";
-import { useUser } from "@/app/dashboard/layout";
+import { useUser } from "@/app/dashboard/user-context";
 
 export default function SettingsPage() {
   const { t } = useI18n();

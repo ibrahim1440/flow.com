@@ -1,10 +1,26 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
+import { extractIp } from "@/lib/rate-limit";
+import { checkAndRecordRateLimit } from "@/lib/api-rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(request: Request, { params }: Params) {
+  const ip = extractIp(request);
+  const { limited } = await checkAndRecordRateLimit({
+    scope: "cupping_score_get",
+    key: ip,
+    limit: 60,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (limited) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again later." },
+      { status: 429 }
+    );
+  }
+
   const { id } = await params;
 
   const session = await prisma.cuppingSession.findUnique({
@@ -17,6 +33,20 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 export async function POST(request: Request, { params }: Params) {
+  const ip = extractIp(request);
+  const { limited } = await checkAndRecordRateLimit({
+    scope: "cupping_score_post",
+    key: ip,
+    limit: 20,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (limited) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again later." },
+      { status: 429 }
+    );
+  }
+
   const { id } = await params;
 
   const session = await prisma.cuppingSession.findUnique({ where: { id } });

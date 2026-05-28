@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Tag, Printer, Search } from "lucide-react";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 
 type Product = {
   id: string; productNameEn: string; productNameAr: string | null;

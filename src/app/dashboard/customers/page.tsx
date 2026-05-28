@@ -5,8 +5,8 @@ import {
   Users2, Plus, Search, Pencil, Trash2, Star, X, ChevronRight,
   Phone, Mail, MapPin, Package,
 } from "lucide-react";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 
 type GreenBeanSlim = { id: string; beanType: string; serialNumber: string };

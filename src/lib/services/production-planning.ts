@@ -31,6 +31,7 @@ export async function recalcProductionOrderStatus(
   const agg = await tx.roastingBatch.aggregate({
     where: {
       productionOrderId,
+      isBlend: false,
       status: { not: "Rejected" },
     },
     _sum: { roastedBeanQuantity: true },

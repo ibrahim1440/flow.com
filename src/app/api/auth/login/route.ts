@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { compareSync } from "bcryptjs";
+import { compare } from "bcryptjs";
+import { createHash } from "crypto";
 import { signToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, ALL_MODULES } from "@/lib/auth";
+import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
+
+const sha256Pin = (p: string) => createHash("sha256").update(p).digest("hex");
 
 const ROUTE_MODULE_MAP: Record<string, string> = {
   "/dashboard": "dashboard",
@@ -28,42 +32,99 @@ function resolveRoute(defaultRoute: string, permissions: ReturnType<typeof parse
 }
 
 export async function POST(request: Request) {
+  const ip = extractIp(request);
   const { method = "pin", pin, username, password } = await request.json();
 
-  let employee: Awaited<ReturnType<typeof prisma.employee.findFirst>> = null;
+  type LoginEmployee = { id: string; name: string; role: string; permissions: string; defaultRoute: string | null; active: boolean; preferredLanguage: string };
+  let employee: LoginEmployee | null = null;
 
   if (method === "pin") {
     if (!pin) {
       return NextResponse.json({ error: "PIN required" }, { status: 400 });
     }
-    // Scan all employees (including inactive) to give a precise error
-    const all = await prisma.employee.findMany();
-    const matched = all.find((e) => compareSync(pin, e.pin)) ?? null;
-    if (matched && !matched.active) {
-      return NextResponse.json({ error: "الحساب معطل، يرجى مراجعة الإدارة" }, { status: 403 });
+    const ipHash = hashRateLimitKey(ip);
+    const identifierHash = hashRateLimitKey("pin:" + String(pin).trim());
+    await pruneExpired();
+    if (await isIpRateLimited(ipHash, 30)) {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
     }
-    employee = matched;
+    if (await isPairRateLimited(ipHash, identifierHash, 10)) {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+    }
+    const pinHashValue = sha256Pin(pin);
+
+    const byHash = await prisma.employee.findFirst({
+      where: { pinHash: pinHashValue, active: true },
+      select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, pin: true, preferredLanguage: true },
+    });
+
+    if (byHash) {
+      // pinHash is only a lookup key, not the credential proof — always bcrypt verify
+      if (!(await compare(pin, byHash.pin))) {
+        await recordFailedAttempt(ipHash, identifierHash);
+        return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+      }
+      await clearAttempts(ipHash, identifierHash);
+      employee = byHash;
+    } else {
+      // Fallback: scan only active employees whose pinHash is not yet populated
+      const candidates = await prisma.employee.findMany({
+        where: { pinHash: null, active: true },
+        select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, pin: true, preferredLanguage: true },
+      });
+      let matched: typeof candidates[0] | null = null;
+      for (const e of candidates) {
+        if (await compare(pin, e.pin)) { matched = e; break; }
+      }
+      if (!matched) {
+        await recordFailedAttempt(ipHash, identifierHash);
+        return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+      }
+      // Opportunistic backfill: next login hits fast path.
+      // P2002 means two employees share the same PIN (transition edge case) — admin must resolve.
+      try {
+        await prisma.employee.update({
+          where: { id: matched.id },
+          data: { pinHash: pinHashValue },
+        });
+      } catch (err) {
+        console.error("[login] pinHash backfill failed for employee:", matched.id, err);
+      }
+      await clearAttempts(ipHash, identifierHash);
+      employee = matched;
+    }
 
   } else if (method === "password") {
     if (!username || !password) {
       return NextResponse.json({ error: "Username and password required" }, { status: 400 });
     }
+    const normalizedUsername = String(username).trim().toLowerCase();
+    const ipHash = hashRateLimitKey(ip);
+    const identifierHash = hashRateLimitKey("pwd:" + normalizedUsername);
+    await pruneExpired();
+    if (await isIpRateLimited(ipHash, 30)) {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+    }
+    if (await isPairRateLimited(ipHash, identifierHash, 10)) {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+    }
     const matched = await prisma.employee.findFirst({
       where: { OR: [{ username }, { name: username }] },
+      select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, preferredLanguage: true, password: true },
     });
-    if (matched && !matched.active) {
-      return NextResponse.json({ error: "الحساب معطل، يرجى مراجعة الإدارة" }, { status: 403 });
-    }
-    if (!matched || !matched.password || !compareSync(password, matched.password)) {
+    if (!matched || !matched.active || !matched.password || !(await compare(password, matched.password))) {
+      await recordFailedAttempt(ipHash, identifierHash);
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
-    employee = matched;
+    await clearAttempts(ipHash, identifierHash);
+    const { password: _pw, ...matchedEmployee } = matched;
+    employee = matchedEmployee;
   } else {
     return NextResponse.json({ error: "Invalid login method" }, { status: 400 });
   }
 
   if (!employee) {
-    return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
   let permissions = parsePermissions(employee.permissions as string);

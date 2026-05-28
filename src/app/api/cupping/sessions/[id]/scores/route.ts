@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth-server";
+import { requireModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, { params }: Params) {
-  const { user, error } = await requireAuth();
+  const { user, error } = await requireModule("cupping");
   if (error) return error;
 
   const { id } = await params;
@@ -28,7 +28,7 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 export async function POST(request: Request, { params }: Params) {
-  const { user, error } = await requireAuth();
+  const { user, error } = await requireEdit("cupping");
   if (error) return error;
 
   const { id } = await params;

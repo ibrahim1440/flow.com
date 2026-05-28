@@ -6,9 +6,9 @@ import {
   ROLE_LABELS, ALL_MODULES, MODULE_LABELS, MODULE_SUB_PRIVILEGES,
   buildDefaultPermissions, hasSubPrivilege, hasModuleAccess,
   type Permissions, type AccessLevel,
-} from "@/lib/auth";
+} from "@/lib/auth-shared";
 import { formatDate } from "@/lib/utils";
-import { useUser } from "../layout";
+import { useUser } from "../user-context";
 import { useI18n } from "@/lib/i18n/context";
 
 type Employee = {
@@ -435,7 +435,7 @@ export default function EmployeesPage() {
                           <div className="px-4 py-2.5 border-t border-border bg-white">
                             <div className="flex flex-wrap gap-x-5 gap-y-2">
                               {subs.map((sub) => {
-                                const enabled = perm.sub?.[sub.key] ?? (perm.access === "edit");
+                                const enabled = perm.sub?.[sub.key] === true;
                                 return (
                                   <label key={sub.key} className="flex items-center gap-2 cursor-pointer group/sub">
                                     <input type="checkbox" checked={enabled}

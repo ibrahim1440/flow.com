@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { compareSync, hashSync } from "bcryptjs";
+import { compare, hash } from "bcryptjs";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
 import { signToken, parsePermissions, buildDefaultPermissions } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
+import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
 
 const sha256Pin = (pin: string) => createHash("sha256").update(pin).digest("hex");
 
@@ -74,10 +75,7 @@ export async function PATCH(request: Request) {
     return response;
   } catch (err) {
     console.error("[PATCH /api/profile] error:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal server error" },
-      { status: 500 }
-    );
+    return handlePrismaError(err);
   }
 }
 
@@ -94,13 +92,27 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "PIN must be 4–8 digits" }, { status: 400 });
   }
 
+  const ip = extractIp(request);
+  const ipHash = hashRateLimitKey(ip);
+  const identifierHash = hashRateLimitKey("profile-pin:" + user.id);
+  await pruneExpired();
+  if (await isIpRateLimited(ipHash, 10)) {
+    return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+  }
+  if (await isPairRateLimited(ipHash, identifierHash, 5)) {
+    return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+  }
+
   const employee = await prisma.employee.findUnique({ where: { id: user.id } });
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 
   // Verify current PIN
-  if (!compareSync(currentPin, employee.pin)) {
-    return NextResponse.json({ error: "Current PIN is incorrect" }, { status: 401 });
+  if (!(await compare(currentPin, employee.pin))) {
+    await recordFailedAttempt(ipHash, identifierHash);
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
+
+  await clearAttempts(ipHash, identifierHash);
 
   const taken = await prisma.employee.findFirst({
     where: { pinHash: sha256Pin(newPin), id: { not: user.id } },
@@ -113,7 +125,7 @@ export async function PUT(request: Request) {
   try {
     await prisma.employee.update({
       where: { id: user.id },
-      data: { pin: hashSync(newPin, 10), pinHash: sha256Pin(newPin) },
+      data: { pin: await hash(newPin, 10), pinHash: sha256Pin(newPin) },
     });
     return NextResponse.json({ success: true });
   } catch (err) {

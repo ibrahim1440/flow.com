@@ -8,8 +8,8 @@ import {
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import toast from "react-hot-toast";
@@ -196,8 +196,10 @@ export default function QCPage() {
   const [form, setForm] = useState(BLANK_FORM);
   const [submitting, setSubmitting] = useState(false);
 
-  // Finalize confirmation modal
-  const [confirmFinalizeId, setConfirmFinalizeId] = useState<string | null>(null);
+  // Finalize modal (single batch)
+  const [finalizeBatch, setFinalizeBatch] = useState<Batch | null>(null);
+  const [finalizeOutcome, setFinalizeOutcome] = useState<"Passed" | "Rejected" | "">("");
+  const [finalizeReason, setFinalizeReason] = useState("");
   const [finalizing, setFinalizing] = useState(false);
 
   // Invite link modal
@@ -212,6 +214,7 @@ export default function QCPage() {
   const [showBulkWarning, setShowBulkWarning] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkOutcome, setBulkOutcome] = useState<"Passed" | "Rejected">("Passed");
+  const [bulkFinalizeReason, setBulkFinalizeReason] = useState("");
   const [isBulkFinalizing, setIsBulkFinalizing] = useState(false);
 
   const loadBacklog = useCallback(async () => {
@@ -292,14 +295,20 @@ export default function QCPage() {
     }
   }
 
-  async function handleFinalize(batchId: string) {
+  async function handleFinalize(batch: Batch, outcome: "Passed" | "Rejected", reason: string) {
     setFinalizing(true);
     try {
-      const res = await fetch(`/api/qc/${batchId}/finalize`, { method: "POST" });
+      const res = await fetch(`/api/qc/${batch.id}/finalize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome, ...(reason.trim() ? { finalDecisionReason: reason.trim() } : {}) }),
+      });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || t("error")); return; }
       toast.success(`${data.status}: ${data.acceptCount}/${data.total} ${t("accepted")}`);
-      setConfirmFinalizeId(null);
+      setFinalizeBatch(null);
+      setFinalizeOutcome("");
+      setFinalizeReason("");
       loadBacklog();
       if (historyLoaded) loadHistory();
     } finally {
@@ -331,7 +340,11 @@ export default function QCPage() {
       const res = await fetch("/api/qc-records/bulk-finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchIds: Array.from(selectedIds), outcome: bulkOutcome }),
+        body: JSON.stringify({
+          batchIds: Array.from(selectedIds),
+          outcome: bulkOutcome,
+          ...(bulkFinalizeReason.trim() ? { finalDecisionReason: bulkFinalizeReason.trim() } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || t("error")); return; }
@@ -339,6 +352,7 @@ export default function QCPage() {
       setSelectedIds(new Set());
       setShowBulkModal(false);
       setShowBulkWarning(false);
+      setBulkFinalizeReason("");
       loadBacklog();
       if (historyLoaded) loadHistory();
     } finally {
@@ -645,7 +659,7 @@ export default function QCPage() {
                         )}
                         {canManage && total > 0 && (
                           <button
-                            onClick={() => total === 1 ? setConfirmFinalizeId(batch.id) : handleFinalize(batch.id)}
+                            onClick={() => { setFinalizeBatch(batch); setFinalizeOutcome(""); setFinalizeReason(""); }}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-charcoal text-white rounded-lg text-xs hover:bg-charcoal/80 shadow-md active:scale-[0.98] transition-all font-bold"
                           >
                             {t("finalizeQc")}
@@ -1027,28 +1041,86 @@ export default function QCPage() {
         </div>
       )}
 
-      {/* Single-tester warning modal */}
-      {confirmFinalizeId && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setConfirmFinalizeId(null)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
-            <AlertTriangle size={40} className="text-amber-500 mx-auto mb-3" />
-            <h2 className="text-lg font-extrabold text-charcoal mb-2">{t("onlyOneTester")}</h2>
-            <p className="text-sm text-brown/70 mb-5">{t("oneTesterWarning")}</p>
-            <div className="flex gap-3">
-              <button onClick={() => setConfirmFinalizeId(null)} className="flex-1 py-2 border rounded-lg hover:bg-gray-50 font-medium text-sm">
-                {t("addMoreTesters")}
-              </button>
-              <button
-                onClick={() => handleFinalize(confirmFinalizeId)}
-                disabled={finalizing}
-                className="flex-1 py-2 bg-charcoal text-white rounded-lg hover:bg-charcoal/80 font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {finalizing ? <><Loader2 size={14} className="animate-spin" /> {t("finalizing")}</> : t("finalizeAnyway")}
-              </button>
+      {/* Single-batch finalize modal */}
+      {finalizeBatch && (() => {
+        const fb = finalizeBatch;
+        const fbAccept = fb.qcRecords.filter((r) => r.decision === "Accept").length;
+        const fbReject = fb.qcRecords.filter((r) => r.decision === "Reject").length;
+        const fbTotal = fb.qcRecords.length;
+        const reasonRequired = finalizeOutcome === "Passed" && fbReject > 0;
+        const canConfirm = finalizeOutcome !== "" && !(reasonRequired && !finalizeReason.trim());
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !finalizing && setFinalizeBatch(null)}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("finalizeQc")}</h2>
+              <p className="text-xs text-brown/60 mb-4 font-mono">{fb.batchNumber}</p>
+
+              {fbTotal === 1 && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
+                  <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+                  <p className="text-xs text-amber-700 font-medium">{t("oneTesterWarning")}</p>
+                </div>
+              )}
+
+              <div className="flex items-center gap-4 bg-cream rounded-xl px-4 py-2.5 mb-4 text-sm">
+                <span className="text-brown font-semibold">{fbTotal} {fbTotal !== 1 ? t("testers") : t("tester")}</span>
+                <span className="flex items-center gap-1 font-bold text-green-600"><CheckCircle2 size={13} /> {fbAccept} {t("accept")}</span>
+                <span className="flex items-center gap-1 font-bold text-red-600"><XCircle size={13} /> {fbReject} {t("reject")}</span>
+              </div>
+
+              <p className="text-sm font-semibold text-charcoal mb-3">{t("bulkOutcomeLabel")}</p>
+              <div className="flex gap-3 mb-4">
+                <button
+                  onClick={() => setFinalizeOutcome("Passed")}
+                  className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all text-sm ${finalizeOutcome === "Passed" ? "bg-green-600 text-white border-green-600" : "bg-white text-green-700 border-green-300 hover:bg-green-50"}`}
+                >
+                  <CheckCircle2 size={15} className="inline ltr:mr-1.5 rtl:ml-1.5" />
+                  {t("statusPassed")}
+                </button>
+                <button
+                  onClick={() => setFinalizeOutcome("Rejected")}
+                  className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all text-sm ${finalizeOutcome === "Rejected" ? "bg-red-600 text-white border-red-600" : "bg-white text-red-600 border-red-300 hover:bg-red-50"}`}
+                >
+                  <XCircle size={15} className="inline ltr:mr-1.5 rtl:ml-1.5" />
+                  {t("rejectedLabel")}
+                </button>
+              </div>
+
+              {finalizeOutcome === "Passed" && (
+                <div className="mb-4">
+                  <label className="block text-sm font-semibold text-charcoal mb-1">
+                    {reasonRequired ? "Override reason (required)" : "Decision notes (optional)"}
+                  </label>
+                  <textarea
+                    value={finalizeReason}
+                    onChange={(e) => setFinalizeReason(e.target.value)}
+                    rows={2}
+                    placeholder={reasonRequired ? "State reason for passing despite rejected records…" : "Optional notes…"}
+                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm resize-none"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleFinalize(fb, finalizeOutcome as "Passed" | "Rejected", finalizeReason)}
+                  disabled={!canConfirm || finalizing}
+                  className="flex-1 py-2.5 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm"
+                >
+                  {finalizing ? <><Loader2 size={14} className="animate-spin" /> {t("finalizing")}</> : t("confirm")}
+                </button>
+                <button
+                  onClick={() => setFinalizeBatch(null)}
+                  disabled={finalizing}
+                  className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors text-sm"
+                >
+                  {t("cancel")}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Invite link modal */}
       {inviteLink && (
@@ -1187,11 +1259,29 @@ export default function QCPage() {
                 {t("bulkFailAll")}
               </button>
             </div>
+            {bulkOutcome === "Passed" && (() => {
+              const selectedBatches = filteredBacklog.filter((b) => selectedIds.has(b.id));
+              const hasAnyReject = selectedBatches.some((b) => b.qcRecords.some((r) => r.decision === "Reject"));
+              return (
+                <div className="mb-5">
+                  <label className="block text-sm font-semibold text-charcoal mb-1">
+                    {hasAnyReject ? "Override reason (required)" : "Decision notes (optional)"}
+                  </label>
+                  <textarea
+                    value={bulkFinalizeReason}
+                    onChange={(e) => setBulkFinalizeReason(e.target.value)}
+                    rows={2}
+                    placeholder={hasAnyReject ? "State reason for passing despite rejected records…" : "Optional notes…"}
+                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm resize-none"
+                  />
+                </div>
+              );
+            })()}
             <div className="flex gap-3">
               <button
                 onClick={executeBulkFinalize}
-                disabled={isBulkFinalizing}
-                className="flex-1 py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                disabled={isBulkFinalizing || (bulkOutcome === "Passed" && filteredBacklog.filter((b) => selectedIds.has(b.id)).some((b) => b.qcRecords.some((r) => r.decision === "Reject")) && !bulkFinalizeReason.trim())}
+                className="flex-1 py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all flex items-center justify-center gap-2"
               >
                 {isBulkFinalizing ? <><Loader2 size={16} className="animate-spin" />{t("bulkFinalizing")}</> : t("confirm")}
               </button>

@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { Plus, Search, ShoppingCart, ChevronDown, ChevronUp, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 
@@ -18,6 +18,7 @@ function itemCompletionTotal(item: OrderItem): number {
 
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
+  productId: string | null; productSkuId: string | null;
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; status: string; isBlend: boolean }[];
   deliveries: { date: string; quantityKg: number; deliveryType: string }[];
@@ -32,6 +33,8 @@ type Order = {
 
 type Customer = { id: string; name: string };
 type GreenBean = { id: string; serialNumber: string; beanType: string; quantityKg: number };
+type ProductSku = { id: string; skuCode: string; weightGrams: number; isBulk: boolean; price: number };
+type ProductSummary = { id: string; productNameEn: string; productNameAr: string | null; productSkus: ProductSku[] };
 
 function StatusBadge({ status }: { status: string }) {
   const { t } = useI18n();
@@ -65,17 +68,18 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
+  const [products, setProducts] = useState<ProductSummary[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [form, setForm] = useState({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ beanTypeName: "", quantityKg: 0, greenBeanId: "" }] });
+  const [form, setForm] = useState({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] });
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: "", nameAr: "", phone: "", email: "", address: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     quotationNumber: string; approvalStatus: string; paymentStatus: string; vatInvoiceStatus: string; notes: string;
-    items: { id?: string; beanTypeName: string; quantityKg: number; greenBeanId: string }[];
+    items: { id?: string; beanTypeName: string; quantityKg: number; greenBeanId: string; productId: string; productSkuId: string }[];
   }>({ quotationNumber: "", approvalStatus: "", paymentStatus: "", vatInvoiceStatus: "", notes: "", items: [] });
 
   useEffect(() => {
@@ -83,12 +87,14 @@ export default function OrdersPage() {
   }, []);
 
   async function loadData() {
-    const [ordersRes, custRes, beansRes] = await Promise.all([
+    const [ordersRes, custRes, beansRes, productsRes] = await Promise.all([
       fetch("/api/orders"), fetch("/api/customers"), fetch("/api/green-beans"),
+      fetch("/api/coffee-products/summary"),
     ]);
     setOrders(await ordersRes.json());
     setCustomers(await custRes.json());
     setBeans(await beansRes.json());
+    setProducts(await productsRes.json());
   }
 
   function getStockWarnings() {
@@ -122,7 +128,7 @@ export default function OrdersPage() {
       return;
     }
     setShowForm(false);
-    setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ beanTypeName: "", quantityKg: 0, greenBeanId: "" }] });
+    setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] });
     loadData();
   }
 
@@ -151,10 +157,12 @@ export default function OrdersPage() {
       vatInvoiceStatus: order.vatInvoiceStatus,
       notes: order.notes || "",
       items: order.items.map((i) => ({
-        id: i.id,
+        id:          i.id,
         beanTypeName: i.beanTypeName,
-        quantityKg: i.quantityKg,
+        quantityKg:  i.quantityKg,
         greenBeanId: beans.find((b) => b.beanType === i.beanTypeName)?.id || "",
+        productId:   i.productId   || "",
+        productSkuId: i.productSkuId || "",
       })),
     });
   }
@@ -215,7 +223,7 @@ export default function OrdersPage() {
   }
 
   function addItem() {
-    setForm({ ...form, items: [...form.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "" }] });
+    setForm({ ...form, items: [...form.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] });
   }
 
   function updateItem(idx: number, field: string, value: string | number) {
@@ -329,6 +337,24 @@ export default function OrdersPage() {
                             <input type="number" placeholder="kg" value={item.quantityKg || ""} onChange={(e) => updateItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
                               className="w-24 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
                           </div>
+                          <div className="flex gap-2 mt-1">
+                            <select value={item.productId} onChange={(e) => {
+                              updateItem(idx, "productId", e.target.value);
+                              updateItem(idx, "productSkuId", "");
+                            }} className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                              <option value="">No product</option>
+                              {products.map((p) => <option key={p.id} value={p.id}>{p.productNameEn}</option>)}
+                            </select>
+                            {item.productId && (
+                              <select value={item.productSkuId} onChange={(e) => updateItem(idx, "productSkuId", e.target.value)}
+                                className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                                <option value="">No SKU</option>
+                                {(products.find((p) => p.id === item.productId)?.productSkus ?? []).map((s) => (
+                                  <option key={s.id} value={s.id}>{s.skuCode} ({s.weightGrams}g)</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
                           {warnings[idx] && (
                             <p className="text-xs font-bold text-red-600 mt-1 px-1">{warnings[idx]}</p>
                           )}
@@ -414,12 +440,30 @@ export default function OrdersPage() {
                                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
                               )}
                             </div>
+                            <div className="flex gap-2 mt-1">
+                              <select value={item.productId} onChange={(e) => {
+                                updateEditItem(idx, "productId", e.target.value);
+                                updateEditItem(idx, "productSkuId", "");
+                              }} className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                                <option value="">No product</option>
+                                {products.map((p) => <option key={p.id} value={p.id}>{p.productNameEn}</option>)}
+                              </select>
+                              {item.productId && (
+                                <select value={item.productSkuId} onChange={(e) => updateEditItem(idx, "productSkuId", e.target.value)}
+                                  className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                                  <option value="">No SKU</option>
+                                  {(products.find((p) => p.id === item.productId)?.productSkus ?? []).map((s) => (
+                                    <option key={s.id} value={s.id}>{s.skuCode} ({s.weightGrams}g)</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
                             {editWarnings[idx] && (
                               <p className="text-xs font-bold text-red-600 mt-1 px-1">{editWarnings[idx]}</p>
                             )}
                           </div>
                         ))}
-                        <button type="button" onClick={() => setEditForm({ ...editForm, items: [...editForm.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "" }] })}
+                        <button type="button" onClick={() => setEditForm({ ...editForm, items: [...editForm.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] })}
                           className="text-sm text-brown hover:underline">{t("addItem")}</button>
                       </div>
                       <div className="flex gap-2 justify-end">

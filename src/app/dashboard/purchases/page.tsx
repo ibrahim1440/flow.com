@@ -5,8 +5,8 @@ import {
   ShoppingBag, Plus, Search, X, ChevronDown, Package, CalendarDays, Banknote,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { useUser } from "../layout";
-import { hasSubPrivilege } from "@/lib/auth";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

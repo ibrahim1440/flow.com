@@ -15,7 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { error, user } = await requireSub("inventory", "adjust");
+  const { error, user } = await requireSub("inventory", "receive");
   if (error) return error;
 
   const body = await request.json();

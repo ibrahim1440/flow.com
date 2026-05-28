@@ -5,6 +5,12 @@ import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
+class AppError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
@@ -37,6 +43,7 @@ export async function GET(request: Request) {
   const batches = await prisma.roastingBatch.findMany({
     where,
     orderBy: { date: "desc" },
+    take: 500,
     include: {
       orderItem: { include: { order: { include: { customer: { include: { roastPreferences: true } } } } } },
       greenBean: true,
@@ -57,14 +64,21 @@ export async function POST(request: Request) {
   const data = await request.json();
   const { orderItemId, greenBeanId, greenBeanQuantity, roastedBeanQuantity, wasteQuantity, roastProfile, productionOrderId } = data;
 
-  if (greenBeanId) {
-    const bean = await prisma.greenBean.findUnique({ where: { id: greenBeanId } });
-    if (!bean || bean.quantityKg < greenBeanQuantity) {
-      return NextResponse.json(
-        { error: `Insufficient stock. Available: ${bean?.quantityKg || 0}kg, Requested: ${greenBeanQuantity}kg` },
-        { status: 400 }
-      );
-    }
+  const qty = Number(greenBeanQuantity);
+  if (!Number.isFinite(qty) || qty <= 0) {
+    return NextResponse.json({ error: "greenBeanQuantity must be a positive number." }, { status: 400 });
+  }
+
+  const roastedQty = Number(roastedBeanQuantity ?? 0);
+  const wasteQty   = Number(wasteQuantity ?? 0);
+  if (!Number.isFinite(roastedQty) || roastedQty < 0) {
+    return NextResponse.json({ error: "roastedBeanQuantity must be a non-negative number." }, { status: 400 });
+  }
+  if (!Number.isFinite(wasteQty) || wasteQty < 0) {
+    return NextResponse.json({ error: "wasteQuantity must be a non-negative number." }, { status: 400 });
+  }
+  if (roastedQty + wasteQty > qty) {
+    return NextResponse.json({ error: "roastedBeanQuantity + wasteQuantity cannot exceed greenBeanQuantity." }, { status: 400 });
   }
 
   const batchNumber = await generateBatchNumber(greenBeanId);
@@ -72,50 +86,63 @@ export async function POST(request: Request) {
   try {
   const batch = await prisma.$transaction(async (tx) => {
     let previousQuantity: number | null = null;
+    let newQuantity:      number | null = null;
 
     if (greenBeanId) {
+      // Step 1: confirm existence and active status
       const bean = await tx.greenBean.findUnique({
-        where: { id: greenBeanId },
+        where:  { id: greenBeanId },
+        select: { isActive: true },
+      });
+      if (!bean)          throw new AppError(404, "Green bean not found.");
+      if (!bean.isActive) throw new AppError(400, "Cannot use an inactive green bean.");
+
+      // Step 2: conditional update — WHERE quantityKg >= qty is evaluated atomically at write time
+      const updated = await tx.greenBean.updateMany({
+        where: { id: greenBeanId, quantityKg: { gte: qty } },
+        data:  { quantityKg: { decrement: qty } },
+      });
+      if (updated.count === 0) throw new AppError(409, "Insufficient stock.");
+
+      // Step 3: re-read post-decrement quantity inside the same transaction
+      const updatedBean = await tx.greenBean.findUnique({
+        where:  { id: greenBeanId },
         select: { quantityKg: true },
       });
-      previousQuantity = bean!.quantityKg;
-
-      await tx.greenBean.update({
-        where: { id: greenBeanId },
-        data: { quantityKg: { decrement: greenBeanQuantity } },
-      });
+      newQuantity      = updatedBean!.quantityKg;
+      previousQuantity = newQuantity + qty;
     }
 
     const qcDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const newBatch = await tx.roastingBatch.create({
       data: {
         orderItemId,
-        greenBeanId: greenBeanId ?? null,
-        greenBeanQuantity,
-        roastedBeanQuantity: roastedBeanQuantity || 0,
-        wasteQuantity: wasteQuantity || 0,
-        roastProfile: roastProfile || null,
+        greenBeanId:         greenBeanId ?? null,
+        greenBeanQuantity:   qty,
+        roastedBeanQuantity: roastedQty,
+        wasteQuantity:       wasteQty,
+        roastProfile:        roastProfile || null,
         batchNumber,
-        status: "Pending QC",
+        status:              "Pending QC",
         qcDeadline,
-        productionOrderId: productionOrderId ?? null,
+        productionOrderId:   productionOrderId ?? null,
       },
       include: { orderItem: true, greenBean: true },
     });
 
-    if (greenBeanId && previousQuantity !== null) {
+    if (greenBeanId && previousQuantity !== null && newQuantity !== null) {
       await tx.inventoryMovement.create({
         data: {
-          type: "OUT",
-          category: "RAW_MATERIAL",
+          type:              "OUT",
+          category:          "RAW_MATERIAL",
           referenceEntityId: greenBeanId,
-          quantityChanged: -greenBeanQuantity,
+          quantityChanged:   -qty,
           previousQuantity,
-          newQuantity: previousQuantity - greenBeanQuantity,
-          sourceDocType: "ROASTING_BATCH",
-          sourceDocId: newBatch.id,
-          userId: user.id,
-          notes: null,
+          newQuantity,
+          sourceDocType:     "ROASTING_BATCH",
+          sourceDocId:       newBatch.id,
+          userId:            user.id,
+          notes:             null,
         },
       });
     }
@@ -130,7 +157,10 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json(batch, { status: 201 });
-  } catch (err) {
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     return handlePrismaError(err);
   }
 }

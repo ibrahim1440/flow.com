@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 
 export async function POST(request: Request) {
   const { error } = await requireSub("production", "blend");
@@ -87,6 +88,8 @@ export async function POST(request: Request) {
         quantityUsed: batches.find((b) => b.id === sourceBatchId)!.roastedBeanQuantity,
       })),
     });
+
+    await recalcOrderItemStatus(targetOrderItemId, tx);
 
     return tx.roastingBatch.findUnique({
       where: { id: blendedBatch.id },

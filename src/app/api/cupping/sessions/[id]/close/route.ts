@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth-server";
+import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function PUT(_req: Request, { params }: Params) {
-  const { user, error } = await requireAuth();
+  const { error } = await requireEdit("cupping");
   if (error) return error;
-
-  if (user.role !== "admin") {
-    return NextResponse.json({ error: "Admin only" }, { status: 403 });
-  }
 
   const { id } = await params;
 

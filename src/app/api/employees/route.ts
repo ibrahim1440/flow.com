@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { hashSync } from "bcryptjs";
+import { hash } from "bcryptjs";
 import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -9,6 +9,24 @@ const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
   defaultRoute: true, active: true, createdAt: true,
 } as const;
+
+const ALLOWED_DEFAULT_ROUTES = new Set([
+  "/dashboard",
+  "/dashboard/inventory",
+  "/dashboard/orders",
+  "/dashboard/production",
+  "/dashboard/qc",
+  "/dashboard/packaging",
+  "/dashboard/dispatch",
+  "/dashboard/history",
+  "/dashboard/analytics",
+  "/dashboard/labels",
+  "/dashboard/employees",
+  "/dashboard/customers",
+  "/dashboard/purchases",
+  "/dashboard/settings",
+  "/dashboard/profile",
+]);
 
 function sha256Pin(pin: string): string {
   return createHash("sha256").update(pin).digest("hex");
@@ -45,6 +63,10 @@ export async function POST(request: Request) {
 
   if (!username) return NextResponse.json({ error: "Username is required" }, { status: 400 });
   if (!pin || pin.length < 4) return NextResponse.json({ error: "PIN must be at least 4 digits" }, { status: 400 });
+  if (defaultRoute !== undefined && defaultRoute !== null && defaultRoute !== "") {
+    if (!ALLOWED_DEFAULT_ROUTES.has(defaultRoute))
+      return NextResponse.json({ error: "Invalid defaultRoute." }, { status: 400 });
+  }
 
   if (await isPinTaken(pin)) {
     return NextResponse.json({ error: "This PIN is already assigned to another employee. Please choose a unique PIN." }, { status: 409 });
@@ -55,12 +77,12 @@ export async function POST(request: Request) {
       data: {
         name,
         username,
-        pin: hashSync(pin, 10),
+        pin: await hash(pin, 10),
         pinHash: sha256Pin(pin),
         role,
         permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
         defaultRoute: defaultRoute || "/dashboard",
-        ...(password ? { password: hashSync(password, 10) } : {}),
+        ...(password ? { password: await hash(password, 10) } : {}),
       },
       select: SELECT_FULL,
     });

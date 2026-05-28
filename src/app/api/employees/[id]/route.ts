@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { hashSync } from "bcryptjs";
+import { hash } from "bcryptjs";
 import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -9,6 +9,24 @@ const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
   defaultRoute: true, active: true, createdAt: true,
 } as const;
+
+const ALLOWED_DEFAULT_ROUTES = new Set([
+  "/dashboard",
+  "/dashboard/inventory",
+  "/dashboard/orders",
+  "/dashboard/production",
+  "/dashboard/qc",
+  "/dashboard/packaging",
+  "/dashboard/dispatch",
+  "/dashboard/history",
+  "/dashboard/analytics",
+  "/dashboard/labels",
+  "/dashboard/employees",
+  "/dashboard/customers",
+  "/dashboard/purchases",
+  "/dashboard/settings",
+  "/dashboard/profile",
+]);
 
 function sha256Pin(pin: string): string {
   return createHash("sha256").update(pin).digest("hex");
@@ -39,9 +57,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const data: Record<string, unknown> = { name, role };
   if (username !== undefined) data.username = username;
   data.permissions = typeof permissions === "string" ? permissions : JSON.stringify(permissions || {});
-  if (defaultRoute !== undefined) data.defaultRoute = defaultRoute;
-  if (pin) { data.pin = hashSync(pin, 10); data.pinHash = sha256Pin(pin); }
-  if (password) data.password = hashSync(password, 10);
+  if (defaultRoute !== undefined) {
+    if (!ALLOWED_DEFAULT_ROUTES.has(defaultRoute))
+      return NextResponse.json({ error: "Invalid defaultRoute." }, { status: 400 });
+    data.defaultRoute = defaultRoute;
+  }
+  if (pin) { data.pin = await hash(pin, 10); data.pinHash = sha256Pin(pin); }
+  if (password) data.password = await hash(password, 10);
   if (active !== undefined) data.active = active;
 
   try {
@@ -72,6 +94,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
         { status: 400 }
       );
     }
-    throw err;
+    return handlePrismaError(err);
   }
 }
