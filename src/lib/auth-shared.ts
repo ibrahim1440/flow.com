@@ -91,6 +91,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   ],
   settings: [
     { key: "reset", label: "Factory reset (wipe all data)" },
+    { key: "training_reset", label: "Training data reset (wipe demo/training data including catalog)" },
   ],
   customers: [
     { key: "manage", label: "Manage customer roast preferences" },

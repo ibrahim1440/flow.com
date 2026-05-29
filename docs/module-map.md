@@ -6,7 +6,7 @@
 
 ## Last Validated
 
-Generated from code audit on 2026-05-20. Last updated 2026-05-28 to reflect R01 purchase receive guard alignment, R02 QC view_records enforcement, R04/R05 translate and public cupping rate limiting, R09 dashboard/analytics API route documentation correction, delivery FGL enforcement, admin reset full operational reset, R07 MVP safe limits, and cupping Known gaps correction. Updated 2026-05-29 (Final Verification Closure Pass): corrected stale route names in modules 4 (production-orders removed), 5 (guest-qc added), 6 (packaging routes corrected), 10 (labels routes corrected), 11 (employees guard accuracy); production.view_history sub-privilege corrected to No in permission table; employees guard notes clarified.
+Generated from code audit on 2026-05-20. Last updated 2026-05-28 to reflect R01 purchase receive guard alignment, R02 QC view_records enforcement, R04/R05 translate and public cupping rate limiting, R09 dashboard/analytics API route documentation correction, delivery FGL enforcement, admin reset full operational reset, R07 MVP safe limits, and cupping Known gaps correction. Updated 2026-05-29 (Final Verification Closure Pass): corrected stale route names in modules 4 (production-orders removed), 5 (guest-qc added), 6 (packaging routes corrected), 10 (labels routes corrected), 11 (employees guard accuracy); production.view_history sub-privilege corrected to No in permission table; employees guard notes clarified. Updated 2026-05-29 (Training Reset): added `POST /api/admin/training-reset` and `settings.training_reset` sub-privilege; module 13 settings updated to document both reset routes.
 Must be revalidated after any major route, permission, schema, or workflow change.
 
 ---
@@ -169,10 +169,11 @@ The ERP is a Next.js App Router monolith. All API routes live under `src/app/api
 | | |
 |---|---|
 | **Page** | `src/app/dashboard/settings/page.tsx` |
-| **API routes** | `POST /api/admin/reset` |
-| **Guard** | `requireSub("settings", "reset")` + rate limiting + confirmation phrase + admin PIN re-verify |
-| **Sub-privileges** | `reset` |
-| **Known gaps** | None. Reset performs full operational data reset as of 2026-05-28. Deletes (in FK-safe order): CuppingScore, CuppingSessionBatch, CuppingSession, InventoryMovement, FinishedGoodsLot, ProductionOrder, PurchaseRecord, QcRecord, Delivery, BlendIngredient, RoastingBatch, OrderItem, Order, Customer, GreenBean. Preserves: Employee, Supplier, CoffeeProduct, ProductSKU, SystemConfig, LoginAttempt, RateLimit. |
+| **API routes** | `POST /api/admin/reset`, `POST /api/admin/training-reset` |
+| **Guard (reset)** | `requireSub("settings", "reset")` + rate limiting + confirmation phrase (`RESET HIQBAH`) + admin PIN re-verify |
+| **Guard (training-reset)** | `requireSub("settings", "training_reset")` + rate limiting + confirmation phrase (`CLEAR DEMO DATA`) + admin PIN re-verify |
+| **Sub-privileges** | `reset`, `training_reset` |
+| **Known gaps** | None. **Admin Reset** (`POST /api/admin/reset`): full operational data reset. Deletes (in FK-safe order): CuppingScore, CuppingSessionBatch, CuppingSession, InventoryMovement, FinishedGoodsLot, ProductionOrder, PurchaseRecord, QcRecord, Delivery, BlendIngredient, RoastingBatch, OrderItem, Order, Customer, GreenBean. Preserves: Employee, Supplier, CoffeeProduct, ProductSKU, SystemConfig, LoginAttempt, RateLimit. **Training Reset** (`POST /api/admin/training-reset`): extends Admin Reset scope by also deleting ProductSKU, CoffeeProduct, and Supplier (FK-safe order: ProductSKU before CoffeeProduct; PurchaseRecord already deleted in step 7 so Supplier is safe). For demo/training phase cleanup only — must not be used after real production data is entered. Preserves: Employee, SystemConfig, LoginAttempt, RateLimit. |
 
 ---
 
@@ -249,6 +250,7 @@ The ERP is a Next.js App Router monolith. All API routes live under `src/app/api
 | employees | create | Yes |
 | employees | edit | Yes |
 | settings | reset | Yes |
+| settings | training_reset | Yes |
 | customers | manage | Yes |
 
 ---
@@ -314,6 +316,6 @@ history
 labels
   └─→ production, packaging (label templates reference batch / lot data)
 
-settings (reset)
-  └─→ all data models (destructive — deletes most operational data)
+settings (reset / training-reset)
+  └─→ all data models (destructive — Admin Reset deletes operational data; Training Reset also deletes catalog)
 ```

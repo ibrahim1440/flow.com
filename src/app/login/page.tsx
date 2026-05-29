@@ -121,7 +121,7 @@ export default function LoginPage() {
       />
 
       <div className="w-full max-w-sm relative z-10">
-        <div className="bg-white rounded-2xl shadow-2xl shadow-black/30 p-7">
+        <div className="bg-white rounded-2xl shadow-2xl shadow-charcoal/20 p-7">
 
           {/* Logo */}
           <div className="text-center mb-7">
@@ -151,7 +151,7 @@ export default function LoginPage() {
                 <label className="block text-xs font-bold text-brown uppercase tracking-wider mb-1.5 text-center">
                   Enter Your PIN
                 </label>
-                <div className="flex items-center justify-center gap-4 px-4 py-5 bg-cream rounded-xl border-2 border-border min-h-[68px]">
+                <div className="flex items-center justify-center gap-4 px-4 py-5 bg-cream rounded-xl border-2 border-border min-h-[68px] shadow-inner">
                   {pin.length === 0 ? (
                     <span className="text-brown/35 text-sm select-none">Tap the keypad below</span>
                   ) : (
@@ -175,7 +175,7 @@ export default function LoginPage() {
               )}
 
               {/* Numpad */}
-              <div dir="ltr" className="grid grid-cols-3 gap-2.5 mb-5">
+              <div dir="ltr" className="grid grid-cols-3 gap-2.5 mb-5 place-items-center">
                 {numpadRows.flat().map((key) => {
                   if (key === "backspace") {
                     return (
@@ -184,7 +184,7 @@ export default function LoginPage() {
                         type="button"
                         onClick={() => pressKey("backspace")}
                         disabled={pin.length === 0 || loading}
-                        className="flex items-center justify-center py-4 rounded-xl border-2 border-border bg-white text-charcoal disabled:opacity-25 active:scale-95 active:bg-cream transition-all duration-100 select-none"
+                        className="w-16 h-16 rounded-full bg-transparent text-charcoal hover:bg-cream/60 disabled:opacity-25 active:scale-90 transition-all duration-100 select-none flex items-center justify-center"
                       >
                         <Delete size={20} strokeWidth={2} />
                       </button>
@@ -197,7 +197,7 @@ export default function LoginPage() {
                         type="button"
                         onClick={() => submitPin(pin)}
                         disabled={pin.length < 4 || loading}
-                        className="flex items-center justify-center py-4 rounded-xl bg-orange text-white disabled:opacity-30 active:scale-95 transition-all duration-100 shadow-lg shadow-orange/30 select-none"
+                        className="w-16 h-16 rounded-full bg-orange hover:bg-orange-dark text-white disabled:opacity-30 active:scale-90 transition-all duration-100 shadow-lg shadow-orange/25 select-none flex items-center justify-center"
                       >
                         {loading
                           ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
@@ -212,7 +212,7 @@ export default function LoginPage() {
                       type="button"
                       onClick={() => pressKey(key)}
                       disabled={loading}
-                      className="py-4 rounded-xl border-2 border-border bg-white text-charcoal text-xl font-bold active:scale-95 active:bg-cream transition-all duration-100 select-none disabled:opacity-40"
+                      className="w-16 h-16 rounded-full border-2 border-border bg-white text-charcoal text-xl font-bold flex items-center justify-center active:scale-90 active:bg-cream transition-all duration-100 select-none disabled:opacity-40"
                     >
                       {key}
                     </button>
@@ -285,7 +285,7 @@ export default function LoginPage() {
           )}
 
           {/* Mode toggle */}
-          <div className="text-center pt-1">
+          <div className="text-center pt-4 mt-2 border-t border-border">
             {mode === "pin" ? (
               <button
                 type="button"

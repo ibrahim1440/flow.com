@@ -102,6 +102,16 @@ Verify via the application UI or Prisma Studio. No code or schema changes requir
 - [ ] Company logo uploaded or confirmed as default (ح glyph)
 - [ ] `SystemConfig` singleton record confirmed to exist (auto-created on first logo request)
 
+**Demo / Training Data Cleanup (complete this block only if a demo or training session was run before entering real production data)**
+
+> Skip this block if no demo or training session was conducted on the production database.
+> If training was run, all demo records should have used the `DEMO` prefix in their names (e.g., DEMO Supplier, DEMO Product, DEMO Customer). This naming policy must have been enforced by SOP during the training phase — the system does not enforce it automatically.
+
+- [ ] All demo/training records were created with the `DEMO` prefix — or Training Reset has been run to wipe them before real production data is entered.
+- [ ] If using Training Reset to clean up: **Training Reset (`POST /api/admin/training-reset`) is irreversible.** It deletes all operational data AND all catalog data (Supplier, CoffeeProduct, ProductSKU). A current backup must exist before it is triggered. Training Reset must not be run after real production data has been entered.
+- [ ] After Training Reset (if run): verify the database contains only Employee accounts and SystemConfig. No suppliers, green beans, products, orders, or batches should remain.
+- [ ] Real production catalog (Suppliers, Green Beans, CoffeeProducts, ProductSKUs) is ready to be entered fresh per Section 3 above.
+
 ---
 
 ## 4. Backup and Rollback
@@ -215,6 +225,26 @@ Do not mark any item complete unless the test was actually performed.
 
 ---
 
+**⚠ Training Reset — SPECIAL HANDLING REQUIRED**
+
+- [ ] **Training reset smoke test**
+
+  > **This item applies only during the demo/training phase — before any real production data is entered.**
+  >
+  > Training Reset is **irreversible** and deletes ALL data including catalog data (Supplier, CoffeeProduct, ProductSKU) in addition to all operational data. It is more destructive than Admin Reset — Admin Reset preserves catalog; Training Reset does not.
+  >
+  > This test must NOT be run on launch-day production data or after any real production data has been entered.
+  >
+  > Before checking this item, the following must all be true:
+  > - You are in the demo/training phase — no real production data has been entered
+  > - A current backup exists (or you accept that all data will be wiped to a clean slate)
+  > - The decision owner has explicitly approved running this test
+  >
+  > What to verify if this test is run during demo/training:
+  > Confirmation phrase (`CLEAR DEMO DATA`) + admin PIN accepted → all operational and catalog data deleted → Employee accounts and SystemConfig preserved → redirect to `/dashboard`
+
+---
+
 ## 6. Role-Based User Acceptance Testing
 
 One block per role. Each assigned tester completes their own section.
@@ -225,6 +255,7 @@ The tester confirms they can perform expected actions and cannot perform restric
 - [ ] Can access all modules including `/dashboard/settings` and `/dashboard/employees`
 - [ ] Can create, edit, and deactivate employees
 - [ ] Can trigger admin reset *(confirm only — do NOT trigger on live production data)*
+- [ ] Can trigger training reset *(demo/training phase only — not after real production data has been entered)*
 - [ ] Tester name: _______________________ | Date completed: _______________________
 
 **Inventory role**

@@ -101,6 +101,18 @@ export const translations = {
   resetError:         { en: "Reset failed",             ar: "فشلت إعادة الضبط" },
   wrongPhrase:        { en: "Confirmation phrase is incorrect", ar: "عبارة التأكيد غير صحيحة" },
 
+  // ── Training Data Reset ──────────────────────────────────────────────────
+  trainingResetTitle:       { en: "Training Data Reset",            ar: "إعادة تعيين بيانات التدريب" },
+  trainingResetSectionDesc: { en: "For use ONLY during the demo/training phase — before real production data is entered. Deletes all demo/training data including suppliers, products, and SKUs. Employees and system settings are preserved. Do not use after real launch without explicit approval.", ar: "للاستخدام أثناء مرحلة التدريب التجريبي فقط — قبل إدخال بيانات الإنتاج الحقيقية. يحذف جميع البيانات التجريبية بما فيها الموردون والمنتجات ووحدات الحفظ (SKU). يُبقي على الموظفين وإعدادات النظام. لا تستخدمه بعد إطلاق النظام الحقيقي إلا بموافقة صريحة." },
+  trainingResetBtn:         { en: "Clear All Demo / Training Data", ar: "مسح جميع بيانات التدريب" },
+  trainingResetConfirmTitle: { en: "Confirm Training Data Reset",   ar: "تأكيد إعادة تعيين بيانات التدريب" },
+  trainingResetConfirmDesc: { en: "This action is IRREVERSIBLE. All demo/training data will be permanently deleted — orders, customers, batches, QC records, deliveries, inventory movements, AND suppliers, products, and SKUs. Employees and system settings are preserved. Only run this before real production data has been entered.", ar: "هذا الإجراء لا يمكن التراجع عنه. سيُحذف نهائياً جميع بيانات التدريب — الطلبات، العملاء، الدفعات، سجلات الجودة، التسليمات، حركات المخزون، والموردون والمنتجات ووحدات الحفظ. يُبقي على الموظفين وإعدادات النظام. نفِّذ هذا قبل إدخال بيانات الإنتاج الحقيقية فقط." },
+  trainingPhraseToConfirm:  { en: "Type CLEAR DEMO DATA to confirm", ar: "اكتب CLEAR DEMO DATA للتأكيد" },
+  trainingConfirmPhrase:    { en: "CLEAR DEMO DATA",                ar: "CLEAR DEMO DATA" },
+  trainingBackupCheck:      { en: "I confirm a current backup / snapshot exists.",  ar: "أؤكد وجود نسخة احتياطية / لقطة حديثة من قاعدة البيانات." },
+  trainingResetSuccess:     { en: "Training data reset complete. All demo data has been wiped.", ar: "اكتملت إعادة التعيين. تم مسح جميع بيانات التدريب." },
+  trainingResetError:       { en: "Training reset failed",          ar: "فشلت إعادة تعيين بيانات التدريب" },
+
   // ── Shared / Common ──────────────────────────────────────────────────────
   view:               { en: "View",                   ar: "عرض" },
   name:               { en: "Name",                   ar: "الاسم" },

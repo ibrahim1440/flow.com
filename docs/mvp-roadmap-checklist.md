@@ -22,7 +22,7 @@ This document tracks the path from current state to internal MVP launch for the 
 
 | | |
 |---|---|
-| **Date last updated** | 2026-05-28 |
+| **Date last updated** | 2026-05-29 |
 | **Phase 0 (Foundation)** | Complete |
 | **Phase 1 (Pre-MVP)** | In progress — Google Drive triage remains |
 | **Migration baseline** | Established 2026-05-22; three migrations tracked |
@@ -85,6 +85,8 @@ The MVP is the system as it currently stands, with the Phase 1 pre-MVP items bel
 - [x] **Policy decision: Admin reset + ledger orphans** — Decided and implemented 2026-05-28.
 
   > **Decision:** Admin reset performs full operational data reset. It deletes all transactional and operational records including inventory movements, purchase records, finished goods lots, production orders, cupping sessions and scores, orders, deliveries, batches, customers, and green beans. It preserves employees, suppliers, product catalog (CoffeeProduct, ProductSKU), system settings (SystemConfig), and security/rate-limit metadata (LoginAttempt, RateLimit). CoffeeProduct was removed from the deletion list — it is catalog/master data, not operational data. Enforced 2026-05-28 — `POST /api/admin/reset` now performs the full operational reset. Frontend warning text updated to accurately describe the full scope.
+  >
+  > **Training Reset** (`POST /api/admin/training-reset`) added 2026-05-29 — extends Admin Reset scope by also deleting catalog data (ProductSKU, CoffeeProduct, Supplier) for demo/training phase cleanup. Requires `settings.training_reset` sub-privilege (admin only by default). For use before real production data is entered only. Must not be used after real production data is entered.
 
 ### Optional items (complete before MVP if time allows)
 
@@ -131,6 +133,7 @@ The MVP is the system as it currently stands, with the Phase 1 pre-MVP items bel
 | Blend InventoryMovement | P4 | Blend transformation (`isBlend: true`) creates no InventoryMovement entry | Deferred to Phase 2 |
 | approvalStatus | Info | `approvalStatus` / `paymentStatus` have no write path; all orders retain default values | Deferred to Phase 2 |
 | Admin reset | Info | Admin reset is full operational data reset — all transactional records deleted; Employee, Supplier, CoffeeProduct, ProductSKU, SystemConfig, LoginAttempt, RateLimit preserved | **Closed 2026-05-28** |
+| Training reset | Info | Training Reset (`POST /api/admin/training-reset`) extends Admin Reset scope — also deletes catalog data (ProductSKU, CoffeeProduct, Supplier). Admin-only (`settings.training_reset` sub-privilege). For demo/training phase cleanup before real production data is entered only. | **Added 2026-05-29** |
 | QC rejection flow | Info | No enforced downstream policy when QC finalizes with a reject decision — batch is not automatically quarantined or flagged | Deferred to Phase 2 |
 | R09+ | Deferred | Remaining identified risks (R09–R24) — not yet reviewed or approved | Deferred to Phase 2 |
 
