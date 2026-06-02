@@ -10,6 +10,10 @@ const SELECT_FULL = {
   defaultRoute: true, active: true, createdAt: true,
 } as const;
 
+const SELECT_ROSTER = {
+  id: true, name: true, role: true, active: true,
+} as const;
+
 const ALLOWED_DEFAULT_ROUTES = new Set([
   "/dashboard",
   "/dashboard/inventory",
@@ -45,12 +49,13 @@ async function isPinTaken(plainPin: string, excludeId?: string): Promise<boolean
 }
 
 export async function GET() {
-  const { error } = await requireAuth();
+  const { user, error } = await requireAuth();
   if (error) return error;
 
+  const isAdmin = user.role === "admin";
   const employees = await prisma.employee.findMany({
     orderBy: { createdAt: "desc" },
-    select: SELECT_FULL,
+    select: isAdmin ? SELECT_FULL : SELECT_ROSTER,
   });
   return NextResponse.json(employees);
 }
