@@ -2,30 +2,30 @@
 
 :root {
   /* Primary Palette */
-  --slate: #738995;
-  --slate-light: #8fa3ae;
-  --slate-dark: #5a6f7a;
-  --orange: #E25D2F;
-  --orange-light: #f0816060;
-  --orange-dark: #c44a20;
-  --cream: #F8E8DC;
-  --cream-dark: #f0d9c8;
+  --slate: #6B7280;
+  --slate-light: #9CA3AF;
+  --slate-dark: #4B5563;
+  --orange: #7C3AED;
+  --orange-light: #F3E8FF;
+  --orange-dark: #6D28D9;
+  --cream: #F9FAFB;
+  --cream-dark: #F3F4F6;
 
   /* Secondary Palette */
-  --charcoal: #282120;
-  --brown: #9F5F46;
-  --brown-light: #b87a60;
+  --charcoal: #1F2937;
+  --brown: #6B7280;
+  --brown-light: #9CA3AF;
   --white: #FFFFFF;
 
   /* Semantic */
-  --background: #F8E8DC;
-  --foreground: #282120;
+  --background: #F9FAFB;
+  --foreground: #1F2937;
   --card: #FFFFFF;
-  --card-hover: #FDFAF8;
-  --border: #e8d5c4;
-  --border-light: #f0e0d2;
-  --muted: #f5ede5;
-  --muted-foreground: #7a6b60;
+  --card-hover: #F9FAFB;
+  --border: #E5E7EB;
+  --border-light: #F3F4F6;
+  --muted: #F3F4F6;
+  --muted-foreground: #6B7280;
 
   /* Status */
   --success: #22c55e;
@@ -34,13 +34,13 @@
   --warning-bg: #fef3c7;
   --danger: #ef4444;
   --danger-bg: #fecaca;
-  --info: #738995;
-  --info-bg: #e8eef1;
+  --info: #64748B;
+  --info-bg: #F1F5F9;
 
   /* Sidebar */
-  --sidebar: #282120;
-  --sidebar-hover: #3a3230;
-  --sidebar-active: #E25D2F;
+  --sidebar: #1F2937;
+  --sidebar-hover: #374151;
+  --sidebar-active: #7C3AED;
   --sidebar-text: rgba(255, 255, 255, 0.7);
   --sidebar-text-active: #FFFFFF;
 }
@@ -103,7 +103,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .status-completed { background: var(--success-bg); color: #166534; }
 .status-pending { background: var(--warning-bg); color: #92400e; }
-.status-in-production { background: var(--info-bg); color: #415a66; }
+.status-in-production { background: var(--info-bg); color: #475569; }
 .status-delivered { background: var(--success-bg); color: #166534; }
 .status-partial { background: var(--warning-bg); color: #92400e; }
 .status-not-yet { background: var(--muted); color: var(--muted-foreground); }

@@ -273,7 +273,7 @@ export default function EmployeesPage() {
               </div>
               <div className="text-xs text-brown/50 font-medium space-y-0.5">
                 <p className="flex items-center gap-1.5">
-                  <Navigation size={11} className="text-[#738995]" />
+                  <Navigation size={11} className="text-[#6B7280]" />
                   {t("defaultPage")}: <span className="text-charcoal font-bold">{routeLabel(emp.defaultRoute || "/dashboard")}</span>
                 </p>
                 <p>{formatDate(emp.createdAt)}</p>
@@ -355,7 +355,7 @@ export default function EmployeesPage() {
               {/* Default Landing Page */}
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1.5 flex items-center gap-1.5">
-                  <Navigation size={14} className="text-[#738995]" /> {t("defaultPage")}
+                  <Navigation size={14} className="text-[#6B7280]" /> {t("defaultPage")}
                 </label>
                 <select
                   value={form.defaultRoute}

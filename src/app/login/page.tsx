@@ -136,7 +136,7 @@ export default function LoginPage() {
                     className="text-[72px] leading-none"
                     style={{ fontFamily: "'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif", color: "#8B9DB5" }}
                   >ح</span>
-                  <span className="block w-10 h-[5px] rounded-full mt-3" style={{ backgroundColor: "#E25D2F", transform: "rotate(-8deg)" }} />
+                  <span className="block w-10 h-[5px] rounded-full mt-3" style={{ backgroundColor: "#7C3AED", transform: "rotate(-8deg)" }} />
                 </>
               )}
             </div>

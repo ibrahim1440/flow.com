@@ -160,9 +160,9 @@ function AggregateResults({ scores }: { scores: Score[] }) {
         <ResponsiveContainer width="100%" height={280}>
           <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
             <PolarGrid stroke="#e5e7eb" />
-            <PolarAngleAxis dataKey="attribute" tick={{ fontSize: 11, fill: "#6b4c2a", fontWeight: 600 }} />
+            <PolarAngleAxis dataKey="attribute" tick={{ fontSize: 11, fill: "#6B7280", fontWeight: 600 }} />
             <PolarRadiusAxis angle={90} domain={[6, 10]} tickCount={5} tick={{ fontSize: 9, fill: "#9ca3af" }} />
-            <Radar name="Average" dataKey="average" stroke="#E25D2F" fill="#E25D2F" fillOpacity={0.25} strokeWidth={2} />
+            <Radar name="Average" dataKey="average" stroke="#7C3AED" fill="#7C3AED" fillOpacity={0.25} strokeWidth={2} />
             <Tooltip
               formatter={(v) => [typeof v === "number" ? v.toFixed(2) : v, "Avg Score"]}
               contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }}

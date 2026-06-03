@@ -8,10 +8,10 @@ import { AmiriBold, AmiriRegular } from "./fonts/amiri-base64";
 const bidi = bidiFactory();
 
 const BRAND = {
-  primary: "#738995",
-  accent: "#E25D2F",
-  primaryRGB: [115, 137, 149] as [number, number, number],
-  accentRGB: [226, 93, 47] as [number, number, number],
+  primary: "#6B7280",
+  accent: "#7C3AED",
+  primaryRGB: [107, 114, 128] as [number, number, number],
+  accentRGB: [124, 58, 237] as [number, number, number],
   white: [255, 255, 255] as [number, number, number],
   lightGray: [245, 245, 245] as [number, number, number],
   darkText: [30, 30, 30] as [number, number, number],

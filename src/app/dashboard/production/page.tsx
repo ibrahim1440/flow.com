@@ -464,11 +464,11 @@ export default function ProductionPage() {
           {batches.length > 0 && (
             <div className="flex gap-2 justify-end">
               <button onClick={() => exportBatchesPDF(toExportRows(batches))}
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#738995] text-white rounded-xl text-xs font-bold hover:bg-[#5f7580] shadow-sm active:scale-[0.98] transition-all">
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#6B7280] text-white rounded-xl text-xs font-bold hover:bg-[#4B5563] shadow-sm active:scale-[0.98] transition-all">
                 <FileText size={14} /> PDF
               </button>
               <button onClick={() => exportBatchesExcel(toExportRows(batches))}
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#E25D2F] text-white rounded-xl text-xs font-bold hover:bg-[#c94e24] shadow-sm active:scale-[0.98] transition-all">
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#7C3AED] text-white rounded-xl text-xs font-bold hover:bg-[#6D28D9] shadow-sm active:scale-[0.98] transition-all">
                 <FileSpreadsheet size={14} /> Excel
               </button>
             </div>

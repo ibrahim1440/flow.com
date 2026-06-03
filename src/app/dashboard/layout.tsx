@@ -70,7 +70,7 @@ function SidebarNav({
             ) : (
               <>
                 <span className="text-[22px] text-white/90 leading-none" style={{ fontFamily: "'Scheherazade New', 'Amiri', serif" }}>ح</span>
-                <span className="block w-4 h-[3px] rounded-full mt-0.5" style={{ backgroundColor: "#E25D2F" }} />
+                <span className="block w-4 h-[3px] rounded-full mt-0.5" style={{ backgroundColor: "#7C3AED" }} />
               </>
             )}
           </div>

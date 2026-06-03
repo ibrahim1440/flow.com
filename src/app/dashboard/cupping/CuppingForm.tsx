@@ -75,7 +75,7 @@ function ScoreSlider({
       <div className="relative h-2 rounded-full bg-gray-100" dir="ltr">
         <div
           className="absolute inset-y-0 left-0 rounded-full transition-all duration-75"
-          style={{ width: `${pct}%`, backgroundColor: "#E25D2F" }}
+          style={{ width: `${pct}%`, backgroundColor: "#7C3AED" }}
         />
         <input
           type="range" min={6} max={10} step={0.25}
@@ -86,7 +86,7 @@ function ScoreSlider({
         {/* Thumb */}
         <div
           className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white border-2 shadow-md pointer-events-none transition-all duration-75"
-          style={{ left: `calc(${pct}% - 8px)`, borderColor: "#E25D2F" }}
+          style={{ left: `calc(${pct}% - 8px)`, borderColor: "#7C3AED" }}
         />
       </div>
       <div className="flex justify-between text-[10px] text-brown/40 font-medium select-none" dir="ltr">

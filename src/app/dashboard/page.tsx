@@ -49,11 +49,11 @@ type AnalyticsData = {
 
 // ─── Brand colors (for Recharts — must use hex) ───────────────────────────────
 
-const C_ORANGE   = "#E25D2F";
-const C_BROWN    = "#9F5F46";
+const C_ORANGE   = "#7C3AED";
+const C_BROWN    = "#6B7280";
 const C_GREEN    = "#22c55e";
 const C_RED      = "#ef4444";
-const C_CREAM    = "#F8E8DC";
+const C_CREAM    = "#EDE9FE";
 
 // ─── Custom bar tooltip ───────────────────────────────────────────────────────
 
