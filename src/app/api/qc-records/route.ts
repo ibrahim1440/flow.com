@@ -33,6 +33,12 @@ export async function POST(request: Request) {
   if (body.decision !== "Accept" && body.decision !== "Reject") {
     return NextResponse.json({ error: "decision must be 'Accept' or 'Reject'" }, { status: 400 });
   }
+  if (body.decision === "Reject" && !body.remarks?.trim()) {
+    return NextResponse.json(
+      { error: "Rejection reason is required when decision is Reject." },
+      { status: 400 }
+    );
+  }
 
   const batch = await prisma.roastingBatch.findUnique({ where: { id: body.batchId } });
   if (!batch) return NextResponse.json({ error: "Batch not found." }, { status: 404 });

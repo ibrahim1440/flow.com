@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useUser } from "@/app/dashboard/user-context";
+import { canEdit } from "@/lib/auth-shared";
 
 type SessionBatch = {
   id: string;
@@ -522,6 +523,7 @@ export default function CuppingPage() {
   const [tab, setTab] = useState<"active" | "history">("active");
 
   const isAdmin = user?.role === "admin";
+  const canCreateSession = canEdit(user?.permissions ?? {}, "cupping");
 
   const fetchSessions = useCallback(async () => {
     setLoading(true);
@@ -563,7 +565,7 @@ export default function CuppingPage() {
           </h1>
           <p className="text-brown text-sm mt-1">Specialty Coffee Association — Collaborative Sensory Evaluation</p>
         </div>
-        {isAdmin && (
+        {canCreateSession && (
           <button
             onClick={() => setShowModal(true)}
             className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors shadow-sm"

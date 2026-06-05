@@ -13,6 +13,13 @@ export async function POST(request: Request, { params }: Params) {
   const { decision, color, colorWhole, colorGround, remarks, underDeveloped, overDeveloped, coffeeOrigin, processing, serialNumber } =
     await request.json();
 
+  if (decision === "Reject" && !remarks?.trim()) {
+    return NextResponse.json(
+      { error: "Rejection reason is required when decision is Reject." },
+      { status: 400 }
+    );
+  }
+
   const batch = await prisma.roastingBatch.findUnique({ where: { id: batchId } });
   if (!batch) return NextResponse.json({ error: "Batch not found" }, { status: 404 });
   if (batch.status !== "Pending QC") {

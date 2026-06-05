@@ -251,6 +251,10 @@ export default function QCPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.decision) { toast.error(t("verdict")); return; }
+    if (form.decision === "Reject" && !form.remarks?.trim()) {
+      toast.error("Rejection reason is required.");
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch(`/api/qc/${form.batchId}/records`, {
