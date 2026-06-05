@@ -33,9 +33,13 @@ export async function POST(request: Request) {
   if (body.decision !== "Accept" && body.decision !== "Reject") {
     return NextResponse.json({ error: "decision must be 'Accept' or 'Reject'" }, { status: 400 });
   }
-  if (body.decision === "Reject" && !body.remarks?.trim()) {
+  const hasRejectReason =
+    Boolean(body.underDeveloped) ||
+    Boolean(body.overDeveloped) ||
+    Boolean(body.remarks?.trim());
+  if (body.decision === "Reject" && !hasRejectReason) {
     return NextResponse.json(
-      { error: "Rejection reason is required when decision is Reject." },
+      { error: "Please select a rejection reason or write a remark." },
       { status: 400 }
     );
   }

@@ -13,9 +13,13 @@ export async function POST(request: Request, { params }: Params) {
   const { decision, color, colorWhole, colorGround, remarks, underDeveloped, overDeveloped, coffeeOrigin, processing, serialNumber } =
     await request.json();
 
-  if (decision === "Reject" && !remarks?.trim()) {
+  const hasRejectReason =
+    Boolean(underDeveloped) ||
+    Boolean(overDeveloped) ||
+    Boolean(remarks?.trim());
+  if (decision === "Reject" && !hasRejectReason) {
     return NextResponse.json(
-      { error: "Rejection reason is required when decision is Reject." },
+      { error: "Please select a rejection reason or write a remark." },
       { status: 400 }
     );
   }

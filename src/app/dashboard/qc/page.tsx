@@ -251,8 +251,12 @@ export default function QCPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.decision) { toast.error(t("verdict")); return; }
-    if (form.decision === "Reject" && !form.remarks?.trim()) {
-      toast.error("Rejection reason is required.");
+    const hasRejectReason =
+      form.underDeveloped ||
+      form.overDeveloped ||
+      Boolean(form.remarks?.trim());
+    if (form.decision === "Reject" && !hasRejectReason) {
+      toast.error("Please select a rejection reason or write a remark.");
       return;
     }
     setSubmitting(true);
