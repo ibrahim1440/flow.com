@@ -81,6 +81,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "roastedBeanQuantity + wasteQuantity cannot exceed greenBeanQuantity." }, { status: 400 });
   }
 
+  // ── Surplus gate ─────────────────────────────────────────────────────────
+  // Backend enforcement: non-admin users cannot create batches that exceed the
+  // order item's required quantity. UI warning alone is bypassable via direct API.
+  const surplusOrderItem = await prisma.orderItem.findUnique({
+    where: { id: orderItemId },
+    select: { quantityKg: true },
+  });
+  if (!surplusOrderItem) {
+    return NextResponse.json({ error: "Order item not found." }, { status: 404 });
+  }
+
+  const existingAgg = await prisma.roastingBatch.aggregate({
+    where: {
+      orderItemId,
+      isBlend: false,
+      status: { not: "Rejected" },
+    },
+    _sum: { greenBeanQuantity: true },
+  });
+
+  const alreadyKg = existingAgg._sum.greenBeanQuantity ?? 0;
+  const excess = +(alreadyKg + qty - surplusOrderItem.quantityKg).toFixed(3);
+
+  if (excess > 0 && user.role !== "admin") {
+    return NextResponse.json(
+      {
+        error: `Batch would exceed the order quantity by ${excess}kg. Only an admin can authorize surplus production.`,
+      },
+      { status: 422 }
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const batchNumber = await generateBatchNumber(greenBeanId);
 
   try {
