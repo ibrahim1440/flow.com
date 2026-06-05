@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule } from "@/lib/auth-server";
+import { requireAnyModule } from "@/lib/auth-server";
 
 export async function GET() {
-  const { error } = await requireModule("inventory");
+  const { error } = await requireAnyModule("dispatch", "inventory");
   if (error) return error;
 
   const lots = await prisma.finishedGoodsLot.findMany({
@@ -11,6 +11,7 @@ export async function GET() {
     take: 200,
     include: {
       product: { select: { productNameEn: true, productNameAr: true } },
+      roastingBatch: { select: { orderItemId: true } },
     },
   });
 

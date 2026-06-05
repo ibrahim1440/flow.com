@@ -36,6 +36,7 @@ type FGLot = {
   productId: string;
   product: { productNameEn: string; productNameAr: string | null };
   status: string;
+  roastingBatch: { orderItemId: string } | null;
 };
 
 type DeliveryRow = {
@@ -192,13 +193,16 @@ export default function DispatchPage() {
   const lotExceedsQty = selectedLot !== null && form.quantityKg > selectedLot.availableQty;
   const canSubmit = !!lotId && !lotExceedsQty && !submitting;
 
-  // Split lots: matching product first, others below (using optgroup)
-  const matchingLots = selectedItem?.productId
-    ? lots.filter((l) => l.productId === selectedItem.productId)
+  // Split lots by priority:
+  // Tier 1/2: lots matching orderItem.productId (SKU-ready path, unchanged)
+  // Tier 3:   lots whose roastingBatch links back to this orderItem (bulk/custom path)
+  // Other:    remaining unrelated lots
+  const matchingLots = selectedItem
+    ? selectedItem.productId
+      ? lots.filter((l) => l.productId === selectedItem.productId)
+      : lots.filter((l) => l.roastingBatch?.orderItemId === selectedItem.id)
     : [];
-  const otherLots = selectedItem?.productId
-    ? lots.filter((l) => l.productId !== selectedItem.productId)
-    : lots;
+  const otherLots = lots.filter((l) => !matchingLots.includes(l));
 
   function lotLabel(lot: FGLot) {
     const productLabel = lang === "ar" ? (lot.product.productNameAr ?? lot.product.productNameEn) : lot.product.productNameEn;
