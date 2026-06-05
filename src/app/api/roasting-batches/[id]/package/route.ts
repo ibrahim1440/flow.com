@@ -31,14 +31,31 @@ export async function PUT(
     return NextResponse.json({ error: "Batch not found" }, { status: 404 });
   }
 
-  const effectiveProductId    = batch.productId ?? batch.orderItem?.productId    ?? null;
-  const effectiveProductSkuId = batch.orderItem?.productSkuId ?? null;
+  // Read body before effectiveProductId resolution so body.productId can serve as fallback
+  // for bulk/custom orders where neither the batch nor the order item carries a product.
+  let body: Record<string, unknown>;
+  try { body = (await request.json()) as Record<string, unknown>; } catch { body = {}; }
+
+  const effectiveProductId =
+    batch.productId ??
+    batch.orderItem?.productId ??
+    (typeof body.productId === "string" && body.productId ? body.productId : null);
+
+  const effectiveProductSkuId =
+    batch.orderItem?.productSkuId ??
+    (typeof body.productSkuId === "string" && body.productSkuId ? body.productSkuId : null);
 
   if (!effectiveProductId) {
     return NextResponse.json(
-      { error: "Cannot package batch: no product is linked to this batch or its order item." },
+      { error: "Cannot package batch: select a product for this order." },
       { status: 400 }
     );
+  }
+
+  // Validate body.productId against DB only when it is the fallback source
+  if (!batch.productId && !batch.orderItem?.productId && body.productId) {
+    const product = await prisma.coffeeProduct.findUnique({ where: { id: effectiveProductId } });
+    if (!product) return NextResponse.json({ error: "Product not found." }, { status: 400 });
   }
 
   if (batch.status !== "Passed" && batch.status !== "Partially Packaged") {
@@ -49,8 +66,6 @@ export async function PUT(
   }
 
   try {
-    const body = await request.json();
-
     const b3   = Number(body.bags3kg      ?? 0);
     const b1   = Number(body.bags1kg      ?? 0);
     const b250 = Number(body.bags250g     ?? 0);

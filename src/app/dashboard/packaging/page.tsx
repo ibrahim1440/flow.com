@@ -11,17 +11,29 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
+  productId: string | null;
   greenBeanQuantity: number; roastedBeanQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
   parentBatchId: string | null;
   parentBatch: { id: string; batchNumber: string } | null;
   greenBean: { beanType: string } | null;
-  orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
+  orderItem: { beanTypeName: string; productId: string | null; productSkuId: string | null; order: { orderNumber: number; customer: { name: string } } };
+};
+
+type ProductSummary = {
+  id: string;
+  productNameEn: string;
+  productNameAr: string | null;
+  productSkus: { id: string; skuCode: string; weightGrams: number }[];
 };
 
 function packagedKg(b: { bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number }) {
   return +(b.bags3kg * 3 + b.bags1kg * 1 + b.bags250g * 0.25 + b.bags150g * 0.15 + b.samplesGrams / 1000).toFixed(3);
+}
+
+function isBulkCustom(batch: Batch): boolean {
+  return !batch.productId && !batch.orderItem.productId;
 }
 
 export default function PackagingPage() {
@@ -30,6 +42,7 @@ export default function PackagingPage() {
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
   const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
+  const lang = user?.preferredLanguage ?? "ar";
 
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,8 +60,11 @@ export default function PackagingPage() {
   const [showForm, setShowForm] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
   const [form, setForm] = useState({ bags3kg: 0, bags1kg: 0, bags250g: 0, bags150g: 0, samplesGrams: 0 });
+  const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [selectedSkuId, setSelectedSkuId] = useState("");
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); loadProducts(); }, []);
 
   async function loadData() {
     const res = await fetch("/api/roasting-batches?statuses=Passed,Partially+Packaged");
@@ -56,9 +72,16 @@ export default function PackagingPage() {
     setLoading(false);
   }
 
+  async function loadProducts() {
+    const res = await fetch("/api/coffee-products/summary");
+    if (res.ok) setProducts(await res.json());
+  }
+
   function openPackage(batch: Batch) {
     setSelectedBatch(batch);
     setForm({ bags3kg: 0, bags1kg: 0, bags250g: 0, bags150g: 0, samplesGrams: 0 });
+    setSelectedProductId("");
+    setSelectedSkuId("");
     setError(""); setSuccess("");
     setShowForm(true);
   }
@@ -81,10 +104,15 @@ export default function PackagingPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    const requestBody: Record<string, unknown> = { ...form };
+    if (isBulkCustom(selectedBatch!)) {
+      requestBody.productId = selectedProductId;
+      if (selectedSkuId) requestBody.productSkuId = selectedSkuId;
+    }
     const res = await fetch(`/api/roasting-batches/${selectedBatch!.id}/package`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify(requestBody),
     });
     if (!res.ok) {
       try {
@@ -264,7 +292,8 @@ export default function PackagingPage() {
               const newTotalKg = +(alreadyPacked + addingKg).toFixed(3);
               const exceeded = addingKg > remainingCapacity + 0.1;
               const empty = addingKg === 0;
-              const invalid = exceeded || empty;
+              const needsProduct = isBulkCustom(selectedBatch!);
+              const invalid = exceeded || empty || (needsProduct && !selectedProductId);
               const newPct = selectedBatch.roastedBeanQuantity > 0 ? Math.min((newTotalKg / selectedBatch.roastedBeanQuantity) * 100, 100) : 0;
               return (
                 <>
@@ -287,6 +316,41 @@ export default function PackagingPage() {
                     <p className="text-[11px] text-brown/50 mt-1 text-end">{newTotalKg}kg / {selectedBatch.roastedBeanQuantity}kg</p>
                   </div>
                   <form onSubmit={handleSubmit} className="space-y-3">
+                    {needsProduct && (
+                      <div className="space-y-3 pb-3 border-b border-border">
+                        <div>
+                          <label className="block text-sm font-bold text-charcoal mb-1">
+                            Product <span className="text-red-500">*</span>
+                          </label>
+                          <select value={selectedProductId}
+                            onChange={(e) => { setSelectedProductId(e.target.value); setSelectedSkuId(""); }}
+                            className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                            <option value="">Select product…</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {lang === "ar" && p.productNameAr ? p.productNameAr : p.productNameEn}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {selectedProductId && (products.find((p) => p.id === selectedProductId)?.productSkus.length ?? 0) > 0 && (
+                          <div>
+                            <label className="block text-sm font-bold text-charcoal mb-1">
+                              SKU <span className="text-brown/50 font-normal text-xs">(optional)</span>
+                            </label>
+                            <select value={selectedSkuId} onChange={(e) => setSelectedSkuId(e.target.value)}
+                              className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                              <option value="">No specific SKU</option>
+                              {products.find((p) => p.id === selectedProductId)?.productSkus.map((sku) => (
+                                <option key={sku.id} value={sku.id}>
+                                  {sku.skuCode} ({sku.weightGrams >= 1000 ? `${sku.weightGrams / 1000}kg` : `${sku.weightGrams}g`})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       {([
                         { key: "bags3kg", label: "3kg bags" },
