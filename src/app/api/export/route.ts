@@ -16,7 +16,7 @@ export async function GET(request: Request) {
       data = await prisma.order.findMany({
         include: { customer: true, items: { include: { roastingBatches: true, deliveries: true } } },
         orderBy: { createdAt: "desc" },
-        take: 1000,
+        take: 500,
       });
       break;
     case "production":
@@ -24,25 +24,25 @@ export async function GET(request: Request) {
         where: { isBlend: false },
         include: { orderItem: { include: { order: { include: { customer: true } } } }, greenBean: true },
         orderBy: { date: "desc" },
-        take: 1000,
+        take: 500,
       });
       break;
     case "qc":
       data = await prisma.qcRecord.findMany({
         include: { batch: { include: { orderItem: { include: { order: { include: { customer: true } } } } } } },
         orderBy: { date: "desc" },
-        take: 1000,
+        take: 500,
       });
       break;
     case "deliveries":
       data = await prisma.delivery.findMany({
         include: { orderItem: { include: { order: { include: { customer: true } } } } },
         orderBy: { date: "desc" },
-        take: 1000,
+        take: 500,
       });
       break;
     case "inventory":
-      data = await prisma.greenBean.findMany({ orderBy: { beanType: "asc" } });
+      data = await prisma.greenBean.findMany({ orderBy: { beanType: "asc" }, take: 200 });
       break;
     default:
       return NextResponse.json({ error: "Invalid export type" }, { status: 400 });

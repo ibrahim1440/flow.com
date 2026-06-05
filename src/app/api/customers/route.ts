@@ -9,6 +9,7 @@ export async function GET() {
 
   const customers = await prisma.customer.findMany({
     orderBy: { name: "asc" },
+    take: 200,
     include: {
       _count: { select: { orders: true, roastPreferences: true } },
       roastPreferences: {

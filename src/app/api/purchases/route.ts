@@ -9,6 +9,7 @@ export async function GET() {
 
   const purchases = await prisma.purchaseRecord.findMany({
     orderBy: { purchaseDate: "desc" },
+    take: 200,
     include: { supplier: true },
   });
   return NextResponse.json(purchases);

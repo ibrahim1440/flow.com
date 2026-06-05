@@ -108,6 +108,7 @@ export async function GET(request: Request) {
         qcRecords: { select: { id: true, decision: true } },
       },
       orderBy: { qcDeadline: "asc" },
+      take: 50,
     }),
   ]);
 

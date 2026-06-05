@@ -8,7 +8,12 @@ function createPrismaClient() {
   if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
     const { Pool } = require("pg");
     const { PrismaPg } = require("@prisma/adapter-pg");
-    const pool = new Pool({ connectionString: url });
+    const pool = new Pool({
+      connectionString: url,
+      max: 10,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 5000,
+    });
     const adapter = new PrismaPg(pool);
     return new PrismaClient({ adapter });
   }

@@ -8,6 +8,7 @@ export async function GET() {
 
   const lots = await prisma.finishedGoodsLot.findMany({
     orderBy: { createdAt: "desc" },
+    take: 200,
     include: {
       product: { select: { productNameEn: true, productNameAr: true } },
     },

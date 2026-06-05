@@ -64,6 +64,9 @@ model GreenBean {
   roastPreferences CustomerRoastPreference[]
   coffeeProducts   CoffeeProduct[]
   productionOrders ProductionOrder[]
+
+  @@index([isActive])
+  @@index([isActive, quantityKg])
 }
 
 model Order {
@@ -81,6 +84,9 @@ model Order {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   items             OrderItem[]
+
+  @@index([createdAt])
+  @@index([customerId, createdAt])
 }
 
 model OrderItem {
@@ -104,6 +110,10 @@ model OrderItem {
   roastingBatches  RoastingBatch[]
   deliveries       Delivery[]
   productionOrders ProductionOrder[]
+
+  @@index([productionStatus])
+  @@index([deliveryStatus])
+  @@index([productionStatus, deliveryStatus])
 }
 
 model RoastingBatch {
@@ -156,6 +166,8 @@ model RoastingBatch {
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
+  @@index([status])
+  @@index([status, createdAt])
 }
 
 model BlendIngredient {
@@ -191,6 +203,9 @@ model QcRecord {
   decision       String        @default("Accept") // "Accept" or "Reject"
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  @@index([date])
+  @@index([batchId, date])
 }
 
 model Delivery {
@@ -203,6 +218,8 @@ model Delivery {
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+
+  @@index([date])
 }
 
 model CuppingSession {
@@ -219,6 +236,8 @@ model CuppingSession {
   scores         CuppingScore[]
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
+
+  @@index([status])
 }
 
 model CuppingSessionBatch {
@@ -348,6 +367,9 @@ model PurchaseRecord {
   notes        String?
   userId       String?
   createdAt    DateTime     @default(now())
+
+  @@index([purchaseDate])
+  @@index([supplierId, purchaseDate])
 }
 
 // ─── Inventory Ledger ─────────────────────────────────────────────────────────
@@ -386,6 +408,10 @@ model InventoryMovement {
   userId            String?
   timestamp         DateTime          @default(now())
   notes             String?
+
+  @@index([timestamp])
+  @@index([category, timestamp])
+  @@index([referenceEntityId])
 }
 
 // ─── Finished Goods ───────────────────────────────────────────────────────────
@@ -409,6 +435,9 @@ model FinishedGoodsLot {
   availableQty    Float
   status          LotStatus      @default(AVAILABLE)
   createdAt       DateTime       @default(now())
+
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ─── Product Catalog & Production Planning ────────────────────────────────────

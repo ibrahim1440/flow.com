@@ -14,6 +14,7 @@ export async function GET(request: Request) {
   const beans = await prisma.greenBean.findMany({
     where: all ? undefined : { isActive: true },
     orderBy: { createdAt: "desc" },
+    take: 200,
   });
 
   return NextResponse.json(beans);

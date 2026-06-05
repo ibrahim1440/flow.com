@@ -7,10 +7,14 @@ export async function GET() {
   if (error) return error;
 
   const customers = await prisma.customer.findMany({
+    take: 100,
     include: {
       orders: {
         orderBy: { createdAt: "asc" },
-        include: { items: true },
+        take: 20,
+        include: {
+          items: { select: { quantityKg: true, beanTypeName: true } },
+        },
       },
     },
   });
