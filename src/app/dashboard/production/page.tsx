@@ -685,6 +685,11 @@ export default function ProductionPage() {
                         <input type="number" step="0.01"
                           value={Math.max(0, +(roastForm.greenBeanQuantity - roastForm.roastedBeanQuantity).toFixed(2))}
                           readOnly className="w-full px-3 py-2.5 border-2 border-border rounded-xl bg-cream/50 text-brown outline-none" />
+                        {roastForm.greenBeanQuantity > 0 && roastForm.roastedBeanQuantity > 0 && !roastedExceeds && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Loss rate: {(((roastForm.greenBeanQuantity - roastForm.roastedBeanQuantity) / roastForm.greenBeanQuantity) * 100).toFixed(1)}%
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-bold text-charcoal mb-1">{t("roastProfileLabel")}</label>
