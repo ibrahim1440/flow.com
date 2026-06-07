@@ -97,6 +97,7 @@ export default function ProductionPage() {
 
   // Overproduction confirmation
   const [overproductionExcess, setOverproductionExcess] = useState<number | null>(null);
+  const [surplusError, setSurplusError] = useState<string | null>(null);
 
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
@@ -132,6 +133,7 @@ export default function ProductionPage() {
   async function handleRoastSubmit(e: React.FormEvent, forceSubmit = false) {
     e.preventDefault();
     setError("");
+    setSurplusError(null);
 
     if (roastForm.greenBeanId) {
       const bean = beans.find((b) => b.id === roastForm.greenBeanId);
@@ -169,13 +171,22 @@ export default function ProductionPage() {
     if (!res.ok) {
       try {
         const data = await res.json();
-        setError(data.error || "Failed to create batch");
+        if (forceSubmit) {
+          setSurplusError(data.error || "Failed to create batch");
+        } else {
+          setError(data.error || "Failed to create batch");
+        }
       } catch {
-        setError("Failed to create batch");
+        if (forceSubmit) {
+          setSurplusError("Failed to create batch");
+        } else {
+          setError("Failed to create batch");
+        }
       }
       return;
     }
 
+    setOverproductionExcess(null);
     setSuccess(t("batchCreated"));
     setShowRoastForm(false);
     loadData();
@@ -587,23 +598,35 @@ export default function ProductionPage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-3">
-              <button
-                onClick={(e) => {
-                  setOverproductionExcess(null);
-                  // Re-fire submit bypassing the guard
-                  const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
-                  handleRoastSubmit(fakeEvent, true);
-                }}
-                className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 active:scale-[0.98] transition-all shadow-md">
-                {t("addAsSurplus")}
-              </button>
-              <button
-                onClick={() => setOverproductionExcess(null)}
-                className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                {t("cancel")}
-              </button>
-            </div>
+            {surplusError ? (
+              <div className="space-y-3">
+                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-xl text-sm font-semibold">
+                  {surplusError}
+                </div>
+                <button
+                  onClick={() => { setOverproductionExcess(null); setSurplusError(null); }}
+                  className="w-full py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                  {t("cancel")}
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-3">
+                <button
+                  onClick={async () => {
+                    setSurplusError(null);
+                    const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+                    await handleRoastSubmit(fakeEvent, true);
+                  }}
+                  className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 active:scale-[0.98] transition-all shadow-md">
+                  {t("addAsSurplus")}
+                </button>
+                <button
+                  onClick={() => { setOverproductionExcess(null); setSurplusError(null); }}
+                  className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                  {t("cancel")}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
