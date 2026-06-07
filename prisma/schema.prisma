@@ -163,6 +163,7 @@ model RoastingBatch {
   blendInputs           BlendIngredient[]     @relation("BlendTarget")
   blendOutputs          BlendIngredient[]     @relation("BlendSource")
   finishedGoodsLots     FinishedGoodsLot[]
+  serialHistory         BatchSerialHistory[]
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
@@ -201,8 +202,9 @@ model QcRecord {
   isExternal     Boolean       @default(false)
   testerName     String?
   decision       String        @default("Accept") // "Accept" or "Reject"
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  correctionHistory QcCorrectionHistory[]
 
   @@index([date])
   @@index([batchId, date])
@@ -482,6 +484,55 @@ model ProductionOrder {
   updatedAt           DateTime              @updatedAt
   roastingBatches     RoastingBatch[]
 }
+
+// ─── QC Correction History ────────────────────────────────────────────────────
+
+model QcCorrectionHistory {
+  id               String                    @id @default(cuid())
+  qcRecordId       String
+  qcRecord         QcRecord                  @relation(fields: [qcRecordId], references: [id], onDelete: Cascade)
+  batchId          String
+  correctionReason String
+  changedById      String
+  changedByName    String
+  changedAt        DateTime                  @default(now())
+  fieldChanges     QcCorrectionFieldChange[]
+
+  @@index([qcRecordId])
+  @@index([batchId])
+  @@index([changedAt])
+}
+
+model QcCorrectionFieldChange {
+  id           String              @id @default(cuid())
+  correctionId String
+  correction   QcCorrectionHistory @relation(fields: [correctionId], references: [id], onDelete: Cascade)
+  fieldName    String
+  oldValue     String?
+  newValue     String?
+
+  @@index([correctionId])
+}
+
+// ─── Batch Serial History ─────────────────────────────────────────────────────
+
+model BatchSerialHistory {
+  id             String        @id @default(cuid())
+  batchId        String
+  batch          RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  greenBeanId    String?
+  oldBatchNumber String
+  newBatchNumber String
+  reason         String
+  changedById    String
+  changedByName  String
+  changedAt      DateTime      @default(now())
+
+  @@index([batchId])
+  @@index([oldBatchNumber])
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 model LoginAttempt {
   id             String   @id @default(cuid())

@@ -47,7 +47,13 @@ export async function GET(request: Request) {
     include: {
       orderItem: { include: { order: { include: { customer: { include: { roastPreferences: true } } } } } },
       greenBean: true,
-      qcRecords: { include: { employee: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" as const } },
+      qcRecords: {
+        include: {
+          employee: { select: { id: true, name: true } },
+          _count: { select: { correctionHistory: true } },
+        },
+        orderBy: { createdAt: "asc" as const },
+      },
       childBatches: { select: { id: true, batchNumber: true } },
       parentBatch: { select: { id: true, batchNumber: true } },
       blendInputs: { select: { id: true, sourceBatchId: true, quantityUsed: true, sourceBatch: { select: { batchNumber: true } } } },

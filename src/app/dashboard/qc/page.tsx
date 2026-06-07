@@ -39,6 +39,26 @@ type TesterRecord = {
   overDeveloped: boolean;
   date: string;
   employee: { id: string; name: string } | null;
+  coffeeOrigin: string;
+  processing: string;
+  serialNumber: string;
+  _count?: { correctionHistory: number };
+};
+
+type CorrectionFieldChange = {
+  id: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+};
+
+type CorrectionEvent = {
+  id: string;
+  correctionReason: string;
+  changedById: string;
+  changedByName: string;
+  changedAt: string;
+  fieldChanges: CorrectionFieldChange[];
 };
 
 type Batch = {
@@ -167,13 +187,41 @@ const BLANK_FORM = {
   underDeveloped: false, overDeveloped: false,
   color: "", colorWhole: "", colorGround: "",
   remarks: "",
+  correctionReason: "",
 };
+
+const FIELD_LABELS: Record<string, string> = {
+  decision: "Decision",
+  onProfile: "On Profile",
+  underDeveloped: "Under Developed",
+  overDeveloped: "Over Developed",
+  color: "Color (Agtron)",
+  colorWhole: "Color Whole",
+  colorGround: "Color Ground",
+  remarks: "Remarks",
+  coffeeOrigin: "Coffee Origin",
+  processing: "Processing",
+  serialNumber: "Serial Number",
+};
+
+function formatFieldValue(raw: string | null): string {
+  if (raw === null || raw === "null") return "—";
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "boolean") return parsed ? "Yes" : "No";
+    if (parsed === null) return "—";
+    return String(parsed);
+  } catch {
+    return raw;
+  }
+}
 
 export default function QCPage() {
   const user = useUser();
   const { t } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "qc", "create_record");
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "qc", "manage");
+  const canEditRecord = hasSubPrivilege(user?.permissions ?? {}, "qc", "edit_record");
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
   const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
@@ -191,10 +239,16 @@ export default function QCPage() {
   const [backlogOrder, setBacklogOrder] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Correction history
+  const [expandedCorrectionId, setExpandedCorrectionId] = useState<string | null>(null);
+  const [correctionsCache, setCorrectionsCache] = useState<Record<string, CorrectionEvent[]>>({});
+  const [loadingCorrectionId, setLoadingCorrectionId] = useState<string | null>(null);
+
   // Panel submission form
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(BLANK_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
 
   // Finalize modal (single batch)
   const [finalizeBatch, setFinalizeBatch] = useState<Batch | null>(null);
@@ -237,13 +291,58 @@ export default function QCPage() {
     if (tab === "history" && !historyLoaded) loadHistory();
   }, [tab, historyLoaded, loadHistory]);
 
+  function closeForm() {
+    setShowForm(false);
+    setForm(BLANK_FORM);
+    setEditingRecordId(null);
+  }
+
+  async function toggleCorrectionHistory(recordId: string) {
+    if (expandedCorrectionId === recordId) {
+      setExpandedCorrectionId(null);
+      return;
+    }
+    setExpandedCorrectionId(recordId);
+    if (correctionsCache[recordId]) return;
+    setLoadingCorrectionId(recordId);
+    try {
+      const res = await fetch(`/api/qc-records/${recordId}/corrections`);
+      if (res.ok) {
+        const data = await res.json();
+        setCorrectionsCache((prev) => ({ ...prev, [recordId]: data.corrections }));
+      }
+    } finally {
+      setLoadingCorrectionId(null);
+    }
+  }
+
   function startQcForBatch(batch: Batch) {
+    setEditingRecordId(null);
     setForm({
       ...BLANK_FORM,
       batchId: batch.id,
       coffeeOrigin: batch.greenBean?.beanType || batch.orderItem.beanTypeName,
       processing: batch.greenBean?.process || "",
       serialNumber: batch.batchNumber,
+    });
+    setShowForm(true);
+  }
+
+  function startEditRecord(record: TesterRecord, batch: Batch) {
+    setEditingRecordId(record.id);
+    setForm({
+      batchId: batch.id,
+      coffeeOrigin: record.coffeeOrigin || batch.greenBean?.beanType || batch.orderItem.beanTypeName,
+      processing: record.processing || "",
+      serialNumber: record.serialNumber || batch.batchNumber,
+      decision: (record.decision === "Accept" || record.decision === "Reject") ? record.decision : "",
+      underDeveloped: record.underDeveloped,
+      overDeveloped: record.overDeveloped,
+      color: record.color != null ? String(record.color) : "",
+      colorWhole: record.colorWhole != null ? String(record.colorWhole) : "",
+      colorGround: record.colorGround != null ? String(record.colorGround) : "",
+      remarks: record.remarks ?? "",
+      correctionReason: "",
     });
     setShowForm(true);
   }
@@ -259,29 +358,48 @@ export default function QCPage() {
       toast.error("Please select a rejection reason or write a remark.");
       return;
     }
+    if (editingRecordId && !form.correctionReason.trim()) {
+      toast.error("Correction reason is required.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/qc/${form.batchId}/records`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          decision: form.decision,
-          coffeeOrigin: form.coffeeOrigin,
-          processing: form.processing,
-          serialNumber: form.serialNumber,
-          color: form.color || null,
-          colorWhole:  form.colorWhole  ? form.colorWhole  : null,
-          colorGround: form.colorGround ? form.colorGround : null,
-          remarks: form.remarks || null,
-          underDeveloped: form.underDeveloped,
-          overDeveloped: form.overDeveloped,
-        }),
-      });
+      const basePayload = {
+        decision: form.decision,
+        coffeeOrigin: form.coffeeOrigin,
+        processing: form.processing,
+        serialNumber: form.serialNumber,
+        color: form.color || null,
+        colorWhole:  form.colorWhole  ? form.colorWhole  : null,
+        colorGround: form.colorGround ? form.colorGround : null,
+        remarks: form.remarks || null,
+        underDeveloped: form.underDeveloped,
+        overDeveloped: form.overDeveloped,
+      };
+
+      const res = editingRecordId
+        ? await fetch(`/api/qc-records/${editingRecordId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...basePayload, correctionReason: form.correctionReason.trim() }),
+          })
+        : await fetch(`/api/qc/${form.batchId}/records`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(basePayload),
+          });
+
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || t("error")); return; }
-      toast.success(t("saveRecord"));
-      setShowForm(false);
-      setForm(BLANK_FORM);
+      toast.success(editingRecordId ? "QC record corrected." : t("saveRecord"));
+      if (editingRecordId) {
+        setCorrectionsCache((prev) => {
+          const next = { ...prev };
+          delete next[editingRecordId];
+          return next;
+        });
+      }
+      closeForm();
       loadBacklog();
     } finally {
       setSubmitting(false);
@@ -686,26 +804,104 @@ export default function QCPage() {
                       return (
                         <div className="mt-3 pt-3 border-t border-amber-200/60 space-y-1.5">
                           <p className="text-xs font-bold text-charcoal mb-2">{t("testerRecords")}</p>
-                          {batch.qcRecords.map((r) => (
-                            <div key={r.id} className="flex items-center justify-between bg-white/70 rounded-lg px-3 py-2">
-                              <div>
-                                <span className="text-xs font-semibold text-charcoal">
-                                  {r.testerName || r.employee?.name || "—"}
-                                  {r.isExternal && (
-                                    <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full">
-                                      {t("guestBadge")}
+                          {batch.qcRecords.map((r) => {
+                            const corrCount = r._count?.correctionHistory ?? 0;
+                            const isCorrExpanded = expandedCorrectionId === r.id;
+                            const cachedCorrs = correctionsCache[r.id];
+                            const isLoadingCorr = loadingCorrectionId === r.id;
+                            return (
+                              <div key={r.id} className="rounded-lg overflow-hidden">
+                                <div className="flex items-center justify-between bg-white/70 px-3 py-2">
+                                  <div>
+                                    <span className="text-xs font-semibold text-charcoal">
+                                      {r.testerName || r.employee?.name || "—"}
+                                      {r.isExternal && (
+                                        <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full">
+                                          {t("guestBadge")}
+                                        </span>
+                                      )}
+                                      {corrCount > 0 && (
+                                        <span className="ltr:ml-1.5 rtl:mr-1.5 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
+                                          Edited
+                                        </span>
+                                      )}
                                     </span>
-                                  )}
-                                </span>
-                                {r.color && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50">{t("colorLabel")} {r.color}</span>}
-                                {r.remarks && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50 truncate max-w-[120px] inline-block">{r.remarks}</span>}
+                                    {r.color && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50">{t("colorLabel")} {r.color}</span>}
+                                    {r.remarks && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50 truncate max-w-[120px] inline-block">{r.remarks}</span>}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {corrCount > 0 && (
+                                      <button
+                                        onClick={() => toggleCorrectionHistory(r.id)}
+                                        className="text-[10px] font-bold text-brown/50 hover:text-brown px-1.5 py-0.5 rounded hover:bg-cream transition-colors"
+                                      >
+                                        {isCorrExpanded ? "Hide history" : `History (${corrCount})`}
+                                      </button>
+                                    )}
+                                    {canEditRecord && (r.employee?.id === user?.id || canManage) && (
+                                      <button
+                                        onClick={() => startEditRecord(r, batch)}
+                                        className="text-[10px] font-bold text-orange hover:text-orange-dark px-1.5 py-0.5 rounded hover:bg-orange/10 transition-colors"
+                                      >
+                                        Correct
+                                      </button>
+                                    )}
+                                    <span className={`flex items-center gap-1 text-xs font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
+                                      {r.decision === "Accept" ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                                      {r.decision === "Accept" ? t("accept") : t("reject")}
+                                    </span>
+                                  </div>
+                                </div>
+                                {isCorrExpanded && (
+                                  <div className="bg-amber-50/60 border-t border-amber-100 px-3 py-2">
+                                    {isLoadingCorr && (
+                                      <p className="text-[10px] text-brown/50 flex items-center gap-1">
+                                        <Loader2 size={10} className="animate-spin" /> Loading history…
+                                      </p>
+                                    )}
+                                    {!isLoadingCorr && cachedCorrs && cachedCorrs.length === 0 && (
+                                      <p className="text-[10px] text-brown/50">No corrections recorded.</p>
+                                    )}
+                                    {!isLoadingCorr && cachedCorrs && cachedCorrs.length > 0 && (
+                                      <div className="space-y-2">
+                                        {cachedCorrs.map((ev) => (
+                                          <div key={ev.id} className="text-[10px] border border-amber-200 rounded-lg overflow-hidden">
+                                            <div className="bg-amber-100/70 px-2 py-1 flex items-center justify-between gap-2 flex-wrap">
+                                              <span className="font-bold text-charcoal">{ev.changedByName}</span>
+                                              <span className="text-brown/60">{new Date(ev.changedAt).toLocaleString()}</span>
+                                              <span className="text-brown/80 italic truncate max-w-[200px]">"{ev.correctionReason}"</span>
+                                            </div>
+                                            {ev.fieldChanges.length > 0 ? (
+                                              <table className="w-full text-[10px]">
+                                                <thead>
+                                                  <tr className="bg-white/50">
+                                                    <th className="text-start px-2 py-1 font-semibold text-brown/70">Field</th>
+                                                    <th className="text-start px-2 py-1 font-semibold text-brown/70">From</th>
+                                                    <th className="text-start px-2 py-1 font-semibold text-brown/70">To</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-amber-100">
+                                                  {ev.fieldChanges.map((fc) => (
+                                                    <tr key={fc.id} className="bg-white/30">
+                                                      <td className="px-2 py-1 font-medium text-charcoal">{FIELD_LABELS[fc.fieldName] ?? fc.fieldName}</td>
+                                                      <td className="px-2 py-1 text-red-700 font-mono">{formatFieldValue(fc.oldValue)}</td>
+                                                      <td className="px-2 py-1 text-green-700 font-mono">{formatFieldValue(fc.newValue)}</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            ) : (
+                                              <p className="px-2 py-1 text-brown/50 italic">No field changes — acknowledged correction.</p>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                              <span className={`flex items-center gap-1 text-xs font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
-                                {r.decision === "Accept" ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                                {r.decision === "Accept" ? t("accept") : t("reject")}
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                           {hasAgtron && (
                             <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />
                           )}
@@ -884,23 +1080,31 @@ export default function QCPage() {
 
       {/* QC Submission Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeForm}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("submitQcRecord")}</h2>
+            <h2 className="text-lg font-extrabold text-charcoal mb-1">
+              {editingRecordId ? "Correct QC Record" : t("submitQcRecord")}
+            </h2>
             <p className="text-xs text-brown/60 mb-4">{t("qcFormSubtitle")}</p>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-charcoal mb-1">{t("roastingBatchLabel")}</label>
-                <select value={form.batchId} onChange={(e) => {
-                  const batch = backlogBatches.find((b) => b.id === e.target.value);
-                  if (batch) setForm({ ...form, batchId: batch.id, coffeeOrigin: batch.greenBean?.beanType || batch.orderItem.beanTypeName, processing: batch.greenBean?.process || "", serialNumber: batch.batchNumber });
-                }}
-                  className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
-                  <option value="">{t("selectBatch")}</option>
-                  {backlogBatches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.batchNumber} — {b.orderItem.beanTypeName} (#{b.orderItem.order.orderNumber})</option>
-                  ))}
-                </select>
+                {editingRecordId ? (
+                  <p className="px-3 py-2 bg-cream/60 border-2 border-border rounded-xl text-sm text-charcoal font-mono">
+                    {backlogBatches.find((b) => b.id === form.batchId)?.batchNumber ?? form.batchId}
+                  </p>
+                ) : (
+                  <select value={form.batchId} onChange={(e) => {
+                    const batch = backlogBatches.find((b) => b.id === e.target.value);
+                    if (batch) setForm({ ...form, batchId: batch.id, coffeeOrigin: batch.greenBean?.beanType || batch.orderItem.beanTypeName, processing: batch.greenBean?.process || "", serialNumber: batch.batchNumber });
+                  }}
+                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
+                    <option value="">{t("selectBatch")}</option>
+                    {backlogBatches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.batchNumber} — {b.orderItem.beanTypeName} (#{b.orderItem.order.orderNumber})</option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1035,12 +1239,27 @@ export default function QCPage() {
                   className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" rows={3}
                   placeholder={t("cuppingNotesPlaceholder")} />
               </div>
+              {editingRecordId && (
+                <div>
+                  <label className="block text-sm font-medium text-charcoal mb-1">
+                    Correction reason <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={form.correctionReason}
+                    onChange={(e) => setForm({ ...form, correctionReason: e.target.value })}
+                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                    rows={2}
+                    placeholder="Why is this record being corrected?"
+                    required
+                  />
+                </div>
+              )}
               <div className="flex gap-3 pt-2">
                 <button type="submit" disabled={submitting}
                   className="flex-1 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                   {submitting ? <><Loader2 size={15} className="animate-spin" /> {t("saving")}</> : t("saveRecord")}
                 </button>
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border rounded-lg hover:bg-gray-50">
+                <button type="button" onClick={closeForm} className="flex-1 py-2 border rounded-lg hover:bg-gray-50">
                   {t("cancel")}
                 </button>
               </div>
