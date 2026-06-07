@@ -57,6 +57,10 @@ function statusLabel(status: string, t: (k: TranslationKey) => string) {
   return map[status] ? t(map[status]) : status;
 }
 
+function formatKg(value: number): string {
+  return String(parseFloat(value.toFixed(3)));
+}
+
 export default function ProductionPage() {
   const user = useUser();
   const { t } = useI18n();
@@ -439,8 +443,8 @@ export default function ProductionPage() {
                     {produced > 0 && (
                       <div>
                         <div className="flex justify-between text-xs text-brown mb-1">
-                          <span>{produced}kg {t("producedKg")}</span>
-                          <span>{remaining}kg {t("remainingKg")}</span>
+                          <span>{formatKg(produced)}kg {t("producedKg")}</span>
+                          <span>{formatKg(remaining)}kg {t("remainingKg")}</span>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2">
                           <div className="bg-orange h-2 rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
@@ -527,7 +531,7 @@ export default function ProductionPage() {
                       #{batch.orderItem.order.orderNumber} — {batch.orderItem.order.customer.name} — {batch.greenBean?.beanType || batch.orderItem.beanTypeName}
                     </p>
                     <p className="text-xs text-brown/50 mt-0.5">
-                      {batch.roastedBeanQuantity}kg {t("roastedLabel")} | {batch.greenBeanQuantity}kg {t("greenLabel")} | {formatDate(batch.date)}
+                      {formatKg(batch.roastedBeanQuantity)}kg {t("roastedLabel")} | {formatKg(batch.greenBeanQuantity)}kg {t("greenLabel")} | {formatDate(batch.date)}
                       {batch.roastProfile && ` | ${batch.roastProfile}`}
                     </p>
                   </div>
@@ -564,7 +568,7 @@ export default function ProductionPage() {
                 {batch.isBlend && batch.blendInputs.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-border">
                     <p className="text-xs text-violet-600/70">
-                      {t("blendSources")}: {batch.blendInputs.map((inp) => `${inp.sourceBatch.batchNumber} (${inp.quantityUsed}kg)`).join(" + ")}
+                      {t("blendSources")}: {batch.blendInputs.map((inp) => `${inp.sourceBatch.batchNumber} (${formatKg(inp.quantityUsed)}kg)`).join(" + ")}
                     </p>
                   </div>
                 )}
@@ -586,7 +590,7 @@ export default function ProductionPage() {
                 <h3 className="font-extrabold text-charcoal text-base">{t("overprodWarnTitle")}</h3>
                 <p className="text-sm text-brown mt-1">
                   {t("overprodWarnBody")}{" "}
-                  <span className="font-bold text-amber-700">+{overproductionExcess}kg</span>
+                  <span className="font-bold text-amber-700">+{formatKg(overproductionExcess)}kg</span>
                   {". "}
                   {t("overprodWarnConfirm")}
                 </p>
@@ -645,7 +649,7 @@ export default function ProductionPage() {
                   className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
                   <option value="">{t("selectBeanStock")}</option>
                   {beans.map((b) => (
-                    <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {b.quantityKg}kg</option>
+                    <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {formatKg(b.quantityKg)}kg</option>
                   ))}
                 </select>
               </div>
@@ -666,7 +670,14 @@ export default function ProductionPage() {
               {(() => {
                 const roastedExceeds = roastForm.roastedBeanQuantity > roastForm.greenBeanQuantity && roastForm.greenBeanQuantity > 0;
                 const roastedIsZero  = roastForm.roastedBeanQuantity <= 0;
-                const submitDisabled = roastedExceeds || roastedIsZero;
+                const selectedBean = roastForm.greenBeanId
+                  ? beans.find((b) => b.id === roastForm.greenBeanId) ?? null
+                  : null;
+                const insufficientStock =
+                  selectedBean !== null &&
+                  roastForm.greenBeanQuantity > 0 &&
+                  roastForm.greenBeanQuantity > selectedBean.quantityKg;
+                const submitDisabled = roastedExceeds || roastedIsZero || insufficientStock;
                 return (
                   <>
                     {roastedIsZero && (
@@ -677,6 +688,11 @@ export default function ProductionPage() {
                     {roastedExceeds && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
                         {t("roastedExceedsGreen")}
+                      </div>
+                    )}
+                    {insufficientStock && selectedBean && (
+                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
+                        Insufficient stock. Available: {formatKg(selectedBean.quantityKg)} kg.
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-3">
