@@ -127,9 +127,10 @@ export default function ProductionPage() {
     setSelectedItem(item);
     const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.greenBeanQuantity, 0);
     const remaining = item.quantityKg - produced;
+    const cleanRemaining = Number(remaining.toFixed(3));
     const pref = item.order.customer.roastPreferences?.find((p) => p.greenBeanId === item.greenBeanId);
     const profileHint = profileOverrides[item.id] ?? pref?.profileName ?? "";
-    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: remaining, roastedBeanQuantity: 0, roastProfile: profileHint });
+    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: cleanRemaining, roastedBeanQuantity: 0, roastProfile: profileHint });
     setError(""); setSuccess("");
     setShowRoastForm(true);
   }
@@ -677,9 +678,15 @@ export default function ProductionPage() {
                   selectedBean !== null &&
                   roastForm.greenBeanQuantity > 0 &&
                   roastForm.greenBeanQuantity > selectedBean.quantityKg;
-                const submitDisabled = roastedExceeds || roastedIsZero || insufficientStock;
+                const greenQtyInvalid = roastForm.greenBeanQuantity <= 0;
+                const submitDisabled = roastedExceeds || roastedIsZero || insufficientStock || greenQtyInvalid;
                 return (
                   <>
+                    {greenQtyInvalid && (
+                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
+                        Green bean quantity must be greater than 0.
+                      </div>
+                    )}
                     {roastedIsZero && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
                         Roasted quantity must be greater than 0.
