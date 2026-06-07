@@ -71,8 +71,8 @@ export async function POST(request: Request) {
 
   const roastedQty = Number(roastedBeanQuantity ?? 0);
   const wasteQty   = Number(wasteQuantity ?? 0);
-  if (!Number.isFinite(roastedQty) || roastedQty < 0) {
-    return NextResponse.json({ error: "roastedBeanQuantity must be a non-negative number." }, { status: 400 });
+  if (!Number.isFinite(roastedQty) || roastedQty <= 0) {
+    return NextResponse.json({ error: "Roasted quantity must be greater than 0." }, { status: 400 });
   }
   if (!Number.isFinite(wasteQty) || wasteQty < 0) {
     return NextResponse.json({ error: "wasteQuantity must be a non-negative number." }, { status: 400 });

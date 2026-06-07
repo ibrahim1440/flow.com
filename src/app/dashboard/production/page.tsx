@@ -665,8 +665,15 @@ export default function ProductionPage() {
               </div>
               {(() => {
                 const roastedExceeds = roastForm.roastedBeanQuantity > roastForm.greenBeanQuantity && roastForm.greenBeanQuantity > 0;
+                const roastedIsZero  = roastForm.roastedBeanQuantity <= 0;
+                const submitDisabled = roastedExceeds || roastedIsZero;
                 return (
                   <>
+                    {roastedIsZero && (
+                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
+                        Roasted quantity must be greater than 0.
+                      </div>
+                    )}
                     {roastedExceeds && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
                         {t("roastedExceedsGreen")}
@@ -687,8 +694,8 @@ export default function ProductionPage() {
                       </div>
                     </div>
                     <div className="flex gap-3 pt-2">
-                      <button type="submit" disabled={roastedExceeds}
-                        className={`flex-1 py-3 rounded-xl font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${roastedExceeds ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
+                      <button type="submit" disabled={submitDisabled}
+                        className={`flex-1 py-3 rounded-xl font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${submitDisabled ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
                         {t("recordBatch")}
                       </button>
                       <button type="button" onClick={() => setShowRoastForm(false)} className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
