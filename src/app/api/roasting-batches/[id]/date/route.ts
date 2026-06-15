@@ -33,10 +33,17 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const { id } = await params;
   const body = await request.json();
-  const { newDate } = body as { newDate?: string };
+  const { newDate, reason } = body as { newDate?: string; reason?: string };
 
   if (!newDate) {
     return NextResponse.json({ error: "newDate required" }, { status: 400 });
+  }
+
+  if (!reason || !String(reason).trim()) {
+    return NextResponse.json(
+      { error: "Reason is required when changing the batch serial number." },
+      { status: 400 }
+    );
   }
 
   const targetDate = new Date(newDate);
@@ -64,10 +71,27 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const oldBatchNumber = batch.batchNumber;
   const newBatchNumber = await generateBatchNumberForDate(batch.greenBeanId, targetDate, id);
+  const serialChanged = oldBatchNumber !== newBatchNumber;
 
-  await prisma.roastingBatch.update({
-    where: { id },
-    data: { batchNumber: newBatchNumber, date: targetDate },
+  await prisma.$transaction(async (tx) => {
+    await tx.roastingBatch.update({
+      where: { id },
+      data: { batchNumber: newBatchNumber, date: targetDate },
+    });
+
+    if (serialChanged) {
+      await tx.batchSerialHistory.create({
+        data: {
+          batchId: id,
+          greenBeanId: batch.greenBeanId ?? null,
+          oldBatchNumber,
+          newBatchNumber,
+          reason: String(reason).trim(),
+          changedById: user.id,
+          changedByName: user.name,
+        },
+      });
+    }
   });
 
   const newDateLaterThanParent = batch.parentBatch

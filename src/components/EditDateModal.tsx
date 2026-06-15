@@ -38,6 +38,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
   const batchDateStr = batch.date ? batch.date.slice(0, 10) : todayStr;
 
   const [newDate, setNewDate] = useState(batchDateStr);
+  const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -49,12 +50,16 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!reason.trim()) {
+      setError("Reason for change is required.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/roasting-batches/${batch.id}/date`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newDate }),
+        body: JSON.stringify({ newDate, reason: reason.trim() }),
       });
       const data: DatePatchResponse = await res.json();
       if (!res.ok) {
@@ -88,7 +93,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
       const res = await fetch(`/api/roasting-batches/${firstResult.parentBatch.id}/date`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newDate }),
+        body: JSON.stringify({ newDate, reason: reason.trim() }),
       });
       const data: DatePatchResponse = await res.json();
       if (!res.ok) {
@@ -159,6 +164,19 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
                   onChange={(e) => setNewDate(e.target.value)}
                   required
                   className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
+                  {lang === "ar" ? "سبب التغيير" : "Reason for change"}{" "}
+                  <span className="text-red-500 normal-case font-bold">*</span>
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={2}
+                  placeholder={lang === "ar" ? "لماذا يتم تغيير التاريخ/الرقم التسلسلي؟" : "Why is this batch date/serial being changed?"}
+                  className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors resize-none"
                 />
               </div>
               <p className="text-[11px] text-brown/50 leading-relaxed">
