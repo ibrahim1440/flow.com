@@ -218,7 +218,7 @@ function formatFieldValue(raw: string | null): string {
 
 export default function QCPage() {
   const user = useUser();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "qc", "create_record");
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "qc", "manage");
   const canEditRecord = hasSubPrivilege(user?.permissions ?? {}, "qc", "edit_record");
@@ -243,6 +243,14 @@ export default function QCPage() {
   const [expandedCorrectionId, setExpandedCorrectionId] = useState<string | null>(null);
   const [correctionsCache, setCorrectionsCache] = useState<Record<string, CorrectionEvent[]>>({});
   const [loadingCorrectionId, setLoadingCorrectionId] = useState<string | null>(null);
+
+  // Batch serial superseded lookup
+  const [serialLookup, setSerialLookup] = useState<{
+    found: boolean;
+    query: string;
+    currentMatches: { id: string; batchNumber: string; date: string; status: string; beanType: string | null }[];
+    superseded: { oldBatchNumber: string; newBatchNumber: string; batchId: string; currentBatchNumber: string | null; date: string | null; status: string | null; beanType: string | null; changedAt: string; reason: string | null }[];
+  } | null>(null);
 
   // Panel submission form
   const [showForm, setShowForm] = useState(false);
@@ -290,6 +298,24 @@ export default function QCPage() {
   useEffect(() => {
     if (tab === "history" && !historyLoaded) loadHistory();
   }, [tab, historyLoaded, loadHistory]);
+
+  useEffect(() => {
+    const q = backlogSearch.trim();
+    if (q.length < 8 || !/^\d+$/.test(q)) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/roasting-batches/serial-lookup?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
+        if (res.ok) setSerialLookup(await res.json());
+        else setSerialLookup(null);
+      } catch {
+        // aborted or network error — silently ignore
+      }
+    }, 400);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [backlogSearch]);
 
   function closeForm() {
     setShowForm(false);
@@ -665,6 +691,33 @@ export default function QCPage() {
                   )}
                 </div>
               )}
+            </div>
+          )}
+          {serialLookup?.query === backlogSearch.trim() && serialLookup.superseded.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+              <p className="flex items-center gap-1.5 text-amber-800 text-xs font-bold uppercase tracking-wide">
+                <AlertTriangle size={12} />
+                {lang === "ar" ? "الرقم التسلسلي تم استبداله" : "Batch serial superseded"}
+              </p>
+              {serialLookup.superseded.map((s, i) => (
+                <p key={i} className="text-xs text-amber-800 leading-relaxed">
+                  {lang === "ar" ? (
+                    <>
+                      الرقم <span className="font-mono font-bold">{s.oldBatchNumber}</span> تم استبداله بـ{" "}
+                      <span className="font-mono font-bold">{s.newBatchNumber}</span>
+                      {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
+                      {s.reason && <> · {s.reason}</>}
+                    </>
+                  ) : (
+                    <>
+                      Batch serial <span className="font-mono font-bold">{s.oldBatchNumber}</span> has been superseded by{" "}
+                      <span className="font-mono font-bold">{s.newBatchNumber}</span>
+                      {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
+                      {s.reason && <> · <span className="italic">{s.reason}</span></>}
+                    </>
+                  )}
+                </p>
+              ))}
             </div>
           )}
           {filteredBacklog.length === 0 ? (

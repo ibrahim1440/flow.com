@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Box, Package, Trash2, CalendarDays } from "lucide-react";
+import { AlertTriangle, Box, Package, Trash2, CalendarDays } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
@@ -57,6 +57,14 @@ export default function PackagingPage() {
   const [filterBean, setFilterBean] = useState("");
   const [filterOrder, setFilterOrder] = useState("");
 
+  // Batch serial superseded lookup
+  const [serialLookup, setSerialLookup] = useState<{
+    found: boolean;
+    query: string;
+    currentMatches: { id: string; batchNumber: string; date: string; status: string; beanType: string | null }[];
+    superseded: { oldBatchNumber: string; newBatchNumber: string; batchId: string; currentBatchNumber: string | null; date: string | null; status: string | null; beanType: string | null; changedAt: string; reason: string | null }[];
+  } | null>(null);
+
   const [showForm, setShowForm] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
   const [form, setForm] = useState({ bags3kg: 0, bags1kg: 0, bags250g: 0, bags150g: 0, samplesGrams: 0 });
@@ -65,6 +73,24 @@ export default function PackagingPage() {
   const [selectedSkuId, setSelectedSkuId] = useState("");
 
   useEffect(() => { loadData(); loadProducts(); }, []);
+
+  useEffect(() => {
+    const q = filterSearch.trim();
+    if (q.length < 8 || !/^\d+$/.test(q)) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/roasting-batches/serial-lookup?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
+        if (res.ok) setSerialLookup(await res.json());
+        else setSerialLookup(null);
+      } catch {
+        // aborted or network error — silently ignore
+      }
+    }, 400);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [filterSearch]);
 
   async function loadData() {
     const res = await fetch("/api/roasting-batches?statuses=Passed,Partially+Packaged");
@@ -193,6 +219,33 @@ export default function PackagingPage() {
         />
       )}
 
+      {serialLookup?.query === filterSearch.trim() && serialLookup.superseded.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+          <p className="flex items-center gap-1.5 text-amber-800 text-xs font-bold uppercase tracking-wide">
+            <AlertTriangle size={12} />
+            {lang === "ar" ? "الرقم التسلسلي تم استبداله" : "Batch serial superseded"}
+          </p>
+          {serialLookup.superseded.map((s, i) => (
+            <p key={i} className="text-xs text-amber-800 leading-relaxed">
+              {lang === "ar" ? (
+                <>
+                  الرقم <span className="font-mono font-bold">{s.oldBatchNumber}</span> تم استبداله بـ{" "}
+                  <span className="font-mono font-bold">{s.newBatchNumber}</span>
+                  {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
+                  {s.reason && <> · {s.reason}</>}
+                </>
+              ) : (
+                <>
+                  Batch serial <span className="font-mono font-bold">{s.oldBatchNumber}</span> has been superseded by{" "}
+                  <span className="font-mono font-bold">{s.newBatchNumber}</span>
+                  {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
+                  {s.reason && <> · <span className="italic">{s.reason}</span></>}
+                </>
+              )}
+            </p>
+          ))}
+        </div>
+      )}
       {filteredBatches.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-2xl border border-border text-brown/40">
           <Box size={40} className="mx-auto mb-3 opacity-50" />
