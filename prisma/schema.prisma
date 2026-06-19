@@ -430,7 +430,7 @@ model FinishedGoodsLot {
   product         CoffeeProduct  @relation(fields: [productId], references: [id])
   productSkuId    String?
   productSku      ProductSKU?    @relation(fields: [productSkuId], references: [id])
-  batchNumber     String         @unique
+  batchNumber     String
   roastingBatchId String?        @unique
   roastingBatch   RoastingBatch? @relation(fields: [roastingBatchId], references: [id])
   quantityKg      Float
