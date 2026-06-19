@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule } from "@/lib/auth-server";
+import { requireEdit } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
@@ -11,7 +11,7 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, user } = await requireModule("packaging");
+  const { error, user } = await requireEdit("packaging");
   if (error) return error;
 
   const { id } = await params;

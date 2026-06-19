@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 
 export async function POST(request: Request) {
   const { error } = await requireSub("production", "blend");
@@ -60,6 +61,14 @@ export async function POST(request: Request) {
 
   const targetOrderItemId = orderItemId || batches[0].orderItemId;
 
+  const productionOrderIds = [
+    ...new Set(
+      batches
+        .map((b) => b.productionOrderId)
+        .filter((id): id is string => id !== null)
+    ),
+  ];
+
   try {
   const result = await prisma.$transaction(async (tx) => {
     const blendedBatch = await tx.roastingBatch.create({
@@ -88,6 +97,10 @@ export async function POST(request: Request) {
         quantityUsed: batches.find((b) => b.id === sourceBatchId)!.roastedBeanQuantity,
       })),
     });
+
+    for (const productionOrderId of productionOrderIds) {
+      await recalcProductionOrderStatus(productionOrderId, tx);
+    }
 
     await recalcOrderItemStatus(targetOrderItemId, tx);
 

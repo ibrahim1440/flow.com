@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
+import { extractIp } from "@/lib/rate-limit";
+import { checkAndRecordRateLimit } from "@/lib/api-rate-limit";
 
 type Params = { params: Promise<{ batchId: string; token: string }> };
 
@@ -32,6 +34,20 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function POST(request: Request, { params }: Params) {
+  const ip = extractIp(request);
+  const { limited } = await checkAndRecordRateLimit({
+    scope: "guest_qc_submit",
+    key: ip,
+    limit: 10,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (limited) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again later." },
+      { status: 429 }
+    );
+  }
+
   const { batchId, token } = await params;
   const batch = await getBatch(batchId, token);
   if (!batch) return NextResponse.json({ error: "Invalid or expired link" }, { status: 404 });
