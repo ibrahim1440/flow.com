@@ -65,6 +65,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "create", label: "Create new orders" },
     { key: "edit", label: "Edit existing orders" },
     { key: "delete", label: "Delete orders" },
+    { key: "approve", label: "Approve / reject orders" },
   ],
   production: [
     { key: "start_batch", label: "Start / continue roasting" },

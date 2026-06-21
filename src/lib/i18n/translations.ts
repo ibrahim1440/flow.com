@@ -254,6 +254,15 @@ export const translations = {
   addNewCustomer:     { en: "Add new customer",       ar: "إضافة عميل جديد" },
   itemsTotal:         { en: "item(s)",                ar: "عنصر" },
   totalOrdersCount:   { en: "total orders",           ar: "طلب إجمالي" },
+  approveOrder:       { en: "Approve",                ar: "اعتماد" },
+  rejectOrder:        { en: "Reject",                 ar: "رفض" },
+  resetToPending:     { en: "Reset to Pending",       ar: "إعادة إلى معلق" },
+  approvalStatusLabel:{ en: "Approval",                ar: "الاعتماد" },
+  approvalApproved:   { en: "Approved",               ar: "معتمد" },
+  approvalRejected:   { en: "Rejected",                ar: "مرفوض" },
+  approvalPending:    { en: "Pending Approval",       ar: "بانتظار الاعتماد" },
+  rejectReasonPrompt: { en: "Enter rejection reason:", ar: "أدخل سبب الرفض:" },
+  reasonRequiredError:{ en: "A reason is required to reject an order.", ar: "سبب الرفض مطلوب." },
 
   // ── Packaging page ────────────────────────────────────────────────────
   batchesReadyPackage:{ en: "batches ready to package", ar: "دفعات جاهزة للتعبئة" },

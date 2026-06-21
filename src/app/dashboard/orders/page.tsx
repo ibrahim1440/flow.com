@@ -59,12 +59,20 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge ${cls}`}>{label}</span>;
 }
 
+function ApprovalBadge({ approvalStatus }: { approvalStatus: string }) {
+  const { t } = useI18n();
+  const cls = approvalStatus === "Yes" ? "status-completed" : approvalStatus === "No" ? "status-not-paid" : "status-pending";
+  const label = approvalStatus === "Yes" ? t("approvalApproved") : approvalStatus === "No" ? t("approvalRejected") : t("approvalPending");
+  return <span className={`status-badge ${cls}`}>{label}</span>;
+}
+
 export default function OrdersPage() {
   const user = useUser();
   const { t } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
+  const canApproveOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "approve");
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
@@ -193,11 +201,13 @@ export default function OrdersPage() {
 
   async function handleEditSave() {
     if (!editingId) return;
-    const { items, ...rest } = editForm;
+    // approvalStatus/paymentStatus/vatInvoiceStatus are not editable through this
+    // generic route — they are owned by POST /api/orders/[id]/approve.
+    const { items, quotationNumber, notes } = editForm;
     const res = await fetch(`/api/orders/${editingId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...rest, items }),
+      body: JSON.stringify({ quotationNumber, notes, items }),
     });
     if (!res.ok) {
       const body = await res.json();
@@ -206,6 +216,29 @@ export default function OrdersPage() {
     }
     setEditingId(null);
     loadData();
+  }
+
+  async function submitApprovalDecision(orderId: string, decision: "Yes" | "No" | "Pending", reason?: string) {
+    const res = await fetch(`/api/orders/${orderId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(reason !== undefined ? { decision, reason } : { decision }),
+    });
+    if (!res.ok) {
+      const body = await res.json();
+      alert(body.error || "Failed to update approval status.");
+      return;
+    }
+    loadData();
+  }
+
+  function rejectOrder(orderId: string) {
+    const reason = window.prompt(t("rejectReasonPrompt"))?.trim();
+    if (!reason) {
+      if (reason === "") alert(t("reasonRequiredError"));
+      return;
+    }
+    submitApprovalDecision(orderId, "No", reason);
   }
 
   async function createCustomer() {
@@ -393,6 +426,7 @@ export default function OrdersPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <ApprovalBadge approvalStatus={order.approvalStatus} />
                 <StatusBadge status={order.items.every((i) => i.productionStatus === "Completed") ? "Completed" : order.items.some((i) => i.productionStatus === "In Production") ? "In Production" : "Pending"} />
                 {expanded === order.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
               </div>
@@ -401,6 +435,24 @@ export default function OrdersPage() {
             {expanded === order.id && (
               <div className="border-t border-border p-4 bg-cream">
                 <div className="flex justify-end gap-2 mb-3">
+                  {canApproveOrder && order.approvalStatus !== "Yes" && (
+                    <button onClick={() => submitApprovalDecision(order.id, "Yes")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100">
+                      {t("approveOrder")}
+                    </button>
+                  )}
+                  {canApproveOrder && order.approvalStatus !== "No" && (
+                    <button onClick={() => rejectOrder(order.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
+                      {t("rejectOrder")}
+                    </button>
+                  )}
+                  {canApproveOrder && order.approvalStatus !== "Pending" && (
+                    <button onClick={() => submitApprovalDecision(order.id, "Pending")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-brown bg-white border border-border rounded-lg hover:bg-cream">
+                      {t("resetToPending")}
+                    </button>
+                  )}
                   {canEditOrder && editingId !== order.id && (
                     <button onClick={() => startEdit(order)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-orange bg-orange-light border border-orange/20 rounded-lg hover:bg-orange/10">
