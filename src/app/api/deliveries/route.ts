@@ -63,9 +63,29 @@ export async function POST(request: Request) {
       if (finishedGoodsLotId) {
         const lot = await tx.finishedGoodsLot.findUnique({
           where: { id: finishedGoodsLotId },
-          select: { id: true },
+          select: {
+            id: true,
+            productId: true,
+            productSkuId: true,
+            roastingBatch: { select: { orderItemId: true } },
+          },
         });
         if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
+
+        // Dual-path match: by product when the order item has one, otherwise by the
+        // batch this lot was packaged from (every RoastingBatch belongs to one OrderItem).
+        const productMatches = orderItem.productId
+          ? lot.productId === orderItem.productId
+          : lot.roastingBatch?.orderItemId === orderItem.id;
+
+        // SKU is only enforced when both sides specify one — legacy/incomplete rows
+        // with a null SKU on either side are not rejected on that basis alone.
+        const skuMatches =
+          !orderItem.productSkuId || !lot.productSkuId || lot.productSkuId === orderItem.productSkuId;
+
+        if (!productMatches || !skuMatches) {
+          throw { _appCode: 409, message: "Selected finished goods lot does not match this order item." };
+        }
       }
 
       // 1. Create delivery record — needed first so its ID is available for the ledger
