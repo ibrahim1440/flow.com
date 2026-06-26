@@ -553,3 +553,79 @@ model RateLimit {
   @@index([scope, keyHash, createdAt])
   @@index([createdAt])
 }
+
+// ─── Migration-history recovery ────────────────────────────────────────────
+// The models below are owned by sibling repos (ERP-login, ERP-workstations) and were
+// already applied directly to the shared demo database by those branches before this
+// branch's migration history existed. Imported byte-identical to their source schemas
+// (see ERP-login/prisma/schema.prisma and ERP-workstations/prisma/schema.prisma) purely
+// so this branch's schema.prisma matches the live demo DB and `prisma migrate dev` does
+// not propose dropping them. Not part of Accounting S0 — do not extend or modify here;
+// changes belong in the owning repo.
+
+model AuthAuditLog {
+  id               String   @id @default(cuid())
+  userId           String?
+  identifierHash   String?
+  action           String
+  result           String
+  reasonCode       String?
+  sourceInterface  String   @default("WEB")
+  workspaceRouting String?
+  ipHash           String
+  userAgent        String?
+  metadata         Json?
+  occurredAt       DateTime @default(now())
+
+  @@index([userId, occurredAt])
+  @@index([identifierHash, occurredAt])
+  @@index([action, occurredAt])
+  @@index([result, occurredAt])
+}
+
+model WorkItemClaim {
+  id             String    @id @default(cuid())
+  stationType    String                          // ROASTING | QUALITY | WAREHOUSE | PACKAGING | BAR
+  itemType       String                          // e.g. "RoastingBatch" | "QcRecord" — polymorphic, like InventoryMovement.referenceEntityId
+  itemId         String
+  itemRef        String                          // `${itemType}:${itemId}`
+  activeItemRef  String?   @unique               // == itemRef while status="ACTIVE", null otherwise (enforces at most one active claim per item)
+  claimedById    String                          // Employee.id, denormalized — no FK relation (audit-table convention)
+  claimedByName  String
+  status         String    @default("ACTIVE")    // ACTIVE | RELEASED | EXPIRED | OVERRIDDEN
+  claimedAt      DateTime  @default(now())
+  expiresAt      DateTime?
+  releasedAt     DateTime?
+  releasedById   String?
+  releasedByName String?
+
+  @@index([stationType, status])
+  @@index([itemType, itemId])
+  @@index([itemRef])
+  @@index([claimedById])
+  @@index([claimedAt])
+  @@index([status, expiresAt])
+}
+
+model WorkstationActionLog {
+  id              String   @id @default(cuid())
+  stationType     String
+  itemType        String
+  itemId          String
+  action          String                         // CLAIM | RELEASE | ADVANCE:<action> | FLAG
+  fromState       String?
+  toState         String?
+  employeeId      String                         // Employee.id, denormalized — no FK relation
+  employeeName    String
+  idempotencyKey  String   @unique
+  status          String                         // SUCCESS | REJECTED | ERROR
+  reason          String?
+  sourceInterface String   @default("STATION")
+  createdAt       DateTime @default(now())
+
+  @@index([stationType, createdAt])
+  @@index([itemType, itemId])
+  @@index([employeeId])
+  @@index([status])
+}
+
