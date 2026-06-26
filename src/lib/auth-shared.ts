@@ -34,6 +34,7 @@ export const ALL_MODULES = [
   "cupping",
   "settings",
   "customers",
+  "accounting",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -53,6 +54,7 @@ export const MODULE_LABELS: Record<string, string> = {
   cupping: "Cupping",
   settings: "System Settings",
   customers: "Customers / CRM",
+  accounting: "Accounting",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -96,6 +98,19 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   ],
   customers: [
     { key: "manage", label: "Manage customer roast preferences" },
+  ],
+  accounting: [
+    { key: "settings_manage", label: "Manage accounting settings" },
+    { key: "coa_manage", label: "Manage chart of accounts" },
+    { key: "tax_category_manage", label: "Manage tax categories" },
+    { key: "period_lock", label: "Lock fiscal periods" },
+    { key: "period_close", label: "Close fiscal periods" },
+    { key: "journal_create", label: "Create journal entries" },
+    { key: "journal_submit", label: "Submit journal entries" },
+    { key: "journal_approve", label: "Approve journal entries" },
+    { key: "journal_post", label: "Post journal entries" },
+    { key: "journal_reverse", label: "Reverse posted journal entries" },
+    { key: "export_view", label: "View Qoyod export records" },
   ],
 };
 

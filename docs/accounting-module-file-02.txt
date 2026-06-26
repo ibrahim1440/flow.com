@@ -1,0 +1,981 @@
+# Rewritten Technical Document — File 02: Accounting Module (Hiqbah ERP — قسم المحاسبة)
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 1 — PURPOSE OF THIS FILE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Purpose of This File
+
+This file defines the **Accounting Module** of the Hiqbah ERP and how it fits with the rest of the platform (inventory, production, roasting, QC, sales, purchasing, café/POS, branches, integrations). It is the financial backbone of the system.
+
+The file's stated goals are:
+
+- Move from a model where an external accounting system (Qoyod / Qyood) is the source of truth to a model where the ERP itself generates accounting events internally, and uses Qoyod only as a transitional export/sync target.
+- Define accounting policies that the rest of the ERP must respect (inventory costing, COGS recognition, waste treatment, VAT, customer advances, payment terms, branch accounting).
+- Specify the chart of accounts, journal entry rules, invoice rules, payment rules, approval rules, fiscal period rules, and reporting outputs.
+- Capture the policy decisions made after a pre-development Q&A round, so developers have a single normative reference.
+
+The file is **not a UI specification** and **not a code-generation contract**. It is the operational and data-logic contract that the Accounting, Inventory, Production, Sales, Purchasing, and Integration services must obey.
+
+It is also the file that decides whether the ERP can ever become its own accounting system or remains a satellite tool around Qoyod. The chosen direction is **gradual replacement of Qoyod**, with the ERP being the long-term system of record. Every design choice below is evaluated against that direction.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 2 — CLEAN TECHNICAL SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Clean Technical Summary
+
+The Accounting Module is a **policy-driven, event-sourced financial layer** that:
+
+- Receives **Accounting Events** from every operational module (inventory movement, production, roasting, QC, transformation, packaging, sales, purchasing, payments, waste, calibration, branch transfer, period closing).
+- Translates each event into one or more **Draft Journal Entries** based on per-tenant accounting policies (costing method, COGS policy, waste treatment, VAT category, branch-accounting mode).
+- Routes drafts through an **approval workflow** when required, posts them to the **General Ledger**, and emits an **export job** for Qoyod during the transition period.
+- Maintains the **Chart of Accounts**, **Fiscal Periods**, **Tax Categories**, **Customer/Supplier Accounts**, **Customer Advances**, **AR/AP aging**, **Inventory Valuation**, **COGS**, **Waste accounts**, and **Reports**.
+- Enforces hard rules: no silent edits after posting, no posting in closed periods, no posting on parent accounts, no reuse of customer advances, no transformation treated as new production, no production overhead allocation in Phase 1.
+- Is **tenant-scoped end to end**: chart of accounts, settings, mappings, journal entries, invoices, payments, fiscal calendar, reports — every record carries `tenant_id` and every query filters by it.
+- Supports the **multi-phase rollout** declared in the source: Phase 1 (basic accounting + CSV export to Qoyod), Phase 2 (inventory, production, waste, COGS, POS, API export), Phase 3 (ZATCA-grade official invoicing from ERP, multi-currency, full SaaS tenant accounting).
+
+The module's invariant is captured at the end of the source file and is the **single most important rule** for the developer:
+
+> No financial or inventory movement is final until it has produced an Accounting Event. No silent edit after posting or export. Correction is always Reversal / Adjustment / Credit Note / Debit Note.
+
+This invariant must be enforced **server-side**, not by UI conventions.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 3 — ORIGINAL BUSINESS INTENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Original Business Intent
+
+The author's intent is a sequenced, defensible accounting strategy:
+
+1. The ERP must own the accounting logic internally from day one — even if the official invoice is still emitted by Qoyod during the transition. The ERP must not be reduced to a "feeder" that pushes raw data to Qoyod and trusts Qoyod's interpretation.
+2. The ERP must support **practical defaults for a small roastery / café** (Weighted Average costing, COGS on shipping for B2B, COGS on sale for POS, Cost-Center-only branch accounting, alert-only credit policy, SAR currency, 15% VAT default) while leaving the door open for richer setups (FIFO, branch accounting, multi-currency, international suppliers, advanced overhead allocation) without re-architecting later.
+3. Waste must not hide inside generic COGS. **Calibration Waste**, **QC Testing Waste**, **Abnormal Roasting Loss**, and **Training Waste** are first-class accounts.
+4. Customer money received in advance is a **liability**, not revenue. Customer advances are tracked through their own lifecycle (Requested → Received → Applied → Closed / Refunded).
+5. **Blending and product transformation are not production** for accounting purposes — they consume source lots and create a new lot at the same cost, with no revenue and no COGS recognition.
+6. The transition with Qoyod must be **safe** (idempotent export keys, mapping tables, reconciliation reports, no silent edits, retry tracking, payload/response snapshots) so that the eventual departure from Qoyod does not corrupt historical data.
+7. The architecture must remain **SaaS-ready**: per-tenant settings, per-tenant chart of accounts, per-tenant tax categories, per-tenant fiscal calendar, per-tenant mappings — all enforced.
+8. ZATCA readiness is built in from the structure (UUID, QR, XML hash, invoice type, exemption reason) even though Phase 1 doesn't generate the official e-invoice from ERP.
+
+This intent is sound. The rewrite below preserves it, sharpens the boundaries between operational and accounting events, and flags risks where the source is permissive or under-specified.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Business Logic
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Master invariants (binding across the module)
+
+1. Every operational event that affects money or inventory **MUST** generate an Accounting Event server-side before the operation is considered complete.
+2. Accounting Events produce **Draft Journal Entries**; postings happen only after validation (and approval where required).
+3. **Debit = Credit** is enforced at the journal entry level; partial posting is rejected.
+4. **Parent accounts** in the chart of accounts cannot receive postings — only leaf accounts with `allowPosting = true`.
+5. **No posting in a Locked or Closed fiscal period.**
+6. **No silent edit** after posting or after Qoyod export. Corrections are explicit Reversal, Adjustment, Credit Note, or Debit Note.
+7. **No hard delete** of accounting records. Soft delete + reversal only.
+8. **Tenant scope** is mandatory on every accounting record and every query.
+9. **Tax category** on every invoice line is captured as a **snapshot** at posting time; later changes to the tax category master do not retroactively change historical invoices.
+10. **Customer Advances** are liabilities, never revenue, until applied to a final invoice.
+11. **Transformation/Blending** never produces revenue or COGS; it is a cost-preserving inventory move.
+12. **Order Allocation** never produces COGS; only shipping/delivery/sale/closure (per policy) produces COGS.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 Triggers (what creates an Accounting Event)
+
+- Goods Receipt confirmed
+- Purchase Invoice posted
+- Payment to supplier issued
+- Expense recorded
+- Customer Order with advance required → Advance Receipt
+- Sales Invoice posted
+- Receipt of payment from customer (full / partial / overpayment)
+- Application of customer advance to a final invoice
+- Refund of customer advance
+- Roasting Output recorded (cost moves from green to roasted WIP/inventory)
+- Roasting Loss recorded (normal absorbed in cost, abnormal expensed)
+- Calibration Waste recorded
+- QC Testing Waste recorded
+- Training Waste recorded
+- Product Transformation / Blend recorded
+- Packaging Consumption recorded
+- Finished Goods Creation
+- Shipment / Delivery / POS Sale (depending on COGS policy)
+- Inventory Count Variance approved
+- Period closing entry
+- Fixed asset depreciation (future)
+- Manual journal entry approved
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Preconditions
+
+- Tenant is Active; subscription is Active.
+- Fiscal period for the transaction date is Open (not Locked, not Closed).
+- The user holds the necessary permission for the action and any approval thresholds.
+- Required masters exist (account, tax category, customer/supplier, branch, cost center).
+- For inventory-affecting events, the inventory ledger must accept the move (no negative stock unless explicitly allowed for that account type — default is `allowNegativeInventory = false`).
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 During the process
+
+1. Operational service writes the operational record (e.g., RoastingBatch, ShipmentLine, ReceiptVoucher).
+2. Operational service emits an Accounting Event (in the same DB transaction) with `event_type`, `source_module`, `source_document_id`, `tenant_id`, `branch_id`, `occurred_at`, and payload.
+3. AccountingService translates the event into one or more Draft Journal Entries using the tenant's policies (costing method, COGS policy, waste treatment, VAT category, branch-accounting mode, account mappings).
+4. If approval is required (amount limit, document type, role, branch, risk flag), the draft is held in `Submitted` state until approved.
+5. On approval (or auto-post for low-risk auto-generated entries), the journal entry is posted: status → `Posted`, period stamp applied, balances updated.
+6. If Qoyod export is enabled, an Export Job is enqueued (idempotent by `external_export_key`).
+7. Audit log entry is written.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 Post-process
+
+- AR / AP / Inventory / Cash balances are recomputed (or derived from ledger, depending on implementation).
+- Reports become aware of the new posting.
+- Reconciliation reports update.
+- Notifications are emitted where configured (overdue alerts, approval pending, export failed).
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━6 What must be prevented
+
+- Posting on a parent account.
+- Posting with `debit ≠ credit`.
+- Posting outside an open fiscal period.
+- Posting without an account mapping for the event type (must fail loudly, not silently default).
+- Applying the same customer advance twice.
+- Generating COGS at order allocation.
+- Treating a blend as new production.
+- Editing or deleting a posted/exported entry.
+- Hardcoding VAT rate anywhere in code.
+- Cross-tenant access to chart of accounts, invoices, or journal entries.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━7 What requires approval
+
+- Purchase invoices above a configurable amount limit.
+- Supplier payments above a configurable amount limit.
+- Journal entries above a configurable amount limit.
+- Reversal of any posted journal entry.
+- Manual adjustment entries.
+- Period closing.
+- Use of non-default tax category (Zero-rated, Exempt, Out of Scope).
+- Override of overdue-customer order block.
+- Abnormal roasting loss treatment (when outside the normal range).
+- Waste records above configured thresholds.
+- Customer advance refund.
+- Inventory variance posting (after physical count).
+- Editing approval rules themselves (must require higher-level role).
+- Qoyod export execution and re-export.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — BUSINESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━8 What must be logged
+
+- Every Accounting Event with its source operational document.
+- Every journal entry state change (Draft → Submitted → Approved → Posted → Reversed).
+- Every approval decision (approver, timestamp, reason if override).
+- Every Qoyod export attempt (success/fail with payload and response snapshots).
+- Every settings change (especially costing method, COGS policy, branch mode, credit policy).
+- Every reversal/adjustment with reason.
+- Every tax category change at the master level (snapshot is preserved on historical invoices).
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 5 — SYSTEM MODULES / SECTIONS INVOLVED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ System Modules / Sections Involved
+
+The Accounting Module connects to or owns:
+
+- Accounting Dashboard
+- Chart of Accounts
+- Journal Entries
+- Sales Invoices
+- Purchase Invoices
+- Receipts (Customer payments)
+- Payments (to Suppliers)
+- Expenses
+- Customer Accounts (AR)
+- Supplier Accounts (AP)
+- VAT / Tax Categories
+- Customer Advances / Deposits
+- Inventory Valuation
+- COGS Recognition
+- Waste & Adjustments (Roasting Loss, Calibration Waste, QC Testing Waste, Training Waste, Inventory Variance)
+- Cost Centers & Branches
+- Qoyod Export
+- POS Integration (Phase 2+)
+- Financial Reports
+- Financial Approvals
+- Audit Log
+- Accounting Settings (per tenant)
+- Fiscal Periods / Period Closing
+- ZATCA-readiness fields (Phase 3)
+
+External / cross-module touchpoints:
+
+- Purchasing & Goods Receipt (raw inventory cost basis)
+- Production & Roasting (WIP, output, loss)
+- Quality Control (QC waste, conditional release)
+- Packaging & Finished Goods (cost rollup)
+- Sales Orders & Allocation (no COGS at allocation)
+- Shipping & Delivery (COGS trigger per policy)
+- Café / POS (POS sale → COGS)
+- Customer Portal (advance payment requests, invoice viewing)
+- Supplier Portal (future)
+- Notifications (overdue, approval pending)
+- Audit Log Service (cross-module)
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Workflow / Process Logic
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Workflow A — Sales Invoice (B2B with Payment Terms)
+
+| # | Step | Role | Input | Action | Validation | Status | Inventory | Audit |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Customer Order created | Sales | Customer, items, prices | Capture order, payment terms, advance flag | Customer not blocked; credit policy check | Order = Draft | None | Logged |
+| 2 | Advance required? | System | Order config | Branch to 6.3 if yes | — | — | None | — |
+| 3 | Production / shipping | Operations | — | Fulfill order | — | — | Reserved → Shipped | Logged |
+| 4 | Sales Invoice Draft | Sales / Acct | Order, prices, tax snapshot | Compute subtotal, VAT, total | Tax category set; account map exists; period open | Invoice = Draft | — | Logged |
+| 5 | Approval (if threshold) | Approver | Draft | Approve / Reject | Permission + threshold | Draft → Approved | — | Approval logged |
+| 6 | Posting | AccountingService | Approved draft | Create JE: Dr AR / Cr Sales / Cr VAT Output; emit Accounting Event | Debit=Credit; period open | Invoice = Posted | — | JE + Event logged |
+| 7 | COGS recognition | AccountingService | Per policy (OnShipping/OnDelivery/OnInvoice/OnClosure) | Create JE: Dr COGS / Cr Finished Goods | Inventory cost layer available | — | FG decreased (cost) | Logged |
+| 8 | Receipt of payment | Cashier | Amount, method | Record receipt | Amount ≤ invoice balance + tolerance | Invoice → Partially Paid / Paid | None | Logged |
+| 9 | Qoyod Export | System | Posted JE | Enqueue export | Export key unique; mapping complete | Export = Ready → Exported | None | Export logged |
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 Workflow B — Purchase Invoice + Goods Receipt
+
+| # | Step | Role | Input | Action | Validation | Status | Inventory | Audit |
+|---|---|---|---|---|---|---|---|---|
+| 1 | PO created | Purchasing | Supplier, items | Capture PO | Supplier active | PO = Draft → Approved | — | Logged |
+| 2 | Goods Receipt | Warehouse | Quantities received | Record receipt | Match PO; ±tolerance | GR = Posted | Raw inventory ↑ | Logged |
+| 3 | Purchase Invoice Draft | Acct | Supplier invoice | Capture lines, VAT | Account map; period open | PI = Draft | — | Logged |
+| 4 | Approval | Approver | Draft | Approve / Reject | Threshold check | Draft → Approved | — | Logged |
+| 5 | Posting | AccountingService | Approved PI | JE: Dr Inventory or Expense or Fixed Asset / Dr VAT Input / Cr AP | Three-way match (PO/GR/Invoice); period open | PI = Posted | Cost layer recorded | JE + Event logged |
+| 6 | Payment | Cashier | Amount, method | Record payment | Balance check; bank acct exists | PI → Partially Paid / Paid | — | Logged |
+| 7 | Qoyod Export | System | Posted JE | Export with mapping | Unique export key | Exported | — | Logged |
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Workflow C — Customer Advance / Deposit
+
+| # | Step | Role | Input | Action | Validation | Status | Audit |
+|---|---|---|---|---|---|---|---|
+| 1 | Order requires advance | Sales | Customer Order | Create Advance Request | Order open | Advance = Requested | Logged |
+| 2 | Customer pays advance | Cashier | Receipt | Record Receipt | Amount, currency match | Advance = Received; JE: Dr Bank / Cr Customer Advances | Logged |
+| 3 | Optional advance tax invoice | Acct | Receipt | Issue Advance Invoice | Tax setup OK | Advance = AdvanceInvoiceIssued | Logged |
+| 4 | Production proceeds | Operations | — | Continue | Advance received OR override approval | — | Logged |
+| 5 | Final invoice issued | Acct | Sales Invoice | Post invoice JE | Period open | Invoice = Posted | Logged |
+| 6 | Apply advance | AccountingService | Advance + Invoice | JE: Dr Customer Advances / Cr AR | Advance ≥ application amount; not already fully applied | Advance → Partially/Fully Applied | Logged |
+| 7 | Customer pays balance | Cashier | Receipt | Record Receipt | — | Invoice → Paid | Logged |
+| 8 | Order closure | System | All settled | Close order | All invoices closed | Order = Closed | Logged |
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 Workflow D — Daily Calibration Waste
+
+1. Barista starts a Calibration Session on a station screen (Branch, Machine, Grinder, Bean, Lot must be selected).
+2. Each calibration shot is logged (mandatory per shot — no aggregate-only entries).
+3. System computes total dose; if shots > `reviewRequiredShotsThreshold` or waste% > `calibrationWastePercentageThreshold` → approval required.
+4. On finish, inventory is deducted from Roasted Coffee Inventory.
+5. Accounting Event emitted: **Dr Calibration Waste / Cr Roasted Coffee Inventory**.
+6. Calibration Waste record created and linked to the inventory movement and the JE.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 Workflow E — QC Testing Waste
+
+1. After a Roasting Batch completes (or as part of QC sampling), a QC Test is started.
+2. QC user selects Test Type (Cupping, Espresso Test, Filter Test, Sample Roast, Roast Defect, Complaint Investigation, Retest, Shelf-Life).
+3. Bean / Batch / Lot is selected; sample count and dose per sample entered (waste auto-calculated).
+4. Approval required above threshold.
+5. Inventory deducted from Roasted Coffee or Finished Goods inventory.
+6. Accounting Event emitted: **Dr QC Testing Waste / Cr Roasted/FG Inventory**.
+7. Batch quality status updated.
+8. For Complaint Investigation tests, link to the complaint record is mandatory.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━6 Workflow F — Roasting Output & Roasting Loss
+
+1. Roasting batch begins (operational module). Green coffee weight in.
+2. Roasting completes. Roasted output weight recorded.
+3. Roasting Loss = Green Input – Roasted Output. Loss % computed.
+4. If loss% within normal range → normal loss is absorbed into roasted cost. JE: **Dr Roasted Coffee WIP / Cr Green Coffee Inventory** (entire green cost transferred).
+5. If loss% outside normal range → flagged as **Possible Abnormal Loss**. Reason + approval required. After approval: JE separates normal vs abnormal portion. Abnormal portion: **Dr Abnormal Roasting Loss (expense) / Cr Green Coffee WIP**.
+6. Cost per roasted kg recomputed for valuation.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━7 Workflow G — Product Transformation / Blend
+
+1. Operator selects source batches/lots with quantities (e.g., Batch A 3 kg + Batch B 2 kg).
+2. System reserves source quantities.
+3. New Blend Batch (Batch C) is created with combined cost = sum of source costs (or + actual processing cost if non-zero).
+4. Accounting Event: **Dr New Blend Inventory / Cr Source Batch Inventory** — same total cost, no P&L impact.
+5. Tax category for the event = Out of Scope (internal, non-sale).
+6. The dashboard counts this as Transformation, **not** production. No revenue, no COGS, no inventory inflation.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━8 Workflow H — Qoyod Export (Phase 1: CSV/Excel; Phase 2: API)
+
+1. A posted journal entry (or batch of entries) becomes eligible for export when `tenant.export_to_qoyod = true` and Qoyod mapping is complete for all accounts in the entry.
+2. Export Job enqueued with a unique `external_export_key` derived from (`tenant_id`, `journal_entry_id`, `version`) — idempotent.
+3. Phase 1: a scheduled job exports rows to CSV/Excel; user downloads and uploads to Qoyod; user marks job as Exported with Qoyod reference.
+4. Phase 2: API push to Qoyod; response (success + Qoyod ID, or error) stored as `responseSnapshot`.
+5. On failure: status = Export Failed, error message stored, retry up to N times with backoff.
+6. Reconciliation Report compares ERP postings vs Qoyod reference for a period, flags differences.
+7. If a posted entry needs correction after export → Reversal JE + new JE; both exported; original is **never edited**.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — WORKFLOW / PROCESS LOGIC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━9 Workflow I — Period Closing
+
+1. Period close requested for month M.
+2. Pre-close checklist: review invoices, payments, advances, AR/AP aging, inventory valuation, COGS, waste, VAT, Qoyod export/reconciliation.
+3. Locked period: no new postings with dates within M; only adjustments via subsequent open period.
+4. Closed period: even adjustments require a higher-level override; closing entries are computed (P&L → Retained Earnings).
+5. Reports generated and snapshotted.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 7 — DATA REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Data Requirements
+
+Mandatory contextual fields on every accounting record:
+
+- `tenant_id`
+- `branch_id` (when applicable; allocations may be cost-center via `cost_center_id`)
+- `cost_center_id`
+- `created_by`, `updated_by`, `approved_by`, `posted_by`
+- `created_at`, `updated_at`, `submitted_at`, `approved_at`, `posted_at`, `exported_at`
+- `status` (entity-specific lifecycle)
+- `source_module`, `source_document_id`, `source_event_id`
+- `source_interface` (WEB | IOS | ANDROID | STATION | API | INTEGRATION | SYSTEM)
+- `currency_code`, `exchange_rate`, `transaction_currency_amount`, `base_currency_amount`
+- `tax_category_snapshot` (on invoice lines / journal lines that carry tax)
+- `external_export_key`, `qoyod_reference_id`, `export_status`, `payload_snapshot`, `response_snapshot`, `retry_count`, `error_message`
+- `audit_log_id`
+
+Per-entity highlights are defined in §15 (Data Model).
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 8 — INVENTORY IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Inventory Impact
+
+The accounting module is **the primary consumer** of inventory movement events, and many of its rules constrain inventory behavior:
+
+- **Goods Receipt** increases Raw Inventory at cost; the cost basis enters the costing engine (Weighted Average / FIFO / Standard depending on tenant setting).
+- **Raw Material Consumption** (e.g., green coffee into roasting) decreases Raw Inventory and increases WIP.
+- **Roasting Output** decreases Green/WIP and increases Roasted Coffee Inventory at the rolled cost (incl. normal loss absorption).
+- **Packaging Consumption** decreases Packaging Materials inventory and increases Finished Goods cost.
+- **Finished Goods Creation** records FG with full rolled cost.
+- **Calibration Waste / QC Testing Waste** decrease Roasted/FG Inventory and charge to dedicated waste accounts — **not** to general COGS.
+- **Transformation/Blend** moves cost from source to destination lot **without** changing total inventory value (no revenue, no COGS).
+- **Allocation/Reservation** does **not** change inventory value; it only marks quantity as committed.
+- **Shipping/Delivery/Sale** (per COGS policy) decreases FG Inventory and recognizes COGS.
+- **Inventory Variance** from physical count creates an adjustment posting that hits `5700 Inventory Variance / Shrinkage`; never silent.
+- **Negative inventory is disallowed by default** (`allowNegativeInventory = false`); allow-list per account type per tenant setting if ever needed.
+
+### Anti-double-count rules
+
+- Transformation must never be counted as new production in dashboards or yield reports.
+- Allocation is not COGS.
+- Customer advance receipt is not revenue.
+- Returned-from-customer inventory increases FG but does not retroactively erase original COGS unless the sale is fully reversed via Credit Note.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 9 — ACCOUNTING / COSTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Accounting / Costing Impact
+
+This module **is** the accounting layer; everything in §6, §8, §11, §12, §13, §14, §15 (waste), §16, §17, §18 is accounting impact. Highlights:
+
+- **Inventory valuation method** is tenant-configurable: Weighted Average (default), FIFO, Standard Cost. The method is **fixed once postings exist**; switching methods retroactively is disallowed and requires a controlled migration (out of Phase 1 scope).
+- **COGS policy** is tenant-configurable per channel (B2B: OnShipping or OnDelivery; POS: OnSale; Online: OnFulfillment/OnShipping).
+- **Overhead allocation** is **disabled in Phase 1** (Direct Cost Only). Phase 2 enables Production Overhead Allocation against Normal Capacity (not against actual low-volume runs, which would distort unit cost).
+- **Roasting Loss**: Normal absorbed into roasted cost; Abnormal expensed.
+- **Calibration / QC / Training Waste**: separate accounts (5500 / 5600 / 5900).
+- **Customer Advances** booked to liability `2410`, not revenue, until applied.
+- **VAT** is policy-driven via `TaxCategory` records; the rate is **never hardcoded**; snapshot is captured per invoice line.
+- **Branch accounting** defaults to Cost Center; later upgradable to Separate Accounts or Hybrid without data migration if the model carries `branch_id` and `cost_center_id` from day one.
+- **Period control**: postings outside the open period are rejected.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 10 — PERMISSIONS / RBAC CONSIDERATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Permissions / RBAC Considerations
+
+Suggested permission set (extends the file's list):
+
+| Permission | Description |
+|---|---|
+| `accounting.settings.view` / `accounting.settings.manage` | Tenant accounting settings |
+| `accounting.coa.view` / `accounting.coa.manage` | Chart of Accounts |
+| `accounting.taxCategory.view` / `accounting.taxCategory.manage` | Tax Categories |
+| `accounting.journal.create` / `.submit` / `.approve` / `.post` / `.reverse` | Journal lifecycle |
+| `accounting.salesInvoice.create` / `.submit` / `.approve` / `.post` / `.creditNote` | Sales invoice lifecycle |
+| `accounting.purchaseInvoice.create` / `.approve` / `.post` / `.debitNote` | Purchase invoice lifecycle |
+| `accounting.receipt.create` / `.post` | Customer receipts |
+| `accounting.payment.create` / `.approve` / `.post` | Supplier payments |
+| `accounting.advance.create` / `.apply` / `.refund` | Customer advances |
+| `accounting.expense.create` / `.approve` / `.post` | Expenses |
+| `accounting.inventory.valuation.view` / `.adjust` | Inventory valuation actions |
+| `accounting.cogs.view` / `.policy.manage` | COGS visibility and policy |
+| `accounting.waste.calibration.view` / `.approve` | Calibration Waste |
+| `accounting.waste.qc.view` / `.approve` | QC Testing Waste |
+| `accounting.waste.training.view` / `.approve` | Training Waste |
+| `accounting.period.lock` / `.close` / `.reopen` | Period control |
+| `accounting.export.execute` / `.reconcile` | Qoyod export operations |
+| `accounting.approvalRules.manage` | Approval rule definitions (sensitive — higher role) |
+| `accounting.reports.view` / `.export` | Reports |
+| `accounting.auditLog.view` | Audit visibility |
+
+Hard rules:
+
+- Soft delete only for accounting records; never hard delete posted documents.
+- Approval rules themselves require a **higher** role to modify (prevent self-elevation).
+- Reversal requires explicit permission and a mandatory reason.
+- Period reopen is restricted to a top-level role; every reopen is alerted to all admins.
+- `accounting.settings.manage` is **not** the same as `accounting.approvalRules.manage`; they are separate to prevent a single admin from disabling the approval system silently.
+- Tenant Owner cannot bypass approval thresholds for sensitive operations (reversal, period close) — even owners post through the workflow; this prevents a single compromised account from undoing history.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Backend / API Readiness Review
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Backend services
+
+- `AccountingSettingsService` — tenant-scoped settings (CRUD with audit, version history).
+- `ChartOfAccountsService` — tenant CoA, parent/leaf, allowPosting, Qoyod mapping.
+- `TaxCategoryService` — tenant tax categories; snapshot generator.
+- `FiscalPeriodService` — open / lock / close lifecycle; period lookup by date.
+- `JournalEntryService` — draft, submit, approve, post, reverse; balance validation; period validation; debit=credit validation.
+- `AccountingEventBus` — receives operational events; dispatches to translators; persists event log.
+- `AccountingEventTranslatorRegistry` — one translator per operational event type (GoodsReceipt, RoastingOutput, Calibration, QCTest, Shipment, Invoice, etc.).
+- `SalesInvoiceService` / `PurchaseInvoiceService` / `ReceiptService` / `PaymentService` / `ExpenseService` — invoice and payment lifecycle.
+- `CustomerAdvanceService` — advance lifecycle and application.
+- `InventoryValuationService` — costing engine (WAvg / FIFO / Standard); cost-layer maintenance; revaluation jobs.
+- `COGSService` — COGS posting per policy and channel.
+- `WasteAccountingService` — Calibration / QC / Training / Abnormal Loss / Variance.
+- `TransformationAccountingService` — cost-preserving inventory move.
+- `ApprovalEngine` — rule evaluator (role, user, amount, doc type, branch, vendor/customer, risk flag, overdue, non-standard tax).
+- `QoyodExportService` — queue, mapping, idempotency, retries, payload/response store.
+- `ReconciliationService` — ERP vs Qoyod, POS vs ERP, inventory vs ledger.
+- `ReportingService` — Trial Balance, GL, P&L, Balance Sheet, AR/AP Aging, VAT, Inventory Valuation, COGS, Waste, Reconciliation.
+- `AuditLogService` (shared) — append-only.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 APIs (representative)
+
+- `/accounting/settings` (GET/PATCH)
+- `/accounting/coa` (GET/POST/PATCH/DELETE-soft) with mapping endpoints
+- `/accounting/tax-categories` (CRUD)
+- `/accounting/fiscal-periods` (list, lock, close, reopen)
+- `/accounting/journals` (draft, submit, approve, post, reverse, get)
+- `/accounting/sales-invoices` (CRUD, post, credit-note)
+- `/accounting/purchase-invoices` (CRUD, post, debit-note)
+- `/accounting/receipts`, `/accounting/payments`, `/accounting/expenses`
+- `/accounting/advances` (create, receive, apply, refund)
+- `/accounting/inventory/valuation` (read, adjust)
+- `/accounting/cogs` (per-policy execution, query)
+- `/accounting/waste/calibration`, `/qc`, `/training`, `/abnormal-loss`
+- `/accounting/transformations` (cost-preserving moves; read)
+- `/accounting/approvals` (queue, decide, override with reason)
+- `/accounting/export/qoyod` (enqueue, status, retry, reconciliation)
+- `/accounting/reports/*` (each report)
+- `/accounting/audit-log` (filtered)
+
+All routes versioned (`/v1/...`), tenant scope from session, never from body.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Server-side validations
+
+- Debit=Credit on every JE.
+- Account is leaf and `allowPosting`.
+- Period is Open for the transaction date.
+- Tax category exists for tenant and is Active.
+- Mapping exists for Qoyod export if export enabled.
+- Approval thresholds evaluated against `ApprovalRule` set for the tenant.
+- Advance can only be applied up to its remaining balance.
+- Reversal links to original JE; cannot reverse an already-reversed JE.
+- Settings changes that affect historical computations (costing method, COGS policy) are blocked when historical postings exist; require a controlled "policy change" process.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 Database transactions
+
+Each of the following must be a single ACID transaction (or saga with compensations if cross-service):
+
+- Posting a JE: write JE + lines + balance update + accounting event linkage + audit log.
+- Posting an invoice: write invoice + lines + JE + AR/AP update + audit log.
+- Recording a receipt: write receipt + JE + invoice payment-status update + advance update if applicable + audit log.
+- Applying an advance: validate available balance + write application + JE + invoice update + audit log.
+- Roasting output: inventory move (green→roasted) + cost rollup + JE + audit log.
+- Waste records: inventory deduction + waste record + JE + audit log.
+- Transformation: source consumption + destination creation + cost copy + JE + audit log.
+- Qoyod export attempt: status change + payload/response snapshots + retry counter + audit log.
+- Period close: lock flag + closing entries + report snapshots + audit log.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 Frontend-only logic that would be risky
+
+- Computing VAT in the browser and trusting it on submit.
+- Computing invoice totals client-side without re-validation.
+- Deciding "advance covers the invoice" client-side without server reapplication.
+- Hiding approval steps via UI without server enforcement.
+- Choosing tax category in the UI without verifying server-side that the customer/transaction qualifies (especially Zero-rated/Exempt).
+- Picking the COGS policy at posting time from the client.
+- Storing the chart of accounts in localStorage and trusting it.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — BACKEND / API READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━6 Failure scenarios
+
+- Operational event commits but Accounting Event fails → operation must roll back, or be queued for reliable retry; never leave the system in a state where stock moved but no JE exists.
+- Qoyod API down → export job retries; user sees Export Failed; manual fallback (CSV) available.
+- Approval rule misconfiguration creates an unapprovable invoice → tenant admin override path (with audit) is required to unblock.
+- Two concurrent receipts on the same invoice → row-level lock; partial payments must be serializable.
+- Tax category deleted/disabled after invoices exist → blocked at the master service; only deactivation is allowed and only for new invoices.
+- Mapping missing during export → export halts for that JE; user gets a clear actionable error; never silent skip.
+- Negative balance attempt on advance application → rejected with explicit error.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 12 — SAAS READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ SaaS Readiness Review
+
+- **Tenant scope is end-to-end.** Settings, CoA, tax categories, fiscal periods, mappings, journals, invoices, receipts, payments, expenses, advances, waste records, reports — all carry `tenant_id`. RLS or query filter enforced.
+- **Per-tenant chart of accounts**: each tenant gets a template-cloned CoA on tenant creation; tenants may extend/customize but not rename system-defined parent codes.
+- **Per-tenant defaults** (per source file §30): costing method, COGS policy, branch mode, credit policy, currency, tax category, waste treatment, export settings. Stored in `AccountingSettings`.
+- **Subscription gating**: Phase 2 features (POS integration, Qoyod API, advanced branch accounting, multi-currency, SaaS tenant accounting reports) should be plan-gated via feature flags. ZATCA invoice emission may also be plan-gated.
+- **Cross-tenant leak risks**:
+  - Account ID collisions across tenants → mitigated by `(tenant_id, code)` unique constraints, never `code` global.
+  - Approval rules from one tenant accidentally applied to another → rule lookup must be tenant-scoped.
+  - Qoyod mapping mixing → mapping table is tenant-scoped; Qoyod credentials are tenant-scoped.
+  - Reports must filter by tenant; "global" admin reports require a platform role and explicit cross-tenant header.
+- **Per-tenant numbering sequences**: invoice numbers, JE numbers, advance numbers — never global. Format configurable per tenant within ZATCA constraints.
+- **Multi-tenant Qoyod credentials**: credentials encrypted at rest; per tenant; never logged in payload snapshots in plaintext.
+- **Tenant configuration required**:
+  - Fiscal year start
+  - Costing method
+  - COGS policies per channel
+  - Tax categories + default
+  - Branch list and branch accounting mode
+  - Approval rules
+  - Customer credit policy
+  - Qoyod mapping + credentials (if used)
+  - Account map per accounting event type (e.g., what account is "Roasted Coffee Inventory" for this tenant)
+- **Tenant migration / cloning**: when a new tenant is created, system templates the CoA, tax categories, and approval rule starter set. Never copy data from another tenant.
+- **Tenant onboarding for accounting**: explicit "Accounting Setup Wizard" must be passed before the tenant can post anything. This prevents tenants from posting with missing mappings.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — WEB / iOS / ANDROID / STATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Web / iOS / Android / Station Readiness Review
+
+| Surface | Accounting workflows | Notes |
+|---|---|---|
+| Web (back-office) | Full accounting module: CoA, JE, invoices, receipts, payments, advances, expenses, period close, reports, settings, approvals, Qoyod export | Primary surface |
+| iOS / Android | Read-most: invoice list, receipt status, AR/AP aging summaries, dashboard KPIs, approval inbox (approve/reject pending invoices/payments/journal entries), notifications | No JE drafting on mobile in Phase 1 |
+| Station screens | Calibration Waste entry (Barista screen), QC Testing Waste entry (QC screen), POS sale (Café screen), Receipt at branch counter | These generate accounting events but do not expose CoA/JE UI |
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — WEB / iOS / ANDROID / STATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Permission consistency
+
+The same authorization is enforced regardless of surface. A user without `accounting.purchaseInvoice.approve` cannot approve from any device.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — WEB / iOS / ANDROID / STATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 Source-interface logging
+
+Every accounting event records `source_interface`. Investigators can answer "was this JE generated by a POS sale from a station screen or a manual entry from web?".
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — WEB / iOS / ANDROID / STATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Notifications
+
+- New invoice posted to your AR.
+- Payment received from customer.
+- Approval pending (invoice, payment, JE, period close).
+- Overdue customer alert.
+- Roasting loss out of range.
+- Calibration / QC waste above threshold.
+- Qoyod export failed.
+- Reconciliation mismatch found.
+- Period close completed.
+
+Channels: in-app web, iOS push, Android push, email; SMS for critical only.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — WEB / iOS / ANDROID / STATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 Offline / poor connectivity
+
+- Calibration and QC waste entry on station screens may need a short-window offline buffer (shots recorded locally, synced when online). Final accounting event is created only on sync; the client never posts JEs.
+- POS sales on station require offline buffering for café reliability; accounting events created on sync, with audit of `created_offline = true` and `synced_at`.
+- Mobile approval workflows should not allow approval offline (decisions need fresh server state).
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — WEB / iOS / ANDROID / STATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 Frontend-only logic risks (restated)
+
+- Tax computed only on the client is **forbidden**.
+- Approval threshold checks only on the client are **forbidden**.
+- Period-open check only on the client is **forbidden**.
+- COGS recognition triggered by the client is **forbidden** — server emits on event policy.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Integration Readiness Review
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Qoyod (Qyood) — current external accounting platform
+
+- Transitional integration. ERP is master of accounting logic; Qoyod is the official invoice source today and the export target.
+- Phase 1: CSV/Excel export; Phase 2: API push; Phase 3: optional two-way sync + reconciliation.
+- Mappings: ERP Account ↔ Qoyod Account, ERP VAT ↔ Qoyod Tax, ERP Customer ↔ Qoyod Customer, ERP Supplier ↔ Qoyod Supplier, ERP Product ↔ Qoyod Product, ERP Payment Method ↔ Qoyod Bank/Cash, ERP Branch/Cost Center ↔ Qoyod Cost Center.
+- Idempotency: `external_export_key` is `{tenant_id, journal_entry_id, version}`. Same key must not produce two Qoyod records.
+- Failure handling: explicit Export Failed state, retry with backoff, manual re-export by permission.
+- Reconciliation: Qoyod Reconciliation Report compares ERP postings vs Qoyod-side records for a period; flagged differences require explanation.
+- Decommissioning Qoyod: when ERP becomes the official invoice source, Qoyod export transitions from "required" to "optional" by feature flag without breaking historical data.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 POS Integration
+
+- Phase 2+. Daily Sales Import or API integration.
+- Data: sales, payment methods, VAT, discounts, returns, inventory deduction, COGS at sale, daily summary, bank/cash reconciliation.
+- Duplicate-import prevention: each POS sale carries a stable `external_id`; ERP rejects duplicates per `(tenant_id, pos_provider, external_id)`.
+- Tenant-scoped credentials; per-branch device-level configuration possible.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Payment Gateways (future)
+
+- Online card / Apple Pay / Mada / STC Pay integrations. Settlement reports become bank reconciliation inputs. Payment gateway fees post to `6900 Bank Fees`.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 Shipping Providers (future)
+
+- Shipping cost recognition feeds `6500 Delivery / Shipping Expense` or COGS depending on whether shipping is billed to customer.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 ZATCA (Saudi e-invoicing)
+
+- Phase 3 ERP becomes the e-invoice issuer. The schema must already carry: `zatca_uuid`, `qr_code`, `xml_hash`, `invoice_type`, `tax_exemption_reason`, `previous_invoice_hash`, etc. These columns are populated by Qoyod today and by ERP later.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━6 Devices
+
+- Weight scales (for goods receipt, roasting input/output, packaging): readings feed inventory; accounting events flow from those inventory moves.
+- Roasting machines, packaging machines: same pattern.
+- Device readings are never trusted blindly: variance checks against expected values, with abnormal flagged for approval.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━7 Tenant-specific integration settings
+
+- Qoyod credentials, Qoyod URL/region, export schedule (real-time vs nightly), POS provider per branch, payment gateway selection, ZATCA toggle, multi-currency on/off, supplier currency support.
+- All stored in `TenantIntegrationSetting` and `IntegrationCredential` (encrypted).
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — INTEGRATION READINESS REVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━8 Security risks
+
+- Qoyod API keys leakage → encrypt at rest; rotate; never log plaintext; redact in payload snapshots.
+- Replay of export jobs → idempotency via `external_export_key`.
+- POS spoofing → POS device authentication required; per-device credentials.
+- Manual override of failed export without audit → require permission + reason.
+- Cross-tenant Qoyod credential mix-up → tenant scope on every credential read; tests must cover this case.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — DASHBOARD / REPORTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Dashboard / Reporting Impact
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — DASHBOARD / REPORTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Phase 1 reports
+
+Trial Balance, General Ledger, P&L, Balance Sheet, Sales Report, Purchase Report, VAT Report, AR Aging, AP Aging, Supplier Statement, Customer Statement, Customer Advances Report, Expense Report, Cash/Bank Movement, Qoyod Export Report.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — DASHBOARD / REPORTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 Phase 2 reports
+
+Inventory Valuation, COGS Report, Gross Margin by Product, Profit by Branch/Cost Center, Roasting Yield, Roasting Loss, Calibration Waste, QC Testing Waste, Inventory Variance, Product Profitability, Sales Rep Commissions, POS Reconciliation, Qoyod Reconciliation.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — DASHBOARD / REPORTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Phase 3 reports
+
+Cash Flow, Budget vs Actual, Product Full Cost, Branch P&L, Customer Profitability, Multi-currency reports, SaaS tenant reports.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — DASHBOARD / REPORTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 Dashboard counting rules
+
+- **Transformation/Blend is NOT counted as production** in any production KPI.
+- **Allocation is NOT shipped quantity.**
+- **Customer advance is NOT revenue.**
+- **Calibration / QC / Training waste are NOT COGS**; they roll up to Operational Waste KPI separately.
+- **Abnormal Roasting Loss** is separate from Normal Roasting Loss in dashboards.
+- **POS sales** flow to revenue once reconciled, never on raw event import alone.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — DASHBOARD / REPORTING IMPACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 Risk to avoid
+
+Reporting must derive figures from the **ledger / accounting events**, never from secondary caches that can drift. If a cache is used for performance, a daily reconciliation job verifies it against the ledger.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — DEVELOPER IMPLEMENTATION NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Developer Implementation Notes
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — DEVELOPER IMPLEMENTATION NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Suggested entities
+
+(Extends the file's list; relationships in parentheses.)
+
+- `AccountingSettings` (tenant_id PK)
+- `Account` (`id, tenant_id, code, name_ar, name_en, parent_id?, type, allow_posting, currency, is_active, qoyod_account_id?`)
+- `TaxCategory` (`id, tenant_id, code, name_ar, name_en, rate, category_type, is_default, is_active, requires_reason, requires_approval, requires_supporting_document, zatca_tax_category_code`)
+- `FiscalPeriod` (`id, tenant_id, year, period_no, start_date, end_date, status [Open|Locked|Closed]`)
+- `CostCenter` / `Branch`
+- `JournalEntry` (`id, tenant_id, entry_no, entry_date, period_id, type [Manual|Auto|Reversal|Adjustment|Opening|Closing], status, source_module, source_document_id, reverses_entry_id?, total_debit, total_credit, currency, exchange_rate, posted_at, posted_by, ...`)
+- `JournalEntryLine` (`id, je_id, account_id, debit, credit, branch_id?, cost_center_id?, tax_category_snapshot_id?, description, ...`)
+- `SalesInvoice` (header) + `SalesInvoiceLine`
+- `PurchaseInvoice` + `PurchaseInvoiceLine`
+- `Receipt` (customer payment) — links to Invoice / Advance
+- `Payment` (supplier payment) — links to PurchaseInvoice
+- `Expense` — links to Account / Supplier / Branch
+- `CustomerAccount` (AR sub-ledger) / `SupplierAccount` (AP sub-ledger)
+- `CustomerAdvance` (`status: Requested | Received | AdvanceInvoiceIssued | PartiallyApplied | FullyApplied | Refunded | Cancelled`)
+- `AdvanceApplication` (advance → invoice link with amount)
+- `AdvanceInvoice` (prepayment invoice)
+- `InventoryValuation` (per item per branch — derived; persisted for reporting snapshot)
+- `InventoryCostLayer` (FIFO layers per item per branch — when FIFO enabled)
+- `InventoryAccountingEvent` (`id, tenant_id, source_module, source_document_id, event_type, occurred_at, payload, je_id?`)
+- `WasteRecord` (`id, tenant_id, type [Calibration|QC|Training|AbnormalRoastingLoss|Variance], qty, cost, related_lot_id, je_id, ...`)
+- `RoastingBatchCost` (rolled cost per batch)
+- `CalibrationWasteRecord` (shots, dose, machine, grinder, bean, lot)
+- `QCTestingWasteRecord` (test type, samples, dose, batch, lot, complaint_id?)
+- `CurrencyRate` (date, from, to, rate)
+- `ApprovalRule` (`id, tenant_id, scope_type, scope_id?, doc_type, role_id?, user_id?, amount_min?, amount_max?, requires_reason, escalation_role_id?`)
+- `ApprovalRequest` / `ApprovalLog`
+- `QoyodExportRecord` (`id, tenant_id, je_id, external_export_key, status, payload_snapshot, response_snapshot, qoyod_reference_id?, retry_count, error_message, exported_at, exported_by`)
+- `QoyodMapping` (per tenant per entity type)
+- `ReconciliationRecord`
+- `AuditLog` (shared)
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — DEVELOPER IMPLEMENTATION NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 Status lifecycles
+
+- `JournalEntry`: Draft → Submitted → Approved → Posted → (Reversed)
+- `SalesInvoice` / `PurchaseInvoice`: Draft → Submitted → Approved → Posted → (Partially Paid | Paid | Voided via Credit/Debit Note)
+- `CustomerAdvance`: Requested → Received → AdvanceInvoiceIssued? → PartiallyApplied → FullyApplied | Refunded | Cancelled
+- `FiscalPeriod`: Open → Locked → Closed (Reopen allowed only by top-level role with audit)
+- `QoyodExportRecord`: NotExported → ReadyForExport → Exported | ExportFailed → Reconciled | ReExportRequired | Cancelled
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — DEVELOPER IMPLEMENTATION NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Background jobs
+
+- Roasting cost rollup (after batch closure).
+- COGS recognition on shipping/delivery/closure per policy.
+- Daily AR/AP aging refresh.
+- Qoyod export queue worker (with backoff).
+- Reconciliation snapshot generation.
+- Period-end report snapshots.
+- Inventory revaluation (when re-costing events occur).
+- Customer credit status refresh.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — DEVELOPER IMPLEMENTATION NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━4 Event-driven hooks
+
+`AccountingEventEmitted`, `JournalEntryPosted`, `InvoicePosted`, `PaymentReceived`, `AdvanceApplied`, `WasteRecorded`, `RoastingLossOutOfRange`, `PeriodLocked`, `PeriodClosed`, `ExportFailed`, `ReconciliationMismatch`.
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — DEVELOPER IMPLEMENTATION NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━5 Multi-tenant query filtering
+
+Mandatory tenant filter on every read and write. Row-Level Security recommended at the database level so application bugs cannot cause leaks. Composite uniqueness keys include `tenant_id` everywhere (account code, invoice number, JE number).
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 17 — EDGE CASES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Edge Cases
+
+- A customer pays more than the invoice → Overpayment status; system creates a customer credit (or refund) record, never a silent rounding.
+- A customer pays less than the invoice → Partially Paid; aging clock continues.
+- Customer advance refund after partial application → only the unapplied portion can be refunded; applied portion can only be reversed by reversing the original invoice/credit note.
+- Same supplier invoice received twice → unique constraint on `(tenant_id, supplier_id, supplier_invoice_number, invoice_date)` rejects duplicates.
+- Goods Receipt without Purchase Invoice → accrued liability `GR/IR` (Goods Received / Invoice Received) account; invoice later clears the accrual.
+- Purchase Invoice arrives before Goods Receipt → allowed for service invoices; for inventory, hold for matching.
+- Roasting Loss < 0 (output > input) → physically impossible; reject and flag for investigation.
+- Calibration session with 0 shots → cannot record waste (system should reject empty session).
+- QC test for a batch that has been fully shipped → must allow (complaint investigation) but waste is deducted from a separately tracked retained-sample account, not FG.
+- Transformation that increases total weight (e.g., absorbing moisture) → flagged as anomaly; explicit override required; cost is not increased.
+- POS sale arrives backdated to a Locked period → blocked; queued for adjustment in the open period.
+- Tax category changed at master → historical invoices retain snapshot; new invoices use new rate.
+- Customer becomes overdue mid-order: if policy = AlertOnly, order proceeds with alert; if BlockOrders, order requires approval to continue.
+- Approval rule deleted while a request is pending → request is invalidated and reassigned per fallback rule; never auto-approved silently.
+- Multi-currency invoice in Phase 1: the source explicitly says SAR-only in Phase 1, but the schema carries currency fields. The service must reject non-SAR invoices until multi-currency is enabled, never store with implicit currency.
+- Reversal of a JE that has been exported to Qoyod: ERP posts Reversal JE; Qoyod export of the reversal is required; the original Qoyod entry is **not** mutated.
+- Period close with pending approvals → block close; show outstanding items.
+- Negative stock attempt via waste record → reject (default policy).
+- POS daily summary differs from imported sales → reconciliation report flags; manual adjustment with reason.
+- Same operational event causes accounting event twice due to retry → idempotency key on `source_document_id + event_type + version` rejects the second.
+- User changes inventory costing method while history exists → blocked; requires a controlled migration outside Phase 1.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 18 — QUESTIONS / AMBIGUITIES / RISKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Questions / Ambiguities / Risks
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 18 — QUESTIONS / AMBIGUITIES / RISKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━1 Questions to confirm
+
+| # | Question | Why it matters |
+|---|---|---|
+| Q1 | When ERP becomes the official invoice source (Phase 3), is the existing Qoyod history migrated into ERP, or treated as historical-only? | Affects schema, reporting continuity, and reconciliation rules. |
+| Q2 | Is partial-currency support (e.g., supplier in USD, base in SAR) needed in Phase 1 at all, or strictly SAR-only? | The schema carries currency fields but the source says SAR only — a mid-Phase-1 USD purchase will need a decision. |
+| Q3 | Are ZATCA Phase-2 e-invoicing fields (UUID, QR, XML hash, previous hash chain) populated by Qoyod and stored in ERP today, or generated by ERP from day one in shadow mode? | Determines whether ERP can swap roles cleanly in Phase 3. |
+| Q4 | Does the tenant ever own multiple legal entities (e.g., café and roastery as separate companies for tax)? | Affects "tenant vs company" modeling — current design treats one tenant = one legal entity. |
+| Q5 | Are café/POS sales recognized in the same `SalesInvoice` table as B2B, or in a separate `POSReceipt` table aggregated daily? | The source mentions daily POS summaries; the JE pattern differs. |
+| Q6 | What is the exact rule for "Normal Capacity" used in Phase 2 overhead allocation? Annual budget? Trailing 12 months? Production plan? | Without a clear rule, overhead allocation will be inconsistent. |
+| Q7 | Are roasting losses ever **negative-cost-impacting** (e.g., shrinkage in Green inventory that occurred outside roasting)? | The source treats Roasting Loss strictly during roasting; storage shrinkage is a separate Variance event — confirm. |
+| Q8 | Can a single Customer Advance cover multiple final invoices (split across orders)? | The schema supports it via `AdvanceApplication` but the workflow assumes one advance → one final invoice. |
+| Q9 | Is there an Opening Balance migration plan from Qoyod when ERP goes live? | Without it, Phase 1 will start with zero balances and reports will be misleading. |
+| Q10 | Does the customer credit policy "RequireApproval" apply to both new orders and continued production on existing orders? | Affects approval routing logic. |
+| Q11 | Will the system support draft invoices visible to customers (quotations vs invoices) or are quotations a separate document? | Affects the sales workflow and accounting impact. |
+| Q12 | Should retained QC sample inventory be a tracked sub-account separate from FG (per edge case above)? | Affects inventory model and reporting. |
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 18 — QUESTIONS / AMBIGUITIES / RISKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━2 Risks (classified)
+
+| ID | Risk | Class | Recommended fix |
+|---|---|---|---|
+| R1 | Operational event commits without Accounting Event due to non-transactional emit | **Critical** | Outbox pattern: write the operational record and the accounting event in the same DB transaction; a separate worker dispatches the event. Eliminates inconsistency. |
+| R2 | Qoyod export keys not idempotent → duplicate entries in Qoyod | **Critical** | Enforce unique `external_export_key`; both sides (ERP queue dedup + Qoyod reference check before retry). |
+| R3 | Silent edit after posting (e.g., dev shortcut admin tool, direct DB update by support engineer) | **Critical** | Database triggers reject UPDATE on posted JE lines; only Reversal-JE creation is permitted; audited. |
+| R4 | Costing method change mid-history corrupts valuation | **High** | Block change when postings exist; require a documented migration plan + period close + reopen with audit. |
+| R5 | Tax rate hardcoded in any service or report | **High** | Code review rule + automated test: search for `15`, `0.15`, "VAT" literals; all rate uses must go through `TaxCategoryService`. |
+| R6 | Approval rule misconfigured → no one can approve → operations blocked | **High** | Fallback rule (e.g., Tenant Owner always last-resort) + admin "stuck approvals" dashboard. |
+| R7 | Per-tenant CoA collision when codes mismatch with Qoyod mapping | **High** | Mapping completeness check before enabling export; visible "missing mapping" alert. |
+| R8 | Branch accounting upgrade (CostCenter → SeparateAccounts) breaks historical reports | **High** | Carry `branch_id` and `cost_center_id` on every line from day one; upgrade is a settings flip that affects only new postings unless the tenant requests retroactive split (controlled migration). |
+| R9 | Customer Advance applied twice due to race condition | **High** | Row-level lock on the advance; check `remaining_amount` inside transaction; idempotency on application creation. |
+| R10 | POS sale duplicated on retry import | **High** | `(tenant_id, pos_provider, external_id)` unique constraint; dedup before posting. |
+| R11 | Reversal of an exported JE creates Qoyod desync | **High** | Reversal must also export; explicit reconciliation flag for reversed entries; do not edit original. |
+| R12 | Period reopen allowed too easily | **Medium** | Highest role only; mandatory reason; alert to all admins; audit. |
+| R13 | Calibration / QC waste used to "hide" abnormal roasting loss | **Medium** | Hard separation in code; periodic anomaly report compares waste category trends vs production volume. |
+| R14 | Transformation/Blend used to inflate inventory by entering more output than input | **Medium** | Enforce output qty ≤ input qty (within tolerance); excess requires override with reason; never auto-creates revenue. |
+| R15 | Customer advance treated as revenue in dashboards | **Medium** | Dashboard derives revenue strictly from `Revenue` accounts (4xxx); advances live in `2410` and are not summed into revenue. |
+| R16 | Multi-tenant query missing tenant filter | **Critical** | Row-Level Security in DB; every query goes through tenant-scoped repository; static analysis check. |
+| R17 | Approval thresholds editable by the same user who needs to be approved | **Critical** | Separation: `accounting.approvalRules.manage` requires a strictly higher role than the approval being modified; tested invariant. |
+| R18 | ZATCA fields not populated during transition → migration to ERP-issued invoices becomes painful | **High** | Capture ZATCA fields from Qoyod responses and store on ERP invoices today, even if Qoyod is the issuer. |
+| R19 | Period-close report snapshots not stored → past reports become unreproducible after later corrections | **High** | Snapshot reports at close time; later "corrected" reports are separate documents. |
+| R20 | Qoyod credentials stored in plaintext or logged in payload snapshots | **Critical** | Encrypt credentials; redact sensitive fields from payload/response snapshots; key rotation policy. |
+| R21 | Negative inventory allowed by misconfiguration → COGS computed against nothing | **High** | Default `allowNegativeInventory = false`; enabling requires platform-admin permission + per-account scope. |
+| R22 | Customer credit policy AlertOnly silently turned off, allowing huge overdue exposure | **Medium** | Settings change is audited; weekly digest to Tenant Owner about overdue exposure. |
+| R23 | Approval log appended to but readable cross-tenant | **Critical** | AuditLog and ApprovalLog tenant-scoped; tested invariant. |
+| R24 | Reports computed from caches that diverge from ledger | **Medium** | Nightly reconciliation; cache invalidation on every JE post; reports include `as_of` timestamp. |
+| R25 | A B2C customer's accumulated café POS sales are not aggregated into a customer account for CRM | **Low** | Decide whether POS is anonymous or customer-linked. If linked, ensure AR sub-ledger handles many small entries efficiently. |
+| R26 | Sales Rep commission accruals not modeled | **Medium** | Add explicit accrual logic in Phase 2; otherwise commissions ride below the line and distort margin. |
+| R27 | Inventory revaluation when costing method or cost layers shift causes mass JE posting that may cross period boundaries | **High** | Revaluations always post on a single dated entry within the current open period; older periods are never touched. |
+
+#━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 18 — QUESTIONS / AMBIGUITIES / RISKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━3 Ambiguities to confirm
+
+- Whether Roasting Loss "normal range" defaults of 12–18% are tenant-overridable per bean/origin/profile (the source implies yes — confirm enforcement details).
+- Whether `silentEditAfterPosting = false` means "no edits ever" or "no edits without reversal trail" — the rewrite assumes the latter.
+- Whether `internationalSuppliersPhase1 = false` blocks recording such a supplier at all or only prevents transactions — assumed: record allowed, transactions blocked until multi-currency enabled.
+- Whether `Cash before production` and `Advance before production` are the same workflow with different timing semantics or distinct paths — assumed: same workflow, different settings.
+- Whether `Café/POS COGS On Sale` applies even when POS is offline-buffered (i.e., COGS dated to event time, not sync time) — assumed: dated to event time with `created_offline` flag.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 19 — ARTIFACT OUTPUT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Artifact Output Requirement
+
+- Text file artifact: `Rewritten_Technical_Document_File_02_Accounting_Module.txt` (this file).
+- Word artifact was **explicitly skipped** at user request for this file.
+- Content preserved in working context for the future master document.
+
+---
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 20 — RECOMMENDED NEXT STEP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Recommended Next Step
+
+Before moving to the next file, please confirm or decide on the following items so they can be locked into the design:
+
+1. **Q1, Q3, Q9** — Migration / opening balance / ZATCA-shadow strategy at the Qoyod → ERP cutover. Without a documented plan, Phase 3 is risky.
+2. **Q4** — Whether one tenant = one legal entity, or whether one tenant can hold multiple legal entities. Affects core schema.
+3. **Q5** — POS sales recognition model (per-sale invoice vs daily summary). Affects 100s of database rows per day in the café flow.
+4. **R1 (Critical)** — Confirm the outbox-pattern requirement so operational and accounting writes are atomic.
+5. **R3 (Critical)** — Confirm that database-level constraints will prevent silent edits on posted records, not only application code.
+6. **R16 (Critical)** — Confirm Row-Level Security or equivalent multi-tenant enforcement at the database layer.
+7. **R17 (Critical)** — Confirm separation between `accounting.settings.manage` and `accounting.approvalRules.manage`, and that the latter requires a strictly higher role.
+8. **R18 (High)** — Confirm ZATCA fields will be captured into ERP today from Qoyod responses (shadow capture).
+9. **R20 (Critical)** — Confirm credential encryption and payload redaction strategy for Qoyod and any future integration.
+10. **R27 (High)** — Confirm that inventory revaluation JEs always post in the open period only, never retroactively.
+11. **Default policy lock-in** — Confirm the Phase-1 defaults in §30 of the source as binding: Weighted Average, COGS OnShipping/OnDelivery for B2B, OnSale for POS, CostCenterOnly, AlertOnly credit, SAR, VAT15%, etc.
+12. **Per-tenant Accounting Setup Wizard** — Confirm we treat tenant onboarding for accounting as a hard gate (cannot post until wizard complete).
+
+Once these decisions are locked, we can move to the next file with confidence that the accounting module will not collapse later due to a deferred policy decision.
+
+---
+
+I have finished rewriting this file.
+I have saved the rewritten version as a Text file in artifacts (Word skipped per your request).
+Please review and confirm if I should continue to the next file.

@@ -335,6 +335,79 @@ async function main() {
     await prisma.coffeeProduct.create({ data: p });
   }
 
+  // ── Accounting S0 foundation ────────────────────────────────────────────────
+  // setupComplete stays false here deliberately — there is no setup wizard in S0, so
+  // posting must remain blocked until an explicit, approved setup flow exists.
+  await prisma.accountingSettings.create({
+    data: { id: "singleton", baseCurrency: "SAR", exportToQoyod: false, setupComplete: false },
+  });
+
+  // Minimal starter Chart of Accounts — deliberately not the full Phase 2 waste/COGS
+  // chart, since inventory valuation, COGS, and waste accounting are out of S0 scope.
+  // Includes one parent/leaf pair per top-level group so "no posting to parent" is testable.
+  const coaGroups: { parent: { code: string; nameEn: string; type: string }; children: { code: string; nameEn: string; type: string }[] }[] = [
+    {
+      parent: { code: "1000", nameEn: "Assets", type: "ASSET" },
+      children: [
+        { code: "1010", nameEn: "Cash", type: "ASSET" },
+        { code: "1100", nameEn: "Accounts Receivable", type: "ASSET" },
+        { code: "1300", nameEn: "VAT Input", type: "ASSET" },
+      ],
+    },
+    {
+      parent: { code: "2000", nameEn: "Liabilities", type: "LIABILITY" },
+      children: [
+        { code: "2010", nameEn: "Accounts Payable", type: "LIABILITY" },
+        { code: "2100", nameEn: "VAT Output", type: "LIABILITY" },
+        { code: "2410", nameEn: "Customer Advances", type: "LIABILITY" },
+      ],
+    },
+    {
+      parent: { code: "3000", nameEn: "Equity", type: "EQUITY" },
+      children: [{ code: "3900", nameEn: "Opening Balance Equity", type: "EQUITY" }],
+    },
+    {
+      parent: { code: "4000", nameEn: "Revenue", type: "REVENUE" },
+      children: [{ code: "4010", nameEn: "Sales Revenue", type: "REVENUE" }],
+    },
+    {
+      parent: { code: "5000", nameEn: "Expenses", type: "EXPENSE" },
+      children: [{ code: "5010", nameEn: "General Expense", type: "EXPENSE" }],
+    },
+  ];
+
+  for (const group of coaGroups) {
+    const parent = await prisma.account.create({
+      data: { ...group.parent, type: group.parent.type as never, allowPosting: false },
+    });
+    for (const child of group.children) {
+      await prisma.account.create({
+        data: { ...child, type: child.type as never, allowPosting: true, parentId: parent.id },
+      });
+    }
+  }
+
+  // Standard VAT 15% exists here as seed/reference data only — service logic must never
+  // hardcode this rate; it must always be read from this TaxCategory record.
+  await prisma.taxCategory.createMany({
+    data: [
+      { code: "STD15", nameEn: "Standard VAT", rate: 15, categoryType: "STANDARD", isDefault: true },
+      { code: "ZERO0", nameEn: "Zero-Rated", rate: 0, categoryType: "ZERO_RATED" },
+      { code: "EXEMPT", nameEn: "Exempt", rate: 0, categoryType: "EXEMPT" },
+      { code: "OOS", nameEn: "Out of Scope", rate: 0, categoryType: "OUT_OF_SCOPE" },
+    ],
+  });
+
+  await prisma.fiscalPeriod.create({
+    data: {
+      year: 2026,
+      periodNo: 6,
+      startDate: new Date("2026-06-01T00:00:00.000Z"),
+      endDate: new Date("2026-06-30T23:59:59.999Z"),
+      status: "OPEN",
+    },
+  });
+
   console.log("Seed completed successfully!");
 }
 

@@ -99,6 +99,52 @@ ALTER TABLE "FinishedGoodsLot" DROP CONSTRAINT IF EXISTS "FinishedGoodsLot_avail
 
 ---
 
+## 3a. Manual CHECK Constraints Embedded in a Migration File (Accounting S0)
+
+> **Status: APPLIED TO DEMO DB ONLY.** Applied via `npx prisma migrate deploy` against
+> the demo Neon endpoint as migration `20260626130557_add_accounting_s0_foundation`.
+> **Not applied to production.** Production deployment of this migration is a separate,
+> explicitly approved step and has not occurred.
+
+Unlike the five constraints in Section 3 (which were applied out-of-band against a
+live database via `prisma db execute` and exist in no migration file), the two
+constraints below were added by hand directly into a generated migration's SQL file
+*before* that migration was ever applied — the same technique, but tracked in version
+control from the start rather than reconciled after the fact.
+
+| Constraint name | Table | Rule |
+|---|---|---|
+| `JournalEntryLine_debit_credit_exclusive_positive` | `JournalEntryLine` | `(debit > 0 AND credit = 0) OR (debit = 0 AND credit > 0)` |
+| `FiscalPeriod_startDate_before_endDate` | `FiscalPeriod` | `startDate <= endDate` |
+
+**Why these are manual SQL constraints:** Prisma's schema language has no `@check`/`@@check`
+attribute (see Section 4 below). `JournalEntryLine_debit_credit_exclusive_positive` enforces,
+in one constraint, all four S0 ledger-line rules at once: debit ≥ 0, credit ≥ 0, the two are
+never both positive, and the two are never both zero — exactly one side of every journal line
+must be positive. `FiscalPeriod_startDate_before_endDate` prevents a fiscal period from ever
+being recorded with its end date before its start date.
+
+**Migration ownership:** Both constraints belong to
+`prisma/migrations/20260626130557_add_accounting_s0_foundation/migration.sql`, appended by
+hand after Prisma's auto-generated `CREATE TABLE`/`ADD CONSTRAINT` statements in that same
+file, immediately before the foreign key section ends.
+
+**They must not be removed silently.** If this migration is ever regenerated, edited, or
+squashed, both `ALTER TABLE ... ADD CONSTRAINT` statements must be preserved or reproduced —
+same rule as the five P0 constraints in Section 3. Removing either constraint would allow a
+journal line with negative amounts, both sides zero, both sides positive, or a fiscal period
+with an inverted date range to be written directly into the ledger, bypassing the
+application-layer checks in `src/lib/accounting/validation.ts`.
+
+Rollback SQL (if ever needed, only after the migration has been applied):
+
+```sql
+ALTER TABLE "JournalEntryLine" DROP CONSTRAINT IF EXISTS "JournalEntryLine_debit_credit_exclusive_positive";
+ALTER TABLE "FiscalPeriod" DROP CONSTRAINT IF EXISTS "FiscalPeriod_startDate_before_endDate";
+```
+
+---
+
 ## 4. Prisma Cannot Represent These CHECK Constraints
 
 Prisma's schema language (`schema.prisma`) has no `@check` or `@@check` attribute.

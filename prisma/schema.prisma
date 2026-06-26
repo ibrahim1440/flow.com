@@ -629,3 +629,266 @@ model WorkstationActionLog {
   @@index([status])
 }
 
+// ─── Accounting S0 Foundation ──────────────────────────────────────────────
+// Single-tenant (no tenantId — no Tenant model exists; see docs/saas-readiness.md).
+// Money fields use Decimal (not Float) — debit=credit integrity cannot tolerate
+// floating-point rounding error. This is a deliberate deviation from the Float
+// convention used elsewhere in this schema, scoped only to these tables.
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum TaxCategoryType {
+  STANDARD
+  ZERO_RATED
+  EXEMPT
+  OUT_OF_SCOPE
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  LOCKED
+  CLOSED
+}
+
+enum JournalEntryType {
+  MANUAL
+  AUTO
+  REVERSAL
+  ADJUSTMENT
+  OPENING
+  CLOSING
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+  REVERSED
+}
+
+enum AccountingEventStatus {
+  PENDING
+  TRANSLATED
+  FAILED
+}
+
+enum QoyodExportStatus {
+  NOT_EXPORTED
+  READY_FOR_EXPORT
+  EXPORTED
+  EXPORT_FAILED
+}
+
+model AccountingSettings {
+  // Singleton row, same pattern as SystemConfig — no Tenant model exists yet.
+  id        String @id @default("singleton")
+
+  baseCurrency String @default("SAR")
+
+  // Phase 2+ placeholders — stored now per spec, not enforced by any service logic in S0.
+  costingMethod String @default("WeightedAverage")
+  cogsPolicy    String @default("OnShipping")
+  branchAccountingMode String @default("CostCenterOnly")
+
+  exportToQoyod Boolean @default(false)
+
+  // Posting is blocked everywhere except setup routes while this is false. Must not
+  // default to true — there is no setup wizard in S0, so setup is never complete by default.
+  setupComplete Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+model Account {
+  id             String      @id @default(cuid())
+  code           String      @unique
+  nameAr         String?
+  nameEn         String
+  parentId       String?
+  parent         Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children       Account[]   @relation("AccountHierarchy")
+  type           AccountType
+  allowPosting   Boolean     @default(true)
+  isActive       Boolean     @default(true)
+  qoyodAccountId String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  createdBy      String?
+  updatedBy      String?
+
+  journalEntryLines JournalEntryLine[]
+
+  @@index([type])
+  @@index([parentId])
+  @@index([isActive])
+}
+
+model TaxCategory {
+  id                    String          @id @default(cuid())
+  code                  String          @unique
+  nameAr                String?
+  nameEn                String
+  rate                  Decimal         @db.Decimal(5, 2)
+  categoryType          TaxCategoryType @default(STANDARD)
+  isDefault             Boolean         @default(false)
+  isActive              Boolean         @default(true)
+  requiresReason        Boolean         @default(false)
+  requiresApproval      Boolean         @default(false)
+  zatcaTaxCategoryCode  String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  createdBy             String?
+  updatedBy             String?
+
+  @@index([isActive])
+  @@index([categoryType])
+}
+
+model FiscalPeriod {
+  id        String             @id @default(cuid())
+  year      Int
+  periodNo  Int
+  startDate DateTime
+  endDate   DateTime
+  status    FiscalPeriodStatus @default(OPEN)
+  lockedAt  DateTime?
+  lockedBy  String?
+  closedAt  DateTime?
+  closedBy  String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  journalEntries JournalEntry[]
+
+  @@unique([year, periodNo])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model JournalEntry {
+  id               String             @id @default(cuid())
+  entryNo          Int                @unique @default(autoincrement())
+  entryDate        DateTime
+  fiscalPeriodId   String
+  fiscalPeriod     FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
+  type             JournalEntryType   @default(MANUAL)
+  status           JournalEntryStatus @default(DRAFT)
+  sourceModule      String            @default("manual")
+  sourceDocumentId  String?
+  description       String?
+
+  // Reversal link lives on the REVERSAL entry, pointing at the ORIGINAL it reverses.
+  // @unique on reversesEntryId means Postgres allows many NULLs (non-reversal entries)
+  // but at most one row may point at a given original — i.e. an entry can only ever
+  // be reversed once. This is enforced at the DB level, not just in service code.
+  reversesEntryId  String?            @unique
+  reversesEntry    JournalEntry?      @relation("JournalEntryReversal", fields: [reversesEntryId], references: [id])
+  reversedByEntry  JournalEntry?      @relation("JournalEntryReversal")
+
+  totalDebit  Decimal @db.Decimal(18, 2) @default(0)
+  totalCredit Decimal @db.Decimal(18, 2) @default(0)
+  currency    String  @default("SAR")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdBy   String?
+  submittedAt DateTime?
+  submittedBy String?
+  approvedAt  DateTime?
+  approvedBy  String?
+  postedAt    DateTime?
+  postedBy    String?
+
+  // Set only on the reversal entry itself (explanation for why the original was reversed).
+  reversalReason String?
+
+  lines            JournalEntryLine[]
+  accountingEvents AccountingEvent[]
+  qoyodExportRecords QoyodExportRecord[]
+
+  @@index([status])
+  @@index([fiscalPeriodId])
+  @@index([entryDate])
+  @@index([sourceModule, sourceDocumentId])
+}
+
+model JournalEntryLine {
+  id             String       @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        Account      @relation(fields: [accountId], references: [id])
+
+  // DB-level CHECK constraint (added by hand to the migration SQL, same precedent as the
+  // existing non-negative-quantity constraints) enforces: debit >= 0, credit >= 0, and
+  // exactly one of the two is > 0 while the other is exactly 0. See migration SQL comment.
+  debit  Decimal @db.Decimal(18, 2) @default(0)
+  credit Decimal @db.Decimal(18, 2) @default(0)
+
+  description         String?
+  taxCategorySnapshot  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model AccountingEvent {
+  id               String                @id @default(cuid())
+  eventType        String
+  sourceModule     String
+  sourceDocumentId String
+  sourceEventId    String
+
+  // Dedicated idempotency key, built from sourceModule + sourceDocumentId + eventType +
+  // sourceEventId (the source's own event/version id). A single source document can emit
+  // many distinct events (e.g. multiple deliveries against one order) — keying only on
+  // (sourceModule, sourceDocumentId, eventType) would incorrectly block valid repeats.
+  idempotencyKey String @unique
+
+  occurredAt   DateTime              @default(now())
+  payload      Json
+  status       AccountingEventStatus @default(PENDING)
+  journalEntryId String?
+  journalEntry   JournalEntry?       @relation(fields: [journalEntryId], references: [id])
+  errorMessage   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sourceModule, sourceDocumentId])
+  @@index([status])
+  @@index([eventType])
+}
+
+model QoyodExportRecord {
+  id                String            @id @default(cuid())
+  journalEntryId    String
+  journalEntry      JournalEntry      @relation(fields: [journalEntryId], references: [id])
+  externalExportKey String            @unique
+  status            QoyodExportStatus @default(NOT_EXPORTED)
+  payloadSnapshot   Json?
+  responseSnapshot  Json?
+  qoyodReferenceId  String?
+  retryCount        Int               @default(0)
+  errorMessage      String?
+  exportedAt        DateTime?
+  exportedBy        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([journalEntryId])
+}
