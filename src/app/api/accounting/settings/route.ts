@@ -7,11 +7,13 @@ export async function GET() {
   const { error } = await requireModule("accounting");
   if (error) return error;
 
-  const settings = await prisma.accountingSettings.upsert({
-    where: { id: "singleton" },
-    create: { id: "singleton" },
-    update: {},
-  });
+  const settings = await prisma.accountingSettings.findUnique({ where: { id: "singleton" } });
+  if (!settings) {
+    return NextResponse.json(
+      { configured: false, settings: null, error: "Accounting settings have not been initialized." },
+      { status: 404 },
+    );
+  }
   return NextResponse.json(settings);
 }
 
