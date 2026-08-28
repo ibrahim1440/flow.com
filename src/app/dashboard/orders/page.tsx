@@ -21,8 +21,34 @@ function itemCompletionTotal(item: OrderItem): number {
     .reduce((s, b) => s + (b.roastedBeanQuantity > 0 ? b.roastedBeanQuantity : b.greenBeanQuantity), 0);
 }
 
+type CatalogProduct = {
+  id: string;
+  skuCode: string;
+  name: string;
+  packSize: string;
+  price: number;
+  isActive: boolean;
+  availableUnits: number;
+  hasBom: boolean;
+};
+
+type FulfilmentPreview = {
+  lines: {
+    productSkuId: string;
+    skuCode: string;
+    name: string;
+    orderedUnits: number;
+    availableUnits: number;
+    allocatedUnits: number;
+    productionRequiredUnits: number;
+    productionRequirement: { units: number; hasBom: boolean; blockedBy: string[] } | null;
+  }[];
+  totals: { orderedUnits: number; allocatedUnits: number; productionRequiredUnits: number };
+};
+
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
+  quantityUnits: number | null;
   productId: string | null; productSkuId: string | null;
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; status: string; isBlend: boolean }[];
@@ -93,13 +119,23 @@ export default function OrdersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
   const [products, setProducts] = useState<ProductSummary[]>([]);
-  // Free-to-promise kilograms on the shelf, per product id.
-  const [shelfByProduct, setShelfByProduct] = useState<Map<string, number>>(new Map());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [form, setForm] = useState({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] });
+  // ── SKU-based order entry ────────────────────────────────────────────────
+  // A new order line is a finished product and a quantity of whole units. The coffee,
+  // origin, pack size, price and BOM all follow from the SKU, so none of them is asked
+  // for — that is the point of the redesign. Legacy bean-based lines on existing orders
+  // stay readable further down this page; they simply cannot be created any more.
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
+  const [preview, setPreview] = useState<FulfilmentPreview | null>(null);
+  const [form, setForm] = useState<{
+    customerId: string;
+    quotationNumber: string;
+    approvalStatus: string;
+    items: { productSkuId: string; quantityUnits: number }[];
+  }>({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: "", nameAr: "", phone: "", email: "", address: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -113,68 +149,57 @@ export default function OrdersPage() {
   }, []);
 
   async function loadData() {
-    const [ordersRes, custRes, beansRes, productsRes, lotsRes] = await Promise.all([
+    const [ordersRes, custRes, beansRes, productsRes, catalogRes] = await Promise.all([
       fetch("/api/orders"), fetch("/api/customers"), fetch("/api/green-beans"),
       fetch("/api/coffee-products/summary"),
-      // The shelf counts towards what can be ordered, so the form has to know about it.
-      fetch("/api/finished-goods-lots"),
+      // The sellable catalog: one entry per finished SKU, with its free unit count.
+      // The raw finished-goods-lots fetch is gone — free stock is per SKU and in units
+      // now, and /api/products already reports it; summing lot kilograms here would have
+      // been a second, disagreeing implementation of availability.
+      fetch("/api/products"),
     ]);
     setOrders(await ordersRes.json());
     setCustomers(await custRes.json());
     setBeans(await beansRes.json());
     setProducts(await productsRes.json());
-    if (lotsRes.ok) {
-      const lots: { productId: string; availableQty: number; reservedQty: number; status: string }[] = await lotsRes.json();
-      const free = new Map<string, number>();
-      for (const l of lots) {
-        if (l.status !== "AVAILABLE") continue;
-        const f = l.availableQty - (l.reservedQty ?? 0);
-        if (f > 0) free.set(l.productId, (free.get(l.productId) ?? 0) + f);
-      }
-      setShelfByProduct(free);
-    }
+    if (catalogRes.ok) setCatalog(await catalogRes.json());
   }
 
-  // Mirrors checkOrderAvailability on the server: the shelf absorbs what it can first
-  // and only the remainder is charged against green beans. Warning on green stock alone
-  // used to flag orders the roastery could in fact fill straight off the shelf.
-  function getStockWarnings() {
-    const shelfPool = new Map(shelfByProduct);
-    const greenDemand = new Map<string, number>();
-    const coveredByShelf: number[] = [];
+  // Live fulfilment check for the lines currently typed into the create form.
+  //
+  // Asks the server rather than recomputing here: it draws the free pool down across
+  // lines and explodes the shortfall through each SKU's BOM, and duplicating that in the
+  // browser would be a second implementation to keep in step. Nothing is reserved — the
+  // binding reservation happens at preparation review and can come out lower if someone
+  // else buys the same stock in between.
+  useEffect(() => {
+    const lines = form.items
+      .filter((i) => i.productSkuId && i.quantityUnits > 0)
+      .map((i) => ({ productSkuId: i.productSkuId, quantityUnits: i.quantityUnits }));
 
-    form.items.forEach((item, idx) => {
-      let remaining = item.quantityKg || 0;
-      if (item.productId && remaining > 0) {
-        const pool = shelfPool.get(item.productId) ?? 0;
-        const cover = Math.min(remaining, pool);
-        if (cover > 0) {
-          shelfPool.set(item.productId, pool - cover);
-          remaining -= cover;
-        }
-        coveredByShelf[idx] = cover;
-      } else {
-        coveredByShelf[idx] = 0;
+    // Ignore a response that arrives after the inputs have moved on. Every setPreview
+    // below runs inside the timer callback rather than in the effect body, so this never
+    // sets state synchronously during render.
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (lines.length === 0) {
+        setPreview(null);
+        return;
       }
-      if (remaining > 0 && item.greenBeanId) {
-        greenDemand.set(item.greenBeanId, (greenDemand.get(item.greenBeanId) || 0) + remaining);
-      }
-    });
+      const res = await fetch("/api/orders/fulfillment-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lines }),
+      });
+      if (cancelled) return;
+      setPreview(res.ok ? await res.json() : null);
+    }, 250);
 
-    const warnings = form.items.map((item) => {
-      if (!item.greenBeanId || !item.quantityKg) return null;
-      const bean = beans.find((b) => b.id === item.greenBeanId);
-      if (!bean) return null;
-      const totalDemand = greenDemand.get(item.greenBeanId) || 0;
-      if (totalDemand > bean.quantityKg) {
-        return `${t("insufficientStock")} ${bean.quantityKg}kg, ${t("greenStillNeeded")}: ${totalDemand.toFixed(1)}kg`;
-      }
-      return null;
-    });
-
-    // Pure: returns both halves rather than writing state during render.
-    return { warnings, coveredByShelf };
-  }
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.items]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -189,7 +214,8 @@ export default function OrdersPage() {
       return;
     }
     setShowForm(false);
-    setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] });
+    setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
+    setPreview(null);
     loadData();
   }
 
@@ -309,13 +335,20 @@ export default function OrdersPage() {
   }
 
   function addItem() {
-    setForm({ ...form, items: [...form.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] });
+    setForm({ ...form, items: [...form.items, { productSkuId: "", quantityUnits: 0 }] });
   }
 
-  function updateItem(idx: number, field: string, value: string | number) {
-    const newItems = [...form.items];
-    (newItems[idx] as Record<string, string | number>)[field] = value;
-    setForm({ ...form, items: newItems });
+  function updateItem(idx: number, field: "productSkuId" | "quantityUnits", value: string | number) {
+    setForm({
+      ...form,
+      items: form.items.map((it, i) =>
+        i === idx
+          ? field === "quantityUnits"
+            ? { ...it, quantityUnits: Number(value) || 0 }
+            : { ...it, productSkuId: String(value) }
+          : it
+      ),
+    });
   }
 
   const filtered = orders.filter((o) => {
@@ -403,67 +436,123 @@ export default function OrdersPage() {
                   className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
               </div>
               {(() => {
-                const { warnings, coveredByShelf } = getStockWarnings();
-                const hasStockError = warnings.some((w) => w !== null);
+                // Section 8: one search box, then a quantity. No bean picker, no product
+                // picker, no SKU field — the SKU is the line.
+                const previewBySku = new Map((preview?.lines ?? []).map((l) => [l.productSkuId, l]));
+                const blocked = form.items.some((i) => !i.productSkuId || i.quantityUnits <= 0);
                 return (
                   <>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">{t("orderItemsLabel")}</label>
-                      {form.items.map((item, idx) => (
-                        <div key={idx} className="mb-2">
-                          <div className="flex gap-2">
-                            <select value={item.greenBeanId} onChange={(e) => {
-                              const bean = beans.find((b) => b.id === e.target.value);
-                              updateItem(idx, "greenBeanId", e.target.value);
-                              if (bean) updateItem(idx, "beanTypeName", bean.beanType);
-                            }} className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
-                              <option value="">{t("selectBean")}</option>
-                              {beans.map((b) => <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg}kg)</option>)}
-                            </select>
-                            <input type="number" placeholder="kg" value={item.quantityKg || ""} onChange={(e) => updateItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
-                              className="w-24 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
-                          </div>
-                          {item.quantityKg > 0 && (coveredByShelf[idx] ?? 0) > 0 && (
-                            <p className="mt-1 text-xs font-semibold text-green-700">
-                              {t("shelfCoverageLabel")}: {(coveredByShelf[idx] ?? 0).toFixed(1)}kg
-                              {item.quantityKg - (coveredByShelf[idx] ?? 0) > 0 && (
-                                <span className="text-brown/60 font-medium">
-                                  {" "}— {t("toProduceLabel")}: {(item.quantityKg - (coveredByShelf[idx] ?? 0)).toFixed(1)}kg
-                                </span>
+                      {form.items.map((item, idx) => {
+                        const sku = catalog.find((c) => c.id === item.productSkuId);
+                        const row = item.productSkuId ? previewBySku.get(item.productSkuId) : undefined;
+                        return (
+                          <div key={idx} className="mb-2 border-2 border-border rounded-xl p-2.5">
+                            <div className="flex gap-2 items-start">
+                              <div className="flex-1">
+                                <input
+                                  list={`sku-list-${idx}`}
+                                  defaultValue=""
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    const chosen = catalog.find(
+                                      (c) => `${c.name} — ${c.skuCode}` === v || c.skuCode === v
+                                    );
+                                    updateItem(idx, "productSkuId", chosen ? chosen.id : "");
+                                  }}
+                                  placeholder={t("searchProductLabel")}
+                                  className="w-full px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                                />
+                                <datalist id={`sku-list-${idx}`}>
+                                  {catalog
+                                    .filter((c) => c.isActive)
+                                    .map((c) => (
+                                      <option key={c.id} value={`${c.name} — ${c.skuCode}`}>
+                                        {`${t("availableLabel")}: ${c.availableUnits}`}
+                                      </option>
+                                    ))}
+                                </datalist>
+                              </div>
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                placeholder={t("quantityUnitsLabel")}
+                                value={item.quantityUnits || ""}
+                                onChange={(e) => updateItem(idx, "quantityUnits", parseInt(e.target.value, 10) || 0)}
+                                className="w-24 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                                required
+                              />
+                              {form.items.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}
+                                  className="px-2 py-2 text-brown/60 hover:text-red-600"
+                                  aria-label="Remove line"
+                                >
+                                  <X size={16} />
+                                </button>
                               )}
-                            </p>
-                          )}
-                          <div className="flex gap-2 mt-1">
-                            <select value={item.productId} onChange={(e) => {
-                              updateItem(idx, "productId", e.target.value);
-                              updateItem(idx, "productSkuId", "");
-                            }} className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
-                              <option value="">No product</option>
-                              {products.map((p) => <option key={p.id} value={p.id}>{p.productNameEn}</option>)}
-                            </select>
-                            {item.productId && (
-                              <select value={item.productSkuId} onChange={(e) => updateItem(idx, "productSkuId", e.target.value)}
-                                className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
-                                <option value="">No SKU</option>
-                                {(products.find((p) => p.id === item.productId)?.productSkus ?? []).map((s) => (
-                                  <option key={s.id} value={s.id}>{s.skuCode} ({s.weightGrams}g)</option>
-                                ))}
-                              </select>
+                            </div>
+
+                            {sku ? (
+                              <p className="mt-1.5 text-xs text-brown/70 font-medium">
+                                {sku.skuCode} · {sku.packSize} · {sku.price.toFixed(2)} · {t("availableLabel")}:{" "}
+                                <span className="font-bold text-charcoal">{sku.availableUnits}</span>
+                                {!sku.hasBom && <span className="text-red-600 font-bold"> · {t("noBomWarning")}</span>}
+                              </p>
+                            ) : (
+                              <p className="mt-1.5 text-xs text-brown/50 font-medium">{t("noProductSelected")}</p>
+                            )}
+
+                            {/* Section 5: what the shelf covers, and what has to be produced. */}
+                            {row && row.orderedUnits > 0 && (
+                              <div className="mt-1.5 flex items-center gap-3 text-xs font-semibold flex-wrap">
+                                <span className="text-green-700">
+                                  {t("fromShelfLabel")}: {row.allocatedUnits}
+                                </span>
+                                {row.productionRequiredUnits > 0 && (
+                                  <span className="text-amber-700">
+                                    {t("toProduceUnitsLabel")}: {row.productionRequiredUnits}
+                                  </span>
+                                )}
+                                {row.productionRequirement && !row.productionRequirement.hasBom && (
+                                  <span className="text-red-600">{t("noBomWarning")}</span>
+                                )}
+                              </div>
                             )}
                           </div>
-                          {warnings[idx] && (
-                            <p className="text-xs font-bold text-red-600 mt-1 px-1">{warnings[idx]}</p>
-                          )}
-                        </div>
-                      ))}
-                      <button type="button" onClick={addItem} className="text-sm text-brown hover:underline">{t("addItem")}</button>
+                        );
+                      })}
+                      <button type="button" onClick={addItem} className="text-sm text-brown hover:underline">
+                        {t("addItem")}
+                      </button>
                     </div>
+
+                    {preview && preview.totals.orderedUnits > 0 && (
+                      <div className="rounded-xl bg-cream border border-border px-3 py-2 text-xs font-semibold text-brown flex gap-4 flex-wrap">
+                        <span>{t("fulfilmentCheckTitle")}</span>
+                        <span className="text-green-700">
+                          {t("fromShelfLabel")}: {preview.totals.allocatedUnits}
+                        </span>
+                        <span className="text-amber-700">
+                          {t("toProduceUnitsLabel")}: {preview.totals.productionRequiredUnits}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="flex gap-3 pt-2">
-                      <button type="submit" disabled={hasStockError}
-                        className={`flex-1 py-2 rounded-lg font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${hasStockError ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20 hover:shadow-orange/35"}`}>
+                      <button
+                        type="submit"
+                        disabled={blocked}
+                        className={`flex-1 py-2 rounded-lg font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${blocked ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20 hover:shadow-orange/35"}`}
+                      >
                         {t("createOrder")}
                       </button>
-                      <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">{t("cancel")}</button>
+                      <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        {t("cancel")}
+                      </button>
                     </div>
                   </>
                 );

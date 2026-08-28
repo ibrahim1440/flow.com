@@ -16,6 +16,7 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },
   { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
   { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
+  { key: "productsNav", icon: Package,        href: "/dashboard/products", module: "inventory" },
   { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
   { key: "workstationPreparation", icon: PackageCheck, href: "/dashboard/workstation/preparation", module: "orders" },
   { key: "production", icon: Factory,         href: "/dashboard/production" },
