@@ -114,3 +114,94 @@ h1, h2, h3, h4, h5, h6 {
   .no-print { display: none !important; }
   body { background: white; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Order Operations (S0) — scoped design tokens
+   ADDITIVE ONLY. Mirrors the approved Figma "ERP Design System & Order
+   Operations" file (zinc-gray neutrals + restrained indigo accent).
+   These --oo-* tokens are consumed ONLY by Order Operations components
+   (src/components/OrderLifecyclePanel.tsx). They do not replace or alias
+   the existing brand tokens (--orange, --slate, --status-*, etc.) used
+   elsewhere in the ERP — those are untouched.
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --oo-text-primary: #18181b;
+  --oo-text-secondary: #52525b;
+  --oo-text-muted: #a1a1aa;
+
+  --oo-bg-default: #ffffff;
+  --oo-bg-subtle: #fafafa;
+  --oo-bg-elevated: #ffffff;
+
+  --oo-border-default: #e4e4e7;
+  --oo-border-strong: #d4d4d8;
+
+  --oo-action-primary: #4f46e5;
+  --oo-action-primary-hover: #4338ca;
+
+  /* Waiting Approval / Waiting Preparation Review */
+  --oo-status-waiting: #d97706;
+  --oo-status-waiting-bg: #fffbeb;
+
+  /* Preparing */
+  --oo-status-preparing: #2563eb;
+  --oo-status-preparing-bg: #eff6ff;
+
+  /* Ready for Shipping (teal — kept distinct from Completed's green) */
+  --oo-status-ready: #0d9488;
+  --oo-status-ready-bg: #f0fdfa;
+
+  /* Completed */
+  --oo-status-success: #16a34a;
+  --oo-status-success-bg: #f0fdf4;
+
+  /* On Hold */
+  --oo-status-hold: #b45309;
+  --oo-status-hold-bg: #fef3c7;
+
+  /* Blocked (preparation decision, not an order status) */
+  --oo-status-blocked: #dc2626;
+  --oo-status-blocked-bg: #fef2f2;
+
+  /* Rejected — destructive red */
+  --oo-status-rejected: #dc2626;
+  --oo-status-rejected-bg: #fef2f2;
+
+  /* Cancelled — neutral dark gray, deliberately NOT red so it never reads
+     the same as Rejected/Blocked. */
+  --oo-status-cancelled: #3f3f46;
+  --oo-status-cancelled-bg: #f4f4f5;
+}
+
+@theme inline {
+  --color-oo-text-primary: var(--oo-text-primary);
+  --color-oo-text-secondary: var(--oo-text-secondary);
+  --color-oo-text-muted: var(--oo-text-muted);
+
+  --color-oo-bg-default: var(--oo-bg-default);
+  --color-oo-bg-subtle: var(--oo-bg-subtle);
+  --color-oo-bg-elevated: var(--oo-bg-elevated);
+
+  --color-oo-border-default: var(--oo-border-default);
+  --color-oo-border-strong: var(--oo-border-strong);
+
+  --color-oo-action-primary: var(--oo-action-primary);
+  --color-oo-action-primary-hover: var(--oo-action-primary-hover);
+
+  --color-oo-status-waiting: var(--oo-status-waiting);
+  --color-oo-status-waiting-bg: var(--oo-status-waiting-bg);
+  --color-oo-status-preparing: var(--oo-status-preparing);
+  --color-oo-status-preparing-bg: var(--oo-status-preparing-bg);
+  --color-oo-status-ready: var(--oo-status-ready);
+  --color-oo-status-ready-bg: var(--oo-status-ready-bg);
+  --color-oo-status-success: var(--oo-status-success);
+  --color-oo-status-success-bg: var(--oo-status-success-bg);
+  --color-oo-status-hold: var(--oo-status-hold);
+  --color-oo-status-hold-bg: var(--oo-status-hold-bg);
+  --color-oo-status-blocked: var(--oo-status-blocked);
+  --color-oo-status-blocked-bg: var(--oo-status-blocked-bg);
+  --color-oo-status-rejected: var(--oo-status-rejected);
+  --color-oo-status-rejected-bg: var(--oo-status-rejected-bg);
+  --color-oo-status-cancelled: var(--oo-status-cancelled);
+  --color-oo-status-cancelled-bg: var(--oo-status-cancelled-bg);
+}

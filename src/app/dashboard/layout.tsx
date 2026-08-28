@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
-  Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet,
+  Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
 } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
@@ -17,6 +17,7 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
   { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
   { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
+  { key: "workstationPreparation", icon: PackageCheck, href: "/dashboard/workstation/preparation", module: "orders" },
   { key: "production", icon: Factory,         href: "/dashboard/production" },
   { key: "qc",         icon: ClipboardCheck,  href: "/dashboard/qc" },
   { key: "packaging",  icon: Box,             href: "/dashboard/packaging" },
