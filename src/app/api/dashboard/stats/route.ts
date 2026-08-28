@@ -123,7 +123,7 @@ export async function GET(request: Request) {
   const qcBatchAlerts = openQcBatches.map((b) => ({
     id: b.id,
     batchNumber: b.batchNumber,
-    origin: b.greenBean?.beanType ?? b.orderItem.beanTypeName,
+    origin: b.greenBean?.beanType ?? b.orderItem?.beanTypeName ?? "",
     testerCount: b.qcRecords.length,
     deadline: b.qcDeadline,
     isOverdue: b.qcDeadline ? b.qcDeadline < now : false,

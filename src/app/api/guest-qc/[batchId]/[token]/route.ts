@@ -25,7 +25,7 @@ export async function GET(_request: Request, { params }: Params) {
 
   return NextResponse.json({
     batchNumber: batch.batchNumber,
-    origin: batch.greenBean?.beanType || batch.orderItem.beanTypeName,
+    origin: batch.greenBean?.beanType || batch.orderItem?.beanTypeName || "",
     processing: batch.greenBean?.process || "",
     roastedKg: batch.roastedBeanQuantity,
     status: batch.status,
@@ -67,7 +67,7 @@ export async function POST(request: Request, { params }: Params) {
       isExternal: true,
       testerName: testerName.trim(),
       decision: decision === "Reject" ? "Reject" : "Accept",
-      coffeeOrigin: batch.greenBean?.beanType || batch.orderItem.beanTypeName,
+      coffeeOrigin: batch.greenBean?.beanType || batch.orderItem?.beanTypeName || "",
       processing: batch.greenBean?.process || "",
       serialNumber: batch.batchNumber,
       onProfile: decision !== "Reject",

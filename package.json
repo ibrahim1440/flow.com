@@ -11,7 +11,13 @@
     "seed": "npx tsx prisma/seed.ts",
     "db:push:local": "prisma db push",
     "db:migrate": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "e2e": "node scripts/e2e/shelf-flow.mjs && node scripts/e2e/roast-to-stock.mjs && node scripts/e2e/race.mjs && node scripts/e2e/pages.mjs",
+    "e2e:shelf": "node scripts/e2e/shelf-flow.mjs",
+    "e2e:race": "node scripts/e2e/race.mjs",
+    "e2e:stock": "node scripts/e2e/roast-to-stock.mjs",
+    "e2e:pages": "node scripts/e2e/pages.mjs",
+    "e2e:reset": "node scripts/e2e/reset.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

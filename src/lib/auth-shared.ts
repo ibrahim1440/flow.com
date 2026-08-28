@@ -68,9 +68,12 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "edit", label: "Edit existing orders" },
     { key: "delete", label: "Delete orders" },
     { key: "approve", label: "Approve / reject orders" },
+    { key: "prepare_review", label: "Submit preparation review decisions" },
+    { key: "manage_status", label: "Hold / resume / cancel / complete orders" },
   ],
   production: [
     { key: "start_batch", label: "Start / continue roasting" },
+    { key: "roast_to_stock", label: "Roast to stock (no order behind the batch)" },
     { key: "blend", label: "Blend batches" },
     { key: "view_history", label: "View completed batches" },
     { key: "cancel_batch", label: "Cancel / delete batches" },
@@ -135,8 +138,8 @@ function makeModulePermission(access: AccessLevel, subKeys?: string[]): ModulePe
 }
 
 export function buildDefaultPermissions(role: string): Permissions {
-  const allEdit = (mod: string): ModulePermission =>
-    makeModulePermission("edit", MODULE_SUB_PRIVILEGES[mod]?.map((s) => s.key));
+  const allEdit = (mod: string, except: string[] = []): ModulePermission =>
+    makeModulePermission("edit", MODULE_SUB_PRIVILEGES[mod]?.map((s) => s.key).filter((k) => !except.includes(k)));
   const allView = (mod: string): ModulePermission =>
     makeModulePermission("view", MODULE_SUB_PRIVILEGES[mod]?.map((s) => s.key));
   const none = (): ModulePermission => ({ access: "none" });
@@ -155,7 +158,11 @@ export function buildDefaultPermissions(role: string): Permissions {
     case "roasting":
       return {
         dashboard: allEdit("dashboard"), inventory: allView("inventory"),
-        orders: allView("orders"), production: allEdit("production"),
+        // roast_to_stock withheld deliberately: roasting for the shelf is production beyond
+        // what any order asked for, which is exactly what the per-order surplus gate makes
+        // admin-only. Granting it here by default would have made that gate circumventable
+        // by simply omitting the order item. An admin can still turn it on per employee.
+        orders: allView("orders"), production: allEdit("production", ["roast_to_stock"]),
         qc: none(), packaging: allEdit("packaging"),
         dispatch: none(), history: none(), analytics: none(),
         labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),

@@ -68,7 +68,7 @@ export async function GET(request: Request) {
     batchNumber: b.batchNumber,
     date: b.date.toISOString(),
     status: b.status,
-    beanType: b.greenBean?.beanType ?? b.orderItem.beanTypeName ?? null,
+    beanType: b.greenBean?.beanType ?? b.orderItem?.beanTypeName ?? null,
   }));
 
   const superseded = historyEntries.map((h) => ({
@@ -78,7 +78,7 @@ export async function GET(request: Request) {
     currentBatchNumber: h.batch.batchNumber,
     date: h.batch.date.toISOString(),
     status: h.batch.status,
-    beanType: h.batch.greenBean?.beanType ?? h.batch.orderItem.beanTypeName ?? null,
+    beanType: h.batch.greenBean?.beanType ?? h.batch.orderItem?.beanTypeName ?? null,
     changedAt: h.changedAt.toISOString(),
     reason: h.reason ?? null,
   }));

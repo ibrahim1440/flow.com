@@ -30,6 +30,7 @@ type FinishedGoodsLot = {
   batchNumber: string;
   quantityKg: number;
   availableQty: number;
+  reservedQty: number;
   status: "AVAILABLE" | "RESERVED" | "SHIPPED";
   createdAt: string;
   product: { productNameEn: string; productNameAr: string | null };
@@ -637,7 +638,11 @@ export default function InventoryPage() {
 
   const totalStock  = beans.filter((b) => b.isActive).reduce((s, b) => s + b.quantityKg, 0);
   const activeCount = beans.filter((b) => b.isActive).length;
-  const totalAvailableFG = lots.filter((l) => l.status === "AVAILABLE").reduce((s, l) => s + l.availableQty, 0);
+  const availableLots = lots.filter((l) => l.status === "AVAILABLE");
+  const totalAvailableFG = availableLots.reduce((s, l) => s + l.availableQty, 0);
+  // Split the shelf into what is already promised to an order and what is still sellable.
+  const totalReservedFG = availableLots.reduce((s, l) => s + (l.reservedQty ?? 0), 0);
+  const totalFreeFG = Math.max(0, totalAvailableFG - totalReservedFG);
 
   return (
     <div className="space-y-6">
@@ -715,6 +720,8 @@ export default function InventoryPage() {
           {activeTab === "finished" && (
             <p className="text-brown text-sm font-medium">
               متاح للشحن: {totalAvailableFG.toFixed(1)} kg
+              <span className="text-brown/50"> — {t("totalReservedFG")}: {totalReservedFG.toFixed(1)} kg</span>
+              <span className="text-green-600 font-bold"> — {t("totalFreeFG")}: {totalFreeFG.toFixed(1)} kg</span>
             </p>
           )}
           {activeTab === "ledger" && (
@@ -905,6 +912,8 @@ export default function InventoryPage() {
                     <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("productName")}</th>
                     <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("totalQtyKg")}</th>
                     <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("availableQtyKg")}</th>
+                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("reservedQtyKg")}</th>
+                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("freeQtyKg")}</th>
                     <th className="text-center px-4 py-3 font-semibold text-charcoal">{t("lotStatusLabel")}</th>
                     <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("date")}</th>
                   </tr>
@@ -914,6 +923,7 @@ export default function InventoryPage() {
                     const st = LOT_STATUS_STYLES[lot.status] ?? LOT_STATUS_STYLES.AVAILABLE;
                     const StatusIcon = st.icon;
                     const availRatio = lot.quantityKg > 0 ? lot.availableQty / lot.quantityKg : 0;
+                    const freeQty = Math.max(0, lot.availableQty - (lot.reservedQty ?? 0));
                     return (
                       <tr key={lot.id} className="hover:bg-cream/50 transition-colors">
                         <td className="px-4 py-3 font-mono text-xs font-bold text-charcoal">{lot.batchNumber}</td>
@@ -928,6 +938,16 @@ export default function InventoryPage() {
                             {lot.availableQty.toFixed(1)}
                           </span>
                           <span className="text-brown/40 text-xs ml-1">({(availRatio * 100).toFixed(0)}%)</span>
+                        </td>
+                        <td className="px-4 py-3 text-end font-mono tabular-nums text-brown">
+                          {(lot.reservedQty ?? 0).toFixed(1)}
+                        </td>
+                        <td className="px-4 py-3 text-end">
+                          <span className={`font-bold tabular-nums font-mono ${
+                            freeQty > 0 ? "text-green-600" : "text-brown/40"
+                          }`}>
+                            {freeQty.toFixed(1)}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${st.cls}`}>

@@ -33,10 +33,15 @@ type FGLot = {
   batchNumber: string;
   quantityKg: number;
   availableQty: number;
+  reservedQty: number;
+  /** Promised to the order item being delivered — shippable by it, invisible to others. */
+  reservedForThisItem?: number;
+  /** reservedForThisItem + free stock: what this item may take off the lot right now. */
+  deliverableQty?: number;
   productId: string;
   product: { productNameEn: string; productNameAr: string | null };
   status: string;
-  roastingBatch: { orderItemId: string } | null;
+  roastingBatch?: { orderItemId: string } | null;
 };
 
 type DeliveryRow = {
@@ -105,13 +110,27 @@ export default function DispatchPage() {
     setSubmitError("");
     setShowForm(true);
 
-    // Fetch available finished goods lots in parallel with modal open
+    // What this specific item can ship from. Filtering the global lot list by free
+    // quantity is wrong: a batch roasted for this very order is reserved to it in full
+    // the moment it is packaged, so its own lot has zero free quantity and would be
+    // filtered out — leaving the ordinary roast -> package -> deliver path with nothing
+    // to pick. The server returns each lot's deliverableQty for this item: its own
+    // reservation plus whatever is free to anyone.
     setLotsLoading(true);
     try {
-      const res = await fetch("/api/finished-goods-lots");
+      const res = await fetch(`/api/order-items/${item.id}/fulfillment-options`);
       if (res.ok) {
-        const data: FGLot[] = await res.json();
-        setLots(data.filter((l) => l.status === "AVAILABLE" && l.availableQty > 0));
+        const data = await res.json();
+        type ApiLot = Omit<FGLot, "product"> & { product: FGLot["product"] | null };
+        setLots(
+          (data.matchingLots as ApiLot[])
+            .filter((l) => (l.deliverableQty ?? 0) > 0)
+            // Legacy/unnamed lots fall back to their batch number so the picker never
+            // renders a blank row.
+            .map((l) => ({ ...l, product: l.product ?? { productNameEn: l.batchNumber, productNameAr: null } }))
+        );
+      } else {
+        setLots([]);
       }
     } finally {
       setLotsLoading(false);
@@ -153,9 +172,16 @@ export default function DispatchPage() {
   }
 
   // ── Ready items list ──────────────────────────────────────────────────────
+  // An item is ready when there is coffee it can ship: either its own batches have been
+  // packaged, or preparation review covered it from the shelf. Gating on packaged batches
+  // alone — the rule the delivery route itself no longer uses — would hide exactly the
+  // orders this change exists to enable: the ones filled from stock with no roast at all.
   const readyItems = orders.flatMap((o: any) =>
     o.items
-      .filter((i: any) => i.deliveryStatus !== "Delivered" && packagedKg(i.roastingBatches) > i.deliveredQty)
+      .filter((i: any) =>
+        i.deliveryStatus !== "Delivered" &&
+        (packagedKg(i.roastingBatches) > i.deliveredQty || (i.availableQuantity ?? 0) > 0)
+      )
       .map((i: any) => ({ ...i, order: { orderNumber: o.orderNumber, customer: { name: o.customer?.name } } }))
   );
 
@@ -190,7 +216,9 @@ export default function DispatchPage() {
 
   // ── Lot selection derived state ───────────────────────────────────────────
   const selectedLot   = lots.find((l) => l.id === lotId) ?? null;
-  const lotExceedsQty = selectedLot !== null && form.quantityKg > selectedLot.availableQty;
+  // What this item may take off the selected lot: its own reservation plus free stock.
+  const lotFreeQty    = selectedLot ? Math.max(0, selectedLot.deliverableQty ?? 0) : 0;
+  const lotExceedsQty = selectedLot !== null && form.quantityKg > lotFreeQty;
   const canSubmit = !!lotId && !lotExceedsQty && !submitting;
 
   // Split lots by priority:
@@ -206,7 +234,8 @@ export default function DispatchPage() {
 
   function lotLabel(lot: FGLot) {
     const productLabel = lang === "ar" ? (lot.product.productNameAr ?? lot.product.productNameEn) : lot.product.productNameEn;
-    return `${lot.batchNumber} — ${productLabel} — ${t("lotAvailableKg")}: ${lot.availableQty.toFixed(1)} kg`;
+    const free = Math.max(0, lot.deliverableQty ?? 0);
+    return `${lot.batchNumber} — ${productLabel} — ${t("lotAvailableKg")}: ${free.toFixed(1)} kg`;
   }
 
   return (
@@ -415,9 +444,9 @@ export default function DispatchPage() {
                         {selectedLot.batchNumber}
                       </span>
                       <span className={`font-bold tabular-nums ${
-                        selectedLot.availableQty > 0 ? "text-green-600" : "text-red-500"
+                        lotFreeQty > 0 ? "text-green-600" : "text-red-500"
                       }`}>
-                        {selectedLot.availableQty.toFixed(1)} kg {t("lotAvailableKg")}
+                        {lotFreeQty.toFixed(1)} kg {t("lotAvailableKg")}
                       </span>
                     </div>
                     <p className="text-xs text-brown/60 mt-0.5">
@@ -450,7 +479,7 @@ export default function DispatchPage() {
                 {lotExceedsQty && (
                   <div className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-red-600">
                     <AlertTriangle size={13} />
-                    {t("lotExceedsWarn")} ({selectedLot!.availableQty.toFixed(1)} kg {t("lotAvailableKg")})
+                    {t("lotExceedsWarn")} ({lotFreeQty.toFixed(1)} kg {t("lotAvailableKg")})
                   </div>
                 )}
 

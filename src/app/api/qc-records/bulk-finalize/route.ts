@@ -69,7 +69,10 @@ export async function POST(request: Request) {
     }
 
     // Collect unique IDs to recalculate each affected entity only once.
-    const orderItemIds = [...new Set(batches.map((b) => b.orderItemId))];
+    // Stock batches contribute no order item — there is nothing to recalculate for them.
+    const orderItemIds = [...new Set(
+      batches.map((b) => b.orderItemId).filter((id): id is string => id !== null)
+    )];
     const productionOrderIds = [
       ...new Set(batches.map((b) => b.productionOrderId).filter((id): id is string => id !== null)),
     ];

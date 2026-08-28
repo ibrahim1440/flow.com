@@ -69,7 +69,8 @@ export async function DELETE(request: Request, { params }: Params) {
     await tx.roastingBatch.delete({ where: { id } });
 
     // 3. Recalculate order item and production order status after deletion.
-    await recalcOrderItemStatus(batch.orderItemId, tx);
+    // A stock batch has no order item whose production status could change.
+    if (batch.orderItemId) await recalcOrderItemStatus(batch.orderItemId, tx);
 
     if (batch.productionOrderId) {
       await recalcProductionOrderStatus(batch.productionOrderId, tx);

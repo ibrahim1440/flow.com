@@ -38,7 +38,8 @@ export type BatchExportRow = {
   batchNumber: string;
   date: string;
   customer: string;
-  orderNumber: number;
+  // string when the batch has no order behind it (roast to stock)
+  orderNumber: number | string;
   beanType: string;
   greenBeanQuantity: number;
   roastedBeanQuantity: number;

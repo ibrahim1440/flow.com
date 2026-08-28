@@ -70,7 +70,8 @@ export async function POST(request: Request, { params }: Params) {
         },
       });
 
-      await recalcOrderItemStatus(batch.orderItemId, tx);
+      // A stock batch has no order item whose production status could change.
+      if (batch.orderItemId) await recalcOrderItemStatus(batch.orderItemId, tx);
 
       if (batch.productionOrderId) {
         await recalcProductionOrderStatus(batch.productionOrderId, tx);

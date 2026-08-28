@@ -21,7 +21,7 @@ type SessionBatch = {
     batchNumber: string;
     roastProfile: string | null;
     greenBean: { beanType: string; serialNumber: string } | null;
-    orderItem: { beanTypeName: string };
+    orderItem: { beanTypeName: string } | null;
   } | null;
 };
 
@@ -49,7 +49,8 @@ type AvailableBatch = {
   status: string;
   roastProfile: string | null;
   greenBean: { beanType: string; serialNumber: string } | null;
-  orderItem: { beanTypeName: string; order: { orderNumber: number } };
+  // Nullable since roast-to-stock: a batch roasted for the shelf has no order behind it.
+  orderItem: { beanTypeName: string; order: { orderNumber: number } } | null;
 };
 
 // ── Invite Modal ──────────────────────────────────────────────────────────────
@@ -289,7 +290,7 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
         return {
           type: "batch" as const,
           batchId: id,
-          label: b.greenBean?.beanType || b.orderItem.beanTypeName,
+          label: b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? ""),
           sub: b.batchNumber,
         };
       }),
@@ -366,7 +367,7 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
                 <div className="flex flex-wrap gap-1.5">
                   {[...selectedIds].map((id, i) => {
                     const b = batches.find((x) => x.id === id);
-                    const label = b ? (b.greenBean?.beanType || b.orderItem.beanTypeName) : "Batch";
+                    const label = b ? (b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "")) : "Batch";
                     const sub = b?.batchNumber ?? "";
                     return (
                       <span key={id} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-orange/10 border border-orange/25 text-xs font-bold text-orange">
@@ -428,7 +429,7 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
                 <div className="space-y-1.5 pr-0.5">
                   {batches.map((b) => {
                     const checked = selectedIds.has(b.id);
-                    const label = b.greenBean?.beanType || b.orderItem.beanTypeName;
+                    const label = b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "");
                     return (
                       <button
                         key={b.id}

@@ -1,0 +1,11 @@
+-- Allow a roasting batch to exist without an order behind it.
+--
+-- Shelf-first fulfilment let orders consume the shelf, but nothing could fill it on
+-- purpose: every batch had to name an order item, so the only stock that ever reached
+-- the shelf was accidental — an admin over-roasting against an order, or leftovers from
+-- a cancelled one. Dropping NOT NULL is what makes deliberate replenishment possible.
+--
+-- Widening only. Every existing row already carries an order item, so nothing is
+-- rewritten and no backfill is needed; the reverse direction (re-adding NOT NULL) stays
+-- available for as long as no stock batch has been created.
+ALTER TABLE "RoastingBatch" ALTER COLUMN "orderItemId" DROP NOT NULL;

@@ -167,7 +167,13 @@ was likely intended for future use and is not wired up.
   directly, not `InventoryMovement`.
 
 ### Layer 3: Finished Goods Lots
-- **Model:** `FinishedGoodsLot.availableQty` + `FinishedGoodsLot.status`
+- **Model:** `FinishedGoodsLot.availableQty` + `FinishedGoodsLot.reservedQty` + `FinishedGoodsLot.status`
+- **Free to promise:** `availableQty - reservedQty`. `availableQty` is what is physically
+  on the shelf; `reservedQty` is the part of it already promised to an order item and not
+  yet shipped. `reservedQty` is deliberately NOT ledgered — a reservation moves no coffee,
+  so it produces no InventoryMovement. The detail behind it is in `StockAllocation`
+  (one row per order item / lot pair, status `RESERVED | CONSUMED | RELEASED`), which is
+  the audit trail for promises, not for physical movement.
 - **IM category:** `FINISHED_GOODS`
 - **referenceEntityId:** `FinishedGoodsLot.id`
 - **Tracked by:** packaging runs, deliveries with FGL link
@@ -206,6 +212,17 @@ was likely intended for future use and is not wired up.
 - **Policy decided:** All new deliveries must reference a `FinishedGoodsLot`. Submissions without `finishedGoodsLotId` are rejected at the API layer. Samples, corrections, and exceptional withdrawals require future dedicated workflows.
 - **Historical records:** Delivery records created before 2026-05-28 without an FGL link are not backfilled. They remain in the database and are visible in delivery history but have no corresponding InventoryMovement.
 - **Remaining gap:** The `Delivery` model has no FK to `FinishedGoodsLot` — the FGL reference is stored only in `InventoryMovement.referenceEntityId`. This is tracked separately in Gap 4 (plain-string references).
+
+### Gap 2b — Shelf stock was unreachable from any order but its own — Resolved 2026-08-26
+- **Was:** `POST /api/deliveries` gated eligibility on packaged bags of roasting batches
+  belonging to the *same* order item, while deducting from any lot matching by product.
+  A full shelf could not be sold to a new order, and a delivery that did pass the gate
+  could reduce a lot the gate had never measured — the ledger row was correct, but the
+  quantity it recorded had been authorised against different coffee.
+- **Now:** delivery consumes through `consumeShelfStock()` in
+  `src/lib/services/shelf-allocation.ts`. The `OUT / FINISHED_GOODS / DELIVERY` ledger row
+  is written from the balances that same call actually changed, so measurement and
+  deduction are the same kilograms by construction.
 
 ### Gap 3 — Roasted/WIP layer is not a first-class InventoryCategory
 - **Impact:** QC rejections (a form of write-off), roasting-batch-level blend merges,

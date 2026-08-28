@@ -18,6 +18,9 @@ export async function POST(request: Request) {
 
   const batches = await prisma.roastingBatch.findMany({
     where: { id: { in: batchIds } },
+    // findMany without orderBy returns rows in unspecified order, and batches[0] below
+    // decides who owns the blend. Oldest-first makes that choice deterministic.
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
   if (batches.length !== batchIds.length) {
@@ -59,7 +62,44 @@ export async function POST(request: Request) {
     .join("");
   const blendedBatchNumber = `${today}${seqParts}`;
 
-  const targetOrderItemId = orderItemId || batches[0].orderItemId;
+  // Blending stock batches produces a stock blend: null here means the blended output
+  // belongs to no order, so packaging leaves it free-to-promise on the shelf exactly as
+  // it does for its inputs. An explicit orderItemId still wins, which is how a stock
+  // blend can be steered onto an order.
+  //
+  // Where the inputs disagree — some owned by an order, some not — the order wins, and it
+  // must be named explicitly. Picking silently would either orphan an order's production
+  // (its coffee vanishing into free stock) or quietly claim stock for an order that never
+  // asked for it, and which of the two happened would depend on row order.
+  const ownedInputs = batches.filter((b) => b.orderItemId !== null);
+  if (!orderItemId && ownedInputs.length > 0 && ownedInputs.length !== batches.length) {
+    return NextResponse.json(
+      { error: "These batches belong to different owners — some to an order, some to stock. Specify orderItemId to say which order the blend is for." },
+      { status: 400 }
+    );
+  }
+  const distinctOwners = [...new Set(ownedInputs.map((b) => b.orderItemId as string))];
+  if (!orderItemId && distinctOwners.length > 1) {
+    return NextResponse.json(
+      { error: "These batches belong to different order items. Specify orderItemId to say which order the blend is for." },
+      { status: 400 }
+    );
+  }
+
+  const targetOrderItemId: string | null = orderItemId || distinctOwners[0] || null;
+
+  // A stock blend must still name the coffee it is, for exactly the reason a stock batch
+  // must: packaging has no order item to inherit a product from, and a lot nothing can
+  // identify is a lot no order can ever be matched to. Inherit it from the inputs when
+  // they agree; the packaging route's body.productId fallback covers the rest.
+  const distinctProducts = [...new Set(batches.map((b) => b.productId).filter((id): id is string => id !== null))];
+  const blendProductId = targetOrderItemId === null && distinctProducts.length === 1 ? distinctProducts[0] : null;
+  if (targetOrderItemId === null && blendProductId === null) {
+    return NextResponse.json(
+      { error: "A stock blend must resolve to a single product. Blend batches of the same product, or blend onto an order item." },
+      { status: 400 }
+    );
+  }
 
   const productionOrderIds = [
     ...new Set(
@@ -74,6 +114,7 @@ export async function POST(request: Request) {
     const blendedBatch = await tx.roastingBatch.create({
       data: {
         orderItemId: targetOrderItemId,
+        productId: blendProductId,
         batchNumber: blendedBatchNumber,
         greenBeanQuantity: greenTotal,
         roastedBeanQuantity: roastedTotal,
@@ -102,7 +143,13 @@ export async function POST(request: Request) {
       await recalcProductionOrderStatus(productionOrderId, tx);
     }
 
-    await recalcOrderItemStatus(targetOrderItemId, tx);
+    // Every input that belonged to an order has just been flipped to "Blended", which
+    // changes that item's production picture — not only the item the blend now belongs to.
+    // Recalculating the target alone left the others reading a stale status.
+    const affectedItemIds = [...new Set([...distinctOwners, ...(targetOrderItemId ? [targetOrderItemId] : [])])];
+    for (const itemId of affectedItemIds) {
+      await recalcOrderItemStatus(itemId, tx);
+    }
 
     return tx.roastingBatch.findUnique({
       where: { id: blendedBatch.id },

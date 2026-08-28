@@ -24,6 +24,7 @@ model Employee {
   updatedAt         DateTime       @updatedAt
   qcRecords         QcRecord[]
   cuppingScores     CuppingScore[]
+  ownedOrders       Order[]        @relation("OrderOwner") // Order Operations S0 (additive)
 }
 
 model Customer {
@@ -85,8 +86,23 @@ model Order {
   updatedAt         DateTime    @updatedAt
   items             OrderItem[]
 
+  // ─── Order Operations S0 (additive) ──────────────────────────────────────
+  // Backend-controlled lifecycle status — independent of approvalStatus above,
+  // never accepted through the generic create/update payloads. String (not enum)
+  // to match the existing convention on this model (approvalStatus/paymentStatus/
+  // vatInvoiceStatus are also plain strings, not Prisma enums).
+  // Values: Waiting Approval, Waiting Preparation Review, Preparing,
+  // Ready for Shipping, Completed, On Hold, Cancelled, Rejected
+  status  String    @default("Waiting Approval")
+  ownerId String?
+  owner   Employee? @relation("OrderOwner", fields: [ownerId], references: [id])
+
+  activities OrderActivity[]
+
   @@index([createdAt])
   @@index([customerId, createdAt])
+  @@index([status])
+  @@index([ownerId])
 }
 
 model OrderItem {
@@ -111,6 +127,19 @@ model OrderItem {
   deliveries       Delivery[]
   productionOrders ProductionOrder[]
 
+  // ─── Order Operations S0 (additive) ──────────────────────────────────────
+  // Written only by POST /api/orders/[id]/preparation-review — never by the
+  // generic order edit route. Float to match quantityKg/deliveredQty/remainingQty
+  // above — this model has no Decimal fields to stay consistent with.
+  // Since the shelf-allocation change these three are SERVER-DERIVED, never client
+  // supplied: availableQuantity is the sum of RESERVED StockAllocation rows for this
+  // item and productionRequiredQuantity is the outstanding remainder.
+  preparationDecision        String? // Available on Shelf, Needs Production, Partially Available, Blocked
+  availableQuantity          Float?
+  productionRequiredQuantity Float?
+
+  allocations StockAllocation[]
+
   @@index([productionStatus])
   @@index([deliveryStatus])
   @@index([productionStatus, deliveryStatus])
@@ -118,8 +147,14 @@ model OrderItem {
 
 model RoastingBatch {
   id                  String         @id @default(cuid())
-  orderItemId         String
-  orderItem           OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  // Optional since roast-to-stock. A batch with no order item is a deliberate
+  // replenishment of the shelf: it consumes green stock and writes the same ledger
+  // entries as any other roast, but its packaged output is reserved to nobody and
+  // becomes free-to-promise for whichever order needs it first. Every batch created
+  // before this change carries an order item, and the order-driven path still sets one.
+  orderItemId         String?
+  orderItem           OrderItem?     @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   batchNumber         String
   date                DateTime       @default(now())
   greenBeanId         String?
@@ -182,28 +217,28 @@ model BlendIngredient {
 }
 
 model QcRecord {
-  id             String        @id @default(cuid())
-  batchId        String
-  batch          RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  date           DateTime      @default(now())
-  coffeeOrigin   String
-  processing     String
-  serialNumber   String
-  onProfile      Boolean       @default(false)
-  underDeveloped Boolean       @default(false)
-  overDeveloped  Boolean       @default(false)
-  color          Int?
-  colorWhole     Float?
-  colorGround    Float?
-  remarks        String?
+  id                String                @id @default(cuid())
+  batchId           String
+  batch             RoastingBatch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  date              DateTime              @default(now())
+  coffeeOrigin      String
+  processing        String
+  serialNumber      String
+  onProfile         Boolean               @default(false)
+  underDeveloped    Boolean               @default(false)
+  overDeveloped     Boolean               @default(false)
+  color             Int?
+  colorWhole        Float?
+  colorGround       Float?
+  remarks           String?
   // Multi-tester panel fields
-  employeeId     String?
-  employee       Employee?     @relation(fields: [employeeId], references: [id])
-  isExternal     Boolean       @default(false)
-  testerName     String?
-  decision       String        @default("Accept") // "Accept" or "Reject"
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
+  employeeId        String?
+  employee          Employee?             @relation(fields: [employeeId], references: [id])
+  isExternal        Boolean               @default(false)
+  testerName        String?
+  decision          String                @default("Accept") // "Accept" or "Reject"
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
   correctionHistory QcCorrectionHistory[]
 
   @@index([date])
@@ -435,11 +470,47 @@ model FinishedGoodsLot {
   roastingBatch   RoastingBatch? @relation(fields: [roastingBatchId], references: [id])
   quantityKg      Float
   availableQty    Float
+
+  // ─── Shelf allocation ────────────────────────────────────────────────────
+  // Kilograms already promised to an order item but not yet shipped. Denormalised
+  // sum of the RESERVED StockAllocation rows pointing at this lot — kept on the lot
+  // itself so "is there enough free stock" is answerable by a single conditional
+  // UPDATE (availableQty - reservedQty >= n), the same atomic pattern the delivery
+  // deduction already uses. Free-to-promise is always availableQty - reservedQty.
+  reservedQty     Float          @default(0)
+  allocations     StockAllocation[]
+
   status          LotStatus      @default(AVAILABLE)
   createdAt       DateTime       @default(now())
 
   @@index([status])
   @@index([createdAt])
+}
+
+enum AllocationStatus {
+  RESERVED
+  CONSUMED
+  RELEASED
+}
+
+// One order item may be covered by several lots, so the promise is a row per
+// (order item, lot) pair rather than a column on either side. RESERVED rows are the
+// detail behind FinishedGoodsLot.reservedQty; CONSUMED rows record what a delivery
+// actually shipped; RELEASED rows are cancelled promises kept for audit.
+model StockAllocation {
+  id                 String           @id @default(cuid())
+  orderItemId        String
+  orderItem          OrderItem        @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  finishedGoodsLotId String
+  finishedGoodsLot   FinishedGoodsLot @relation(fields: [finishedGoodsLotId], references: [id])
+  quantityKg         Float
+  status             AllocationStatus @default(RESERVED)
+  createdById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([orderItemId, status])
+  @@index([finishedGoodsLotId, status])
 }
 
 // ─── Product Catalog & Production Planning ────────────────────────────────────
@@ -532,6 +603,39 @@ model BatchSerialHistory {
   @@index([oldBatchNumber])
 }
 
+// ─── Order Operations S0 — Activity Timeline ──────────────────────────────────
+// Unified append-only timeline for both system-generated lifecycle events and
+// manual operational notes on an Order. Deliberately one table, not one history
+// table per event kind: every row shares the same shape and the UI renders them
+// as a single chronological feed — `type` already covers query-time filtering.
+//
+// onDelete: Cascade on the Order relation matches the existing domain-history
+// convention (QcCorrectionHistory -> QcRecord, BatchSerialHistory -> RoastingBatch,
+// both Cascade above): activity history has no independent existence once its
+// parent Order is gone. The existing Order.notes free-text field is untouched
+// and continues to serve whatever it already serves; OrderActivity is additive.
+//
+// Future tenancy: tenant-owned transitively through Order (see docs/saas-readiness.md).
+// No tenantId added now, per the standing SaaS-readiness constraint.
+model OrderActivity {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  type    String // ORDER_CREATED | ORDER_APPROVED | ORDER_REJECTED | PREPARATION_REVIEWED |
+  // STATUS_CHANGED | MANUAL_NOTE | ORDER_HELD | ORDER_RESUMED | ORDER_CANCELLED | ORDER_COMPLETED
+  message String @db.Text
+
+  department String? // Sales, Online, Preparation, Production, Operations, Shipping — set only on MANUAL_NOTE
+  authorId   String? // Employee.id, denormalized — no FK relation (matches WorkItemClaim/QcCorrectionHistory convention)
+  authorName String
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 model LoginAttempt {
@@ -585,14 +689,14 @@ model AuthAuditLog {
 
 model WorkItemClaim {
   id             String    @id @default(cuid())
-  stationType    String                          // ROASTING | QUALITY | WAREHOUSE | PACKAGING | BAR
-  itemType       String                          // e.g. "RoastingBatch" | "QcRecord" — polymorphic, like InventoryMovement.referenceEntityId
+  stationType    String // ROASTING | QUALITY | WAREHOUSE | PACKAGING | BAR
+  itemType       String // e.g. "RoastingBatch" | "QcRecord" — polymorphic, like InventoryMovement.referenceEntityId
   itemId         String
-  itemRef        String                          // `${itemType}:${itemId}`
-  activeItemRef  String?   @unique               // == itemRef while status="ACTIVE", null otherwise (enforces at most one active claim per item)
-  claimedById    String                          // Employee.id, denormalized — no FK relation (audit-table convention)
+  itemRef        String // `${itemType}:${itemId}`
+  activeItemRef  String?   @unique // == itemRef while status="ACTIVE", null otherwise (enforces at most one active claim per item)
+  claimedById    String // Employee.id, denormalized — no FK relation (audit-table convention)
   claimedByName  String
-  status         String    @default("ACTIVE")    // ACTIVE | RELEASED | EXPIRED | OVERRIDDEN
+  status         String    @default("ACTIVE") // ACTIVE | RELEASED | EXPIRED | OVERRIDDEN
   claimedAt      DateTime  @default(now())
   expiresAt      DateTime?
   releasedAt     DateTime?
@@ -612,13 +716,13 @@ model WorkstationActionLog {
   stationType     String
   itemType        String
   itemId          String
-  action          String                         // CLAIM | RELEASE | ADVANCE:<action> | FLAG
+  action          String // CLAIM | RELEASE | ADVANCE:<action> | FLAG
   fromState       String?
   toState         String?
-  employeeId      String                         // Employee.id, denormalized — no FK relation
+  employeeId      String // Employee.id, denormalized — no FK relation
   employeeName    String
   idempotencyKey  String   @unique
-  status          String                         // SUCCESS | REJECTED | ERROR
+  status          String // SUCCESS | REJECTED | ERROR
   reason          String?
   sourceInterface String   @default("STATION")
   createdAt       DateTime @default(now())
@@ -688,13 +792,13 @@ enum QoyodExportStatus {
 
 model AccountingSettings {
   // Singleton row, same pattern as SystemConfig — no Tenant model exists yet.
-  id        String @id @default("singleton")
+  id String @id @default("singleton")
 
   baseCurrency String @default("SAR")
 
   // Phase 2+ placeholders — stored now per spec, not enforced by any service logic in S0.
-  costingMethod String @default("WeightedAverage")
-  cogsPolicy    String @default("OnShipping")
+  costingMethod        String @default("WeightedAverage")
+  cogsPolicy           String @default("OnShipping")
   branchAccountingMode String @default("CostCenterOnly")
 
   exportToQoyod Boolean @default(false)
@@ -733,21 +837,21 @@ model Account {
 }
 
 model TaxCategory {
-  id                    String          @id @default(cuid())
-  code                  String          @unique
-  nameAr                String?
-  nameEn                String
-  rate                  Decimal         @db.Decimal(5, 2)
-  categoryType          TaxCategoryType @default(STANDARD)
-  isDefault             Boolean         @default(false)
-  isActive              Boolean         @default(true)
-  requiresReason        Boolean         @default(false)
-  requiresApproval      Boolean         @default(false)
-  zatcaTaxCategoryCode  String?
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
-  createdBy             String?
-  updatedBy             String?
+  id                   String          @id @default(cuid())
+  code                 String          @unique
+  nameAr               String?
+  nameEn               String
+  rate                 Decimal         @db.Decimal(5, 2)
+  categoryType         TaxCategoryType @default(STANDARD)
+  isDefault            Boolean         @default(false)
+  isActive             Boolean         @default(true)
+  requiresReason       Boolean         @default(false)
+  requiresApproval     Boolean         @default(false)
+  zatcaTaxCategoryCode String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  createdBy            String?
+  updatedBy            String?
 
   @@index([isActive])
   @@index([categoryType])
@@ -782,20 +886,20 @@ model JournalEntry {
   fiscalPeriod     FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
   type             JournalEntryType   @default(MANUAL)
   status           JournalEntryStatus @default(DRAFT)
-  sourceModule      String            @default("manual")
-  sourceDocumentId  String?
-  description       String?
+  sourceModule     String             @default("manual")
+  sourceDocumentId String?
+  description      String?
 
   // Reversal link lives on the REVERSAL entry, pointing at the ORIGINAL it reverses.
   // @unique on reversesEntryId means Postgres allows many NULLs (non-reversal entries)
   // but at most one row may point at a given original — i.e. an entry can only ever
   // be reversed once. This is enforced at the DB level, not just in service code.
-  reversesEntryId  String?            @unique
-  reversesEntry    JournalEntry?      @relation("JournalEntryReversal", fields: [reversesEntryId], references: [id])
-  reversedByEntry  JournalEntry?      @relation("JournalEntryReversal")
+  reversesEntryId String?       @unique
+  reversesEntry   JournalEntry? @relation("JournalEntryReversal", fields: [reversesEntryId], references: [id])
+  reversedByEntry JournalEntry? @relation("JournalEntryReversal")
 
-  totalDebit  Decimal @db.Decimal(18, 2) @default(0)
-  totalCredit Decimal @db.Decimal(18, 2) @default(0)
+  totalDebit  Decimal @default(0) @db.Decimal(18, 2)
+  totalCredit Decimal @default(0) @db.Decimal(18, 2)
   currency    String  @default("SAR")
 
   createdAt   DateTime  @default(now())
@@ -811,8 +915,8 @@ model JournalEntry {
   // Set only on the reversal entry itself (explanation for why the original was reversed).
   reversalReason String?
 
-  lines            JournalEntryLine[]
-  accountingEvents AccountingEvent[]
+  lines              JournalEntryLine[]
+  accountingEvents   AccountingEvent[]
   qoyodExportRecords QoyodExportRecord[]
 
   @@index([status])
@@ -831,11 +935,11 @@ model JournalEntryLine {
   // DB-level CHECK constraint (added by hand to the migration SQL, same precedent as the
   // existing non-negative-quantity constraints) enforces: debit >= 0, credit >= 0, and
   // exactly one of the two is > 0 while the other is exactly 0. See migration SQL comment.
-  debit  Decimal @db.Decimal(18, 2) @default(0)
-  credit Decimal @db.Decimal(18, 2) @default(0)
+  debit  Decimal @default(0) @db.Decimal(18, 2)
+  credit Decimal @default(0) @db.Decimal(18, 2)
 
   description         String?
-  taxCategorySnapshot  Json?
+  taxCategorySnapshot Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -845,7 +949,7 @@ model JournalEntryLine {
 }
 
 model AccountingEvent {
-  id               String                @id @default(cuid())
+  id               String @id @default(cuid())
   eventType        String
   sourceModule     String
   sourceDocumentId String
@@ -857,11 +961,11 @@ model AccountingEvent {
   // (sourceModule, sourceDocumentId, eventType) would incorrectly block valid repeats.
   idempotencyKey String @unique
 
-  occurredAt   DateTime              @default(now())
-  payload      Json
-  status       AccountingEventStatus @default(PENDING)
+  occurredAt     DateTime              @default(now())
+  payload        Json
+  status         AccountingEventStatus @default(PENDING)
   journalEntryId String?
-  journalEntry   JournalEntry?       @relation(fields: [journalEntryId], references: [id])
+  journalEntry   JournalEntry?         @relation(fields: [journalEntryId], references: [id])
   errorMessage   String?
 
   createdAt DateTime @default(now())

@@ -73,11 +73,12 @@ type Batch = {
   parentBatchId: string | null;
   qcDeadline: string | null;
   qcToken: string | null;
+  // Nullable since roast-to-stock: a batch roasted for the shelf has no order behind it.
   orderItem: {
     beanTypeName: string;
     greenBeanId: string | null;
     order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
-  };
+  } | null;
   greenBean: { beanType: string; process: string } | null;
   qcRecords: TesterRecord[];
   childBatches: { id: string; batchNumber: string }[];
@@ -347,7 +348,7 @@ export default function QCPage() {
     setForm({
       ...BLANK_FORM,
       batchId: batch.id,
-      coffeeOrigin: batch.greenBean?.beanType || batch.orderItem.beanTypeName,
+      coffeeOrigin: batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? ""),
       processing: batch.greenBean?.process || "",
       serialNumber: batch.batchNumber,
     });
@@ -358,7 +359,7 @@ export default function QCPage() {
     setEditingRecordId(record.id);
     setForm({
       batchId: batch.id,
-      coffeeOrigin: record.coffeeOrigin || batch.greenBean?.beanType || batch.orderItem.beanTypeName,
+      coffeeOrigin: record.coffeeOrigin || batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? ""),
       processing: record.processing || "",
       serialNumber: record.serialNumber || batch.batchNumber,
       decision: (record.decision === "Accept" || record.decision === "Reject") ? record.decision : "",
@@ -557,7 +558,7 @@ export default function QCPage() {
     const seen = new Set<string>();
     const opts: FilterOption[] = [];
     for (const b of backlogBatches) {
-      const v = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      const v = b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "");
       if (!seen.has(v)) { seen.add(v); opts.push({ label: v, value: v }); }
     }
     return opts;
@@ -567,25 +568,25 @@ export default function QCPage() {
     const seen = new Set<string>();
     const opts: FilterOption[] = [];
     for (const b of backlogBatches) {
-      const v = String(b.orderItem.order.orderNumber);
-      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${b.orderItem.order.customer.name}`, value: v }); }
+      const v = String((b.orderItem?.order.orderNumber ?? t("stockBatchLabel")));
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${(b.orderItem?.order.customer.name ?? t("stockBatchLabel"))}`, value: v }); }
     }
     return opts;
-  }, [backlogBatches]);
+  }, [backlogBatches, t]);
 
   const filteredBacklog = useMemo(() => {
     const q = backlogSearch.toLowerCase();
     return backlogBatches.filter((b) => {
-      const beanType = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      const beanType = b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "");
       if (backlogBean && beanType !== backlogBean) return false;
-      if (backlogOrder && String(b.orderItem.order.orderNumber) !== backlogOrder) return false;
+      if (backlogOrder && String((b.orderItem?.order.orderNumber ?? t("stockBatchLabel"))) !== backlogOrder) return false;
       if (q) {
-        const haystack = `${b.batchNumber} ${b.orderItem.order.orderNumber} ${b.orderItem.order.customer.name} ${beanType}`.toLowerCase();
+        const haystack = `${b.batchNumber} ${(b.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} ${(b.orderItem?.order.customer.name ?? t("stockBatchLabel"))} ${beanType}`.toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [backlogBatches, backlogSearch, backlogBean, backlogOrder]);
+  }, [backlogBatches, backlogSearch, backlogBean, backlogOrder, t]);
 
   function deadlineDisplay(deadline: string | null) {
     if (!deadline) return null;
@@ -776,7 +777,7 @@ export default function QCPage() {
                           )}
                         </div>
                         <p className="text-xs text-brown mt-0.5">
-                          {batch.greenBean?.beanType || batch.orderItem.beanTypeName} — #{batch.orderItem.order.orderNumber} ({batch.orderItem.order.customer.name})
+                          {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} — #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} ({(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))})
                         </p>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {batch.roastedBeanQuantity}kg {t("roastedLabel")}{batch.roastProfile ? ` · ${batch.roastProfile}` : ""}
@@ -849,8 +850,8 @@ export default function QCPage() {
 
                     {/* Expanded tester list */}
                     {isExpanded && total > 0 && (() => {
-                      const batchGbId = batch.orderItem.greenBeanId;
-                      const batchPref = batch.orderItem.order.customer.roastPreferences.find(
+                      const batchGbId = (batch.orderItem?.greenBeanId ?? null);
+                      const batchPref = (batch.orderItem?.order.customer.roastPreferences ?? []).find(
                         (p) => p.greenBeanId === batchGbId
                       ) ?? null;
                       const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
@@ -1071,7 +1072,7 @@ export default function QCPage() {
                         )}
                       </div>
                       <p className="text-xs text-brown mt-0.5">
-                        {batch.greenBean?.beanType || batch.orderItem.beanTypeName} — #{batch.orderItem.order.orderNumber} ({batch.orderItem.order.customer.name})
+                        {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} — #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} ({(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))})
                       </p>
                     </div>
                     <button onClick={() => setExpandedId(isExpanded ? null : batch.id)}
@@ -1092,8 +1093,8 @@ export default function QCPage() {
                         </p>
                       )}
                       {batch.qcRecords.length > 0 && (() => {
-                        const batchGbId = batch.orderItem.greenBeanId;
-                        const batchPref = batch.orderItem.order.customer.roastPreferences.find(
+                        const batchGbId = (batch.orderItem?.greenBeanId ?? null);
+                        const batchPref = (batch.orderItem?.order.customer.roastPreferences ?? []).find(
                           (p) => p.greenBeanId === batchGbId
                         ) ?? null;
                         const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
@@ -1149,12 +1150,12 @@ export default function QCPage() {
                 ) : (
                   <select value={form.batchId} onChange={(e) => {
                     const batch = backlogBatches.find((b) => b.id === e.target.value);
-                    if (batch) setForm({ ...form, batchId: batch.id, coffeeOrigin: batch.greenBean?.beanType || batch.orderItem.beanTypeName, processing: batch.greenBean?.process || "", serialNumber: batch.batchNumber });
+                    if (batch) setForm({ ...form, batchId: batch.id, coffeeOrigin: batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? ""), processing: batch.greenBean?.process || "", serialNumber: batch.batchNumber });
                   }}
                     className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                     <option value="">{t("selectBatch")}</option>
                     {backlogBatches.map((b) => (
-                      <option key={b.id} value={b.id}>{b.batchNumber} — {b.orderItem.beanTypeName} (#{b.orderItem.order.orderNumber})</option>
+                      <option key={b.id} value={b.id}>{b.batchNumber} — {(b.orderItem?.beanTypeName ?? "")} (#{(b.orderItem?.order.orderNumber ?? t("stockBatchLabel"))})</option>
                     ))}
                   </select>
                 )}
@@ -1184,8 +1185,9 @@ export default function QCPage() {
               {/* Agtron Color Inputs */}
               {(() => {
                 const selBatch = backlogBatches.find((b) => b.id === form.batchId);
-                const batchGreenBeanId = selBatch?.orderItem.greenBeanId ?? null;
-                const pref = selBatch?.orderItem.order.customer.roastPreferences.find(
+                const batchGreenBeanId = selBatch?.orderItem?.greenBeanId ?? null;
+                // A stock batch has no customer, so no roast preference to honour.
+                const pref = selBatch?.orderItem?.order.customer.roastPreferences.find(
                   (p) => p.greenBeanId === batchGreenBeanId
                 ) ?? null;
                 const whole = parseFloat(form.colorWhole);

@@ -4,6 +4,11 @@ import { requireEdit } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import {
+  ALLOCATABLE_ITEM_SELECT,
+  outstandingForItem,
+  reserveShelfStock,
+} from "@/lib/services/shelf-allocation";
 
 const MARGIN = 0.1;
 
@@ -161,6 +166,35 @@ export async function PUT(
           notes:             null,
         },
       });
+
+      // ── Claim the packaged coffee for the order it was roasted for ──────────
+      // Reserving here is what keeps the shelf honest: only the genuine surplus — coffee
+      // beyond what this order still needs — stays free for other orders to draw on,
+      // which is exactly what the orders screen already calls "surplus to inventory".
+      //
+      // A stock batch has no order item at all. Nothing is reserved, so its whole output
+      // lands on the shelf free-to-promise — which is the entire point of roasting to
+      // stock, and the only way the shelf gets filled on purpose rather than by accident.
+      const owner = batch.orderItemId
+        ? await tx.orderItem.findUnique({
+            where: { id: batch.orderItemId },
+            select: { ...ALLOCATABLE_ITEM_SELECT, preparationDecision: true, order: { select: { status: true } } },
+          })
+        : null;
+      // A cancelled or blocked order must not silently take stock back. Cancelling
+      // releases its reservations; re-claiming them here for a batch that was already in
+      // the roaster would strand the coffee on a dead order.
+      const ownerIsLive =
+        owner !== null &&
+        owner.order.status !== "Cancelled" &&
+        owner.order.status !== "Rejected" &&
+        owner.preparationDecision !== "Blocked";
+      if (owner && ownerIsLive) {
+        const outstanding = await outstandingForItem(tx, owner);
+        if (outstanding > 0) {
+          await reserveShelfStock(tx, owner, outstanding, user.id);
+        }
+      }
 
       if (batch.productionOrderId) {
         await recalcProductionOrderStatus(batch.productionOrderId, tx);

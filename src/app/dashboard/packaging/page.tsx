@@ -18,7 +18,8 @@ type Batch = {
   parentBatchId: string | null;
   parentBatch: { id: string; batchNumber: string } | null;
   greenBean: { beanType: string } | null;
-  orderItem: { beanTypeName: string; productId: string | null; productSkuId: string | null; order: { orderNumber: number; customer: { name: string } } };
+  // Nullable since roast-to-stock: a batch roasted for the shelf has no order behind it.
+  orderItem: { beanTypeName: string; productId: string | null; productSkuId: string | null; order: { orderNumber: number; customer: { name: string } } } | null;
 };
 
 type ProductSummary = {
@@ -33,7 +34,7 @@ function packagedKg(b: { bags3kg: number; bags1kg: number; bags250g: number; bag
 }
 
 function isBulkCustom(batch: Batch): boolean {
-  return !batch.productId && !batch.orderItem.productId;
+  return !batch.productId && !(batch.orderItem?.productId ?? null);
 }
 
 export default function PackagingPage() {
@@ -158,7 +159,7 @@ export default function PackagingPage() {
     const seen = new Set<string>();
     const opts: FilterOption[] = [];
     for (const b of batches) {
-      const v = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      const v = b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "");
       if (!seen.has(v)) { seen.add(v); opts.push({ label: v, value: v }); }
     }
     return opts;
@@ -168,25 +169,25 @@ export default function PackagingPage() {
     const seen = new Set<string>();
     const opts: FilterOption[] = [];
     for (const b of batches) {
-      const v = String(b.orderItem.order.orderNumber);
-      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${b.orderItem.order.customer.name}`, value: v }); }
+      const v = String((b.orderItem?.order.orderNumber ?? t("stockBatchLabel")));
+      if (!seen.has(v)) { seen.add(v); opts.push({ label: `#${v} – ${(b.orderItem?.order.customer.name ?? t("stockBatchLabel"))}`, value: v }); }
     }
     return opts;
-  }, [batches]);
+  }, [batches, t]);
 
   const filteredBatches = useMemo(() => {
     const q = filterSearch.toLowerCase();
     return batches.filter((b) => {
-      const beanType = b.greenBean?.beanType || b.orderItem.beanTypeName;
+      const beanType = b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "");
       if (filterBean && beanType !== filterBean) return false;
-      if (filterOrder && String(b.orderItem.order.orderNumber) !== filterOrder) return false;
+      if (filterOrder && String((b.orderItem?.order.orderNumber ?? t("stockBatchLabel"))) !== filterOrder) return false;
       if (q) {
-        const haystack = `${b.batchNumber} ${b.orderItem.order.orderNumber} ${b.orderItem.order.customer.name} ${beanType}`.toLowerCase();
+        const haystack = `${b.batchNumber} ${(b.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} ${(b.orderItem?.order.customer.name ?? t("stockBatchLabel"))} ${beanType}`.toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [batches, filterSearch, filterBean, filterOrder]);
+  }, [batches, filterSearch, filterBean, filterOrder, t]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin" /></div>;
@@ -284,7 +285,7 @@ export default function PackagingPage() {
                       )}
                     </div>
                     <p className="text-sm text-brown font-medium">
-                      #{batch.orderItem.order.orderNumber} — {batch.orderItem.order.customer.name} — {batch.greenBean?.beanType || batch.orderItem.beanTypeName}
+                      #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} — {(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))} — {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}
                     </p>
                     <p className="text-xs text-brown/50 mt-0.5">
                       {batch.roastedBeanQuantity}kg {t("roastedLabel")} | {batch.greenBeanQuantity}kg {t("greenLabel")} | {formatDate(batch.date)}
@@ -337,7 +338,7 @@ export default function PackagingPage() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("packageBatchTitle")}</h2>
-            <p className="text-sm text-brown font-medium mb-1">{selectedBatch.batchNumber} — {selectedBatch.greenBean?.beanType || selectedBatch.orderItem.beanTypeName}</p>
+            <p className="text-sm text-brown font-medium mb-1">{selectedBatch.batchNumber} — {selectedBatch.greenBean?.beanType || (selectedBatch.orderItem?.beanTypeName ?? "")}</p>
             {(() => {
               const alreadyPacked = packagedKg(selectedBatch);
               const remainingCapacity = +(selectedBatch.roastedBeanQuantity - alreadyPacked).toFixed(3);

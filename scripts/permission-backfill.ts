@@ -48,7 +48,7 @@ function createPrismaClient(): PrismaClient {
 }
 
 // Keep in sync with src/lib/auth-shared.ts MODULE_SUB_PRIVILEGES manually when sub-privileges are added.
-const MODULE_SUB_PRIVILEGES: Record<string, { key: string }[]> = {
+const MODULE_SUB_PRIVILEGES: Record<string, { key: string; adminOnly?: boolean }[]> = {
   inventory: [
     { key: "receive" },
     { key: "adjust" },
@@ -61,6 +61,11 @@ const MODULE_SUB_PRIVILEGES: Record<string, { key: string }[]> = {
   ],
   production: [
     { key: "start_batch" },
+    // Added 2026-08-27 with roast-to-stock. adminOnly because it is a NEW capability that
+    // nobody previously had — backfilling it as true for every edit-access employee would
+    // grant a power the system never gave them, and would make the admin-only surplus gate
+    // circumventable by omitting the order item.
+    { key: "roast_to_stock", adminOnly: true },
     { key: "blend" },
     { key: "view_history" },
     { key: "cancel_batch" },
@@ -101,7 +106,8 @@ type Permissions = Record<string, ModulePermission>;
  */
 function mergeSubKeys(
   perm: ModulePermission,
-  subs: { key: string }[],
+  subs: { key: string; adminOnly?: boolean }[],
+  role: string,
 ): { changed: boolean; perm: ModulePermission } {
   if (perm.access === "none") return { changed: false, perm };
 
@@ -112,7 +118,10 @@ function mergeSubKeys(
 
   for (const sub of subs) {
     if (!(sub.key in merged)) {
-      merged[sub.key] = grantValue;
+      // A key marked adminOnly is a capability the system did not previously have at all,
+      // so "preserve current effective access" means denying it — except to admins, who
+      // hold every privilege by definition.
+      merged[sub.key] = sub.adminOnly ? role === "admin" : grantValue;
       changed = true;
     }
     // Already present — never overwrite, even if the value differs from grantValue.
@@ -171,7 +180,7 @@ async function main() {
       for (const [module, subs] of Object.entries(MODULE_SUB_PRIVILEGES)) {
         const perm = nextPerms[module];
         if (!perm) continue; // module not present in this employee's permissions — skip
-        const { changed, perm: merged } = mergeSubKeys(perm, subs);
+        const { changed, perm: merged } = mergeSubKeys(perm, subs, emp.role);
         if (changed) {
           nextPerms[module] = merged;
           anyChange = true;

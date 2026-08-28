@@ -49,6 +49,9 @@ export async function POST(request: Request) {
       prisma.cuppingSessionBatch.deleteMany(),
       prisma.cuppingSession.deleteMany(),
       prisma.inventoryMovement.deleteMany(),
+      // Must precede finishedGoodsLot: StockAllocation.finishedGoodsLotId is ON DELETE
+      // RESTRICT, so leaving these behind makes the whole reset transaction fail.
+      prisma.stockAllocation.deleteMany(),
       prisma.finishedGoodsLot.deleteMany(),
       prisma.productionOrder.deleteMany(),
       prisma.purchaseRecord.deleteMany(),

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { checkOrderAvailability } from "@/lib/services/shelf-allocation";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -32,6 +33,9 @@ export async function GET(request: Request) {
           greenBean: true,
         },
       },
+      // Order Operations S0: minimal owner projection — no permissions/pin/credential fields.
+      owner: { select: { id: true, name: true, role: true } },
+      activities: { orderBy: { createdAt: "asc" } },
     },
   });
   return NextResponse.json(orders);
@@ -119,37 +123,13 @@ export async function POST(request: Request) {
     if (!result.ok) return result.error;
     const resolvedItems = result.items;
 
-    const beanIds = [...new Set(
-      resolvedItems
-        .filter((i) => i.greenBeanId)
-        .map((i) => i.greenBeanId as string)
-    )];
-
-    if (beanIds.length > 0) {
-      const greenBeans = await prisma.greenBean.findMany({ where: { id: { in: beanIds } } });
-      const stockMap = new Map(greenBeans.map((b) => [b.id, b.quantityKg]));
-
-      const demandMap = new Map<string, number>();
-      for (const item of resolvedItems) {
-        if (!item.greenBeanId) continue;
-        demandMap.set(item.greenBeanId, (demandMap.get(item.greenBeanId) || 0) + item.quantityKg);
-      }
-
-      const insufficient: string[] = [];
-      for (const [beanId, demand] of demandMap) {
-        const available = stockMap.get(beanId) ?? 0;
-        if (demand > available) {
-          const bean = greenBeans.find((b) => b.id === beanId);
-          insufficient.push(`${bean?.beanType ?? "Unknown"}: need ${demand}kg, available ${available}kg`);
-        }
-      }
-
-      if (insufficient.length > 0) {
-        return NextResponse.json(
-          { error: "Insufficient stock", details: insufficient },
-          { status: 400 }
-        );
-      }
+    // Shelf first, green beans for the remainder — see checkOrderAvailability.
+    const insufficient = await checkOrderAvailability(prisma, resolvedItems);
+    if (insufficient.length > 0) {
+      return NextResponse.json(
+        { error: "Insufficient stock", details: insufficient },
+        { status: 400 }
+      );
     }
 
     let order;

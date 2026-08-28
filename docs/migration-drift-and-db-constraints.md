@@ -145,6 +145,62 @@ ALTER TABLE "FiscalPeriod" DROP CONSTRAINT IF EXISTS "FiscalPeriod_startDate_bef
 
 ---
 
+## 3b. Manual CHECK Constraints Embedded in a Migration File (Shelf Allocation)
+
+> **Status: APPLIED TO THE LOCAL TEST DATABASE ONLY.** Shipped as migration
+> `20260826090000_add_shelf_allocation`. It has not been deployed to the demo or
+> production Neon endpoints — that remains a separate, explicitly approved step.
+
+Same technique as Section 3a: the constraints live inside the migration file, in version
+control from the start.
+
+| Constraint name | Table | Rule |
+|---|---|---|
+| `FinishedGoodsLot_reservedQty_within_available` | `FinishedGoodsLot` | `reservedQty >= 0 AND reservedQty <= availableQty` |
+| `StockAllocation_quantityKg_positive` | `StockAllocation` | `quantityKg > 0` |
+
+`FinishedGoodsLot_reservedQty_within_available` is the invariant the whole shelf-first
+mechanism rests on: a lot may never promise more coffee than it physically holds. The
+reservation path in `src/lib/services/shelf-allocation.ts` guards this in its own
+conditional `UPDATE`, but the constraint is what makes the rule true regardless of which
+code path writes the row.
+
+**Backfill:** none required. `reservedQty` was added with `DEFAULT 0`, which is the
+correct historical value — before this migration nothing could reserve stock, so no
+kilogram was ever promised without being shipped in the same transaction. Verified against
+a populated database (44 `RoastingBatch`, 50 `OrderItem`, 44 `Delivery` rows): the
+migration applies with no errors and no data change beyond the new column default.
+
+**They must not be removed silently** — same rule as Sections 3 and 3a.
+
+Rollback SQL (if ever needed, only after the migration has been applied):
+
+```sql
+ALTER TABLE "FinishedGoodsLot" DROP CONSTRAINT IF EXISTS "FinishedGoodsLot_reservedQty_within_available";
+ALTER TABLE "StockAllocation" DROP CONSTRAINT IF EXISTS "StockAllocation_quantityKg_positive";
+```
+
+---
+
+## 3c. Nullable Column Widening (Roast to Stock)
+
+> **Status: APPLIED TO THE LOCAL TEST DATABASE ONLY.** Migration
+> `20260827090000_allow_roast_to_stock`.
+
+```sql
+ALTER TABLE "RoastingBatch" ALTER COLUMN "orderItemId" DROP NOT NULL;
+```
+
+No CHECK constraint and no backfill: every existing row already carries an order item, so the
+widening rewrites nothing.
+
+**Reversibility caveat.** Re-adding `SET NOT NULL` succeeds only while no stock batch exists.
+Once one has been created the reverse migration will fail, and the rows would have to be
+deleted or reassigned first. This is the intended one-way door — a stock batch is a batch that
+genuinely belongs to no order.
+
+---
+
 ## 4. Prisma Cannot Represent These CHECK Constraints
 
 Prisma's schema language (`schema.prisma`) has no `@check` or `@@check` attribute.

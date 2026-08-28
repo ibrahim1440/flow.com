@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Factory, AlertTriangle, CheckCircle, Merge, Box, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
+import { Factory, AlertTriangle, CheckCircle, Merge, Box, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
@@ -20,7 +20,8 @@ type Batch = {
   parentBatchId: string | null;
   parentBatch: { id: string; batchNumber: string } | null;
   greenBean: { beanType: string } | null;
-  orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
+  // Nullable since roast-to-stock: a batch roasted for the shelf has no order behind it.
+  orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } } | null;
   qcRecords: { id: string; onProfile: boolean }[];
   childBatches: { id: string; batchNumber: string }[];
   blendInputs: { id: string; sourceBatchId: string; quantityUsed: number; sourceBatch: { batchNumber: string } }[];
@@ -31,6 +32,8 @@ type CustomerPref = { id: string; greenBeanId: string; profileName: string; usag
 
 type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
+  /** Kilograms preparation review covered from the shelf. Null until the review runs. */
+  availableQuantity: number | null;
   greenBeanId: string | null; greenBean: { id: string; beanType: string; quantityKg: number } | null;
   order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; isBlend: boolean }[];
@@ -63,9 +66,10 @@ function formatKg(value: number): string {
 
 export default function ProductionPage() {
   const user = useUser();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const canStartBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "start_batch");
   const canBlend = hasSubPrivilege(user?.permissions ?? {}, "production", "blend");
+  const canRoastToStock = hasSubPrivilege(user?.permissions ?? {}, "production", "roast_to_stock");
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
   const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
@@ -80,8 +84,12 @@ export default function ProductionPage() {
   const [showRoastForm, setShowRoastForm] = useState(false);
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const [roastForm, setRoastForm] = useState({
-    greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "",
+    greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "", productId: "",
   });
+  const [products, setProducts] = useState<{ id: string; productNameEn: string; productNameAr: string | null }[]>([]);
+  // Roast-to-stock: no order behind the batch, so its output lands on the shelf free for
+  // whichever order needs it first.
+  const [stockMode, setStockMode] = useState(false);
 
   // Profile overrides (keyed by orderItemId) — local state for per-session profile hints
   const [profileOverrides, setProfileOverrides] = useState<Record<string, string>>({});
@@ -113,24 +121,49 @@ export default function ProductionPage() {
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
-    const [ordersRes, beansRes, batchRes] = await Promise.all([
+    const [ordersRes, beansRes, batchRes, productsRes] = await Promise.all([
       fetch("/api/orders?status=Pending,In+Production"),
       fetch("/api/green-beans"),
       fetch("/api/roasting-batches"),
+      // Needed only by the roast-to-stock path, which must name the product it produces.
+      fetch("/api/coffee-products/summary"),
     ]);
     if (ordersRes.ok) setOrders(await ordersRes.json());
     if (beansRes.ok) setBeans(await beansRes.json());
+    if (productsRes.ok) setProducts(await productsRes.json());
     if (batchRes.ok) setBatches(await batchRes.json());
   }
 
   function startProduction(item: OrderItem) {
+    setStockMode(false);
     setSelectedItem(item);
     const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.greenBeanQuantity, 0);
-    const remaining = item.quantityKg - produced;
-    const cleanRemaining = Number(remaining.toFixed(3));
+    // Only the part the shelf could not cover needs roasting. Prefilling the full ordered
+    // quantity on a partially covered item hands the roaster a number the server will
+    // reject with 422, and roasting it anyway would produce exactly the surplus the shelf
+    // existed to avoid. availableQuantity is set by preparation review; before any review
+    // it is null and the whole order is still to be made.
+    const coveredFromShelf = item.availableQuantity ?? 0;
+    const remaining = item.quantityKg - coveredFromShelf - produced;
+    const cleanRemaining = Number(Math.max(0, remaining).toFixed(3));
     const pref = item.order.customer.roastPreferences?.find((p) => p.greenBeanId === item.greenBeanId);
     const profileHint = profileOverrides[item.id] ?? pref?.profileName ?? "";
-    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: cleanRemaining, roastedBeanQuantity: 0, roastProfile: profileHint });
+    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: cleanRemaining, roastedBeanQuantity: 0, roastProfile: profileHint, productId: "" });
+    setError(""); setSuccess("");
+    setShowRoastForm(true);
+  }
+
+  function closeRoastForm() {
+    setShowRoastForm(false);
+    // Never leave stock mode armed: the next order-driven roast would post without its
+    // order item and silently become a stock batch.
+    setStockMode(false);
+  }
+
+  function startStockProduction() {
+    setStockMode(true);
+    setSelectedItem(null);
+    setRoastForm({ greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "", productId: "" });
     setError(""); setSuccess("");
     setShowRoastForm(true);
   }
@@ -148,11 +181,13 @@ export default function ProductionPage() {
       }
     }
 
-    if (!forceSubmit && selectedItem) {
+    if (!forceSubmit && !stockMode && selectedItem) {
       const alreadyGreen = selectedItem.roastingBatches
         .filter((b) => !b.isBlend)
         .reduce((s, b) => s + b.greenBeanQuantity, 0);
-      const excess = +(alreadyGreen + roastForm.greenBeanQuantity - selectedItem.quantityKg).toFixed(2);
+      // Same ceiling the server enforces: ordered minus what the shelf already covers.
+      const ceiling = selectedItem.quantityKg - (selectedItem.availableQuantity ?? 0);
+      const excess = +(alreadyGreen + roastForm.greenBeanQuantity - ceiling).toFixed(2);
       if (excess > 0) {
         setOverproductionExcess(excess);
         return;
@@ -164,7 +199,9 @@ export default function ProductionPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        orderItemId: selectedItem!.id,
+        // Omitting orderItemId is what makes this a stock batch.
+        orderItemId: stockMode ? undefined : selectedItem!.id,
+        productId: stockMode ? roastForm.productId : undefined,
         greenBeanId: roastForm.greenBeanId || undefined,
         greenBeanQuantity: roastForm.greenBeanQuantity,
         roastedBeanQuantity: roastForm.roastedBeanQuantity,
@@ -193,7 +230,7 @@ export default function ProductionPage() {
 
     setOverproductionExcess(null);
     setSuccess(t("batchCreated"));
-    setShowRoastForm(false);
+    closeRoastForm();
     loadData();
   }
 
@@ -303,9 +340,9 @@ export default function ProductionPage() {
     return list.map((b) => ({
       batchNumber: b.batchNumber,
       date: formatDate(b.date),
-      customer: b.orderItem.order.customer.name,
-      orderNumber: b.orderItem.order.orderNumber,
-      beanType: b.greenBean?.beanType || b.orderItem.beanTypeName,
+      customer: (b.orderItem?.order.customer.name ?? t("stockBatchLabel")),
+      orderNumber: (b.orderItem?.order.orderNumber ?? t("stockBatchLabel")),
+      beanType: b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? ""),
       greenBeanQuantity: b.greenBeanQuantity,
       roastedBeanQuantity: b.roastedBeanQuantity,
       wasteQuantity: +(b.greenBeanQuantity - b.roastedBeanQuantity).toFixed(2),
@@ -328,12 +365,20 @@ export default function ProductionPage() {
             {pendingItems.length} {t("pending")} | {pendingQcBatches.length} {t("awaitingQc")}
           </p>
         </div>
-        {canBlend && blendableBatches.length >= 2 && (
-          <button onClick={() => { setShowBlendForm(true); setBlendSelected(new Set()); setError(""); }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate text-white rounded-xl font-bold text-sm hover:bg-slate-dark transition-all duration-200 shadow-md">
-            <Merge size={16} /> {t("blendBatches")}
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {canStartBatch && canRoastToStock && (
+            <button onClick={startStockProduction}
+              className="flex items-center gap-2 px-4 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange-dark transition-all duration-200 shadow-md active:scale-[0.98]">
+              <Boxes size={16} /> {t("roastToStock")}
+            </button>
+          )}
+          {canBlend && blendableBatches.length >= 2 && (
+            <button onClick={() => { setShowBlendForm(true); setBlendSelected(new Set()); setError(""); }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate text-white rounded-xl font-bold text-sm hover:bg-slate-dark transition-all duration-200 shadow-md">
+              <Merge size={16} /> {t("blendBatches")}
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2"><AlertTriangle size={18} />{error}</div>}
@@ -529,7 +574,7 @@ export default function ProductionPage() {
                       )}
                     </div>
                     <p className="text-sm text-brown font-medium">
-                      #{batch.orderItem.order.orderNumber} — {batch.orderItem.order.customer.name} — {batch.greenBean?.beanType || batch.orderItem.beanTypeName}
+                      #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} — {(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))} — {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}
                     </p>
                     <p className="text-xs text-brown/50 mt-0.5">
                       {formatKg(batch.roastedBeanQuantity)}kg {t("roastedLabel")} | {formatKg(batch.greenBeanQuantity)}kg {t("greenLabel")} | {formatDate(batch.date)}
@@ -637,17 +682,43 @@ export default function ProductionPage() {
       )}
 
       {/* Roast Form Modal */}
-      {showRoastForm && selectedItem && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowRoastForm(false); }}>
+      {showRoastForm && (selectedItem || stockMode) && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeRoastForm(); }}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
-            <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("recordRoastTitle")}</h2>
-            <p className="text-sm text-brown font-medium mb-4">#{selectedItem.order.orderNumber} — {selectedItem.beanTypeName}</p>
+            <h2 className="text-lg font-extrabold text-charcoal mb-1">
+              {stockMode ? t("roastToStockTitle") : t("recordRoastTitle")}
+            </h2>
+            {stockMode ? (
+              <p className="text-sm text-brown font-medium mb-4">{t("roastToStockHint")}</p>
+            ) : (
+              <p className="text-sm text-brown font-medium mb-4">#{selectedItem!.order.orderNumber} — {selectedItem!.beanTypeName}</p>
+            )}
             <p className="text-xs text-brown/50 mb-4">{t("snAutoGenerated")}</p>
             <form onSubmit={handleRoastSubmit} className="space-y-3">
+              {/* The page-level error banner sits behind this modal's backdrop, so a failed
+                  submit from here has to report itself inside the dialog. */}
+              {error && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
+                  <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" /> <span>{error}</span>
+                </div>
+              )}
+              {stockMode && (
+                <div>
+                  <label className="block text-sm font-bold text-charcoal mb-1">{t("productLabel")}</label>
+                  <select value={roastForm.productId} onChange={(e) => setRoastForm({ ...roastForm, productId: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
+                    <option value="">{t("selectProduct")}</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{lang === "ar" ? (p.productNameAr ?? p.productNameEn) : p.productNameEn}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-brown/60">{t("roastToStockProductHint")}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1">{t("greenBeanSource")}</label>
                 <select value={roastForm.greenBeanId} onChange={(e) => setRoastForm({ ...roastForm, greenBeanId: e.target.value })}
-                  className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                  className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                   <option value="">{t("selectBeanStock")}</option>
                   {beans.map((b) => (
                     <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {formatKg(b.quantityKg)}kg</option>
@@ -679,7 +750,12 @@ export default function ProductionPage() {
                   roastForm.greenBeanQuantity > 0 &&
                   roastForm.greenBeanQuantity > selectedBean.quantityKg;
                 const greenQtyInvalid = roastForm.greenBeanQuantity <= 0;
-                const submitDisabled = roastedExceeds || roastedIsZero || insufficientStock || greenQtyInvalid;
+                // greenBeanId is required by the API for every direct roast, and a stock
+                // roast has no order item to prefill it from — so the button must reflect
+                // that rather than letting the user submit into a 400.
+                const submitDisabled =
+                  roastedExceeds || roastedIsZero || insufficientStock || greenQtyInvalid ||
+                  !roastForm.greenBeanId || (stockMode && !roastForm.productId);
                 return (
                   <>
                     {greenQtyInvalid && (
@@ -726,7 +802,7 @@ export default function ProductionPage() {
                         className={`flex-1 py-3 rounded-xl font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${submitDisabled ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
                         {t("recordBatch")}
                       </button>
-                      <button type="button" onClick={() => setShowRoastForm(false)} className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                      <button type="button" onClick={() => closeRoastForm()} className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
                         {t("cancel")}
                       </button>
                     </div>
@@ -746,7 +822,17 @@ export default function ProductionPage() {
         const blendType = selectedStatuses.size === 1
           ? (selectedStatuses.has("Pending QC") ? "Before QC" : "After QC")
           : null;
-        const canSubmit = blendSelected.size >= 2 && !isMixed;
+        // Blending an order's coffee together with stock coffee has no single right answer:
+        // the result either swallows the order's production into free stock, or claims
+        // unowned stock for an order that never asked for it. The server refuses such a
+        // selection; say so here rather than letting the operator discover it on submit.
+        const owners = new Set(selectedBatches.map((b) => (b.orderItem ? "order" : "stock")));
+        const mixesOwnership = owners.size > 1;
+        const distinctOrderItems = new Set(
+          selectedBatches.filter((b) => b.orderItem).map((b) => b.orderItem!.order.orderNumber)
+        );
+        const mixesOrders = distinctOrderItems.size > 1;
+        const canSubmit = blendSelected.size >= 2 && !isMixed && !mixesOwnership && !mixesOrders;
         return (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowBlendForm(false); }}>
             <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
@@ -766,8 +852,11 @@ export default function ProductionPage() {
                             <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${STATUS_STYLES[batch.status]}`}>
                               {statusLabel(batch.status, t)}
                             </span>
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${batch.orderItem ? "bg-info-bg text-slate" : "bg-amber-100 text-amber-800"}`}>
+                              {batch.orderItem ? `#${batch.orderItem.order.orderNumber}` : t("stockBatchLabel")}
+                            </span>
                           </div>
-                          <p className="text-xs text-brown">{batch.greenBean?.beanType || batch.orderItem.beanTypeName} — {batch.roastedBeanQuantity}kg</p>
+                          <p className="text-xs text-brown">{batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} — {batch.roastedBeanQuantity}kg</p>
                         </div>
                         <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${selected ? "bg-orange border-orange" : "border-gray-300"}`}>
                           {selected && <CheckCircle size={14} className="text-white" />}
@@ -782,7 +871,12 @@ export default function ProductionPage() {
                   {t("cannotMixStatuses")}
                 </div>
               )}
-              {blendSelected.size >= 2 && !isMixed && (
+              {(mixesOwnership || mixesOrders) && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-xl text-xs font-bold mb-4">
+                  {mixesOwnership ? t("cannotMixStockAndOrder") : t("cannotMixOrders")}
+                </div>
+              )}
+              {blendSelected.size >= 2 && !isMixed && !mixesOwnership && !mixesOrders && (
                 <div className={`rounded-xl p-3 mb-4 border ${blendType === "Before QC" ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
                   <p className="text-xs font-bold text-charcoal mb-1">
                     {t("blendPreview")} — <span className={blendType === "Before QC" ? "text-amber-700" : "text-emerald-700"}>{blendType === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}</span>
