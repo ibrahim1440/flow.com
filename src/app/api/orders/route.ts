@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
-import { checkOrderAvailability } from "@/lib/services/shelf-allocation";
+import { kgForUnits } from "@/lib/services/finished-products";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -42,20 +42,18 @@ export async function GET(request: Request) {
 }
 
 type RawItem = {
-  beanTypeName: string;
-  quantityKg:   unknown;
-  greenBeanId?: string;
-  productId?:   string;
-  productSkuId?: string;
+  productSkuId?: unknown;
+  quantityUnits?: unknown;
 };
 
 type ResolvedItem = {
   beanTypeName: string;
   quantityKg:   number;
+  quantityUnits: number;
   greenBeanId:  string | null;
   remainingQty: number;
   productId:    string | null;
-  productSkuId: string | null;
+  productSkuId: string;
 };
 
 async function resolveItems(
@@ -64,36 +62,57 @@ async function resolveItems(
   const resolved: ResolvedItem[] = [];
 
   for (const item of items) {
-    const qty = Number(item.quantityKg);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      return { ok: false, error: NextResponse.json({ error: "quantityKg must be a positive number." }, { status: 400 }) };
+    // SKU-only. A sales line is now a quantity of one finished product; the coffee,
+    // origin, pack size, price and BOM all follow from the SKU, so none of them is
+    // asked for. Legacy bean-based lines stay readable but cannot be created any more.
+    if (typeof item.productSkuId !== "string" || !item.productSkuId) {
+      return {
+        ok: false,
+        error: NextResponse.json(
+          { error: "Each order line requires a productSkuId. Select a finished product." },
+          { status: 400 }
+        ),
+      };
     }
 
-    let resolvedProductId:    string | null = null;
-    let resolvedProductSkuId: string | null = null;
-
-    if (typeof item.productSkuId === "string" && item.productSkuId) {
-      const sku = await prisma.productSKU.findUnique({ where: { id: item.productSkuId } });
-      if (!sku)
-        return { ok: false, error: NextResponse.json({ error: "Product SKU not found." }, { status: 400 }) };
-      if (typeof item.productId === "string" && item.productId && sku.productId !== item.productId)
-        return { ok: false, error: NextResponse.json({ error: "SKU does not belong to the specified product." }, { status: 400 }) };
-      resolvedProductId    = sku.productId;
-      resolvedProductSkuId = sku.id;
-    } else if (typeof item.productId === "string" && item.productId) {
-      const product = await prisma.coffeeProduct.findUnique({ where: { id: item.productId } });
-      if (!product)
-        return { ok: false, error: NextResponse.json({ error: "Product not found." }, { status: 400 }) };
-      resolvedProductId = product.id;
+    const units = Number(item.quantityUnits);
+    if (!Number.isInteger(units) || units <= 0) {
+      return {
+        ok: false,
+        error: NextResponse.json(
+          { error: "quantityUnits must be a whole number greater than zero." },
+          { status: 400 }
+        ),
+      };
     }
+
+    const sku = await prisma.productSKU.findUnique({
+      where: { id: item.productSkuId },
+      include: { product: { select: { id: true, productNameEn: true, defaultGreenBeanId: true } } },
+    });
+    if (!sku)
+      return { ok: false, error: NextResponse.json({ error: "Product SKU not found." }, { status: 400 }) };
+    if (!sku.isActive)
+      return {
+        ok: false,
+        error: NextResponse.json(
+          { error: `"${sku.skuCode}" is inactive and cannot be sold.` },
+          { status: 400 }
+        ),
+      };
 
     resolved.push({
-      beanTypeName: item.beanTypeName,
-      quantityKg:   qty,
-      greenBeanId:  item.greenBeanId || null,
-      remainingQty: qty,
-      productId:    resolvedProductId,
-      productSkuId: resolvedProductSkuId,
+      // Kept populated for the dispatch, history and export screens that read it.
+      beanTypeName: sku.product.productNameEn,
+      // Derived from units — never supplied by the client, never a rival total.
+      quantityKg: kgForUnits(sku, units),
+      quantityUnits: units,
+      // Traceability only. A sales order never draws on green coffee (section 7);
+      // this records which bean the SKU is made from so production can follow the chain.
+      greenBeanId: sku.product.defaultGreenBeanId ?? null,
+      remainingQty: kgForUnits(sku, units),
+      productId: sku.productId,
+      productSkuId: sku.id,
     });
   }
 
@@ -123,14 +142,17 @@ export async function POST(request: Request) {
     if (!result.ok) return result.error;
     const resolvedItems = result.items;
 
-    // Shelf first, green beans for the remainder — see checkOrderAvailability.
-    const insufficient = await checkOrderAvailability(prisma, resolvedItems);
-    if (insufficient.length > 0) {
-      return NextResponse.json(
-        { error: "Insufficient stock", details: insufficient },
-        { status: 400 }
-      );
-    }
+    // No stock gate here, deliberately (section 7).
+    //
+    // Order creation used to refuse the order when green coffee was short. That belongs
+    // to a different stage now: a sales order reserves FINISHED GOODS and nothing else,
+    // and whatever the shelf cannot cover becomes a production requirement rather than a
+    // rejection. Production is what consumes green coffee, against the SKU's BOM, and it
+    // does its own raw-material check at that point.
+    //
+    // The fulfilment split is computed after creation — see
+    // POST /api/orders/fulfillment-preview for the pre-submit view and the preparation
+    // review for the binding reservation.
 
     let order;
     for (let attempt = 0; attempt < 5; attempt++) {

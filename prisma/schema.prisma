@@ -140,13 +140,26 @@ model OrderItem {
 
   allocations StockAllocation[]
 
+  // ─── SKU-based sales lines ───────────────────────────────────────────────
+  // A line created through the Finished Products flow sells whole units of one SKU:
+  // `productSkuId` is set and `quantityUnits` is authoritative. `quantityKg` is still
+  // written, derived as units x (weightGrams / 1000), because delivery, production and
+  // every report downstream read it — it is a projection of units, not a rival total.
+  //
+  // Legacy lines (26 of the 35 that existed at the time of this change) have
+  // quantityUnits = null and only quantityKg. They stay readable and deliverable but
+  // no new line may be created that way: order creation now requires a valid SKU.
+  quantityUnits  Int?
+  deliveredUnits Int  @default(0)
+
   @@index([productionStatus])
   @@index([deliveryStatus])
   @@index([productionStatus, deliveryStatus])
+  @@index([productSkuId])
 }
 
 model RoastingBatch {
-  id                  String         @id @default(cuid())
+  id String @id @default(cuid())
 
   // Optional since roast-to-stock. A batch with no order item is a deliberate
   // replenishment of the shelf: it consumes green stock and writes the same ledger
@@ -174,6 +187,16 @@ model RoastingBatch {
   bags150g     Int   @default(0)
   samplesGrams Float @default(0)
 
+  // ─── Roasted / intermediate stock ────────────────────────────────────────
+  // Roasted coffee from this batch that has not yet been packed into a finished SKU.
+  // This is the intermediate stage the finished-goods BOM draws on: roasting raises it,
+  // packaging lowers it. Green coffee is consumed by roasting alone and never by a BOM.
+  //
+  // Seeded from roastedBeanQuantity minus what this batch had already packed at
+  // migration time, so existing batches do not suddenly present already-packed coffee
+  // as available. A CHECK constraint keeps it within [0, roastedBeanQuantity].
+  roastedAvailableKg Float @default(0)
+
   // Blending lineage
   isBlend       Boolean         @default(false) // true = this is a blend output, NOT new production
   blendTiming   String?
@@ -198,6 +221,7 @@ model RoastingBatch {
   blendInputs           BlendIngredient[]     @relation("BlendTarget")
   blendOutputs          BlendIngredient[]     @relation("BlendSource")
   finishedGoodsLots     FinishedGoodsLot[]
+  packedLots            FinishedGoodsLot[]    @relation("PackedFromBatch")
   serialHistory         BatchSerialHistory[]
 
   @@unique([greenBeanId, batchNumber])
@@ -255,6 +279,11 @@ model Delivery {
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+
+  // Units shipped, for deliveries against a SKU line. Null on legacy kg deliveries.
+  // quantityKg stays populated in both cases (derived from units for SKU lines) so
+  // dispatch history and the inventory ledger keep reading one field.
+  quantityUnits Int?
 
   @@index([date])
 }
@@ -372,6 +401,9 @@ model CoffeeProduct {
   roastingBatches    RoastingBatch[]
   finishedGoodsLots  FinishedGoodsLot[]
   productSkus        ProductSKU[]
+
+  // BOM lines that consume this coffee as roasted/intermediate stock.
+  bomComponents BomComponent[]
 }
 
 // ─── Procurement ─────────────────────────────────────────────────────────────
@@ -405,8 +437,14 @@ model PurchaseRecord {
   userId       String?
   createdAt    DateTime     @default(now())
 
+  // Typed link for PACKAGING purchases. `itemId` above stays as-is for the existing
+  // untyped rows; this is the FK that lets a purchase actually restock a MaterialItem.
+  materialItemId String?
+  materialItem   MaterialItem? @relation(fields: [materialItemId], references: [id])
+
   @@index([purchaseDate])
   @@index([supplierId, purchaseDate])
+  @@index([materialItemId])
 }
 
 // ─── Inventory Ledger ─────────────────────────────────────────────────────────
@@ -421,6 +459,8 @@ enum MovementType {
 enum InventoryCategory {
   RAW_MATERIAL
   FINISHED_GOODS
+  ROASTED_COFFEE // intermediate stock between roasting and packaging
+  PACKAGING_MATERIAL // MaterialItem stock: bags, labels, cartons
 }
 
 enum SourceDocType {
@@ -430,6 +470,8 @@ enum SourceDocType {
   BLEND
   MANUAL_ADJUSTMENT
   PACKING
+  BOM_CONSUMPTION // packaging drawing roasted coffee + materials per a SKU's BOM
+  PRODUCTION_ORDER
 }
 
 model InventoryMovement {
@@ -477,14 +519,44 @@ model FinishedGoodsLot {
   // itself so "is there enough free stock" is answerable by a single conditional
   // UPDATE (availableQty - reservedQty >= n), the same atomic pattern the delivery
   // deduction already uses. Free-to-promise is always availableQty - reservedQty.
-  reservedQty     Float          @default(0)
-  allocations     StockAllocation[]
+  reservedQty Float             @default(0)
+  allocations StockAllocation[]
 
-  status          LotStatus      @default(AVAILABLE)
-  createdAt       DateTime       @default(now())
+  status    LotStatus @default(AVAILABLE)
+  createdAt DateTime  @default(now())
+
+  // ─── Unit-native finished goods ──────────────────────────────────────────
+  // For a SKU-tracked lot, UNITS are the single source of truth: kg-equivalent is
+  // always derived as units x (ProductSKU.weightGrams / 1000), never stored twice.
+  //
+  // `isUnitTracked` is the discriminator, not a second opinion on the same balance.
+  // A lot is EITHER unit-tracked (new packaging output; units* authoritative,
+  // availableQty/reservedQty frozen at 0) OR legacy kg (rows produced before this
+  // change; availableQty/reservedQty authoritative, units* stay 0). The legacy rows
+  // cannot be converted honestly — 8.45 kg against a 1 KG SKU is not a whole number
+  // of bags — so they keep serving the legacy bean-based order lines in kg and are
+  // never rewritten.
+  isUnitTracked  Boolean @default(false)
+  unitsProduced  Int     @default(0)
+  unitsAvailable Int     @default(0)
+  unitsReserved  Int     @default(0)
+
+  // Which roast this lot was packed from. Distinct from `roastingBatchId` above, and not
+  // a duplicate of it: that column is 1:1 and UNIQUE — "this lot is that batch's entire
+  // packaged output", the legacy shape where a batch became exactly one kg lot. One roast
+  // can be packed into several SKUs (a 1 KG lot and a 250 g lot from the same batch), so
+  // the unit-tracked path needs a MANY:1 link and cannot reuse a unique column.
+  //
+  // Unit-tracked lots set this and leave `roastingBatchId` null; legacy lots are the
+  // reverse. Nothing sets both, so batch traceability is unambiguous either way.
+  packedFromBatchId String?
+  packedFromBatch   RoastingBatch? @relation("PackedFromBatch", fields: [packedFromBatchId], references: [id])
 
   @@index([status])
   @@index([createdAt])
+  @@index([productSkuId, status])
+  @@index([isUnitTracked, status])
+  @@index([packedFromBatchId])
 }
 
 enum AllocationStatus {
@@ -509,6 +581,12 @@ model StockAllocation {
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
+  // Whole sellable units reserved, for allocations against a unit-tracked lot.
+  // Null on the legacy kg allocations (including the four written by the
+  // 20260826120000 backfill), where quantityKg remains authoritative. Exactly one of
+  // the two is meaningful per row, decided by the lot's isUnitTracked flag.
+  quantityUnits Int?
+
   @@index([orderItemId, status])
   @@index([finishedGoodsLotId, status])
 }
@@ -522,12 +600,101 @@ enum ProductionOrderStatus {
   CANCELLED
 }
 
+enum ProductCategory {
+  ROASTED_COFFEE
+  GREEN_COFFEE
+  MERCHANDISE
+  OTHER
+}
+
+enum UnitOfMeasure {
+  UNIT // a discrete sellable pack (bag, box) — the default for finished SKUs
+  KG
+  GRAM
+  PIECE
+}
+
+enum MaterialCategory {
+  PACKAGING // bags, cartons
+  LABEL // stickers, printed labels
+  CONSUMABLE
+  OTHER
+}
+
+// Stocked non-coffee inventory: the bags, labels and cartons a BOM consumes.
+// Deliberately separate from GreenBean (coffee, kg-denominated) — these are counted
+// in discrete pieces and are never roasted. PurchaseRecord.materialItemId links a
+// PACKAGING purchase to the item it restocks, so buying bags can raise stock instead
+// of only recording cost.
+model MaterialItem {
+  id             String           @id @default(cuid())
+  code           String           @unique
+  name           String
+  nameAr         String?
+  category       MaterialCategory @default(PACKAGING)
+  unitOfMeasure  UnitOfMeasure    @default(PIECE)
+  quantityOnHand Float            @default(0)
+  reorderPoint   Float            @default(0)
+  isActive       Boolean          @default(true)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  bomComponents BomComponent[]
+  purchases     PurchaseRecord[]
+
+  @@index([isActive])
+  @@index([category, isActive])
+}
+
+enum BomComponentType {
+  ROASTED_COFFEE // consumes kg from roasted/intermediate stock, identified by CoffeeProduct
+  MATERIAL // consumes pieces from MaterialItem
+}
+
+// One line of a finished SKU's bill of materials, expressed PER SELLABLE UNIT.
+//
+// A ROASTED_COFFEE line points at a CoffeeProduct and is measured in kilograms — it
+// draws on roasted/intermediate stock, never on GreenBean directly. Green coffee is
+// consumed only by roasting; the chain is
+//   GreenBean -> Roasting -> roasted stock -> Packaging (this BOM) -> FinishedGoodsLot.
+// A MATERIAL line points at a MaterialItem and is measured in pieces.
+//
+// Exactly one of coffeeProductId / materialItemId is set; a CHECK constraint in the
+// migration enforces that rather than leaving it to route code.
+model BomComponent {
+  id           String     @id @default(cuid())
+  productSkuId String
+  productSku   ProductSKU @relation(fields: [productSkuId], references: [id], onDelete: Cascade)
+
+  type BomComponentType
+
+  coffeeProductId String?
+  coffeeProduct   CoffeeProduct? @relation(fields: [coffeeProductId], references: [id])
+  materialItemId  String?
+  materialItem    MaterialItem?  @relation(fields: [materialItemId], references: [id])
+
+  quantityPerUnit Float // kg for ROASTED_COFFEE, pieces for MATERIAL
+  unitOfMeasure   UnitOfMeasure
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([productSkuId])
+  @@index([materialItemId])
+  @@index([coffeeProductId])
+}
+
+// A ProductSKU is the sellable Finished Product: exactly one SKU per row
+// ("Brazil Coffee – 1 KG" and "Brazil Coffee – 250g" are two rows). The coffee/origin
+// it is made from is `product` (CoffeeProduct); the pack size is `weightGrams`.
+// Sales orders reference ONLY this model — never a green bean, never a CoffeeProduct.
 model ProductSKU {
   id                String             @id @default(cuid())
   productId         String
   product           CoffeeProduct      @relation(fields: [productId], references: [id])
   skuCode           String             @unique
-  weightGrams       Float
+  weightGrams       Float // net weight of one sellable unit; master data for BOM/production maths
   isBulk            Boolean            @default(false)
   price             Float              @default(0)
   createdAt         DateTime           @default(now())
@@ -535,6 +702,21 @@ model ProductSKU {
   orderItems        OrderItem[]
   finishedGoodsLots FinishedGoodsLot[]
   productionOrders  ProductionOrder[]
+
+  // ─── Finished Products catalog (additive) ────────────────────────────────
+  // Explicit display name. Nullable because the six pre-existing SKUs were created
+  // before this field; the API falls back to "<product name> – <pack size>" when unset.
+  name          String?
+  nameAr        String?
+  category      ProductCategory @default(ROASTED_COFFEE)
+  unitOfMeasure UnitOfMeasure   @default(UNIT)
+  isActive      Boolean         @default(true)
+
+  // Bill of materials — what one unit of this SKU consumes.
+  bomComponents BomComponent[]
+
+  @@index([isActive])
+  @@index([category, isActive])
 }
 
 model ProductionOrder {

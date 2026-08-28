@@ -18,6 +18,7 @@ import {
   reserveShelfStock,
   roundKg,
 } from "@/lib/services/shelf-allocation";
+import { kgForUnits, releaseFinishedUnits, reserveFinishedUnits } from "@/lib/services/finished-products";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -182,8 +183,77 @@ export async function POST(request: Request, { params }: Params) {
       for (const p of parsedItems) {
         const item = await tx.orderItem.findUniqueOrThrow({
           where: { id: p.orderItemId },
-          select: ALLOCATABLE_ITEM_SELECT,
+          select: {
+            ...ALLOCATABLE_ITEM_SELECT,
+            quantityUnits: true,
+            deliveredUnits: true,
+            productSku: { select: { weightGrams: true } },
+          },
         });
+
+        // ── SKU lines reserve whole units ──────────────────────────────────
+        // A line created through the Finished Products flow is a quantity of one SKU,
+        // and finished goods are counted in units. It draws on unit-tracked lots through
+        // reserveFinishedUnits; the kilogram path below is for the legacy bean-based
+        // lines only, and the two pools are disjoint so neither can spend the other's
+        // stock. availableQuantity / productionRequiredQuantity stay in kilograms in both
+        // cases — they are Float columns that have always meant kg — derived here from
+        // the units actually reserved.
+        if (item.quantityUnits !== null && item.productSkuId && item.productSku) {
+          const sku = item.productSku;
+          await releaseFinishedUnits(tx, item.id);
+
+          const demandUnits = Math.max(0, item.quantityUnits - item.deliveredUnits);
+
+          if (p.decision === "Blocked") {
+            outcomes.push({
+              orderItemId: item.id,
+              decision: "Blocked",
+              availableQuantity: 0,
+              productionRequiredQuantity: kgForUnits(sku, demandUnits),
+              reservedFromLots: [],
+            });
+            continue;
+          }
+
+          const takenUnits = await reserveFinishedUnits(
+            tx,
+            { id: item.id, productSkuId: item.productSkuId, productSku: sku },
+            demandUnits,
+            user.id
+          );
+          const reservedUnits = takenUnits.reservedUnits;
+          const stillNeededUnits = Math.max(0, demandUnits - reservedUnits);
+          const derived = decisionFor(stillNeededUnits, reservedUnits) as PreparationDecision;
+
+          if (p.decision !== null && p.decision !== derived) {
+            throw {
+              _appCode: 409,
+              message:
+                `Item ${item.id}: "${p.decision}" is not supported by stock. ` +
+                `${reservedUnits} of ${demandUnits} unit(s) can be covered from finished goods, so the decision is "${derived}".`,
+              computed: {
+                orderItemId: item.id,
+                decision: derived,
+                availableUnits: reservedUnits,
+                productionRequiredUnits: stillNeededUnits,
+              },
+            };
+          }
+
+          outcomes.push({
+            orderItemId: item.id,
+            decision: derived,
+            availableQuantity: kgForUnits(sku, reservedUnits),
+            productionRequiredQuantity: kgForUnits(sku, stillNeededUnits),
+            reservedFromLots: takenUnits.lots.map((l) => ({
+              lotId: l.lotId,
+              batchNumber: l.batchNumber,
+              quantityKg: kgForUnits(sku, l.units),
+            })),
+          });
+          continue;
+        }
 
         // Re-reviewing an item starts from a clean slate: hand back what it holds, then
         // take a fresh reservation against the shelf as it stands now.

@@ -70,6 +70,23 @@ export async function PUT(
     );
   }
 
+  // Reciprocal of the guard in ../pack-sku: a batch is packed either the legacy
+  // kilogram way or into SKU units, never both. This route does not draw down
+  // roastedAvailableKg, so without this check a roast already packed into units could be
+  // sold a second time as kilograms.
+  const unitLot = await prisma.finishedGoodsLot.findFirst({
+    where: { packedFromBatchId: batch.id },
+    select: { id: true },
+  });
+  if (unitLot) {
+    return NextResponse.json(
+      {
+        error: `Batch ${batch.batchNumber} was already packed into finished product units. A batch cannot be packed both ways.`,
+      },
+      { status: 409 }
+    );
+  }
+
   try {
     const b3   = Number(body.bags3kg      ?? 0);
     const b1   = Number(body.bags1kg      ?? 0);

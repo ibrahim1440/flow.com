@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { releaseShelfStock } from "@/lib/services/shelf-allocation";
+import { releaseFinishedUnits } from "@/lib/services/finished-products";
 import {
   appendOrderActivity,
   aggregatePreparationStatus,
@@ -128,7 +129,10 @@ export async function POST(request: Request, { params }: Params) {
           select: { id: true },
         });
         for (const item of cancelledItems) {
+          // Both pools: legacy lines hold kilograms, SKU lines hold units. An order can
+          // in principle contain either, so release from both rather than guessing.
           await releaseShelfStock(tx, item.id);
+          await releaseFinishedUnits(tx, item.id);
         }
       }
 

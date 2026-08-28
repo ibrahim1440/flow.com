@@ -57,10 +57,16 @@ export function lotMatchFilter(item: AllocatableItem): Prisma.FinishedGoodsLotWh
   return { ...base, ...sku, status: "AVAILABLE" };
 }
 
-/** Kilograms currently promised to this order item and not yet shipped. */
+/**
+ * Kilograms currently promised to this order item and not yet shipped.
+ *
+ * Kilogram allocations only (quantityUnits: null). A SKU line's promise is counted in
+ * units against unit-tracked lots and is read through finished-products.ts; including it
+ * here would let the kilogram path see a balance it has no way to release.
+ */
 export async function reservedForItem(tx: PrismaTx, orderItemId: string): Promise<number> {
   const agg = await tx.stockAllocation.aggregate({
-    where: { orderItemId, status: "RESERVED" },
+    where: { orderItemId, status: "RESERVED", quantityUnits: null },
     _sum: { quantityKg: true },
   });
   return roundKg(agg._sum.quantityKg ?? 0);
@@ -357,7 +363,16 @@ async function releaseAllocations(
   limitKg?: number
 ): Promise<number> {
   const candidates = await tx.stockAllocation.findMany({
-    where,
+    // quantityUnits: null restricts this to KILOGRAM allocations.
+    //
+    // Unit allocations (against unit-tracked lots) are released by
+    // releaseFinishedUnits in finished-products.ts, which decrements the lot's
+    // unitsReserved. Without this filter that pairing breaks: this function would claim
+    // the unit row by flipping it to RELEASED and then subtract its kg from the lot's
+    // reservedQty — which is 0 on a unit-tracked lot, so GREATEST(0, 0 - 5) silently
+    // absorbed the release and the units stayed reserved forever, invisible to everyone.
+    // The two reserve paths are disjoint, so the two release paths must be too.
+    where: { ...where, quantityUnits: null },
     select: { id: true, finishedGoodsLotId: true, quantityKg: true },
     // Newest first when trimming: the most recent promise is the one to give back.
     // Deterministic order also keeps concurrent releasers taking lot locks in step.

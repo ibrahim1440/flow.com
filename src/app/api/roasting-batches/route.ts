@@ -235,6 +235,12 @@ export async function POST(request: Request) {
         greenBeanId:         greenBeanId ?? null,
         greenBeanQuantity:   qty,
         roastedBeanQuantity: roastedQty,
+        // Roasted output starts fully available as intermediate stock. Packing a SKU
+        // draws this down through the BOM. The legacy kg packaging path does not
+        // decrement it, so the two paths are kept mutually exclusive per batch — each
+        // refuses to run on a batch the other has already packed — and the same roasted
+        // coffee can never be spent twice.
+        roastedAvailableKg:  roastedQty,
         wasteQuantity:       wasteQty,
         roastProfile:        roastProfile || null,
         batchNumber,
