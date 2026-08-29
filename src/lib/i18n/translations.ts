@@ -756,6 +756,30 @@ export const translations = {
   fulfilmentCheckTitle:   { en: "Fulfilment check",                ar: "فحص التوفر" },
   noProductSelected:      { en: "Select a product to add a line.", ar: "اختر منتجاً لإضافة سطر." },
   legacyLineLabel:        { en: "Legacy line",                     ar: "سطر قديم" },
+
+  // ── Production requirement (step 9) ────────────────────────────────────
+  productionReqTitle:     { en: "Production Requirement",           ar: "متطلب الإنتاج" },
+  productionReqShortfall: { en: "To produce",                       ar: "المطلوب إنتاجه" },
+  productionReqCovered:   { en: "Fully covered from finished stock.", ar: "مغطّى بالكامل من المخزون النهائي." },
+  productionReqCreate:    { en: "Create production order",          ar: "إنشاء أمر إنتاج" },
+  productionReqCreated:   { en: "Production order created",         ar: "تم إنشاء أمر الإنتاج" },
+  productionReqOpen:      { en: "Production order already open",    ar: "يوجد أمر إنتاج مفتوح" },
+  productionReqConsumes:  { en: "Will consume",                     ar: "سيستهلك" },
+  productionReqNoBom:     { en: "No BOM — cannot derive production needs.", ar: "لا توجد مكونات — لا يمكن اشتقاق احتياج الإنتاج." },
+  productionReqShort:     { en: "Not enough stock",                 ar: "المخزون غير كافٍ" },
+  productionReqLegacy:    { en: "Legacy kilogram line — no SKU production requirement.", ar: "سطر قديم بالكيلوغرام — لا يوجد متطلب إنتاج بالأصناف." },
+  orderedLabel:           { en: "Ordered",                          ar: "المطلوب" },
+  reservedLabel:          { en: "Reserved",                         ar: "المحجوز" },
+
+  // ── Pack into finished product (step 12) ───────────────────────────────
+  packSkuBtn:             { en: "Pack as product",                  ar: "تعبئة كمنتج" },
+  packSkuTitle:           { en: "Pack into finished product",       ar: "التعبئة إلى منتج نهائي" },
+  roastedAvailableLabel:  { en: "Roasted coffee available",         ar: "البن المحمّص المتاح" },
+  unitsToPackLabel:       { en: "Units to pack",                    ar: "عدد الوحدات" },
+  maxUnitsLabel:          { en: "Max from this batch",              ar: "الحد الأقصى من هذه الدفعة" },
+  packSkuNoProducts:      { en: "No product has a BOM yet. Define components in Products first.", ar: "لا يوجد منتج له مكونات بعد. عرّف المكونات في صفحة المنتجات أولاً." },
+  packSkuDone:            { en: "Packed into finished goods",       ar: "تمت التعبئة إلى المخزون النهائي" },
+  packSkuLegacyWarning:   { en: "This batch was already packed by kilogram and cannot also be packed as units.", ar: "هذه الدفعة عُبّئت بالكيلوغرام ولا يمكن تعبئتها بالوحدات أيضاً." },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;

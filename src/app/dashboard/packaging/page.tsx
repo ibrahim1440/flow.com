@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertTriangle, Box, Package, Trash2, CalendarDays } from "lucide-react";
+import { AlertTriangle, Box, Package, Trash2, CalendarDays, Boxes, X } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
@@ -12,6 +12,9 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
   productId: string | null;
+  // Roasted coffee from this batch not yet packed into a finished SKU. The BOM draws
+  // on this, so it is what caps how many units can be packed.
+  roastedAvailableKg: number;
   greenBeanQuantity: number; roastedBeanQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
@@ -27,6 +30,25 @@ type ProductSummary = {
   productNameEn: string;
   productNameAr: string | null;
   productSkus: { id: string; skuCode: string; weightGrams: number }[];
+};
+
+// The Finished Products catalog, for packing a roast into whole SKU units (step 12).
+type CatalogSku = {
+  id: string;
+  skuCode: string;
+  name: string;
+  packSize: string;
+  weightGrams: number;
+  isActive: boolean;
+  hasBom: boolean;
+  availableUnits: number;
+};
+
+type BomPerUnit = {
+  label: string;
+  unitOfMeasure: string;
+  quantityPerUnit: number;
+  quantityAvailable: number;
 };
 
 function packagedKg(b: { bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number }) {
@@ -73,7 +95,31 @@ export default function PackagingPage() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedSkuId, setSelectedSkuId] = useState("");
 
-  useEffect(() => { loadData(); loadProducts(); }, []);
+  // ── Pack as finished product (step 12) ───────────────────────────────────
+  const [packBatch, setPackBatch] = useState<Batch | null>(null);
+  const [catalog, setCatalog] = useState<CatalogSku[]>([]);
+  const [packSkuId, setPackSkuId] = useState("");
+  const [packUnits, setPackUnits] = useState(0);
+  const [packBom, setPackBom] = useState<BomPerUnit[]>([]);
+  const [packError, setPackError] = useState("");
+  const [packing, setPacking] = useState(false);
+
+  useEffect(() => { loadData(); loadProducts(); loadCatalog(); }, []);
+
+  // Pull the selected SKU's per-unit BOM so the modal can show what a given number of
+  // units will consume before anything is committed.
+  useEffect(() => {
+    // Clearing when the selection is emptied happens in the select's onChange, not
+    // here: a setState in an effect body triggers a cascading render.
+    if (!packSkuId) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/products/${packSkuId}`);
+      if (cancelled) return;
+      setPackBom(res.ok ? ((await res.json()).bomPerUnit ?? []) : []);
+    })();
+    return () => { cancelled = true; };
+  }, [packSkuId]);
 
   useEffect(() => {
     const q = filterSearch.trim();
@@ -97,6 +143,11 @@ export default function PackagingPage() {
     const res = await fetch("/api/roasting-batches?statuses=Passed,Partially+Packaged");
     if (res.ok) setBatches(await res.json());
     setLoading(false);
+  }
+
+  async function loadCatalog() {
+    const res = await fetch("/api/products");
+    if (res.ok) setCatalog(await res.json());
   }
 
   async function loadProducts() {
@@ -125,6 +176,39 @@ export default function PackagingPage() {
       setSuccess(t("batchCancelled"));
       setCancelBatch(null);
       loadData();
+    }
+  }
+
+  function openPackSku(batch: Batch) {
+    setPackBatch(batch);
+    setPackSkuId("");
+    setPackUnits(0);
+    setPackBom([]);
+    setPackError("");
+  }
+
+  async function handlePackSku(e: React.FormEvent) {
+    e.preventDefault();
+    setPackError("");
+    setPacking(true);
+    try {
+      const res = await fetch(`/api/roasting-batches/${packBatch!.id}/pack-sku`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productSkuId: packSkuId, units: packUnits }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPackError(data.error || "Failed to pack.");
+        return;
+      }
+      setSuccess(`${t("packSkuDone")}: ${data.unitsPacked} × ${data.skuCode}`);
+      setPackBatch(null);
+      loadData();
+      // Finished stock changed, so the catalog's availableUnits is now stale.
+      loadCatalog();
+    } finally {
+      setPacking(false);
     }
   }
 
@@ -297,6 +381,17 @@ export default function PackagingPage() {
                       <button onClick={() => setCancelBatch(batch)}
                         className="p-2 rounded-xl text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
                         <Trash2 size={16} />
+                      </button>
+                    )}
+                    {/* Step 12 — pack this roast into whole units of a finished SKU,
+                        consuming its BOM. Hidden once the batch has been packed the
+                        legacy kilogram way, since the two paths are mutually exclusive
+                        (the server refuses it too — this just avoids offering a dead
+                        button). */}
+                    {packagedKg(batch) === 0 && (
+                      <button onClick={() => openPackSku(batch)}
+                        className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-action-primary text-white rounded-xl text-sm font-bold hover:bg-oo-action-primary-hover active:scale-[0.98] transition-all">
+                        <Boxes size={16} /> {t("packSkuBtn")}
                       </button>
                     )}
                     <button onClick={() => openPackage(batch)}
@@ -506,6 +601,137 @@ export default function PackagingPage() {
           }}
         />
       )}
+
+      {/* ── Step 12: pack a roast into whole units of a finished SKU ────────── */}
+      {packBatch && (() => {
+        const sku = catalog.find((c) => c.id === packSkuId);
+        const sellable = catalog.filter((c) => c.isActive && c.hasBom);
+        // Roasted coffee is what caps the run: the BOM's coffee line per unit divided
+        // into what this batch still holds. Materials are checked by the server, which
+        // is the only place that can reserve them.
+        const coffeePerUnit = packBom
+          .filter((b) => b.unitOfMeasure === "KG")
+          .reduce((s, b) => s + b.quantityPerUnit, 0);
+        const maxUnits = coffeePerUnit > 0
+          ? Math.floor((packBatch.roastedAvailableKg + 0.0005) / coffeePerUnit)
+          : 0;
+        const overCapacity = packUnits > maxUnits;
+        return (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto">
+            <form onSubmit={handlePackSku} className="bg-white rounded-2xl w-full max-w-lg my-8 shadow-xl">
+              <div className="flex items-center justify-between p-4 border-b border-oo-border-default">
+                <div>
+                  <h2 className="font-extrabold text-oo-text-primary">{t("packSkuTitle")}</h2>
+                  <p className="text-xs text-oo-text-muted font-mono">{packBatch.batchNumber}</p>
+                </div>
+                <button type="button" onClick={() => setPackBatch(null)} aria-label="Close">
+                  <X size={20} className="text-oo-text-muted" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                <div className="rounded-xl bg-oo-bg-subtle px-3 py-2 text-sm">
+                  <span className="text-oo-text-secondary">{t("roastedAvailableLabel")}: </span>
+                  <b className="text-oo-text-primary">{packBatch.roastedAvailableKg} kg</b>
+                </div>
+
+                {sellable.length === 0 ? (
+                  <p className="text-sm font-semibold text-oo-status-blocked">{t("packSkuNoProducts")}</p>
+                ) : (
+                  <>
+                    <label className="block">
+                      <span className="text-xs font-bold text-oo-text-secondary">{t("productNameLabel")}</span>
+                      <select
+                        value={packSkuId}
+                        onChange={(e) => { setPackSkuId(e.target.value); setPackUnits(0); setPackBom([]); }}
+                        className="w-full px-3 py-2 rounded-xl border border-oo-border-default text-sm"
+                        required
+                      >
+                        <option value="">—</option>
+                        {sellable.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.skuCode})</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {sku && packBom.length > 0 && (
+                      <>
+                        <label className="block">
+                          <span className="text-xs font-bold text-oo-text-secondary">
+                            {t("unitsToPackLabel")} — {t("maxUnitsLabel")}: {maxUnits}
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            max={maxUnits > 0 ? maxUnits : undefined}
+                            value={packUnits || ""}
+                            onChange={(e) => setPackUnits(parseInt(e.target.value, 10) || 0)}
+                            className="w-full px-3 py-2 rounded-xl border border-oo-border-default text-sm"
+                            required
+                          />
+                        </label>
+
+                        {packUnits > 0 && (
+                          <div className="rounded-xl border border-oo-border-default p-2.5">
+                            <p className="text-[11px] font-bold text-oo-text-muted uppercase mb-1">
+                              {t("productionReqConsumes")}
+                            </p>
+                            <ul className="space-y-0.5">
+                              {packBom.map((b, i) => {
+                                const need = +(b.quantityPerUnit * packUnits).toFixed(3);
+                                const short = need > b.quantityAvailable + 0.0005;
+                                return (
+                                  <li key={i} className="text-xs flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-oo-text-secondary">
+                                      {b.label}: <b>{need}</b> {b.unitOfMeasure === "KG" ? "kg" : "pcs"}
+                                    </span>
+                                    {short && (
+                                      <span className="text-oo-status-blocked font-semibold">
+                                        ({t("productionReqShort")} — {b.quantityAvailable})
+                                      </span>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        )}
+
+                        {overCapacity && (
+                          <p className="text-xs font-semibold text-oo-status-blocked">
+                            {t("roastedAvailableLabel")}: {packBatch.roastedAvailableKg} kg — {t("maxUnitsLabel")}: {maxUnits}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+
+                {packError && (
+                  <p className="text-xs font-semibold text-oo-status-blocked flex items-start gap-1.5">
+                    <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> {packError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3 p-4 border-t border-oo-border-default">
+                <button
+                  type="submit"
+                  disabled={packing || !packSkuId || packUnits <= 0 || overCapacity}
+                  className="flex-1 py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {packing ? "…" : t("packSkuBtn")}
+                </button>
+                <button type="button" onClick={() => setPackBatch(null)}
+                  className="flex-1 py-2.5 border border-oo-border-default rounded-xl font-bold text-sm hover:bg-oo-bg-subtle">
+                  {t("cancel")}
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
     </div>
   );
 }

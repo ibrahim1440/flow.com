@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   PackageCheck, Clock, ChevronDown, ChevronUp, ClipboardList, MessageSquare,
-  ShoppingCart, RefreshCw, PauseCircle, CheckCircle2,
+  ShoppingCart, RefreshCw, PauseCircle, CheckCircle2, Hammer,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
@@ -12,6 +12,7 @@ import {
   OrderStatusBadge, NeedsAttentionBadge, ActivityTimeline, AddNoteForm,
   StatusActionsBar, PreparationReviewTable, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
+import { ProductionRequirementPanel } from "@/components/ProductionRequirementPanel";
 
 // Only these statuses represent orders currently relevant to Preparation/Production —
 // approved but not yet finished, or paused. Waiting Approval, Rejected, Cancelled, and
@@ -203,6 +204,15 @@ export default function PreparationWorkstationPage() {
                             <ClipboardList size={16} /> {t("preparationReviewLabel")}
                           </p>
                           <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
+                        </div>
+
+                        {/* Step 9: what the shelf could not cover, and the button that
+                            turns exactly that into a production order. */}
+                        <div className="bg-white rounded-xl border border-border p-3.5">
+                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
+                            <Hammer size={16} /> {t("productionReqTitle")}
+                          </p>
+                          <ProductionRequirementPanel itemIds={order.items.map((i) => i.id)} />
                         </div>
 
                         <div className="bg-white rounded-xl border border-border p-3.5">
