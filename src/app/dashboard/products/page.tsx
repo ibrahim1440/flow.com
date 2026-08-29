@@ -10,7 +10,18 @@ import { useI18n } from "@/lib/i18n/context";
 // materials a BOM draws on. Gated on the `inventory` module — see the note in
 // src/app/api/products/route.ts for why this is not a new permission module.
 
-type Coffee = { id: string; productNameEn: string; productNameAr: string | null };
+type Coffee = {
+  id: string;
+  productNameEn: string;
+  productNameAr: string | null;
+  countryEn: string;
+  regionEn: string | null;
+  processEn: string | null;
+  expectedRoastLoss: number;
+  defaultGreenBeanId: string | null;
+};
+
+type GreenBean = { id: string; serialNumber: string; beanType: string; quantityKg: number };
 
 type Product = {
   id: string;
@@ -52,10 +63,12 @@ type BomRow = {
 
 export default function ProductsPage() {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"products" | "materials">("products");
+  const [tab, setTab] = useState<"products" | "materials" | "coffees">("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [coffees, setCoffees] = useState<Coffee[]>([]);
+  const [beans, setBeans] = useState<GreenBean[]>([]);
+  const [showCoffeeForm, setShowCoffeeForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -73,20 +86,23 @@ export default function ProductsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [p, m, c] = await Promise.all([
+      const [p, m, c, g] = await Promise.all([
         fetch("/api/products?activeOnly=false"),
         fetch("/api/materials?activeOnly=false"),
         fetch("/api/coffee-products"),
+        fetch("/api/green-beans"),
       ]);
-      const [pj, mj, cj] = await Promise.all([
+      const [pj, mj, cj, gj] = await Promise.all([
         p.ok ? p.json() : [],
         m.ok ? m.json() : [],
         c.ok ? c.json() : [],
+        g.ok ? g.json() : [],
       ]);
       if (cancelled) return;
       setProducts(pj);
       setMaterials(mj);
       setCoffees(cj);
+      setBeans(Array.isArray(gj) ? gj : []);
       setLoading(false);
     })();
     return () => {
@@ -110,6 +126,17 @@ export default function ProductsPage() {
     );
   }, [materials, search]);
 
+  const visibleCoffees = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return coffees;
+    return coffees.filter(
+      (c) =>
+        c.productNameEn.toLowerCase().includes(q) ||
+        (c.productNameAr ?? "").toLowerCase().includes(q) ||
+        c.countryEn.toLowerCase().includes(q)
+    );
+  }, [coffees, search]);
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -121,10 +148,17 @@ export default function ProductsPage() {
         </div>
         <button
           type="button"
-          onClick={() => (tab === "products" ? setShowProductForm(true) : setShowMaterialForm(true))}
+          onClick={() =>
+            tab === "products"
+              ? setShowProductForm(true)
+              : tab === "materials"
+              ? setShowMaterialForm(true)
+              : setShowCoffeeForm(true)
+          }
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-oo-action-primary text-white text-sm font-bold hover:bg-oo-action-primary-hover transition-colors"
         >
-          <Plus size={16} /> {tab === "products" ? t("newProductBtn") : t("newMaterialBtn")}
+          <Plus size={16} />{" "}
+          {tab === "products" ? t("newProductBtn") : tab === "materials" ? t("newMaterialBtn") : t("newCoffeeBtn")}
         </button>
       </div>
 
@@ -139,7 +173,7 @@ export default function ProductsPage() {
       )}
 
       <div className="flex items-center gap-2 flex-wrap">
-        {(["products", "materials"] as const).map((key) => (
+        {(["products", "coffees", "materials"] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -150,7 +184,7 @@ export default function ProductsPage() {
                 : "bg-oo-bg-subtle text-oo-text-secondary border-2 border-transparent hover:border-oo-border-default"
             }`}
           >
-            {key === "products" ? t("tabProducts") : t("tabMaterials")}
+            {key === "products" ? t("tabProducts") : key === "coffees" ? t("tabCoffees") : t("tabMaterials")}
           </button>
         ))}
         <div className="relative flex-1 min-w-[200px]">
@@ -171,6 +205,8 @@ export default function ProductsPage() {
         </div>
       ) : tab === "products" ? (
         <ProductTable products={visibleProducts} onOpenBom={setBomFor} onChanged={load} onError={setError} />
+      ) : tab === "coffees" ? (
+        <CoffeeTable coffees={visibleCoffees} products={products} />
       ) : (
         <MaterialTable materials={visibleMaterials} onChanged={load} onError={setError} />
       )}
@@ -192,6 +228,18 @@ export default function ProductsPage() {
           onClose={() => setShowMaterialForm(false)}
           onSaved={() => {
             setShowMaterialForm(false);
+            load();
+          }}
+          onError={setError}
+        />
+      )}
+
+      {showCoffeeForm && (
+        <CoffeeForm
+          beans={beans}
+          onClose={() => setShowCoffeeForm(false)}
+          onSaved={() => {
+            setShowCoffeeForm(false);
             load();
           }}
           onError={setError}
@@ -304,6 +352,55 @@ function ProductTable({
                 >
                   {p.isActive ? t("inactiveLabel") : t("activeLabel")}
                 </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// The coffee / origin catalog: the parent every finished SKU is made from. Creating one
+// had no screen at all before — it was API-only — which made the Products section
+// unusable from empty, because the origin dropdown had nothing to offer.
+function CoffeeTable({ coffees, products }: { coffees: Coffee[]; products: Product[] }) {
+  const { t } = useI18n();
+
+  if (coffees.length === 0)
+    return (
+      <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
+        <Coffee size={40} className="mx-auto mb-2" />
+        <p>{t("noCoffeesYet")}</p>
+      </div>
+    );
+
+  return (
+    <div className="bg-white rounded-2xl border border-oo-border-default overflow-x-auto">
+      <table className="w-full text-sm min-w-[700px]">
+        <thead>
+          <tr className="border-b border-oo-border-default text-oo-text-secondary text-xs font-bold uppercase">
+            <th className="text-start p-3">{t("coffeeNameEnLabel")}</th>
+            <th className="text-start p-3">{t("countryLabel")}</th>
+            <th className="text-start p-3">{t("regionLabel")}</th>
+            <th className="text-start p-3">{t("processLabel")}</th>
+            <th className="text-end p-3">{t("roastLossLabel")}</th>
+            <th className="text-end p-3">{t("skuCountLabel")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {coffees.map((c) => (
+            <tr key={c.id} className="border-b border-oo-border-default last:border-0">
+              <td className="p-3 font-semibold text-oo-text-primary">
+                {c.productNameEn}
+                {c.productNameAr && <div className="text-xs text-oo-text-muted">{c.productNameAr}</div>}
+              </td>
+              <td className="p-3 text-oo-text-secondary">{c.countryEn}</td>
+              <td className="p-3 text-oo-text-secondary">{c.regionEn || "—"}</td>
+              <td className="p-3 text-oo-text-secondary">{c.processEn || "—"}</td>
+              <td className="p-3 text-end text-oo-text-secondary">{c.expectedRoastLoss}%</td>
+              <td className="p-3 text-end font-bold text-oo-text-primary">
+                {products.filter((p) => p.coffee?.id === c.id).length}
               </td>
             </tr>
           ))}
@@ -484,6 +581,13 @@ function ProductForm({
   return (
     <Modal title={t("newProductBtn")} onClose={onClose}>
       <div className="space-y-3">
+        {/* An empty dropdown here is a dead end, and the reason is not obvious — say it
+            plainly rather than letting the user hunt for a disabled button. */}
+        {coffees.length === 0 && (
+          <p className="text-xs font-semibold text-oo-status-blocked bg-oo-bg-subtle rounded-xl p-2.5">
+            {t("noCoffeesForProduct")}
+          </p>
+        )}
         <label className="block">
           <span className="text-xs font-bold text-oo-text-secondary">{t("coffeeOriginLabel")}</span>
           <select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })} className={field}>
@@ -607,6 +711,113 @@ function MaterialForm({
           className="w-full py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50"
         >
           {saving ? "…" : t("newMaterialBtn")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function CoffeeForm({
+  beans,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  beans: GreenBean[];
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (m: string) => void;
+}) {
+  const { t } = useI18n();
+  const [form, setForm] = useState({
+    productNameEn: "", productNameAr: "", countryEn: "", regionEn: "", processEn: "",
+    defaultGreenBeanId: "", expectedRoastLoss: "15",
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/coffee-products", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          productNameEn: form.productNameEn,
+          productNameAr: form.productNameAr || undefined,
+          countryEn: form.countryEn,
+          regionEn: form.regionEn || undefined,
+          processEn: form.processEn || undefined,
+          defaultGreenBeanId: form.defaultGreenBeanId || undefined,
+          expectedRoastLoss: Number(form.expectedRoastLoss),
+        }),
+      });
+      if (!res.ok) {
+        onError((await res.json()).error ?? "Failed to create coffee.");
+        return;
+      }
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = "w-full px-3 py-2 rounded-xl border border-oo-border-default text-sm";
+
+  return (
+    <Modal title={t("newCoffeeBtn")} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-xs font-bold text-oo-text-secondary">{t("coffeeNameEnLabel")}</span>
+            <input value={form.productNameEn} onChange={(e) => setForm({ ...form, productNameEn: e.target.value })} className={field} placeholder="Brazil Santos" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-oo-text-secondary">{t("coffeeNameArLabel")}</span>
+            <input value={form.productNameAr} onChange={(e) => setForm({ ...form, productNameAr: e.target.value })} className={field} placeholder="برازيل سانتوس" />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-xs font-bold text-oo-text-secondary">{t("countryLabel")}</span>
+            <input value={form.countryEn} onChange={(e) => setForm({ ...form, countryEn: e.target.value })} className={field} placeholder="Brazil" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-oo-text-secondary">{t("regionLabel")}</span>
+            <input value={form.regionEn} onChange={(e) => setForm({ ...form, regionEn: e.target.value })} className={field} />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-xs font-bold text-oo-text-secondary">{t("processLabel")}</span>
+            <input value={form.processEn} onChange={(e) => setForm({ ...form, processEn: e.target.value })} className={field} placeholder="Washed" />
+          </label>
+          <label className="block">
+            {/* Drives the green-bean draw on every production order derived from this
+                coffee: expectedGreenBeanKg = target / (1 - loss). */}
+            <span className="text-xs font-bold text-oo-text-secondary">{t("roastLossLabel")}</span>
+            <input type="number" min={0} max={50} step="0.1" value={form.expectedRoastLoss}
+              onChange={(e) => setForm({ ...form, expectedRoastLoss: e.target.value })} className={field} />
+          </label>
+        </div>
+        <label className="block">
+          <span className="text-xs font-bold text-oo-text-secondary">{t("defaultGreenBeanLabel")}</span>
+          <select value={form.defaultGreenBeanId} onChange={(e) => setForm({ ...form, defaultGreenBeanId: e.target.value })} className={field}>
+            <option value="">—</option>
+            {beans.map((b) => (
+              <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg}kg)</option>
+            ))}
+          </select>
+          {beans.length === 0 && (
+            <span className="text-[11px] text-oo-text-muted">{t("noGreenBeansYet")}</span>
+          )}
+        </label>
+        <button
+          type="button"
+          disabled={saving || !form.productNameEn.trim() || !form.countryEn.trim()}
+          onClick={submit}
+          className="w-full py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50"
+        >
+          {saving ? "…" : t("newCoffeeBtn")}
         </button>
       </div>
     </Modal>

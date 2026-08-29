@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule, requireEdit } from "@/lib/auth-server";
+import { requireAnyModule, requireAuth } from "@/lib/auth-server";
+import { canEdit } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
 
 export async function GET() {
-  const { error } = await requireModule("labels");
+  // Widened beyond `labels`: the coffee/origin list is the parent of every finished
+  // product, so the Products section (gated on `inventory`) and the order and packaging
+  // screens all need to read it. Gated on `labels` alone, the origin dropdown came back
+  // empty — and therefore unusable — for anyone without the Labels module.
+  const { error } = await requireAnyModule("labels", "inventory", "orders", "production", "packaging");
   if (error) return error;
 
   const products = await prisma.coffeeProduct.findMany({ orderBy: { productNameEn: "asc" } });
@@ -17,8 +22,14 @@ function nullify(v: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireEdit("labels");
+  // Creating an origin is a catalog action, so edit rights on EITHER the Labels module
+  // (where it used to live) or Inventory (which gates the Products section that now
+  // offers it) are accepted. Deliberately not widened to read-only modules.
+  const { user, error } = await requireAuth();
   if (error) return error;
+  if (!canEdit(user.permissions, "labels") && !canEdit(user.permissions, "inventory")) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
 
   try {
     const body = await request.json();

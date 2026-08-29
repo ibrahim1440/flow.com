@@ -780,6 +780,21 @@ export const translations = {
   packSkuNoProducts:      { en: "No product has a BOM yet. Define components in Products first.", ar: "لا يوجد منتج له مكونات بعد. عرّف المكونات في صفحة المنتجات أولاً." },
   packSkuDone:            { en: "Packed into finished goods",       ar: "تمت التعبئة إلى المخزون النهائي" },
   packSkuLegacyWarning:   { en: "This batch was already packed by kilogram and cannot also be packed as units.", ar: "هذه الدفعة عُبّئت بالكيلوغرام ولا يمكن تعبئتها بالوحدات أيضاً." },
+
+  // ── Coffee / origin catalog ────────────────────────────────────────────
+  tabCoffees:             { en: "Coffee / Origins",                ar: "البن / المنشأ" },
+  newCoffeeBtn:           { en: "New Coffee",                      ar: "بن جديد" },
+  coffeeNameEnLabel:      { en: "Coffee name (English)",           ar: "اسم البن (إنجليزي)" },
+  coffeeNameArLabel:      { en: "Coffee name (Arabic)",            ar: "اسم البن (عربي)" },
+  countryLabel:           { en: "Country",                         ar: "الدولة" },
+  regionLabel:            { en: "Region",                          ar: "المنطقة" },
+  processLabel:           { en: "Process",                         ar: "المعالجة" },
+  defaultGreenBeanLabel:  { en: "Default green bean",              ar: "البن الأخضر الافتراضي" },
+  roastLossLabel:         { en: "Expected roast loss %",           ar: "نسبة فقد التحميص %" },
+  skuCountLabel:          { en: "Products",                        ar: "المنتجات" },
+  noCoffeesYet:           { en: "No coffee origins yet. Add one before creating products.", ar: "لا توجد أصناف بن بعد. أضف واحداً قبل إنشاء المنتجات." },
+  noCoffeesForProduct:    { en: "Create a coffee / origin first — a product is made from one.", ar: "أنشئ بناً / منشأ أولاً — كل منتج يُصنع من بن." },
+  noGreenBeansYet:        { en: "No green beans in stock yet",     ar: "لا يوجد بن أخضر في المخزون بعد" },
 } satisfies Dict;
 
 export type TranslationKey = keyof typeof translations;
