@@ -195,14 +195,21 @@ export async function PUT(
       const owner = batch.orderItemId
         ? await tx.orderItem.findUnique({
             where: { id: batch.orderItemId },
-            select: { ...ALLOCATABLE_ITEM_SELECT, preparationDecision: true, order: { select: { status: true } } },
+            select: { ...ALLOCATABLE_ITEM_SELECT, preparationDecision: true, quantityUnits: true, order: { select: { status: true } } },
           })
         : null;
       // A cancelled or blocked order must not silently take stock back. Cancelling
       // releases its reservations; re-claiming them here for a batch that was already in
       // the roaster would strand the coffee on a dead order.
+      // A SKU line is reserved in UNITS, through the unit path only. Auto-reserving
+      // kilograms for it here produces an allocation in the wrong denomination: the unit
+      // path cannot see it, preparation review still reports the line as needing
+      // production, and the kilograms sit locked on a legacy lot helping nobody. Seen on
+      // real data — a 10-unit order carrying a phantom 4.2 kg reservation.
+      const ownerIsUnitLine = owner !== null && owner.quantityUnits !== null;
       const ownerIsLive =
         owner !== null &&
+        !ownerIsUnitLine &&
         owner.order.status !== "Cancelled" &&
         owner.order.status !== "Rejected" &&
         owner.preparationDecision !== "Blocked";

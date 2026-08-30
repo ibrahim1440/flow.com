@@ -4,6 +4,7 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { consumeShelfStock, lotMatchFilter, roundKg, trimReservationToDemand } from "@/lib/services/shelf-allocation";
+import { consumeFinishedUnits, kgForUnits, trimUnitReservationToDemand } from "@/lib/services/finished-products";
 
 export async function GET() {
   const { error } = await requireModule("dispatch");
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
   if (error) return error;
 
   const data = await request.json();
-  const { orderItemId, quantityKg, deliveryType, notes, finishedGoodsLotId } = data;
+  const { orderItemId, quantityKg, quantityUnits, deliveryType, notes, finishedGoodsLotId } = data;
 
   if (!finishedGoodsLotId) {
     return NextResponse.json(
@@ -35,8 +36,118 @@ export async function POST(request: Request) {
 
   try {
     const delivery = await prisma.$transaction(async (tx) => {
-      const orderItem = await tx.orderItem.findUnique({ where: { id: orderItemId } });
+      const orderItem = await tx.orderItem.findUnique({
+        where: { id: orderItemId },
+        include: { productSku: { select: { id: true, skuCode: true, weightGrams: true } } },
+      });
       if (!orderItem) throw { _appCode: 404, message: "Order item not found" };
+
+      // ── SKU lines ship whole units ────────────────────────────────────────
+      // The kilogram path below draws on availableQty/reservedQty, which stay at 0 on a
+      // unit-tracked lot — so it could never ship a SKU line at all, and the units the
+      // preparation review had reserved would sit there forever. Everything here is in
+      // units; quantityKg is written alongside as the derived equivalent, because the
+      // ledger, recalcOrderItemStatus and every dispatch report read it.
+      if (orderItem.quantityUnits !== null && orderItem.productSku) {
+        const sku = orderItem.productSku;
+        const units = Number(quantityUnits);
+        if (!Number.isInteger(units) || units <= 0) {
+          throw { _appCode: 400, message: "quantityUnits must be a whole number greater than zero." };
+        }
+
+        const outstandingUnits = orderItem.quantityUnits - orderItem.deliveredUnits;
+        if (outstandingUnits <= 0) {
+          throw { _appCode: 400, message: "This order item has already been delivered in full." };
+        }
+        if (units > outstandingUnits) {
+          throw {
+            _appCode: 400,
+            message: `Cannot deliver ${units} unit(s). Only ${outstandingUnits} of this line is still undelivered.`,
+          };
+        }
+
+        const lot = await tx.finishedGoodsLot.findUnique({
+          where: { id: finishedGoodsLotId },
+          select: { id: true, productSkuId: true, isUnitTracked: true },
+        });
+        if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
+        if (!lot.isUnitTracked || lot.productSkuId !== sku.id) {
+          throw {
+            _appCode: 409,
+            message: `Selected lot does not hold units of ${sku.skuCode}.`,
+          };
+        }
+
+        const shippedKg = kgForUnits(sku, units);
+
+        const newDelivery = await tx.delivery.create({
+          data: { orderItemId, quantityUnits: units, quantityKg: shippedKg, deliveryType, notes },
+        });
+
+        // Conditional increment, same reasoning as the kilogram path: the outstanding
+        // check above was an unlocked read, so two dispatchers could both pass it.
+        const claimed = await tx.orderItem.updateMany({
+          where: { id: orderItemId, deliveredUnits: { lte: orderItem.quantityUnits - units } },
+          data: { deliveredUnits: { increment: units }, deliveredQty: { increment: shippedKg } },
+        });
+        if (claimed.count === 0) {
+          throw {
+            _appCode: 409,
+            message: "This order item was delivered by someone else while this delivery was being recorded. Please reload and retry.",
+          };
+        }
+
+        const updated = await tx.orderItem.findUniqueOrThrow({
+          where: { id: orderItemId },
+          select: { deliveredUnits: true, quantityUnits: true },
+        });
+        await tx.orderItem.update({
+          where: { id: orderItemId },
+          data: {
+            deliveryStatus:
+              (updated.quantityUnits ?? 0) - updated.deliveredUnits <= 0 ? "Delivered" : "Partial Delivered",
+          },
+        });
+
+        const shipped = await consumeFinishedUnits(tx, orderItem, finishedGoodsLotId, units, user.id);
+        if (!shipped) {
+          throw {
+            _appCode: 409,
+            message: "Insufficient free units on the selected lot — they may be reserved for another order.",
+          };
+        }
+
+        await tx.finishedGoodsLot.update({
+          where: { id: finishedGoodsLotId },
+          data: { status: shipped.newUnits <= 0 ? "SHIPPED" : "AVAILABLE" },
+        });
+
+        await tx.inventoryMovement.create({
+          data: {
+            type: "OUT",
+            category: "FINISHED_GOODS",
+            referenceEntityId: finishedGoodsLotId,
+            quantityChanged: -shippedKg,
+            previousQuantity: kgForUnits(sku, shipped.previousUnits),
+            newQuantity: kgForUnits(sku, shipped.newUnits),
+            sourceDocType: "DELIVERY",
+            sourceDocId: newDelivery.id,
+            userId: user.id,
+            notes: `${units} x ${sku.skuCode}`,
+          },
+        });
+
+        // Hand back units this line no longer needs — it may hold reservations on lots
+        // this shipment never touched.
+        await trimUnitReservationToDemand(tx, {
+          id: orderItemId,
+          quantityUnits: updated.quantityUnits ?? 0,
+          deliveredUnits: updated.deliveredUnits,
+        });
+
+        await recalcOrderItemStatus(orderItemId, tx);
+        return newDelivery;
+      }
 
       const qty = roundKg(Number(quantityKg));
       if (!Number.isFinite(qty) || qty <= 0) {

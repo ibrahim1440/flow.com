@@ -238,6 +238,187 @@ export async function releaseFinishedUnits(tx: PrismaTx, orderItemId: string): P
   return released;
 }
 
+/**
+ * Ship whole units off a unit-tracked lot for this order item.
+ *
+ * Mirrors consumeShelfStock in shelf-allocation.ts, which does the same job in kilograms,
+ * and keeps its contract: returns null when the lot cannot cover the shipment so the
+ * caller can answer 409, and reports before/after so the ledger row can be written.
+ *
+ * The item's OWN reservation is spent first and only the remainder is taken from free
+ * stock — a delivery must never ship units promised to a different order. Because both
+ * unitsAvailable and unitsReserved fall together for the reserved part, shipping stock
+ * this item already held leaves free-to-promise untouched.
+ *
+ * Integers throughout, so unlike the kilogram path there is no floating-point slack.
+ */
+export async function consumeFinishedUnits(
+  tx: PrismaTx,
+  item: { id: string },
+  lotId: string,
+  units: number,
+  userId: string | null
+): Promise<{ previousUnits: number; newUnits: number } | null> {
+  const want = Math.trunc(units);
+  if (want <= 0) return null;
+
+  const held = await tx.stockAllocation.findMany({
+    where: { orderItemId: item.id, finishedGoodsLotId: lotId, status: "RESERVED", quantityUnits: { not: null } },
+    select: { id: true, quantityUnits: true, quantityKg: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+
+  // Claim reservation rows one at a time; `claimed` counts only what this transaction won.
+  let claimed = 0;
+  for (const a of held) {
+    if (claimed >= want) break;
+    const rowUnits = a.quantityUnits ?? 0;
+    if (rowUnits <= 0) continue;
+
+    const stillNeeded = want - claimed;
+
+    if (rowUnits > stillNeeded) {
+      // This row straddles the shipment: shrink it and book the shipped part separately,
+      // so the untouched remainder stays reserved to this item.
+      const perUnitKg = rowUnits > 0 ? a.quantityKg / rowUnits : 0;
+      const shrunk = await tx.stockAllocation.updateMany({
+        where: { id: a.id, status: "RESERVED", quantityUnits: rowUnits },
+        data: {
+          quantityUnits: rowUnits - stillNeeded,
+          quantityKg: roundKg(perUnitKg * (rowUnits - stillNeeded)),
+        },
+      });
+      if (shrunk.count === 0) continue;
+      await tx.stockAllocation.create({
+        data: {
+          orderItemId: item.id,
+          finishedGoodsLotId: lotId,
+          quantityUnits: stillNeeded,
+          quantityKg: roundKg(perUnitKg * stillNeeded),
+          status: "CONSUMED",
+          createdById: userId,
+        },
+      });
+      claimed += stillNeeded;
+      break;
+    }
+
+    const won = await tx.stockAllocation.updateMany({
+      where: { id: a.id, status: "RESERVED" },
+      data: { status: "CONSUMED" },
+    });
+    if (won.count === 0) continue;
+    claimed += rowUnits;
+  }
+
+  // Anything the promise did not cover must come out of free stock now.
+  const fromFree = want - claimed;
+  if (fromFree > 0) {
+    const lot = await tx.finishedGoodsLot.findUnique({
+      where: { id: lotId },
+      select: { productSku: { select: { weightGrams: true } } },
+    });
+    const topUp = await tx.$executeRaw`
+      UPDATE "FinishedGoodsLot"
+         SET "unitsReserved" = "unitsReserved" + ${fromFree}
+       WHERE "id" = ${lotId}
+         AND "status" = 'AVAILABLE'
+         AND "isUnitTracked" = true
+         AND ("unitsAvailable" - "unitsReserved") >= ${fromFree}
+    `;
+    if (topUp !== 1) return null; // not enough free stock — caller answers 409
+    await tx.stockAllocation.create({
+      data: {
+        orderItemId: item.id,
+        finishedGoodsLotId: lotId,
+        quantityUnits: fromFree,
+        quantityKg: lot?.productSku ? kgForUnits(lot.productSku, fromFree) : 0.001,
+        status: "CONSUMED",
+        createdById: userId,
+      },
+    });
+  }
+
+  const shipped = await tx.$executeRaw`
+    UPDATE "FinishedGoodsLot"
+       SET "unitsAvailable" = "unitsAvailable" - ${want},
+           "unitsReserved"  = "unitsReserved"  - ${want}
+     WHERE "id" = ${lotId}
+       AND "unitsAvailable" >= ${want}
+       AND "unitsReserved"  >= ${want}
+  `;
+  if (shipped !== 1) return null;
+
+  const after = await tx.finishedGoodsLot.findUniqueOrThrow({
+    where: { id: lotId },
+    select: { unitsAvailable: true },
+  });
+  return { previousUnits: after.unitsAvailable + want, newUnits: after.unitsAvailable };
+}
+
+/**
+ * Give back any unit promise this item no longer needs — it has been delivered, or shrunk.
+ *
+ * The kilogram path calls trimReservationToDemand after every delivery for the same
+ * reason: an item that reserved units across two lots but shipped from one would
+ * otherwise leave the other lot's units promised to an order that is already complete,
+ * hiding stock that is physically present from every other order.
+ */
+export async function trimUnitReservationToDemand(
+  tx: PrismaTx,
+  item: { id: string; quantityUnits: number; deliveredUnits: number }
+): Promise<number> {
+  const stillWanted = Math.max(0, item.quantityUnits - item.deliveredUnits);
+
+  const rows = await tx.stockAllocation.findMany({
+    where: { orderItemId: item.id, status: "RESERVED", quantityUnits: { not: null } },
+    select: { id: true, finishedGoodsLotId: true, quantityUnits: true, quantityKg: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+
+  const reserved = rows.reduce((s, r) => s + (r.quantityUnits ?? 0), 0);
+  let excess = reserved - stillWanted;
+  if (excess <= 0) return 0;
+
+  let released = 0;
+  for (const r of rows) {
+    if (excess <= 0) break;
+    const rowUnits = r.quantityUnits ?? 0;
+    if (rowUnits <= 0) continue;
+
+    if (rowUnits > excess) {
+      const perUnitKg = r.quantityKg / rowUnits;
+      const shrunk = await tx.stockAllocation.updateMany({
+        where: { id: r.id, status: "RESERVED", quantityUnits: rowUnits },
+        data: { quantityUnits: rowUnits - excess, quantityKg: roundKg(perUnitKg * (rowUnits - excess)) },
+      });
+      if (shrunk.count === 0) continue;
+      await tx.$executeRaw`
+        UPDATE "FinishedGoodsLot"
+           SET "unitsReserved" = GREATEST(0, "unitsReserved" - ${excess})
+         WHERE "id" = ${r.finishedGoodsLotId}
+      `;
+      released += excess;
+      excess = 0;
+      break;
+    }
+
+    const won = await tx.stockAllocation.updateMany({
+      where: { id: r.id, status: "RESERVED" },
+      data: { status: "RELEASED" },
+    });
+    if (won.count === 0) continue;
+    await tx.$executeRaw`
+      UPDATE "FinishedGoodsLot"
+         SET "unitsReserved" = GREATEST(0, "unitsReserved" - ${rowUnits})
+       WHERE "id" = ${r.finishedGoodsLotId}
+    `;
+    released += rowUnits;
+    excess -= rowUnits;
+  }
+  return released;
+}
+
 // ─── Bill of materials ───────────────────────────────────────────────────────
 
 export type BomRequirement = {

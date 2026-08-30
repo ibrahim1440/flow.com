@@ -26,7 +26,14 @@ type OrderItem = {
   productId: string | null;
   roastingBatches: BatchSlim[];
   order: { orderNumber: number; customer: { name: string } };
+  // Non-null on a SKU line: it is sold, reserved and shipped in whole units.
+  quantityUnits: number | null;
+  deliveredUnits: number;
+  productSku: { id: string; skuCode: string; weightGrams: number } | null;
 };
+
+/** A SKU line ships units; a legacy line ships kilograms. */
+const isUnitLine = (i: OrderItem | null): boolean => !!i && i.quantityUnits !== null && !!i.productSku;
 
 type FGLot = {
   id: string;
@@ -38,6 +45,9 @@ type FGLot = {
   reservedForThisItem?: number;
   /** reservedForThisItem + free stock: what this item may take off the lot right now. */
   deliverableQty?: number;
+  /** The same figure in whole units, present only on unit-tracked lots. */
+  deliverableUnits?: number;
+  unitsAvailable?: number;
   productId: string;
   product: { productNameEn: string; productNameAr: string | null };
   status: string;
@@ -99,11 +109,22 @@ export default function DispatchPage() {
 
   // ── Open delivery modal ───────────────────────────────────────────────────
   async function startDelivery(item: OrderItem) {
-    const available = Math.max(0, +(packagedKg(item.roastingBatches) - item.deliveredQty).toFixed(3));
+    // A SKU line's outstanding amount is a unit count and comes straight off the line —
+    // not from summing packaged bags of its own batches, which is the legacy heuristic
+    // and says nothing about a line filled from shelf stock someone else roasted.
+    const outstandingUnits = isUnitLine(item)
+      ? Math.max(0, (item.quantityUnits ?? 0) - item.deliveredUnits)
+      : 0;
+    const available = isUnitLine(item)
+      ? outstandingUnits
+      : Math.max(0, +(packagedKg(item.roastingBatches) - item.deliveredQty).toFixed(3));
+
     setSelectedItem(item);
     setForm({
       quantityKg:   available,
-      deliveryType: available >= item.quantityKg ? "full" : "partial",
+      deliveryType: isUnitLine(item)
+        ? (available >= outstandingUnits ? "full" : "partial")
+        : (available >= item.quantityKg ? "full" : "partial"),
       notes:        "",
     });
     setLotId("");
@@ -155,7 +176,11 @@ export default function DispatchPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         orderItemId:        selectedItem!.id,
-        quantityKg:         form.quantityKg,
+        // The same input box carries units for a SKU line and kilograms for a legacy one;
+        // the server branches on the line, so send the field it will actually read.
+        ...(isUnitLine(selectedItem)
+          ? { quantityUnits: Math.trunc(form.quantityKg) }
+          : { quantityKg: form.quantityKg }),
         deliveryType:       form.deliveryType,
         notes:              form.notes || null,
         finishedGoodsLotId: lotId || null,
@@ -178,10 +203,16 @@ export default function DispatchPage() {
   // orders this change exists to enable: the ones filled from stock with no roast at all.
   const readyItems = orders.flatMap((o: any) =>
     o.items
-      .filter((i: any) =>
-        i.deliveryStatus !== "Delivered" &&
-        (packagedKg(i.roastingBatches) > i.deliveredQty || (i.availableQuantity ?? 0) > 0)
-      )
+      .filter((i: any) => {
+        if (i.deliveryStatus === "Delivered") return false;
+        // A SKU line is shippable when units remain on it. Its stock may have been
+        // reserved from shelf lots somebody else roasted, so the packaged-bags heuristic
+        // below — which only ever looks at this line's OWN batches — would hide it.
+        if (i.quantityUnits !== null && i.quantityUnits !== undefined) {
+          return (i.quantityUnits - (i.deliveredUnits ?? 0)) > 0;
+        }
+        return packagedKg(i.roastingBatches) > i.deliveredQty || (i.availableQuantity ?? 0) > 0;
+      })
       .map((i: any) => ({ ...i, order: { orderNumber: o.orderNumber, customer: { name: o.customer?.name } } }))
   );
 
@@ -216,8 +247,13 @@ export default function DispatchPage() {
 
   // ── Lot selection derived state ───────────────────────────────────────────
   const selectedLot   = lots.find((l) => l.id === lotId) ?? null;
+  const unitLine      = isUnitLine(selectedItem);
   // What this item may take off the selected lot: its own reservation plus free stock.
-  const lotFreeQty    = selectedLot ? Math.max(0, selectedLot.deliverableQty ?? 0) : 0;
+  // Compared in the line's own denomination — units for a SKU line, kilograms otherwise —
+  // so the ceiling matches what the input box actually holds.
+  const lotFreeQty    = selectedLot
+    ? Math.max(0, (unitLine ? selectedLot.deliverableUnits : selectedLot.deliverableQty) ?? 0)
+    : 0;
   const lotExceedsQty = selectedLot !== null && form.quantityKg > lotFreeQty;
   const canSubmit = !!lotId && !lotExceedsQty && !submitting;
 
@@ -234,6 +270,10 @@ export default function DispatchPage() {
 
   function lotLabel(lot: FGLot) {
     const productLabel = lang === "ar" ? (lot.product.productNameAr ?? lot.product.productNameEn) : lot.product.productNameEn;
+    if (unitLine) {
+      const freeUnits = Math.max(0, lot.deliverableUnits ?? 0);
+      return `${lot.batchNumber} — ${productLabel} — ${t("availableLabel")}: ${freeUnits} ${t("unitsLabel")}`;
+    }
     const free = Math.max(0, lot.deliverableQty ?? 0);
     return `${lot.batchNumber} — ${productLabel} — ${t("lotAvailableKg")}: ${free.toFixed(1)} kg`;
   }
@@ -460,19 +500,33 @@ export default function DispatchPage() {
 
               {/* ── Quantity ── */}
               <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5">{t("quantityKg")} *</label>
+                <label className="block text-sm font-bold text-charcoal mb-1.5">
+                  {unitLine ? `${t("quantityUnitsLabel")} *` : `${t("quantityKg")} *`}
+                </label>
                 <input
-                  type="number" step="0.001" min="0.001"
+                  type="number"
+                  step={unitLine ? 1 : 0.001}
+                  min={unitLine ? 1 : 0.001}
                   value={form.quantityKg}
-                  onChange={(e) => setForm({ ...form, quantityKg: parseFloat(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      quantityKg: unitLine
+                        ? (parseInt(e.target.value, 10) || 0)
+                        : (parseFloat(e.target.value) || 0),
+                    })
+                  }
                   required
                   className={`w-full px-3 py-2.5 border-2 rounded-xl focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm ${
                     lotExceedsQty ? "border-red-300 focus:border-red-400" : "border-border focus:border-orange"
                   }`}
                 />
-                {/* Max packaged hint */}
+                {/* Outstanding hint. A SKU line reads it straight off the line; the legacy
+                    path keeps its packaged-bags heuristic. */}
                 <p className="text-xs text-brown/60 mt-1">
-                  {t("maxLabel")} {Math.max(0, +(packagedKg(selectedItem.roastingBatches) - selectedItem.deliveredQty).toFixed(3))} kg ({t("packaged")})
+                  {unitLine
+                    ? `${t("maxLabel")} ${Math.max(0, (selectedItem.quantityUnits ?? 0) - selectedItem.deliveredUnits)} ${t("unitsLabel")}`
+                    : `${t("maxLabel")} ${Math.max(0, +(packagedKg(selectedItem.roastingBatches) - selectedItem.deliveredQty).toFixed(3))} kg (${t("packaged")})`}
                 </p>
 
                 {/* Lot quantity warning */}

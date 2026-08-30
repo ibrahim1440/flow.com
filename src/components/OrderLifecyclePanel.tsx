@@ -825,7 +825,11 @@ export function PreparationReviewTable({
 
       {canEdit && (
         <>
-          {(stockError || missingStock) && (
+          {/* Not while the fetch is still in flight. `missingStock` is trivially true
+              before the first response lands, so without this guard every open of an
+              already-reviewed order flashes a red "could not load stock" that is simply
+              describing the loading state. */}
+          {!stockLoading && (stockError || missingStock) && (
             <p className="text-xs font-bold text-red-600">{t("stockPreviewUnavailable")}</p>
           )}
           <button
