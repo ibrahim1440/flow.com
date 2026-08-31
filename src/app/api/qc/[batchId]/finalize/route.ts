@@ -60,8 +60,13 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.roastingBatch.update({
-        where: { id: batchId },
+      // Conditional on the status this request was validated against. The check above
+      // reads the batch outside the transaction, so two QC users finalising the same
+      // batch at the same moment both passed it — and both were told they had succeeded
+      // while one verdict was silently overwritten. A batch a tester had REJECTED could
+      // end up Passed, with the rejection reason gone, and go on to be packed and shipped.
+      const updated = await tx.roastingBatch.updateMany({
+        where: { id: batchId, status: batch.status },
         data: {
           status: outcome,
           qcClosedById: user.id,
@@ -69,6 +74,12 @@ export async function POST(request: Request, { params }: Params) {
           qcFinalDecisionReason: finalDecisionReason?.trim() || null,
         },
       });
+      if (updated.count === 0) {
+        throw {
+          _appCode: 409,
+          message: "This batch was finalized by someone else while you were deciding. Please reload and check the outcome.",
+        };
+      }
 
       // A stock batch has no order item whose production status could change.
       if (batch.orderItemId) await recalcOrderItemStatus(batch.orderItemId, tx);
@@ -81,7 +92,11 @@ export async function POST(request: Request, { params }: Params) {
     const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
     const rejectCount = batch.qcRecords.length - acceptCount;
     return NextResponse.json({ status: outcome, total: batch.qcRecords.length, acceptCount, rejectCount });
-  } catch (err) {
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
+    }
     return handlePrismaError(err);
   }
 }

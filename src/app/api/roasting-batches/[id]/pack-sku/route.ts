@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -154,13 +155,27 @@ export async function POST(request: Request, { params }: Params) {
       }
 
       // ── Packaging materials ────────────────────────────────────────────────
-      for (const line of requirements.filter((r) => r.type === "MATERIAL")) {
-        if (!line.materialItemId) continue;
+      // Three round trips per component — look it up, claim it, record the movement —
+      // added up fast on a bill of materials of any size, and this database is across the
+      // public internet. Only the middle one has to be per-component: the conditional
+      // UPDATE is the atomic claim and stays exactly as it was. The lookups are collapsed
+      // into one query before the loop, and the movements into one insert after it, so a
+      // three-component pack costs five round trips instead of nine.
+      const materialLines = requirements.filter((r) => r.type === "MATERIAL" && r.materialItemId);
 
-        const material = await tx.materialItem.findUnique({
-          where: { id: line.materialItemId },
-          select: { id: true, code: true, name: true, quantityOnHand: true },
-        });
+      const materials = new Map(
+        (
+          await tx.materialItem.findMany({
+            where: { id: { in: materialLines.map((l) => l.materialItemId as string) } },
+            select: { id: true, code: true, name: true, quantityOnHand: true },
+          })
+        ).map((m) => [m.id, m])
+      );
+
+      const materialMovements: Prisma.InventoryMovementCreateManyInput[] = [];
+
+      for (const line of materialLines) {
+        const material = materials.get(line.materialItemId as string);
         if (!material)
           throw { _appCode: 409, message: `Material ${line.label} no longer exists.` };
 
@@ -176,20 +191,24 @@ export async function POST(request: Request, { params }: Params) {
             message: `Not enough ${material.name} (${material.code}): need ${line.quantityRequired}, have ${material.quantityOnHand}.`,
           };
 
-        await tx.inventoryMovement.create({
-          data: {
-            type: "OUT",
-            category: "PACKAGING_MATERIAL",
-            referenceEntityId: material.id,
-            quantityChanged: -line.quantityRequired,
-            previousQuantity: material.quantityOnHand,
-            newQuantity: Number((material.quantityOnHand - line.quantityRequired).toFixed(3)),
-            sourceDocType: "BOM_CONSUMPTION",
-            sourceDocId: batch.id,
-            userId: user.id,
-            notes: `Packed ${units} x ${sku.skuCode}`,
-          },
+        materialMovements.push({
+          type: "OUT",
+          category: "PACKAGING_MATERIAL",
+          referenceEntityId: material.id,
+          quantityChanged: -line.quantityRequired,
+          previousQuantity: material.quantityOnHand,
+          newQuantity: Number((material.quantityOnHand - line.quantityRequired).toFixed(3)),
+          sourceDocType: "BOM_CONSUMPTION",
+          sourceDocId: batch.id,
+          userId: user.id,
+          notes: `Packed ${units} x ${sku.skuCode}`,
         });
+      }
+
+      // Written after the loop, inside the same transaction: if any component came up
+      // short the throw above aborts before this runs, and nothing is left behind.
+      if (materialMovements.length > 0) {
+        await tx.inventoryMovement.createMany({ data: materialMovements });
       }
 
       // ── Finished goods ─────────────────────────────────────────────────────

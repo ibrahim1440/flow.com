@@ -77,9 +77,17 @@ export async function POST(request: Request) {
       ...new Set(batches.map((b) => b.productionOrderId).filter((id): id is string => id !== null)),
     ];
 
-    await prisma.$transaction(async (tx) => {
-      await tx.roastingBatch.updateMany({
-        where: { id: { in: batchIds } },
+    // The status each batch was validated against, so the write can be made conditional
+    // on nothing having moved underneath it.
+    const expectedStatuses = [...new Set(batches.map((b) => b.status))];
+
+    const finalized = await prisma.$transaction(async (tx) => {
+      // Conditional on those statuses. The batches were read and their transitions
+      // checked before the transaction opened, so without this a batch finalised by
+      // somebody else in between would be silently overwritten — and the caller told
+      // every batch had been finalised when one had been decided the other way.
+      const updated = await tx.roastingBatch.updateMany({
+        where: { id: { in: batchIds }, status: { in: expectedStatuses } },
         data: {
           status: outcome,
           qcClosedById: user.id,
@@ -95,9 +103,13 @@ export async function POST(request: Request) {
       for (const productionOrderId of productionOrderIds) {
         await recalcProductionOrderStatus(productionOrderId, tx);
       }
+
+      return updated.count;
     }, TX_OPTS);
 
-    return NextResponse.json({ finalized: batchIds.length, outcome });
+    // The real number, not the number asked for. Reporting the requested count would tell
+    // the operator that a batch somebody else had already decided was finalised by them.
+    return NextResponse.json({ finalized, requested: batchIds.length, outcome });
   } catch (err) {
     return handlePrismaError(err);
   }
