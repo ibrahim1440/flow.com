@@ -11,10 +11,33 @@ function createPrismaClient() {
     const pool = new Pool({
       connectionString: url,
       max: 10,
-      idleTimeoutMillis: 10000,
+      // Opening a connection to this database costs about a second — measured at
+      // 992-1067 ms across repeated trials, almost all of it TLS and session setup, while
+      // a query on an already-open connection costs about 167 ms. At a 10-second idle
+      // timeout every pause longer than a coffee-machine glance threw the connection away,
+      // so the operator's next click paid that second again before any work started.
+      //
+      // Five minutes spans normal think-time between actions while still returning
+      // connections during a genuinely quiet period. The ceiling of 10 bounds what is
+      // held open regardless.
+      idleTimeoutMillis: 300_000,
       connectionTimeoutMillis: 5000,
     });
     const adapter = new PrismaPg(pool);
+    // Opt-in query tracing, off unless ERP_QUERY_LOG is set. Performance work on this
+    // deployment is about the NUMBER of sequential round trips rather than the cost of
+    // any single query, and that is not something you can reason about from the outside:
+    // pg_stat_statements is database-wide, so it cannot attribute queries to one request.
+    // This prints each statement with its duration so a single request can be profiled
+    // for what it actually does.
+    if (process.env.ERP_QUERY_LOG) {
+      const client = new PrismaClient({ adapter, log: [{ emit: "event", level: "query" }] });
+      (client as unknown as { $on: (e: "query", cb: (q: { query: string; duration: number }) => void) => void })
+        .$on("query", (q) => {
+          console.log(`[q] ${String(q.duration).padStart(5)}ms  ${q.query.replace(/\s+/g, " ").slice(0, 110)}`);
+        });
+      return client;
+    }
     return new PrismaClient({ adapter });
   }
 

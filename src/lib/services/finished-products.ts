@@ -218,31 +218,44 @@ export async function reserveFinishedUnits(
  * units, and a GREATEST(0, …) floor would silently swallow the second subtraction.
  */
 export async function releaseFinishedUnits(tx: PrismaTx, orderItemId: string): Promise<number> {
-  const candidates = await tx.stockAllocation.findMany({
-    where: { orderItemId, status: "RESERVED", quantityUnits: { not: null } },
-    select: { id: true, finishedGoodsLotId: true, quantityUnits: true },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-  });
-
-  let released = 0;
-  for (const a of candidates) {
-    const units = a.quantityUnits ?? 0;
-    if (units <= 0) continue;
-
-    const claimed = await tx.stockAllocation.updateMany({
-      where: { id: a.id, status: "RESERVED" },
-      data: { status: "RELEASED" },
-    });
-    if (claimed.count === 0) continue;
-
-    await tx.$executeRaw`
-      UPDATE "FinishedGoodsLot"
-         SET "unitsReserved" = GREATEST(0, "unitsReserved" - ${units})
-       WHERE "id" = ${a.finishedGoodsLotId}
-    `;
-    released += units;
-  }
-  return released;
+  // One statement, and the claim is unchanged.
+  //
+  // This used to read the allocations and then walk them, costing two round trips per row
+  // — a re-review of an order spread over ten lots spent twenty-one round trips here
+  // alone, and against a database on the public internet that is most of a second and a
+  // half before any work is done.
+  //
+  // The guarantee is identical because it comes from the same place. `UPDATE … WHERE
+  // status = 'RESERVED' … RETURNING` locks and flips exactly the rows that were still
+  // reserved when it ran, and returns only those; a concurrent releaser that got there
+  // first finds nothing left to flip and so decrements nothing. Grouping those returned
+  // rows by lot and subtracting once per lot gives each lot precisely the units this
+  // caller actually claimed — the same arithmetic the loop performed, in one trip.
+  //
+  // Both data-modifying CTEs run to completion whether or not the outer query reads them,
+  // which is what makes the lot decrement safe to express this way.
+  const rows = await tx.$queryRaw<{ released: number }[]>`
+    WITH claimed AS (
+      UPDATE "StockAllocation"
+         SET "status" = 'RELEASED'
+       WHERE "orderItemId" = ${orderItemId}
+         AND "status" = 'RESERVED'
+         AND "quantityUnits" IS NOT NULL
+       RETURNING "finishedGoodsLotId" AS lot, COALESCE("quantityUnits", 0) AS units
+    ),
+    per_lot AS (
+      SELECT lot, SUM(units)::int AS units FROM claimed GROUP BY lot
+    ),
+    touched AS (
+      UPDATE "FinishedGoodsLot" f
+         SET "unitsReserved" = GREATEST(0, f."unitsReserved" - p.units)
+        FROM per_lot p
+       WHERE f."id" = p.lot
+      RETURNING 1
+    )
+    SELECT COALESCE((SELECT SUM(units) FROM claimed), 0)::int AS released
+  `;
+  return Number(rows[0]?.released ?? 0);
 }
 
 /**

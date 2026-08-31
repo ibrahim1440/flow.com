@@ -24,7 +24,7 @@ type Params = { params: Promise<{ id: string }> };
  * The arithmetic lives in outstandingDemandForItem so that the read (GET) and the write
  * (POST) cannot drift apart.
  */
-async function shortfallFor(orderItemId: string) {
+async function shortfallFor(orderItemId: string, opts: { withProgress?: boolean } = {}) {
   const item = await prisma.orderItem.findUnique({
     where: { id: orderItemId },
     select: {
@@ -58,7 +58,12 @@ async function shortfallFor(orderItemId: string) {
     deliveredUnits: item.deliveredUnits,
   });
 
-  const progress = await productionProgressMany(prisma, item.productionOrders);
+  // Progress per existing production order is for the panel to display. The POST path
+  // never reads it, and computing it costs two more round trips on a database where each
+  // one is about 167 ms — so it is only gathered when the caller will actually show it.
+  const progress = opts.withProgress
+    ? await productionProgressMany(prisma, item.productionOrders)
+    : new Map();
 
   return {
     ok: true as const,
@@ -83,7 +88,7 @@ export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
 
   try {
-    const result = await shortfallFor(id);
+    const result = await shortfallFor(id, { withProgress: true });
     if (!result.ok)
       return NextResponse.json({ error: result.error.message }, { status: result.error._appCode });
 

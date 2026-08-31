@@ -180,16 +180,25 @@ export async function POST(request: Request, { params }: Params) {
         reservedFromLots: { lotId: string; batchNumber: string; quantityKg: number }[];
       }[] = [];
 
+      // Every line's row in one query rather than one query per line. Against a database
+      // where a round trip costs about 167 ms, fetching them inside the loop made a
+      // three-line review pay three round trips before it had reserved anything. The rows
+      // are only read here — the atomic claims below are unchanged, so nothing about
+      // concurrency depends on when they were fetched.
+      const itemRows = await tx.orderItem.findMany({
+        where: { id: { in: parsedItems.map((p) => p.orderItemId) } },
+        select: {
+          ...ALLOCATABLE_ITEM_SELECT,
+          quantityUnits: true,
+          deliveredUnits: true,
+          productSku: { select: { weightGrams: true } },
+        },
+      });
+      const itemRowsById = new Map(itemRows.map((r) => [r.id, r]));
+
       for (const p of parsedItems) {
-        const item = await tx.orderItem.findUniqueOrThrow({
-          where: { id: p.orderItemId },
-          select: {
-            ...ALLOCATABLE_ITEM_SELECT,
-            quantityUnits: true,
-            deliveredUnits: true,
-            productSku: { select: { weightGrams: true } },
-          },
-        });
+        const item = itemRowsById.get(p.orderItemId);
+        if (!item) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
 
         // ── SKU lines reserve whole units ──────────────────────────────────
         // A line created through the Finished Products flow is a quantity of one SKU,

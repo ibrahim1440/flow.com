@@ -362,6 +362,42 @@ async function releaseAllocations(
   where: { orderItemId: string; status: "RESERVED"; finishedGoodsLotId?: { not: string } },
   limitKg?: number
 ): Promise<number> {
+  // A full release — no budget — is the common case: preparation review hands everything
+  // back before re-reserving, and so do cancel and complete. It needs no per-row decision
+  // at all, so it is done in one statement instead of two round trips per allocation.
+  //
+  // The claim is the same one the loop below relies on: `UPDATE … WHERE status =
+  // 'RESERVED' … RETURNING` flips and returns only rows that were still reserved, so a
+  // concurrent releaser cannot give the same kilograms back twice. The budgeted path
+  // keeps the loop, because deciding how much of each row to give back is genuinely
+  // per-row work.
+  if (limitKg === undefined) {
+    const excludeLot = where.finishedGoodsLotId?.not ?? null;
+    const rows = await tx.$queryRaw<{ released: number }[]>`
+      WITH claimed AS (
+        UPDATE "StockAllocation"
+           SET "status" = 'RELEASED'
+         WHERE "orderItemId" = ${where.orderItemId}
+           AND "status" = 'RESERVED'
+           AND "quantityUnits" IS NULL
+           AND (${excludeLot}::text IS NULL OR "finishedGoodsLotId" <> ${excludeLot})
+         RETURNING "finishedGoodsLotId" AS lot, "quantityKg" AS kg
+      ),
+      per_lot AS (
+        SELECT lot, SUM(kg) AS kg FROM claimed GROUP BY lot
+      ),
+      touched AS (
+        UPDATE "FinishedGoodsLot" f
+           SET "reservedQty" = GREATEST(0, f."reservedQty" - p.kg)
+          FROM per_lot p
+         WHERE f."id" = p.lot
+        RETURNING 1
+      )
+      SELECT COALESCE((SELECT SUM(kg) FROM claimed), 0)::float8 AS released
+    `;
+    return roundKg(Number(rows[0]?.released ?? 0));
+  }
+
   const candidates = await tx.stockAllocation.findMany({
     // quantityUnits: null restricts this to KILOGRAM allocations.
     //

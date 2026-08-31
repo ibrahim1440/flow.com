@@ -28,7 +28,13 @@ export async function GET(request: Request) {
       customer: { include: { roastPreferences: true } },
       items: {
         include: {
-          roastingBatches: { include: { qcRecords: true } },
+          // Batches without their QC records. This list is loaded by four screens —
+          // Orders, Order Preparation, Production and Dispatch — and none of them reads
+          // a batch's QC records; the QC screen and the history page fetch those from
+          // their own endpoints. Nesting them here meant every order carried every QC
+          // record of every batch of every line, which is what made this response grow to
+          // 905 KB at 293 orders.
+          roastingBatches: true,
           deliveries: true,
           greenBean: true,
           // Without this the dispatch screen cannot tell a SKU line from a legacy
