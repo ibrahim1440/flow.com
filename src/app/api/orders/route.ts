@@ -31,6 +31,11 @@ export async function GET(request: Request) {
           roastingBatches: { include: { qcRecords: true } },
           deliveries: true,
           greenBean: true,
+          // Without this the dispatch screen cannot tell a SKU line from a legacy
+          // kilogram one: it decides by whether productSku is present, and the relation
+          // was never sent. Every unit order therefore rendered as kilograms with
+          // "Available: 0kg" and an unusable delivery form, even with stock reserved to it.
+          productSku: true,
         },
       },
       // Order Operations S0: minimal owner projection — no permissions/pin/credential fields.

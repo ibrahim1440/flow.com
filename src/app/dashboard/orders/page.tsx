@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, Search, ShoppingCart, ChevronDown, ChevronUp, Trash2, UserPlus, X, Pencil, Save, Clock, ClipboardList, MessageSquare } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
@@ -122,6 +122,14 @@ export default function OrdersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
+  // In-flight guard for the create-order write, so the button cannot be pressed twice.
+  //
+  // Two flags on purpose. The state drives the disabled attribute; the ref is what
+  // actually stops a second submit, because setState does not apply within the same tick —
+  // two clicks dispatched before React re-renders both saw creating === false and both
+  // sent the order. A ref changes immediately, so the second call returns at the door.
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   // ── SKU-based order entry ────────────────────────────────────────────────
   // A new order line is a finished product and a quantity of whole units. The coffee,
@@ -203,20 +211,31 @@ export default function OrdersPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch("/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    if (!res.ok) {
-      const body = await res.json();
-      alert(body.error + (body.details ? "\n" + body.details.join("\n") : ""));
-      return;
+    // Without this guard a double click sent the order twice and the customer got two of
+    // them. The button is disabled below for the same reason; this is the guard that holds
+    // when the click arrives before React has re-rendered.
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        alert(body.error + (body.details ? "\n" + body.details.join("\n") : ""));
+        return;
+      }
+      setShowForm(false);
+      setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
+      setPreview(null);
+      loadData();
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
     }
-    setShowForm(false);
-    setForm({ customerId: "", quotationNumber: "", approvalStatus: "Pending", items: [{ productSkuId: "", quantityUnits: 0 }] });
-    setPreview(null);
-    loadData();
   }
 
   async function updateOrder(id: string, data: Record<string, string>) {
@@ -439,7 +458,7 @@ export default function OrdersPage() {
                 // Section 8: one search box, then a quantity. No bean picker, no product
                 // picker, no SKU field — the SKU is the line.
                 const previewBySku = new Map((preview?.lines ?? []).map((l) => [l.productSkuId, l]));
-                const blocked = form.items.some((i) => !i.productSkuId || i.quantityUnits <= 0);
+                const blocked = creating || form.items.some((i) => !i.productSkuId || i.quantityUnits <= 0);
                 return (
                   <>
                     <div>
@@ -564,7 +583,7 @@ export default function OrdersPage() {
 
       <div className="space-y-3">
         {filtered.map((order) => (
-          <div key={order.id} className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div key={order.id} data-testid={`order-card-${order.orderNumber}`} className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
             <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-cream/50" onClick={() => setExpanded(expanded === order.id ? null : order.id)}>
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-cream rounded-lg flex items-center justify-center">

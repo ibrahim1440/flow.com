@@ -156,6 +156,7 @@ export default function PreparationWorkstationPage() {
             return (
               <div
                 key={order.id}
+                data-testid={`ws-order-${order.orderNumber}`}
                 className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-colors ${
                   attention ? "border-red-300" : "border-border"
                 } ${isOpen ? "xl:col-span-3 md:col-span-2" : ""}`}

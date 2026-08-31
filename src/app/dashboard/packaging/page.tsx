@@ -345,7 +345,7 @@ export default function PackagingPage() {
             const pct = total > 0 ? Math.min((packed / total) * 100, 100) : 0;
             const remaining = +(total - packed).toFixed(3);
             return (
-              <div key={batch.id} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
+              <div key={batch.id} data-testid={`pack-batch-${batch.batchNumber}`} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <div className="flex items-center gap-2">

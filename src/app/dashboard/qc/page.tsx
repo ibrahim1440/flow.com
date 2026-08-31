@@ -738,7 +738,7 @@ export default function QCPage() {
                 const isExpanded = expandedId === batch.id;
 
                 return (
-                  <div key={batch.id} className={`rounded-xl border p-4 transition-all duration-300 hover:shadow-md ${dl?.isOverdue ? "bg-red-50 border-red-200" : dl?.isUrgent ? "bg-amber-50 border-amber-200" : "bg-amber-50 border-amber-200"}`}>
+                  <div key={batch.id} data-testid={`qc-batch-${batch.batchNumber}`} className={`rounded-xl border p-4 transition-all duration-300 hover:shadow-md ${dl?.isOverdue ? "bg-red-50 border-red-200" : dl?.isUrgent ? "bg-amber-50 border-amber-200" : "bg-amber-50 border-amber-200"}`}>
                     {/* Batch header */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">

@@ -182,12 +182,15 @@ export default function ProductionPage() {
     }
 
     if (!forceSubmit && !stockMode && selectedItem) {
-      const alreadyGreen = selectedItem.roastingBatches
+      // Roasted output, matching the server. Comparing green input against a ceiling
+      // expressed in finished kilograms warned on every ordinary roast, because roasting
+      // always loses weight.
+      const alreadyRoasted = selectedItem.roastingBatches
         .filter((b) => !b.isBlend)
-        .reduce((s, b) => s + b.greenBeanQuantity, 0);
+        .reduce((s, b) => s + b.roastedBeanQuantity, 0);
       // Same ceiling the server enforces: ordered minus what the shelf already covers.
       const ceiling = selectedItem.quantityKg - (selectedItem.availableQuantity ?? 0);
-      const excess = +(alreadyGreen + roastForm.greenBeanQuantity - ceiling).toFixed(2);
+      const excess = +(alreadyRoasted + roastForm.roastedBeanQuantity - ceiling).toFixed(2);
       if (excess > 0) {
         setOverproductionExcess(excess);
         return;
@@ -417,11 +420,13 @@ export default function ProductionPage() {
                 const remaining = item.quantityKg - produced;
                 const progress = item.quantityKg > 0 ? (produced / item.quantityKg) * 100 : 0;
                 return (
-                  <div key={item.id} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
+                  <div key={item.id} data-testid={`roast-item-${item.order.orderNumber}`} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="font-bold text-charcoal">#{item.order.orderNumber} — {item.order.customer.name}</p>
-                        <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg}kg {t("kgOrdered")}</p>
+                        {/* The translation already carries the unit ("kg ordered"), so the
+                            literal kg here was rendering "12kg kg ordered". */}
+                        <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg} {t("kgOrdered")}</p>
                         {/* Customer roast profile badge */}
                         {editingProfileId === item.id ? (
                           <div className="flex items-center gap-2 mt-1">
@@ -642,8 +647,8 @@ export default function ProductionPage() {
                 </p>
                 <p className="text-xs text-brown/60 mt-2">
                   {t("requiredQtyLabel")}: {selectedItem.quantityKg}kg — {t("totalProducedLabel")}: {+(
-                    selectedItem.roastingBatches.filter((b) => !b.isBlend).reduce((s, b) => s + b.greenBeanQuantity, 0) +
-                    roastForm.greenBeanQuantity
+                    selectedItem.roastingBatches.filter((b) => !b.isBlend).reduce((s, b) => s + b.roastedBeanQuantity, 0) +
+                    roastForm.roastedBeanQuantity
                   ).toFixed(2)}kg
                 </p>
               </div>

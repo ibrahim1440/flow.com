@@ -314,7 +314,7 @@ export default function DispatchPage() {
               const packed    = packagedKg(item.roastingBatches);
               const available = Math.max(0, +(packed - item.deliveredQty).toFixed(3));
               return (
-                <div key={item.id} className="bg-white rounded-2xl border border-border p-4 flex items-center justify-between gap-4">
+                <div key={item.id} data-testid={`dispatch-row-${item.order.orderNumber}`} className="bg-white rounded-2xl border border-border p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="font-semibold">#{item.order.orderNumber} — {item.order.customer.name}</p>
                     <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg}kg {t("kgOrdered")}</p>
@@ -437,7 +437,9 @@ export default function DispatchPage() {
                 {lotsLoading ? (
                   <div className="flex items-center gap-2 px-3 py-2.5 border-2 border-border rounded-xl text-sm text-brown/60">
                     <div className="w-4 h-4 border-2 border-orange border-t-transparent rounded-full animate-spin" />
-                    <span>جارٍ تحميل اللوتات…</span>
+                    {/* Also hard-coded Arabic: an English session saw it while the
+                        lot list loaded, which on a remote database is several seconds. */}
+                    <span>{t("loadingLots")}</span>
                   </div>
                 ) : lots.length === 0 ? (
                   <div className="space-y-1.5">
@@ -453,7 +455,9 @@ export default function DispatchPage() {
                     required
                     className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm bg-white"
                   >
-                    <option value="">— اختر اللوت —</option>
+                    {/* Was hard-coded Arabic, so an English session saw one Arabic string
+                        in the middle of an otherwise English form. */}
+                    <option value="">{t("selectLot")}</option>
 
                     {/* Matching product group */}
                     {matchingLots.length > 0 && (

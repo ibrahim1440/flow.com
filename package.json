@@ -17,7 +17,10 @@
     "e2e:race": "node scripts/e2e/race.mjs",
     "e2e:stock": "node scripts/e2e/roast-to-stock.mjs",
     "e2e:pages": "node scripts/e2e/pages.mjs",
-    "e2e:reset": "node scripts/e2e/reset.mjs"
+    "e2e:reset": "node scripts/e2e/reset.mjs",
+    "uat": "playwright test",
+    "uat:desktop": "playwright test --project=desktop",
+    "uat:report": "playwright show-report"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
@@ -50,6 +53,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/file-saver": "^2.0.7",

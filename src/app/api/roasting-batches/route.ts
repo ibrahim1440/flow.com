@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -13,24 +14,31 @@ class AppError extends Error {
   }
 }
 
-async function generateBatchNumber(greenBeanId: string | null | undefined): Promise<string> {
-  const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
+/**
+ * The day's next batch serial.
+ *
+ * The sequence is per DAY, not per green bean. It used to count only batches of the same
+ * bean, so the first Colombia roast and the first Kenya roast on one morning were both
+ * numbered ...01 — two physically different batches sharing the serial that operators,
+ * QC cards, packaging cards and labels all identify a lot by. Nothing was corrupted,
+ * because every write goes through the row id, but the number stopped identifying anything.
+ *
+ * Derived from the highest serial issued today rather than from a count, for the same
+ * reason the production numbering is: a count silently reissues a number as soon as the
+ * table has a gap. The advisory lock serialises the read-then-insert so two roasts
+ * recorded at the same moment cannot claim the same serial; it is released at commit.
+ */
+async function generateBatchNumber(tx: Prisma.TransactionClient): Promise<string> {
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
-  const dayStart = new Date(now);
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const dayEnd = new Date(now);
-  dayEnd.setUTCHours(23, 59, 59, 999);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(7763, ${Number(dateStr) % 2147483647}::int)`;
 
-  const existing = await prisma.roastingBatch.findMany({
-    where: {
-      greenBeanId: greenBeanId ?? null,
-      createdAt: { gte: dayStart, lte: dayEnd },
-    },
-    select: { id: true },
-  });
+  const [{ max }] = await tx.$queryRaw<{ max: number | null }[]>`
+    SELECT MAX(CAST(SUBSTRING("batchNumber" FROM 9) AS INTEGER)) AS max
+      FROM "RoastingBatch"
+     WHERE "batchNumber" ~ ${`^${dateStr}[0-9]+$`}`;
 
-  return `${dateStr}${String(existing.length + 1).padStart(2, "0")}`;
+  return `${dateStr}${String((max ?? 0) + 1).padStart(2, "0")}`;
 }
 
 export async function GET(request: Request) {
@@ -47,7 +55,17 @@ export async function GET(request: Request) {
     orderBy: { date: "desc" },
     take: 500,
     include: {
-      orderItem: { include: { order: { include: { customer: { include: { roastPreferences: true } } } } } },
+      orderItem: {
+        include: {
+          order: { include: { customer: { include: { roastPreferences: true } } } },
+          // Which coffee an order-backed batch is. A stock batch carries productId
+          // directly; a batch roasted against an order carries nothing and has to be
+          // identified through its line's SKU. Without this the production-order screen
+          // could not tell what any order-backed batch was, so its "link a roasting batch"
+          // picker was permanently empty — exactly the batches most worth linking.
+          productSku: { select: { id: true, skuCode: true, productId: true } },
+        },
+      },
       greenBean: true,
       qcRecords: {
         include: {
@@ -150,15 +168,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Order item not found." }, { status: 404 });
   }
 
+  // Roasted output, not green input. The ceiling below is expressed in the finished
+  // kilograms the order needs, so the thing measured against it has to be the coffee that
+  // will actually become those kilograms. Summing green here compared an input to an
+  // output: since roasting always loses weight, every correct roast looked like surplus.
+  // A 12 kg order needs about 14.3 kg of green at a 16 % loss, and that produced
+  // "would exceed the order quantity by 2.3kg — only an admin can authorize surplus
+  // production", which stopped non-admin roasters from working at all.
   const existingAgg = isStockBatch
-    ? { _sum: { greenBeanQuantity: 0 } }
+    ? { _sum: { roastedBeanQuantity: 0 } }
     : await prisma.roastingBatch.aggregate({
         where: {
           orderItemId,
           isBlend: false,
           status: { not: "Rejected" },
         },
-        _sum: { greenBeanQuantity: true },
+        _sum: { roastedBeanQuantity: true },
       });
 
   // What this item is actually allowed to consume from the roaster: the ordered quantity
@@ -177,8 +202,8 @@ export async function POST(request: Request) {
     ? Math.max(0, +(surplusOrderItem.quantityKg - alreadyReserved).toFixed(3))
     : Infinity;
 
-  const alreadyKg = existingAgg._sum.greenBeanQuantity ?? 0;
-  const excess = +(alreadyKg + qty - productionCeiling).toFixed(3);
+  const alreadyKg = existingAgg._sum.roastedBeanQuantity ?? 0;
+  const excess = +(alreadyKg + roastedQty - productionCeiling).toFixed(3);
 
   if (excess > 0 && user.role !== "admin") {
     return NextResponse.json(
@@ -193,10 +218,12 @@ export async function POST(request: Request) {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  const batchNumber = await generateBatchNumber(greenBeanId);
-
   try {
   const batch = await prisma.$transaction(async (tx) => {
+    // Generated inside the transaction so the advisory lock it takes is held until commit,
+    // which is what stops two concurrent roasts being handed the same serial.
+    const batchNumber = await generateBatchNumber(tx);
+
     let previousQuantity: number | null = null;
     let newQuantity:      number | null = null;
 

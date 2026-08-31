@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
   Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
-  ClipboardList,
+  ClipboardList, ShieldAlert,
 } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
@@ -153,10 +153,38 @@ function SidebarNav({
   );
 }
 
+/**
+ * The module a dashboard route belongs to, by longest matching navigation prefix.
+ *
+ * Longest-match so a nested route resolves to its own section rather than a shorter one
+ * that happens to share a prefix, and so detail pages (a production order, say) inherit
+ * the same requirement as their list.
+ */
+function requiredModuleFor(pathname: string): string | null {
+  const match = NAV_ITEMS.filter(
+    (item) => item.href !== "/dashboard" && (pathname === item.href || pathname.startsWith(item.href + "/"))
+  ).sort((a, b) => b.href.length - a.href.length)[0];
+  return match ? match.module ?? (match.key as string) : null;
+}
+
 function DashboardShell({ user, children }: { user: User; children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { lang } = useI18n();
+  const { lang, t } = useI18n();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // Hiding a navigation entry keeps a screen out of the way; it does not keep anybody out
+  // of it. Typing the address, following an old bookmark or using browser history all
+  // reached the page, which then rendered its full chrome and an empty list — because the
+  // APIs behind it were refusing every request. The data was never exposed and no write
+  // was ever accepted, but the operator was shown a working-looking screen for work they
+  // cannot do. The route is refused here, once, for every dashboard page.
+  const requiredModule = requiredModuleFor(pathname);
+  const routeAllowed =
+    requiredModule === null ||
+    (hasModuleAccess(user.permissions, requiredModule) &&
+      // Settings carries the same admin-only double guard as its navigation entry.
+      (requiredModule !== "settings" || user.role === "admin"));
 
   async function handleLogout() {
     await fetch("/api/auth/me", { method: "DELETE" });
@@ -200,7 +228,25 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-5 lg:p-7">{children}</main>
+        <main className="flex-1 overflow-y-auto p-5 lg:p-7">
+          {routeAllowed ? (
+            children
+          ) : (
+            <div className="max-w-md mx-auto mt-16 bg-white rounded-2xl border border-border p-8 text-center">
+              <div className="w-12 h-12 rounded-xl bg-oo-status-blocked-bg flex items-center justify-center mx-auto mb-4">
+                <ShieldAlert size={22} className="text-oo-status-blocked" />
+              </div>
+              <h1 className="text-lg font-extrabold text-charcoal">{t("accessDeniedTitle")}</h1>
+              <p className="text-sm text-brown mt-1.5">{t("accessDeniedBody")}</p>
+              <a
+                href="/dashboard"
+                className="inline-block mt-5 px-4 py-2 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark transition-colors"
+              >
+                {t("dashboard")}
+              </a>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );
