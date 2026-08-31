@@ -162,6 +162,7 @@ export async function reserveFinishedUnits(
   });
 
   const taken: UnitReservationResult["lots"] = [];
+  const rows: Prisma.StockAllocationCreateManyInput[] = [];
   let remaining = want;
 
   for (const lot of lots) {
@@ -182,21 +183,27 @@ export async function reserveFinishedUnits(
     // Move on to the next lot rather than failing the whole reservation.
     if (affected !== 1) continue;
 
-    await tx.stockAllocation.create({
-      data: {
-        orderItemId: item.id,
-        finishedGoodsLotId: lot.id,
-        quantityUnits: take,
-        // Derived, never independent — see the note at the top of this file.
-        quantityKg: kgForUnits(item.productSku, take),
-        status: "RESERVED",
-        createdById: userId,
-      },
+    // The conditional UPDATE above is the atomic claim and must stay per-lot. The
+    // allocation row is only the detail behind it, so the inserts are collected and
+    // written once after the loop: on a remote database each round-trip costs ~167 ms,
+    // and a reservation spanning ten lots was spending ten of them on inserts alone.
+    // Correctness is unaffected — this all runs inside one transaction, so unitsReserved
+    // and the RESERVED rows still become visible together, or not at all.
+    rows.push({
+      orderItemId: item.id,
+      finishedGoodsLotId: lot.id,
+      quantityUnits: take,
+      // Derived, never independent — see the note at the top of this file.
+      quantityKg: kgForUnits(item.productSku, take),
+      status: "RESERVED",
+      createdById: userId,
     });
 
     taken.push({ lotId: lot.id, batchNumber: lot.batchNumber, units: take });
     remaining -= take;
   }
+
+  if (rows.length > 0) await tx.stockAllocation.createMany({ data: rows });
 
   return { reservedUnits: want - remaining, lots: taken };
 }

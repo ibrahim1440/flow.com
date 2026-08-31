@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
@@ -225,7 +225,7 @@ export async function PUT(
       }
 
       return updatedBatch;
-    });
+    }, TX_OPTS);
 
     return NextResponse.json(updated);
   } catch (err) {

@@ -202,7 +202,11 @@ export default function DispatchPage() {
   // alone — the rule the delivery route itself no longer uses — would hide exactly the
   // orders this change exists to enable: the ones filled from stock with no roast at all.
   const readyItems = orders.flatMap((o: any) =>
-    o.items
+    // Only orders the delivery route will actually accept. This mirrors
+    // DELIVERY_ALLOWED_STATUSES in lib/services/order-operations — that is the
+    // enforcement, this is only here so dispatch is not shown cancelled, held and
+    // unapproved orders it would be refused on. Keep the two in step.
+    (o.status === "Preparing" || o.status === "Ready for Shipping" ? o.items : [])
       .filter((i: any) => {
         if (i.deliveryStatus === "Delivered") return false;
         // A SKU line is shippable when units remain on it. Its stock may have been

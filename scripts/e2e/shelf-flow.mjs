@@ -1,3 +1,14 @@
+// SUPERSEDED — targets the pre-SKU order API.
+//
+// This suite creates order lines from a green bean and a kilogram quantity. Order
+// creation is SKU-only since the Finished Products change, so POST /api/orders now
+// answers 400 "Each order line requires a productSkuId" and the fixtures below cannot
+// be built. The kilogram shelf mechanics it asserts still exist for historical rows,
+// but they can no longer be reached through the order API.
+//
+// The equivalent behaviour for the current unit-based model is covered by the
+// Finished Products and delivery suites. Retiring or rewriting this file is a
+// post-MVP task; it is left in place so the history of what it proved is not lost.
 // ─────────────────────────────────────────────────────────────────────────────
 //  Shelf-first fulfilment end-to-end suite.
 //

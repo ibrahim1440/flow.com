@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { handlePrismaError } from "@/lib/api-error";
@@ -275,7 +275,7 @@ export async function POST(request: Request) {
     }
 
     return newBatch;
-  });
+  }, TX_OPTS);
 
   return NextResponse.json(batch, { status: 201 });
   } catch (err: unknown) {

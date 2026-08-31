@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import {
@@ -390,7 +390,7 @@ export async function POST(request: Request, { params }: Params) {
           },
         },
       });
-    });
+    }, TX_OPTS);
 
     return NextResponse.json(result);
   } catch (err: unknown) {

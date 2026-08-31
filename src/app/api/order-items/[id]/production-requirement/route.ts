@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub, requireAnyModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { createProductionOrderFromSales } from "@/lib/services/production-planning";
@@ -140,7 +140,7 @@ export async function POST(_request: Request, { params }: Params) {
 
     const created = await prisma.$transaction((tx) =>
       createProductionOrderFromSales(item.id, tx, shortfallKg)
-    );
+    , TX_OPTS);
 
     return NextResponse.json(
       {

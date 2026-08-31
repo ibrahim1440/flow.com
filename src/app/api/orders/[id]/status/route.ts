@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { releaseShelfStock } from "@/lib/services/shelf-allocation";
@@ -120,10 +120,16 @@ export async function POST(request: Request, { params }: Params) {
         };
       }
 
-      // A cancelled order must stop holding shelf stock, otherwise its reservations sit
+      // A terminal order must stop holding shelf stock, otherwise its reservations sit
       // there forever and quietly starve every other order of coffee that is physically
       // present. Released rows are kept for audit rather than deleted.
-      if (action === "cancel") {
+      //
+      // "complete" is included alongside "cancel": completing an order whose lines were
+      // never fully delivered used to leave the undelivered units reserved to a closed
+      // order, invisible to everyone and unrecoverable without editing the database by
+      // hand. Where a line WAS delivered its allocation is already CONSUMED, so the
+      // release is a no-op there and only genuine leftovers are handed back.
+      if (action === "cancel" || action === "complete") {
         const cancelledItems = await tx.orderItem.findMany({
           where: { orderId: id },
           select: { id: true },
@@ -156,7 +162,7 @@ export async function POST(request: Request, { params }: Params) {
         where: { id },
         select: { id: true, status: true, ownerId: true },
       });
-    });
+    }, TX_OPTS);
 
     return NextResponse.json(result);
   } catch (err: unknown) {

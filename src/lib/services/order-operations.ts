@@ -119,6 +119,28 @@ export function isCancelAllowedFrom(status: OrderStatus): boolean {
   return !TERMINAL_ORDER_STATUSES.has(status);
 }
 
+// ─── Dispatch ──────────────────────────────────────────────────────────────
+
+// Statuses from which a delivery may be recorded.
+//
+// "Ready for Shipping" is the obvious one. "Preparing" is included because a multi-line
+// order aggregates to it as soon as ONE line still needs production, while its other
+// lines may already be covered from the shelf and legitimately dispatchable — refusing
+// there would block partial dispatch of mixed orders, which is ordinary practice.
+//
+// Everything else is excluded for a specific reason. "Waiting Approval" and "Waiting
+// Preparation Review" have had no preparation review, and review is what reserves the
+// stock — shipping before it hands out coffee that is promised to nobody, so units leave
+// the shelf with no reservation behind them. "On Hold" is the one status whose entire
+// purpose is to stop work on the order. "Completed", "Cancelled" and "Rejected" are
+// terminal, and the first two have already released their reservations, so a delivery
+// there consumes stock that was handed back to the free pool.
+export const DELIVERY_ALLOWED_STATUSES: OrderStatus[] = ["Preparing", "Ready for Shipping"];
+
+export function isDeliveryAllowedFrom(status: OrderStatus): boolean {
+  return DELIVERY_ALLOWED_STATUSES.includes(status);
+}
+
 export const REASON_MAX_LENGTH = 500;
 
 // ─── Quantity validation (business rule 6) ──────────────────────────────────

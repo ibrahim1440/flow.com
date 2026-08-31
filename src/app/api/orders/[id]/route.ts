@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { checkOrderAvailability, releaseShelfStock } from "@/lib/services/shelf-allocation";
@@ -113,7 +113,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     await prisma.$transaction(async (tx) => {
       for (const itemId of toDelete) await releaseShelfStock(tx, itemId);
       await tx.orderItem.deleteMany({ where: { id: { in: toDelete } } });
-    });
+    }, TX_OPTS);
     }
 
     for (const item of resolvedItems) {
@@ -218,7 +218,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       const items = await tx.orderItem.findMany({ where: { orderId: id }, select: { id: true } });
       for (const item of items) await releaseShelfStock(tx, item.id);
       await tx.order.delete({ where: { id } });
-    });
+    }, TX_OPTS);
     return NextResponse.json({ success: true });
   } catch (err) {
     return handlePrismaError(err);

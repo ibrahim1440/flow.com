@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
       for (const productionOrderId of productionOrderIds) {
         await recalcProductionOrderStatus(productionOrderId, tx);
       }
-    });
+    }, TX_OPTS);
 
     return NextResponse.json({ finalized: batchIds.length, outcome });
   } catch (err) {

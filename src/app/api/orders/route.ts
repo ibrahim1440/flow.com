@@ -131,6 +131,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "customerId is required" }, { status: 400 });
     }
 
+    // An order with no lines is not a smaller order, it is a stuck one: it consumes an
+    // order number, can be approved and reviewed, aggregates to "Waiting Preparation
+    // Review" forever (aggregatePreparationStatus returns that for an empty item list)
+    // and can never reach Ready for Shipping. Refuse it at the door.
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json(
+        { error: "An order must have at least one line." },
+        { status: 400 }
+      );
+    }
+
     const orderData = {
       customerId:        body.customerId as string,
       quotationNumber:   typeof body.quotationNumber === "string" ? body.quotationNumber.trim() || null : null,

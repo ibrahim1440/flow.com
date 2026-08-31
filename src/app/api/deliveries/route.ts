@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { consumeShelfStock, lotMatchFilter, roundKg, trimReservationToDemand } from "@/lib/services/shelf-allocation";
 import { consumeFinishedUnits, kgForUnits, trimUnitReservationToDemand } from "@/lib/services/finished-products";
+import { DELIVERY_ALLOWED_STATUSES, isDeliveryAllowedFrom, type OrderStatus } from "@/lib/services/order-operations";
 
 export async function GET() {
   const { error } = await requireModule("dispatch");
@@ -38,9 +39,25 @@ export async function POST(request: Request) {
     const delivery = await prisma.$transaction(async (tx) => {
       const orderItem = await tx.orderItem.findUnique({
         where: { id: orderItemId },
-        include: { productSku: { select: { id: true, skuCode: true, weightGrams: true } } },
+        include: {
+          productSku: { select: { id: true, skuCode: true, weightGrams: true } },
+          order: { select: { status: true } },
+        },
       });
       if (!orderItem) throw { _appCode: 404, message: "Order item not found" };
+
+      // Shipping is an order-level decision, not a line-level one. Without this check the
+      // route would record a delivery against any order at all: one still Waiting Approval,
+      // one a manager put On Hold, one already Cancelled or Rejected. Coffee physically
+      // leaves the shelf in every case, and for a cancelled order it leaves against
+      // reservations the cancellation has already handed back — so the same units can be
+      // promised to somebody else and shipped here at the same time.
+      if (!isDeliveryAllowedFrom(orderItem.order.status as OrderStatus)) {
+        throw {
+          _appCode: 409,
+          message: `Cannot record a delivery for an order in status "${orderItem.order.status}". Only ${DELIVERY_ALLOWED_STATUSES.map((s) => `"${s}"`).join(" or ")} orders can be dispatched.`,
+        };
+      }
 
       // ── SKU lines ship whole units ────────────────────────────────────────
       // The kilogram path below draws on availableQty/reservedQty, which stay at 0 on a
@@ -271,7 +288,7 @@ export async function POST(request: Request) {
       await recalcOrderItemStatus(orderItemId, tx);
 
       return newDelivery;
-    });
+    }, TX_OPTS);
 
     return NextResponse.json(delivery, { status: 201 });
   } catch (err: unknown) {

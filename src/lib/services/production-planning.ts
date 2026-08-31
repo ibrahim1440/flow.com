@@ -126,10 +126,30 @@ export async function createProductionOrderFromSales(
   // Round to 3 dp to avoid floating-point drift across many production orders.
   const expectedGreenBeanKg = +(targetWeightKg / (1 - lossFraction)).toFixed(3);
 
-  // Sequential production number — count inside the same tx.
-  const existingCount = await tx.productionOrder.count();
+  // Sequential production number, derived from the highest number already issued this
+  // year rather than from a row count.
+  //
+  // count() + 1 reissues a number the moment the table has a gap, and productionNumber is
+  // UNIQUE. Worse, the count never moves past the collision: with rows 0002-0006 present,
+  // count() + 1 proposes 0006 on every single call, so the FIRST deleted production order
+  // stops production scheduling permanently — every later attempt fails with "a record
+  // with these details already exists" and no amount of retrying helps. Observed exactly
+  // that way on a database holding PRD-2026-0002 through PRD-2026-0006.
+  //
+  // The advisory lock serializes the read-then-insert against concurrent callers; it is
+  // held to the end of this transaction and needs no explicit unlock. Without it two
+  // simultaneous requests read the same maximum and one dies on the unique constraint —
+  // safe, but it surfaces to the operator as a duplicate error on a perfectly valid order.
   const year = new Date().getFullYear();
-  const productionNumber = `PRD-${year}-${String(existingCount + 1).padStart(4, "0")}`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(7761, ${year}::int)`;
+
+  // The regex guard means a malformed row can never reach the cast, and MAX ignores gaps.
+  const [{ max: lastSeq }] = await tx.$queryRaw<{ max: number | null }[]>`
+    SELECT MAX(CAST(SUBSTRING("productionNumber" FROM 10) AS INTEGER)) AS max
+      FROM "ProductionOrder"
+     WHERE "productionNumber" ~ ${`^PRD-${year}-[0-9]+$`}`;
+
+  const productionNumber = `PRD-${year}-${String((lastSeq ?? 0) + 1).padStart(4, "0")}`;
 
   return tx.productionOrder.create({
     data: {

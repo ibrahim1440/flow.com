@@ -1,3 +1,12 @@
+// PARTIALLY SUPERSEDED — the final section targets the pre-SKU order API.
+//
+// Everything up to and including packaging is current and passes. The last section
+// ("a later order is filled from it with no roasting at all") builds a bean-based order
+// line, and order creation is SKU-only since the Finished Products change, so
+// POST /api/orders answers 400 "Each order line requires a productSkuId". Rewriting that
+// section against a ProductSKU is a post-MVP task; the shelf mechanics it asserts are
+// covered meanwhile by the finished-goods suites.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 //  Roast-to-stock: deliberately replenishing the shelf with no order behind it.
 //

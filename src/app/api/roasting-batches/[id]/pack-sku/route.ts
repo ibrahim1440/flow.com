@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
@@ -273,7 +273,7 @@ export async function POST(request: Request, { params }: Params) {
           .filter((r) => r.type === "MATERIAL")
           .map((r) => ({ label: r.label, quantity: r.quantityRequired })),
       };
-    });
+    }, TX_OPTS);
 
     return NextResponse.json(result, { status: 201 });
   } catch (err: unknown) {
