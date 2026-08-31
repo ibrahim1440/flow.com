@@ -25,12 +25,13 @@ type Requirement = {
   orderedUnits: number;
   deliveredUnits: number;
   reservedUnits: number;
+  scheduledUnits: number;
   shortfallUnits: number;
   shortfallKg: number;
   components: BomLine[];
   hasBom: boolean;
   blockedBy: string[];
-  existingProductionOrders: { id: string; productionNumber: string; status: string; targetUnits: number }[];
+  existingProductionOrders: { id: string; productionNumber: string; status: string; targetUnits: number; producedUnits: number }[];
 };
 
 export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
@@ -121,9 +122,6 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
       )}
 
       {rows.map((row) => {
-        const open = row.existingProductionOrders.find(
-          (p) => p.status === "PENDING" || p.status === "IN_PRODUCTION"
-        );
         return (
           <div key={row.orderItemId} className="rounded-xl border border-oo-border-default p-2.5">
             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -131,7 +129,11 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
               <span className="text-xs text-oo-text-secondary">
                 {t("orderedLabel")}: <b>{row.orderedUnits}</b> · {t("reservedLabel")}:{" "}
                 <b className="text-oo-status-success">{row.reservedUnits}</b> ·{" "}
-                {t("productionReqShortfall")}:{" "}
+                {t("scheduledLabel")}:{" "}
+                <b className={row.scheduledUnits > 0 ? "text-oo-status-preparing" : "text-oo-text-muted"}>
+                  {row.scheduledUnits}
+                </b>{" "}
+                · {t("productionReqShortfall")}:{" "}
                 <b className={row.shortfallUnits > 0 ? "text-oo-status-waiting" : "text-oo-text-muted"}>
                   {row.shortfallUnits}
                 </b>
@@ -163,11 +165,11 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                   ))}
                 </ul>
 
-                {open ? (
-                  <p className="mt-2 text-xs font-semibold text-oo-status-preparing">
-                    {t("productionReqOpen")}: {open.productionNumber} ({open.targetUnits})
-                  </p>
-                ) : canCreate ? (
+                {/* An existing production order no longer suppresses the button. What it
+                    already owes this line is subtracted from the shortfall by the server,
+                    so a shortfall shown here is genuinely additional work — which is what
+                    lets an increased order quantity be scheduled instead of refused. */}
+                {canCreate ? (
                   <button
                     type="button"
                     disabled={busy === row.orderItemId}
@@ -183,6 +185,29 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                   </button>
                 ) : null}
               </>
+            )}
+
+            {/* Shown whether or not there is a shortfall: when a line looks short but the
+                button offers nothing, these are the orders explaining why. */}
+            {row.existingProductionOrders.length > 0 && (
+              <ul className="mt-2 space-y-0.5 border-t border-oo-border-default pt-2">
+                {row.existingProductionOrders.map((p) => (
+                  <li key={p.id} className="text-[11px] text-oo-text-secondary flex items-center gap-1.5 flex-wrap">
+                    <a
+                      href={`/dashboard/production-orders/${p.id}`}
+                      className="font-mono font-bold text-oo-action-primary hover:underline"
+                    >
+                      {p.productionNumber}
+                    </a>
+                    <span className="text-oo-text-muted">
+                      {p.producedUnits}/{p.targetUnits}
+                    </span>
+                    <span className="uppercase tracking-wide font-semibold text-oo-text-muted">
+                      {p.status.replace("_", " ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         );

@@ -5,7 +5,7 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { reservedForItem } from "@/lib/services/shelf-allocation";
-import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import { recalcProductionOrderStatus, assertProductionOrderAcceptsRoast } from "@/lib/services/production-planning";
 
 class AppError extends Error {
   constructor(readonly status: number, message: string) {
@@ -225,6 +225,21 @@ export async function POST(request: Request) {
       previousQuantity = newQuantity + qty;
     }
 
+    // A batch may be roasted directly against a production order. Validate the pairing
+    // before creating it: an order that is closed, or one for a different coffee, must not
+    // silently absorb this roast into its progress.
+    if (productionOrderId) {
+      const batchProductId = isStockBatch
+        ? (productId as string)
+        : (
+            await tx.orderItem.findUnique({
+              where: { id: orderItemId },
+              select: { productSku: { select: { productId: true } } },
+            })
+          )?.productSku?.productId ?? null;
+      await assertProductionOrderAcceptsRoast(tx, productionOrderId, batchProductId);
+    }
+
     const qcDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const newBatch = await tx.roastingBatch.create({
       data: {
@@ -281,6 +296,12 @@ export async function POST(request: Request) {
   } catch (err: unknown) {
     if (err instanceof AppError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    // The production-planning guards throw the `{ _appCode, message }` shape the newer
+    // routes use, rather than this file's older AppError class.
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }

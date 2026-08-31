@@ -73,6 +73,16 @@ export const ACTIVITY_TYPES = [
   "ORDER_RESUMED",
   "ORDER_CANCELLED",
   "ORDER_COMPLETED",
+  // Production-order events. They live on the customer order's timeline rather than in a
+  // separate production audit log: every production order in this workflow is raised from
+  // an order line, and the person asking "why was this order late?" wants the roasting
+  // history in the same list as the approval and the hold, not in a second place.
+  "PRODUCTION_ORDER_CREATED",
+  "PRODUCTION_ORDER_RELEASED",
+  "PRODUCTION_ORDER_COMPLETED",
+  "PRODUCTION_ORDER_CANCELLED",
+  "PRODUCTION_BATCH_LINKED",
+  "PRODUCTION_BATCH_UNLINKED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 

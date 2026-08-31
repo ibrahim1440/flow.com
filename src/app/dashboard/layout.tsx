@@ -6,6 +6,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
   Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
+  ClipboardList,
 } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
@@ -20,6 +21,7 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
   { key: "workstationPreparation", icon: PackageCheck, href: "/dashboard/workstation/preparation", module: "orders" },
   { key: "production", icon: Factory,         href: "/dashboard/production" },
+  { key: "productionOrdersNav", icon: ClipboardList, href: "/dashboard/production-orders", module: "production" },
   { key: "qc",         icon: ClipboardCheck,  href: "/dashboard/qc" },
   { key: "packaging",  icon: Box,             href: "/dashboard/packaging" },
   { key: "dispatch",   icon: Truck,           href: "/dashboard/dispatch" },
@@ -107,9 +109,12 @@ function SidebarNav({
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {filteredNav.map((item) => {
+          // Compared on whole path segments, not raw prefixes: a bare startsWith makes
+          // "/dashboard/production" light up on "/dashboard/production-orders" too, so two
+          // entries would look selected at once.
           const isActive =
             pathname === item.href ||
-            (item.href !== "/dashboard" && pathname.startsWith(item.href));
+            (item.href !== "/dashboard" && pathname.startsWith(item.href + "/"));
           return (
             <a
               key={item.key}

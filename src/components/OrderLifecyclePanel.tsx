@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import {
   AlertTriangle, Clock, ClipboardClock, MessageSquare, PauseCircle, RotateCcw, Ban, CheckCircle2,
   ClipboardList, UserCircle2, Loader2, Send, RefreshCw, PackageCheck, XCircle, Hammer,
-  CircleDashed, CircleDotDashed, Check,
+  CircleDashed, CircleDotDashed, Check, Flame,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "@/app/dashboard/user-context";
@@ -269,6 +269,12 @@ const ACTIVITY_LABEL_KEYS: Record<string, TranslationKey> = {
   ORDER_RESUMED: "activityOrderResumed",
   ORDER_CANCELLED: "activityOrderCancelled",
   ORDER_COMPLETED: "activityOrderCompleted",
+  PRODUCTION_ORDER_CREATED: "activityProductionOrderCreated",
+  PRODUCTION_ORDER_RELEASED: "activityProductionOrderReleased",
+  PRODUCTION_ORDER_COMPLETED: "activityProductionOrderCompleted",
+  PRODUCTION_ORDER_CANCELLED: "activityProductionOrderCancelled",
+  PRODUCTION_BATCH_LINKED: "activityProductionBatchLinked",
+  PRODUCTION_BATCH_UNLINKED: "activityProductionBatchUnlinked",
 };
 
 const ACTIVITY_ICON: Record<string, React.ElementType> = {
@@ -280,6 +286,12 @@ const ACTIVITY_ICON: Record<string, React.ElementType> = {
   ORDER_RESUMED: RotateCcw,
   ORDER_CANCELLED: Ban,
   ORDER_COMPLETED: CheckCircle2,
+  PRODUCTION_ORDER_CREATED: Hammer,
+  PRODUCTION_ORDER_RELEASED: Hammer,
+  PRODUCTION_ORDER_COMPLETED: CheckCircle2,
+  PRODUCTION_ORDER_CANCELLED: Ban,
+  PRODUCTION_BATCH_LINKED: Flame,
+  PRODUCTION_BATCH_UNLINKED: Flame,
 };
 
 export function ActivityTimeline({ activities }: { activities: LifecycleActivity[] }) {
