@@ -8,7 +8,7 @@ import {
   productionProgressMany,
   advisoryKey,
 } from "@/lib/services/production-planning";
-import { appendOrderActivity, productionGateRefusal } from "@/lib/services/order-operations";
+import { appendOrderActivity, productionGateRefusal, assertOrderStillAcceptsProduction } from "@/lib/services/order-operations";
 import { explodeBom, kgForUnits } from "@/lib/services/finished-products";
 
 type Params = { params: Promise<{ id: string }> };
@@ -210,6 +210,37 @@ export async function POST(_request: Request, { params }: Params) {
       const liveKg = kgForUnits(item.productSku!, live.outstandingUnits);
       const order = await createProductionOrderFromSales(item.id, tx, liveKg);
 
+      // ── Late lifecycle-serialization barrier ────────────────────────────────
+      // Locks the parent Order row and re-checks eligibility against
+      // transaction-current state. A Hold or Cancel that committed while this
+      // transaction was running is caught here and the whole transaction — including the
+      // production order just created — rolls back. Taken last, after the scheduling
+      // work, to keep production in the same OrderItem-then-Order direction preparation
+      // review uses; see assertOrderStillAcceptsProduction for the deadlock argument.
+      await assertOrderStillAcceptsProduction(tx, item.id, "schedule");
+
+      // The shortfall above was computed before that lock existed, so a preparation review
+      // committing in between could have reserved stock this order line now no longer
+      // needs. Re-derive it now that the Order lock makes review unable to commit under
+      // us: if reservations and open production orders together exceed what is still
+      // owed, this request would over-schedule and must not stand.
+      const settled = await outstandingDemandForItem(tx, {
+        id: fresh.id,
+        quantityUnits: fresh.quantityUnits ?? 0,
+        deliveredUnits: fresh.deliveredUnits,
+      });
+      const committedUnits =
+        settled.orderedUnits - settled.deliveredUnits - settled.reservedUnits - settled.scheduledUnits;
+      if (committedUnits < 0) {
+        throw {
+          _appCode: 409,
+          message:
+            `Coverage for this line changed while the request was in flight: ` +
+            `${settled.reservedUnits} unit(s) reserved and ${settled.scheduledUnits} scheduled ` +
+            `now exceed the ${settled.orderedUnits - settled.deliveredUnits} still owed. Nothing was scheduled.`,
+        };
+      }
+
       await appendOrderActivity(tx, {
         orderId: item.order.id,
         type: "PRODUCTION_ORDER_CREATED",
@@ -245,6 +276,16 @@ export async function POST(_request: Request, { params }: Params) {
       { status: 201 }
     );
   } catch (err) {
+    // The guards inside the transaction — the serialization barrier, the coverage
+    // re-check, and the "covered while in flight" case — throw the `{ _appCode, message }`
+    // shape the newer routes use. handlePrismaError does not understand it and would turn
+    // a deliberate 409 into a generic 500, which is exactly what the losing request of two
+    // concurrent scheduling attempts used to receive. Handled locally here, the same way
+    // roasting-batches/route.ts already does, rather than by changing the shared handler.
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
+    }
     return handlePrismaError(err);
   }
 }

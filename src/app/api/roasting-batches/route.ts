@@ -7,7 +7,7 @@ import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { reservedForItem } from "@/lib/services/shelf-allocation";
 import { recalcProductionOrderStatus, assertProductionOrderAcceptsRoast } from "@/lib/services/production-planning";
-import { productionGateRefusal } from "@/lib/services/order-operations";
+import { productionGateRefusal, assertOrderStillAcceptsProduction } from "@/lib/services/order-operations";
 
 class AppError extends Error {
   constructor(readonly status: number, message: string) {
@@ -340,6 +340,22 @@ export async function POST(request: Request) {
     if (newBatch.productionOrderId) {
       await recalcProductionOrderStatus(newBatch.productionOrderId, tx);
     }
+
+    // ── Late lifecycle-serialization barrier ──────────────────────────────────
+    // Last thing before commit, and deliberately after recalcOrderItemStatus above: this
+    // transaction already holds the OrderItem row lock by then, so acquiring the Order row
+    // lock here keeps roasting in the OrderItem-then-Order direction that preparation
+    // review uses. Taking Order first instead would invert against review and deadlock.
+    //
+    // The gate at the top of this transaction read committed state as of its own start; a
+    // Hold or Cancel committing during the roast is invisible to it. This re-check sees
+    // that, and because it runs before commit the rollback takes the green decrement, the
+    // batch, the inventory movement and the order-item recalculation with it — a refused
+    // roast leaves stock exactly as it was.
+    //
+    // Stock batches are excluded: they have no customer order whose lifecycle could
+    // invalidate them, and are bounded by their own privilege and the atomic stock check.
+    if (!isStockBatch) await assertOrderStillAcceptsProduction(tx, orderItemId, "start");
 
     return newBatch;
   }, TX_OPTS);

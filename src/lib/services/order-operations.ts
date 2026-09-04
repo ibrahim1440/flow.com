@@ -242,6 +242,72 @@ export function productionGateRefusal(
   return null;
 }
 
+/**
+ * Late lifecycle-serialization barrier for order-backed production.
+ *
+ * Call this INSIDE the production transaction, after the OrderItem and inventory work and
+ * immediately before commit. It locks the parent Order row and re-evaluates eligibility
+ * against transaction-current committed state, so a Hold or Cancel that committed while
+ * this transaction was running is seen and the whole transaction rolls back.
+ *
+ * ── Why the lock is taken here and not earlier ─────────────────────────────
+ * The roasting transaction writes OrderItem (recalcOrderItemStatus) before it finishes, and
+ * preparation-review writes OrderItem and then Order. Taking Order first in production
+ * would invert that and deadlock: production would hold Order and wait for OrderItem while
+ * review held OrderItem and waited for Order. Acquiring Order last keeps production in the
+ * same direction review already uses — OrderItem then Order — so no cycle exists.
+ *
+ * ── Why FOR UPDATE OF o, and not a conditional UPDATE ─────────────────────
+ * FOR UPDATE takes the same conflicting row lock a status transition needs, without writing
+ * anything: no business-visible timestamp is touched. Under READ COMMITTED, once the lock
+ * is granted Postgres re-reads the latest committed version of the row, so the values
+ * returned here are transaction-current rather than from this transaction's snapshot. The
+ * OF o restricts the lock to the Order row: locking the joined OrderItem too would put an
+ * OrderItem lock AFTER Order in the roasting path and reintroduce the inversion above.
+ *
+ * ── Why preparationDecision may be read under this same lock ──────────────
+ * It is serialized transitively rather than directly, which is sound only while all of the
+ * following hold — verified at the time of writing:
+ *   1. preparation-review is the ONLY writer of OrderItem.preparationDecision in the
+ *      application (every other reference in src/ is a read).
+ *   2. It never writes null: decisionFor returns one of three non-null literals, so a
+ *      decision can go null -> decided or decided -> decided', never decided -> null.
+ *      (Re-review DOES overwrite an existing decision — the weaker "never becomes null" is
+ *      the property this argument needs, not "only ever set once".)
+ *   3. That same transaction always writes the parent Order row before commit
+ *      (order.updateMany, unconditional, after every OrderItem update).
+ * Because of (3), no review can commit a decision change while this lock is held; because
+ * of (2), a decision that is already non-null cannot become null under us. If a future
+ * change writes preparationDecision without touching the Order row, this argument breaks
+ * and the decision must be locked directly.
+ */
+export async function assertOrderStillAcceptsProduction(
+  tx: PrismaTx,
+  orderItemId: string,
+  verb: "schedule" | "start" = "schedule",
+): Promise<void> {
+  const rows = await tx.$queryRaw<
+    { status: string; approvalStatus: string; preparationDecision: string | null }[]
+  >`
+    SELECT o."status", o."approvalStatus", oi."preparationDecision"
+      FROM "OrderItem" oi
+      JOIN "Order" o ON o."id" = oi."orderId"
+     WHERE oi."id" = ${orderItemId}
+       FOR UPDATE OF o
+  `;
+  const current = rows[0];
+  if (!current) throw { _appCode: 404, message: "Order item not found." };
+
+  const refusal = productionGateRefusal(
+    {
+      preparationDecision: current.preparationDecision,
+      order: { status: current.status, approvalStatus: current.approvalStatus },
+    },
+    verb,
+  );
+  if (refusal) throw refusal;
+}
+
 export const REASON_MAX_LENGTH = 500;
 
 // ─── Quantity validation (business rule 6) ──────────────────────────────────
