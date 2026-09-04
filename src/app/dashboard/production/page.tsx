@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import { exportBatchesPDF, exportBatchesExcel, type BatchExportRow } from "@/lib/export";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
+import { canStartProduction } from "@/lib/order-operations-client";
 import { useI18n } from "@/lib/i18n/context";
 import { type TranslationKey } from "@/lib/i18n/translations";
 
@@ -283,8 +284,14 @@ export default function ProductionPage() {
     }
   }
 
+  // Defence in depth only — the backend is the authority (see productionGateRefusal in
+  // services/order-operations). An operator must not be offered Start Production for work
+  // the server will refuse, so the same three conditions are applied here: the order is in
+  // a production-entry status, it is approved, and this line has been through preparation
+  // review. Every field is already in the /api/orders payload; nothing was added to it.
   const pendingItems = orders.flatMap((o: any) =>
     o.items
+      .filter((i: { preparationDecision: string | null }) => canStartProduction(o, i))
       .filter((i: any) => i.productionStatus !== "Completed" && i.productionStatus !== "Order cancelled")
       .map((i: any) => ({
         ...i,

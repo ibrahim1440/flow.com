@@ -7,6 +7,7 @@ import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { reservedForItem } from "@/lib/services/shelf-allocation";
 import { recalcProductionOrderStatus, assertProductionOrderAcceptsRoast } from "@/lib/services/production-planning";
+import { productionGateRefusal } from "@/lib/services/order-operations";
 
 class AppError extends Error {
   constructor(readonly status: number, message: string) {
@@ -220,6 +221,30 @@ export async function POST(request: Request) {
 
   try {
   const batch = await prisma.$transaction(async (tx) => {
+    // ── Production entry gate ────────────────────────────────────────────────
+    // First statement in the transaction, before the serial is allocated and well before
+    // the green-bean decrement below, so a roast against an order that is not approved or
+    // not reviewed cannot move inventory, write a ledger row or consume a batch number.
+    //
+    // Order-backed roasts only. A stock batch has no customer order to be in a valid state
+    // — roast-to-stock is bounded instead by its own admin-only privilege and by the
+    // atomic green-stock check further down, both unchanged.
+    //
+    // This supplements assertProductionOrderAcceptsRoast rather than replacing it: that
+    // guard validates the PRODUCTION order's own status and coffee, and still runs below.
+    if (!isStockBatch) {
+      const gateSubject = await tx.orderItem.findUnique({
+        where: { id: orderItemId },
+        select: {
+          preparationDecision: true,
+          order: { select: { status: true, approvalStatus: true } },
+        },
+      });
+      if (!gateSubject) throw new AppError(404, "Order item not found.");
+      const refusal = productionGateRefusal(gateSubject, "start");
+      if (refusal) throw refusal;
+    }
+
     // Generated inside the transaction so the advisory lock it takes is held until commit,
     // which is what stops two concurrent roasts being handed the same serial.
     const batchNumber = await generateBatchNumber(tx);

@@ -151,6 +151,97 @@ export function isDeliveryAllowedFrom(status: OrderStatus): boolean {
   return DELIVERY_ALLOWED_STATUSES.includes(status);
 }
 
+// ─── Production ────────────────────────────────────────────────────────────
+
+// Statuses from which production may be scheduled or roasted against a customer order.
+//
+// The set is derived from aggregatePreparationStatus below, which is the source of truth
+// for how an order reaches a status at all. It returns "Waiting Preparation Review" if ANY
+// line still lacks a preparationDecision, so the two statuses here are the only ones that
+// can be reached once every line has been reviewed:
+//
+//   "Preparing"          — reviewed, and at least one line needs more than the shelf holds.
+//                          This is the ordinary production case.
+//   "Ready for Shipping" — reviewed, and every line was shelf-covered AT REVIEW TIME.
+//                          Included deliberately: coverage can go stale afterwards when
+//                          another order frees or claims stock, and the roasting route
+//                          derives its ceiling from live reservations rather than the
+//                          stored productionRequiredQuantity precisely because of that.
+//                          Refusing here would block legitimate work; the live shortfall
+//                          check remains the authority on whether anything is left to make.
+//
+// Everything else is excluded for a specific reason. "Waiting Approval" has not been
+// approved — production there consumes green coffee for an order that may never be agreed.
+// "Waiting Preparation Review" is approved but unreviewed: review is what reserves shelf
+// stock and computes the shortfall, so roasting first produces against a quantity nobody
+// has established. "On Hold" is the one status whose entire purpose is to stop work.
+// "Completed", "Cancelled" and "Rejected" are terminal.
+//
+// Order.status is also written directly by the approve and status routes, not only by the
+// aggregate, which is why "On Hold" can coexist with fully reviewed lines and must be
+// listed as excluded rather than assumed unreachable.
+export const PRODUCTION_ENTRY_STATUSES: OrderStatus[] = ["Preparing", "Ready for Shipping"];
+
+export function isProductionAllowedFrom(status: OrderStatus): boolean {
+  return PRODUCTION_ENTRY_STATUSES.includes(status);
+}
+
+/** The fields the production gate needs. Loaded by the caller; this function does no I/O. */
+export type ProductionGateSubject = {
+  preparationDecision: string | null;
+  order: { status: string; approvalStatus: string };
+};
+
+/**
+ * Whether this order line may have production started or scheduled against it.
+ *
+ * Returns the refusal in the `{ _appCode, message }` shape both call sites already
+ * understand, or null when production is allowed. Deliberately pure: the roasting route
+ * needs to check this inside its transaction before any inventory moves, while the
+ * production-requirement route checks it before opening one, and a function that did its
+ * own reads could not serve both without an extra round trip.
+ *
+ * Not gated on productionRequiredQuantity. That column is written only by preparation
+ * review and goes stale as coverage moves; the live shortfall is authoritative and is
+ * computed separately by each caller.
+ */
+export function productionGateRefusal(
+  subject: ProductionGateSubject,
+  verb: "schedule" | "start" = "schedule",
+): { _appCode: number; message: string } | null {
+  const { order, preparationDecision } = subject;
+
+  // Status first: it produces the most specific message, and it is the check the existing
+  // lifecycle test asserts against for a cancelled order.
+  if (!isOrderStatus(order.status) || !isProductionAllowedFrom(order.status)) {
+    return {
+      _appCode: 409,
+      message: `Cannot ${verb} production for an order in status "${order.status}".`,
+    };
+  }
+
+  // Belt and braces. status and approvalStatus are separate columns written by the same
+  // route, so a disagreement between them means something wrote one without the other.
+  if (order.approvalStatus !== "Yes") {
+    return {
+      _appCode: 409,
+      message: `Cannot ${verb} production: this order has not been approved (approval is "${order.approvalStatus}").`,
+    };
+  }
+
+  // Per line, because a roast targets one line and the order-level status is a derived
+  // column. A null decision means preparation review never ran for this line, so nothing
+  // has reserved shelf stock against it and no shortfall has been established.
+  if (preparationDecision === null) {
+    return {
+      _appCode: 409,
+      message: `Cannot ${verb} production: this line has not completed preparation review.`,
+    };
+  }
+
+  return null;
+}
+
 export const REASON_MAX_LENGTH = 500;
 
 // ─── Quantity validation (business rule 6) ──────────────────────────────────

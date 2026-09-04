@@ -8,7 +8,7 @@ import {
   productionProgressMany,
   advisoryKey,
 } from "@/lib/services/production-planning";
-import { appendOrderActivity } from "@/lib/services/order-operations";
+import { appendOrderActivity, productionGateRefusal } from "@/lib/services/order-operations";
 import { explodeBom, kgForUnits } from "@/lib/services/finished-products";
 
 type Params = { params: Promise<{ id: string }> };
@@ -32,8 +32,10 @@ async function shortfallFor(orderItemId: string, opts: { withProgress?: boolean 
       quantityUnits: true,
       deliveredUnits: true,
       productSkuId: true,
+      // preparationDecision and approvalStatus feed the production entry gate.
+      preparationDecision: true,
       productSku: { select: { id: true, skuCode: true, weightGrams: true } },
-      order: { select: { id: true, status: true, orderNumber: true } },
+      order: { select: { id: true, status: true, orderNumber: true, approvalStatus: true } },
       productionOrders: {
         select: { id: true, productionNumber: true, status: true, targetUnits: true, targetWeightKg: true },
         orderBy: { createdAt: "asc" },
@@ -141,11 +143,17 @@ export async function POST(_request: Request, { params }: Params) {
 
     const { item, demand, shortfallUnits } = result;
 
-    if (item.order.status === "Cancelled" || item.order.status === "Rejected")
-      return NextResponse.json(
-        { error: `Cannot schedule production for an order in status "${item.order.status}".` },
-        { status: 409 }
-      );
+    // Production entry gate. This replaces a check that refused only "Cancelled" and
+    // "Rejected" — two of eight statuses — and never looked at approval or at whether
+    // preparation review had run, so a requirement could be raised for an order still
+    // waiting to be approved. The wording for a terminal status is unchanged, because the
+    // lifecycle suite asserts the refusal names the status.
+    //
+    // Checked here rather than inside the transaction below on purpose: this route's catch
+    // is handlePrismaError, which does not understand the `{ _appCode }` shape, so a throw
+    // would surface as a generic 500 instead of this 409.
+    const refusal = productionGateRefusal(item, "schedule");
+    if (refusal) return NextResponse.json({ error: refusal.message }, { status: refusal._appCode });
 
     // Nothing outstanding is a legitimate, common answer — the shelf covers the line, or
     // production already scheduled covers it. The message distinguishes the two, because

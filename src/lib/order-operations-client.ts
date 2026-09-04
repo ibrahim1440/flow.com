@@ -204,3 +204,28 @@ export function canCancel(status: string): boolean {
 export function canComplete(status: string): boolean {
   return status === "Ready for Shipping";
 }
+
+// Mirrors PRODUCTION_ENTRY_STATUSES in services/order-operations, re-declared here as
+// plain strings for the same reason HOLD_FROM_STATUSES above is: this module is imported
+// by client components, and the server module pulls in Prisma. The server copy is the
+// authority — this one only decides what an operator is offered.
+const PRODUCTION_FROM_STATUSES = new Set(["Preparing", "Ready for Shipping"]);
+
+/**
+ * Whether the Production screen should offer this line as actionable.
+ *
+ * Defence in depth for the production entry gate: the same three conditions the backend
+ * enforces in productionGateRefusal — an allowed order status, an approved order, and a
+ * line that has been through preparation review. Showing an action the server will refuse
+ * is how an unapproved order came to appear in the production queue in the first place.
+ */
+export function canStartProduction(
+  order: { status: string; approvalStatus: string },
+  item: { preparationDecision: string | null }
+): boolean {
+  return (
+    PRODUCTION_FROM_STATUSES.has(order.status) &&
+    order.approvalStatus === "Yes" &&
+    item.preparationDecision != null
+  );
+}
