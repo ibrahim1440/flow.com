@@ -13,6 +13,7 @@ import {
   RESUME_FROM_STATUS,
   COMPLETE_FROM_STATUSES,
   REASON_MAX_LENGTH,
+  lockOrderLifecycleResources,
   type OrderStatus,
   type StatusAction,
 } from "@/lib/services/order-operations";
@@ -104,6 +105,20 @@ export async function POST(request: Request, { params }: Params) {
           _appCode: 409,
           message: `Action '${action}' is not allowed from status "${currentStatus}".`,
         };
+      }
+
+      // ── Canonical lock order ────────────────────────────────────────────────
+      // Cancel and complete release this order's reservations further down. Taking those
+      // allocation, lot and line locks HERE, before the Order row is touched, is what keeps
+      // this route on the ALLOC → OrderItem → Order order that preparation review and
+      // roasting already use. Acquiring Order first and reaching back for allocations
+      // afterwards is the inversion that made this route deadlock against a concurrent
+      // review; see lockOrderLifecycleResources for the full invariant.
+      //
+      // Only for the two actions that release. Hold and resume touch no allocations, so
+      // locking them would serialise those against unrelated work for nothing.
+      if (action === "cancel" || action === "complete") {
+        await lockOrderLifecycleResources(tx, id);
       }
 
       // Conditional guard: re-checks the same expected-from set atomically, so a

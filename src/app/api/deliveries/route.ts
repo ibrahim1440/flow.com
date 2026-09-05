@@ -5,7 +5,13 @@ import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { consumeShelfStock, lotMatchFilter, roundKg, trimReservationToDemand } from "@/lib/services/shelf-allocation";
 import { consumeFinishedUnits, kgForUnits, trimUnitReservationToDemand } from "@/lib/services/finished-products";
-import { DELIVERY_ALLOWED_STATUSES, isDeliveryAllowedFrom, type OrderStatus } from "@/lib/services/order-operations";
+import {
+  DELIVERY_ALLOWED_STATUSES,
+  isDeliveryAllowedFrom,
+  lockDeliveryResources,
+  assertOrderStillAcceptsDelivery,
+  type OrderStatus,
+} from "@/lib/services/order-operations";
 
 export async function GET() {
   const { error } = await requireModule("dispatch");
@@ -45,6 +51,17 @@ export async function POST(request: Request) {
         },
       });
       if (!orderItem) throw { _appCode: 404, message: "Order item not found" };
+
+      // ── Canonical lock order ──────────────────────────────────────────────
+      // This route used to claim the OrderItem first and only then consume allocations and
+      // the lot, which is OrderItem → ALLOC — the exact reverse of preparation review, and
+      // a deadlock whenever a dispatcher shipped a line while preparation re-reviewed the
+      // same order. Taking the allocation and lot locks here, before the claim, puts
+      // dispatch on the shared ALLOC → OrderItem → Order order.
+      //
+      // Scoped to this line and this lot rather than the whole order, so two lines of one
+      // order can still be dispatched at the same time.
+      await lockDeliveryResources(tx, orderItemId, typeof finishedGoodsLotId === "string" ? finishedGoodsLotId : null);
 
       // Shipping is an order-level decision, not a line-level one. Without this check the
       // route would record a delivery against any order at all: one still Waiting Approval,
@@ -163,6 +180,10 @@ export async function POST(request: Request) {
         });
 
         await recalcOrderItemStatus(orderItemId, tx);
+
+        // Late lifecycle barrier for the unit path — same reasoning as the kilogram path
+        // below. Both branches return their own delivery, so both need the check.
+        await assertOrderStillAcceptsDelivery(tx, orderItemId);
         return newDelivery;
       }
 
@@ -286,6 +307,15 @@ export async function POST(request: Request) {
 
       // 5. Recalculate productionStatus + remainingQty (reads the new deliveredQty committed above)
       await recalcOrderItemStatus(orderItemId, tx);
+
+      // 6. Late lifecycle barrier — the last acquisition, after ALLOC and OrderItem.
+      // The order-status check at the top of this transaction read through an unlocked
+      // nested select, so a cancellation committing while this delivery was in flight was
+      // invisible to it and the shipment went out against a dead order. This locks the
+      // Order row and re-reads the status as of now; a cancel that got there first is seen
+      // here and the rollback takes the delivery row, the delivered units, the allocation
+      // consumption and the lot decrement with it.
+      await assertOrderStillAcceptsDelivery(tx, orderItemId);
 
       return newDelivery;
     }, TX_OPTS);

@@ -308,6 +308,144 @@ export async function assertOrderStillAcceptsProduction(
   if (refusal) throw refusal;
 }
 
+/**
+ * Late lifecycle barrier for dispatch, mirroring the production one.
+ *
+ * Call as the last acquisition of the delivery transaction, after the allocation, lot and
+ * OrderItem work — which keeps dispatch on ALLOC → OrderItem → Order. Locks the Order row
+ * and re-reads its status as of now, so a cancellation or hold that committed while the
+ * delivery was in flight is seen rather than missed by the unlocked read at the top.
+ *
+ * Uses isDeliveryAllowedFrom, the same source of truth the route's own entry check uses, so
+ * the two cannot drift.
+ */
+export async function assertOrderStillAcceptsDelivery(
+  tx: PrismaTx,
+  orderItemId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<{ status: string }[]>`
+    SELECT o."status"
+      FROM "OrderItem" oi
+      JOIN "Order" o ON o."id" = oi."orderId"
+     WHERE oi."id" = ${orderItemId}
+       FOR UPDATE OF o`;
+  const current = rows[0];
+  if (!current) throw { _appCode: 404, message: "Order item not found" };
+
+  if (!isOrderStatus(current.status) || !isDeliveryAllowedFrom(current.status)) {
+    throw {
+      _appCode: 409,
+      message: `Cannot record a delivery for an order in status "${current.status}".`,
+    };
+  }
+}
+
+// ─── Lifecycle lock ordering ───────────────────────────────────────────────
+//
+// THE INVARIANT, for every transaction that changes operational state for an order:
+//
+//     StockAllocation(id ASC) → FinishedGoodsLot(id ASC) → OrderItem(id ASC) → Order
+//
+// Equivalently, and easier to check in review: never take a StockAllocation or
+// FinishedGoodsLot lock while already holding a conflicting lock on an Order or an
+// OrderItem. GreenBean and RoastingBatch may be locked before all of these; ProductionOrder
+// may be locked any time after OrderItem; advisory locks 7761/7762/7763 keep their places.
+//
+// ── Why StockAllocation before FinishedGoodsLot ───────────────────────────
+// It is the order the paths that take conflicting locks on EXISTING rows already use:
+// releaseShelfStock, releaseFinishedUnits and consumeFinishedUnits all update the
+// allocation first and the lot second. The reserve paths look inverted — they update the
+// lot and then create the allocation — but that second step is an INSERT of a new row,
+// which cannot wait on a row another transaction holds, so no StockAllocation → wait edge
+// exists there and the two do not form a cycle.
+//
+// The two release paths iterate allocations in opposite directions (releaseShelfStock
+// newest-first, consumeFinishedUnits oldest-first). That is safe only because they operate
+// on disjoint row sets by construction — kilogram allocations have quantityUnits NULL and
+// unit allocations have it NOT NULL, and each path filters on exactly that. Their comments
+// say so, and this ordering depends on it staying true.
+//
+// Multiple rows are always locked in primary-key order so that two transactions locking
+// overlapping sets take them in the same sequence rather than whatever order the planner
+// returns.
+
+/**
+ * Take the order's allocation, lot and line locks up front, in canonical order.
+ *
+ * Call this as the FIRST conflicting acquisition of a lifecycle transaction that will later
+ * release or consume allocations — before any Order or OrderItem write. It exists so that
+ * such a transaction never has to reach backwards for an allocation lock while holding
+ * Order, which is the inversion that made cancel deadlock against preparation review.
+ *
+ * Locking the OrderItem rows here matters as much as locking the allocations: an order can
+ * have no allocations at all, and FOR UPDATE over an empty set protects nothing. Preparation
+ * review must take the OrderItem lock before it can commit, so holding the item rows is what
+ * actually stops new reservations appearing underneath a cancellation — not the allocation
+ * locks, which only cover rows that already exist.
+ */
+export async function lockOrderLifecycleResources(tx: PrismaTx, orderId: string): Promise<void> {
+  await tx.$queryRaw`
+    SELECT sa."id"
+      FROM "StockAllocation" sa
+      JOIN "OrderItem" oi ON oi."id" = sa."orderItemId"
+     WHERE oi."orderId" = ${orderId}
+       AND sa."status" = 'RESERVED'
+     ORDER BY sa."id" ASC
+       FOR UPDATE OF sa`;
+
+  await tx.$queryRaw`
+    SELECT f."id"
+      FROM "FinishedGoodsLot" f
+     WHERE f."id" IN (
+             SELECT DISTINCT sa."finishedGoodsLotId"
+               FROM "StockAllocation" sa
+               JOIN "OrderItem" oi ON oi."id" = sa."orderItemId"
+              WHERE oi."orderId" = ${orderId} AND sa."status" = 'RESERVED')
+     ORDER BY f."id" ASC
+       FOR UPDATE OF f`;
+
+  await tx.$queryRaw`
+    SELECT oi."id" FROM "OrderItem" oi
+     WHERE oi."orderId" = ${orderId}
+     ORDER BY oi."id" ASC
+       FOR UPDATE OF oi`;
+}
+
+/**
+ * The same, scoped to the one line and lot a delivery touches.
+ *
+ * A dispatch has no reason to lock the whole order, and locking only what it will consume
+ * keeps two lines of the same order shippable at once. The order between the two resources
+ * is identical to the whole-order helper above.
+ */
+export async function lockDeliveryResources(
+  tx: PrismaTx,
+  orderItemId: string,
+  finishedGoodsLotId: string | null,
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT sa."id" FROM "StockAllocation" sa
+     WHERE sa."orderItemId" = ${orderItemId} AND sa."status" = 'RESERVED'
+     ORDER BY sa."id" ASC
+       FOR UPDATE OF sa`;
+
+  // Every lot this line could touch, not only the one being shipped from. After the
+  // shipment the route trims reservations back to the remaining demand, and that reaches
+  // lots this delivery never drew from — locking only the target lot would leave those
+  // acquired later, while the OrderItem is already held, which is the OrderItem → lot edge
+  // this whole change exists to remove. The target lot is unioned in because a first
+  // shipment can draw from a lot the line holds no reservation on yet.
+  await tx.$queryRaw`
+    SELECT f."id" FROM "FinishedGoodsLot" f
+     WHERE f."id" IN (
+             SELECT sa."finishedGoodsLotId" FROM "StockAllocation" sa
+              WHERE sa."orderItemId" = ${orderItemId} AND sa."status" = 'RESERVED'
+             UNION
+             SELECT ${finishedGoodsLotId}::text WHERE ${finishedGoodsLotId}::text IS NOT NULL)
+     ORDER BY f."id" ASC
+       FOR UPDATE OF f`;
+}
+
 export const REASON_MAX_LENGTH = 500;
 
 // ─── Quantity validation (business rule 6) ──────────────────────────────────
