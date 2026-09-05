@@ -18,6 +18,7 @@
     "e2e:stock": "node scripts/e2e/roast-to-stock.mjs",
     "e2e:pages": "node scripts/e2e/pages.mjs",
     "e2e:reset": "node scripts/e2e/reset.mjs",
+    "regression": "node scripts/e2e/regression/run-all.mjs",
     "uat": "playwright test",
     "uat:desktop": "playwright test --project=desktop",
     "uat:report": "playwright show-report"
