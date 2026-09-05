@@ -9,6 +9,11 @@ import {
   outstandingForItem,
   reserveShelfStock,
 } from "@/lib/services/shelf-allocation";
+import {
+  readLineReservationState,
+  canReserveToOrderLine,
+  casUpdateOrderItem,
+} from "@/lib/services/order-operations";
 
 const MARGIN = 0.1;
 
@@ -207,16 +212,41 @@ export async function PUT(
       // production, and the kilograms sit locked on a legacy lot helping nobody. Seen on
       // real data — a 10-unit order carrying a phantom 4.2 kg reservation.
       const ownerIsUnitLine = owner !== null && owner.quantityUnits !== null;
-      const ownerIsLive =
-        owner !== null &&
-        !ownerIsUnitLine &&
-        owner.order.status !== "Cancelled" &&
-        owner.order.status !== "Rejected" &&
-        owner.preparationDecision !== "Blocked";
-      if (owner && ownerIsLive) {
-        const outstanding = await outstandingForItem(tx, owner);
-        if (outstanding > 0) {
-          await reserveShelfStock(tx, owner, outstanding, user.id);
+
+      // ── Order-linked auto-reservation ──────────────────────────────────────
+      // Packaging itself is never blocked by the owner's state: the coffee was roasted and
+      // packed and belongs on the shelf either way. Only the decision to PROMISE it to the
+      // owning order is gated, and an ineligible owner simply means the lot stays
+      // free-to-promise — which is what roast-to-stock produces anyway.
+      //
+      // The old gate refused only Cancelled, Rejected and a Blocked decision, so an order
+      // still Waiting Approval, still unreviewed, On Hold or already Completed could take
+      // stock. canReserveToOrderLine is the shared vocabulary: a reviewed, approved, live
+      // order line and nothing else.
+      if (owner && !ownerIsUnitLine) {
+        // Transaction-current, and re-read here rather than trusted from the unlocked
+        // snapshot above: the outstanding figure below is derived from quantity and
+        // delivered, and a delivery committing since that read would make this reserve
+        // against demand that no longer exists.
+        const fresh = await readLineReservationState(tx, owner.id);
+        if (fresh && canReserveToOrderLine(fresh)) {
+          const outstanding = await outstandingForItem(tx, {
+            ...owner,
+            quantityKg: fresh.quantityKg,
+            deliveredQty: fresh.deliveredQty,
+          });
+          if (outstanding > 0) {
+            await reserveShelfStock(tx, owner, outstanding, user.id);
+            // Compare-and-swap on the line this reservation was computed from. Packaging
+            // writes no other OrderItem field, so this guard write exists purely to make
+            // the reservation atomic with respect to the demand it was based on. It runs
+            // AFTER the allocation and lot work above, preserving ALLOC -> OrderItem.
+            await casUpdateOrderItem(
+              tx,
+              { id: fresh.id, updatedAt: fresh.updatedAt, deliveredUnits: fresh.deliveredUnits, deliveredQty: fresh.deliveredQty },
+              {}
+            );
+          }
         }
       }
 
@@ -229,6 +259,13 @@ export async function PUT(
 
     return NextResponse.json(updated);
   } catch (err) {
+    // The reservation compare-and-swap throws the `{ _appCode, message }` shape the newer
+    // routes use. handlePrismaError does not understand it and would turn a deliberate 409
+    // into a generic 500, so it is handled locally here as the other routes do.
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
+    }
     return handlePrismaError(err);
   }
 }

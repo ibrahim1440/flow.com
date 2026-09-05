@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
-  loginAs, openWorkstationOrder,
+  loginAs, openWorkstationOrder, roastForOrder, qcPass, packIntoSku,
   orderCard, collectPageProblems, catalog,
 } from "./support/app";
 import { one, all, num } from "./support/db";
@@ -71,33 +71,82 @@ test("Hammering Save Preparation Review reserves stock only once", async ({ page
   await loginAs(page, "sales");
   const card = await openWorkstationOrder(page, orderNumber);
 
-  const selects = card.locator("table select");
-  for (let i = 0; i < (await selects.count()); i++) await selects.nth(i).selectOption("Available on Shelf");
+  // ── Put real stock behind the line before hammering anything ──────────────
+  // Without stock this test is vacuous: every save reserves zero and "reserved <= ordered"
+  // holds no matter how badly the saves race, which is exactly how a double reservation
+  // went unnoticed. Getting stock here needs the full chain, in this order:
+  //   review once  -> the order leaves "Waiting Preparation Review" and enters the
+  //                   production queue (production is gated on a reviewed, approved order)
+  //   roast, QC, pack -> 8 units of KEN-1KG on the shelf
+  // 8 against a 6-unit line leaves room to over-reserve if the guard fails.
+  const first = card.locator("table select");
+  for (let i = 0; i < (await first.count()); i++) await first.nth(i).selectOption("Available on Shelf");
+  const firstSave = card.getByRole("button", { name: /Save Preparation Review/i });
+  await expect(firstSave).toBeEnabled();
+  await firstSave.click();
+  await expect
+    .poll(async () => (await one<{ s: string }>(`SELECT status s FROM "Order" WHERE "orderNumber"=$1`, [orderNumber])).s,
+      { timeout: 60_000 })
+    .not.toBe("Waiting Preparation Review");
 
-  const save = card.getByRole("button", { name: /Save Preparation Review/i });
+  // Roasting, QC and packaging each need their own module; sales holds none of them and
+  // the layout route guard refuses the page outright. The admin fixture holds all three.
+  await loginAs(page, "admin");
+  const batch = await roastForOrder(page, orderNumber, 10, 8, { acceptSurplus: true });
+  await qcPass(page, batch);
+  await packIntoSku(page, batch, catalog.skus.ken1kg.id, 8);
+
+  await loginAs(page, "sales");
+  const stocked = await openWorkstationOrder(page, orderNumber);
+  const selects2 = stocked.locator("table select");
+  for (let i = 0; i < (await selects2.count()); i++) await selects2.nth(i).selectOption("Available on Shelf");
+
+  const save = stocked.getByRole("button", { name: /Save Preparation Review/i });
   await expect(save).toBeEnabled();
   for (let i = 0; i < 4; i++) await save.click({ force: true, timeout: 5_000 }).catch(() => {});
 
-  await expect
-    .poll(async () => (await one<{ d: string }>(
-      `SELECT oi."preparationDecision" d FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o."orderNumber"=$1`,
-      [orderNumber]
-    )).d, { timeout: 60_000 })
-    .toBeTruthy();
+  const ordered = num((await one<{ q: number }>(
+    `SELECT oi."quantityUnits" q FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o."orderNumber"=$1`,
+    [orderNumber]
+  )).q);
 
-  // The line has no stock behind it, so nothing should be reserved; what matters is that
-  // repeated saves did not stack allocations on top of each other.
+  // Wait for the reservation itself, not for the decision. The line was already reviewed
+  // once to get it into the production queue, so preparationDecision is non-null before
+  // the hammering even starts and polling on it would let the assertions run early — which
+  // is how this read 0 and looked like a failure when the final state was right.
+  //
+  // Converging on exactly the ordered quantity is the assertion: 0 never converges, and a
+  // double reservation of 12 never converges either.
+  await expect
+    .poll(async () => num((await one<{ n: number }>(
+      `SELECT COALESCE(SUM(sa."quantityUnits"),0)::int n
+         FROM "StockAllocation" sa JOIN "OrderItem" oi ON oi.id=sa."orderItemId"
+         JOIN "Order" o ON o.id=oi."orderId"
+        WHERE o."orderNumber"=$1 AND sa.status='RESERVED'`, [orderNumber]
+    )).n), { timeout: 60_000, message: "the winning save reserves exactly the demand ceiling" })
+    .toBe(ordered);
+
+  // With stock behind the line, what matters is that the repeated saves reserved the
+  // demand once rather than stacking a fresh reservation per click.
   const reserved = await one<{ n: number; rows: number }>(
     `SELECT COALESCE(SUM(sa."quantityUnits"),0)::int n, COUNT(*)::int rows
        FROM "StockAllocation" sa JOIN "OrderItem" oi ON oi.id=sa."orderItemId"
        JOIN "Order" o ON o.id=oi."orderId"
       WHERE o."orderNumber"=$1 AND sa.status='RESERVED'`, [orderNumber]
   );
-  const ordered = num((await one<{ q: number }>(
-    `SELECT oi."quantityUnits" q FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o."orderNumber"=$1`,
-    [orderNumber]
-  )).q);
-  expect(num(reserved.n), "repeated saves never reserve more than the line ordered").toBeLessThanOrEqual(ordered);
+  // EXACTLY the demand ceiling, once — not merely "at most ordered", which the old
+  // zero-stock version satisfied trivially with 0. With 8 units on the shelf behind a
+  // 6-unit line, a lost race would show 12 here, and a partial one anything but 6.
+  expect(num(reserved.n), "repeated saves reserve the demand ceiling exactly once").toBe(ordered);
+  expect(num(reserved.rows), "and hold it as a single reservation, not one per click").toBeGreaterThan(0);
+
+  // The stock behind the line must be reduced by exactly what is reserved — proof the
+  // extra clicks did not each take their own bite out of the lot.
+  const lot = await one<{ avail: number; res: number }>(
+    `SELECT SUM("unitsAvailable")::int avail, SUM("unitsReserved")::int res
+       FROM "FinishedGoodsLot" WHERE "productSkuId"=$1`, [catalog.skus.ken1kg.id]
+  );
+  expect(num(lot.res), "the lot holds exactly the units reserved to this line").toBe(ordered);
 });
 
 test("The same order in two tabs: the stale tab is refused, not silently obeyed", async ({ context }) => {

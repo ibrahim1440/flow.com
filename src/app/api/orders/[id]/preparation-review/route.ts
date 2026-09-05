@@ -6,6 +6,8 @@ import {
   appendOrderActivity,
   aggregatePreparationStatus,
   isPreparationDecision,
+  readLineReservationState,
+  casUpdateOrderItem,
   PREPARATION_REVIEW_ENTRY_STATUSES,
   NOTE_MESSAGE_MAX_LENGTH,
   type PreparationDecision,
@@ -195,10 +197,33 @@ export async function POST(request: Request, { params }: Params) {
         },
       });
       const itemRowsById = new Map(itemRows.map((r) => [r.id, r]));
+      // The compare-and-swap token per line: the values each reservation decision was
+      // actually computed from, captured at the transaction-current re-read below.
+      const casTokens = new Map<string, { id: string; updatedAt: Date; deliveredUnits: number; deliveredQty: number }>();
 
       for (const p of parsedItems) {
-        const item = itemRowsById.get(p.orderItemId);
-        if (!item) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
+        const stale = itemRowsById.get(p.orderItemId);
+        if (!stale) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
+
+        // ── Transaction-current demand ────────────────────────────────────
+        // The rows fetched above were read as the first statement of this transaction,
+        // before anything was locked. A delivery committing since then is invisible to
+        // them, and the ceiling computed from quantity - delivered would be a snapshot
+        // from one moment combined with allocation work done at another. Re-read here,
+        // immediately before the ceiling is derived, and record the token this decision
+        // is based on so the write at the end can prove nothing moved underneath it.
+        //
+        // A plain read: it takes no row lock, so the lock order frozen in dd14506 is
+        // untouched — ALLOC still precedes OrderItem, which still precedes Order.
+        const fresh = await readLineReservationState(tx, p.orderItemId);
+        if (!fresh) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
+        const item = { ...stale, ...fresh, productSku: stale.productSku };
+        casTokens.set(item.id, {
+          id: fresh.id,
+          updatedAt: fresh.updatedAt,
+          deliveredUnits: fresh.deliveredUnits,
+          deliveredQty: fresh.deliveredQty,
+        });
 
         // ── SKU lines reserve whole units ──────────────────────────────────
         // A line created through the Finished Products flow is a quantity of one SKU,
@@ -322,17 +347,22 @@ export async function POST(request: Request, { params }: Params) {
       }
 
       for (const o of outcomes) {
-        await tx.orderItem.update({
-          where: { id: o.orderItemId },
-          data: {
-            preparationDecision: o.decision,
-            // Server-derived, at the repo-wide 3-decimal kg precision.
-            availableQuantity: o.availableQuantity,
-            productionRequiredQuantity: o.productionRequiredQuantity,
-            // productionStatus, deliveryStatus, remainingQty intentionally omitted —
-            // these remain system-derived (recalcOrderItemStatus) and must never be
-            // written by preparation review.
-          },
+        // Compare-and-swap, not a plain update. The predicate is the line's identity plus
+        // the exact delivery figures this decision was computed from, so a delivery or a
+        // second review that committed in between makes this write match zero rows and
+        // throw — rolling back the releases, the reservation inserts and the lot
+        // increments made above. Without it two concurrent reviews each reserved the full
+        // demand and the line ended holding twice what it had ordered.
+        const seen = casTokens.get(o.orderItemId);
+        if (!seen) throw { _appCode: 500, message: `Missing CAS token for item ${o.orderItemId}.` };
+        await casUpdateOrderItem(tx, seen, {
+          preparationDecision: o.decision,
+          // Server-derived, at the repo-wide 3-decimal kg precision.
+          availableQuantity: o.availableQuantity,
+          productionRequiredQuantity: o.productionRequiredQuantity,
+          // productionStatus, deliveryStatus, remainingQty intentionally omitted —
+          // these remain system-derived (recalcOrderItemStatus) and must never be
+          // written by preparation review.
         });
       }
 

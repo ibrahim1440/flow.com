@@ -340,6 +340,149 @@ export async function assertOrderStillAcceptsDelivery(
   }
 }
 
+// ─── Reservation eligibility and compare-and-swap ──────────────────────────
+
+// Statuses in which finished goods may be reserved TO a customer order line.
+//
+// Deliberately a separate constant from DELIVERY_ALLOWED_STATUSES and
+// PRODUCTION_ENTRY_STATUSES even though all three currently hold the same two values.
+// They are different questions — may we ship, may we produce, may we promise stock — and
+// the codebase already keeps the first two apart for that reason. Collapsing them would
+// make a future divergence in one silently change the other two.
+//
+// "Preparing" and "Ready for Shipping" are the only statuses aggregatePreparationStatus can
+// return once every line has a decision, so they are exactly the reviewed, live states.
+// Everything else is excluded for a specific reason:
+//   "Waiting Approval"            — nobody has agreed to buy this yet.
+//   "Waiting Preparation Review"  — no reviewed demand exists to reserve against, which is
+//                                   the stale-ceiling problem in its purest form.
+//   "On Hold"                     — the status whose whole purpose is to stop work.
+//   "Completed"                   — its leftovers were already released; re-promising them
+//                                   strands stock on a closed order.
+//   "Cancelled" / "Rejected"      — terminal, reservations already released.
+export const RESERVATION_ALLOWED_STATUSES: OrderStatus[] = ["Preparing", "Ready for Shipping"];
+
+export function isReservationAllowedFrom(status: string): boolean {
+  return isOrderStatus(status) && RESERVATION_ALLOWED_STATUSES.includes(status);
+}
+
+/**
+ * May finished goods be reserved to this order line right now?
+ *
+ * A boolean rather than a throw, because the packaging path must keep packaging even when
+ * the owner order cannot take a reservation — the coffee still exists and still belongs on
+ * the shelf. Only the auto-reservation is skipped.
+ */
+export function canReserveToOrderLine(subject: {
+  preparationDecision: string | null;
+  order: { status: string; approvalStatus: string };
+}): boolean {
+  return (
+    isReservationAllowedFrom(subject.order.status) &&
+    subject.order.approvalStatus === "Yes" &&
+    subject.preparationDecision !== null &&
+    // A blocked line is one the reviewer deliberately refused to promise stock to.
+    subject.preparationDecision !== "Blocked"
+  );
+}
+
+/** The transaction-current state a reservation decision must be based on. */
+export type LineReservationState = {
+  id: string;
+  updatedAt: Date;
+  quantityUnits: number | null;
+  deliveredUnits: number;
+  quantityKg: number;
+  deliveredQty: number;
+  preparationDecision: string | null;
+  order: { status: string; approvalStatus: string };
+};
+
+/**
+ * Re-read the line inside the transaction, immediately before its demand ceiling is
+ * computed.
+ *
+ * The defect this exists for: both preparation review and the legacy packaging reservation
+ * derived their ceiling from a snapshot taken at the very top of the transaction, then
+ * released and reserved against allocation state that was transaction-current. One decision,
+ * two points in time — measured at 4 delivered plus 10 reserved on a line ordered 10, and at
+ * 24 reserved on a line ordered 12 when two reviews ran together.
+ *
+ * This is a plain read: it takes no row lock and therefore cannot affect the lock order
+ * frozen in dd14506. It narrows the window; casUpdateOrderItem below closes it.
+ */
+export async function readLineReservationState(
+  tx: PrismaTx,
+  orderItemId: string,
+): Promise<LineReservationState | null> {
+  const row = await tx.orderItem.findUnique({
+    where: { id: orderItemId },
+    select: {
+      id: true,
+      updatedAt: true,
+      quantityUnits: true,
+      deliveredUnits: true,
+      quantityKg: true,
+      deliveredQty: true,
+      preparationDecision: true,
+      order: { select: { status: true, approvalStatus: true } },
+    },
+  });
+  return row ?? null;
+}
+
+/**
+ * A timestamp guaranteed to differ from the token we are swapping against.
+ *
+ * Prisma's implicit @updatedAt is normally enough — it writes new Date() on every update —
+ * but the column is timestamp(3), so an update landing in the same millisecond as the value
+ * we observed would write back a byte-identical token and a second racing writer's
+ * compare-and-swap would wrongly succeed. Forcing at least one millisecond past the observed
+ * value removes that edge entirely rather than arguing about how unlikely it is.
+ */
+export function nextUpdatedAt(seen: Date): Date {
+  return new Date(Math.max(Date.now(), seen.getTime() + 1));
+}
+
+/**
+ * Compare-and-swap on the order line.
+ *
+ * The predicate is the line's identity plus the exact values the caller's reservation
+ * decision was computed from. If a delivery, another review or an order edit committed in
+ * between, the row no longer matches, updateMany reports zero rows, and the caller throws —
+ * rolling back every allocation release, reservation insert and lot increment made in the
+ * same transaction.
+ *
+ * Under READ COMMITTED the UPDATE blocks on any concurrent writer's row lock and then
+ * re-evaluates this WHERE against the newly committed row, which is what makes the losing
+ * transaction see the winner's token rather than its own stale copy.
+ */
+export async function casUpdateOrderItem(
+  tx: PrismaTx,
+  seen: { id: string; updatedAt: Date; deliveredUnits: number; deliveredQty: number },
+  data: Record<string, unknown>,
+): Promise<void> {
+  const result = await tx.orderItem.updateMany({
+    where: {
+      id: seen.id,
+      updatedAt: seen.updatedAt,
+      deliveredUnits: seen.deliveredUnits,
+      deliveredQty: seen.deliveredQty,
+    },
+    // updatedAt is set explicitly rather than left to @updatedAt, so the token is
+    // guaranteed to move past the one just swapped against.
+    data: { ...data, updatedAt: nextUpdatedAt(seen.updatedAt) },
+  });
+  if (result.count === 0) {
+    throw {
+      _appCode: 409,
+      message:
+        "This order line changed while the request was in flight — a delivery or another " +
+        "review committed first. Nothing was reserved. Please reload and retry.",
+    };
+  }
+}
+
 // ─── Lifecycle lock ordering ───────────────────────────────────────────────
 //
 // THE INVARIANT, for every transaction that changes operational state for an order:
