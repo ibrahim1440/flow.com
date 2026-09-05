@@ -357,6 +357,17 @@ export const translations = {
   stepperReadyForShipping:     { en: "Ready for Shipping",           ar: "جاهز للشحن" },
   stepperCompleted:            { en: "Completed",                    ar: "مكتمل" },
 
+  // Screen-reader-only stage state. The stepper conveys state visually through fill,
+  // ring and icon; these give a non-visual user the same information.
+  stepperStateComplete:        { en: "completed",                    ar: "مكتملة" },
+  stepperStateActive:          { en: "in progress",                  ar: "قيد التنفيذ" },
+  stepperStatePending:         { en: "awaiting decision",            ar: "بانتظار القرار" },
+  stepperStateUpcoming:        { en: "not started",                  ar: "لم تبدأ" },
+  stepperStatePaused:          { en: "paused",                       ar: "متوقفة مؤقتاً" },
+  stepperStateRejected:        { en: "rejected",                     ar: "مرفوضة" },
+  stepperStateCancelled:       { en: "cancelled",                    ar: "ملغاة" },
+  stepperLabel:                { en: "Order lifecycle",              ar: "دورة حياة الطلب" },
+
   // ── Inline Blocked reason (Preparation Review) ─────────────────────────
   prepBlockedReasonLabel:      { en: "Reason for blocking",          ar: "سبب الحظر" },
   prepBlockedReasonPlaceholder:{ en: "Explain why this item is blocked...", ar: "اشرح سبب حظر هذا العنصر..." },

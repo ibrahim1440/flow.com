@@ -57,10 +57,18 @@ const ORDER_STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   "Rejected": "orderStatusRejected",
 };
 
-// Icon and color-token pairing per approved status — every status must be
-// distinguishable by icon + label, never by color alone. Cancelled and
-// Rejected deliberately use different icons AND different tokens (neutral
-// gray vs. destructive red) — they must never share a visual treatment.
+// Icon and colour-token pairing per approved status — every status must be
+// distinguishable by icon + label, never by colour alone.
+//
+// Cancelled vs Rejected is the distinction to protect: Cancelled is NEUTRAL grey
+// (#3f3f46 on #f4f4f5, XCircle) because the order simply stopped; Rejected is
+// DESTRUCTIVE red (#b91c1c on #fef2f2, Ban) because it failed the approval gate.
+// They must never be merged.
+//
+// Rejected and Blocked intentionally share the red-50 background. That is not a
+// bug to "fix": Blocked is an item-level decision at #dc2626 with AlertTriangle,
+// Rejected is an order-level status one step darker at #b91c1c with Ban, so they
+// stay separable by foreground, icon, label and level.
 const ORDER_STATUS_ICON: Record<string, React.ElementType> = {
   "Waiting Approval": Clock,
   "Waiting Preparation Review": ClipboardClock,
@@ -194,6 +202,19 @@ function computeProgressStages(order: {
   return { states: STEPPER_STAGES.map((_, i) => (i < base ? "complete" : i === base ? "active" : "future")) };
 }
 
+// Screen-reader equivalent of the visual stage treatment. Without this the stepper
+// announces five bare stage names with no indication of which one the order is at.
+function stageStateLabelKey(state: StageState, negativeKind?: "cancelled" | "rejected"): TranslationKey {
+  switch (state) {
+    case "complete": return "stepperStateComplete";
+    case "active":   return "stepperStateActive";
+    case "pending":  return "stepperStatePending";
+    case "paused":   return "stepperStatePaused";
+    case "negative": return negativeKind === "rejected" ? "stepperStateRejected" : "stepperStateCancelled";
+    default:         return "stepperStateUpcoming";
+  }
+}
+
 function stageVisual(state: StageState, negativeKind?: "cancelled" | "rejected") {
   switch (state) {
     case "complete":
@@ -229,12 +250,20 @@ export function OrderProgressStepper({
   const { states, negativeKind } = computeProgressStages({ status, approvalStatus, items });
 
   return (
-    <div className="flex items-start w-full" role="list" aria-label={t("orderStatusLabel")}>
+    <ol className="flex items-start w-full" aria-label={t("stepperLabel")}>
       {STEPPER_STAGES.map((stage, i) => {
         const state = states[i];
         const visual = stageVisual(state, negativeKind);
+        // The stage the order is actually sitting at — "active" while work is in
+        // progress, "paused" while held. A terminal/negative stage is where the
+        // order stopped, so it is the current step too.
+        const isCurrent = state === "active" || state === "paused" || state === "negative";
         return (
-          <div key={stage} role="listitem" className="flex-1 flex flex-col items-center min-w-0">
+          <li
+            key={stage}
+            {...(isCurrent ? { "aria-current": "step" as const } : {})}
+            className="flex-1 flex flex-col items-center min-w-0"
+          >
             <div className="flex items-center w-full">
               <div className={`flex-1 h-0.5 ${i === 0 ? "opacity-0" : visual.line}`} />
               <div className={`flex items-center justify-center w-6 h-6 rounded-full border-2 flex-shrink-0 ${visual.ring}`}>
@@ -249,10 +278,11 @@ export function OrderProgressStepper({
             <span className={`mt-1 text-[11px] font-semibold text-center leading-tight px-0.5 ${visual.fg}`}>
               {t(STAGE_LABEL_KEY[stage])}
             </span>
-          </div>
+            <span className="sr-only">{t(stageStateLabelKey(state, negativeKind))}</span>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }
 

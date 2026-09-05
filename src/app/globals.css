@@ -163,8 +163,10 @@ h1, h2, h3, h4, h5, h6 {
   --oo-status-blocked: #dc2626;
   --oo-status-blocked-bg: #fef2f2;
 
-  /* Rejected — destructive red */
-  --oo-status-rejected: #dc2626;
+  /* Rejected — destructive red, one step darker than Blocked so an order-level
+     approval failure never reads as an item-level block. Shares the red-50 tint
+     with Blocked deliberately; the two are separated by foreground, icon and label. */
+  --oo-status-rejected: #b91c1c;
   --oo-status-rejected-bg: #fef2f2;
 
   /* Cancelled — neutral dark gray, deliberately NOT red so it never reads
