@@ -26,6 +26,36 @@
 There is no CI/CD pipeline committed to this repository. Both commands are run manually by
 whoever performs the release, which is exactly why the migration step must be deliberate.
 
+### RP-2 — build-time datasource shape dependency
+
+> **Technical debt.** It is not a reason to expose Production credentials during a build.
+
+`npm run build` must never require Production database credentials merely to compile.
+
+It does, however, currently require `DATABASE_URL` to be present and *PostgreSQL-shaped*.
+`src/lib/db.ts` selects its driver adapter from the URL scheme: a `postgresql://` or
+`postgres://` prefix selects the Postgres adapter, while anything else — including an unset
+variable — selects the SQLite adapter, which is incompatible with the schema's `postgres`
+provider and fails during page-data collection.
+
+That is a dependency on the *shape* of the value, not on reaching a database. RP-1
+certification verified the build completing against
+`postgresql://nouser:nopass@127.0.0.1:1/nodb` — an address with no listener. Had the build
+attempted a connection it would have failed.
+
+**For build-only or CI compilation, where no database access is required, use a
+non-sensitive, non-routable or intentionally unreachable PostgreSQL-shaped value rather than
+Production credentials.** The real `DATABASE_URL` is needed only for:
+
+- `npm run db:migrate`
+- application runtime / startup
+- operations that genuinely require database access
+
+An unreachable value is also a useful fail-closed control. This is a statement about the
+build as certified here, not a guarantee that no future build-time code will ever query a
+database: if such code is introduced, a build pointed at an unreachable address fails loudly
+instead of quietly reaching Production.
+
 ## 1. Current Status
 
 ### Schema vs Live Database

@@ -153,7 +153,8 @@ Operational tasks required before soft launch. None require code or schema chang
 - [ ] **Freeze scope** — This document is the scope freeze record. No new features enter MVP.
 - [ ] **Commit and tag current code** — Create a git commit covering all Phase 0 and Phase 1 work. Tag as `v1.0.0-mvp` or equivalent. Establishes a clean rollback point.
 - [ ] **Backup production database** — Neon branch snapshot or pg_dump. Store securely and verify restore before proceeding.
-- [ ] **Run final build** — `npm run build` against the production `DATABASE_URL`. Confirm "No pending migrations to apply." Confirm TypeScript: 0 errors.
+- [ ] **Run final build** — `npm run build`. It applies no migrations and needs no production credentials: build with a non-sensitive, intentionally unreachable PostgreSQL-shaped `DATABASE_URL` (see "RP-2 — build-time datasource shape dependency" in `docs/migration-drift-and-db-constraints.md`). Confirm TypeScript: 0 errors.
+- [ ] **Apply migrations explicitly** — `npm run db:migrate` against the positively verified production database, as a separate step before the application is deployed or started. Confirm "No pending migrations to apply.", or exactly the intended migrations applied.
 - [ ] **Run critical workflow smoke tests** — One pass per role-critical path: login, inventory, order creation, roasting batch, QC, packaging, delivery.
 - [ ] **Train internal users** — Walk each role through their workflow using the SOP. Confirm each user can log in and reach their default page.
 - [ ] **Soft launch with limited staff** — Bring the system live for a small group first (admin + one operator per role) before opening to all staff.
