@@ -87,7 +87,7 @@ without a tenant model and a subscription/entitlement layer.
 | Module/feature gating | 2 / 10 | Permission model exists; not tenant-scoped |
 | Rate limiting | 1 / 10 | Global, not per-tenant |
 | API guards | 2 / 10 | Module guards exist; no tenant enforcement |
-| Migration readiness | 8 / 10 | Baseline established 2026-05-22; `migrate deploy` is production build command; schema drift resolved |
+| Migration readiness | 8 / 10 | Baseline established 2026-05-22; `migrate deploy` is the explicit production migration command (`npm run db:migrate`), separate from the build; schema drift resolved |
 | Schema design | 3 / 10 | No tenantId; otherwise clean relational model |
 
 **Overall readiness: 1.9 / 10 — Not multi-tenant. Not SaaS-hostile either. Migration baseline resolved; all other dimensions unchanged.**

@@ -48,11 +48,24 @@ Run these checks on launch day, against the production environment, before openi
 - [ ] Run: `npx tsc --noEmit`
       Expected: exit 0, no errors, no output
 
+**Database migration (explicit — before the application is deployed or started)**
+- [ ] Positively verify the target database first: host, database name and environment are
+      the intended ones. Do not trust whatever `DATABASE_URL` happens to be set to.
+- [ ] Run: `npm run db:migrate`
+      Expected: `No pending migrations to apply.`, or exactly the intended migrations applied
+- [ ] Confirm the command was `prisma migrate deploy` — never `prisma migrate dev`,
+      `prisma migrate reset` or `prisma db push`
+
 **Production build**
 - [ ] Run: `npm run build`
-      Expected: `prisma generate` succeeds + `No pending migrations to apply.` + Next.js build succeeds + TypeScript 0 errors
-- [ ] Confirm build script is: `prisma generate && prisma migrate deploy && next build`
-- [ ] Confirm build script does **not** contain: `db push` or `--accept-data-loss`
+      Expected: `prisma generate` succeeds + Next.js build succeeds + TypeScript 0 errors.
+      No migration output: the build does not apply migrations.
+- [ ] Confirm build script is: `prisma generate && next build`
+- [ ] Confirm build script does **not** contain: `prisma migrate deploy`, `db push` or
+      `--accept-data-loss` — building must never apply a migration
+- [ ] `DATABASE_URL` is set to the target environment's postgres URL before building: the
+      build picks its database driver from that value, and fails without it, though it opens
+      no connection
 
 **Environment variables**
 - [ ] `JWT_SECRET` is set to a strong value (≥ 32 characters) in production `.env`

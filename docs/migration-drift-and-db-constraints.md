@@ -2,6 +2,30 @@
 
 > **Status: Migration baseline established 2026-05-22. Schema drift resolved. `prisma migrate deploy` is now the production deployment command. `_prisma_migrations` contains three applied migrations: `20260522000000_baseline`, `20260526115344_add_qc_final_decision_reason`, `20260528084853_add_rate_limit`. Old migrations archived at `prisma/migrations_archive_before_baseline_20260522/`.**
 
+## 0. Release Contract — Build and Migration Are Separate
+
+> **The application build never applies migrations.** Compiling the application cannot
+> change any database schema.
+
+| Step | Command | Resolves to | Touches the database |
+|---|---|---|---|
+| Application build | `npm run build` | `prisma generate && next build` | **No** |
+| Database migration | `npm run db:migrate` | `prisma migrate deploy` | **Yes — deliberately** |
+
+1. `npm run build` does **not** apply migrations. It generates the Prisma client and
+   compiles the application.
+2. Migration is an explicit release step, run on its own and never as a build side effect.
+3. Where a release includes schema changes, run `npm run db:migrate` against the intended
+   environment **before** deploying or starting the application against it.
+4. Positively verify the database target before running it — host, database name and
+   environment — rather than trusting whatever `DATABASE_URL` is currently set to.
+5. A production migration must never be triggered merely by compiling or building.
+6. Never use `prisma migrate dev`, `prisma migrate reset` or `prisma db push` to migrate
+   production. `prisma migrate deploy` is the only production migration command.
+
+There is no CI/CD pipeline committed to this repository. Both commands are run manually by
+whoever performs the release, which is exactly why the migration step must be deliberate.
+
 ## 1. Current Status
 
 ### Schema vs Live Database
@@ -62,7 +86,7 @@ the composite index; the old single-column index is not present.
 | Command | Why it is dangerous |
 |---|---|
 | `prisma migrate dev` | **Safe for local development as of 2026-05-22.** The baseline is in sync. Use this to generate new tracked migration files for schema changes. Review generated SQL before committing. Never run in production. |
-| `prisma migrate deploy` | **Production deployment command as of 2026-05-22.** Used in `package.json build`. The baseline ensures no pending migrations fail. Safe in CI/CD. |
+| `prisma migrate deploy` | **Production migration command as of 2026-05-22.** Run explicitly via `npm run db:migrate` as a separate release step — deliberately **not** part of `npm run build`. The baseline ensures no pending migrations fail. Verify the target database before running it. |
 | `prisma migrate reset` | Drops and recreates the entire database — all data is destroyed |
 | `prisma db push` (without explicit approval) | Continues to worsen migration-history drift. Must not be used as a routine schema change tool going forward |
 
@@ -242,6 +266,8 @@ were performed in order:
    ```
 10. **`package.json` build script updated:**
     - `"build"`: `prisma generate && prisma migrate deploy && next build`
+      > **Superseded.** `"build"` is now `prisma generate && next build`; migrations run
+      > explicitly via `npm run db:migrate`. The line above records the 2026-05-22 state.
     - `"db:push"` → renamed to `"db:push:local"`: `prisma db push` (local/prototype only)
 
 ### Baseline SQL Review Checklist (Executed)
@@ -299,7 +325,7 @@ These items were verified before the baseline was marked applied:
 | `npx prisma migrate diff --from-empty --to-schema ... --script` | Read-only | Generates full schema SQL for review |
 | `npx prisma db execute --stdin` | Write — requires explicit approval | Used for targeted SQL not representable in schema.prisma (e.g., CHECK constraints) |
 | `npx prisma migrate resolve --applied <name>` | Write — requires explicit approval | Records a migration as applied without running it; only use after full SQL review |
-| `npx prisma migrate deploy` | **Production command** — used in `build` script | Safe. Baseline ensures no pending migrations fail. Use in CI/CD and production deploys. |
+| `npx prisma migrate deploy` | **Production command** — explicit release step, not part of `build` | Safe. Baseline ensures no pending migrations fail. Run via `npm run db:migrate` against a positively verified target database. |
 | `npx prisma migrate dev` | **Safe for local development** | Generates tracked migration files for schema changes. Review generated SQL before committing. Never run in production. |
 | `npx prisma studio` | Read-only UI | Safe to run at any time |
 
@@ -316,7 +342,7 @@ It has no rollback capability, creates no audit trail, and makes `prisma migrate
 
 **These consequences existed before 2026-05-22 and are now resolved by the baseline:**
 - ~~Half the database schema had no migration coverage~~ — all 22 tables covered by `20260522000000_baseline`.
-- ~~`migrate deploy` would fail in CI or a fresh environment~~ — `migrate deploy` is the production build command.
+- ~~`migrate deploy` would fail in CI or a fresh environment~~ — `migrate deploy` is the production migration command, run explicitly via `npm run db:migrate`.
 - ~~A future database restore from migrations would produce an incomplete schema~~ — the baseline covers the full schema.
 - ~~Automated rollback of a bad deploy is not possible via the migration system~~ — the Neon snapshot `before-migration-baseline-20260522` provides a restore point; future migrations are tracked and reversible.
 
