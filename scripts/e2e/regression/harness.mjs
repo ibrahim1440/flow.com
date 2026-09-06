@@ -152,7 +152,12 @@ export async function skuUnits(skuId) {
             COALESCE(SUM("unitsAvailable"),0)::int available,
             COALESCE(SUM("unitsReserved"),0)::int reserved
        FROM "FinishedGoodsLot" WHERE "productSkuId"=$1`, [skuId]);
-  return { produced: num(r.produced), available: num(r.available), reserved: num(r.reserved) };
+  // Free-to-promise, defined exactly as the application defines it:
+  // FinishedGoodsLot.availableQty - reservedQty (see prisma/schema.prisma). Deliberately
+  // not clamped at zero — a negative value means reserved exceeded available, which is
+  // precisely the over-reservation these suites exist to catch.
+  const available = num(r.available), reserved = num(r.reserved);
+  return { produced: num(r.produced), available, reserved, free: available - reserved };
 }
 export async function roastedStock(coffeeProductId) {
   return num((await one(

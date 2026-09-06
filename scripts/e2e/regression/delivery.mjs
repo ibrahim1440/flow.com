@@ -13,7 +13,7 @@ const TAG = "E2E-DEL";
 const PIN = String(100000 + Math.floor(Math.random() * 899999));
 const EMP = "e2edel_admin", CUST = "e2edel_cust", BEAN = "e2edel_bean", COFFEE = "e2edel_coffee";
 const perms = JSON.parse(
-  fs.readFileSync(new URL("./fixtures/admin-permissions.json", import.meta.url), "utf8")
+  fsx.readFileSync(new URL("./fixtures/admin-permissions.json", import.meta.url), "utf8")
 );
 const db = new Client({ connectionString: DB_URL });
 
