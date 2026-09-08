@@ -182,9 +182,33 @@ async function main() {
   const resumeNotHeld = await api(`/api/orders/${o1.json.id}/status`, { method: "POST", body: { action: "resume" } });
   check("resume on a non-held order refused -> 409", resumeNotHeld.status === 409, "status=" + resumeNotHeld.status);
 
-  sub("D3. Completed order is terminal");
+  sub("D3. Completion requires full delivery, and a completed order is terminal");
+  // DEF-001 regression guard. Reaching Ready for Shipping says the shelf can cover the
+  // order, not that anything shipped. This step used to complete o1 with nothing
+  // delivered at all and assert 200 — encoding the defect it should have caught.
+  const cmpUndelivered = await api(`/api/orders/${o1.json.id}/status`, { method: "POST", body: { action: "complete" } });
+  check("complete with nothing delivered refused -> 409", cmpUndelivered.status === 409, "status=" + cmpUndelivered.status);
+  if (cmpUndelivered.status === 200) issue("HIGH", "Order completed with nothing delivered", "An order in Ready for Shipping with deliveredUnits=0 was closed as fulfilled.");
+  let o1Row = await one('SELECT status FROM "Order" WHERE id=$1', [o1.json.id]);
+  check("a refused completion leaves the order untouched", o1Row.status === "Ready for Shipping", o1Row.status);
+  const heldAfterRefusal = num((await one(
+    `SELECT COALESCE(SUM("quantityUnits"),0)::int u FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED'`, [i1])).u);
+  check("a refused completion releases no reservation", heldAfterRefusal === 2, `reserved=${heldAfterRefusal}`);
+
+  // Partial delivery is still not enough.
+  const lotBra = await one(`SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND "isUnitTracked" LIMIT 1`, [skus.bra1kg.id]);
+  const part1 = await api("/api/deliveries", { method: "POST", body: { orderItemId: i1, quantityUnits: 1, deliveryType: "partial", finishedGoodsLotId: lotBra.id } });
+  check("first of two units delivered -> 201", part1.status === 201, "status=" + part1.status);
+  const cmpPartial = await api(`/api/orders/${o1.json.id}/status`, { method: "POST", body: { action: "complete" } });
+  check("complete with 1 of 2 units delivered refused -> 409", cmpPartial.status === 409, "status=" + cmpPartial.status);
+
+  // Fully delivered, so completion is now legitimate.
+  const part2 = await api("/api/deliveries", { method: "POST", body: { orderItemId: i1, quantityUnits: 1, deliveryType: "full", finishedGoodsLotId: lotBra.id } });
+  check("second unit delivered -> 201", part2.status === 201, "status=" + part2.status);
   const done = await api(`/api/orders/${o1.json.id}/status`, { method: "POST", body: { action: "complete" } });
-  check("complete from Ready for Shipping -> 200", done.status === 200, "status=" + done.status);
+  check("complete once fully delivered -> 200", done.status === 200, "status=" + done.status);
+  o1Row = await one('SELECT status FROM "Order" WHERE id=$1', [o1.json.id]);
+  check("order is Completed", o1Row.status === "Completed", o1Row.status);
   const backToProd = await api(`/api/orders/${o1.json.id}/preparation-review`, { method: "POST", body: { items: [{ orderItemId: i1 }] } });
   check("a completed order cannot re-enter preparation -> 409", backToProd.status === 409, "status=" + backToProd.status);
   const reApprove = await api(`/api/orders/${o1.json.id}/approve`, { method: "POST", body: { decision: "Yes" } });
@@ -193,8 +217,10 @@ async function main() {
   check("a completed order cannot be cancelled -> 409", cancelDone.status === 409, "status=" + cancelDone.status);
 
   sub("D3b. A completed order must not keep holding stock");
-  // Regression guard: completing an order whose units were never delivered used to leave
-  // them reserved to a closed order forever, invisible to every other order.
+  // Now guaranteed by two rules working together: completion requires full delivery, and
+  // delivery consumes the reservation it ships against. The guard stays because the
+  // property is what matters — a closed order holding stock would be invisible to every
+  // other order — not the particular route that could once violate it.
   const heldByCompleted = num((await one(
     `SELECT COALESCE(SUM("quantityUnits"),0)::int u FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED'`, [i1])).u);
   check("a completed order holds no reservations", heldByCompleted === 0, `still holding ${heldByCompleted} units`);

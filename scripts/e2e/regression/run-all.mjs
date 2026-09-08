@@ -18,6 +18,7 @@ const SUITES = [
   "production-gate",         // Production Entry Gate: approval/review required before production
   "production-concurrency",  // the gate under concurrent lifecycle transitions
   "lifecycle-locks",         // canonical lock order; deadlock freedom
+  "completion-gate",         // DEF-001: an order completes only once every line has shipped
   "reservation-cas",         // reservation compare-and-swap; no double reservation
   "po-lifecycle",            // Production Order state machine, batches, cancellation
   "hardening",               // concurrency, idempotency, forced rollback, security smoke

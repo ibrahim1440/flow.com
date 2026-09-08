@@ -180,6 +180,20 @@ async function main() {
   const statusF = await orderStatus(oF.id);
   check(`order reached Ready for Shipping (was ${statusF})`, statusF === "Ready for Shipping", statusF);
 
+  // DEF-001: completion now requires every line delivered in full, so this fixture has to
+  // ship its 4 units through the real delivery route before it can reach Completed. That
+  // is a precondition of what D3 tests, not the subject of it — the assertions below are
+  // unchanged and still measure the production entry gate against a Completed order.
+  const lotF = await one(
+    'SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1 AND "productSkuId"=$2',
+    [stockBatch.id, C.skus.bra250.id]);
+  const shipF = await api("/api/deliveries", {
+    method: "POST",
+    body: { orderItemId: oF.items[0].id, quantityUnits: 4, deliveryType: "full", finishedGoodsLotId: lotF.id },
+  });
+  check("all 4 ordered units delivered in full -> 201", shipF.status === 201,
+    `status=${shipF.status} ${S(shipF.json).slice(0, 140)}`);
+
   const done = await statusAct(oF, "complete", P + " done");
   check("order completed", done.status === 200 && (await orderStatus(oF.id)) === "Completed",
     `status=${done.status} ${await orderStatus(oF.id)}`);

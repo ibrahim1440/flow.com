@@ -129,6 +129,136 @@ export function isCancelAllowedFrom(status: OrderStatus): boolean {
   return !TERMINAL_ORDER_STATUSES.has(status);
 }
 
+// ─── Completion delivery gate ──────────────────────────────────────────────
+//
+// An order may reach "Completed" only once every line has actually shipped.
+//
+// Reaching Ready for Shipping is a statement about STOCK — preparation review found cover
+// for the order — not about fulfilment. Completion used to check only that status plus the
+// caller's authority, so an order with nothing delivered could be closed as fulfilled, and
+// the release that runs immediately afterwards would hand its reserved coffee back to the
+// free pool. The result was a Completed order with deliveredUnits = 0, no Delivery rows,
+// and nothing in the ledger recording that anything had failed to ship.
+//
+// The comparison is PER LINE and discriminated on quantityUnits, because this model has
+// two kinds of line and only one of them counts in units:
+//
+//   SKU line (quantityUnits non-null) — units are authoritative and quantityKg is a
+//     projection of them (see the note at the top of finished-products.ts). Comparing
+//     kilograms here would gate on a derived value rather than on the real one.
+//   Legacy kilogram line (quantityUnits null) — rows predating SKU-based ordering. They
+//     carry no units at all, so units cannot answer the question and kilograms are the
+//     only authority they have. Gating those on units would make every one of them
+//     permanently uncompletable, which is why this is not simply
+//     `deliveredUnits === quantityUnits`.
+//
+// Stated as EXACT delivery, not "at least enough". Completed certifies an internally
+// consistent fulfilment state, so the gate fails closed in both directions: a line that
+// shipped MORE than it ordered is as inconsistent as one that shipped less, and an
+// integrity gate must not wave it through. Deliberately not resting on "the delivery route
+// makes over-delivery impossible" — that argument protects data this route creates, not
+// historical or corrupted rows, which are exactly what a gate is for.
+//
+// Completion additionally requires that the order hold NO live RESERVED allocation. A
+// fully delivered line holds none, because both delivery paths trim reservations down to
+// the remaining demand as their last act; a reservation surviving full delivery is
+// therefore an inconsistent state. Completion refuses it and leaves it untouched rather
+// than quietly releasing it — silently normalising that state is how the original defect
+// stayed invisible. Cancel keeps releasing reservations under its own contract; only
+// completion is strict, because only completion claims the order was fulfilled.
+
+export type CompletionLine = {
+  quantityUnits: number | null;
+  deliveredUnits: number;
+  quantityKg: number;
+  deliveredQty: number;
+};
+
+/** Live RESERVED allocations still attached to the order, summarised by the caller. */
+export type LiveReservationSummary = {
+  rows: number;
+  units: number;
+  kg: number;
+};
+
+/**
+ * Kilogram equality tolerance for the completion gate: half a gram.
+ *
+ * Every kg figure in this codebase is stored at 3 decimal places — gram precision — via
+ * roundKg. So the smallest difference between two genuinely different quantities is one
+ * gram, 0.001. Half of that is the widest tolerance that can absorb IEEE754 noise from
+ * summing several rounded deliveries (drift measured in units of 1e-16) while remaining
+ * strictly below one gram, so it can never accept a line that is short or long by a real,
+ * representable amount.
+ *
+ * Concretely: 2.5 kg ordered against 2.499 kg delivered differs by a full gram and is
+ * REFUSED — it is a genuine shortfall at the precision this system stores, not noise.
+ */
+const COMPLETION_KG_EPSILON = 0.0005;
+
+/** Exact fulfilment: not short, and not over. */
+export function isLineFullyDelivered(line: CompletionLine): boolean {
+  if (line.quantityUnits !== null) return line.deliveredUnits === line.quantityUnits;
+  return Math.abs(line.deliveredQty - line.quantityKg) <= COMPLETION_KG_EPSILON;
+}
+
+function describeLine(line: CompletionLine): string {
+  if (line.quantityUnits !== null) {
+    return line.deliveredUnits > line.quantityUnits
+      ? `${line.deliveredUnits} delivered against ${line.quantityUnits} ordered`
+      : `${line.quantityUnits - line.deliveredUnits} of ${line.quantityUnits} unit(s) outstanding`;
+  }
+  return line.deliveredQty > line.quantityKg
+    ? `${roundKg(line.deliveredQty)} kg delivered against ${line.quantityKg} kg ordered`
+    : `${roundKg(line.quantityKg - line.deliveredQty)} of ${line.quantityKg} kg outstanding`;
+}
+
+/**
+ * The refusal for a completion that would close an order in an inconsistent state, or null
+ * when every line is delivered exactly and nothing remains reserved.
+ *
+ * Pure, so the route can call it inside its transaction against rows it has already locked,
+ * and so both rules are testable without a database.
+ *
+ * Quantities are checked first because an undelivered order is the ordinary case; a
+ * surviving reservation is an anomaly and gets its own, differently worded refusal so the
+ * two are never confused in an operator's hands.
+ */
+export function completionRefusal(
+  lines: CompletionLine[],
+  reservations: LiveReservationSummary,
+): { _appCode: number; message: string } | null {
+  const inconsistent = lines.filter((line) => !isLineFullyDelivered(line));
+  if (inconsistent.length > 0) {
+    // Bounded: a long multi-line order must not produce an unbounded error string.
+    const detail = inconsistent.slice(0, 3).map(describeLine).join("; ");
+    const more = inconsistent.length > 3 ? ` and ${inconsistent.length - 3} more line(s)` : "";
+    return {
+      _appCode: 409,
+      message:
+        `Cannot complete this order: ${inconsistent.length} of ${lines.length} line(s) are not ` +
+        `delivered exactly in full — ${detail}${more}. ` +
+        `Every line must be delivered in full before the order can be completed.`,
+    };
+  }
+
+  if (reservations.rows > 0) {
+    const held = reservations.units > 0
+      ? `${reservations.units} unit(s)`
+      : `${roundKg(reservations.kg)} kg`;
+    return {
+      _appCode: 409,
+      message:
+        `Cannot complete this order: every line is delivered, but ${held} across ` +
+        `${reservations.rows} allocation row(s) are still reserved to it. A fully delivered ` +
+        `order should hold no reservation, so this is an inconsistent state. It has been left ` +
+        `untouched for investigation rather than released.`,
+    };
+  }
+
+  return null;
+}
+
 // ─── Dispatch ──────────────────────────────────────────────────────────────
 
 // Statuses from which a delivery may be recorded.
