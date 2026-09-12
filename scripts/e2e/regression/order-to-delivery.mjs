@@ -6,6 +6,10 @@ import {
 } from "./harness.mjs";
 const JSON_stringify_safe = (v) => { try { return JSON.stringify(v) ?? String(v); } catch { return String(v); } };
 import { buildCatalog, teardown, roastAndPass} from "./catalog.mjs";
+// The oversell decision is shared with harness-selftest.mjs, which proves it fires on a
+// deliberately invalid state without needing a database. Section F must use that same
+// function, or the proof would cover a copy rather than this suite.
+import { assessOversell } from "./oversell.mjs";
 
 const P = "P1";
 
@@ -259,11 +263,15 @@ async function main() {
     `SELECT COALESCE(SUM(sa."quantityUnits"),0)::int u FROM "StockAllocation" sa
       JOIN "FinishedGoodsLot" f ON f.id=sa."finishedGoodsLotId"
      WHERE sa.status='RESERVED' AND f."productSkuId"=$1`, [skus.bra1kg.id])).u);
-  const gained = totalReserved - reservedBefore;
-  check(`racers together take at most the ${free0} units that were free`, gained <= free0, `gained=${gained} free0=${free0} totalReserved=${totalReserved} reviews_ok=${okCount}`);
+  // One decision, used twice below, and raised rather than silently false if any balance
+  // is missing. `gained` is signed, so concurrent work that nets a release is not an
+  // oversell; the comparison is strict, so consuming exactly the free stock passes.
+  const race = assessOversell({ freeBefore: free0, reservedBefore, reservedAfter: totalReserved });
+  const gained = race.gained;
+  check(`racers together take at most the ${free0} units that were free`, !race.oversold, `gained=${gained} free0=${free0} totalReserved=${totalReserved} reviews_ok=${okCount}`);
   check('reserved never exceeds available on the lot', afterRace.reserved <= afterRace.available, JSON_stringify_safe(afterRace));
   check("lot balance stays consistent after the race", afterRace.reserved <= afterRace.available, JSON_stringify_safe(afterRace));
-  if (gained > free0) issue("BLOCKER", "Concurrent reservations oversell finished goods", `${gained} units taken from ${free0} free.`);
+  if (race.oversold) issue("BLOCKER", "Concurrent reservations oversell finished goods", `${gained} units taken from ${free0} free.`);
 
   sub("F2. Duplicate delivery submissions (double-click)");
   const dlvOrder = await mkOrder(customers.cafe.id, "double click delivery", [{ productSkuId: skus.idn250.id, quantityUnits: 5 }]);

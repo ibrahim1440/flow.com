@@ -107,7 +107,10 @@ async function main() {
   }});
   check("create SKU -> 201", sku.status === 201, JSON.stringify(sku.json).slice(0, 250));
   const skuId = sku.json?.id;
-  if (!skuId) { console.log("FATAL: no SKU"); await finish(before); return; }
+  // Bailing out here abandons roughly nine tenths of this suite, so it must be RED. It
+  // used to print a plausible "N passed, 0 failed" and exit 0 — a 201 with no id in the
+  // body would have been reported as a healthy green suite that simply had little to say.
+  if (!skuId) { check("SKU creation returns an id", false, "201 with no id in the body — the rest of the suite cannot run"); await finish(before); return; }
   const weightChange = await api(`/api/products/${skuId}`, { method: "PATCH", body: { weightGrams: 500 } });
   check("pack size is immutable once created -> 409", weightChange.status === 409, "status=" + weightChange.status);
 
@@ -131,7 +134,8 @@ async function main() {
   }});
   check("create stock roast -> 201", batch.status === 201, JSON.stringify(batch.json).slice(0, 250));
   const batchId = batch.json?.id;
-  if (!batchId) { console.log("FATAL: no batch"); await finish(before); return; }
+  // Same reasoning as the SKU bail-out above: an abandoned suite must not report green.
+  if (!batchId) { check("roast creation returns an id", false, "201 with no id in the body — the rest of the suite cannot run"); await finish(before); return; }
   await db.query(`UPDATE "RoastingBatch" SET "batchNumber"=$2 WHERE id=$1`, [batchId, TAG + "-B1"]);
   let rb = await one(`SELECT "roastedAvailableKg","roastedBeanQuantity",status FROM "RoastingBatch" WHERE id=$1`, [batchId]);
   check("roasted output becomes roasted stock (10kg)", Number(rb.roastedAvailableKg) === 10, "roastedAvailableKg=" + rb.roastedAvailableKg);

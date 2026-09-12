@@ -29,6 +29,18 @@ const review = (o) =>
 const movementsFor = async (entityId) =>
   num((await one(`SELECT COUNT(*)::int n FROM "InventoryMovement" WHERE "referenceEntityId"=$1`, [entityId])).n);
 
+// D5's orphan set. The predicate stays global and stays whole — a movement with no source
+// document is untraceable wherever it sits, and narrowing it to sourceDocId alone would
+// throw away two thirds of the check. What is scoped is the *comparison*: the suite records
+// the orphans that already existed before it touched anything and asserts only on rows that
+// appear afterwards. IDs, not a count — one historical orphan being deleted while a new one
+// is written nets to zero, and a count-only assertion would report that as clean.
+const orphanMovementIds = async () =>
+  new Set((await all(
+    `SELECT id FROM "InventoryMovement"
+       WHERE "sourceDocType" IS NULL OR "sourceDocId" IS NULL OR "referenceEntityId" IS NULL`
+  )).map((r) => r.id));
+
 const lotFor = async (skuId) =>
   (await one(`SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND "isUnitTracked" AND "unitsAvailable">0 ORDER BY "createdAt" LIMIT 1`, [skuId]))?.id;
 
@@ -36,6 +48,10 @@ async function main() {
   await db.connect();
   await teardown(P);
   await db.query('DELETE FROM "ProductionOrder" WHERE id LIKE $1', [P + "_%"]);
+  // Taken here deliberately: after this suite's own leftovers are gone, but before it logs
+  // in, builds its catalog, or writes a single movement. Anything orphaned from this point
+  // on was orphaned by the code under test.
+  const orphansBefore = await orphanMovementIds();
   await loginAs(ADMIN_PIN);
   C = await buildCatalog(P);
   const adminCookie = getCookie();
@@ -325,8 +341,14 @@ async function main() {
   check("finished goods survive the cancellation", producedAfter === producedBefore, `${producedBefore} -> ${producedAfter}`);
 
   sub("D5. every stock movement has a traceable source");
-  const orphan = await all(`SELECT id FROM "InventoryMovement" WHERE "sourceDocType" IS NULL OR "sourceDocId" IS NULL OR "referenceEntityId" IS NULL`);
-  check("no inventory movement lacks a source document", orphan.length === 0, String(orphan.length));
+  const orphansAfter = await orphanMovementIds();
+  const newOrphans = [...orphansAfter].filter((id) => !orphansBefore.has(id));
+  console.log(`    pre-existing orphans ${orphansBefore.size} (tolerated as baseline history), new ${newOrphans.length}`);
+  check(
+    "no inventory movement created by this run lacks a source document",
+    newOrphans.length === 0,
+    `${newOrphans.length} new orphan(s): ${S(newOrphans.slice(0, 5))}`
+  );
 
   await invariants("after production invariants");
 

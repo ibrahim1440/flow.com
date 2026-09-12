@@ -8,6 +8,9 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+// Pure. Extracted so the runner's own trustworthiness check is testable — this file runs
+// the entire regression suite at import time and so can never be imported by a test.
+import { classifySuiteResult } from "./suite-verdict.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +18,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // the production gate is easier to read than the same failure surfacing inside a full
 // order-to-delivery run twenty minutes later.
 const SUITES = [
+  "harness-selftest",        // proves the detector fires and the runner rejects dead suites — pure, no DB
   "production-gate",         // Production Entry Gate: approval/review required before production
   "production-concurrency",  // the gate under concurrent lifecycle transitions
   "lifecycle-locks",         // canonical lock order; deadlock freedom
@@ -43,15 +47,38 @@ const run = (name) =>
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
+    // Only STDOUT feeds the summary match. Folding stderr into the same buffer meant any
+    // text a suite wrote to stderr could satisfy the summary regex, so a suite could be
+    // counted as having reported when it had not. stderr is still echoed live — never
+    // hidden — it simply no longer counts as a report.
     let out = "";
     child.stdout.on("data", (d) => { out += d; process.stdout.write(d); });
-    child.stderr.on("data", (d) => { out += d; process.stderr.write(d); });
+    child.stderr.on("data", (d) => { process.stderr.write(d); });
     child.on("close", (code) => {
       // Each suite prints "<n> passed, <m> failed" as its last summary line.
       const m = [...out.matchAll(/^(\d+) passed, (\d+) failed/gm)].pop();
-      resolve({ name, code, passed: m ? Number(m[1]) : 0, failed: m ? Number(m[2]) : 0 });
+      // `reported` is the point: a suite that died before printing a summary used to be
+      // indistinguishable from one that genuinely ran zero assertions, and both were
+      // silently counted as 0/0.
+      resolve({
+        name,
+        code,
+        reported: m !== undefined,
+        passed: m ? Number(m[1]) : 0,
+        failed: m ? Number(m[2]) : 0,
+      });
     });
   });
+
+/**
+ * Suites that are expected to assert nothing.
+ *
+ * Deliberately empty: every registered suite asserts, and the one non-assertion file in
+ * this directory (catalog.mjs, a fixture builder) is not registered as a suite at all.
+ * It exists so that a genuine future utility can be declared here EXPLICITLY rather than
+ * by silently reporting zero.
+ */
+const ZERO_ASSERTION_OK = new Set();
 
 const results = [];
 for (const name of list) {
@@ -60,15 +87,35 @@ for (const name of list) {
 }
 
 console.log(`\n${"=".repeat(78)}\n  REGRESSION SUMMARY\n${"=".repeat(78)}`);
-let totalPassed = 0, totalFailed = 0, red = 0;
+let totalPassed = 0, totalFailed = 0;
+const bad = [];
 for (const r of results) {
   totalPassed += r.passed;
   totalFailed += r.failed;
-  if (r.code !== 0) red++;
+
+  // A suite is only trustworthy if it ran, said what it did, and said something.
+  const reasons = classifySuiteResult(r, ZERO_ASSERTION_OK);
+  if (reasons.length) bad.push({ name: r.name, reasons });
+
+  const status = reasons.length === 0 ? "ok" : reasons.join("; ");
   console.log(
-    `  ${r.name.padEnd(24)} ${String(r.passed).padStart(4)} passed  ${String(r.failed).padStart(3)} failed  exit ${r.code}`
+    `  ${r.name.padEnd(24)} ${String(r.passed).padStart(4)} passed  ${String(r.failed).padStart(3)} failed  exit ${r.code}  ${status}`
   );
 }
 console.log(`\n  ${results.length} suite(s), ${totalPassed} harness assertions, ${totalFailed} failed`);
-console.log(red === 0 ? "  ALL SUITES GREEN\n" : `  ${red} SUITE(S) RED\n`);
-process.exit(red === 0 ? 0 : 1);
+
+if (bad.length === 0) {
+  console.log("  ALL SUITES GREEN\n");
+} else {
+  // Name them. A summary that says only "1 SUITE(S) RED" makes the reader hunt through
+  // scrollback for which one, and a suite that died silently leaves nothing to find.
+  console.log(`  ${bad.length} SUITE(S) NOT TRUSTWORTHY:`);
+  for (const b of bad) console.log(`    - ${b.name}: ${b.reasons.join("; ")}`);
+  console.log("");
+}
+
+// exitCode rather than process.exit: on Windows, stdout to a pipe is asynchronous, and an
+// immediate exit can truncate the very summary above when the run is captured or teed.
+// Every child has already closed, so nothing holds the loop open and the process still
+// exits promptly with the same status.
+process.exitCode = bad.length === 0 ? 0 : 1;

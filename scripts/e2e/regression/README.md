@@ -61,6 +61,7 @@ what certification measures.
 
 | Suite | Covers |
 | --- | --- |
+| `harness-selftest` | That this harness is capable of failing — see below. **Pure: no database, no server.** |
 | `production-gate` | Production Entry Gate — production refused unless the order is approved and reviewed |
 | `production-concurrency` | The gate under concurrent hold / cancel, both serialization directions |
 | `lifecycle-locks` | Canonical lock order `ALLOC → OrderItem → Order`; deadlock freedom |
@@ -72,8 +73,35 @@ what certification measures.
 | `order-to-delivery` | End-to-end, happy and unhappy paths |
 | `release-simulation` | A second end-to-end pass on different data |
 
-Each suite tears down only the fixtures it created, keyed by its own tag, and asserts a set
-of global inventory invariants before it exits. Each exits non-zero on failure.
+Every suite except `harness-selftest` drives the running application over HTTP, tears down
+only the fixtures it created — keyed by its own tag — and asserts a set of global inventory
+invariants before it exits. Each exits non-zero on failure.
+
+## Can this harness fail?
+
+`harness-selftest` is the odd one out: it touches no database and no server, and asserts
+nothing about the ERP. It exists because a green harness proves nothing by itself.
+
+Two defects made that concrete. `delivery.mjs` read its fixture through `fs` while binding
+the import as `fsx`, so it threw at module evaluation and never ran one of its 22
+assertions — and the runner scored the corpse `0 passed, 0 failed`, which looked exactly
+like a healthy suite with nothing to say. Separately, `skuUnits()` returned no `free` key
+while four committed assertions read `.free`, so every one of them compared against
+`undefined` — and `undefined` answers *false in both directions*. The oversell detector
+next to them (`if (gained > free0) issue("BLOCKER", ...)`) could not fire under any
+circumstances. The certification run reported ALL SUITES GREEN throughout.
+
+So `harness-selftest` proves, on every run and with nothing installed:
+
+- the oversell detector **fires** on a deliberately invalid reservation state, and stays
+  **silent** on a valid one (`oversell.mjs`);
+- a missing or NaN balance now **raises** instead of quietly comparing false;
+- the runner **rejects** a suite that exited non-zero, printed no summary, asserted
+  nothing, or reported failures and then exited 0 (`suite-verdict.mjs`).
+
+Both modules are pure and import nothing. They are the same modules `harness.mjs`,
+`order-to-delivery.mjs` and `run-all.mjs` actually use — testing a private copy would have
+proved only that the copy worked.
 
 They run **serially** — see the comment in `run-all.mjs`. They share one database and one
 stock pool, and several assert on global invariants, so running two at once makes those

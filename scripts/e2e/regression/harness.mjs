@@ -16,6 +16,10 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+// Pure arithmetic, no imports of its own — safe to load before the safety rails below.
+// The `free` figure every suite reads is computed by this module so that
+// harness-selftest.mjs proves the SHIPPED path rather than a copy of it.
+import { freeUnits } from "./oversell.mjs";
 
 // Resolved from this file's own location so the suites run from any checkout — a clean
 // clone, a CI workspace, a git worktree — rather than from one developer's directory.
@@ -152,7 +156,17 @@ export async function skuUnits(skuId) {
             COALESCE(SUM("unitsAvailable"),0)::int available,
             COALESCE(SUM("unitsReserved"),0)::int reserved
        FROM "FinishedGoodsLot" WHERE "productSkuId"=$1`, [skuId]);
-  return { produced: num(r.produced), available: num(r.available), reserved: num(r.reserved) };
+  // Free-to-promise, defined exactly as the application defines it:
+  // FinishedGoodsLot.availableQty - reservedQty (see prisma/schema.prisma). Deliberately
+  // not clamped at zero — a negative value means reserved exceeded available, which is
+  // precisely the over-reservation these suites exist to catch.
+  //
+  // Four committed assertions read `.free` while this function returned only
+  // produced/available/reserved, so every one of them compared against `undefined` and
+  // answered false in both directions. The arithmetic lives in oversell.mjs so that it is
+  // provable without a database; see harness-selftest.mjs.
+  const available = num(r.available), reserved = num(r.reserved);
+  return { produced: num(r.produced), available, reserved, free: freeUnits(available, reserved) };
 }
 export async function roastedStock(coffeeProductId) {
   return num((await one(
