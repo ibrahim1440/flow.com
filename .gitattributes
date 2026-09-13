@@ -1,0 +1,15 @@
+# Prisma migration files are immutable artifacts, and their bytes are load-bearing.
+#
+# Prisma records a SHA-256 of each migration.sql in the _prisma_migrations table when it is
+# applied, and compares that checksum against the file on disk on every later run. A
+# migration is therefore not just text that happens to be executed — its exact bytes are
+# part of the database's recorded history.
+#
+# On Windows, core.autocrlf defaults to true, so a clean checkout rewrites every LF in the
+# working tree to CRLF. The committed blobs stay LF and the SQL is unchanged in meaning, but
+# the file on disk no longer hashes to the checksum the database recorded, and the mismatch
+# is reported against migrations nobody has touched in months.
+#
+# eol=lf pins the working-tree representation regardless of any developer's core.autocrlf
+# setting, so the file that Prisma hashes is always the file that was applied.
+prisma/migrations/**/migration.sql text eol=lf
