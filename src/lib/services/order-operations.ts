@@ -386,6 +386,62 @@ export function canReserveToOrderLine(subject: {
   );
 }
 
+/**
+ * Late lifecycle barrier for an auto-reservation, mirroring the production and delivery ones.
+ *
+ * Call it as the LAST acquisition of a transaction that has just reserved stock to a line —
+ * after the allocation, lot and OrderItem work — so Order stays at the end of the
+ * StockAllocation → FinishedGoodsLot → OrderItem → Order chain and no inversion is
+ * introduced. Cancellation acquires the same resources in the same direction, so the two
+ * serialise against each other rather than deadlocking.
+ *
+ * ── Why the compare-and-swap on the line is not enough ────────────────────
+ * casUpdateOrderItem proves the LINE did not move: its predicate is the line's updatedAt
+ * and delivery figures. A cancellation writes Order and StockAllocation and never touches
+ * OrderItem, so that token still matched — the reservation written here was committed onto
+ * an order that had already been cancelled, and the cancellation's release had run before
+ * these rows existed. The result was stock promised to a dead order and invisible to every
+ * live one. The CAS answers "did this line change?"; this answers "may this order still
+ * take stock?", and both questions have to be asked.
+ *
+ * ── Why it throws instead of skipping ─────────────────────────────────────
+ * By the time this runs the allocation rows are already written, so the only way not to
+ * leave them behind is to take the whole transaction down. That is safe for the caller:
+ * packaging is retryable, and on the retry the order reads as ineligible in the ordinary
+ * unlocked pre-check, so no reservation is attempted and the packaging simply succeeds.
+ */
+export async function assertOrderStillAcceptsReservation(
+  tx: PrismaTx,
+  orderItemId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<
+    { status: string; approvalStatus: string; preparationDecision: string | null }[]
+  >`
+    SELECT o."status", o."approvalStatus", oi."preparationDecision"
+      FROM "OrderItem" oi
+      JOIN "Order" o ON o."id" = oi."orderId"
+     WHERE oi."id" = ${orderItemId}
+       FOR UPDATE OF o
+  `;
+  const current = rows[0];
+  if (!current) throw { _appCode: 404, message: "Order item not found." };
+
+  if (
+    !canReserveToOrderLine({
+      preparationDecision: current.preparationDecision,
+      order: { status: current.status, approvalStatus: current.approvalStatus },
+    })
+  ) {
+    throw {
+      _appCode: 409,
+      message:
+        `This order stopped accepting stock while the packaging was being recorded ` +
+        `(status "${current.status}"). Nothing was packaged or reserved — repeat the ` +
+        `request and the coffee will be packaged to free stock instead.`,
+    };
+  }
+}
+
 /** The transaction-current state a reservation decision must be based on. */
 export type LineReservationState = {
   id: string;

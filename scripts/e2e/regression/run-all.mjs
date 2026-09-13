@@ -23,6 +23,7 @@ const SUITES = [
   "production-concurrency",  // the gate under concurrent lifecycle transitions
   "lifecycle-locks",         // canonical lock order; deadlock freedom
   "reservation-cas",         // reservation compare-and-swap; no double reservation
+  "packaging-stock",         // kilogram packaging arithmetic, roasted draw-down, availability
   "po-lifecycle",            // Production Order state machine, batches, cancellation
   "hardening",               // concurrency, idempotency, forced rollback, security smoke
   "finished-products",       // units, lots, packaging paths

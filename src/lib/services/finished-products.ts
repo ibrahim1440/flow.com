@@ -441,6 +441,17 @@ export async function trimUnitReservationToDemand(
 
 // ─── Bill of materials ───────────────────────────────────────────────────────
 
+/**
+ * The batch states whose roasted coffee can actually be packed.
+ *
+ * Not a new rule invented here: it is the gate both packaging routes already apply before
+ * they will touch a batch. A batch still awaiting QC has not been cleared for anything, a
+ * Rejected one never will be, and a Blended one has had its coffee moved into the blend
+ * output. Each of those keeps a non-zero roastedAvailableKg, so a balance on its own is
+ * not availability — the state has to say the coffee is packable too.
+ */
+export const PACKABLE_BATCH_STATUSES: readonly string[] = ["Passed", "Partially Packaged"];
+
 export type BomRequirement = {
   type: "ROASTED_COFFEE" | "MATERIAL";
   label: string;
@@ -480,7 +491,7 @@ export async function explodeBom(
   });
   if (components.length === 0) return [];
 
-  // Roasted stock per coffee product, summed across every batch still holding some.
+  // Roasted stock per coffee product, summed across every batch that can still be packed.
   const coffeeIds = [
     ...new Set(
       components
@@ -492,7 +503,18 @@ export async function explodeBom(
   if (coffeeIds.length > 0) {
     const grouped = await tx.roastingBatch.groupBy({
       by: ["productId"],
-      where: { productId: { in: coffeeIds }, roastedAvailableKg: { gt: 0 } },
+      where: {
+        productId: { in: coffeeIds },
+        // Both halves are load-bearing. roastedAvailableKg is the authoritative remaining
+        // balance — it is exactly what packing draws down, so a batch that has been packed
+        // out reads as zero and drops out on its own. But a balance sitting on a batch that
+        // packaging would refuse is not availability: Rejected and Blended batches keep
+        // theirs, and a batch awaiting QC still holds its entire output. Reporting those as
+        // packable told the fulfilment and production screens the coffee was ready when
+        // nothing could have packed it.
+        status: { in: [...PACKABLE_BATCH_STATUSES] },
+        roastedAvailableKg: { gt: 0 },
+      },
       _sum: { roastedAvailableKg: true },
     });
     for (const g of grouped) {

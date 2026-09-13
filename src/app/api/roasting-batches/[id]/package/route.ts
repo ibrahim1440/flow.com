@@ -8,15 +8,64 @@ import {
   ALLOCATABLE_ITEM_SELECT,
   outstandingForItem,
   reserveShelfStock,
+  roundKg,
 } from "@/lib/services/shelf-allocation";
 import {
   readLineReservationState,
   canReserveToOrderLine,
   casUpdateOrderItem,
+  assertOrderStillAcceptsReservation,
 } from "@/lib/services/order-operations";
+import { PACKABLE_BATCH_STATUSES } from "@/lib/services/finished-products";
 
+// Tolerance on "is this roast fully packaged?". Bag sizes rarely divide a roast exactly,
+// so the last 100 g decides Packaged vs Partially Packaged rather than refusing the pack.
 const MARGIN = 0.1;
 
+/** Net weight of each bag size, in kilograms. A 1 kg bag holds 1 kg of roasted coffee. */
+const BAG_KG = { bags3kg: 3, bags1kg: 1, bags250g: 0.25, bags150g: 0.15 } as const;
+type BagField = keyof typeof BAG_KG;
+const BAG_FIELDS = Object.keys(BAG_KG) as BagField[];
+
+/** The columns this route decides from. Read once, under the batch lock. */
+type LockedBatch = {
+  id: string;
+  batchNumber: string;
+  status: string;
+  productId: string | null;
+  orderItemId: string | null;
+  productionOrderId: string | null;
+  roastedBeanQuantity: number;
+  roastedAvailableKg: number;
+  bags3kg: number;
+  bags1kg: number;
+  bags250g: number;
+  bags150g: number;
+  samplesGrams: number;
+};
+
+/**
+ * Pack a roast into legacy kilogram bags.
+ *
+ * Everything that depends on database state happens inside ONE transaction, and the first
+ * thing that transaction does is take the RoastingBatch row lock. That ordering is the
+ * whole point of this route's shape:
+ *
+ *   - the batch used to be read, and every quantity derived from it, before the
+ *     transaction opened. Two packers on one roast each computed their new bag counters
+ *     from the same stale snapshot and the last writer won, silently discarding the
+ *     other's bags while the ledger still recorded both of them;
+ *   - the lot's availableQty was ASSIGNED the cumulative packed weight rather than
+ *     incremented by this pack's delta, so once anything had shipped off the lot the next
+ *     pack put the shipped kilograms back: 10 kg roasted, 6 packed, 4 dispatched, 4 more
+ *     packed left 10 kg on a shelf holding 6;
+ *   - and the roasted balance the coffee came out of was never drawn down at all, so the
+ *     same kilograms stayed on the books as packable after they had been packed.
+ *
+ * RoastingBatch may be locked ahead of every stock and order lock — see the lock-order
+ * invariant in order-operations.ts — so taking it first costs nothing and makes the batch
+ * the single point of serialisation for its own packaging.
+ */
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -25,163 +74,244 @@ export async function PUT(
   if (error) return error;
 
   const { id } = await params;
-  const batch = await prisma.roastingBatch.findUnique({
-    where: { id },
-    include: {
-      orderItem: {
-        select: {
-          productId:    true,
-          productSkuId: true,
-        },
-      },
-    },
-  });
 
-  if (!batch) {
-    return NextResponse.json({ error: "Batch not found" }, { status: 404 });
-  }
-
-  // Read body before effectiveProductId resolution so body.productId can serve as fallback
-  // for bulk/custom orders where neither the batch nor the order item carries a product.
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; } catch { body = {}; }
 
-  const effectiveProductId =
-    batch.productId ??
-    batch.orderItem?.productId ??
-    (typeof body.productId === "string" && body.productId ? body.productId : null);
+  // ── Input validation ──────────────────────────────────────────────────────
+  // Pure: nothing here reads the database, so it stays outside the transaction.
+  const counts: Record<BagField, number> = {
+    bags3kg:  Number(body.bags3kg  ?? 0),
+    bags1kg:  Number(body.bags1kg  ?? 0),
+    bags250g: Number(body.bags250g ?? 0),
+    bags150g: Number(body.bags150g ?? 0),
+  };
+  const samplesGrams = Number(body.samplesGrams ?? 0);
 
-  const effectiveProductSkuId =
-    batch.orderItem?.productSkuId ??
-    (typeof body.productSkuId === "string" && body.productSkuId ? body.productSkuId : null);
+  const inputChecks: [string, number][] = [
+    ...BAG_FIELDS.map((f) => [f, counts[f]] as [string, number]),
+    ["samplesGrams", samplesGrams],
+  ];
+  for (const [name, value] of inputChecks) {
+    if (!Number.isFinite(value) || value < 0) {
+      return NextResponse.json({ error: `${name} must be a non-negative number.` }, { status: 400 });
+    }
+  }
 
-  if (!effectiveProductId) {
+  // The weight THIS request adds, and nothing else. Every balance below moves by this
+  // figure; the cumulative packed total is only ever used to decide whether the roast is
+  // finished, never as an inventory quantity.
+  const packagedDeltaKg = roundKg(
+    BAG_FIELDS.reduce((sum, f) => sum + counts[f] * BAG_KG[f], 0) + samplesGrams / 1000
+  );
+
+  if (packagedDeltaKg <= 0) {
     return NextResponse.json(
-      { error: "Cannot package batch: select a product for this order." },
+      { error: "At least one package quantity must be greater than zero." },
       { status: 400 }
-    );
-  }
-
-  // Validate body.productId against DB only when it is the fallback source
-  if (!batch.productId && !batch.orderItem?.productId && body.productId) {
-    const product = await prisma.coffeeProduct.findUnique({ where: { id: effectiveProductId } });
-    if (!product) return NextResponse.json({ error: "Product not found." }, { status: 400 });
-  }
-
-  if (batch.status !== "Passed" && batch.status !== "Partially Packaged") {
-    return NextResponse.json(
-      { error: `Cannot package batch with status "${batch.status}". Only QC-passed or partially packaged batches can be packaged.` },
-      { status: 400 }
-    );
-  }
-
-  // Reciprocal of the guard in ../pack-sku: a batch is packed either the legacy
-  // kilogram way or into SKU units, never both. This route does not draw down
-  // roastedAvailableKg, so without this check a roast already packed into units could be
-  // sold a second time as kilograms.
-  const unitLot = await prisma.finishedGoodsLot.findFirst({
-    where: { packedFromBatchId: batch.id },
-    select: { id: true },
-  });
-  if (unitLot) {
-    return NextResponse.json(
-      {
-        error: `Batch ${batch.batchNumber} was already packed into finished product units. A batch cannot be packed both ways.`,
-      },
-      { status: 409 }
     );
   }
 
   try {
-    const b3   = Number(body.bags3kg      ?? 0);
-    const b1   = Number(body.bags1kg      ?? 0);
-    const b250 = Number(body.bags250g     ?? 0);
-    const b150 = Number(body.bags150g     ?? 0);
-    const samp = Number(body.samplesGrams ?? 0);
-
-    const inputChecks: [string, number][] = [
-      ["bags3kg", b3], ["bags1kg", b1], ["bags250g", b250], ["bags150g", b150], ["samplesGrams", samp],
-    ];
-    for (const [name, val] of inputChecks) {
-      if (!Number.isFinite(val) || val < 0) {
-        return NextResponse.json({ error: `${name} must be a non-negative number.` }, { status: 400 });
-      }
-    }
-
-    const newBags3kg      = (batch.bags3kg      || 0) + b3;
-    const newBags1kg      = (batch.bags1kg      || 0) + b1;
-    const newBags250g     = (batch.bags250g     || 0) + b250;
-    const newBags150g     = (batch.bags150g     || 0) + b150;
-    const newSamplesGrams = (batch.samplesGrams || 0) + samp;
-
-    const totalPackagedKg = +(
-      newBags3kg * 3 +
-      newBags1kg * 1 +
-      newBags250g * 0.25 +
-      newBags150g * 0.15 +
-      newSamplesGrams / 1000
-    ).toFixed(3);
-
-    // Weight of only the bags submitted in THIS request — used for the ledger delta
-    const deltaKg = +(b3 * 3 + b1 * 1 + b250 * 0.25 + b150 * 0.15 + samp / 1000).toFixed(3);
-
-    if (deltaKg <= 0) {
-      return NextResponse.json({ error: "At least one package quantity must be greater than zero." }, { status: 400 });
-    }
-
-    if (totalPackagedKg > batch.roastedBeanQuantity + MARGIN) {
-      return NextResponse.json(
-        { error: `Total packaged weight (${totalPackagedKg}kg) would exceed roasted quantity (${batch.roastedBeanQuantity}kg).` },
-        { status: 400 }
-      );
-    }
-
-    const fullyPackaged = totalPackagedKg >= batch.roastedBeanQuantity - MARGIN;
-    const newStatus = fullyPackaged ? "Packaged" : "Partially Packaged";
-
-    if (!isValidTransition(batch.status, newStatus)) {
-      return NextResponse.json(
-        { error: `Cannot transition batch from "${batch.status}" to "${newStatus}".` },
-        { status: 409 }
-      );
-    }
-
     const updated = await prisma.$transaction(async (tx) => {
+      // ── 1. Lock the batch, then read the state every decision below uses ────
+      const locked = await tx.$queryRaw<LockedBatch[]>`
+        SELECT "id", "batchNumber", "status", "productId", "orderItemId", "productionOrderId",
+               "roastedBeanQuantity", "roastedAvailableKg",
+               "bags3kg", "bags1kg", "bags250g", "bags150g", "samplesGrams"
+          FROM "RoastingBatch"
+         WHERE "id" = ${id}
+           FOR UPDATE
+      `;
+      const batch = locked[0];
+      if (!batch) throw { _appCode: 404, message: "Batch not found" };
+
+      const orderItem = batch.orderItemId
+        ? await tx.orderItem.findUnique({
+            where: { id: batch.orderItemId },
+            select: { productId: true, productSkuId: true },
+          })
+        : null;
+
+      // ── 2. Which coffee this lot is ────────────────────────────────────────
+      const effectiveProductId =
+        batch.productId ??
+        orderItem?.productId ??
+        (typeof body.productId === "string" && body.productId ? body.productId : null);
+
+      if (!effectiveProductId) {
+        throw { _appCode: 400, message: "Cannot package batch: select a product for this order." };
+      }
+
+      // Validate the client's product only when it is the fallback source.
+      if (!batch.productId && !orderItem?.productId && body.productId) {
+        const product = await tx.coffeeProduct.findUnique({
+          where: { id: effectiveProductId },
+          select: { id: true },
+        });
+        if (!product) throw { _appCode: 400, message: "Product not found." };
+      }
+
+      // ── 3. Which SKU the lot is stamped with ───────────────────────────────
+      // The SKU decides which order lines this lot can later be matched to. Taken from the
+      // order item it is already trustworthy; taken from the request body it went through
+      // unchecked, so any caller could stamp an unrelated product's SKU — or an id that
+      // does not exist — onto a lot of somebody else's coffee. It must exist, and it must
+      // belong to the coffee actually being packed.
+      //
+      // Deliberately narrower than a full coffee-identity resolver: this refuses a foreign
+      // SKU, it does not try to infer the batch's coffee from one.
+      let effectiveProductSkuId: string | null = orderItem?.productSkuId ?? null;
+      if (
+        effectiveProductSkuId === null &&
+        body.productSkuId !== undefined &&
+        body.productSkuId !== null &&
+        body.productSkuId !== ""
+      ) {
+        if (typeof body.productSkuId !== "string") {
+          throw { _appCode: 400, message: "productSkuId must be a string." };
+        }
+        const sku = await tx.productSKU.findUnique({
+          where: { id: body.productSkuId },
+          select: { id: true, productId: true },
+        });
+        if (!sku) throw { _appCode: 400, message: "Product SKU not found." };
+        if (sku.productId !== effectiveProductId) {
+          throw {
+            _appCode: 400,
+            message: "That product SKU belongs to a different coffee than this batch.",
+          };
+        }
+        effectiveProductSkuId = sku.id;
+      }
+
+      // ── 4. Is this batch packable at all? ──────────────────────────────────
+      if (!PACKABLE_BATCH_STATUSES.includes(batch.status)) {
+        throw {
+          _appCode: 400,
+          message: `Cannot package batch with status "${batch.status}". Only QC-passed or partially packaged batches can be packaged.`,
+        };
+      }
+
+      // Reciprocal of the guard in ../pack-sku: a batch is packed either the legacy
+      // kilogram way or into SKU units, never both. Checked here, inside the transaction
+      // and under the batch lock, rather than before either existed.
+      const unitLot = await tx.finishedGoodsLot.findFirst({
+        where: { packedFromBatchId: batch.id },
+        select: { id: true },
+      });
+      if (unitLot) {
+        throw {
+          _appCode: 409,
+          message: `Batch ${batch.batchNumber} was already packed into finished product units. A batch cannot be packed both ways.`,
+        };
+      }
+
+      // ── 5. Cumulative totals, derived from the locked row ──────────────────
+      // Used only to answer "is the roast finished?" and to keep the bag counters honest.
+      const newCounts: Record<BagField, number> = {
+        bags3kg:  batch.bags3kg  + counts.bags3kg,
+        bags1kg:  batch.bags1kg  + counts.bags1kg,
+        bags250g: batch.bags250g + counts.bags250g,
+        bags150g: batch.bags150g + counts.bags150g,
+      };
+      const newSamplesGrams = batch.samplesGrams + samplesGrams;
+      const totalPackagedKg = roundKg(
+        BAG_FIELDS.reduce((sum, f) => sum + newCounts[f] * BAG_KG[f], 0) + newSamplesGrams / 1000
+      );
+
+      if (totalPackagedKg > batch.roastedBeanQuantity + MARGIN) {
+        throw {
+          _appCode: 400,
+          message: `Total packaged weight (${totalPackagedKg}kg) would exceed roasted quantity (${batch.roastedBeanQuantity}kg).`,
+        };
+      }
+
+      const fullyPackaged = totalPackagedKg >= batch.roastedBeanQuantity - MARGIN;
+      const newStatus = fullyPackaged ? "Packaged" : "Partially Packaged";
+
+      if (!isValidTransition(batch.status, newStatus)) {
+        throw {
+          _appCode: 409,
+          message: `Cannot transition batch from "${batch.status}" to "${newStatus}".`,
+        };
+      }
+
+      // ── 6. Consume the roasted coffee this pack is made of ─────────────────
+      // Finished stock may not be created unless the roasted balance behind it was
+      // actually drawn down, in this same transaction. Conditional even though the row is
+      // already locked: the WHERE clause is what makes the balance impossible to overdraw
+      // and keeps the non-negative CHECK constraint out of reach. The 0.0005 slack is half
+      // a gram, below the 3-decimal storage precision — the same tolerance the unit path
+      // uses on a value that was read rounded.
+      const drawn = await tx.$executeRaw`
+        UPDATE "RoastingBatch"
+           SET "roastedAvailableKg" = "roastedAvailableKg" - ${packagedDeltaKg}
+         WHERE "id" = ${batch.id}
+           AND ("roastedAvailableKg" + 0.0005) >= ${packagedDeltaKg}
+      `;
+      if (drawn !== 1) {
+        throw {
+          _appCode: 409,
+          message:
+            `Not enough roasted coffee on batch ${batch.batchNumber}: packing ${packagedDeltaKg}kg ` +
+            `needs more than the ${roundKg(batch.roastedAvailableKg)}kg still unpacked.`,
+        };
+      }
+
+      // ── 7. Bag counters and batch status ───────────────────────────────────
+      // Incremented rather than assigned. Under the lock either form is correct; the
+      // increment keeps it correct on its own if the lock is ever moved.
       const updatedBatch = await tx.roastingBatch.update({
-        where: { id },
+        where: { id: batch.id },
         data: {
-          bags3kg: newBags3kg, bags1kg: newBags1kg, bags250g: newBags250g,
-          bags150g: newBags150g, samplesGrams: newSamplesGrams, status: newStatus,
+          bags3kg:      { increment: counts.bags3kg },
+          bags1kg:      { increment: counts.bags1kg },
+          bags250g:     { increment: counts.bags250g },
+          bags150g:     { increment: counts.bags150g },
+          samplesGrams: { increment: samplesGrams },
+          status:       newStatus,
         },
       });
 
-      const lot = await tx.finishedGoodsLot.upsert({
+      // ── 8. The shelf grows by this pack's delta ────────────────────────────
+      // THE FIX: availableQty is a live balance, not a running total of everything ever
+      // packed. Assigning the cumulative figure put dispatched kilograms back on the shelf.
+      const existingLot = await tx.finishedGoodsLot.findUnique({
         where: { roastingBatchId: batch.id },
-        create: {
-          productId:       effectiveProductId,
-          productSkuId:    effectiveProductSkuId,
-          batchNumber:     batch.batchNumber,
-          roastingBatchId: batch.id,
-          quantityKg:      batch.roastedBeanQuantity,
-          availableQty:    totalPackagedKg,
-          status:          "AVAILABLE",
-        },
-        update: {
-          availableQty: totalPackagedKg,
-        },
+        select: { id: true, availableQty: true },
       });
+      const lotBalanceBefore = existingLot ? existingLot.availableQty : 0;
 
+      const lot = existingLot
+        ? await tx.finishedGoodsLot.update({
+            where: { id: existingLot.id },
+            data: { availableQty: { increment: packagedDeltaKg } },
+          })
+        : await tx.finishedGoodsLot.create({
+            data: {
+              productId:       effectiveProductId,
+              productSkuId:    effectiveProductSkuId,
+              batchNumber:     batch.batchNumber,
+              roastingBatchId: batch.id,
+              quantityKg:      batch.roastedBeanQuantity,
+              availableQty:    packagedDeltaKg,
+              status:          "AVAILABLE",
+            },
+          });
+
+      // ── 9. Ledger ──────────────────────────────────────────────────────────
+      // previous/new are the LOT's balance either side of this pack, not the running
+      // packed total. The two diverge the moment anything ships, and the ledger has to
+      // reconcile against the shelf rather than against the bag counters.
       await tx.inventoryMovement.create({
         data: {
           type:              "IN",
           category:          "FINISHED_GOODS",
           referenceEntityId: lot.id,
-          quantityChanged:   deltaKg,
-          // previousQuantity is totalPackagedKg - deltaKg:
-          //   first run  → totalPackaged == delta → previous = 0
-          //   subsequent → previous = accumulated total before this run
-          previousQuantity:  +(totalPackagedKg - deltaKg).toFixed(3),
-          newQuantity:       totalPackagedKg,
+          quantityChanged:   packagedDeltaKg,
+          previousQuantity:  roundKg(lotBalanceBefore),
+          newQuantity:       roundKg(lotBalanceBefore + packagedDeltaKg),
           sourceDocType:     "PACKING",
           sourceDocId:       batch.id,
           userId:            user.id,
@@ -189,45 +319,45 @@ export async function PUT(
         },
       });
 
-      // ── Claim the packaged coffee for the order it was roasted for ──────────
+      // ── 10. Claim the packaged coffee for the order it was roasted for ─────
       // Reserving here is what keeps the shelf honest: only the genuine surplus — coffee
-      // beyond what this order still needs — stays free for other orders to draw on,
-      // which is exactly what the orders screen already calls "surplus to inventory".
+      // beyond what this order still needs — stays free for other orders to draw on.
       //
       // A stock batch has no order item at all. Nothing is reserved, so its whole output
-      // lands on the shelf free-to-promise — which is the entire point of roasting to
-      // stock, and the only way the shelf gets filled on purpose rather than by accident.
+      // lands on the shelf free-to-promise, which is the point of roasting to stock.
       const owner = batch.orderItemId
         ? await tx.orderItem.findUnique({
             where: { id: batch.orderItemId },
-            select: { ...ALLOCATABLE_ITEM_SELECT, preparationDecision: true, quantityUnits: true, order: { select: { status: true } } },
+            select: {
+              ...ALLOCATABLE_ITEM_SELECT,
+              preparationDecision: true,
+              quantityUnits: true,
+              order: { select: { status: true } },
+            },
           })
         : null;
-      // A cancelled or blocked order must not silently take stock back. Cancelling
-      // releases its reservations; re-claiming them here for a batch that was already in
-      // the roaster would strand the coffee on a dead order.
+
       // A SKU line is reserved in UNITS, through the unit path only. Auto-reserving
       // kilograms for it here produces an allocation in the wrong denomination: the unit
       // path cannot see it, preparation review still reports the line as needing
-      // production, and the kilograms sit locked on a legacy lot helping nobody. Seen on
-      // real data — a 10-unit order carrying a phantom 4.2 kg reservation.
+      // production, and the kilograms sit locked on a legacy lot helping nobody.
       const ownerIsUnitLine = owner !== null && owner.quantityUnits !== null;
 
-      // ── Order-linked auto-reservation ──────────────────────────────────────
       // Packaging itself is never blocked by the owner's state: the coffee was roasted and
       // packed and belongs on the shelf either way. Only the decision to PROMISE it to the
       // owning order is gated, and an ineligible owner simply means the lot stays
       // free-to-promise — which is what roast-to-stock produces anyway.
-      //
-      // The old gate refused only Cancelled, Rejected and a Blocked decision, so an order
-      // still Waiting Approval, still unreviewed, On Hold or already Completed could take
-      // stock. canReserveToOrderLine is the shared vocabulary: a reviewed, approved, live
-      // order line and nothing else.
+      // Set when a reservation was actually written, so the Order barrier below knows it
+      // has something to validate. It is deliberately NOT taken inline with the
+      // reservation: Order must be this transaction's last acquisition, and the production
+      // order recalculation still has to happen in between.
+      let reservedLineId: string | null = null;
+
       if (owner && !ownerIsUnitLine) {
-        // Transaction-current, and re-read here rather than trusted from the unlocked
-        // snapshot above: the outstanding figure below is derived from quantity and
-        // delivered, and a delivery committing since that read would make this reserve
-        // against demand that no longer exists.
+        // Transaction-current, and re-read here rather than trusted from the snapshot
+        // above: the outstanding figure below is derived from quantity and delivered, and
+        // a delivery committing since that read would make this reserve against demand
+        // that no longer exists.
         const fresh = await readLineReservationState(tx, owner.id);
         if (fresh && canReserveToOrderLine(fresh)) {
           const outstanding = await outstandingForItem(tx, {
@@ -246,12 +376,34 @@ export async function PUT(
               { id: fresh.id, updatedAt: fresh.updatedAt, deliveredUnits: fresh.deliveredUnits, deliveredQty: fresh.deliveredQty },
               {}
             );
+            reservedLineId = fresh.id;
           }
         }
       }
 
+      // ── 11. Production order, BEFORE the Order barrier ─────────────────────
+      // Ordering here is not cosmetic. Every other path that touches both resources takes
+      // ProductionOrder before Order: roasting recalculates the production order and only
+      // then asserts the order still accepts production, and both production-order routes
+      // write the production order before appending an activity row, whose foreign key
+      // takes FOR KEY SHARE on Order. Taking Order first here and reaching back for the
+      // production order afterwards is the one inversion that would let packaging hold
+      // Order while waiting for a production order that a concurrent roast holds while
+      // waiting for Order — a genuine cycle, and the reason this call sits above the
+      // barrier rather than after it.
       if (batch.productionOrderId) {
         await recalcProductionOrderStatus(batch.productionOrderId, tx);
+      }
+
+      // ── 12. Order: the last acquisition of this transaction ────────────────
+      // The CAS above proves the LINE did not move, and a cancellation never writes the
+      // line — it writes Order and StockAllocation. So the token still matched while the
+      // cancel's release ran before these rows existed, and the reservation was committed
+      // onto a dead order. This is the barrier for that, and it is taken last so packaging
+      // ends on the same StockAllocation -> FinishedGoodsLot -> OrderItem -> ProductionOrder
+      // -> Order sequence every other lifecycle path uses.
+      if (reservedLineId) {
+        await assertOrderStillAcceptsReservation(tx, reservedLineId);
       }
 
       return updatedBatch;
@@ -259,9 +411,10 @@ export async function PUT(
 
     return NextResponse.json(updated);
   } catch (err) {
-    // The reservation compare-and-swap throws the `{ _appCode, message }` shape the newer
-    // routes use. handlePrismaError does not understand it and would turn a deliberate 409
-    // into a generic 500, so it is handled locally here as the other routes do.
+    // The reservation compare-and-swap, the lifecycle barrier and every guard above throw
+    // the `{ _appCode, message }` shape the newer routes use. handlePrismaError does not
+    // understand it and would turn a deliberate 409 into a generic 500, so it is handled
+    // locally here as the other routes do.
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };
       return NextResponse.json({ error: e.message }, { status: e._appCode });
