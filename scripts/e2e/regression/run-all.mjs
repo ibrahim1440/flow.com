@@ -26,6 +26,7 @@ const SUITES = [
   "packaging-stock",         // kilogram packaging arithmetic, roasted draw-down, availability
   "packaging-concurrency",   // canonical lot lock order; one packaging method per roast
   "packaging-idempotency",   // operation identity: replay, mismatch, retry-after-rollback
+  "packaging-identity",      // coffee identity fail-closed; SKU auto-reservation to the owning line
   "po-lifecycle",            // Production Order state machine, batches, cancellation
   "hardening",               // concurrency, idempotency, forced rollback, security smoke
   "finished-products",       // units, lots, packaging paths

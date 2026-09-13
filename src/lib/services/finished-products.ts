@@ -214,6 +214,69 @@ export async function reserveFinishedUnits(
 }
 
 /**
+ * Promise units from ONE named lot to an order line.
+ *
+ * reserveFinishedUnits above answers a different question — "cover this demand from the
+ * shelf, oldest lot first" — and answering it here would be wrong. Coffee packed to fulfil
+ * a specific order has to be promised to THAT order, out of the lot this packaging run just
+ * produced; letting FIFO choose would hand the line somebody else's older stock and leave
+ * the fresh units free for another order to take, which is the defect rather than the fix.
+ *
+ * Takes at most what the lot has free, so a caller asking for more than exists gets a
+ * partial reservation rather than a failure: the coffee is on the shelf either way and the
+ * remainder is simply not promised.
+ *
+ * The conditional UPDATE is the atomic claim, exactly as in the FIFO path — the lot lock is
+ * held but the predicate is what makes unitsReserved > unitsAvailable unreachable even if
+ * the lock were ever moved.
+ */
+export async function reserveFinishedUnitsFromLot(
+  tx: PrismaTx,
+  item: UnitAllocatableItem,
+  lotId: string,
+  wantedUnits: number,
+  userId: string | null
+): Promise<number> {
+  const want = Math.max(0, Math.trunc(wantedUnits));
+  if (want <= 0) return 0;
+
+  await lockLotsInIdOrder(tx, [lotId]);
+
+  const lot = await tx.finishedGoodsLot.findUnique({
+    where: { id: lotId },
+    select: { unitsAvailable: true, unitsReserved: true, status: true, isUnitTracked: true },
+  });
+  if (!lot || !lot.isUnitTracked || lot.status !== "AVAILABLE") return 0;
+
+  const take = Math.min(want, Math.max(0, lot.unitsAvailable - lot.unitsReserved));
+  if (take <= 0) return 0;
+
+  const affected = await tx.$executeRaw`
+    UPDATE "FinishedGoodsLot"
+       SET "unitsReserved" = "unitsReserved" + ${take}
+     WHERE "id" = ${lotId}
+       AND "status" = 'AVAILABLE'
+       AND "isUnitTracked" = true
+       AND ("unitsAvailable" - "unitsReserved") >= ${take}
+  `;
+  if (affected !== 1) return 0;
+
+  await tx.stockAllocation.create({
+    data: {
+      orderItemId: item.id,
+      finishedGoodsLotId: lotId,
+      quantityUnits: take,
+      // Derived, never independent — see the note at the top of this file.
+      quantityKg: kgForUnits(item.productSku, take),
+      status: "RESERVED",
+      createdById: userId,
+    },
+  });
+
+  return take;
+}
+
+/**
  * Hand back every unit this order item is holding.
  *
  * The status flip comes FIRST and is itself the lock, exactly as in the kilogram path:

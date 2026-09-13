@@ -248,19 +248,32 @@ async function main() {
   const reqE4 = await requirementGet(itemE);
   check("nothing outstanding again", reqE4.json.shortfallUnits === 0 && reqE4.json.scheduledUnits === 25, S({ s: reqE4.json.scheduledUnits, short: reqE4.json.shortfallUnits }));
 
-  sub("D4. partial production does not release demand it has not met");
-  // Produce 6 of poE1's 15 units. Scheduled should fall by 6 only after those units are
-  // reserved to the line; until then the order still owes its full remainder.
+  sub("D4. partial production reserves what it produced to the line that ordered it");
+  // Produce 6 of poE1's 15 units. Scheduled falls by 6 as they materialise, and — since
+  // R2.3 — those units are claimed by the order line as part of the packaging operation
+  // rather than being left on the shelf for a later review to find.
   const idnB = await roastAndPass(P, C.coffees.indonesia, C.beans.indonesia, 5, 4, 1, "D02");
   await poLink(poE1.id, idnB.id);
   await packSku(idnB.id, C.skus.idn250.id, 6);
   const reqE5 = await requirementGet(itemE);
   check("scheduled falls to 19 as 6 units materialise", reqE5.json.scheduledUnits === 19, S({ s: reqE5.json.scheduledUnits }));
-  // The 6 packed units are free stock on the shelf until a preparation review claims
-  // them, so for that window they count towards neither `reserved` nor `scheduled` and
-  // the line reads 6 short. This is how reservation has always worked in this ERP —
-  // review is what claims stock — but it is worth stating plainly.
-  check("packed-but-unreserved units leave a transient 6-unit gap", reqE5.json.shortfallUnits === 6, String(reqE5.json.shortfallUnits));
+  // ── Behaviour changed deliberately in R2.3 ──────────────────────────────
+  // This assertion used to require a 6-unit gap, and described it as "packed-but-unreserved
+  // units leave a transient gap ... review is what claims stock". That gap WAS the defect:
+  // coffee produced against this very production order landed free-to-promise, the line
+  // still read short, and any other order could be promised the units first. Packaging now
+  // reserves its own output to the line the production order was raised from, so the gap is
+  // closed at the moment the units exist.
+  //
+  // Note what this proves about the route taken: the batch is a STOCK roast — it carries no
+  // orderItemId at all — and the line is reached through
+  // RoastingBatch.productionOrderId -> ProductionOrder.sourceOrderItemId. It is the only
+  // place in the suites that exercises that ownership path end to end.
+  check("the 6 produced units are reserved to the line, leaving no gap",
+    reqE5.json.shortfallUnits === 0, String(reqE5.json.shortfallUnits));
+  check("  and they show up as reserved, not merely as produced",
+    reqE5.json.reservedUnits === 11,
+    S({ ordered: reqE5.json.orderedUnits, reserved: reqE5.json.reservedUnits, scheduled: reqE5.json.scheduledUnits }));
   issue(
     "LOW",
     "Freshly packed units read as a shortfall until the preparation review claims them",

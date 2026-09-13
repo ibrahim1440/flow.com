@@ -83,6 +83,10 @@ export const ACTIVITY_TYPES = [
   "PRODUCTION_ORDER_CANCELLED",
   "PRODUCTION_BATCH_LINKED",
   "PRODUCTION_BATCH_UNLINKED",
+  // Packaging that promises its own output to the order it was roasted for. On the customer
+  // order's timeline for the same reason the production events are: the person asking why an
+  // order was or was not covered wants the packaging run in the same list as the review.
+  "STOCK_RESERVED_FROM_PACKAGING",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 

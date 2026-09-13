@@ -17,6 +17,7 @@ import {
   assertOrderStillAcceptsReservation,
 } from "@/lib/services/order-operations";
 import { PACKABLE_BATCH_STATUSES } from "@/lib/services/finished-products";
+import { resolveBatchCoffeeIdentity } from "@/lib/services/batch-identity";
 import {
   readRequestKey,
   packagingRequestHash,
@@ -172,22 +173,30 @@ export async function PUT(
         : null;
 
       // ── 2. Which coffee this lot is ────────────────────────────────────────
-      const effectiveProductId =
-        batch.productId ??
-        orderItem?.productId ??
-        (typeof body.productId === "string" && body.productId ? body.productId : null);
+      // Proved from backend records, never supplied by the caller. The chain this replaces
+      // ended in `body.productId`, so whenever the backend could not answer — which is the
+      // normal state of an order-backed batch — the request decided what coffee the lot was
+      // and stamped it on finished stock. That is not a fallback, it is the caller writing
+      // the answer to the question being asked.
+      const identity = await resolveBatchCoffeeIdentity(tx, batch);
+      if (!identity.ok) throw { _appCode: identity.status, message: identity.message };
+      const effectiveProductId = identity.productId;
 
-      if (!effectiveProductId) {
-        throw { _appCode: 400, message: "Cannot package batch: select a product for this order." };
-      }
-
-      // Validate the client's product only when it is the fallback source.
-      if (!batch.productId && !orderItem?.productId && body.productId) {
-        const product = await tx.coffeeProduct.findUnique({
-          where: { id: effectiveProductId },
-          select: { id: true },
-        });
-        if (!product) throw { _appCode: 400, message: "Product not found." };
+      // A client may still SEND a product, and it is still worth sending: it is what turns a
+      // stale screen into an error instead of a wrong lot. It is treated as an assertion to
+      // be checked, not as a source to be believed.
+      if (body.productId !== undefined && body.productId !== null && body.productId !== "") {
+        if (typeof body.productId !== "string") {
+          throw { _appCode: 400, message: "productId must be a string." };
+        }
+        if (body.productId !== effectiveProductId) {
+          throw {
+            _appCode: 409,
+            message:
+              "The coffee sent with this request is not the coffee this batch is. " +
+              "Reload the packaging screen and try again.",
+          };
+        }
       }
 
       // ── 3. Which SKU the lot is stamped with ───────────────────────────────

@@ -4,7 +4,20 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
-import { explodeBom, kgForUnits, roundKg } from "@/lib/services/finished-products";
+import {
+  explodeBom, kgForUnits, roundKg, reserveFinishedUnitsFromLot,
+} from "@/lib/services/finished-products";
+import {
+  resolveBatchCoffeeIdentity,
+  resolvePackagingReservationTarget,
+  outstandingUnitsForLine,
+} from "@/lib/services/batch-identity";
+import {
+  canReserveToOrderLine,
+  casUpdateOrderItem,
+  assertOrderStillAcceptsReservation,
+  appendOrderActivity,
+} from "@/lib/services/order-operations";
 import {
   readRequestKey,
   packagingRequestHash,
@@ -88,9 +101,10 @@ export async function POST(request: Request, { params }: Params) {
       // bill of materials, the roasted balance — is then decided while holding it.
       const locked = await tx.$queryRaw<{
         id: string; batchNumber: string; status: string; productId: string | null;
-        roastedAvailableKg: number; productionOrderId: string | null;
+        roastedAvailableKg: number; productionOrderId: string | null; orderItemId: string | null;
       }[]>`
-        SELECT "id", "batchNumber", "status", "productId", "roastedAvailableKg", "productionOrderId"
+        SELECT "id", "batchNumber", "status", "productId", "roastedAvailableKg",
+               "productionOrderId", "orderItemId"
           FROM "RoastingBatch"
          WHERE "id" = ${id}
            FOR UPDATE
@@ -133,6 +147,23 @@ export async function POST(request: Request, { params }: Params) {
       if (!sku.isActive)
         throw { _appCode: 409, message: `"${sku.skuCode}" is inactive and cannot be packed.` };
 
+      // ── Which coffee is this, really? ──────────────────────────────────────
+      // Asked here, before a single balance moves, and answered from backend records only.
+      // The guard this replaces compared the bill of materials against batch.productId,
+      // which is NULL on every order-backed roast — so it short-circuited and matched
+      // nothing on exactly the batches it was written to protect.
+      const identity = await resolveBatchCoffeeIdentity(tx, batch);
+      if (!identity.ok) throw { _appCode: identity.status, message: identity.message };
+
+      if (sku.productId !== identity.productId) {
+        throw {
+          _appCode: 409,
+          message:
+            `"${sku.skuCode}" is not made from the coffee on batch ${batch.batchNumber}, ` +
+            "so it cannot be packed from it.",
+        };
+      }
+
       // ── Bill of materials ──────────────────────────────────────────────────
       const requirements = await explodeBom(tx, sku.id, units);
       if (requirements.length === 0)
@@ -151,9 +182,13 @@ export async function POST(request: Request, { params }: Params) {
       );
 
       if (coffeeNeeded > 0) {
+        // Belt and braces behind the SKU check above. That one proves the SKU's own coffee
+        // matches the batch; this catches a bill of materials that names a DIFFERENT coffee
+        // from the SKU it belongs to. It compares against the resolved identity rather than
+        // batch.productId, so unlike before it can actually fire on an order-backed roast.
         const coffeeLines = requirements.filter((r) => r.type === "ROASTED_COFFEE");
         const mismatched = coffeeLines.find(
-          (r) => r.coffeeProductId && batch.productId && r.coffeeProductId !== batch.productId
+          (r) => r.coffeeProductId && r.coffeeProductId !== identity.productId
         );
         if (mismatched)
           throw {
@@ -319,11 +354,98 @@ export async function POST(request: Request, { params }: Params) {
         });
       }
 
+      // ── Claim the units for the order they were roasted for ────────────────
+      // Coffee packed to fulfil a specific order used to land free-to-promise: the route
+      // created the lot and stopped. Preparation review still reported the line as needing
+      // production, and any other order could be promised the units first.
+      //
+      // Reserving is gated, never assumed. A roast to stock has no owner. A line that
+      // ordered a different SKU of the same coffee is not fulfilled by these units — a
+      // 250 g pack does not satisfy a 1 kg line, and pretending otherwise would be an
+      // oversell dressed up as a convenience. And an order that has stopped accepting stock
+      // gets nothing, exactly as the kilogram path already behaves.
+      let reservedUnits = 0;
+      let reservedLineId: string | null = null;
+      let reservedOrderId: string | null = null;
+
+      const ownerId = await resolvePackagingReservationTarget(tx, batch);
+      if (ownerId) {
+        // One read, not three. Everything the reservation needs — eligibility, the demand
+        // ceiling, the SKU to match against and the order to write the activity to — comes
+        // from the same row, and this database is a sixth of a second away: reading it once
+        // per question would spend three round trips inside a transaction that is holding a
+        // pooled connection and a row lock on the batch the whole time.
+        //
+        // Read here rather than trusted from a snapshot taken at the top of the transaction:
+        // the ceiling below is derived from quantity and delivered, and a delivery
+        // committing in between would make this reserve against demand that no longer
+        // exists. The compare-and-swap further down closes the remaining window.
+        const owner = await tx.orderItem.findUnique({
+          where: { id: ownerId },
+          select: {
+            id: true,
+            orderId: true,
+            productSkuId: true,
+            updatedAt: true,
+            quantityUnits: true,
+            deliveredUnits: true,
+            deliveredQty: true,
+            preparationDecision: true,
+            order: { select: { status: true, approvalStatus: true } },
+          },
+        });
+
+        if (
+          owner &&
+          owner.quantityUnits !== null &&
+          owner.productSkuId === sku.id &&
+          canReserveToOrderLine(owner)
+        ) {
+          const outstanding = await outstandingUnitsForLine(tx, {
+            id: owner.id,
+            quantityUnits: owner.quantityUnits,
+            deliveredUnits: owner.deliveredUnits,
+          });
+          const take = Math.min(units, outstanding);
+          if (take > 0) {
+            reservedUnits = await reserveFinishedUnitsFromLot(
+              tx,
+              { id: owner.id, productSkuId: sku.id, productSku: { weightGrams: sku.weightGrams } },
+              lot.id,
+              take,
+              user.id
+            );
+            if (reservedUnits > 0) {
+              // Compare-and-swap on the line the ceiling was computed from. Packaging writes
+              // no other OrderItem field; this guard write exists purely to make the
+              // reservation atomic with respect to the demand behind it, and it runs AFTER
+              // the allocation and lot work so StockAllocation -> FinishedGoodsLot ->
+              // OrderItem is preserved.
+              await casUpdateOrderItem(
+                tx,
+                {
+                  id: owner.id,
+                  updatedAt: owner.updatedAt,
+                  deliveredUnits: owner.deliveredUnits,
+                  deliveredQty: owner.deliveredQty,
+                },
+                {}
+              );
+              reservedLineId = owner.id;
+              reservedOrderId = owner.orderId;
+            }
+          }
+        }
+      }
+
       const response = {
         lotId: lot.id,
         skuCode: sku.skuCode,
         unitsPacked: units,
         unitsAvailableOnLot: lot.unitsAvailable,
+        reservedUnits,
+        reservedToOrderItemId: reservedLineId,
+        freeUnits: Math.max(0, units - reservedUnits),
         roastedCoffeeConsumedKg: coffeeNeeded,
         roastedAvailableKgRemaining: roundKg(after.roastedAvailableKg),
         materialsConsumed: requirements
@@ -350,7 +472,38 @@ export async function POST(request: Request, { params }: Params) {
         userId: user.id,
       });
 
+      // ── Production order, then Order: the last two acquisitions ────────────
+      // Same ordering the kilogram path was corrected to. Every path that touches both takes
+      // ProductionOrder before Order, and the activity row appended below has a foreign key
+      // to Order, so it belongs here at the very end rather than next to the reservation.
       if (batch.productionOrderId) await recalcProductionOrderStatus(batch.productionOrderId, tx);
+
+      if (reservedLineId && reservedOrderId) {
+        await assertOrderStillAcceptsReservation(tx, reservedLineId);
+
+        // Packaging that promises stock is a decision somebody will later ask about, and
+        // until now it left no trace on the order's timeline. Written after the barrier: the
+        // insert's foreign key takes a lock on Order, which this transaction now holds.
+        {
+          await appendOrderActivity(tx, {
+            orderId: reservedOrderId,
+            type: "STOCK_RESERVED_FROM_PACKAGING",
+            message:
+              `${reservedUnits} × ${sku.skuCode} reserved to this order straight from ` +
+              `packaging batch ${batch.batchNumber}, by ${user.name}.`,
+            authorId: user.id,
+            authorName: user.name,
+            metadata: {
+              orderItemId: reservedLineId,
+              roastingBatchId: batch.id,
+              finishedGoodsLotId: lot.id,
+              reservedUnits,
+              unitsPacked: units,
+              skuCode: sku.skuCode,
+            },
+          });
+        }
+      }
 
       return response;
     }, TX_OPTS);
