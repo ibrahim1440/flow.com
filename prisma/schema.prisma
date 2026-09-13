@@ -223,6 +223,7 @@ model RoastingBatch {
   finishedGoodsLots     FinishedGoodsLot[]
   packedLots            FinishedGoodsLot[]    @relation("PackedFromBatch")
   serialHistory         BatchSerialHistory[]
+  packagingOperations   PackagingOperation[]
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
@@ -552,6 +553,8 @@ model FinishedGoodsLot {
   packedFromBatchId String?
   packedFromBatch   RoastingBatch? @relation("PackedFromBatch", fields: [packedFromBatchId], references: [id])
 
+  packagingOperations PackagingOperation[]
+
   @@index([status])
   @@index([createdAt])
   @@index([productSkuId, status])
@@ -592,6 +595,76 @@ model StockAllocation {
 }
 
 // ─── Product Catalog & Production Planning ────────────────────────────────────
+
+enum PackagingMethod {
+  KG // the legacy kilogram bag path — PUT /api/roasting-batches/[id]/package
+  UNIT // the finished-SKU path      — POST /api/roasting-batches/[id]/pack-sku
+}
+
+/**
+ * One packaging SUBMIT, recorded so that a retry can be recognised instead of re-executed.
+ *
+ * Packaging is not naturally idempotent and never can be. Packing a roast in several goes
+ * is ordinary operational reality, so "the same request twice" and "two genuine partial
+ * packs" are indistinguishable from the payload alone — the two are separated only by the
+ * key the client chose. That is why identity lives here, on the operation, and not as a
+ * single request key on RoastingBatch: one key per batch would make the second partial pack
+ * look like a replay of the first.
+ *
+ * Scoped to (batchId, requestKey) rather than requestKey alone. A key is meaningful only
+ * against the batch it was submitted for; a global unique would make two unrelated roasts
+ * collide if a client ever reused a key, and would turn a local mistake into a cross-batch
+ * failure.
+ *
+ * The row is written in the SAME transaction as the stock it describes, so a failed
+ * packaging leaves no operation behind and the same key may legitimately be retried.
+ */
+model PackagingOperation {
+  id String @id @default(cuid())
+
+  // RESTRICT, deliberately. This table is the audit record of stock that physically moved,
+  // so a cascade would erase the history at exactly the moment it matters most. The batch
+  // DELETE route carries a matching domain guard that answers 409 before the database is
+  // reached — the constraint is the backstop, not the user-facing behaviour.
+  batchId String
+  batch   RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  // Client-supplied idempotency key, or a server-generated one for callers that predate
+  // the contract. A server-generated key gives the operation an audit identity but cannot
+  // deduplicate a retry, because the retry would arrive without the original key.
+  requestKey String
+
+  // SHA-256 over the NORMALISED request intent, never over raw JSON text — property order
+  // must not change the hash. Same key + different hash is a client error, not a replay.
+  requestHash String
+
+  method PackagingMethod
+
+  // Kilograms for the KG path, whole units for the UNIT path. Float to match the rest of
+  // the packaging domain (StockAllocation.quantityKg, FinishedGoodsLot.availableQty);
+  // the Decimal columns in this schema belong to accounting.
+  quantityKg    Float?
+  quantityUnits Int?
+
+  productSkuId String?
+  productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
+
+  finishedGoodsLotId String?
+  finishedGoodsLot   FinishedGoodsLot? @relation(fields: [finishedGoodsLotId], references: [id])
+
+  // The response the first execution returned, replayed verbatim to a retry.
+  responseStatus Int
+  responseJson   Json
+
+  // Employee.id, denormalized — no FK relation (matches the InventoryMovement /
+  // OrderActivity / WorkItemClaim audit-table convention).
+  userId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, requestKey])
+  @@index([batchId, createdAt])
+}
 
 enum ProductionOrderStatus {
   PENDING
@@ -702,6 +775,7 @@ model ProductSKU {
   orderItems        OrderItem[]
   finishedGoodsLots FinishedGoodsLot[]
   productionOrders  ProductionOrder[]
+  packagingOperations PackagingOperation[]
 
   // ─── Finished Products catalog (additive) ────────────────────────────────
   // Explicit display name. Nullable because the six pre-existing SKUs were created

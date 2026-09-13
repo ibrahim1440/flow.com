@@ -34,6 +34,14 @@
 
 import { freeUnits, assessOversell } from "./oversell.mjs";
 import { classifySuiteResult } from "./suite-verdict.mjs";
+// The very modules the application ships, imported directly. Node strips the types, so
+// this needs no build step — which is the whole point: the client-side rules that decide
+// whether a roast can be packed twice are provable on a clean clone.
+import {
+  newRequestKey, createRequestKeyHolder, isConclusiveResponse,
+} from "../../../src/lib/request-key.ts";
+import { evaluateResetAuthorization } from "../../../src/lib/reset-safety.ts";
+import { readRequestKey } from "../../../src/lib/services/packaging-idempotency.ts";
 
 let pass = 0,
   fail = 0;
@@ -222,6 +230,227 @@ check("  the exemption applies only to the declared suite", undeclared.length > 
 // CASE D — a suite that printed failures and then claimed success.
 const liar = classifySuiteResult({ name: "delivery", code: 0, reported: true, passed: 3, failed: 4 });
 check("D. a suite reporting failures but exiting 0 is rejected", liar.includes("reported 4 failure(s) but exited 0"), JSON.stringify(liar));
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// REQUEST-KEY LIFECYCLE — the client half of packaging idempotency.
+//
+// The server half is proved in packaging-idempotency.mjs, over HTTP, against a database.
+// None of that can prove the part that actually decides whether an operator can double-pack
+// a roast: whether the BROWSER sends the same key twice when it should, and a different key
+// when it should. That is pure logic about when a key is minted and when it is retired, and
+// it is asserted here, against the same module the packaging page imports.
+//
+// It also cross-checks the two halves against each other — the client's generated key is
+// fed through the SERVER's own validator, so a change to either contract that breaks the
+// other fails here rather than in production.
+section("REQUEST-KEY LIFECYCLE (client, no browser, no database)");
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+// 1 — one submit, one key.
+const h = createRequestKeyHolder();
+check("a holder mints nothing until an attempt is made", h.current() === null, String(h.current()));
+const first = h.keyForAttempt();
+check("the first attempt mints a v4 UUID", UUID_V4.test(first), first);
+check("asking again during the same attempt returns the SAME key", h.keyForAttempt() === first, h.keyForAttempt());
+
+// 2 — an unknown outcome keeps the key, so a retry is the same operation.
+// This is the case that matters: the pack may have committed and the answer been lost.
+h.recordResponse(503);
+check("a 5xx leaves the operation unresolved and keeps the key", h.current() === first, String(h.current()));
+check("the retry after a 5xx carries the same key", h.keyForAttempt() === first, h.keyForAttempt());
+// A dropped connection never reports a status at all, which is the same thing: nothing is
+// retired because nothing was decided.
+check("a dropped connection (no status reported) also keeps the key", h.current() === first, String(h.current()));
+
+// 3 — a decided outcome retires the key, so the next action is a new operation.
+h.recordResponse(200);
+check("a 2xx retires the key", h.current() === null, String(h.current()));
+const second = h.keyForAttempt();
+check("a genuinely new partial pack gets a DIFFERENT key", second !== first, second + " vs " + first);
+
+// A refusal is decided too: nothing was written, so the operator may correct the quantity
+// and submit again. Keeping the key here would answer that correction with a 422 mismatch.
+h.recordResponse(409);
+check("a 4xx refusal also retires the key", h.current() === null, String(h.current()));
+const third = h.keyForAttempt();
+check("the corrected submit is a new operation, not a replay", third !== second, third + " vs " + second);
+
+// 4 — the two packing forms must not share an operation identity.
+const kg = createRequestKeyHolder();
+const sku = createRequestKeyHolder();
+check("separate holders never collide", kg.keyForAttempt() !== sku.keyForAttempt(),
+  kg.current() + " vs " + sku.current());
+
+// 5 — the generator is not degenerate. A collision would make a real pack silently answer
+// with another operation's stored result, so this is a correctness property, not hygiene.
+const minted = new Set();
+for (let i = 0; i < 2000; i++) minted.add(newRequestKey());
+check("2000 generated keys are all distinct", minted.size === 2000, minted.size + "/2000");
+
+// 6 — CROSS-CHECK: the server's own validator accepts what the client generates.
+const accepted = readRequestKey(new Request("http://x/", { headers: { "Idempotency-Key": first } }));
+check("the server validator accepts a client-generated key",
+  accepted.ok === true && accepted.key === first && accepted.clientSupplied === true,
+  JSON.stringify(accepted));
+
+// ...and still refuses the things it is there to refuse, proving the check above is not
+// vacuous because the validator waves everything through.
+const blank = readRequestKey(new Request("http://x/"));
+check("a caller that sends no key gets a server-generated one, flagged as such",
+  blank.ok === true && blank.clientSupplied === false && blank.key.startsWith("srv-"),
+  JSON.stringify(blank));
+const dirty = readRequestKey(new Request("http://x/", { headers: { "Idempotency-Key": 'a b"c' } }));
+check("the validator still refuses a key outside the charset", dirty.ok === false, JSON.stringify(dirty));
+const long = readRequestKey(new Request("http://x/", { headers: { "Idempotency-Key": "x".repeat(300) } }));
+check("the validator still refuses an unbounded key", long.ok === false, JSON.stringify(long));
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RETRY CLASSIFICATION — which answers retire a packaging key, and which do not.
+//
+// The dangerous direction is retiring a key when the operation may in fact have run: the
+// operator's next click then becomes a second, genuinely separate pack and the roast is
+// drawn down twice. So every status is classified, and anything that is not a decision by
+// the application itself keeps the key.
+section("REQUEST-KEY RETRY CLASSIFICATION");
+
+const KEEPS = [
+  [408, "Request Timeout — abandoned in flight; the work may have finished anyway"],
+  [425, "Too Early — decided below the application"],
+  [429, "Too Many Requests — a 'try again', not a 'this did not happen'"],
+  [500, "Internal Server Error"],
+  [502, "Bad Gateway — a proxy answered, not the application"],
+  [503, "Service Unavailable"],
+  [504, "Gateway Timeout — the pack may have committed after the proxy gave up"],
+  [301, "a redirect decides nothing about the operation"],
+  [599, "an unknown status is treated as ambiguous, not as a decision"],
+  [0, "no status at all"],
+];
+for (const [status, why] of KEEPS) {
+  const holder = createRequestKeyHolder();
+  const k = holder.keyForAttempt();
+  holder.recordResponse(status);
+  check(`${status} KEEPS the key — ${why}`,
+    isConclusiveResponse(status) === false && holder.current() === k,
+    `conclusive=${isConclusiveResponse(status)} held=${holder.current()}`);
+}
+
+const RETIRES = [
+  [200, "packed"],
+  [201, "packed"],
+  [204, "packed"],
+  [400, "validation refusal — nothing was written"],
+  [401, "not authenticated — nothing was written"],
+  [403, "not authorized — nothing was written"],
+  [404, "no such batch — nothing was written"],
+  [409, "status gate or insufficient stock — the transaction rolled back"],
+  [422, "idempotency-key mismatch — the request was never executed"],
+];
+for (const [status, why] of RETIRES) {
+  const holder = createRequestKeyHolder();
+  holder.keyForAttempt();
+  holder.recordResponse(status);
+  check(`${status} RETIRES the key — ${why}`,
+    isConclusiveResponse(status) === true && holder.current() === null,
+    `conclusive=${isConclusiveResponse(status)} held=${holder.current()}`);
+}
+
+// The sequence that matters operationally: a proxy timeout, then a retry, then success.
+// One operation, one key, start to finish.
+const seq = createRequestKeyHolder();
+const seqKey = seq.keyForAttempt();
+seq.recordResponse(504);
+seq.recordResponse(429);
+seq.recordResponse(500);
+check("a 504 then a 429 then a 500 still leaves ONE key for the retry",
+  seq.keyForAttempt() === seqKey, seq.keyForAttempt() + " vs " + seqKey);
+seq.recordResponse(201);
+check("and only the eventual success retires it", seq.current() === null, String(seq.current()));
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RESET SAFETY GUARD — deny by default, and refuse anything ambiguous.
+//
+// This is the last thing between an administrator's click and the irreversible destruction
+// of a customer's operational history, so every permutation is enumerated rather than
+// sampled. It is a pure function of the environment, which is exactly why it can be.
+section("RESET SAFETY GUARD (pure, exhaustive)");
+
+const TEST_URL = "postgresql://u:p@ep-wandering-leaf-aqjtuin5.eu-central-1.aws.neon.tech/neondb?sslmode=require";
+const OK_ENV = {
+  ERP_TRAINING_RESET_ENABLED: "true",
+  ERP_RESET_ALLOWED_HOST: "ep-wandering-leaf-aqjtuin5.eu-central-1.aws.neon.tech",
+  ERP_RESET_ALLOWED_DATABASE: "neondb",
+  DATABASE_URL: TEST_URL,
+};
+
+const allowed = evaluateResetAuthorization(OK_ENV);
+check("a fully and explicitly authorized configuration is allowed",
+  allowed.allowed === true, JSON.stringify(allowed));
+
+// Every single-field defect must deny. Written as overrides of a known-good environment so
+// that each case differs from a passing one in exactly one way.
+const DENY = [
+  ["the enable flag is absent", { ERP_TRAINING_RESET_ENABLED: undefined }],
+  ["the enable flag is empty", { ERP_TRAINING_RESET_ENABLED: "" }],
+  ['the enable flag is "1"', { ERP_TRAINING_RESET_ENABLED: "1" }],
+  ['the enable flag is "yes"', { ERP_TRAINING_RESET_ENABLED: "yes" }],
+  ['the enable flag is "TRUE" (wrong case)', { ERP_TRAINING_RESET_ENABLED: "TRUE" }],
+  ['the enable flag is "false"', { ERP_TRAINING_RESET_ENABLED: "false" }],
+  ["the host allowlist is absent", { ERP_RESET_ALLOWED_HOST: undefined }],
+  ["the host allowlist is empty", { ERP_RESET_ALLOWED_HOST: "" }],
+  ["the host allowlist is only separators", { ERP_RESET_ALLOWED_HOST: " , , " }],
+  ["the database allowlist is absent", { ERP_RESET_ALLOWED_DATABASE: undefined }],
+  ["the database allowlist is empty", { ERP_RESET_ALLOWED_DATABASE: "" }],
+  ["DATABASE_URL is absent", { DATABASE_URL: undefined }],
+  ["DATABASE_URL is not a postgres URL", { DATABASE_URL: "mysql://u:p@h/db" }],
+  ["DATABASE_URL is unparseable", { DATABASE_URL: "postgresql://" }],
+  ["DATABASE_URL names no database", { DATABASE_URL: "postgresql://u:p@host/" }],
+  ["the connected host is not allowlisted", {
+    ERP_RESET_ALLOWED_HOST: "ep-somewhere-else.eu-central-1.aws.neon.tech" }],
+  ["the connected database is not allowlisted", { ERP_RESET_ALLOWED_DATABASE: "other_db" }],
+  ["only a PREFIX of the host is allowlisted (no partial matching)", {
+    ERP_RESET_ALLOWED_HOST: "ep-wandering-leaf-aqjtuin5" }],
+  ["only a SUFFIX of the host is allowlisted", {
+    ERP_RESET_ALLOWED_HOST: "eu-central-1.aws.neon.tech" }],
+  ["the database name is a prefix of an allowlisted one", {
+    ERP_RESET_ALLOWED_DATABASE: "neondb_training" }],
+];
+for (const [label, override] of DENY) {
+  const verdict = evaluateResetAuthorization({ ...OK_ENV, ...override });
+  check("DENIED when " + label,
+    verdict.allowed === false && typeof verdict.reason === "string" && verdict.reason.length > 0,
+    JSON.stringify(verdict));
+}
+
+// A completely empty environment is the realistic production case: nobody configured a
+// destructive-reset target, so there is not one.
+const bare = evaluateResetAuthorization({});
+check("DENIED on a completely unconfigured environment (the production case)",
+  bare.allowed === false, JSON.stringify(bare));
+
+// The DEMO and PRODUCTION endpoints of this deployment must never be authorized by the
+// configuration that authorizes the regression branch. Named explicitly because these are
+// the two databases the whole guard exists to protect.
+for (const [name, host] of [
+  ["demo", "ep-dawn-dust-aqn1u1uf.eu-central-1.aws.neon.tech"],
+  ["production", "ep-icy-field-aq4upc3z.eu-central-1.aws.neon.tech"],
+]) {
+  const verdict = evaluateResetAuthorization({
+    ...OK_ENV,
+    DATABASE_URL: `postgresql://u:p@${host}/neondb?sslmode=require`,
+  });
+  check(`DENIED against the ${name} endpoint under the regression allowlist`,
+    verdict.allowed === false, JSON.stringify(verdict));
+}
+
+// A refusal must never hand back the connection string or the credentials in it.
+const leaky = evaluateResetAuthorization({ ...OK_ENV, ERP_RESET_ALLOWED_DATABASE: "nope" });
+const reasonText = leaky.allowed === false ? leaky.reason : "";
+check("a refusal reason leaks no credential and no connection string",
+  !reasonText.includes("p@") && !reasonText.includes(TEST_URL) && !reasonText.includes("sslmode"),
+  reasonText);
 
 // ─────────────────────────────────────────────────────────────────────────────
 section("HARNESS SELF-TEST");

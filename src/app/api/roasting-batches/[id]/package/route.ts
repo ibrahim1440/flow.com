@@ -17,6 +17,13 @@ import {
   assertOrderStillAcceptsReservation,
 } from "@/lib/services/order-operations";
 import { PACKABLE_BATCH_STATUSES } from "@/lib/services/finished-products";
+import {
+  readRequestKey,
+  packagingRequestHash,
+  guardIdempotency,
+  recordOperation,
+  isReplaySignal,
+} from "@/lib/services/packaging-idempotency";
 
 // Tolerance on "is this roast fully packaged?". Bag sizes rarely divide a roast exactly,
 // so the last 100 g decides Packaged vs Partially Packaged rather than refusing the pack.
@@ -75,6 +82,12 @@ export async function PUT(
 
   const { id } = await params;
 
+  // Malformed keys are refused before anything is read or locked: a key that cannot be
+  // stored is a caller bug, and executing the pack anyway would leave an operation the
+  // caller can never safely retry.
+  const key = readRequestKey(request);
+  if (!key.ok) return NextResponse.json({ error: key.message }, { status: 400 });
+
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; } catch { body = {}; }
 
@@ -112,6 +125,21 @@ export async function PUT(
     );
   }
 
+  // What this request ASKED FOR, independent of how it was serialised. Resending the same
+  // submit reproduces this hash; a different pack under a reused key does not, and is
+  // refused rather than silently answered with the first pack's result.
+  const requestHash = packagingRequestHash({
+    method: "KG",
+    batchId: id,
+    bags3kg: counts.bags3kg,
+    bags1kg: counts.bags1kg,
+    bags250g: counts.bags250g,
+    bags150g: counts.bags150g,
+    samplesGrams,
+    productId: typeof body.productId === "string" && body.productId ? body.productId : null,
+    productSkuId: typeof body.productSkuId === "string" && body.productSkuId ? body.productSkuId : null,
+  });
+
   try {
     const updated = await prisma.$transaction(async (tx) => {
       // ── 1. Lock the batch, then read the state every decision below uses ────
@@ -125,6 +153,16 @@ export async function PUT(
       `;
       const batch = locked[0];
       if (!batch) throw { _appCode: 404, message: "Batch not found" };
+
+      // ── 1a. Has this exact operation already run? ──────────────────────────
+      // Deliberately INSIDE the transaction and AFTER the lock, with no cheaper check in
+      // front of it. A lookup before the transaction could only ever be an optimisation
+      // for an already-committed retry, and it would cost every genuine pack an extra
+      // round trip on a database that is a sixth of a second away. Behind the lock the
+      // answer is also authoritative rather than advisory: two retries of one submit
+      // arriving together queue here, and the second reads what the first committed
+      // instead of racing it.
+      await guardIdempotency(tx, batch.id, key.key, requestHash);
 
       const orderItem = batch.orderItemId
         ? await tx.orderItem.findUnique({
@@ -319,6 +357,34 @@ export async function PUT(
         },
       });
 
+      // ── 9a. Record the operation ───────────────────────────────────────────
+      // In this transaction, and here rather than at the end, for two separate reasons.
+      //
+      // Atomicity: the row and the stock it describes commit or roll back together, so a
+      // pack that fails below leaves no operation behind and the key stays usable. A row
+      // in this table always means the kilograms behind it are really on the shelf.
+      //
+      // Lock order: the insert's foreign keys take FOR KEY SHARE on RoastingBatch, on the
+      // lot, and on the SKU. The first two this transaction already holds. The SKU is a
+      // genuinely new acquisition and is safe for a different reason: FOR KEY SHARE yields
+      // only to locks of FOR UPDATE strength, the products endpoint "deletes" a SKU by
+      // deactivating it — a non-key UPDATE, which does not conflict — and the one path that
+      // really removes SKU rows, the admin reset, takes the batches and the lots before the
+      // SKUs, the same order as here. So nothing is acquired after Order, which has to stay
+      // this transaction's last.
+      await recordOperation(tx, {
+        batchId: batch.id,
+        requestKey: key.key,
+        requestHash,
+        method: "KG",
+        quantityKg: packagedDeltaKg,
+        productSkuId: effectiveProductSkuId,
+        finishedGoodsLotId: lot.id,
+        responseStatus: 200,
+        responseBody: updatedBatch,
+        userId: user.id,
+      });
+
       // ── 10. Claim the packaged coffee for the order it was roasted for ─────
       // Reserving here is what keeps the shelf honest: only the genuine surplus — coffee
       // beyond what this order still needs — stays free for other orders to draw on.
@@ -411,6 +477,15 @@ export async function PUT(
 
     return NextResponse.json(updated);
   } catch (err) {
+    // A replay is signalled by a throw so that the transaction it was detected in rolls
+    // back — the point of a replay is that it changes nothing. The stored snapshot is
+    // returned verbatim, so a retry sees exactly what the first execution answered.
+    if (isReplaySignal(err)) {
+      return NextResponse.json(err._replayBody, {
+        status: err._replayStatus,
+        headers: { "X-Idempotent-Replay": "true" },
+      });
+    }
     // The reservation compare-and-swap, the lifecycle barrier and every guard above throw
     // the `{ _appCode, message }` shape the newer routes use. handlePrismaError does not
     // understand it and would turn a deliberate 409 into a generic 500, so it is handled

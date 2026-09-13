@@ -40,6 +40,10 @@ function cleanup() {
           SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE '${TAG}%'));
     DELETE FROM "QcRecord" WHERE "batchId" IN (SELECT id FROM "RoastingBatch" WHERE "greenBeanId" IN (
         SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE '${TAG}%'));
+    -- PackagingOperation.batchId is ON DELETE RESTRICT: the audit rows go first.
+    DELETE FROM "PackagingOperation" WHERE "batchId" IN (
+        SELECT id FROM "RoastingBatch" WHERE "greenBeanId" IN (
+          SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE '${TAG}%'));
     DELETE FROM "RoastingBatch" WHERE "greenBeanId" IN (
         SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE '${TAG}%');
     DELETE FROM "OrderActivity" WHERE "orderId" IN (SELECT id FROM "Order" WHERE notes LIKE '${TAG}%');

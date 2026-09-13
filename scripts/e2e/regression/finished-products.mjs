@@ -52,6 +52,9 @@ async function cleanup() {
   await db.query(`DELETE FROM "StockAllocation" WHERE "orderItemId" IN (SELECT oi.id FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o.notes LIKE $1)`, [TAG + "%"]);
   await db.query(`DELETE FROM "InventoryMovement" WHERE notes LIKE $1 OR "referenceEntityId" IN (SELECT id FROM "FinishedGoodsLot" WHERE "batchNumber" LIKE $1) OR "sourceDocId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1) OR "referenceEntityId" IN (SELECT id FROM "MaterialItem" WHERE code LIKE $1) OR "referenceEntityId" = $2`, [TAG + "%", BEAN]);
   await db.query(`DELETE FROM "FinishedGoodsLot" WHERE "batchNumber" LIKE $1 OR "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [TAG + "%"]);
+  // PackagingOperation.batchId is ON DELETE RESTRICT, so the packaging audit rows must go
+  // before the batches they belong to or the teardown fails on a foreign key.
+  await db.query(`DELETE FROM "PackagingOperation" WHERE "batchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [TAG + "%"]);
   await db.query(`DELETE FROM "RoastingBatch" WHERE "batchNumber" LIKE $1`, [TAG + "%"]);
   await db.query(`DELETE FROM "ProductionOrder" WHERE "sourceOrderItemId" IN (SELECT oi.id FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o.notes LIKE $1)`, [TAG + "%"]);
   await db.query(`DELETE FROM "Order" WHERE notes LIKE $1`, [TAG + "%"]);

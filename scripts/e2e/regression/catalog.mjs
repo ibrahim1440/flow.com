@@ -99,10 +99,23 @@ export async function teardown(prefix) {
       OR "sourceDocId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)
       OR "referenceEntityId" IN (SELECT id FROM "MaterialItem" WHERE code LIKE $1)
       OR "referenceEntityId" IN (SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE $1)
-      OR "referenceEntityId" IN (SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1))`, [p]);
-  await db.query(`DELETE FROM "FinishedGoodsLot" WHERE "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1) OR "roastingBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [p]);
+      OR "referenceEntityId" IN (SELECT id FROM "FinishedGoodsLot" WHERE "batchNumber" LIKE $1
+          OR "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1))`, [p]);
+  // Matched on the lot's OWN batch number as well as on its batch links, the way the
+  // finished-products teardown already does. Both link columns are ON DELETE SET NULL, so
+  // a lot whose roast was deleted keeps its stock but loses every trace of where it came
+  // from — and a teardown that searches only by link cannot find it, leaving finished
+  // coffee behind that then blocks the CoffeeProduct delete on its RESTRICT foreign key.
+  // Packaged roasts can no longer be deleted, so this is belt and braces; it is here
+  // because a database that has ever seen the old behaviour still contains the wreckage.
+  await db.query(`DELETE FROM "FinishedGoodsLot" WHERE "batchNumber" LIKE $1
+      OR "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)
+      OR "roastingBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [p]);
   await db.query(`DELETE FROM "ProductionOrder" WHERE "sourceOrderItemId" IN (SELECT oi.id FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o.notes LIKE $1)`, [p]);
   await db.query(`DELETE FROM "QcRecord" WHERE "batchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [p]);
+  // PackagingOperation.batchId is ON DELETE RESTRICT, so the packaging audit rows must go
+  // before the batches they belong to or the teardown fails on a foreign key.
+  await db.query(`DELETE FROM "PackagingOperation" WHERE "batchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [p]);
   await db.query(`DELETE FROM "RoastingBatch" WHERE "batchNumber" LIKE $1`, [p]);
   await db.query(`DELETE FROM "Order" WHERE notes LIKE $1`, [p]);
   // Production orders are removed by SKU as well as by source order item: an order raised

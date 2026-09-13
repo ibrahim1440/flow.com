@@ -55,6 +55,10 @@ function cleanup() {
     DELETE FROM "QcRecord" WHERE "batchId" IN (
       SELECT rb.id FROM "RoastingBatch" rb JOIN "OrderItem" oi ON oi.id = rb."orderItemId"
       JOIN "Order" o ON o.id = oi."orderId" WHERE o.notes LIKE '${TAG}%');
+    -- PackagingOperation.batchId is ON DELETE RESTRICT: the audit rows go first.
+    DELETE FROM "PackagingOperation" WHERE "batchId" IN (
+      SELECT rb.id FROM "RoastingBatch" rb JOIN "OrderItem" oi ON oi.id = rb."orderItemId"
+      JOIN "Order" o ON o.id = oi."orderId" WHERE o.notes LIKE '${TAG}%');
     DELETE FROM "RoastingBatch" WHERE "orderItemId" IN (
       SELECT oi.id FROM "OrderItem" oi JOIN "Order" o ON o.id = oi."orderId"
       WHERE o.notes LIKE '${TAG}%');

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
+import { evaluateResetAuthorization, resetRefusalBody } from "@/lib/reset-safety";
 
 const CONFIRM_PHRASE = "CLEAR DEMO DATA";
 
@@ -14,6 +15,22 @@ export async function POST(request: Request) {
     // Layer 1: settings.training_reset sub-privilege required (admin only by default)
     const { user, error } = await requireSub("settings", "training_reset");
     if (error) return error;
+
+
+    // ── Environment / database safety boundary ─────────────────────────────
+    // Deliberately placed here: after authorization, so an anonymous caller learns nothing
+    // about how this deployment is configured, but before pruneExpired() below, which
+    // deletes expired rate-limit rows. A refusal must leave every table in the database
+    // untouched, and "every table" includes the bookkeeping ones.
+    //
+    // Privilege, confirmation phrase and PIN prove that a human meant to do this. They
+    // cannot prove WHICH database is about to be emptied — the same admin holds the same
+    // privilege in production — so a training-data reset is refused outright unless the running
+    // configuration explicitly names this host AND this database as disposable.
+    const auth = evaluateResetAuthorization(process.env);
+    if (!auth.allowed) {
+      return NextResponse.json(resetRefusalBody(auth.reason), { status: 403 });
+    }
 
     const ipHash = hashRateLimitKey(ip);
     const identifierHash = hashRateLimitKey("training-reset:" + user.id);
@@ -61,6 +78,12 @@ export async function POST(request: Request) {
       prisma.qcRecord.deleteMany(),
       prisma.delivery.deleteMany(),
       prisma.blendIngredient.deleteMany(),
+      // Reachable ONLY behind the authorization above, which is what makes it acceptable:
+      // this is the deliberate destruction of disposable data, not the erasure of a
+      // customer's packaging audit trail. PackagingOperation.batchId is ON DELETE RESTRICT,
+      // so it must precede the batches it refers to — and because both statements are in
+      // the one transaction below, the pair either both happen or neither does.
+      prisma.packagingOperation.deleteMany(),
       prisma.roastingBatch.deleteMany(),
       prisma.orderItem.deleteMany(),
       prisma.order.deleteMany(),

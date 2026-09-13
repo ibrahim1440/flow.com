@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { AlertTriangle, Box, Package, Trash2, CalendarDays, Boxes, X } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
+import { createRequestKeyHolder } from "@/lib/request-key";
 
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
@@ -104,6 +105,14 @@ export default function PackagingPage() {
   const [packError, setPackError] = useState("");
   const [packing, setPacking] = useState(false);
 
+  // Names the packaging operation currently being attempted. One per packing path,
+  // because the two forms can be open over the same session and must not share an
+  // operation identity. Refs rather than state: the key must survive a re-render and
+  // changing it must not cause one. All of the retry rules live in the holder, which
+  // harness-selftest asserts directly — see src/lib/request-key.ts.
+  const packKeyHolder = useRef(createRequestKeyHolder());
+  const packageKeyHolder = useRef(createRequestKeyHolder());
+
   useEffect(() => { loadData(); loadProducts(); loadCatalog(); }, []);
 
   // Pull the selected SKU's per-unit BOM so the modal can show what a given number of
@@ -194,9 +203,16 @@ export default function PackagingPage() {
     try {
       const res = await fetch(`/api/roasting-batches/${packBatch!.id}/pack-sku`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": packKeyHolder.current.keyForAttempt(),
+        },
         body: JSON.stringify({ productSkuId: packSkuId, units: packUnits }),
       });
+      // Retires the key only if the server actually decided. A 5xx leaves it in place, so
+      // the operator's next click is recognised as the same operation rather than packing
+      // the coffee a second time; a thrown fetch never reaches this line at all.
+      packKeyHolder.current.recordResponse(res.status);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setPackError(data.error || "Failed to pack.");
@@ -222,9 +238,13 @@ export default function PackagingPage() {
     }
     const res = await fetch(`/api/roasting-batches/${selectedBatch!.id}/package`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": packageKeyHolder.current.keyForAttempt(),
+      },
       body: JSON.stringify(requestBody),
     });
+    packageKeyHolder.current.recordResponse(res.status);
     if (!res.ok) {
       try {
         const data = await res.json();

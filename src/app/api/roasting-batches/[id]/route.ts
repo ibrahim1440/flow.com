@@ -36,6 +36,35 @@ export async function DELETE(request: Request, { params }: Params) {
   }
 
   try { await prisma.$transaction(async (tx) => {
+    // 0. Lock the batch, then refuse to delete one that has packaging history.
+    //
+    // PackagingOperation.batchId is ON DELETE RESTRICT, so the database would stop this
+    // anyway — but it would stop it with a foreign-key violation, which reaches the
+    // operator as a generic "a related record is still referenced". The guard exists to
+    // answer in the language of the domain instead: once coffee has physically been packed
+    // out of a roast, the roast is part of the audit trail and is no longer a thing that
+    // can be made to have never happened. Correcting a pack is a reversal, which this wave
+    // deliberately does not implement; deletion is simply refused.
+    //
+    // The lock is what makes the guard race-free rather than advisory. Packaging holds
+    // this same row FOR UPDATE for its whole transaction, so a pack committing concurrently
+    // is either already visible to the count below, or still waiting — and once it waits,
+    // it finds the batch gone and answers 404 rather than packing into a deleted roast.
+    // Taking RoastingBatch first also matches the canonical hierarchy, which puts it above
+    // the green-bean restock that follows.
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "RoastingBatch" WHERE "id" = ${id} FOR UPDATE
+    `;
+    if (locked.length === 0) throw { _appCode: 404, message: "Batch not found" };
+
+    const packagedCount = await tx.packagingOperation.count({ where: { batchId: id } });
+    if (packagedCount > 0) {
+      throw {
+        _appCode: 409,
+        message: "Batch cannot be deleted because packaging operations exist.",
+      };
+    }
+
     // 1. Restock green beans if requested
     if (restock && batch.greenBeanId && batch.greenBeanQuantity > 0) {
       const bean = await tx.greenBean.findUnique({
@@ -78,5 +107,11 @@ export async function DELETE(request: Request, { params }: Params) {
   });
 
   return NextResponse.json({ success: true });
-  } catch (err) { return handlePrismaError(err); }
+  } catch (err) {
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
+    }
+    return handlePrismaError(err);
+  }
 }

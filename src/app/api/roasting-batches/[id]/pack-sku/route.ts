@@ -5,6 +5,13 @@ import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 import { explodeBom, kgForUnits, roundKg } from "@/lib/services/finished-products";
+import {
+  readRequestKey,
+  packagingRequestHash,
+  guardIdempotency,
+  recordOperation,
+  isReplaySignal,
+} from "@/lib/services/packaging-idempotency";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,6 +39,11 @@ export async function POST(request: Request, { params }: Params) {
 
   const { id } = await params;
 
+  // Refused before anything is read or locked — a key that cannot be stored is a caller
+  // bug, and packing anyway would leave an operation the caller can never safely retry.
+  const key = readRequestKey(request);
+  if (!key.ok) return NextResponse.json({ error: key.message }, { status: 400 });
+
   let body: unknown;
   try {
     body = await request.json();
@@ -49,6 +61,16 @@ export async function POST(request: Request, { params }: Params) {
       { error: "units must be a whole number greater than zero." },
       { status: 400 }
     );
+
+  // What this request ASKED FOR, independent of how it was serialised. A resent submit
+  // reproduces this hash; a different pack under a reused key does not, and is refused
+  // rather than answered with the first pack's result.
+  const requestHash = packagingRequestHash({
+    method: "UNIT",
+    batchId: id,
+    productSkuId: b.productSkuId,
+    units,
+  });
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -75,6 +97,13 @@ export async function POST(request: Request, { params }: Params) {
       `;
       const batch = locked[0];
       if (!batch) throw { _appCode: 404, message: "Batch not found." };
+
+      // ── Has this exact operation already run? ──────────────────────────────
+      // Inside the transaction and behind the lock, with nothing cheaper in front of it.
+      // Two retries of one submit arriving together queue on the batch row, and the second
+      // reads what the first committed rather than racing it. See the note on
+      // guardIdempotency for why a pre-transaction lookup is deliberately not used.
+      await guardIdempotency(tx, batch.id, key.key, requestHash);
 
       if (batch.status !== "Passed" && batch.status !== "Partially Packaged")
         throw {
@@ -290,9 +319,7 @@ export async function POST(request: Request, { params }: Params) {
         });
       }
 
-      if (batch.productionOrderId) await recalcProductionOrderStatus(batch.productionOrderId, tx);
-
-      return {
+      const response = {
         lotId: lot.id,
         skuCode: sku.skuCode,
         unitsPacked: units,
@@ -303,10 +330,42 @@ export async function POST(request: Request, { params }: Params) {
           .filter((r) => r.type === "MATERIAL")
           .map((r) => ({ label: r.label, quantity: r.quantityRequired })),
       };
+
+      // ── Record the operation ───────────────────────────────────────────────
+      // In this transaction, so the row and the stock it describes commit or roll back
+      // together: a pack that fails leaves no operation behind and the key stays usable.
+      // Written before the production-order recalculation because the insert's foreign
+      // keys take FOR KEY SHARE on the batch, the lot and the SKU, all of which sit above
+      // the production-order and order tiers this transaction ends on.
+      await recordOperation(tx, {
+        batchId: batch.id,
+        requestKey: key.key,
+        requestHash,
+        method: "UNIT",
+        quantityUnits: units,
+        productSkuId: sku.id,
+        finishedGoodsLotId: lot.id,
+        responseStatus: 201,
+        responseBody: response,
+        userId: user.id,
+      });
+
+      if (batch.productionOrderId) await recalcProductionOrderStatus(batch.productionOrderId, tx);
+
+      return response;
     }, TX_OPTS);
 
     return NextResponse.json(result, { status: 201 });
   } catch (err: unknown) {
+    // Signalled by a throw so the detecting transaction rolls back — a replay must change
+    // nothing. The stored snapshot is returned verbatim, so a retry sees exactly what the
+    // first execution answered.
+    if (isReplaySignal(err)) {
+      return NextResponse.json(err._replayBody, {
+        status: err._replayStatus,
+        headers: { "X-Idempotent-Replay": "true" },
+      });
+    }
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };
       return NextResponse.json({ error: e.message }, { status: e._appCode });
