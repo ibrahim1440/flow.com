@@ -24,6 +24,7 @@ const SUITES = [
   "lifecycle-locks",         // canonical lock order; deadlock freedom
   "reservation-cas",         // reservation compare-and-swap; no double reservation
   "packaging-stock",         // kilogram packaging arithmetic, roasted draw-down, availability
+  "packaging-concurrency",   // canonical lot lock order; one packaging method per roast
   "po-lifecycle",            // Production Order state machine, batches, cancellation
   "hardening",               // concurrency, idempotency, forced rollback, security smoke
   "finished-products",       // units, lots, packaging paths

@@ -52,17 +52,28 @@ export async function POST(request: Request, { params }: Params) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const batch = await tx.roastingBatch.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          batchNumber: true,
-          status: true,
-          productId: true,
-          roastedAvailableKg: true,
-          productionOrderId: true,
-        },
-      });
+      // ── Lock the batch first ───────────────────────────────────────────────
+      // The same row lock the kilogram path takes as its first statement, and the reason
+      // both paths can no longer run on one roast. Before this, each route checked for the
+      // other's lot through an unlocked read: two requests arriving together both saw no
+      // lot, both proceeded, and the batch ended up packed twice — once as kilograms and
+      // once as units — with the same roasted coffee counted for both. The batch row is
+      // the single point of serialisation, and RoastingBatch may be locked ahead of every
+      // stock and order lock (see the hierarchy in order-operations.ts), so taking it here
+      // costs no ordering guarantees.
+      //
+      // Everything state-dependent below — status, the other path's lot, the SKU, the
+      // bill of materials, the roasted balance — is then decided while holding it.
+      const locked = await tx.$queryRaw<{
+        id: string; batchNumber: string; status: string; productId: string | null;
+        roastedAvailableKg: number; productionOrderId: string | null;
+      }[]>`
+        SELECT "id", "batchNumber", "status", "productId", "roastedAvailableKg", "productionOrderId"
+          FROM "RoastingBatch"
+         WHERE "id" = ${id}
+           FOR UPDATE
+      `;
+      const batch = locked[0];
       if (!batch) throw { _appCode: 404, message: "Batch not found." };
 
       if (batch.status !== "Passed" && batch.status !== "Partially Packaged")

@@ -569,6 +569,63 @@ export async function casUpdateOrderItem(
 // returns.
 
 /**
+ * Take the row locks on a set of finished-goods lots, in the one canonical order.
+ *
+ * The lot is the resource this system contends on most, and it was being acquired in four
+ * different orders: the reserve paths walked candidates oldest-first (createdAt), the trim
+ * paths walked them newest-first — the exact opposite — the bulk release did it in whatever
+ * order the planner chose, and the two lifecycle helpers used id. Two transactions touching
+ * the same pair of lots through different paths could therefore take them in opposite
+ * directions and cycle. `id` wins as the canonical order because it is already what
+ * lockOrderLifecycleResources and lockDeliveryResources use, it is stable and unique, and
+ * unlike createdAt it cannot tie.
+ *
+ * This locks, it does not select. FIFO is a business rule about WHICH coffee leaves the
+ * shelf next and it is untouched: callers still choose their lots oldest-first and still
+ * draw them down in that order. They simply hold every lock before the first mutation, so
+ * the order they then mutate in cannot matter.
+ *
+ * One extra round trip per call, which on this deployment is about 167 ms. That is the
+ * price of the guarantee; it is one statement, and where the caller already holds the locks
+ * (delivery and cancellation pre-lock through their own helpers) it returns immediately.
+ */
+export async function lockLotsInIdOrder(tx: PrismaTx, lotIds: readonly string[]): Promise<void> {
+  const ids = [...new Set(lotIds)].filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (ids.length === 0) return;
+  await tx.$queryRaw`
+    SELECT "id" FROM "FinishedGoodsLot"
+     WHERE "id" IN (${Prisma.join([...ids])})
+     ORDER BY "id" ASC
+       FOR UPDATE`;
+}
+
+/**
+ * Claim an order line's reserved allocations in canonical id order.
+ *
+ * StockAllocation precedes FinishedGoodsLot in the hierarchy, so a release path that locked
+ * lots first would invert against cancellation, which takes allocations then lots. Callers
+ * use this to claim the allocation rows before handing their lot ids to lockLotsInIdOrder.
+ */
+export async function lockAllocationsInIdOrder(
+  tx: PrismaTx,
+  orderItemId: string,
+  kind: "kg" | "units",
+): Promise<string[]> {
+  const rows = kind === "kg"
+    ? await tx.$queryRaw<{ lot: string }[]>`
+        SELECT "finishedGoodsLotId" AS lot FROM "StockAllocation"
+         WHERE "orderItemId" = ${orderItemId} AND "status" = 'RESERVED' AND "quantityUnits" IS NULL
+         ORDER BY "id" ASC
+           FOR UPDATE`
+    : await tx.$queryRaw<{ lot: string }[]>`
+        SELECT "finishedGoodsLotId" AS lot FROM "StockAllocation"
+         WHERE "orderItemId" = ${orderItemId} AND "status" = 'RESERVED' AND "quantityUnits" IS NOT NULL
+         ORDER BY "id" ASC
+           FOR UPDATE`;
+  return rows.map((r) => r.lot);
+}
+
+/**
  * Take the order's allocation, lot and line locks up front, in canonical order.
  *
  * Call this as the FIRST conflicting acquisition of a lifecycle transaction that will later

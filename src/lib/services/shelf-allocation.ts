@@ -1,4 +1,5 @@
 import { Prisma } from "@/generated/prisma/client";
+import { lockLotsInIdOrder, lockAllocationsInIdOrder } from "./order-operations";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -296,6 +297,14 @@ export async function reserveShelfStock(
   if (want <= 0) return { reservedKg: 0, lots: [] };
 
   const lots = await candidateLots(tx, item);
+
+  // candidateLots chose these oldest-first, and the loop below still draws them down in
+  // that order — FIFO is untouched. What changes is that every lock is taken here, in
+  // canonical id order, before the first mutation. Previously the conditional UPDATEs
+  // acquired the rows in createdAt order, which is the opposite of the order the trim
+  // paths use and unrelated to the id order the lifecycle helpers use.
+  await lockLotsInIdOrder(tx, lots.map((l) => l.id));
+
   const taken: ReservationResult["lots"] = [];
   let remaining = want;
 
@@ -373,6 +382,16 @@ async function releaseAllocations(
   // per-row work.
   if (limitKg === undefined) {
     const excludeLot = where.finishedGoodsLotId?.not ?? null;
+
+    // Allocations first, then lots, both in id order — the canonical direction. The
+    // statement below updates the lots through a join, which leaves their acquisition
+    // order to the planner; holding them already makes that order irrelevant. Claiming the
+    // allocations first is what keeps this on StockAllocation -> FinishedGoodsLot rather
+    // than inverting against cancellation. A concurrent releaser blocks on the claim and
+    // then finds nothing still RESERVED, which is the same outcome as before.
+    const heldLots = await lockAllocationsInIdOrder(tx, where.orderItemId, "kg");
+    await lockLotsInIdOrder(tx, heldLots);
+
     const rows = await tx.$queryRaw<{ released: number }[]>`
       WITH claimed AS (
         UPDATE "StockAllocation"
@@ -415,6 +434,12 @@ async function releaseAllocations(
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   if (candidates.length === 0) return 0;
+
+  // Selection above is newest-first, because the most recent promise is the one to give
+  // back. Acquisition is canonical: allocations then lots, both by id. The loop below then
+  // walks its own order holding every lock it will need.
+  await lockAllocationsInIdOrder(tx, where.orderItemId, "kg");
+  await lockLotsInIdOrder(tx, candidates.map((c) => c.finishedGoodsLotId));
 
   let released = 0;
   let budget = limitKg === undefined ? Infinity : roundKg(limitKg);

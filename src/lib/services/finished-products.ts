@@ -1,4 +1,5 @@
 import { Prisma } from "@/generated/prisma/client";
+import { lockLotsInIdOrder, lockAllocationsInIdOrder } from "./order-operations";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -161,6 +162,10 @@ export async function reserveFinishedUnits(
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
+  // FIFO chose them; canonical id order locks them. Same split as the kilogram path: the
+  // loop below still draws the oldest lot down first, it just does so holding every lock.
+  await lockLotsInIdOrder(tx, lots.map((l) => l.id));
+
   const taken: UnitReservationResult["lots"] = [];
   const rows: Prisma.StockAllocationCreateManyInput[] = [];
   let remaining = want;
@@ -234,6 +239,11 @@ export async function releaseFinishedUnits(tx: PrismaTx, orderItemId: string): P
   //
   // Both data-modifying CTEs run to completion whether or not the outer query reads them,
   // which is what makes the lot decrement safe to express this way.
+  // Allocations then lots, both by id, before the statement below reaches them through a
+  // join whose row order is the planner's business. Same reasoning as the kilogram release.
+  const heldLots = await lockAllocationsInIdOrder(tx, orderItemId, "units");
+  await lockLotsInIdOrder(tx, heldLots);
+
   const rows = await tx.$queryRaw<{ released: number }[]>`
     WITH claimed AS (
       UPDATE "StockAllocation"
@@ -399,6 +409,12 @@ export async function trimUnitReservationToDemand(
   const reserved = rows.reduce((s, r) => s + (r.quantityUnits ?? 0), 0);
   let excess = reserved - stillWanted;
   if (excess <= 0) return 0;
+
+  // Newest-first selection, canonical id-order acquisition — the unit twin of the kilogram
+  // trim. Without this the trim walked lots in exactly the opposite direction to the
+  // reserve path, which is an inversion whenever both touch the same two lots.
+  await lockAllocationsInIdOrder(tx, item.id, "units");
+  await lockLotsInIdOrder(tx, rows.map((r) => r.finishedGoodsLotId));
 
   let released = 0;
   for (const r of rows) {
