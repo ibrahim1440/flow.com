@@ -13,3 +13,9 @@
 # eol=lf pins the working-tree representation regardless of any developer's core.autocrlf
 # setting, so the file that Prisma hashes is always the file that was applied.
 prisma/migrations/**/migration.sql text eol=lf
+
+# The schema has no checksum of its own, so this is consistency rather than correctness:
+# Prisma's own tooling rewrites this file, and pinning the line endings keeps a `prisma
+# format` or a `migrate dev` on a Windows machine from producing a diff in which every line
+# has changed and none of them mean anything.
+prisma/schema.prisma text eol=lf
