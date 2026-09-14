@@ -65,6 +65,28 @@ export async function DELETE(request: Request, { params }: Params) {
       };
     }
 
+    // Blend lineage is destroyed silently, not loudly. BlendIngredient cascades from BOTH
+    // ends — sourceBatchId and targetBlendBatchId — so deleting either a batch that
+    // contributed coffee to a blend, or the blend it went into, takes the rows recording the
+    // transformation with it. No foreign key objects, because a cascade is not a refusal:
+    // the delete simply succeeds and the record of where several batches' coffee went stops
+    // existing.
+    //
+    // Checked under the same FOR UPDATE taken above, which is what makes it race-safe rather
+    // than advisory. Blend creation locks its sources FOR UPDATE before inserting any
+    // ingredient row, so a blend committing concurrently is either already visible to this
+    // count, or still waiting on this lock — and once it waits, it finds the batch gone and
+    // answers "One or more batches not found" instead of blending a deleted roast.
+    const blendLinks = await tx.blendIngredient.count({
+      where: { OR: [{ sourceBatchId: id }, { targetBlendBatchId: id }] },
+    });
+    if (blendLinks > 0) {
+      throw {
+        _appCode: 409,
+        message: "Batch cannot be deleted because it is part of blend history.",
+      };
+    }
+
     // 1. Restock green beans if requested
     if (restock && batch.greenBeanId && batch.greenBeanQuantity > 0) {
       const bean = await tx.greenBean.findUnique({
