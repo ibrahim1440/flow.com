@@ -1,4 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
+import { kgForUnits, roundKg } from "./finished-products";
+import { reservedForItem } from "./shelf-allocation";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -280,6 +282,24 @@ export async function assertProductionOrderAcceptsRoast(
   }
 }
 
+/**
+ * The green weight a given finished weight has to start from.
+ *
+ * Extracted rather than invented: this is the conversion createProductionOrderFromSales
+ * already performs when it stores expectedGreenBeanKg, and it is the only sanctioned way to
+ * turn a finished figure into a green one. It lives here so that nothing else has to guess
+ * a percentage — the production screen used to prefill the green input with a FINISHED
+ * remainder, which is not a conversion at all, just the wrong number in the wrong box.
+ *
+ * Loss is clamped to a physically meaningful range before dividing: a 0 % entry from a
+ * data-entry slip would otherwise mean "green equals finished", and a 100 % one would
+ * divide by zero.
+ */
+export function greenKgForFinishedKg(finishedKg: number, expectedRoastLossPct: number): number {
+  const lossPct = Math.min(Math.max(expectedRoastLossPct, 0.1), 99.9);
+  return +(finishedKg / (1 - lossPct / 100)).toFixed(3);
+}
+
 // ─── Outstanding demand ─────────────────────────────────────────────────────
 
 export type OutstandingDemand = {
@@ -348,6 +368,105 @@ export async function outstandingDemandForItem(
   };
 }
 
+export type RoastingCeiling = {
+  /** Finished/roasted kilograms this line may still legitimately have roasted for it. */
+  ceilingKg: number;
+  /** Which arithmetic produced it, so the caller can explain a refusal honestly. */
+  basis: "units" | "legacy-kg";
+  /** Populated for SKU lines: the canonical demand the ceiling was derived from. */
+  demand?: OutstandingDemand;
+  /** Roasted output already produced for this line that nothing else accounts for. */
+  unaccountedRoastedKg: number;
+};
+
+/**
+ * How much more roasted coffee this order line may legitimately have produced.
+ *
+ * The roasting gate used to answer this with arithmetic of its own —
+ * OrderItem.quantityKg minus reservedForItem(...) against the sum of roastedBeanQuantity —
+ * and it was wrong in three separate ways. It never subtracted what had already been
+ * DELIVERED. It never subtracted production already SCHEDULED on an open production order,
+ * so a fully planned line could be roasted a second time from scratch. And reservedForItem
+ * only sums allocations whose quantityUnits IS NULL, which means that on a SKU line — where
+ * every allocation is unit-denominated — the reserved term silently evaluated to zero and
+ * the gate believed nothing was covered at all.
+ *
+ * There is one demand truth in this system and it is outstandingDemandForItem. This routes
+ * the gate through it instead of maintaining a second, weaker formula beside it.
+ *
+ * ── The one thing the canonical figure cannot see ───────────────────────────
+ * Coffee that has been roasted for this line but not yet packed is neither reserved nor
+ * delivered, so it is invisible to the canonical calculation. Whether that matters depends
+ * on how the batch was raised:
+ *
+ *   - raised UNDER a production order, its demand is already held by that order's remaining
+ *     target (producedUnits counts PACKED units, so an unpacked batch does not reduce it).
+ *     Subtracting the batch as well would count the same coffee twice and refuse legitimate
+ *     roasting;
+ *   - raised WITHOUT one, nothing holds it, so it is real coverage and is subtracted here.
+ *
+ * That distinction is the whole reason this is a query rather than a subtraction.
+ */
+export async function roastingCeilingForItem(
+  tx: PrismaTx,
+  orderItemId: string,
+): Promise<RoastingCeiling | null> {
+  const item = await tx.orderItem.findUnique({
+    where: { id: orderItemId },
+    select: {
+      quantityKg: true,
+      deliveredQty: true,
+      quantityUnits: true,
+      deliveredUnits: true,
+      productSkuId: true,
+      productSku: { select: { weightGrams: true } },
+    },
+  });
+  if (!item) return null;
+
+  // Roasted output on this line that no production order is holding demand for.
+  const unaccounted = await tx.roastingBatch.aggregate({
+    where: {
+      orderItemId,
+      productionOrderId: null,
+      isBlend: false,
+      status: { not: "Rejected" },
+    },
+    _sum: { roastedBeanQuantity: true },
+  });
+  const unaccountedRoastedKg = roundKg(unaccounted._sum.roastedBeanQuantity ?? 0);
+
+  if (item.quantityUnits !== null && item.productSkuId && item.productSku) {
+    const demand = await outstandingDemandForItem(tx, {
+      id: orderItemId,
+      quantityUnits: item.quantityUnits,
+      deliveredUnits: item.deliveredUnits,
+    });
+    const outstandingKg = kgForUnits(item.productSku, demand.outstandingUnits);
+    return {
+      ceilingKg: Math.max(0, roundKg(outstandingKg - unaccountedRoastedKg)),
+      basis: "units",
+      demand,
+      unaccountedRoastedKg,
+    };
+  }
+
+  // Legacy bean-based line: no SKU, no units, so demand really is kilograms. Delivered is
+  // subtracted here for the first time — a line that has already shipped most of its
+  // quantity was previously treated as though none of it had left.
+  const reservedKg = await reservedForItem(tx, orderItemId);
+  const linked = await tx.roastingBatch.aggregate({
+    where: { orderItemId, productionOrderId: { not: null }, isBlend: false, status: { not: "Rejected" } },
+    _sum: { roastedBeanQuantity: true },
+  });
+  const alreadyKg = roundKg(unaccountedRoastedKg + (linked._sum.roastedBeanQuantity ?? 0));
+  return {
+    ceilingKg: Math.max(0, roundKg(item.quantityKg - item.deliveredQty - reservedKg - alreadyKg)),
+    basis: "legacy-kg",
+    unaccountedRoastedKg,
+  };
+}
+
 /**
  * Creates a ProductionOrder from a sales OrderItem that has a linked ProductSKU.
  * Call this inside a prisma.$transaction — never standalone.
@@ -407,11 +526,9 @@ export async function createProductionOrderFromSales(
     ? 1
     : Math.ceil((targetWeightKg * 1000) / sku.weightGrams);
 
-  // Clamp loss to a physically meaningful range before dividing.
-  const lossPct = Math.min(Math.max(sku.product.expectedRoastLoss, 0.1), 99.9);
-  const lossFraction = lossPct / 100;
-  // Round to 3 dp to avoid floating-point drift across many production orders.
-  const expectedGreenBeanKg = +(targetWeightKg / (1 - lossFraction)).toFixed(3);
+  // One implementation of the conversion, shared with anything that needs to suggest a
+  // green weight. See greenKgForFinishedKg for the clamping and rounding rationale.
+  const expectedGreenBeanKg = greenKgForFinishedKg(targetWeightKg, sku.product.expectedRoastLoss);
 
   // Sequential production number, derived from the highest number already issued this
   // year rather than from a row count.

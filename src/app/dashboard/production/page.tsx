@@ -38,6 +38,7 @@ type OrderItem = {
   greenBeanId: string | null; greenBean: { id: string; beanType: string; quantityKg: number } | null;
   order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; isBlend: boolean }[];
+  productionOrders?: { id: string; status: string }[];
 };
 
 type GreenBean = { id: string; beanType: string; quantityKg: number; serialNumber: string };
@@ -91,6 +92,16 @@ export default function ProductionPage() {
   // Roast-to-stock: no order behind the batch, so its output lands on the shelf free for
   // whichever order needs it first.
   const [stockMode, setStockMode] = useState(false);
+  // FINISHED kilograms this line still needs, kept separate from anything the operator
+  // types into the green-weight field. Holding it in its own piece of state is the point:
+  // the two numbers used to share one, which is how a finished remainder ended up being
+  // submitted as a green weight.
+  const [remainingFinishedKg, setRemainingFinishedKg] = useState(0);
+  // Which production plan this roast is being made for. Preselected when the line has only
+  // one live plan; left empty when it has several, because that is a decision only the
+  // operator standing at the roaster can make. The server refuses an ambiguous roast, so an
+  // empty value here surfaces as a clear refusal rather than a silently unattributed batch.
+  const [poChoice, setPoChoice] = useState("");
 
   // Profile overrides (keyed by orderItemId) — local state for per-session profile hints
   const [profileOverrides, setProfileOverrides] = useState<Record<string, string>>({});
@@ -138,18 +149,30 @@ export default function ProductionPage() {
   function startProduction(item: OrderItem) {
     setStockMode(false);
     setSelectedItem(item);
-    const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.greenBeanQuantity, 0);
-    // Only the part the shelf could not cover needs roasting. Prefilling the full ordered
-    // quantity on a partially covered item hands the roaster a number the server will
-    // reject with 422, and roasting it anyway would produce exactly the surplus the shelf
-    // existed to avoid. availableQuantity is set by preparation review; before any review
-    // it is null and the whole order is still to be made.
+    // ── Finished demand, in finished kilograms ──────────────────────────────
+    // The figure below is what the ORDER still needs: finished coffee. It is deliberately
+    // NOT written into the green-weight field. The previous version summed greenBeanQuantity
+    // — the weight loaded into the roaster — subtracted it from quantityKg, which is finished
+    // weight, and then prefilled the green input with the result. Two different physical
+    // quantities were being treated as one, and because roasting always loses weight the
+    // suggestion was short every time.
+    //
+    // Converting finished demand to a green weight needs the coffee's roast loss, which this
+    // screen does not have. The operator weighs what goes into the roaster, so the green
+    // field is left for them to fill; the remaining demand is shown beside it as context.
+    const producedFinishedKg = item.roastingBatches
+      .filter((b) => !b.isBlend)
+      .reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
     const coveredFromShelf = item.availableQuantity ?? 0;
-    const remaining = item.quantityKg - coveredFromShelf - produced;
-    const cleanRemaining = Number(Math.max(0, remaining).toFixed(3));
+    const remainingFinishedKg = Number(
+      Math.max(0, item.quantityKg - coveredFromShelf - producedFinishedKg).toFixed(3),
+    );
+    setRemainingFinishedKg(remainingFinishedKg);
     const pref = item.order.customer.roastPreferences?.find((p) => p.greenBeanId === item.greenBeanId);
     const profileHint = profileOverrides[item.id] ?? pref?.profileName ?? "";
-    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: cleanRemaining, roastedBeanQuantity: 0, roastProfile: profileHint, productId: "" });
+    const livePos = livePosFor(item);
+    setPoChoice(livePos.length === 1 ? livePos[0].id : "");
+    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: profileHint, productId: "" });
     setError(""); setSuccess("");
     setShowRoastForm(true);
   }
@@ -169,6 +192,19 @@ export default function ProductionPage() {
     setShowRoastForm(true);
   }
 
+  /**
+   * The single live production order for a line, or undefined.
+   *
+   * Undefined when there is none and, deliberately, when there is more than one: choosing
+   * between them is not something a screen should do silently, and the server refuses a
+   * mismatched pairing anyway.
+   */
+  function livePosFor(item: OrderItem | null): { id: string; status: string }[] {
+    return (item?.productionOrders ?? []).filter(
+      (p) => p.status === "PENDING" || p.status === "IN_PRODUCTION",
+    );
+  }
+
   async function handleRoastSubmit(e: React.FormEvent, forceSubmit = false) {
     e.preventDefault();
     setError("");
@@ -183,15 +219,11 @@ export default function ProductionPage() {
     }
 
     if (!forceSubmit && !stockMode && selectedItem) {
-      // Roasted output, matching the server. Comparing green input against a ceiling
-      // expressed in finished kilograms warned on every ordinary roast, because roasting
-      // always loses weight.
-      const alreadyRoasted = selectedItem.roastingBatches
-        .filter((b) => !b.isBlend)
-        .reduce((s, b) => s + b.roastedBeanQuantity, 0);
-      // Same ceiling the server enforces: ordered minus what the shelf already covers.
-      const ceiling = selectedItem.quantityKg - (selectedItem.availableQuantity ?? 0);
-      const excess = +(alreadyRoasted + roastForm.roastedBeanQuantity - ceiling).toFixed(2);
+      // A courtesy warning only — the server holds the real ceiling and computes it from
+      // the canonical planning figures, which include scheduled production this screen
+      // cannot see. remainingFinishedKg has already had produced output and shelf cover
+      // subtracted, so the comparison here is finished against finished.
+      const excess = +(roastForm.roastedBeanQuantity - remainingFinishedKg).toFixed(2);
       if (excess > 0) {
         setOverproductionExcess(excess);
         return;
@@ -211,6 +243,12 @@ export default function ProductionPage() {
         roastedBeanQuantity: roastForm.roastedBeanQuantity,
         wasteQuantity,
         roastProfile: roastForm.roastProfile || undefined,
+        // The production order this roast is being made for, when the line has exactly one
+        // live one. Without it the batch was stored unlinked and the production order could
+        // never account for what had been roasted against it. The server validates the id
+        // and derives it anyway when it is unambiguous, so this is the screen stating what
+        // it is looking at rather than the only route to the link.
+        productionOrderId: stockMode ? undefined : (poChoice || undefined),
       }),
     });
 
@@ -304,8 +342,13 @@ export default function ProductionPage() {
         },
       }))
       .filter((i: any) => {
-        const produced = (i.roastingBatches ?? []).filter((b: any) => !b.isBlend).reduce((s: number, b: any) => s + b.greenBeanQuantity, 0);
-        return i.quantityKg - produced > 0;
+        // Roasted output against ordered finished weight. Summing greenBeanQuantity here
+        // compared roaster INPUT against customer OUTPUT and hid lines that still needed
+        // roasting, because the green figure is always the larger of the two.
+        const producedFinishedKg = (i.roastingBatches ?? [])
+          .filter((b: any) => !b.isBlend)
+          .reduce((s: number, b: any) => s + b.roastedBeanQuantity, 0);
+        return i.quantityKg - producedFinishedKg > 0;
       })
   );
 
@@ -423,7 +466,9 @@ export default function ProductionPage() {
           ) : (
             <div className="space-y-3">
               {filteredPending.map((item: OrderItem) => {
-                const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.greenBeanQuantity, 0);
+                // Both sides finished weight. Charting green input against a finished target
+                // overstated progress on every line, since green is always heavier.
+                const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
                 const remaining = item.quantityKg - produced;
                 const progress = item.quantityKg > 0 ? (produced / item.quantityKg) * 100 : 0;
                 return (
@@ -737,6 +782,32 @@ export default function ProductionPage() {
                   ))}
                 </select>
               </div>
+              {!stockMode && livePosFor(selectedItem).length > 1 && (
+                <div>
+                  <label className="block text-sm font-bold text-charcoal mb-1">
+                    Production order
+                  </label>
+                  <select
+                    value={poChoice}
+                    onChange={(e) => setPoChoice(e.target.value)}
+                    required
+                    className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                  >
+                    <option value="">Select which production order this roast is for…</option>
+                    {livePosFor(selectedItem).map((p) => (
+                      <option key={p.id} value={p.id}>{p.id} — {p.status}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {!stockMode && remainingFinishedKg > 0 && (
+                <p className="text-sm text-brown/70">
+                  {/* FINISHED kilograms still owed. Shown as context beside the green field,
+                      never written into it: converting this to a green weight needs the
+                      coffee's roast loss, which this screen does not hold. */}
+                  Still to produce: {formatKg(remainingFinishedKg)}kg finished
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-bold text-charcoal mb-1">{t("greenBeanQty")}</label>

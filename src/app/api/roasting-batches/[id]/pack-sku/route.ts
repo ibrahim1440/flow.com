@@ -4,6 +4,7 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import {
   explodeBom, kgForUnits, roundKg, reserveFinishedUnitsFromLot,
 } from "@/lib/services/finished-products";
@@ -471,6 +472,17 @@ export async function POST(request: Request, { params }: Params) {
         responseBody: response,
         userId: user.id,
       });
+
+      // ── The line's own production state ────────────────────────────────────
+      // Packing is what completes production for a unit line, and this route was the only
+      // production-affecting path that never said so: roasting, QC finalize, blending,
+      // batch deletion and delivery all recalculate it. Without this a SKU line could
+      // never leave "In Production" however many units were packed for it, and the
+      // ready-to-ship dashboards — which count Completed-but-not-Delivered — stayed empty.
+      //
+      // At the OrderItem tier, before the production order and the Order barrier below, so
+      // the certified acquisition order is unchanged.
+      if (batch.orderItemId) await recalcOrderItemStatus(batch.orderItemId, tx);
 
       // ── Production order, then Order: the last two acquisitions ────────────
       // Same ordering the kilogram path was corrected to. Every path that touches both takes

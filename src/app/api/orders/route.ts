@@ -42,6 +42,11 @@ export async function GET(request: Request) {
           // was never sent. Every unit order therefore rendered as kilograms with
           // "Available: 0kg" and an unusable delivery form, even with stock reserved to it.
           productSku: true,
+          // Which production plans this line has open. The production screen needs it to
+          // attribute a roast to the plan it is being made for; without it every roast
+          // started from a plan was stored with no link back to it. id and status only:
+          // this response is loaded by four screens and has been trimmed before for size.
+          productionOrders: { select: { id: true, status: true } },
         },
       },
       // Order Operations S0: minimal owner projection — no permissions/pin/credential fields.

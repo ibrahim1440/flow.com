@@ -5,8 +5,12 @@ import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
-import { reservedForItem } from "@/lib/services/shelf-allocation";
-import { recalcProductionOrderStatus, assertProductionOrderAcceptsRoast } from "@/lib/services/production-planning";
+import {
+  recalcProductionOrderStatus,
+  assertProductionOrderAcceptsRoast,
+  roastingCeilingForItem,
+  advisoryKey,
+} from "@/lib/services/production-planning";
 import { productionGateRefusal, assertOrderStillAcceptsProduction } from "@/lib/services/order-operations";
 
 class AppError extends Error {
@@ -159,60 +163,43 @@ export async function POST(request: Request) {
   // order item's required quantity. UI warning alone is bypassable via direct API.
   // A stock batch has no order to exceed, so the gate does not apply to it — what it
   // may consume is bounded by real green stock, checked atomically further down.
-  const surplusOrderItem = isStockBatch
-    ? null
-    : await prisma.orderItem.findUnique({
-        where: { id: orderItemId },
-        select: { quantityKg: true },
-      });
-  if (!isStockBatch && !surplusOrderItem) {
+  //
+  // The ceiling itself now comes from the canonical planning service rather than from a
+  // formula kept here. The local one subtracted neither delivered quantity nor scheduled
+  // production, and its reserved term was computed by reservedForItem, which only sums
+  // kilogram-denominated allocations — on a SKU line, where every allocation is in units,
+  // that silently evaluated to zero and the gate believed nothing was covered.
+  const ceiling = isStockBatch ? null : await roastingCeilingForItem(prisma, orderItemId);
+  if (!isStockBatch && !ceiling) {
     return NextResponse.json({ error: "Order item not found." }, { status: 404 });
   }
 
-  // Roasted output, not green input. The ceiling below is expressed in the finished
-  // kilograms the order needs, so the thing measured against it has to be the coffee that
-  // will actually become those kilograms. Summing green here compared an input to an
-  // output: since roasting always loses weight, every correct roast looked like surplus.
-  // A 12 kg order needs about 14.3 kg of green at a 16 % loss, and that produced
-  // "would exceed the order quantity by 2.3kg — only an admin can authorize surplus
-  // production", which stopped non-admin roasters from working at all.
-  const existingAgg = isStockBatch
-    ? { _sum: { roastedBeanQuantity: 0 } }
-    : await prisma.roastingBatch.aggregate({
-        where: {
-          orderItemId,
-          isBlend: false,
-          status: { not: "Rejected" },
-        },
-        _sum: { roastedBeanQuantity: true },
-      });
-
-  // What this item is actually allowed to consume from the roaster: the ordered quantity
-  // minus whatever the shelf is already holding for it. Only the shortfall should ever be
-  // roasted — roasting the full ordered amount on top of reserved stock would produce the
-  // exact surplus the shelf was meant to absorb.
+  // Roasted output, not green input. The ceiling is expressed in the finished kilograms the
+  // order still needs, so the thing measured against it has to be the coffee that will
+  // actually become those kilograms. Comparing green input to a finished ceiling made every
+  // correct roast look like surplus, because roasting always loses weight.
   //
-  // Derived from live reservations rather than the stored productionRequiredQuantity on
-  // purpose. That column is written only by preparation review, so it goes stale the
-  // moment coverage moves (another order is cancelled and frees stock, a partial batch is
-  // packaged and claims some), and every value written before reservations existed came
-  // from a number a clerk typed with nothing behind it — trusting those would refuse
-  // legitimate roasts on historical rows, some of which carry a stored 0.
-  const alreadyReserved = isStockBatch ? 0 : await reservedForItem(prisma, orderItemId);
-  const productionCeiling = surplusOrderItem
-    ? Math.max(0, +(surplusOrderItem.quantityKg - alreadyReserved).toFixed(3))
-    : Infinity;
-
-  const alreadyKg = existingAgg._sum.roastedBeanQuantity ?? 0;
-  const excess = +(alreadyKg + roastedQty - productionCeiling).toFixed(3);
+  // roastingCeilingForItem has already subtracted delivered, reserved, scheduled production
+  // and any roasted output not held by a production order, so what remains is simply whether
+  // THIS roast fits inside it.
+  const productionCeiling = ceiling ? ceiling.ceilingKg : Infinity;
+  const excess = +(roastedQty - productionCeiling).toFixed(3);
 
   if (excess > 0 && user.role !== "admin") {
+    const d = ceiling?.demand;
+    const covered = d
+      ? [
+          d.deliveredUnits > 0 ? `${d.deliveredUnits} delivered` : null,
+          d.reservedUnits > 0 ? `${d.reservedUnits} reserved` : null,
+          d.scheduledUnits > 0 ? `${d.scheduledUnits} already on production orders` : null,
+        ].filter(Boolean).join(", ")
+      : "";
     return NextResponse.json(
       {
         error:
-          alreadyReserved <= 0
-            ? `Batch would exceed the order quantity by ${excess}kg. Only an admin can authorize surplus production.`
-            : `Batch would exceed the ${productionCeiling}kg still to be produced for this item by ${excess}kg — ${alreadyReserved}kg is already covered from the shelf. Only an admin can authorize surplus production.`,
+          `Batch would exceed the ${productionCeiling}kg still to be produced for this item by ${excess}kg` +
+          (covered ? ` — ${covered}, out of ${d!.orderedUnits} unit(s) ordered.` : ".") +
+          " Only an admin can authorize surplus production.",
       },
       { status: 422 }
     );
@@ -226,6 +213,40 @@ export async function POST(request: Request) {
     // the green-bean decrement below, so a roast against an order that is not approved or
     // not reviewed cannot move inventory, write a ledger row or consume a batch number.
     //
+    // ── Serialize roasts for this order line ───────────────────────────────
+    // FIRST statement of the transaction, and the reason the ceiling above is only a fast
+    // rejection rather than the decision.
+    //
+    // That ceiling is read before the transaction opens and takes no lock, so two operators
+    // starting a roast at the same moment both read the same remaining demand and both pass.
+    // Nothing downstream caught it: the only advisory lock in this transaction is keyed on
+    // the DATE, for batch-number allocation, and it re-checks no demand at all. Measured on
+    // a 4-unit line, both requests were accepted and 8 kg was roasted against a 4 kg demand.
+    //
+    // The lock class and key are deliberately the ones the production-requirement route
+    // already uses — 7762, keyed on the order line. Scheduling a production order and
+    // roasting against the line consume the SAME demand, so they have to serialize against
+    // each other and not merely each against themselves. Held until commit; unrelated order
+    // lines are untouched.
+    if (!isStockBatch) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(7762, ${advisoryKey(orderItemId as string)}::int)`;
+
+      // Re-asked now that this transaction is the only one that can be asking. Everything
+      // before the transaction was advisory; this is the answer that counts.
+      const live = await roastingCeilingForItem(tx, orderItemId as string);
+      if (!live) throw new AppError(404, "Order item not found.");
+      const liveExcess = +(roastedQty - live.ceilingKg).toFixed(3);
+      if (liveExcess > 0 && user.role !== "admin") {
+        throw {
+          _appCode: 409,
+          message:
+            `This line was covered while the request was in flight — only ${live.ceilingKg}kg ` +
+            `still needs producing, and this roast would exceed it by ${liveExcess}kg. ` +
+            "Nothing was roasted.",
+        };
+      }
+    }
+
     // Order-backed roasts only. A stock batch has no customer order to be in a valid state
     // — roast-to-stock is bounded instead by its own admin-only privilege and by the
     // atomic green-stock check further down, both unchanged.
@@ -290,6 +311,65 @@ export async function POST(request: Request) {
             })
           )?.productSku?.productId ?? null;
       await assertProductionOrderAcceptsRoast(tx, productionOrderId, batchProductId);
+
+      // ── The production order and the order line must be the same work ──────
+      // assertProductionOrderAcceptsRoast checks the production order's status and its
+      // coffee. It cannot check WHOSE order this is, and a roast carrying line B's id while
+      // pointing at a production order raised from line A is two different claims about who
+      // the coffee is for. Both are backend-meaningful, so neither may be quietly preferred
+      // — the roast is refused and the operator re-picks.
+      if (!isStockBatch) {
+        const po = await tx.productionOrder.findUnique({
+          where: { id: productionOrderId },
+          select: { productionNumber: true, sourceOrderItemId: true },
+        });
+        if (po?.sourceOrderItemId && po.sourceOrderItemId !== orderItemId) {
+          throw {
+            _appCode: 409,
+            message:
+              `Production order ${po.productionNumber} was raised for a different order line, ` +
+              "so this roast cannot be recorded against both. Start the roast from that " +
+              "production order, or raise one for this line.",
+          };
+        }
+      }
+    }
+
+    // ── Traceability without asking the operator for an id ─────────────────
+    // The production screen never sent productionOrderId — the field appears nowhere in it —
+    // so every roast started from a production plan was stored with no link back to the plan
+    // it came from, and the production order could never tell what had been roasted for it.
+    //
+    // Rather than depend on a screen remembering to send it, the link is derived here when
+    // the answer is unambiguous: exactly one live production order raised from this very
+    // line. Two would be a choice, and choices are not made silently — the batch is simply
+    // left unlinked, as before, and can be attached explicitly afterwards.
+    let effectiveProductionOrderId: string | null = (productionOrderId as string) ?? null;
+    if (!effectiveProductionOrderId && !isStockBatch) {
+      const candidates = await tx.productionOrder.findMany({
+        where: {
+          sourceOrderItemId: orderItemId,
+          status: { in: ["PENDING", "IN_PRODUCTION"] },
+        },
+        select: { id: true },
+        take: 2,
+      });
+      if (candidates.length === 1) {
+        effectiveProductionOrderId = candidates[0].id;
+      } else if (candidates.length > 1) {
+        // Storing the batch unlinked is not the neutral option it looks like. This roast
+        // really was made for one of these plans, and recording it against neither loses the
+        // attribution just as completely as recording it against the wrong one — the
+        // difference being that nobody is told. The operator knows which plan they are
+        // working to; the server does not, and says so.
+        throw {
+          _appCode: 409,
+          message:
+            "This order line has more than one live production order, so it is not clear " +
+            "which one this roast belongs to. Start the roast from the production order " +
+            "itself, or name it in the request. Nothing was roasted.",
+        };
+      }
     }
 
     const qcDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
@@ -313,7 +393,7 @@ export async function POST(request: Request) {
         batchNumber,
         status:              "Pending QC",
         qcDeadline,
-        productionOrderId:   productionOrderId ?? null,
+        productionOrderId:   effectiveProductionOrderId,
       },
       include: { orderItem: true, greenBean: true },
     });
