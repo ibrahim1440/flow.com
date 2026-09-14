@@ -42,6 +42,12 @@ import {
 } from "../../../src/lib/request-key.ts";
 import { evaluateResetAuthorization } from "../../../src/lib/reset-safety.ts";
 import { readRequestKey } from "../../../src/lib/services/packaging-idempotency.ts";
+import {
+  evaluateDatabaseUrl, requireDatabaseUrl, requireDirectUrl,
+} from "../../../src/lib/db-config.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 let pass = 0,
   fail = 0;
@@ -451,6 +457,147 @@ const reasonText = leaky.allowed === false ? leaky.reason : "";
 check("a refusal reason leaks no credential and no connection string",
   !reasonText.includes("p@") && !reasonText.includes(TEST_URL) && !reasonText.includes("sslmode"),
   reasonText);
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("DATABASE CONFIGURATION GUARD (pure, exhaustive) — H1-1");
+//
+// The runtime used to answer a missing or malformed DATABASE_URL by opening a local SQLite
+// file. In production that starts an ERP which looks healthy, shows no data, and accepts
+// writes into a scratch file — the worst failure mode available, because nothing raises.
+// Every permutation is enumerated here, with no server, no database and no risk, which is
+// the same reason the reset guard is tested this way.
+
+const PG_URL = "postgresql://user:secret@db.example.com:5432/erp?sslmode=require";
+
+const okUrl = evaluateDatabaseUrl({ DATABASE_URL: PG_URL });
+check("a valid PostgreSQL URL is accepted", okUrl.ok === true, JSON.stringify(okUrl));
+check("and is decomposed into scheme, host and database",
+  okUrl.ok === true && okUrl.scheme === "postgresql" && okUrl.host === "db.example.com" &&
+  okUrl.database === "erp", JSON.stringify(okUrl));
+check("the postgres:// spelling is accepted too",
+  evaluateDatabaseUrl({ DATABASE_URL: "postgres://u:p@h/db" }).ok === true, "");
+check("scheme comparison is case-insensitive",
+  evaluateDatabaseUrl({ DATABASE_URL: "POSTGRESQL://u:p@h/db" }).ok === true, "");
+check("surrounding whitespace does not defeat it",
+  evaluateDatabaseUrl({ DATABASE_URL: `  ${PG_URL}  ` }).ok === true, "");
+
+// Each of these used to reach the libSQL branch instead of failing.
+const DB_DENY = [
+  ["DATABASE_URL absent", {}],
+  ["DATABASE_URL empty", { DATABASE_URL: "" }],
+  ["DATABASE_URL blank", { DATABASE_URL: "   " }],
+  ["a file: URL (the old silent fallback)", { DATABASE_URL: "file:./prisma/dev.db" }],
+  ["a bare relative file path", { DATABASE_URL: "file:../dev.db" }],
+  ["a libsql: URL", { DATABASE_URL: "libsql://erp-org.turso.io?authToken=x" }],
+  ["an http URL", { DATABASE_URL: "http://db.example.com/erp" }],
+  ["a mysql URL", { DATABASE_URL: "mysql://u:p@h/db" }],
+  ["an unparseable string", { DATABASE_URL: "not a url at all" }],
+  ["a scheme with nothing after it", { DATABASE_URL: "postgresql://" }],
+  ["no database in the path", { DATABASE_URL: "postgresql://u:p@host/" }],
+  ["more than one host", { DATABASE_URL: "postgresql://u:p@host1,host2/db" }],
+];
+for (const [label, env] of DB_DENY) {
+  const verdict = evaluateDatabaseUrl(env);
+  check(`REFUSED: ${label}`, verdict.ok === false, JSON.stringify(verdict));
+}
+
+// The decision is environment-independent on purpose: a fallback that only bites outside
+// production is a fallback that gets tested least where it does most harm.
+for (const nodeEnv of ["production", "development", "test", undefined]) {
+  const verdict = evaluateDatabaseUrl({ NODE_ENV: nodeEnv, DATABASE_URL: "file:./prisma/dev.db" });
+  check(`a file: URL is refused with NODE_ENV=${nodeEnv ?? "(unset)"}`, verdict.ok === false, "");
+}
+
+// requireDatabaseUrl is what db.ts calls at module load, so it must THROW rather than
+// return a value the caller might ignore.
+let threw = false;
+try { requireDatabaseUrl({}); } catch { threw = true; }
+check("requireDatabaseUrl throws when DATABASE_URL is absent", threw, "");
+threw = false;
+try { requireDatabaseUrl({ DATABASE_URL: "file:./prisma/dev.db" }); } catch { threw = true; }
+check("requireDatabaseUrl throws on a file: URL", threw, "");
+check("requireDatabaseUrl returns the URL when it is valid",
+  requireDatabaseUrl({ DATABASE_URL: PG_URL }) === PG_URL, "");
+
+// DIRECT_URL: migrations must name the direct endpoint explicitly.
+threw = false;
+try { requireDirectUrl({ DATABASE_URL: PG_URL }); } catch { threw = true; }
+check("requireDirectUrl throws when DIRECT_URL is absent", threw, "");
+threw = false;
+try { requireDirectUrl({ DIRECT_URL: "file:./dev.db" }); } catch { threw = true; }
+check("requireDirectUrl throws on a non-PostgreSQL DIRECT_URL", threw, "");
+check("requireDirectUrl accepts a direct PostgreSQL endpoint",
+  requireDirectUrl({ DIRECT_URL: PG_URL }) === PG_URL, "");
+
+// A refusal is read by whoever is staring at a failed boot. It must name the problem and
+// nothing else — a connection URL carries a password.
+for (const [label, env] of [
+  ["missing", {}],
+  ["file:", { DATABASE_URL: "file:./prisma/dev.db" }],
+  ["wrong engine", { DATABASE_URL: "mysql://admin:hunter2@db.example.com/erp" }],
+]) {
+  const verdict = evaluateDatabaseUrl(env);
+  const reason = verdict.ok === false ? verdict.reason : "";
+  check(`the ${label} refusal leaks no credential`,
+    !reason.includes("hunter2") && !reason.includes("secret") && !reason.includes("@"), reason);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("DEPLOYMENT CONFIGURATION (static) — H1-1 / H1-4");
+//
+// Static assertions rather than documentation. The build script used to run
+// `prisma migrate deploy`, so every deployment mutated the production database as a side
+// effect of compiling TypeScript, with no approval and no snapshot behind it. Nothing but a
+// test stops that coming back.
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8"));
+const buildScript = pkg.scripts?.build ?? "";
+
+check("a build script exists", buildScript.length > 0, JSON.stringify(pkg.scripts));
+check("the build does NOT run `migrate deploy`", !/migrate\s+deploy/.test(buildScript), buildScript);
+check("the build does NOT run `migrate dev`", !/migrate\s+dev/.test(buildScript), buildScript);
+check("the build does NOT run `db push`", !/db\s+push/.test(buildScript), buildScript);
+check("the build still generates the Prisma client", /prisma\s+generate/.test(buildScript), buildScript);
+check("the build still builds the application", /next\s+build/.test(buildScript), buildScript);
+check("postinstall does not migrate either",
+  !/migrate|db\s+push/.test(pkg.scripts?.postinstall ?? ""), pkg.scripts?.postinstall ?? "");
+check("no npm script other than the explicit one deploys migrations",
+  Object.entries(pkg.scripts ?? {})
+    .filter(([name]) => name !== "db:migrate:deploy")
+    .every(([, cmd]) => !/migrate\s+(deploy|dev)/.test(cmd)),
+  JSON.stringify(pkg.scripts));
+check("an explicit operator migration command exists",
+  typeof pkg.scripts?.["db:migrate:deploy"] === "string", "");
+check("and it goes through the wrapper that requires DIRECT_URL",
+  /scripts\/migrate-deploy\.mjs/.test(pkg.scripts?.["db:migrate:deploy"] ?? ""),
+  pkg.scripts?.["db:migrate:deploy"] ?? "");
+
+// F — the Prisma CLI carried the same silent fallback the runtime did.
+//
+// Comments are stripped before scanning: both files explain what the old fallback WAS,
+// and an assertion that cannot tell a quoted line of history from a live one would force
+// the next person to delete the explanation in order to keep the test green.
+const stripComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+const prismaConfig = stripComments(readFileSync(join(REPO, "prisma.config.ts"), "utf8"));
+check("prisma.config.ts has no implicit SQLite fallback",
+  !/file:\.\/prisma\/dev\.db/.test(prismaConfig), "fallback string still present in code");
+check("prisma.config.ts does not default DATABASE_URL to anything",
+  !/DATABASE_URL\s*\|\|/.test(prismaConfig), "a || fallback is still present");
+check("prisma.config.ts resolves its URL through the fail-closed guard",
+  /requireDatabaseUrl\(/.test(prismaConfig), "guard not used");
+
+const dbModule = stripComments(readFileSync(join(REPO, "src", "lib", "db.ts"), "utf8"));
+check("db.ts no longer imports the libSQL adapter",
+  !/adapter-libsql|PrismaLibSql/.test(dbModule), "libSQL adapter still referenced");
+check("db.ts no longer names a dev.db fallback",
+  !/dev\.db/.test(dbModule), "dev.db still referenced in code");
+check("db.ts does not default DATABASE_URL to anything",
+  !/DATABASE_URL\s*(\|\||\?\?)/.test(dbModule), "a fallback is still present");
+check("db.ts resolves its URL through the fail-closed guard",
+  /requireDatabaseUrl\(/.test(dbModule), "guard not used");
 
 // ─────────────────────────────────────────────────────────────────────────────
 section("HARNESS SELF-TEST");
