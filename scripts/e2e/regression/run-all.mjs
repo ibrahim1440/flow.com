@@ -33,6 +33,7 @@ const SUITES = [
   "hardening",               // concurrency, idempotency, forced rollback, security smoke
   "finished-products",       // units, lots, packaging paths
   "delivery",                // dispatch, partial and full
+  "order-edit-integrity",    // structural order edits: unit/kg authority, reservation trim, removal safety
   "order-to-delivery",       // end-to-end happy and unhappy paths
   "release-simulation",      // a second end-to-end pass on different data
   // LAST, deliberately: this one empties the whole database, which is the behaviour under

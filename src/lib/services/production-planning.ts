@@ -407,6 +407,54 @@ export type RoastingCeiling = {
  *
  * That distinction is the whole reason this is a query rather than a subtraction.
  */
+/**
+ * Roasted output already produced for one order line, split by whether a production order
+ * is holding demand for it.
+ *
+ * Extracted because two callers need the same split and neither may be allowed to invent a
+ * second version of it: the roasting ceiling below, and the order edit, which has to know
+ * whether shrinking a line would strand coffee that was roasted for it.
+ *
+ * `unaccountedKg` is roast that no production order accounts for — an order-backed roast
+ * raised straight against the line. It is invisible to the canonical demand equation, which
+ * sees only delivered, reserved and scheduled, so it has to be carried separately.
+ * `linkedKg` is roast a production order is already answering for, and is therefore
+ * represented in that equation as produced or still-scheduled units.
+ *
+ * The filter is the one the whole system uses for real production: rejected batches never
+ * count, and blends are excluded because a blend's output is already represented by the
+ * batches that went into it.
+ */
+export type RoastedForItem = {
+  unaccountedKg: number;
+  linkedKg: number;
+  totalKg: number;
+};
+
+export async function roastedKgForItem(
+  tx: PrismaTx,
+  orderItemId: string,
+): Promise<RoastedForItem> {
+  const rows = await tx.roastingBatch.groupBy({
+    by: ["productionOrderId"],
+    where: { orderItemId, isBlend: false, status: { not: "Rejected" } },
+    _sum: { roastedBeanQuantity: true },
+  });
+
+  let unaccountedKg = 0;
+  let linkedKg = 0;
+  for (const r of rows) {
+    const kg = r._sum.roastedBeanQuantity ?? 0;
+    if (r.productionOrderId === null) unaccountedKg += kg;
+    else linkedKg += kg;
+  }
+  return {
+    unaccountedKg: roundKg(unaccountedKg),
+    linkedKg: roundKg(linkedKg),
+    totalKg: roundKg(unaccountedKg + linkedKg),
+  };
+}
+
 export async function roastingCeilingForItem(
   tx: PrismaTx,
   orderItemId: string,
@@ -424,17 +472,9 @@ export async function roastingCeilingForItem(
   });
   if (!item) return null;
 
-  // Roasted output on this line that no production order is holding demand for.
-  const unaccounted = await tx.roastingBatch.aggregate({
-    where: {
-      orderItemId,
-      productionOrderId: null,
-      isBlend: false,
-      status: { not: "Rejected" },
-    },
-    _sum: { roastedBeanQuantity: true },
-  });
-  const unaccountedRoastedKg = roundKg(unaccounted._sum.roastedBeanQuantity ?? 0);
+  // Roasted output on this line, split by whether a production order accounts for it.
+  const roasted = await roastedKgForItem(tx, orderItemId);
+  const unaccountedRoastedKg = roasted.unaccountedKg;
 
   if (item.quantityUnits !== null && item.productSkuId && item.productSku) {
     const demand = await outstandingDemandForItem(tx, {
@@ -455,11 +495,7 @@ export async function roastingCeilingForItem(
   // subtracted here for the first time — a line that has already shipped most of its
   // quantity was previously treated as though none of it had left.
   const reservedKg = await reservedForItem(tx, orderItemId);
-  const linked = await tx.roastingBatch.aggregate({
-    where: { orderItemId, productionOrderId: { not: null }, isBlend: false, status: { not: "Rejected" } },
-    _sum: { roastedBeanQuantity: true },
-  });
-  const alreadyKg = roundKg(unaccountedRoastedKg + (linked._sum.roastedBeanQuantity ?? 0));
+  const alreadyKg = roasted.totalKg;
   return {
     ceilingKg: Math.max(0, roundKg(item.quantityKg - item.deliveredQty - reservedKg - alreadyKg)),
     basis: "legacy-kg",

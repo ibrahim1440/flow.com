@@ -456,12 +456,25 @@ export async function consumeFinishedUnits(
  * reason: an item that reserved units across two lots but shipped from one would
  * otherwise leave the other lot's units promised to an order that is already complete,
  * hiding stock that is physically present from every other order.
+ *
+ * `otherCoverageUnits` is coverage of this line that is neither delivered nor reserved — in
+ * practice the unpacked remainder of its open production orders. A delivery has none of it
+ * and passes nothing, which is why the parameter defaults to zero and that path is byte for
+ * byte unchanged. An order edit does have it: shrinking a line whose demand is partly
+ * covered by scheduled production must leave room for that production, or the reservations
+ * and the scheduled units together cover more than the line now orders. The caller supplies
+ * the figure from the canonical demand calculation; this helper does not compute a second
+ * one of its own.
  */
 export async function trimUnitReservationToDemand(
   tx: PrismaTx,
-  item: { id: string; quantityUnits: number; deliveredUnits: number }
+  item: { id: string; quantityUnits: number; deliveredUnits: number },
+  otherCoverageUnits = 0,
 ): Promise<number> {
-  const stillWanted = Math.max(0, item.quantityUnits - item.deliveredUnits);
+  const stillWanted = Math.max(
+    0,
+    item.quantityUnits - item.deliveredUnits - Math.max(0, otherCoverageUnits),
+  );
 
   const rows = await tx.stockAllocation.findMany({
     where: { orderItemId: item.id, status: "RESERVED", quantityUnits: { not: null } },

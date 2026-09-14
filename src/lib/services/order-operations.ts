@@ -87,6 +87,10 @@ export const ACTIVITY_TYPES = [
   // order's timeline for the same reason the production events are: the person asking why an
   // order was or was not covered wants the packaging run in the same list as the review.
   "STOCK_RESERVED_FROM_PACKAGING",
+  // A structural change to the order's own lines: quantities, additions, removals. On the
+  // order's timeline because "why is this order for 5 when the customer asked for 10?" is a
+  // question asked about the order, not about an inventory table.
+  "ORDER_ITEMS_EDITED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
