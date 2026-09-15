@@ -440,6 +440,10 @@ async function main() {
       orderItemId: unitItem, greenBeanId: C.beans.brazil.id,
       greenBeanQuantity: 4, roastedBeanQuantity: 3, wasteQuantity: 1,
       productionOrderId: poId,
+      // The line is already fully covered by the production order this roast belongs to,
+      // so the roast is surplus by the canonical measure and now says so.
+      surplusOverride: true,
+      surplusReason: "Fixture: deliberately produces beyond outstanding demand against a covered line",
     }});
     await sleep(900);
     await releasePo();

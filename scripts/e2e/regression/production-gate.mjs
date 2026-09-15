@@ -44,6 +44,12 @@ const roast = (item, greenKg = 2, roastedKg = 1.6) =>
       productId: C.coffees.brazil.id,
       greenBeanQuantity: greenKg,
       roastedBeanQuantity: roastedKg,
+      // The gate under test here is the production ENTRY gate — approval, review, order
+      // status. These fixtures routinely roast past the quantity ceiling (a production
+      // order usually covers the line already), which since H2A needs asking for. Without
+      // it the surplus gate answers first and the entry gate never gets to speak.
+      surplusOverride: true,
+      surplusReason: "Fixture: deliberately produces beyond outstanding demand to reach the production entry gate",
       wasteQuantity: +(greenKg - roastedKg).toFixed(3),
     },
   });

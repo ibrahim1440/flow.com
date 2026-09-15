@@ -11,7 +11,76 @@ import {
   roastingCeilingForItem,
   advisoryKey,
 } from "@/lib/services/production-planning";
-import { productionGateRefusal, assertOrderStillAcceptsProduction } from "@/lib/services/order-operations";
+import {
+  productionGateRefusal,
+  assertOrderStillAcceptsProduction,
+  appendOrderActivity,
+  REASON_MAX_LENGTH,
+} from "@/lib/services/order-operations";
+
+/**
+ * Authorization to roast past the ceiling.
+ *
+ * Being an admin used to be the whole test: `excess > 0 && user.role !== "admin"` let an
+ * administrator through in silence, with no flag, no reason and nothing written down. One
+ * mis-click could materially overproduce and leave nothing in the record to show that a
+ * limit had been crossed at all.
+ *
+ * Surplus roasting is legitimate — batch minimums, drum capacity, a roaster who would
+ * rather not stop at 7.4kg — so the answer is not to forbid it. The answer is that it has
+ * to be asked for. Privilege is necessary and no longer sufficient: the request must say
+ * that it means to exceed the ceiling, and say why, and the why is kept.
+ */
+const SURPLUS_REASON_MIN_LENGTH = 8;
+
+type SurplusDecision =
+  | { ok: true; reason: string }
+  | { ok: false; status: number; message: string };
+
+function evaluateSurplusOverride(
+  role: string,
+  overrideRequested: unknown,
+  rawReason: unknown,
+): SurplusDecision {
+  if (overrideRequested !== true) {
+    return {
+      ok: false,
+      status: 422,
+      message:
+        role === "admin"
+          ? "This roast exceeds what the order still needs. An admin may authorize it, but " +
+            "the request must ask for it explicitly: send surplusOverride together with a " +
+            "surplusReason. Nothing was roasted."
+          : "Only an admin can authorize surplus production.",
+    };
+  }
+
+  // Checked after the flag so that a non-admin who sends the flag is told the truth about
+  // privilege rather than being sent away to write a better reason.
+  if (role !== "admin") {
+    return { ok: false, status: 403, message: "Only an admin can authorize surplus production." };
+  }
+
+  const reason = typeof rawReason === "string" ? rawReason.trim() : "";
+  if (reason.length < SURPLUS_REASON_MIN_LENGTH) {
+    return {
+      ok: false,
+      status: 400,
+      message:
+        `surplusReason is required when authorizing surplus production and must be at ` +
+        `least ${SURPLUS_REASON_MIN_LENGTH} characters. Nothing was roasted.`,
+    };
+  }
+  if (reason.length > REASON_MAX_LENGTH) {
+    return {
+      ok: false,
+      status: 400,
+      message: `surplusReason must be at most ${REASON_MAX_LENGTH} characters.`,
+    };
+  }
+
+  return { ok: true, reason };
+}
 
 class AppError extends Error {
   constructor(readonly status: number, message: string) {
@@ -93,7 +162,7 @@ export async function POST(request: Request) {
   if (error) return error;
 
   const data = await request.json();
-  const { orderItemId, greenBeanId, productId, greenBeanQuantity, roastedBeanQuantity, wasteQuantity, roastProfile, productionOrderId } = data;
+  const { orderItemId, greenBeanId, productId, greenBeanQuantity, roastedBeanQuantity, wasteQuantity, roastProfile, productionOrderId, surplusOverride, surplusReason } = data;
 
   // A direct roast must always name the green bean it consumes. Without it the whole
   // stock-deduction + ledger block below is skipped, so roasted kilograms appear on the
@@ -185,7 +254,14 @@ export async function POST(request: Request) {
   const productionCeiling = ceiling ? ceiling.ceilingKg : Infinity;
   const excess = +(roastedQty - productionCeiling).toFixed(3);
 
-  if (excess > 0 && user.role !== "admin") {
+  // The decision is taken once, here, and re-taken inside the transaction against live
+  // numbers. Both use the same function, so "admin, explicitly, with a reason" means the
+  // same thing in both places.
+  const surplus = excess > 0
+    ? evaluateSurplusOverride(user.role, surplusOverride, surplusReason)
+    : null;
+
+  if (surplus && !surplus.ok) {
     const d = ceiling?.demand;
     const covered = d
       ? [
@@ -194,20 +270,25 @@ export async function POST(request: Request) {
           d.scheduledUnits > 0 ? `${d.scheduledUnits} already on production orders` : null,
         ].filter(Boolean).join(", ")
       : "";
-    return NextResponse.json(
-      {
-        error:
-          `Batch would exceed the ${productionCeiling}kg still to be produced for this item by ${excess}kg` +
-          (covered ? ` — ${covered}, out of ${d!.orderedUnits} unit(s) ordered.` : ".") +
-          " Only an admin can authorize surplus production.",
-      },
-      { status: 422 }
-    );
+    // The quantity explanation is worth having on the refusal an operator will actually
+    // read; the validation refusals speak for themselves.
+    const prefix = surplus.status === 400
+      ? ""
+      : `Batch would exceed the ${productionCeiling}kg still to be produced for this item by ${excess}kg` +
+        (covered ? ` — ${covered}, out of ${d!.orderedUnits} unit(s) ordered.` : ".") + " ";
+    return NextResponse.json({ error: prefix + surplus.message }, { status: surplus.status });
   }
   // ─────────────────────────────────────────────────────────────────────────
 
   try {
   const batch = await prisma.$transaction(async (tx) => {
+    // Set only when this roast is committed as an authorized surplus, and used twice
+    // below: once on the ledger note and once on the order timeline. It lives inside the
+    // transaction so a rollback takes the evidence with the roast.
+    let overrideEvidence:
+      | { ceilingKg: number; requestedKg: number; excessKg: number; reason: string }
+      | null = null;
+
     // ── Production entry gate ────────────────────────────────────────────────
     // First statement in the transaction, before the serial is allocated and well before
     // the green-bean decrement below, so a roast against an order that is not approved or
@@ -236,13 +317,25 @@ export async function POST(request: Request) {
       const live = await roastingCeilingForItem(tx, orderItemId as string);
       if (!live) throw new AppError(404, "Order item not found.");
       const liveExcess = +(roastedQty - live.ceilingKg).toFixed(3);
-      if (liveExcess > 0 && user.role !== "admin") {
-        throw {
-          _appCode: 409,
-          message:
-            `This line was covered while the request was in flight — only ${live.ceilingKg}kg ` +
-            `still needs producing, and this roast would exceed it by ${liveExcess}kg. ` +
-            "Nothing was roasted.",
+      if (liveExcess > 0) {
+        // Re-asked under the lock. A request that was inside the ceiling when it arrived
+        // and is outside it now needs the same explicit authorization as one that was
+        // outside it from the start — being early is not an authorization.
+        const liveDecision = evaluateSurplusOverride(user.role, surplusOverride, surplusReason);
+        if (!liveDecision.ok) {
+          throw {
+            _appCode: liveDecision.status === 400 ? 400 : 409,
+            message:
+              `This line was covered while the request was in flight — only ${live.ceilingKg}kg ` +
+              `still needs producing, and this roast would exceed it by ${liveExcess}kg. ` +
+              liveDecision.message,
+          };
+        }
+        overrideEvidence = {
+          ceilingKg: live.ceilingKg,
+          requestedKg: roastedQty,
+          excessKg: liveExcess,
+          reason: liveDecision.reason,
         };
       }
     }
@@ -410,7 +503,13 @@ export async function POST(request: Request) {
           sourceDocType:     "ROASTING_BATCH",
           sourceDocId:       newBatch.id,
           userId:            user.id,
-          notes:             null,
+          // The ledger row is where somebody reconciling green stock will be standing when
+          // they ask why this draw was larger than the order justified.
+          notes: overrideEvidence
+            ? `Surplus authorized: ${overrideEvidence.requestedKg}kg roasted against a ` +
+              `${overrideEvidence.ceilingKg}kg ceiling (+${overrideEvidence.excessKg}kg). ` +
+              `Reason: ${overrideEvidence.reason}`
+            : null,
         },
       });
     }
@@ -436,6 +535,34 @@ export async function POST(request: Request) {
     // Stock batches are excluded: they have no customer order whose lifecycle could
     // invalidate them, and are bounded by their own privilege and the atomic stock check.
     if (!isStockBatch) await assertOrderStillAcceptsProduction(tx, orderItemId, "start");
+
+    // Written last, and deliberately after the barrier above: the OrderActivity insert
+    // takes FOR KEY SHARE on Order through its foreign key, and that barrier has just
+    // taken the Order row, so this adds no new lock and no new ordering edge. Same
+    // transaction as the roast, so a refused roast leaves no record of an override that
+    // never happened.
+    if (overrideEvidence && newBatch.orderItem) {
+      await appendOrderActivity(tx, {
+        orderId: newBatch.orderItem.orderId,
+        type: "PRODUCTION_SURPLUS_OVERRIDDEN",
+        message:
+          `${user.name} authorized surplus production on batch ${newBatch.batchNumber}: ` +
+          `${overrideEvidence.requestedKg}kg roasted against a ${overrideEvidence.ceilingKg}kg ` +
+          `ceiling, exceeding it by ${overrideEvidence.excessKg}kg. Reason: ${overrideEvidence.reason}`,
+        authorId: user.id,
+        authorName: user.name,
+        metadata: {
+          batchId: newBatch.id,
+          batchNumber: newBatch.batchNumber,
+          orderItemId: newBatch.orderItemId,
+          productionOrderId: newBatch.productionOrderId,
+          ceilingKg: overrideEvidence.ceilingKg,
+          requestedKg: overrideEvidence.requestedKg,
+          excessKg: overrideEvidence.excessKg,
+          reason: overrideEvidence.reason,
+        },
+      });
+    }
 
     return newBatch;
   }, TX_OPTS);

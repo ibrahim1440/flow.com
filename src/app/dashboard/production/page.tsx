@@ -126,6 +126,18 @@ export default function ProductionPage() {
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // Blending is the one mutating action here with no backend retry protection: the route is
+  // concurrency-safe — two blends cannot spend the same roasted coffee twice — but it is not
+  // idempotent, so two submissions of the same intent against sources that have room both
+  // succeed and two blend batches exist where the operator meant one. A button that stays
+  // live while its own request is in flight is the likeliest way to send the second.
+  //
+  // This is defence in depth and NOT idempotency: it removes the everyday cause (a double
+  // click, an impatient second press) and does nothing about a retried request, a refreshed
+  // tab or a direct API call. Durable protection needs a request key and a uniqueness
+  // constraint, the way packaging got one — which is a schema change, and is recorded for
+  // the migration decision rather than smuggled in here.
+  const [blending, setBlending] = useState(false);
 
   // Edit date modal
   const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
@@ -285,26 +297,41 @@ export default function ProductionPage() {
   }
 
   async function handleBlend() {
+    // Guarded on the state itself rather than only on the disabled attribute: the attribute
+    // stops the pointer, this stops everything else — a keyboard activation, a queued click
+    // delivered before React re-renders, a second call from anywhere.
+    if (blending) return;
+    setBlending(true);
     setError("");
     const ids = Array.from(blendSelected);
-    const res = await fetch("/api/roasting-batches/blend", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batchIds: ids }),
-    });
-    if (!res.ok) {
-      try {
-        const data = await res.json();
-        setError(data.error || "Failed to blend");
-      } catch {
-        setError("Failed to blend");
+    try {
+      const res = await fetch("/api/roasting-batches/blend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchIds: ids }),
+      });
+      if (!res.ok) {
+        // A refusal is deterministic — the server did not blend — so the form reopens with
+        // the selection intact and the operator may correct and retry.
+        try {
+          const data = await res.json();
+          setError(data.error || "Failed to blend");
+        } catch {
+          setError("Failed to blend");
+        }
+        return;
       }
-      return;
+      setSuccess(t("batchesBlended"));
+      setShowBlendForm(false);
+      setBlendSelected(new Set());
+      loadData();
+    } catch {
+      // A network failure is NOT deterministic: the blend may or may not have committed.
+      // Saying so is more honest than inviting a retry that could double it.
+      setError("The blend could not be confirmed. Reload the batch list before trying again.");
+    } finally {
+      setBlending(false);
     }
-    setSuccess(t("batchesBlended"));
-    setShowBlendForm(false);
-    setBlendSelected(new Set());
-    loadData();
   }
 
   async function handleCancelBatch(restock: boolean) {
@@ -972,7 +999,7 @@ export default function ProductionPage() {
                 </div>
               )}
               <div className="flex gap-3">
-                <button onClick={handleBlend} disabled={!canSubmit}
+                <button onClick={handleBlend} disabled={!canSubmit || blending}
                   className="flex-1 py-3 bg-slate text-white rounded-xl font-bold hover:bg-slate-dark shadow-md disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200">
                   {t("blendBatches")} ({blendSelected.size})
                 </button>

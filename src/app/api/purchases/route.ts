@@ -34,10 +34,25 @@ export async function POST(request: Request) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const bean = await tx.greenBean.findUnique({
-        where: { id: itemId },
-        select: { id: true, quantityKg: true },
-      });
+      // ── Serialise against a concurrent delete of this coffee ────────────────
+      // PurchaseRecord.itemId and InventoryMovement.referenceEntityId are untyped strings
+      // with no foreign key behind them, so inserting them takes no lock on the coffee they
+      // name and the database will not stop them naming one that is being deleted. Reading
+      // the row first proves only that it existed a moment ago.
+      //
+      // Locking it is what makes the guard in DELETE /api/green-beans/[id] mean anything: that
+      // route locks this same row, counts the references, and refuses if any exist. Taking the
+      // lock BEFORE the loose rows are written puts the two transactions in a queue — either
+      // the delete sees these rows and refuses, or this transaction finds the coffee gone and
+      // rolls back. Without it the delete can count zero, commit, and leave a purchase and a
+      // ledger entry describing stock that arrived for a coffee that no longer exists.
+      //
+      // FOR UPDATE rather than FOR KEY SHARE because this transaction goes on to update the
+      // row anyway; it is the same lock, taken earlier, and it introduces no new ordering —
+      // GreenBean is still the first thing this transaction acquires.
+      const locked = await tx.$queryRaw<{ id: string; quantityKg: number }[]>`
+        SELECT "id", "quantityKg" FROM "GreenBean" WHERE "id" = ${itemId} FOR UPDATE`;
+      const bean = locked[0];
       if (!bean) throw { _appCode: 404, message: "Green bean not found." };
 
       const previousQuantity = bean.quantityKg;

@@ -45,6 +45,14 @@ import { readRequestKey } from "../../../src/lib/services/packaging-idempotency.
 import {
   evaluateDatabaseUrl, requireDatabaseUrl, requireDirectUrl,
 } from "../../../src/lib/db-config.ts";
+import {
+  normalizeAdjustmentReason,
+  ADJUSTMENT_REASON_MAX_LENGTH,
+  ADJUSTMENT_REASON_MIN_LENGTH,
+} from "../../../src/lib/services/inventory-adjustment.ts";
+import {
+  diffEmployeeChange, diffPermissions, PERMISSION_DIFF_LIMIT,
+} from "../../../src/lib/services/employee-audit.ts";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -599,6 +607,172 @@ check("db.ts does not default DATABASE_URL to anything",
 check("db.ts resolves its URL through the fail-closed guard",
   /requireDatabaseUrl\(/.test(dbModule), "guard not used");
 
+// ─────────────────────────────────────────────────────────────────────────────
+section("MANUAL ADJUSTMENT REASON (pure) — H2A");
+//
+// A manual stock adjustment is the one inventory movement with no document behind it, so
+// the reason is the document. Both adjustment routes share this rule precisely so they
+// cannot drift apart on what counts as an explanation.
+
+for (const [label, input] of [
+  ["undefined", undefined],
+  ["null", null],
+  ["a number", 42],
+  ["empty", ""],
+  ["spaces", "     "],
+  ["a tab and a newline", "\t\n"],
+  ["too short", "typo"],
+  ["short after trimming", "   ok   "],
+  ["longer than the maximum", "x".repeat(ADJUSTMENT_REASON_MAX_LENGTH + 1)],
+]) {
+  const verdict = normalizeAdjustmentReason(input);
+  check(`REFUSED as a reason: ${label}`, verdict.ok === false, JSON.stringify(verdict));
+}
+
+const goodReason = normalizeAdjustmentReason("  Stock count 14 Sep — two bags behind the pallet  ");
+check("a real reason is accepted", goodReason.ok === true, JSON.stringify(goodReason));
+check("and is stored trimmed",
+  goodReason.ok === true && goodReason.reason === "Stock count 14 Sep — two bags behind the pallet",
+  goodReason.ok ? goodReason.reason : "");
+check("a reason of exactly the maximum length is accepted",
+  normalizeAdjustmentReason("x".repeat(ADJUSTMENT_REASON_MAX_LENGTH)).ok === true, "");
+check("a reason of exactly the minimum length is accepted",
+  normalizeAdjustmentReason("x".repeat(ADJUSTMENT_REASON_MIN_LENGTH)).ok === true, "");
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("EMPLOYEE ADMINISTRATION AUDIT (pure) — H2A");
+//
+// The audit describes what CHANGED, derived from the row before and after, so a request that
+// sets the role to what it already was is not a role change six months later. And it records
+// the change EXACTLY: a fingerprint proves only that something moved, which is no use to
+// somebody asked to explain why an operator could suddenly authorize surplus production.
+
+const P_QC = JSON.stringify({
+  dashboard: { access: "edit" },
+  qc: { access: "edit", sub: { create_record: true, manage: false } },
+});
+const P_QC_MANAGE = JSON.stringify({
+  dashboard: { access: "edit" },
+  qc: { access: "edit", sub: { create_record: true, manage: true } },
+});
+const P_DISPATCH = JSON.stringify({
+  dashboard: { access: "edit" },
+  dispatch: { access: "edit", sub: { mark_delivered: true } },
+});
+
+// ── the diff itself ────────────────────────────────────────────────────────
+const noDiff = diffPermissions(P_QC, P_QC);
+check("identical documents differ in nothing", noDiff.changes.length === 0, JSON.stringify(noDiff));
+check("and are not reported as truncated", noDiff.truncated === false, "");
+
+const granted = diffPermissions(P_QC, P_QC_MANAGE);
+check("granting one sub-privilege reports exactly one change",
+  granted.changes.length === 1, JSON.stringify(granted.changes));
+check("naming the privilege by path, with both values",
+  granted.changes[0]?.path === "qc.manage" && granted.changes[0]?.from === false &&
+  granted.changes[0]?.to === true, JSON.stringify(granted.changes[0]));
+
+const revoked = diffPermissions(P_QC_MANAGE, P_QC);
+check("revoking it reports the exact inverse",
+  revoked.changes.length === 1 && revoked.changes[0]?.path === "qc.manage" &&
+  revoked.changes[0]?.from === true && revoked.changes[0]?.to === false,
+  JSON.stringify(revoked.changes[0]));
+
+const moved = diffPermissions(P_QC, P_DISPATCH);
+const paths = moved.changes.map((c) => c.path).sort();
+check("replacing a module reports the access level on both sides",
+  paths.includes("qc.access") && paths.includes("dispatch.access"), JSON.stringify(paths));
+check("and every sub-privilege that moved with it",
+  paths.includes("qc.create_record") && paths.includes("dispatch.mark_delivered"),
+  JSON.stringify(paths));
+check("a module that is gone reads as a change TO null",
+  moved.changes.find((c) => c.path === "qc.access")?.to === null,
+  JSON.stringify(moved.changes.find((c) => c.path === "qc.access")));
+check("a module that is new reads as a change FROM null",
+  moved.changes.find((c) => c.path === "dispatch.access")?.from === null,
+  JSON.stringify(moved.changes.find((c) => c.path === "dispatch.access")));
+
+// One sweeping regrant must not write an unbounded document into the audit log.
+const wide = {};
+for (let i = 0; i < PERMISSION_DIFF_LIMIT + 20; i++) wide[`mod${i}`] = { access: "edit" };
+const truncated = diffPermissions(JSON.stringify({}), JSON.stringify(wide));
+check("an enormous change is capped", truncated.changes.length === PERMISSION_DIFF_LIMIT,
+  `${truncated.changes.length} changes`);
+check("and says so rather than trimming in silence", truncated.truncated === true, "");
+
+// Unparseable permissions must degrade, never throw: an audit write may not be the reason an
+// administrative action fails.
+check("a permission document that is not JSON is survivable",
+  Array.isArray(diffPermissions("{not json", P_QC).changes), "");
+
+// ── which events an edit produces ──────────────────────────────────────────
+const unchanged = diffEmployeeChange(
+  { role: "qc", active: true, permissions: P_QC },
+  { role: "qc", active: true, permissions: P_QC },
+  {},
+);
+check("a change that changes nothing records nothing", unchanged.length === 0, JSON.stringify(unchanged));
+
+const promoted = diffEmployeeChange(
+  { role: "qc", active: true, permissions: P_QC },
+  { role: "admin", active: true, permissions: P_QC },
+  {},
+);
+check("a role change is recorded once",
+  promoted.length === 1 && promoted[0].action === "EMPLOYEE_ROLE_CHANGED", JSON.stringify(promoted));
+check("with both the old and the new role",
+  promoted[0]?.metadata.oldRole === "qc" && promoted[0]?.metadata.newRole === "admin",
+  JSON.stringify(promoted[0]?.metadata));
+
+const deactivated = diffEmployeeChange(
+  { role: "qc", active: true, permissions: P_QC },
+  { role: "qc", active: false, permissions: P_QC },
+  {},
+);
+check("a deactivation is recorded as one, with both values",
+  deactivated.length === 1 && deactivated[0].action === "EMPLOYEE_DEACTIVATED" &&
+  deactivated[0].metadata.oldActive === true && deactivated[0].metadata.newActive === false,
+  JSON.stringify(deactivated));
+check("and a reactivation as the other",
+  diffEmployeeChange(
+    { role: "qc", active: false, permissions: P_QC },
+    { role: "qc", active: true, permissions: P_QC },
+    {},
+  )[0]?.action === "EMPLOYEE_ACTIVATED", "");
+
+const regranted = diffEmployeeChange(
+  { role: "qc", active: true, permissions: P_QC },
+  { role: "qc", active: true, permissions: P_QC_MANAGE },
+  {},
+);
+check("a permission change carries the exact diff, not a summary",
+  regranted.length === 1 && regranted[0].action === "EMPLOYEE_PERMISSIONS_CHANGED" &&
+  JSON.stringify(regranted[0].metadata.changes) ===
+    JSON.stringify([{ path: "qc.manage", from: false, to: true }]),
+  JSON.stringify(regranted[0]?.metadata));
+
+const everythingAtOnce = diffEmployeeChange(
+  { role: "qc", active: true, permissions: P_QC },
+  { role: "admin", active: false, permissions: P_DISPATCH },
+  { pin: true, password: true },
+);
+check("four separate events when four things change", everythingAtOnce.length === 4,
+  JSON.stringify(everythingAtOnce.map((e) => e.action)));
+const credential = everythingAtOnce.find((e) => e.action === "EMPLOYEE_CREDENTIAL_CHANGED");
+check("the credential event names the classes that changed",
+  JSON.stringify(credential?.metadata.credentials) === JSON.stringify(["pin", "password"]),
+  JSON.stringify(credential?.metadata));
+check("only the pin when only the pin changed",
+  JSON.stringify(
+    diffEmployeeChange(
+      { role: "qc", active: true, permissions: P_QC },
+      { role: "qc", active: true, permissions: P_QC },
+      { pin: true },
+    )[0]?.metadata.credentials,
+  ) === JSON.stringify(["pin"]), "");
+check("and NEVER what it changed to",
+  !/\$2[aby]\$|pinHash|password"\s*:\s*"/.test(JSON.stringify(everythingAtOnce)),
+  JSON.stringify(everythingAtOnce).slice(0, 140));
 // ─────────────────────────────────────────────────────────────────────────────
 section("HARNESS SELF-TEST");
 console.log(`${pass} passed, ${fail} failed`);

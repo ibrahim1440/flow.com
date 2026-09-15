@@ -117,7 +117,11 @@ async function orderBackedRoast(orderItem, bean, label, greenKg = 12, roastedKg 
     method: "POST",
     body: { orderItemId: orderItem.id, greenBeanId: bean.id,
             greenBeanQuantity: greenKg, roastedBeanQuantity: roastedKg,
-            wasteQuantity: greenKg - roastedKg },
+            wasteQuantity: greenKg - roastedKg,
+            // Identity is what this suite proves. The fixture roasts more than the line
+            // needs so there is coffee to pack, which since H2A is an explicit request.
+            surplusOverride: true,
+            surplusReason: "Fixture: deliberately produces beyond outstanding demand so packaging has stock" },
   });
   if (r.status !== 201) throw new Error(`order-backed roast failed: ${S(r.json)}`);
   await db.query('UPDATE "RoastingBatch" SET "batchNumber"=$2, status=$3 WHERE id=$1',

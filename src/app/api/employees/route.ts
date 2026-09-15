@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { hash } from "bcryptjs";
 import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
+import { recordEmployeeAudit } from "@/lib/services/employee-audit";
+import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
+
+/** Actor plus a hashed address — the same treatment login attempts already give one. */
+function auditContext(request: Request, actorId: string) {
+  return {
+    actorId,
+    ipHash: hashRateLimitKey(extractIp(request)),
+    userAgent: request.headers.get("user-agent")?.slice(0, 500) ?? null,
+  };
+}
 
 const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
@@ -61,7 +72,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireSub("employees", "create");
+  const { user, error } = await requireSub("employees", "create");
   if (error) return error;
 
   const { name, username, pin, password, role, permissions, defaultRoute } = await request.json();
@@ -78,19 +89,43 @@ export async function POST(request: Request) {
   }
 
   try {
-    const employee = await prisma.employee.create({
-      data: {
-        name,
-        username,
-        pin: await hash(pin, 10),
-        pinHash: sha256Pin(pin),
-        role,
-        permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
-        defaultRoute: defaultRoute || "/dashboard",
-        ...(password ? { password: await hash(password, 10) } : {}),
-      },
-      select: SELECT_FULL,
-    });
+    // Hashing is slow and has no business inside a transaction holding a connection open.
+    const hashedPin = await hash(pin, 10);
+    const hashedPassword = password ? await hash(password, 10) : null;
+
+    // The account and the record of its creation commit together. An account that exists
+    // with no record of who created it, or with what authority, is the gap this closes.
+    const employee = await prisma.$transaction(async (tx) => {
+      const created = await tx.employee.create({
+        data: {
+          name,
+          username,
+          pin: hashedPin,
+          pinHash: sha256Pin(pin),
+          role,
+          permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
+          defaultRoute: defaultRoute || "/dashboard",
+          ...(hashedPassword ? { password: hashedPassword } : {}),
+        },
+        select: SELECT_FULL,
+      });
+
+      // The credential the account was created WITH is never recorded — only that one
+      // was set, and which kind.
+      await recordEmployeeAudit(tx, auditContext(request, user.id), [{
+        action: "EMPLOYEE_CREATED",
+        targetEmployeeId: created.id,
+        targetName: created.name,
+        metadata: {
+          role: created.role,
+          active: created.active,
+          credentials: [ "pin", ...(hashedPassword ? ["password"] : []) ],
+        },
+      }]);
+
+      return created;
+    }, TX_OPTS);
+
     return NextResponse.json(employee, { status: 201 });
   } catch (err) {
     return handlePrismaError(err);

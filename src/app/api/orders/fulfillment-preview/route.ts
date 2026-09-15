@@ -10,6 +10,15 @@ import { planFulfilment, explodeBom, type BomRequirement } from "@/lib/services/
 // NOTHING: it reports what the shelf could cover right now. The binding reservation
 // happens later, inside the order's own transaction, and can legitimately come out lower
 // if someone else buys the same stock in between.
+//
+// ── Why a POST is guarded by view access ───────────────────────────────────
+// A deliberate mismatch, recorded rather than quietly tolerated. The verb is POST only
+// because the request body is a list of prospective lines that does not belong in a query
+// string; nothing here writes. Every call below is a read — findMany, planFulfilment and
+// explodeBom contain no create, update, delete or executeRaw between them — so read
+// access is the correct authorization, and requireModule("orders") is what grants it to
+// both viewers and editors. If this route ever gains a write, its guard must change with
+// it in the same commit.
 
 type RawLine = { productSkuId?: unknown; quantityUnits?: unknown };
 

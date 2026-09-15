@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule } from "@/lib/auth-server";
+import { requireModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { appendOrderActivity, isNoteDepartment, NOTE_MESSAGE_MAX_LENGTH } from "@/lib/services/order-operations";
 
@@ -8,8 +8,17 @@ type Params = { params: Promise<{ id: string }> };
 
 // Manual notes only append MANUAL_NOTE activity rows — no status side effect,
 // and no edit/delete route exists for OrderActivity by design (append-only).
+/**
+ * Append a note to an order's timeline.
+ *
+ * This writes an OrderActivity row, so it is a mutation of the order's audit history and
+ * not a read of it. It was gated on requireModule("orders"), and module access is
+ * satisfied by "view" — so an account granted read-only visibility of orders could write
+ * into the permanent record of any order, under its own name. Notes are evidence: a
+ * viewer may read them and may not add to them.
+ */
 export async function POST(request: Request, { params }: Params) {
-  const { user, error } = await requireModule("orders");
+  const { user, error } = await requireEdit("orders");
   if (error) return error;
 
   const { id } = await params;

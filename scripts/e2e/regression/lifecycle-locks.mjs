@@ -48,6 +48,10 @@ const roast = (item, greenKg = 3, roastedKg = 2.4) =>
     body: {
       orderItemId: item.id, greenBeanId: C.beans.brazil.id, productId: C.coffees.brazil.id,
       greenBeanQuantity: greenKg, roastedBeanQuantity: roastedKg, wasteQuantity: +(greenKg - roastedKg).toFixed(3),
+      // Lock ordering is what this suite proves, not demand arithmetic. The roast has to
+      // reach the locking path, so it asks for the surplus it deliberately creates.
+      surplusOverride: true,
+      surplusReason: "Fixture: deliberately produces beyond outstanding demand to exercise the lock path",
     },
   });
 const deliver = (item, units, lotId) =>

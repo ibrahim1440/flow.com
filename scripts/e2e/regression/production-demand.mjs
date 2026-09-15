@@ -94,7 +94,8 @@ const roastFor = async (orderItem, bean, greenKg, roastedKg, extra = {}) => {
     body: {
       orderItemId: orderItem.id, greenBeanId: bean.id,
       greenBeanQuantity: greenKg, roastedBeanQuantity: roastedKg,
-      wasteQuantity: greenKg - roastedKg, ...extra,
+      wasteQuantity: greenKg - roastedKg,
+      ...extra,
     },
   });
   // Stamp the suite prefix on anything that was actually created. The API numbers batches by
@@ -290,7 +291,7 @@ async function main() {
   check("a production order exists to roast against", schedG.status === 201, S(schedG.json).slice(0, 120));
 
   await topUpGreen(C.beans.brazil.id, 8);
-  const roastG = await roastFor(oG.items[0], C.beans.brazil, 8, 6, { productionOrderId: poG.id });
+  const roastG = await roastFor(oG.items[0], C.beans.brazil, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand", productionOrderId: poG.id });
   check("the roast is accepted", roastG.status === 201, `status=${roastG.status} ${S(roastG.json).slice(0, 140)}`);
   const rowG = await one('SELECT "productionOrderId" poid FROM "RoastingBatch" WHERE id=$1', [roastG.json?.id]);
   console.log(`    batch.productionOrderId = ${rowG?.poid}`);
@@ -309,7 +310,7 @@ async function main() {
     S(schedG2.json).slice(0, 120));
 
   await topUpGreen(C.beans.indonesia.id, 8);
-  const roastG2 = await roastFor(oG2.items[0], C.beans.indonesia, 8, 6);   // no productionOrderId
+  const roastG2 = await roastFor(oG2.items[0], C.beans.indonesia, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand" });   // no productionOrderId
   check("the roast is accepted", roastG2.status === 201,
     `status=${roastG2.status} ${S(roastG2.json).slice(0, 140)}`);
   const rowG2 = await one('SELECT "productionOrderId" poid FROM "RoastingBatch" WHERE id=$1',
@@ -330,7 +331,7 @@ async function main() {
   await topUpGreen(C.beans.brazil.id, 8);
   const greenBefore = await greenStockOf(C.beans.brazil.id);
   const batchesBefore = (await batchesFor(oH2.items[0].id)).length;
-  const foreign = await roastFor(oH2.items[0], C.beans.brazil, 8, 6, { productionOrderId: poH.id });
+  const foreign = await roastFor(oH2.items[0], C.beans.brazil, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand", productionOrderId: poH.id });
   console.log(`    Brazilian roast against an Ethiopian PO -> ${foreign.status} ${S(foreign.json).slice(0, 130)}`);
   check("refused with a 4xx", foreign.status >= 400 && foreign.status < 500, `status=${foreign.status}`);
   check("no batch was created", (await batchesFor(oH2.items[0].id)).length === batchesBefore,
@@ -353,7 +354,7 @@ async function main() {
 
   await topUpGreen(C.beans.brazil.id, 8);
   const greenBeforeI = await greenStockOf(C.beans.brazil.id);
-  const conflict = await roastFor(oI2.items[0], C.beans.brazil, 8, 6, { productionOrderId: poI.id });
+  const conflict = await roastFor(oI2.items[0], C.beans.brazil, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand", productionOrderId: poI.id });
   console.log(`    PO of line A + orderItemId of line B -> ${conflict.status} ${S(conflict.json).slice(0, 130)}`);
   check("refused with a 4xx", conflict.status >= 400 && conflict.status < 500, `status=${conflict.status}`);
   check("no batch on either line",
@@ -510,7 +511,7 @@ async function main() {
 
   await topUpGreen(C.beans.ethiopia.id, 10);
   const greenBeforeN = await greenStockOf(C.beans.ethiopia.id);
-  const ambiguous = await roastFor(oN.items[0], C.beans.ethiopia, 8, 6);   // no productionOrderId
+  const ambiguous = await roastFor(oN.items[0], C.beans.ethiopia, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand" });   // no productionOrderId
   console.log(`    two live plans, no id -> ${ambiguous.status} ${S(ambiguous.json).slice(0, 130)}`);
   check("the roast is refused with 409", ambiguous.status === 409, `status=${ambiguous.status}`);
   check("no batch was created", (await batchesFor(oN.items[0].id)).length === 0,
@@ -523,7 +524,7 @@ async function main() {
   sub("N2. naming one of them explicitly succeeds and links exactly that one");
   const chosen = po2.id;
   await topUpGreen(C.beans.ethiopia.id, 10);
-  const explicit = await roastFor(oN.items[0], C.beans.ethiopia, 8, 6, { productionOrderId: chosen });
+  const explicit = await roastFor(oN.items[0], C.beans.ethiopia, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand", productionOrderId: chosen });
   check("the explicit roast is accepted", explicit.status === 201,
     `status=${explicit.status} ${S(explicit.json).slice(0, 140)}`);
   const rowN = await one('SELECT "productionOrderId" poid FROM "RoastingBatch" WHERE id=$1',
@@ -535,7 +536,7 @@ async function main() {
   const oN2 = await orderFor(C.skus.eth1kg.id, 10, "ambiguous foreign");
   await topUpGreen(C.beans.ethiopia.id, 10);
   const greenBeforeN3 = await greenStockOf(C.beans.ethiopia.id);
-  const wrongPo = await roastFor(oN2.items[0], C.beans.ethiopia, 8, 6, { productionOrderId: chosen });
+  const wrongPo = await roastFor(oN2.items[0], C.beans.ethiopia, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand", productionOrderId: chosen });
   check("refused with a 4xx", wrongPo.status >= 400 && wrongPo.status < 500, `status=${wrongPo.status}`);
   check("no batch created", (await batchesFor(oN2.items[0].id)).length === 0,
     `${(await batchesFor(oN2.items[0].id)).length} batches`);
@@ -553,7 +554,7 @@ async function main() {
   // has to be what was produced, never what was shipped.
   const oO = await orderFor(C.skus.idn250.id, 10, "status semantics");
   await topUpGreen(C.beans.indonesia.id, 10);
-  const roastO = await roastFor(oO.items[0], C.beans.indonesia, 8, 6);
+  const roastO = await roastFor(oO.items[0], C.beans.indonesia, 8, 6, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand" });
   check("a roast exists for the line", roastO.status === 201, S(roastO.json).slice(0, 130));
   await db.query(`UPDATE "RoastingBatch" SET status='Passed' WHERE id=$1`, [roastO.json.id]);
   const packO = await packSku(roastO.json.id, C.skus.idn250.id, 10);
@@ -572,7 +573,7 @@ async function main() {
   sub("O2. a line that has only been partly produced is still In Production");
   const oO2 = await orderFor(C.skus.idn250.id, 10, "status partial");
   await topUpGreen(C.beans.indonesia.id, 10);
-  const roastO2 = await roastFor(oO2.items[0], C.beans.indonesia, 6, 4);
+  const roastO2 = await roastFor(oO2.items[0], C.beans.indonesia, 6, 4, { surplusOverride: true, surplusReason: "Fixture: deliberately produces beyond outstanding demand" });
   await db.query(`UPDATE "RoastingBatch" SET status='Passed' WHERE id=$1`, [roastO2.json.id]);
   await packSku(roastO2.json.id, C.skus.idn250.id, 4);
   const statusO2 = await one(

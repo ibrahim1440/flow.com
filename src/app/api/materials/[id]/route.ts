@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -101,6 +102,13 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!adjusting && Object.keys(data).length === 0)
     return NextResponse.json({ error: "No editable fields supplied." }, { status: 400 });
 
+  // Counting packaging material is the same act as counting coffee, and carries the same
+  // obligation. Only when a quantity is actually being booked: editing a material's name
+  // is not an adjustment and needs no justification.
+  const explained = adjusting ? normalizeAdjustmentReason(b.notes) : null;
+  if (explained && !explained.ok)
+    return NextResponse.json({ error: explained.message }, { status: 400 });
+
   try {
     const result = await prisma.$transaction(async (tx) => {
       const item = await tx.materialItem.findUnique({
@@ -126,7 +134,7 @@ export async function PATCH(request: Request, { params }: Params) {
               sourceDocType: "MANUAL_ADJUSTMENT",
               sourceDocId: null,
               userId: user.id,
-              notes: typeof b.notes === "string" ? b.notes.trim() || null : null,
+              notes: explained && explained.ok ? explained.reason : null,
             },
           });
           data.quantityOnHand = newActualQuantity;

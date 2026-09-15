@@ -83,6 +83,11 @@ export const ACTIVITY_TYPES = [
   "PRODUCTION_ORDER_CANCELLED",
   "PRODUCTION_BATCH_LINKED",
   "PRODUCTION_BATCH_UNLINKED",
+  // An admin deliberately roasting past the calculated ceiling. It belongs on the order
+  // timeline rather than in a private production log for the same reason the events above
+  // do: the question it answers — "why did we roast 12kg for an 8kg order?" — is asked by
+  // someone looking at the order, and the answer must be somewhere they will find it.
+  "PRODUCTION_SURPLUS_OVERRIDDEN",
   // Packaging that promises its own output to the order it was roasted for. On the customer
   // order's timeline for the same reason the production events are: the person asking why an
   // order was or was not covered wants the packaging run in the same list as the review.

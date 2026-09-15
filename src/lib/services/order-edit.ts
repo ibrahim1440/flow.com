@@ -375,6 +375,27 @@ export async function assertIdentityChangeAllowed(
   live: LiveLine,
   next: ResolvedLine,
 ): Promise<void> {
+  // ── A SKU line is never edited back into a legacy kilogram line ──────────
+  // Order creation refuses a line without a productSkuId outright: "Legacy bean-based
+  // lines stay readable but cannot be created any more." The edit path could still make
+  // one, because omitting productSkuId reads as a legacy line rather than as an omission,
+  // and on a pristine line the history check below would wave it through. That is a way to
+  // manufacture, inside an existing order, exactly the shape the system has decided it no
+  // longer creates — losing the unit axis, the pack size, and the ability of production and
+  // packaging to tell what the line is for.
+  //
+  // Refused whatever the line's history, because a pristine line is not the problem: the
+  // resulting shape is. Historical legacy lines keep working on their own axis; they are
+  // simply not a destination.
+  if (live.productSkuId !== null && next.productSkuId === null) {
+    throw {
+      _appCode: 409,
+      message:
+        "This line is sold as a finished product and cannot be converted to a bulk " +
+        "kilogram line. Choose a product for it, or remove the line and add the right one.",
+    };
+  }
+
   const sameSku = (live.productSkuId ?? null) === (next.productSkuId ?? null);
   const sameProduct = (live.productId ?? null) === (next.productId ?? null);
   if (sameSku && sameProduct) return;

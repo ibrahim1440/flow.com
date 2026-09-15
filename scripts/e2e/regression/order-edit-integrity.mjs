@@ -730,7 +730,12 @@ async function main() {
   const rbK3 = await api("/api/roasting-batches", {
     method: "POST",
     body: { orderItemId: oK3.itemId, productionOrderId: poK3, greenBeanId: C.beans.ethiopia.id,
-            greenBeanQuantity: 4, roastedBeanQuantity: 2.5, wasteQuantity: 1.5 },
+            greenBeanQuantity: 4, roastedBeanQuantity: 2.5, wasteQuantity: 1.5,
+            // The production order raised above already covers all 10 units, so by the
+            // canonical measure this roast — the one that FULFILS that order — is surplus.
+            // It is exactly the case K3 exists to examine, so it asks explicitly.
+            surplusOverride: true,
+            surplusReason: "Fixture: deliberately produces beyond outstanding demand to fulfil its own production order" },
   });
   check("the roast against that production order is accepted", rbK3.status === 201,
     `status=${rbK3.status} ${S(rbK3.json).slice(0, 140)}`);
@@ -835,7 +840,9 @@ async function main() {
   const rbK8 = await api("/api/roasting-batches", {
     method: "POST",
     body: { orderItemId: oK7.itemId, greenBeanId: C.beans.brazil.id,
-            greenBeanQuantity: 6, roastedBeanQuantity: 4, wasteQuantity: 2 },
+            greenBeanQuantity: 6, roastedBeanQuantity: 4, wasteQuantity: 2,
+            surplusOverride: true,
+            surplusReason: "Fixture: deliberately produces beyond outstanding demand on a legacy kilogram line" },
   });
   check("a roast against the legacy line is accepted", rbK8.status === 201,
     `status=${rbK8.status} ${S(rbK8.json).slice(0, 140)}`);

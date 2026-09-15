@@ -32,6 +32,7 @@ const SUITES = [
   "po-lifecycle",            // Production Order state machine, batches, cancellation
   "hardening",               // concurrency, idempotency, forced rollback, security smoke
   "platform-hardening",      // live session state, security headers, health endpoint
+  "h2a-hardening",           // destructive paths, explicit surplus override, authorization, audit
   "finished-products",       // units, lots, packaging paths
   "delivery",                // dispatch, partial and full
   "order-edit-integrity",    // structural order edits: unit/kg authority, reservation trim, removal safety

@@ -599,7 +599,12 @@ async function secondRoastFor(orderItemId, bean) {
   const roast = await api("/api/roasting-batches", {
     method: "POST",
     body: { orderItemId, greenBeanId: bean.id, greenBeanQuantity: 8,
-            roastedBeanQuantity: 6, wasteQuantity: 2 },
+            roastedBeanQuantity: 6, wasteQuantity: 2,
+            // Blending is what this suite proves. The fixture needs roasted coffee on an
+            // order line whose demand is already covered, which is surplus by the
+            // canonical measure and is now requested rather than assumed.
+            surplusOverride: true,
+            surplusReason: "Fixture: deliberately produces beyond outstanding demand so there is coffee to blend" },
   });
   if (roast.status !== 201) throw new Error(`second roast failed: ${S(roast.json)}`);
   await db.query('UPDATE "RoastingBatch" SET "batchNumber"=$2, status=$3 WHERE id=$1',
@@ -630,7 +635,12 @@ async function orderWithRoast(note, skuId, coffee, bean) {
   const roast = await api("/api/roasting-batches", {
     method: "POST",
     body: { orderItemId, greenBeanId: bean.id, greenBeanQuantity: 8,
-            roastedBeanQuantity: 6, wasteQuantity: 2 },
+            roastedBeanQuantity: 6, wasteQuantity: 2,
+            // Blending is what this suite proves. The fixture needs roasted coffee on an
+            // order line whose demand is already covered, which is surplus by the
+            // canonical measure and is now requested rather than assumed.
+            surplusOverride: true,
+            surplusReason: "Fixture: deliberately produces beyond outstanding demand so there is coffee to blend" },
   });
   if (roast.status !== 201) throw new Error(`order roast failed: ${S(roast.json)}`);
   await db.query('UPDATE "RoastingBatch" SET "batchNumber"=$2, status=$3 WHERE id=$1',
