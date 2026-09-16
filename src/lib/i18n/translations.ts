@@ -78,7 +78,7 @@ export const translations = {
   english:            { en: "English",               ar: "الإنجليزية" },
   changePin:          { en: "Change PIN",            ar: "تغيير رمز الدخول" },
   currentPin:         { en: "Current PIN",           ar: "رمز الدخول الحالي" },
-  newPin:             { en: "New PIN (4–8 digits)",  ar: "الرمز الجديد (4–8 أرقام)" },
+  newPin:             { en: "New PIN (6 digits)",   ar: "الرمز الجديد (6 أرقام)" },
   confirmNewPin:      { en: "Confirm New PIN",       ar: "تأكيد الرمز الجديد" },
   pinUpdated:         { en: "PIN updated successfully", ar: "تم تحديث رمز الدخول بنجاح" },
   pinMismatch:        { en: "New PINs do not match", ar: "الرمزان الجديدان غير متطابقَين" },

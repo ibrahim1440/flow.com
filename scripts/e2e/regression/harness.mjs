@@ -12,7 +12,7 @@
 // ERP_TEST_DATABASE_URL instead and never look at DATABASE_URL at all, so there is no
 // fall-back path to production — the tests simply cannot reach it.
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -53,6 +53,7 @@ function refuse(reason) {
   console.error(`                          ${ALLOWLIST.join(", ")}`);
   console.error("  ERP_TEST_BASE_URL       the running test server, e.g. http://localhost:3010");
   console.error("  ERP_TEST_ADMIN_PIN      the seeded administrator PIN for that database");
+  console.error("  PIN_LOOKUP_SECRET       the same value the test server is running with");
   console.error("");
   process.exit(2);
 }
@@ -78,6 +79,44 @@ if (!ALLOWLIST.includes(dbName)) {
 // environment rather than written into the repository.
 export const ADMIN_PIN = process.env.ERP_TEST_ADMIN_PIN;
 if (!ADMIN_PIN) refuse("ERP_TEST_ADMIN_PIN is not set.");
+
+// ── The PIN lookup secret ──────────────────────────────────────────
+//
+// PIN login finds its row by HMAC-SHA256 over the candidate, keyed by a secret the
+// database does not contain. These suites both seed employees and log in as them, so they
+// have to produce the same selector the server will search for — which means running with
+// the server’s own secret. A different value here is not a failing test, it is a
+// suite that cannot log in at all, so it is refused up front with the other rails rather
+// than discovered as twenty red suites.
+//
+// Deliberately NOT defaulted. A fixture secret invented here would authenticate against a
+// server that has a real one only by accident.
+export const PIN_LOOKUP_SECRET = process.env.PIN_LOOKUP_SECRET;
+if (!PIN_LOOKUP_SECRET) refuse("PIN_LOOKUP_SECRET is not set.");
+if (PIN_LOOKUP_SECRET.trim().length < 32) {
+  refuse("PIN_LOOKUP_SECRET is shorter than the 32 characters the application requires.");
+}
+
+/**
+ * The selector and the verifier input for a PIN — Secure Version B.
+ *
+ * These mirror pinLookup() and pinVerifierInput() in src/lib/pin-lookup.ts — same domains,
+ * same digests, same encoding — because these suites are plain .mjs and cannot import the
+ * TypeScript module. harness-selftest.mjs reads that file and fails if either side drifts, so
+ * the duplication cannot silently stop matching.
+ *
+ * pinLookupValue is the keyed selector login searches on. pinVerifierInput is what bcrypt
+ * hashes: the fixtures store bcrypt(pinVerifierInput(pin)) in Employee.pin, exactly as the
+ * application's own credential paths do, so a fixture never stores a state the server cannot
+ * produce and the raw PIN never verifies directly.
+ */
+export function pinLookupValue(pin, secret = PIN_LOOKUP_SECRET.trim()) {
+  return createHmac("sha256", secret).update("pin:lookup:v1:" + pin).digest("base64");
+}
+
+export function pinVerifierInput(pin, secret = PIN_LOOKUP_SECRET.trim()) {
+  return createHmac("sha384", secret).update("pin:verify:v1:" + pin).digest("base64");
+}
 
 export const db = new Client({ connectionString: DB_URL });
 
@@ -106,10 +145,42 @@ export const near = (a, b, tol = 0.0005) => Math.abs(Number(a) - Number(b)) < to
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 let cookie = "";
 
-export async function api(path, { method = "GET", body, raw = false } = {}) {
+// ── Idempotency keys for dispatch ─────────────────────────────────────
+//
+// POST /api/deliveries now refuses a request that carries no Idempotency-Key, because a
+// dispatch the server cannot recognise on a retry is a dispatch it may perform twice.
+// Every existing call site here is a separate intended shipment, so each gets its own
+// fresh key — which is exactly what a correct client does and leaves what those suites
+// assert untouched: a second POST is still a second dispatch, judged by the quantity
+// guards as before.
+//
+// It is a default, not a rule. A caller that passes headers["Idempotency-Key"] keeps its
+// own value (that is how a replay is expressed), and one that passes noIdempotencyKey
+// sends none at all (that is how the refusal itself is tested). Auto-minting therefore
+// cannot hide either behaviour from the suite that exists to prove them.
+let keySeq = 0;
+export function freshIdempotencyKey(tag = "e2e") {
+  return `${tag}-${process.pid}-${Date.now().toString(36)}-${++keySeq}`;
+}
+
+export async function api(
+  path,
+  { method = "GET", body, raw = false, headers = {}, noIdempotencyKey = false } = {}
+) {
+  const needsKey =
+    method === "POST" &&
+    path.split("?")[0] === "/api/deliveries" &&
+    !noIdempotencyKey &&
+    !Object.keys(headers).some((h) => h.toLowerCase() === "idempotency-key");
+
   const res = await fetch(BASE + path, {
     method,
-    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    headers: {
+      "content-type": "application/json",
+      ...(cookie ? { cookie } : {}),
+      ...(needsKey ? { "Idempotency-Key": freshIdempotencyKey() } : {}),
+      ...headers,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     redirect: "manual",
   });
@@ -128,16 +199,59 @@ export async function concurrently(n, fn) {
   return Promise.all(Array.from({ length: n }, (_, i) => fn(i)));
 }
 
+/**
+ * A fixture employee who can actually log in — Secure Version B shape.
+ *
+ * The two live credential columns are written together, exactly as the application’s own
+ * credential-setting paths now do: pin = bcrypt(pinVerifierInput(pin)), the proof over the
+ * keyed derivation and never the raw PIN, and pinLookup, the keyed selector login searches
+ * on. The legacy pinHash is deliberately left NULL — the application writes it on no path
+ * under Version B, so a fixture that set it would be testing a state the server cannot
+ * produce.
+ *
+ * The conflict branch refreshes the verifier and the lookup together. Leaving a stale
+ * lookup beside a fresh verifier is precisely the desynchronisation that makes an account
+ * unreachable, and a suite re-run on a dirty database would inherit it.
+ */
 export async function ensureUser(id, name, role, perms, pin) {
   await db.query(
-    `INSERT INTO "Employee" (id,name,pin,"pinHash",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
+    `INSERT INTO "Employee" (id,name,pin,"pinLookup",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
      VALUES ($1,$2,$3,$4,$5,$6,'/dashboard',true,'en',now(),now())
-     ON CONFLICT (id) DO UPDATE SET permissions=EXCLUDED.permissions, role=EXCLUDED.role, active=true`,
-    [id, name, bcrypt.hashSync(pin, 10), createHash("sha256").update(pin).digest("hex"), role, JSON.stringify(perms)]
+     ON CONFLICT (id) DO UPDATE SET permissions=EXCLUDED.permissions, role=EXCLUDED.role, active=true,
+       pin=EXCLUDED.pin, "pinLookup"=EXCLUDED."pinLookup"`,
+    [id, name, bcrypt.hashSync(pinVerifierInput(pin), 10),
+     pinLookupValue(pin), role, JSON.stringify(perms)]
   );
 }
 
+// The seeded administrator predates the cutover, so its row carries a bcrypt(raw-PIN)
+// verifier and no selector — a state that cannot authenticate under Version B, whose login
+// searches by keyed lookup and proves by bcrypt(pinVerifierInput(pin)). The environment
+// supplies this one PIN in plaintext, so the suites reissue the account they own into the
+// Version B shape instead of depending on a hand-run step. Both live columns are written —
+// pin = bcrypt(pinVerifierInput(ADMIN_PIN)) and the matching lookup — and pinHash is left
+// exactly as it was, inert. Idempotent, and only ever for the administrator.
+let adminLookupSettled = false;
+export async function ensureAdminPinLookup() {
+  if (adminLookupSettled) return;
+  adminLookupSettled = true;
+  const lookup = pinLookupValue(ADMIN_PIN);
+  const verifier = bcrypt.hashSync(pinVerifierInput(ADMIN_PIN), 10);
+  // If a prior run already reissued this account, its verifier accepts the Version B input
+  // and its lookup is set — nothing to do.
+  const already = await one(`SELECT id FROM "Employee" WHERE "pinLookup"=$1 AND active=true`, [lookup]);
+  if (already) return;
+  // Otherwise force the canonical administrator into the Version B shape. Prefer the seeded
+  // "admin" account; fall back to any active admin. pinHash is untouched.
+  const target =
+    (await one(`SELECT id FROM "Employee" WHERE active=true AND role='admin' AND username='admin' LIMIT 1`)) ||
+    (await one(`SELECT id FROM "Employee" WHERE active=true AND role='admin' ORDER BY "createdAt" LIMIT 1`));
+  if (!target) throw new Error("ensureAdminPinLookup: no active admin employee to reissue");
+  await db.query(`UPDATE "Employee" SET pin=$1, "pinLookup"=$2 WHERE id=$3`, [verifier, lookup, target.id]);
+}
+
 export async function loginAs(pin) {
+  if (pin === ADMIN_PIN) await ensureAdminPinLookup();
   const r = await api("/api/auth/login", { method: "POST", body: { method: "pin", pin } });
   if (r.status !== 200) throw new Error("login failed: " + r.status + " " + JSON.stringify(r.json));
   return r;

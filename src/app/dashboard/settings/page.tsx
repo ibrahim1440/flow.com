@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/app/dashboard/user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
+import { PIN_LENGTH } from "@/lib/pin-policy";
 
 export default function SettingsPage() {
   const { t } = useI18n();
@@ -375,7 +376,7 @@ export default function SettingsPage() {
                   inputMode="numeric"
                   value={pin}
                   onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-                  maxLength={8}
+                  maxLength={PIN_LENGTH}
                   required
                   className="w-full px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest"
                 />
@@ -488,7 +489,7 @@ export default function SettingsPage() {
                   inputMode="numeric"
                   value={trainPin}
                   onChange={(e) => setTrainPin(e.target.value.replace(/\D/g, ""))}
-                  maxLength={8}
+                  maxLength={PIN_LENGTH}
                   required
                   className="w-full px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/40 tracking-widest"
                 />

@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import {
+  readDeliveryRequestKey,
+  normalizeDeliveryIntent,
+  deliveryIntentHash,
+  type DeliveryIntent,
+} from "@/lib/services/delivery-idempotency";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { consumeShelfStock, lotMatchFilter, roundKg, trimReservationToDemand } from "@/lib/services/shelf-allocation";
 import { consumeFinishedUnits, kgForUnits, trimUnitReservationToDemand } from "@/lib/services/finished-products";
@@ -27,22 +33,60 @@ export async function GET() {
   return NextResponse.json(deliveries);
 }
 
+const IDEMPOTENCY_MISMATCH =
+  "This Idempotency-Key has already been used for a different dispatch. Use a new key for " +
+  "a new dispatch, or resend the original request unchanged.";
+
+/** Only the requestKey index converts a conflict into a replay; anything else is an error. */
+function isRequestKeyConflict(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; meta?: { target?: unknown } };
+  if (e.code !== "P2002") return false;
+  const target = e.meta?.target;
+  const fields = Array.isArray(target) ? target.map(String) : [String(target ?? "")];
+  return fields.some((f) => f === "requestKey" || f.includes("Delivery_requestKey_key"));
+}
+
+/** A replay carries the original row; a fresh dispatch is created. 200 vs 201 says which. */
+type DeliveryOutcome = { delivery: unknown; replayed: boolean };
+
 export async function POST(request: Request) {
+  // Authorization first, before the key is even read: possession of an Idempotency-Key
+  // is not authority, and an unauthorized caller must not be able to learn whether one
+  // exists by watching the status change.
   const { error, user } = await requireSub("dispatch", "mark_delivered");
   if (error) return error;
 
-  const data = await request.json();
-  const { orderItemId, quantityKg, quantityUnits, deliveryType, notes, finishedGoodsLotId } = data;
+  const keyResult = readDeliveryRequestKey(request);
+  if (!keyResult.ok) return NextResponse.json({ error: keyResult.message }, { status: 400 });
+  const requestKey = keyResult.key;
 
-  if (!finishedGoodsLotId) {
-    return NextResponse.json(
-      { error: "A finished goods lot is required for all deliveries." },
-      { status: 400 }
-    );
+  let data: Record<string, unknown>;
+  try { data = (await request.json()) as Record<string, unknown>; } catch { data = {}; }
+
+  const normalized = normalizeDeliveryIntent(data);
+  if (!normalized.ok) return NextResponse.json({ error: normalized.message }, { status: 400 });
+  const intent: DeliveryIntent = normalized.intent;
+  const intentHash = deliveryIntentHash(intent);
+
+  // Everything below reads the canonical intent, never the raw body — the values that are
+  // hashed are the values that get executed and persisted.
+  const { orderItemId, finishedGoodsLotId, deliveryType, notes } = intent;
+
+  // ── Fast replay probe ───────────────────────────────────────────────────
+  // An optimisation, not the concurrency control: it spares the ordinary retry from
+  // taking any locks. Two requests can still both miss it, which is what the post-lock
+  // probe and the unique index below are for.
+  const alreadyDone = await prisma.delivery.findUnique({ where: { requestKey } });
+  if (alreadyDone) {
+    if (alreadyDone.intentHash !== intentHash) {
+      return NextResponse.json({ error: IDEMPOTENCY_MISMATCH }, { status: 422 });
+    }
+    return NextResponse.json(alreadyDone, { status: 200 });
   }
 
   try {
-    const delivery = await prisma.$transaction(async (tx) => {
+    const outcome: DeliveryOutcome = await prisma.$transaction(async (tx) => {
       const orderItem = await tx.orderItem.findUnique({
         where: { id: orderItemId },
         include: {
@@ -61,7 +105,26 @@ export async function POST(request: Request) {
       //
       // Scoped to this line and this lot rather than the whole order, so two lines of one
       // order can still be dispatched at the same time.
-      await lockDeliveryResources(tx, orderItemId, typeof finishedGoodsLotId === "string" ? finishedGoodsLotId : null);
+      await lockDeliveryResources(tx, orderItemId, finishedGoodsLotId);
+
+      // ── Post-lock replay probe ──────────────────────────────────────────
+      // Mandatory, and it must run BEFORE any state-dependent rejection.
+      //
+      // Two identical requests can both pass the fast probe. One wins the lot lock; the
+      // other waits. When the winner commits, the loser is granted the lock and — under
+      // READ COMMITTED, where each statement takes a fresh snapshot — its next statement
+      // sees the winner's committed Delivery. Without this probe the loser would instead
+      // walk into the outstanding-quantity check, find nothing left to ship because the
+      // winner just shipped it, and return 409: a retry of a dispatch that succeeded,
+      // told it failed. The lot is always locked by both (it is part of the intent), so
+      // this ordering is guaranteed rather than hoped for.
+      const committed = await tx.delivery.findUnique({ where: { requestKey } });
+      if (committed) {
+        if (committed.intentHash !== intentHash) {
+          throw { _appCode: 422, message: IDEMPOTENCY_MISMATCH };
+        }
+        return { delivery: committed, replayed: true };
+      }
 
       // Shipping is an order-level decision, not a line-level one. Without this check the
       // route would record a delivery against any order at all: one still Waiting Approval,
@@ -84,10 +147,16 @@ export async function POST(request: Request) {
       // ledger, recalcOrderItemStatus and every dispatch report read it.
       if (orderItem.quantityUnits !== null && orderItem.productSku) {
         const sku = orderItem.productSku;
-        const units = Number(quantityUnits);
-        if (!Number.isInteger(units) || units <= 0) {
-          throw { _appCode: 400, message: "quantityUnits must be a whole number greater than zero." };
+        // The axis is decided by the line, not by the caller. An irrelevant field is
+        // refused rather than ignored: two bodies describing one dispatch would otherwise
+        // hash differently and defeat the key.
+        if (intent.quantityUnits === null) {
+          throw {
+            _appCode: 400,
+            message: `"${sku.skuCode}" is sold in units, so this dispatch needs quantityUnits, not quantityKg.`,
+          };
         }
+        const units = intent.quantityUnits;
 
         const outstandingUnits = orderItem.quantityUnits - orderItem.deliveredUnits;
         if (outstandingUnits <= 0) {
@@ -114,8 +183,15 @@ export async function POST(request: Request) {
 
         const shippedKg = kgForUnits(sku, units);
 
+        // The claim, and the first write of the transaction: the unique index on
+        // requestKey is the final arbiter for two requests that both passed the probes,
+        // and placing it before any consumption means the loser aborts having spent
+        // nothing.
         const newDelivery = await tx.delivery.create({
-          data: { orderItemId, quantityUnits: units, quantityKg: shippedKg, deliveryType, notes },
+          data: {
+            orderItemId, quantityUnits: units, quantityKg: shippedKg, deliveryType, notes,
+            requestKey, intentHash,
+          },
         });
 
         // Conditional increment, same reasoning as the kilogram path: the outstanding
@@ -184,10 +260,19 @@ export async function POST(request: Request) {
         // Late lifecycle barrier for the unit path — same reasoning as the kilogram path
         // below. Both branches return their own delivery, so both need the check.
         await assertOrderStillAcceptsDelivery(tx, orderItemId);
-        return newDelivery;
+        return { delivery: newDelivery, replayed: false };
       }
 
-      const qty = roundKg(Number(quantityKg));
+      // Same rule on the legacy axis, and the quantity is the one canonical value that was
+      // hashed — rounded once, in normalizeDeliveryIntent, then persisted, delivered,
+      // drawn from the lot and written to the ledger unchanged.
+      if (intent.quantityKg === null) {
+        throw {
+          _appCode: 400,
+          message: "This is a bulk kilogram line, so this dispatch needs quantityKg, not quantityUnits.",
+        };
+      }
+      const qty = intent.quantityKg;
       if (!Number.isFinite(qty) || qty <= 0) {
         throw { _appCode: 400, message: "quantityKg must be a positive number." };
       }
@@ -234,8 +319,9 @@ export async function POST(request: Request) {
       }
 
       // 1. Create delivery record — needed first so its ID is available for the ledger
+      // The claim, before any consumption — see the unit branch.
       const newDelivery = await tx.delivery.create({
-        data: { orderItemId, quantityKg: qty, deliveryType, notes },
+        data: { orderItemId, quantityKg: qty, deliveryType, notes, requestKey, intentHash },
       });
 
       // 2. Update delivery tracking on the order item.
@@ -317,15 +403,42 @@ export async function POST(request: Request) {
       // consumption and the lot decrement with it.
       await assertOrderStillAcceptsDelivery(tx, orderItemId);
 
-      return newDelivery;
+      return { delivery: newDelivery, replayed: false };
     }, TX_OPTS);
 
-    return NextResponse.json(delivery, { status: 201 });
+    return NextResponse.json(outcome.delivery, { status: outcome.replayed ? 200 : 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };
       return NextResponse.json({ error: e.message }, { status: e._appCode });
     }
+
+    // ── The unique index had the last word ────────────────────────────────
+    // Two requests passed both probes and both reached the insert. One committed; this
+    // one lost the race on Delivery_requestKey_key and its transaction has rolled back
+    // in full — no delivery, no claimed quantity, no stock drawn, no ledger row. The
+    // winner is now committed and readable, so the correct answer is the replay the
+    // caller was asking for.
+    //
+    // Narrowed to THIS index on purpose: any other uniqueness failure is a real error
+    // and must not be laundered into a successful-looking replay.
+    if (isRequestKeyConflict(err)) {
+      const winner = await prisma.delivery.findUnique({ where: { requestKey } });
+      if (winner) {
+        if (winner.intentHash !== intentHash) {
+          return NextResponse.json({ error: IDEMPOTENCY_MISMATCH }, { status: 422 });
+        }
+        return NextResponse.json(winner, { status: 200 });
+      }
+      // The row that caused the conflict is gone — a concurrent delete, or a rollback
+      // between the conflict and this read. Retryable, and emphatically NOT a second
+      // unguarded dispatch.
+      return NextResponse.json(
+        { error: "This dispatch could not be confirmed. Please retry with the same request." },
+        { status: 503 }
+      );
+    }
+
     return handlePrismaError(err);
   }
 }

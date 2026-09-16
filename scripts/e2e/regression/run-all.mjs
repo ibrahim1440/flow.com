@@ -33,6 +33,7 @@ const SUITES = [
   "hardening",               // concurrency, idempotency, forced rollback, security smoke
   "platform-hardening",      // live session state, security headers, health endpoint
   "h2a-hardening",           // destructive paths, explicit surplus override, authorization, audit
+  "h2b-hardening",           // dispatch idempotency, PIN credentials, PIN-space throttling
   "finished-products",       // units, lots, packaging paths
   "delivery",                // dispatch, partial and full
   "order-edit-integrity",    // structural order edits: unit/kg authority, reservation trim, removal safety

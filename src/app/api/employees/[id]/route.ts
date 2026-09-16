@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { hash } from "bcryptjs";
-import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import {
   recordEmployeeAudit, diffEmployeeChange, lockEmployeeForAdmin,
 } from "@/lib/services/employee-audit";
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
+import { validatePin } from "@/lib/pin-policy";
+import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 
 /** Actor plus a hashed address — the same treatment login attempts already give one. */
 function auditContext(request: Request, actorId: string) {
@@ -41,13 +42,13 @@ const ALLOWED_DEFAULT_ROUTES = new Set([
   "/dashboard/profile",
 ]);
 
-function sha256Pin(pin: string): string {
-  return createHash("sha256").update(pin).digest("hex");
-}
+const DUPLICATE_PIN_MESSAGE =
+  "This PIN is already assigned to another employee. Please choose a unique PIN.";
 
-async function isPinTaken(plainPin: string, excludeId: string): Promise<boolean> {
+/** Friendly pre-check on the keyed lookup; UNIQUE(pinLookup) is the real arbiter. */
+async function isPinTaken(lookup: string, excludeId: string): Promise<boolean> {
   const existing = await prisma.employee.findFirst({
-    where: { pinHash: sha256Pin(plainPin), id: { not: excludeId } },
+    where: { pinLookup: lookup, id: { not: excludeId } },
     select: { id: true },
   });
   return existing !== null;
@@ -60,10 +61,18 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const { name, username, role, permissions, pin, password, defaultRoute, active } = await request.json();
 
+  // One PIN shape, enforced identically on every path that sets one.
+  let newPin: string | null = null;
+  let newLookup: string | null = null;
+  let secret: string | null = null;
   if (pin) {
-    if (pin.length < 4) return NextResponse.json({ error: "PIN must be at least 4 digits" }, { status: 400 });
-    if (await isPinTaken(pin, id)) {
-      return NextResponse.json({ error: "This PIN is already assigned to another employee. Please choose a unique PIN." }, { status: 409 });
+    const pinShape = validatePin(pin);
+    if (!pinShape.ok) return NextResponse.json({ error: pinShape.message }, { status: 400 });
+    newPin = pinShape.pin;
+    secret = requirePinLookupSecret();
+    newLookup = pinLookup(newPin, secret);
+    if (await isPinTaken(newLookup, id)) {
+      return NextResponse.json({ error: DUPLICATE_PIN_MESSAGE }, { status: 409 });
     }
   }
 
@@ -86,7 +95,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Invalid defaultRoute." }, { status: 400 });
     data.defaultRoute = defaultRoute;
   }
-  if (pin) { data.pin = await hash(pin, 10); data.pinHash = sha256Pin(pin); }
+  // Version B writes the two live credential columns together:
+  //   pin       bcrypt(pinVerifierInput(pin)) — the proof, over the keyed derivation and
+  //             never the raw PIN, so a stolen row cannot be attacked offline
+  //   pinLookup keyed HMAC selector — what login actually searches on
+  // The legacy pinHash column is deliberately NOT written: it is inert under Version B and
+  // migration #19 removes it. Refreshing it here would keep a precomputable selector alive.
+  if (newPin && newLookup && secret) {
+    data.pin = await hash(pinVerifierInput(newPin, secret), 10);
+    data.pinLookup = newLookup;
+  }
   if (password) data.password = await hash(password, 10);
   if (active !== undefined) data.active = active;
 

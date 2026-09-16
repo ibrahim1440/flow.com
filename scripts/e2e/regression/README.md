@@ -25,7 +25,8 @@ throwaway database explicitly:
 | --- | --- |
 | `ERP_TEST_DATABASE_URL` | Connection string for a **disposable** database. |
 | `ERP_TEST_BASE_URL` | The running application under test, e.g. `http://localhost:3010`. |
-| `ERP_TEST_ADMIN_PIN` | The seeded administrator PIN for that database. |
+| `ERP_TEST_ADMIN_PIN` | The seeded administrator PIN for that database. Six digits. |
+| `PIN_LOOKUP_SECRET` | **The same value the application under test is running with.** |
 | `ERP_TEST_DB_ALLOWLIST` | Optional. Comma-separated database names that may be used. |
 
 They deliberately **do not read `DATABASE_URL`**. On any machine where the application has
@@ -41,6 +42,24 @@ No credential appears in these files. The administrator PIN comes from the envir
 suites that need their own operator generate a random PIN per run and delete the account
 afterwards.
 
+PIN login finds its employee by an HMAC of the candidate (the keyed *selector*), keyed by
+`PIN_LOOKUP_SECRET`, then proves it by bcrypt over a second keyed HMAC of the candidate (the
+*verifier input*) — never over the raw PIN. `Employee.pin` holds `bcrypt(pinVerifierInput(pin))`,
+so a stolen row cannot be attacked offline without the secret and the raw PIN never verifies
+directly. The suites both seed employees and log in as them, so they must produce the same
+selector and the same verifier input the server does — which means running with the server’s
+own secret. A different value is not a failing test but a suite that cannot log in at all, so
+it is refused up front with the other rails rather than discovered as twenty red suites. It is
+never defaulted.
+
+Because both derivations are keyed, **an employee row created before the cutover cannot log
+in.** The harness reissues exactly one such account — the administrator whose PIN the
+environment supplies in plaintext — into the Version B shape, and every fixture employee is
+created with the two live credential columns written together (`pin` = the bcrypt verifier,
+`pinLookup` = the keyed selector). The legacy `pinHash` column is inert: written by no path
+and read by no path, it waits for migration #19. A test database restored from before
+migration #18 therefore needs nothing done to it by hand.
+
 ## Setting up a test database
 
 ```
@@ -48,9 +67,10 @@ createdb erp_test                       # or a Neon/Postgres branch of your choo
 export ERP_TEST_DATABASE_URL=...        # pointing at it
 DATABASE_URL=$ERP_TEST_DATABASE_URL npx prisma migrate deploy
 DATABASE_URL=$ERP_TEST_DATABASE_URL npx tsx prisma/seed.ts
+export PIN_LOOKUP_SECRET=$(openssl rand -base64 32)   # the server and the suites share this
 DATABASE_URL=$ERP_TEST_DATABASE_URL npm run build && npx next start -p 3010
 export ERP_TEST_BASE_URL=http://localhost:3010
-export ERP_TEST_ADMIN_PIN=...           # the PIN the seed created
+export ERP_TEST_ADMIN_PIN=...           # the six-digit PIN the seed created
 npm run regression
 ```
 
@@ -72,6 +92,7 @@ what certification measures.
 | `delivery` | Dispatch, partial and full |
 | `order-to-delivery` | End-to-end, happy and unhappy paths |
 | `release-simulation` | A second end-to-end pass on different data |
+| `h2b-hardening` | Dispatch idempotency, PIN credentials and cutover, PIN-space throttling |
 
 Every suite except `harness-selftest` drives the running application over HTTP, tears down
 only the fixtures it created — keyed by its own tag — and asserts a set of global inventory

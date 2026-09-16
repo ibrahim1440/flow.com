@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { compare } from "bcryptjs";
-import { createHash } from "crypto";
 import { signToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, ALL_MODULES } from "@/lib/auth";
-import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
+import {
+  extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited,
+  recordFailedAttempt, clearAttempts, recordPinFailure, clearPinAttempts,
+  isPinSpaceConstrained, isIpQuietForPin, isIpPinRateLimited,
+} from "@/lib/rate-limit";
+import { validatePin } from "@/lib/pin-policy";
+import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 
-const sha256Pin = (p: string) => createHash("sha256").update(p).digest("hex");
+// There is deliberately no pinHash helper here any more, and no raw-PIN bcrypt either. The
+// legacy pinHash column is neither read nor written under Version B — it is inert until
+// migration #19 drops it — so an employee carrying a valid pinHash and no pinLookup cannot
+// log in. The credential is proved by bcrypt over pinVerifierInput(pin), never over the raw
+// PIN: keeping a raw-PIN comparison around would be an invitation to reintroduce the offline
+// verifier this design exists to retire.
 
 const ROUTE_MODULE_MAP: Record<string, string> = {
   "/dashboard": "dashboard",
@@ -39,60 +49,64 @@ export async function POST(request: Request) {
   let employee: LoginEmployee | null = null;
 
   if (method === "pin") {
-    if (!pin) {
-      return NextResponse.json({ error: "PIN required" }, { status: 400 });
+    // One PIN shape, checked here exactly as it is checked on every path that SETS one.
+    // An invalid shape is refused before anything is hashed, so a malformed candidate
+    // never reaches the lookup, the verifier or the rate-limit identifier.
+    const shape = validatePin(pin);
+    if (!shape.ok) {
+      return NextResponse.json({ error: shape.message }, { status: 400 });
     }
+    const candidate = shape.pin;
+
     const ipHash = hashRateLimitKey(ip);
-    const identifierHash = hashRateLimitKey("pin:" + String(pin).trim());
+    const identifierHash = hashRateLimitKey("pin:" + candidate);
     await pruneExpired();
+
+    // ── Throttles, before any bcrypt work ─────────────────────────────────
+    // The first two are unchanged. The third is new and exists because neither of them
+    // bounds a DISTRIBUTED walk of the PIN space: the candidate is the identifier, so an
+    // attacker trying 000000, 000001, … produces a different identifierHash every time
+    // and no per-identifier threshold ever accumulates.
     if (await isIpRateLimited(ipHash, 30)) {
       return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
     }
     if (await isPairRateLimited(ipHash, identifierHash, 10)) {
       return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
     }
-    const pinHashValue = sha256Pin(pin);
+    if (await isPinSpaceConstrained()) {
+      // Under a system-wide burst, admit only addresses that have not just failed. An
+      // operator typing the right PIN has no recent failures and is unaffected; every
+      // enumerating address disqualifies itself on its first miss and gets roughly one
+      // attempt a minute. A staff mistype during an attack costs a bounded wait, never a
+      // lockout an attacker can hold open.
+      if (!(await isIpQuietForPin(ipHash)) || (await isIpPinRateLimited(ipHash, 3))) {
+        return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+      }
+    }
 
-    const byHash = await prisma.employee.findFirst({
-      where: { pinHash: pinHashValue, active: true },
+    // ── Lookup, then proof ────────────────────────────────────────────────
+    // Both derivations are keyed by the same secret the database does not contain. pinHash is
+    // NOT consulted: an employee holding a valid legacy pinHash and no pinLookup cannot
+    // authenticate, which is what makes the old recoverable column inert from today.
+    const secret = requirePinLookupSecret();
+    const lookup = pinLookup(candidate, secret);
+
+    const byLookup = await prisma.employee.findFirst({
+      where: { pinLookup: lookup, active: true },
       select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, pin: true, preferredLanguage: true },
     });
 
-    if (byHash) {
-      // pinHash is only a lookup key, not the credential proof — always bcrypt verify
-      if (!(await compare(pin, byHash.pin))) {
-        await recordFailedAttempt(ipHash, identifierHash);
-        return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
-      }
-      await clearAttempts(ipHash, identifierHash);
-      employee = byHash;
-    } else {
-      // Fallback: scan only active employees whose pinHash is not yet populated
-      const candidates = await prisma.employee.findMany({
-        where: { pinHash: null, active: true },
-        select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, pin: true, preferredLanguage: true },
-      });
-      let matched: typeof candidates[0] | null = null;
-      for (const e of candidates) {
-        if (await compare(pin, e.pin)) { matched = e; break; }
-      }
-      if (!matched) {
-        await recordFailedAttempt(ipHash, identifierHash);
-        return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
-      }
-      // Opportunistic backfill: next login hits fast path.
-      // P2002 means two employees share the same PIN (transition edge case) — admin must resolve.
-      try {
-        await prisma.employee.update({
-          where: { id: matched.id },
-          data: { pinHash: pinHashValue },
-        });
-      } catch (err) {
-        console.error("[login] pinHash backfill failed for employee:", matched.id, err);
-      }
-      await clearAttempts(ipHash, identifierHash);
-      employee = matched;
+    // Finding the row is not authenticating the person: bcrypt still decides. It decides over
+    // pinVerifierInput(candidate), never over the raw candidate — the stored hash is
+    // bcrypt(pinVerifierInput(pin)), so a raw-PIN compare would authenticate no one. Two
+    // independent failures would be needed to admit the wrong operator.
+    if (!byLookup || !(await compare(pinVerifierInput(candidate, secret), byLookup.pin))) {
+      await recordPinFailure(ipHash, identifierHash);
+      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
+
+    await clearPinAttempts(ipHash, identifierHash);
+    employee = byLookup;
 
   } else if (method === "password") {
     if (!username || !password) {

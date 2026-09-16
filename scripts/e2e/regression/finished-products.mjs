@@ -3,8 +3,7 @@
 //   -> SKU sales order -> fulfilment split -> reservation -> release
 // All fixtures are tagged E2E-FP and removed at the end.
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
-import { BASE, DB_URL } from "./harness.mjs";  // importing enforces the test-database allowlist
+import { BASE, DB_URL, pinLookupValue, pinVerifierInput } from "./harness.mjs";  // importing enforces the test-database allowlist
 
 const req = createRequire(import.meta.url);
 const { Client } = req("pg");
@@ -85,9 +84,13 @@ async function main() {
   console.log("baseline: " + JSON.stringify(before));
 
   // fixtures
-  await db.query(`INSERT INTO "Employee" (id,name,pin,"pinHash",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
+  // Version B shape: pin = bcrypt(pinVerifierInput(PIN)) and the keyed lookup, exactly what
+  // the application writes. pinHash is left NULL — inert under Version B. Without the lookup
+  // this account exists and cannot log in.
+  await db.query(`INSERT INTO "Employee" (id,name,pin,"pinLookup",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
     VALUES ($1,$2,$3,$4,'admin',$5,'/dashboard',true,'en',now(),now())`,
-    [EMP, TAG + " Admin", bcrypt.hashSync(PIN, 10), createHash("sha256").update(PIN).digest("hex"), JSON.stringify(perms)]);
+    [EMP, TAG + " Admin", bcrypt.hashSync(pinVerifierInput(PIN), 10),
+     pinLookupValue(PIN), JSON.stringify(perms)]);
   await db.query(`INSERT INTO "Customer" (id,name,"createdAt","updatedAt") VALUES ($1,$2,now(),now())`, [CUST, TAG + " Customer"]);
   await db.query(`INSERT INTO "GreenBean" (id,"serialNumber","beanType",country,"quantityKg","isActive","receivedDate","createdAt","updatedAt")
     VALUES ($1,$2,'FP Test Bean','Brazil',100,true,now(),now(),now())`, [BEAN, TAG + "-BEAN"]);

@@ -18,6 +18,7 @@
  * Usage:  DATABASE_URL=… DIRECT_URL=… npm run db:migrate:deploy
  */
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { requireDatabaseUrl, requireDirectUrl } from "../src/lib/db-config.ts";
 
 // Both throw a message naming the problem and never the URL.
@@ -28,11 +29,23 @@ const direct = requireDirectUrl(process.env);
 // credential in it.
 console.log(`Applying migrations to ${new URL(direct).hostname}`);
 
-const prisma = process.platform === "win32" ? "prisma.cmd" : "prisma";
-const result = spawnSync(prisma, ["migrate", "deploy"], { stdio: "inherit", shell: false });
+// Prisma's own JS entrypoint, run under this Node, rather than the shim in .bin.
+//
+// The first version of this script spawned "prisma.cmd" with shell: false, which fails on
+// Windows with EINVAL: since the fix for CVE-2024-27980, Node refuses to spawn .cmd and
+// .bat files without a shell. Reaching for shell: true would work and would also hand a
+// command line to cmd.exe for no reason. Resolving the package's bin entry and running it
+// with process.execPath spawns no shell at all, and behaves identically on every platform.
+const require_ = createRequire(import.meta.url);
+const prismaCli = require_.resolve("prisma/build/index.js");
+
+const result = spawnSync(process.execPath, [prismaCli, "migrate", "deploy"], {
+  stdio: "inherit",
+  shell: false,
+});
 
 if (result.error) {
-  console.error(`Could not run ${prisma}: ${result.error.message}`);
+  console.error(`Could not run the Prisma CLI: ${result.error.message}`);
   process.exit(1);
 }
 process.exit(result.status ?? 1);

@@ -8,7 +8,7 @@
 import {
   ADMIN_PIN, db, api, check, issue, section, sub, one, all, num, near, invariants,
   loginAs, concurrently, greenStock, materialStock, skuUnits, roastedStock, results,
-  setCookie, getCookie, ensureUser,
+  setCookie, getCookie, ensureUser, freshIdempotencyKey,
 } from "./harness.mjs";
 import { buildCatalog, teardown, roastAndPass} from "./catalog.mjs";
 
@@ -183,10 +183,19 @@ async function main() {
   await review(oE);
   const lotE = await lotFor(C.skus.bra250.id);
   const body = { orderItemId: oE.items[0].id, quantityUnits: 4, deliveryType: "full", finishedGoodsLotId: lotE };
-  const first = await api("/api/deliveries", { method: "POST", body });
-  const replay = await api("/api/deliveries", { method: "POST", body });
+  // Two ways a request can arrive twice, and they mean different things. Under the SAME
+  // Idempotency-Key it is a retry of one shipment and must return that shipment; under a
+  // new key it is a second shipment and is judged on the quantity that is left. Both must
+  // leave delivered at 4.
+  const keyE = freshIdempotencyKey("hrd-b1");
+  const first = await api("/api/deliveries", { method: "POST", body, headers: { "Idempotency-Key": keyE } });
+  const replay = await api("/api/deliveries", { method: "POST", body, headers: { "Idempotency-Key": keyE } });
+  const secondShipment = await api("/api/deliveries", { method: "POST", body });
   check("the first shipment is accepted", first.status === 201, "status=" + first.status);
-  check("an identical replay is refused", replay.status >= 400, "status=" + replay.status + " " + S(replay.json).slice(0, 110));
+  check("a retry under the same key replays it", replay.status === 200, "status=" + replay.status + " " + S(replay.json).slice(0, 110));
+  check("and returns the very same delivery", replay.json?.id === first.json?.id, S([replay.json?.id, first.json?.id]));
+  check("a genuinely second shipment is refused on quantity", secondShipment.status >= 400,
+    "status=" + secondShipment.status + " " + S(secondShipment.json).slice(0, 110));
   const delE = num((await one('SELECT "deliveredUnits" d FROM "OrderItem" WHERE id=$1', [oE.items[0].id])).d);
   check("delivered stays at 4", delE === 4, String(delE));
 

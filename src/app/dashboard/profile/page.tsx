@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { UserCircle, Phone, Globe, Lock, CheckCircle, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "@/app/dashboard/user-context";
+import { PIN_LENGTH } from "@/lib/pin-policy";
 
 export default function ProfilePage() {
   const { t, lang } = useI18n();
@@ -208,7 +209,7 @@ export default function ProfilePage() {
                 inputMode="numeric"
                 value={currentPin}
                 onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))}
-                maxLength={8}
+                maxLength={PIN_LENGTH}
                 required
                 className="w-full ltr:pr-10 rtl:pl-10 px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest"
               />
@@ -233,8 +234,8 @@ export default function ProfilePage() {
                 inputMode="numeric"
                 value={newPin}
                 onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
-                maxLength={8}
-                minLength={4}
+                maxLength={PIN_LENGTH}
+                minLength={PIN_LENGTH}
                 required
                 className="w-full ltr:pr-10 rtl:pl-10 px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest"
               />
@@ -259,7 +260,7 @@ export default function ProfilePage() {
                 inputMode="numeric"
                 value={confirmPin}
                 onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))}
-                maxLength={8}
+                maxLength={PIN_LENGTH}
                 required
                 className={`w-full ltr:pr-10 rtl:pl-10 px-4 py-2.5 rounded-xl border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest ${
                   confirmPin && confirmPin !== newPin ? "border-red-400" : "border-border"

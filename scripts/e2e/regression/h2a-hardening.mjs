@@ -30,7 +30,7 @@
 // delivery cannot exceed the ordered quantity. Bounded damage is not idempotency.
 import {
   ADMIN_PIN, db, api, check, issue, section, sub, one, all, num, near, invariants, loginAs,
-  results, ensureUser, Client, DB_URL, BASE, getCookie,
+  results, ensureUser, Client, DB_URL, BASE, getCookie, freshIdempotencyKey,
 } from "./harness.mjs";
 import { buildCatalog, teardown, roastAndPass } from "./catalog.mjs";
 
@@ -909,10 +909,16 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════════
   section("G — DELIVERY RETRY: WHAT ACTUALLY HAPPENS");
   //
-  // Characterization, not a fix. The question is not whether a delivery can exceed the
+  // Written as characterization: the question is not whether a delivery can exceed the
   // ordered quantity — it cannot — but whether repeating the SAME intended dispatch
   // repeats the operation. Those are different properties and only one of them is
-  // idempotency.
+  // idempotency. When this section was written the answer was no, and it recorded a
+  // BLOCKER saying so.
+  //
+  // H2B gave a dispatch an identity, so "the same intended dispatch" now has a meaning it
+  // did not have before: it is one carrying the same Idempotency-Key. These cases send
+  // that — a retry, not a lookalike — and still measure rather than assume, so the
+  // BLOCKER below stays armed and would fire again if the deduplication were lost.
 
   const batchG = await roastAndPass(P, C.coffees.brazil, C.beans.brazil, 12, 10, 2, "G1");
   if (!batchG.id) throw new Error(`fixture roast failed: ${S(batchG.error?.json ?? batchG)}`);
@@ -936,22 +942,30 @@ async function main() {
       `SELECT COUNT(*)::int n FROM "InventoryMovement" WHERE "sourceDocType"='DELIVERY'`)).n),
   });
 
-  const dispatch = () => api("/api/deliveries", {
+  // One key per intended dispatch. Two calls sharing a key are a retry of one shipment;
+  // two calls with different keys are two shipments, which is a different question.
+  const dispatch = (key) => api("/api/deliveries", {
     method: "POST",
+    headers: { "Idempotency-Key": key },
     body: { orderItemId: oG.itemId, quantityUnits: 4, deliveryType: "partial", finishedGoodsLotId: lotG.id },
   });
 
   sub("G1. the same dispatch, sent twice in sequence");
+  const keyG1 = freshIdempotencyKey("h2a-g1");
   const g0 = await snapshotG();
-  const first = await dispatch();
+  const first = await dispatch(keyG1);
   const g1 = await snapshotG();
-  const second = await dispatch();
+  const second = await dispatch(keyG1);
   const g2 = await snapshotG();
   console.log(`    first=${first.status} second=${second.status}`);
   console.log(`    deliveries ${g0.deliveries} -> ${g1.deliveries} -> ${g2.deliveries};` +
               ` delivered ${g0.deliveredUnits} -> ${g1.deliveredUnits} -> ${g2.deliveredUnits};` +
               ` lot ${g0.lotAvailable} -> ${g1.lotAvailable} -> ${g2.lotAvailable}`);
   check("the first dispatch is accepted", first.status === 201, `status=${first.status}`);
+  check("the retry is answered 200, not 201 — it is a replay, not a shipment",
+    second.status === 200, `status=${second.status} ${S(second.json)}`);
+  check("and it returns the delivery the first request created",
+    second.json?.id === first.json?.id, `${second.json?.id} vs ${first.json?.id}`);
 
   const repeated = second.status === 201;
   if (repeated) {
@@ -973,8 +987,9 @@ async function main() {
     `lot=${g2.lotAvailable} reserved=${g2.reserved}`);
 
   sub("G2. the same dispatch, sent twice at once");
+  const keyG2 = freshIdempotencyKey("h2a-g2");
   const g3 = await snapshotG();
-  const [c1, c2] = await Promise.all([dispatch(), dispatch()]);
+  const [c1, c2] = await Promise.all([dispatch(keyG2), dispatch(keyG2)]);
   const g4 = await snapshotG();
   const accepted = [c1.status, c2.status].filter((s) => s === 201).length;
   console.log(`    concurrent: ${c1.status}/${c2.status}; deliveries ${g3.deliveries} -> ${g4.deliveries};` +

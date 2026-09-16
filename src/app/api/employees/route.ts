@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { hash } from "bcryptjs";
-import { createHash } from "crypto";
 import { requireSub, requireAuth } from "@/lib/auth-server";
 import { recordEmployeeAudit } from "@/lib/services/employee-audit";
+import { validatePin } from "@/lib/pin-policy";
+import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
 
-/** Actor plus a hashed address — the same treatment login attempts already give one. */
+/** Actor plus a hashed address â the same treatment login attempts already give one. */
 function auditContext(request: Request, actorId: string) {
   return {
     actorId,
@@ -43,15 +44,21 @@ const ALLOWED_DEFAULT_ROUTES = new Set([
   "/dashboard/profile",
 ]);
 
-function sha256Pin(pin: string): string {
-  return createHash("sha256").update(pin).digest("hex");
-}
+const DUPLICATE_PIN_MESSAGE =
+  "This PIN is already assigned to another employee. Please choose a unique PIN.";
 
-/** O(1) DB-level PIN uniqueness check via deterministic SHA-256 hash. */
-async function isPinTaken(plainPin: string, excludeId?: string): Promise<boolean> {
+/**
+ * O(1) uniqueness on the keyed lookup.
+ *
+ * PINs must stay globally unique while PIN-only login exists: a shared PIN cannot
+ * identify which of two employees is standing at the pad, and whoever the first matching
+ * row happens to be would own the other one's actions. This is the friendly pre-check;
+ * UNIQUE(pinLookup) is what actually decides under concurrency.
+ */
+async function isPinTaken(lookup: string, excludeId?: string): Promise<boolean> {
   const existing = await prisma.employee.findFirst({
     where: {
-      pinHash: sha256Pin(plainPin),
+      pinLookup: lookup,
       ...(excludeId ? { id: { not: excludeId } } : {}),
     },
     select: { id: true },
@@ -78,19 +85,28 @@ export async function POST(request: Request) {
   const { name, username, pin, password, role, permissions, defaultRoute } = await request.json();
 
   if (!username) return NextResponse.json({ error: "Username is required" }, { status: 400 });
-  if (!pin || pin.length < 4) return NextResponse.json({ error: "PIN must be at least 4 digits" }, { status: 400 });
+  const pinShape = validatePin(pin);
+  if (!pinShape.ok) return NextResponse.json({ error: pinShape.message }, { status: 400 });
   if (defaultRoute !== undefined && defaultRoute !== null && defaultRoute !== "") {
     if (!ALLOWED_DEFAULT_ROUTES.has(defaultRoute))
       return NextResponse.json({ error: "Invalid defaultRoute." }, { status: 400 });
   }
 
-  if (await isPinTaken(pin)) {
-    return NextResponse.json({ error: "This PIN is already assigned to another employee. Please choose a unique PIN." }, { status: 409 });
+  const secret = requirePinLookupSecret();
+  const lookup = pinLookup(pinShape.pin, secret);
+  if (await isPinTaken(lookup)) {
+    return NextResponse.json({ error: DUPLICATE_PIN_MESSAGE }, { status: 409 });
   }
 
   try {
     // Hashing is slow and has no business inside a transaction holding a connection open.
-    const hashedPin = await hash(pin, 10);
+    // Version B writes the two live credential columns together:
+    //   pin       bcrypt(pinVerifierInput(pin)) — the proof, over the keyed derivation and
+    //             never the raw PIN, so a stolen row cannot be attacked offline
+    //   pinLookup keyed HMAC selector — what login actually searches on
+    // The legacy pinHash column is deliberately NOT written: it is inert under Version B and
+    // migration #19 removes it. A fresh account therefore carries no pinHash at all.
+    const hashedPin = await hash(pinVerifierInput(pinShape.pin, secret), 10);
     const hashedPassword = password ? await hash(password, 10) : null;
 
     // The account and the record of its creation commit together. An account that exists
@@ -101,7 +117,7 @@ export async function POST(request: Request) {
           name,
           username,
           pin: hashedPin,
-          pinHash: sha256Pin(pin),
+          pinLookup: lookup,
           role,
           permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
           defaultRoute: defaultRoute || "/dashboard",
@@ -110,7 +126,7 @@ export async function POST(request: Request) {
         select: SELECT_FULL,
       });
 
-      // The credential the account was created WITH is never recorded — only that one
+      // The credential the account was created WITH is never recorded â only that one
       // was set, and which kind.
       await recordEmployeeAudit(tx, auditContext(request, user.id), [{
         action: "EMPLOYEE_CREATED",

@@ -1,8 +1,7 @@
 // Closes the loop: order in units -> reserve -> deliver in units -> stock and
 // reservations settle correctly. Includes partial delivery and over-delivery guards.
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
-import { BASE, DB_URL } from "./harness.mjs";  // importing enforces the test-database allowlist
+import { BASE, DB_URL, pinLookupValue, pinVerifierInput, freshIdempotencyKey } from "./harness.mjs";  // importing enforces the test-database allowlist
 
 const req = createRequire(import.meta.url);
 const { Client } = req("pg");
@@ -23,9 +22,18 @@ const section = (t) => console.log("\n" + "=".repeat(74) + "\n" + t + "\n" + "="
 const one = async (s, p) => (await db.query(s, p)).rows[0];
 
 let cookie = "";
-async function api(path, { method = "GET", body } = {}) {
+// Each dispatch below is a separate intended shipment, so each carries its own key. The
+// route refuses a keyless POST; what these cases assert — the quantity and lot guards —
+// is unchanged by giving every one of them a distinct identity.
+async function api(path, { method = "GET", body, key } = {}) {
+  const needsKey = method === "POST" && path.split("?")[0] === "/api/deliveries";
   const res = await fetch(BASE + path, {
-    method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(cookie ? { cookie } : {}),
+      ...(needsKey ? { "Idempotency-Key": key ?? freshIdempotencyKey("e2edel") } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   for (const c of res.headers.getSetCookie?.() ?? []) if (c.startsWith("token=")) cookie = c.split(";")[0];
@@ -66,9 +74,13 @@ async function main() {
   const before = await counts();
   console.log("baseline: " + JSON.stringify(before));
 
-  await db.query(`INSERT INTO "Employee" (id,name,pin,"pinHash",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
+  // Version B shape: pin = bcrypt(pinVerifierInput(PIN)) and the keyed lookup, exactly what
+  // the application writes. pinHash is left NULL — inert under Version B. Without the lookup
+  // this account exists and cannot log in.
+  await db.query(`INSERT INTO "Employee" (id,name,pin,"pinLookup",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
     VALUES ($1,'E2E Delivery',$2,$3,'admin',$4,'/dashboard',true,'en',now(),now())`,
-    [EMP, bcrypt.hashSync(PIN, 10), createHash("sha256").update(PIN).digest("hex"), JSON.stringify(perms)]);
+    [EMP, bcrypt.hashSync(pinVerifierInput(PIN), 10),
+     pinLookupValue(PIN), JSON.stringify(perms)]);
   await db.query(`INSERT INTO "Customer" (id,name,"createdAt","updatedAt") VALUES ($1,$2,now(),now())`, [CUST, TAG + " Cust"]);
   await db.query(`INSERT INTO "GreenBean" (id,"serialNumber","beanType",country,"quantityKg","isActive","receivedDate","createdAt","updatedAt")
     VALUES ($1,$2,'Del Bean','BR',100,true,now(),now(),now())`, [BEAN, TAG + "-B"]);

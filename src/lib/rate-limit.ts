@@ -62,8 +62,35 @@ export async function pruneExpired(): Promise<void> {
   });
 }
 
-// Counts all failed attempts from this IP in the window, regardless of identifier.
-// Catches broad enumeration: many different PINs or usernames tried from one source.
+// ─── The PIN-space bucket ────────────────────────────────────────────────────
+//
+// Per-IP and per-(IP, candidate) counting bounds one address and one guessed value. It
+// bounds nothing about a DISTRIBUTED walk of the PIN space, because on PIN-only login the
+// identifier IS the candidate: 000000, 000001, 000002 each hash differently, so no
+// per-identifier threshold ever accumulates. There is also no account to key a limit on —
+// a wrong PIN identifies nobody.
+//
+// So each PIN failure also writes one row under this fixed synthetic identifier, giving a
+// countable system-wide view of PIN guessing. It is a constant, not a credential, and it
+// goes through the same peppered hash as every other identifier so the table holds no
+// distinguishable plaintext.
+export const PIN_GLOBAL = hashRateLimitKey("bucket:pin-login");
+
+/** How quickly a system-wide burst is judged, and how long the response lasts. */
+const BURST_WINDOW_MS = 60_000;
+const GLOBAL_BURST = 30;
+
+// Counts failed attempts from this IP in the window, EXCLUDING the PIN_GLOBAL marker.
+//
+// The exclusion is what keeps the accounting honest. A failed PIN writes two rows — the
+// candidate row and the marker — and without this predicate each failure would count
+// twice here, silently halving every per-IP limit in the application: login, both
+// destructive resets and the self-service PIN change all read this one function. With it,
+// one failure contributes exactly one row, exactly as before this bucket existed.
+//
+// Note what this deliberately does NOT do: PIN candidate rows still count toward the same
+// per-IP budget password login reads. That cross-method behaviour predates this change and
+// is kept — an address misbehaving on one method is throttled on both.
 // Uses @@index([ipHash, createdAt]).
 export async function isIpRateLimited(
   ipHash: string,
@@ -71,9 +98,57 @@ export async function isIpRateLimited(
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - WINDOW_MS);
   const count = await prisma.loginAttempt.count({
-    where: { ipHash, createdAt: { gte: windowStart } },
+    where: { ipHash, identifierHash: { not: PIN_GLOBAL }, createdAt: { gte: windowStart } },
   });
   return count >= maxAttempts;
+}
+
+/**
+ * Is the system as a whole being walked right now?
+ *
+ * Counts marker rows across every address and every candidate in the last minute. No index
+ * leads with identifierHash, so this scans — of a table that holds only unpruned failures,
+ * which at this scale is a scan of almost nothing. An index would be a schema change made
+ * on speculation; measure first.
+ */
+export async function isPinSpaceConstrained(): Promise<boolean> {
+  const windowStart = new Date(Date.now() - BURST_WINDOW_MS);
+  const count = await prisma.loginAttempt.count({
+    where: { identifierHash: PIN_GLOBAL, createdAt: { gte: windowStart } },
+  });
+  return count >= GLOBAL_BURST;
+}
+
+/** Has this address avoided failing a PIN in the last minute? Uses the composite index. */
+export async function isIpQuietForPin(ipHash: string): Promise<boolean> {
+  const windowStart = new Date(Date.now() - BURST_WINDOW_MS);
+  const count = await prisma.loginAttempt.count({
+    where: { ipHash, identifierHash: PIN_GLOBAL, createdAt: { gte: windowStart } },
+  });
+  return count === 0;
+}
+
+/** This address's PIN failures over the normal window — the tightened allowance. */
+export async function isIpPinRateLimited(ipHash: string, maxAttempts: number): Promise<boolean> {
+  const windowStart = new Date(Date.now() - WINDOW_MS);
+  const count = await prisma.loginAttempt.count({
+    where: { ipHash, identifierHash: PIN_GLOBAL, createdAt: { gte: windowStart } },
+  });
+  return count >= maxAttempts;
+}
+
+/** A failed PIN: the candidate row every limiter already counted, plus the marker. */
+export async function recordPinFailure(ipHash: string, identifierHash: string): Promise<void> {
+  await prisma.loginAttempt.createMany({
+    data: [{ ipHash, identifierHash }, { ipHash, identifierHash: PIN_GLOBAL }],
+  });
+}
+
+/** A success clears both: this address has just proved it belongs to somebody. */
+export async function clearPinAttempts(ipHash: string, identifierHash: string): Promise<void> {
+  await prisma.loginAttempt.deleteMany({
+    where: { ipHash, identifierHash: { in: [identifierHash, PIN_GLOBAL] } },
+  });
 }
 
 // Counts failed attempts for this exact IP + identifier pair in the window.

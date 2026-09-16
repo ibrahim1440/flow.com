@@ -53,6 +53,12 @@ import {
 import {
   diffEmployeeChange, diffPermissions, PERMISSION_DIFF_LIMIT,
 } from "../../../src/lib/services/employee-audit.ts";
+import { PIN_LENGTH, PIN_FORMAT_MESSAGE, validatePin, isValidPin } from "../../../src/lib/pin-policy.ts";
+import { evaluatePinLookupSecret, pinLookup, pinVerifierInput } from "../../../src/lib/pin-lookup.ts";
+import {
+  readDeliveryRequestKey, normalizeDeliveryIntent, deliveryIntentHash, roundKg,
+} from "../../../src/lib/services/delivery-idempotency.ts";
+import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -773,6 +779,404 @@ check("only the pin when only the pin changed",
 check("and NEVER what it changed to",
   !/\$2[aby]\$|pinHash|password"\s*:\s*"/.test(JSON.stringify(everythingAtOnce)),
   JSON.stringify(everythingAtOnce).slice(0, 140));
+// ─────────────────────────────────────────────────────────────────────────────
+section("PIN POLICY (pure) — H2B");
+//
+// Five paths set or check a PIN: employee create, admin employee edit, self-service change,
+// login, and the re-verification guarding the destructive resets. They previously agreed
+// only that a PIN was "at least 4 characters", and only two of them said so in the same
+// words. One rule now decides, and every permutation of it is provable on a clean clone —
+// no server, no database, no credential.
+
+check("the policy length is six", PIN_LENGTH === 6, String(PIN_LENGTH));
+check("six digits is a PIN", validatePin("123456").ok === true);
+check("and the accepted value is returned unchanged", validatePin("123456").pin === "123456");
+
+for (const bad of ["", "1", "12345", "1234567", "12345678"]) {
+  check(`"${bad}" is the wrong length`, validatePin(bad).ok === false);
+}
+for (const bad of ["12345a", "abcdef", "12-456", "12 456", "+12345", "1.2345"]) {
+  check(`"${bad}" is not six digits`, validatePin(bad).ok === false);
+}
+
+sub("digits means ASCII digits");
+// \d in a Unicode-aware regex also matches Arabic-Indic digits, which would let two visually
+// different strings be the same PIN on one path and different PINs on another.
+check("Arabic-Indic digits are refused", validatePin("١٢٣٤٥٦").ok === false);
+check("fullwidth digits are refused", validatePin("１２３４５６").ok === false);
+
+sub("whitespace is refused, not trimmed");
+// Trimming would mean " 012345" and "012345" authenticate the same account while being
+// different strings — and the lookup, the verifier and the rate-limit identifier would each
+// have to agree on where the trimming happened.
+check("a leading space is refused", validatePin(" 123456").ok === false);
+check("a trailing space is refused", validatePin("123456 ").ok === false);
+check("an interior space is refused", validatePin("123 456").ok === false);
+check("a tab is refused", validatePin("\t123456").ok === false);
+
+sub("a PIN is a string, and stays one");
+for (const [label, bad] of [
+  ["a number", 123456], ["null", null], ["undefined", undefined],
+  ["an object", {}], ["an array", ["123456"]], ["a boolean", true],
+]) {
+  check(`${label} is refused`, validatePin(bad).ok === false);
+}
+check("012345 is valid", validatePin("012345").ok === true);
+check("and survives as six characters", validatePin("012345").pin === "012345");
+
+check("isValidPin and validatePin never disagree",
+  ["123456", "012345", "12345", "abcdef", "", " 123456", 123456, null]
+    .every((v) => isValidPin(v) === validatePin(v).ok));
+check("the refusal message states the rule and quotes no candidate",
+  validatePin("12345").message === PIN_FORMAT_MESSAGE && !/12345/.test(PIN_FORMAT_MESSAGE),
+  PIN_FORMAT_MESSAGE);
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("PIN LOOKUP SECRET (pure) — H2B");
+//
+// A lookup secret that quietly defaults to something weak is the original defect wearing a
+// different hat, so this is evaluated the way auth.ts evaluates JWT_SECRET: fail closed, and
+// never name the value in the reason.
+
+const STRONG = "d7Qv2mZ".padEnd(48, "x");
+
+check("unset is refused", evaluatePinLookupSecret({}).ok === false);
+check("empty is refused", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "" }).ok === false);
+check("whitespace-only is refused", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "    " }).ok === false);
+check("31 characters is refused", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "y".repeat(31) }).ok === false);
+check("32 characters is accepted", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "y".repeat(32) }).ok === true);
+for (const weak of ["hiqbah-fallback-secret", "changeme", "secret", "test"]) {
+  check(`the placeholder "${weak}" is refused`,
+    evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: weak }).ok === false);
+}
+// The one placeholder long enough to clear the length gate, so this is the case that proves
+// the blocklist itself is consulted rather than the length doing all the work.
+const LONG_PLACEHOLDER = "replace-this-with-a-strong-random-secret-min-32-chars";
+const placeholderDecision = evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: LONG_PLACEHOLDER });
+check("a 52-character placeholder is refused on its own merits, not on length",
+  placeholderDecision.ok === false && /weak or placeholder/.test(placeholderDecision.reason),
+  placeholderDecision.reason);
+check("and case does not launder it",
+  evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: LONG_PLACEHOLDER.toUpperCase() }).ok === false);
+check("a strong value is accepted and returned trimmed",
+  evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: `  ${STRONG}  ` }).secret === STRONG);
+
+const secretRefusals = [
+  evaluatePinLookupSecret({}),
+  evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "y".repeat(31) }),
+  evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "hiqbah-fallback-secret" }),
+].map((r) => r.reason);
+check("no refusal ever quotes any part of the value it refused",
+  secretRefusals.every((r) => !/yyyy|hiqbah/.test(r)), JSON.stringify(secretRefusals));
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("PIN LOOKUP (pure) — H2B");
+
+const K1 = "k".repeat(40);
+const K2 = "m".repeat(40);
+
+check("the lookup is deterministic", pinLookup("123456", K1) === pinLookup("123456", K1));
+check("different PINs give different values", pinLookup("123456", K1) !== pinLookup("123457", K1));
+check("different secrets give different values", pinLookup("123456", K1) !== pinLookup("123456", K2));
+check("it is not the unsalted hash it replaces",
+  pinLookup("123456", K1) !== createHash("sha256").update("123456").digest("hex"));
+check("it is domain-separated, not a bare HMAC of the PIN",
+  pinLookup("123456", K1) !== createHmac("sha256", K1).update("123456").digest("base64"));
+check("012345 and 12345 are different credentials",
+  pinLookup("012345", K1) !== pinLookup("12345", K1));
+
+sub("the harness duplicates this formula — and must not drift from it");
+// The regression suites are plain .mjs and seed employees with SQL, so harness.mjs computes
+// the selector itself. That duplication is only safe while both sides agree exactly, and
+// nothing in a green suite would notice if they stopped: the fixtures would simply become
+// unloggable, which reads as a broken fixture rather than as drift.
+const lookupSrc = readFileSync(join(REPO, "src", "lib", "pin-lookup.ts"), "utf8");
+const harnessSrc = readFileSync(
+  join(REPO, "scripts", "e2e", "regression", "harness.mjs"), "utf8");
+
+check("the module builds the selector with HMAC-SHA256",
+  /createHmac\(\s*"sha256"/.test(lookupSrc), "");
+check("under the lookup domain prefix pin:lookup:v1:", /"pin:lookup:v1:"/.test(lookupSrc), "");
+check("and encodes it as base64", /digest\(\s*"base64"\s*\)/.test(lookupSrc), "");
+check("the harness names the same lookup domain prefix", /"pin:lookup:v1:"/.test(harnessSrc), "");
+check("the same digest, and the same encoding",
+  /createHmac\(\s*"sha256"/.test(harnessSrc) && /digest\(\s*"base64"\s*\)/.test(harnessSrc), "");
+check("and refuses to run without the server's secret",
+  /PIN_LOOKUP_SECRET is not set/.test(harnessSrc), "");
+check("the two implementations agree on a worked example",
+  createHmac("sha256", K1).update("pin:lookup:v1:" + "012345").digest("base64") === pinLookup("012345", K1));
+
+sub("the verifier input is a distinct keyed derivation — Secure Version B");
+// Employee.pin is bcrypt(pinVerifierInput(PIN)), not bcrypt(PIN). The verifier input is
+// HMAC-SHA384 under its own domain, so it is a different construction AND a different domain
+// from the selector: brute-forcing the stored bcrypt offline recovers only this value, never
+// the PIN, and the raw PIN can never verify directly.
+check("the module builds the verifier input with HMAC-SHA384",
+  /createHmac\(\s*"sha384"/.test(lookupSrc), "");
+check("under the verify domain prefix pin:verify:v1:", /"pin:verify:v1:"/.test(lookupSrc), "");
+check("the harness duplicates the verifier formula too",
+  /createHmac\(\s*"sha384"/.test(harnessSrc) && /"pin:verify:v1:"/.test(harnessSrc), "");
+check("the verifier input is not the selector", pinVerifierInput("123456", K1) !== pinLookup("123456", K1));
+check("it is not a bare HMAC of the PIN",
+  pinVerifierInput("123456", K1) !== createHmac("sha384", K1).update("123456").digest("base64"));
+check("it is deterministic and keyed",
+  pinVerifierInput("123456", K1) === pinVerifierInput("123456", K1) &&
+  pinVerifierInput("123456", K1) !== pinVerifierInput("123456", K2));
+check("different PINs give different verifier inputs",
+  pinVerifierInput("123456", K1) !== pinVerifierInput("123457", K1));
+check("the two implementations agree on a worked verifier example",
+  createHmac("sha384", K1).update("pin:verify:v1:" + "012345").digest("base64") ===
+    pinVerifierInput("012345", K1));
+
+sub("rotation is a window, not a dual-secret migration");
+// A stored HMAC does not say which key produced it, so "how many rows are still on the old
+// secret?" is a question the database cannot answer without every plaintext PIN. A second
+// secret would therefore create state no query could prove complete.
+check("there is no second secret", !/PIN_LOOKUP_SECRET_(OLD|PREVIOUS|NEXT)/.test(lookupSrc), "");
+check("and no version bump smuggled into either domain",
+  !/pin:lookup:v2:/.test(lookupSrc) && !/pin:verify:v2:/.test(lookupSrc), "");
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("DISPATCH IDEMPOTENCY (pure) — H2B");
+//
+// A dispatch had no request identity at all: a retry after an ambiguous outcome created a
+// second Delivery, applied the quantity again and drew the stock again. The ordered-quantity
+// ceiling bounded how much damage that could do; it never noticed that the retry WAS the
+// first request.
+
+const keyReq = (value) =>
+  new Request("http://localhost/api/deliveries", {
+    method: "POST",
+    headers: value === undefined ? {} : { "Idempotency-Key": value },
+  });
+
+check("a missing key is refused", readDeliveryRequestKey(keyReq(undefined)).ok === false);
+check("an empty key is refused", readDeliveryRequestKey(keyReq("")).ok === false);
+check("a whitespace-only key is refused", readDeliveryRequestKey(keyReq("   ")).ok === false);
+check("the refusal names the header it wants",
+  /Idempotency-Key/.test(readDeliveryRequestKey(keyReq(undefined)).message), "");
+check("a padded key is trimmed, not rejected — a retry may arrive padded",
+  readDeliveryRequestKey(keyReq("  abc-123  ")).key === "abc-123");
+check("the certified dialect is accepted", readDeliveryRequestKey(keyReq("aZ0._:-")).ok === true);
+// Not a newline: the Headers API refuses one outright, so a header value carrying it can
+// never reach this reader — the transport rejects that shape before the application sees it.
+for (const bad of ["has space", "slash/es", "semi;colon", 'quote"d', "pipe|d", "comma,d", "brace{s}"]) {
+  check(`${JSON.stringify(bad)} is refused`, readDeliveryRequestKey(keyReq(bad)).ok === false);
+}
+check("200 characters is accepted", readDeliveryRequestKey(keyReq("k".repeat(200))).ok === true);
+check("201 characters is refused", readDeliveryRequestKey(keyReq("k".repeat(201))).ok === false);
+
+sub("one canonical intent, hashed and executed");
+const baseIntent = {
+  orderItemId: "item-1", finishedGoodsLotId: "lot-1",
+  deliveryType: "partial", quantityUnits: 4, notes: "ship it",
+};
+const norm = (b) => normalizeDeliveryIntent(b);
+const hashOf = (b) => deliveryIntentHash(norm(b).intent);
+
+check("a well-formed body normalizes", norm(baseIntent).ok === true);
+check("both quantity axes at once is refused", norm({ ...baseIntent, quantityKg: 1 }).ok === false);
+check("neither axis is refused",
+  norm({ orderItemId: "i", finishedGoodsLotId: "l", deliveryType: "full" }).ok === false);
+check("a missing lot is refused", norm({ ...baseIntent, finishedGoodsLotId: "" }).ok === false);
+check("a missing order item is refused", norm({ ...baseIntent, orderItemId: "  " }).ok === false);
+check("an unknown deliveryType is refused", norm({ ...baseIntent, deliveryType: "maybe" }).ok === false);
+check("deliveryType is case-folded, not rejected", norm({ ...baseIntent, deliveryType: "FULL" }).intent.deliveryType === "full");
+check("a fractional unit count is refused", norm({ ...baseIntent, quantityUnits: 2.5 }).ok === false);
+check("zero units is refused", norm({ ...baseIntent, quantityUnits: 0 }).ok === false);
+check("a negative kilogram figure is refused",
+  norm({ ...baseIntent, quantityUnits: undefined, quantityKg: -1 }).ok === false);
+check("kilograms are rounded once, to grams",
+  norm({ ...baseIntent, quantityUnits: undefined, quantityKg: 1.23456 }).intent.quantityKg === 1.235);
+check("and rounding is the value that gets hashed",
+  hashOf({ ...baseIntent, quantityUnits: undefined, quantityKg: 1.23456 }) ===
+  hashOf({ ...baseIntent, quantityUnits: undefined, quantityKg: 1.235 }));
+check("an empty note is the same as no note",
+  hashOf({ ...baseIntent, notes: "   " }) === hashOf({ ...baseIntent, notes: undefined }));
+
+sub("property order is not part of a dispatch's meaning");
+// Object property order is not part of a body's meaning but it IS part of its serialization,
+// so hashing raw JSON would let a reordered retry look like a different dispatch.
+const reordered = {
+  notes: baseIntent.notes, quantityUnits: baseIntent.quantityUnits,
+  deliveryType: baseIntent.deliveryType, finishedGoodsLotId: baseIntent.finishedGoodsLotId,
+  orderItemId: baseIntent.orderItemId,
+};
+check("the same values in any order hash identically", hashOf(reordered) === hashOf(baseIntent));
+check("a different quantity hashes differently",
+  hashOf({ ...baseIntent, quantityUnits: 5 }) !== hashOf(baseIntent));
+check("a different note hashes differently — it is caller-supplied and persisted",
+  hashOf({ ...baseIntent, notes: "ship it tomorrow" }) !== hashOf(baseIntent));
+check("a different lot hashes differently",
+  hashOf({ ...baseIntent, finishedGoodsLotId: "lot-2" }) !== hashOf(baseIntent));
+check("the hash is a sha256 digest", /^[0-9a-f]{64}$/.test(hashOf(baseIntent)));
+check("kilograms and units are separate positions, not one number",
+  hashOf({ ...baseIntent, quantityUnits: 4 }) !==
+  hashOf({ ...baseIntent, quantityUnits: undefined, quantityKg: 4 }));
+check("roundKg is gram precision", roundKg(1.23456) === 1.235 && roundKg(2) === 2);
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("THE PINHASH CUTOVER, STATICALLY — H2B");
+//
+// Secure Version B writes two live credential columns and reads one, and — critically —
+// bcrypts a keyed derivation of the PIN, never the PIN itself. None of that is visible in a
+// green suite: a path that silently stopped writing pinLookup would leave accounts that
+// cannot log in, a login that started reading pinHash again would quietly restore the
+// precomputable lookup this migration exists to retire, and a path that bcrypted the raw PIN
+// would reintroduce the offline verifier the whole correction removes. All are assertions
+// about source.
+
+const src = (...p) => stripComments(readFileSync(join(REPO, ...p), "utf8"));
+
+const loginRoute = src("src", "app", "api", "auth", "login", "route.ts");
+check("login finds its employee by the keyed lookup", /pinLookup:\s*lookup/.test(loginRoute), "");
+check("and never reads pinHash", !/pinHash/.test(loginRoute), "pinHash is referenced again");
+check("the credential is proved by bcrypt over the derived verifier input",
+  /compare\(\s*pinVerifierInput\(\s*candidate/.test(loginRoute), "");
+check("and never by bcrypting the raw candidate directly",
+  !/compare\(\s*candidate\s*,/.test(loginRoute), "a raw-PIN bcrypt compare is present");
+check("and the candidate is shape-checked before anything is hashed",
+  /validatePin\(/.test(loginRoute), "");
+check("the opportunistic backfill is gone", !/backfill/i.test(loginRoute), "");
+
+for (const [label, ...p] of [
+  ["employee create", "src", "app", "api", "employees", "route.ts"],
+  ["admin employee edit", "src", "app", "api", "employees", "[id]", "route.ts"],
+  ["self-service PIN change", "src", "app", "api", "profile", "route.ts"],
+]) {
+  const path = src(...p);
+  check(`${label} validates the PIN shape`, /validatePin\(/.test(path), "");
+  check(`${label} writes the keyed lookup`, /pinLookups*[:=]/.test(path), "");
+  check(`${label} bcrypts the derived verifier input, not the raw PIN`,
+    /hash\(\s*pinVerifierInput\(/.test(path), "");
+  check(`${label} does NOT write the legacy pinHash — inert until #19`,
+    !/pinHash/.test(path), "pinHash is written on a Version B credential path");
+  check(`${label} checks uniqueness on the lookup, not the legacy column`,
+    /pinLookup:\s*(lookup|newLookup|nextLookup)/.test(path), "");
+}
+
+for (const [label, ...p] of [
+  ["the destructive reset", "src", "app", "api", "admin", "reset", "route.ts"],
+  ["the training reset", "src", "app", "api", "admin", "training-reset", "route.ts"],
+]) {
+  const path = src(...p);
+  check(`${label} shape-checks the re-verified PIN before bcrypt`,
+    /validatePin\(pin\)[\s\S]{0,800}compare\(\s*pinVerifierInput\(\s*pinShape\.pin/.test(path), "");
+  check(`${label} never bcrypts the raw re-verified PIN`,
+    !/compare\(\s*pinShape\.pin\s*,/.test(path), "a raw-PIN bcrypt compare is present");
+}
+
+sub("the rate-limit accounting the marker depends on");
+const rateLimit = src("src", "lib", "rate-limit.ts");
+check("the PIN-space bucket exists", /PIN_GLOBAL/.test(rateLimit), "");
+check("it is peppered like every other identifier",
+  /PIN_GLOBAL\s*=\s*hashRateLimitKey\(/.test(rateLimit), "");
+check("and the per-address count EXCLUDES it, so one failure counts once",
+  /identifierHash:\s*\{\s*not:\s*PIN_GLOBAL\s*\}/.test(rateLimit),
+  "isIpRateLimited would double-count every PIN failure");
+check("a failed PIN writes the candidate row and the marker together",
+  /recordPinFailure[\s\S]{0,300}identifierHash:\s*PIN_GLOBAL/.test(rateLimit), "");
+check("and a success clears both", /clearPinAttempts[\s\S]{0,300}in:\s*\[identifierHash,\s*PIN_GLOBAL\]/.test(rateLimit), "");
+
+sub("migration #18 is additive");
+// The column is added nullable with no default and no backfill, so applying it cannot
+// rewrite a row or take a table lock long enough to matter — and rolling the application
+// back to the previous version leaves a schema that version still runs on.
+const MIG18 = "20260915100000_add_delivery_idempotency_and_pin_lookup";
+const mig18Raw = readFileSync(join(REPO, "prisma", "migrations", MIG18, "migration.sql"), "utf8");
+// The SQL comments explain what the columns replace, and name pinHash while doing it. An
+// assertion that cannot tell an explanation from a statement would force the next person to
+// delete the explanation in order to keep this green.
+const mig18 = mig18Raw.replace(/^\s*--.*$/gm, "");
+const statements = mig18.split(";").map((s) => s.trim()).filter(Boolean);
+check("it is exactly five statements", statements.length === 5, String(statements.length));
+check("two columns on Delivery, two indexes, one column on Employee",
+  statements.filter((s) => /^ALTER TABLE/i.test(s)).length === 3 &&
+  statements.filter((s) => /^CREATE UNIQUE INDEX/i.test(s)).length === 2,
+  JSON.stringify(statements.map((s) => s.slice(0, 28))));
+check("every added column is nullable", !/NOT NULL/i.test(mig18), "a NOT NULL column would fail on existing rows");
+check("nothing is dropped, truncated or rewritten",
+  !/\b(DROP|TRUNCATE|DELETE|UPDATE|RENAME)\b/i.test(mig18), "a destructive statement is present");
+check("no default is backfilled into existing rows", !/\bDEFAULT\b/i.test(mig18), "");
+check("the legacy column is still there for a rollback to use",
+  !/pinHash/i.test(mig18), "the migration touches pinHash");
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("THE MIGRATE-DEPLOY WRAPPER, STATICALLY — H2B");
+//
+// `npm run build` no longer mutates the database as a side effect of compiling. Migrations
+// run through scripts/migrate-deploy.mjs, by a person who means to run them, and only against
+// the direct endpoint. None of that is visible in a green suite: the wrapper is never invoked
+// by a test (running it would apply a migration), so its safety is asserted from source, and
+// the URL boundary it depends on is exercised as pure functions.
+
+sub("the URL boundary the wrapper depends on never quotes a credential");
+// requireDatabaseUrl / requireDirectUrl already prove they THROW on a missing or malformed
+// URL above (fail-closed). What the migration wrapper additionally depends on is that the
+// refusal names the problem and never any part of the value — a connection URL carries a
+// password.
+const SECRET_PW = "hunter2SUPERSECRET";
+const withPw = `postgres://neondb_owner:${SECRET_PW}@ep-example.aws.neon.tech/neondb?sslmode=require`;
+let dbReason = "", directReason = "";
+try { requireDatabaseUrl({ DATABASE_URL: "postgres://:@" }); } catch (e) { dbReason = String(e.message); }
+try { requireDirectUrl({ DIRECT_URL: "not a url at all" }); } catch (e) { directReason = String(e.message); }
+check("a malformed DATABASE_URL refusal quotes no part of the value",
+  dbReason.length > 0 && !dbReason.includes("hunter2") && !dbReason.includes("@"), dbReason);
+check("a malformed DIRECT_URL refusal quotes no part of the value",
+  directReason.length > 0 && !directReason.includes("not a url"), directReason);
+check("a well-formed URL is accepted, and its decision exposes host/db but never the password",
+  evaluateDatabaseUrl({ DATABASE_URL: withPw }).ok === true &&
+  evaluateDatabaseUrl({ DATABASE_URL: withPw }).host === "ep-example.aws.neon.tech" &&
+  !JSON.stringify(evaluateDatabaseUrl({ DATABASE_URL: withPw })).includes(SECRET_PW),
+  "the decision object leaked the password");
+
+sub("the spawn is shell-free, local, and propagates the child's fate");
+const md = stripComments(readFileSync(join(REPO, "scripts", "migrate-deploy.mjs"), "utf8"));
+check("it never spawns a shell", !/shell:\s*true/.test(md), "shell: true is present");
+check("and never reaches for cmd.exe or a .cmd shim",
+  !/cmd\.exe/i.test(md) && !/\.cmd\b/i.test(md), "a cmd.exe / .cmd reference is present");
+check("it runs the Prisma JS CLI resolved from this install, not a bin shim",
+  /createRequire/.test(md) && /resolve\(\s*["']prisma\/build\/index\.js["']\s*\)/.test(md), "");
+check("under this same Node via process.execPath",
+  /spawnSync\(\s*process\.execPath/.test(md), "");
+check("DATABASE_URL and DIRECT_URL are both required before the child is spawned",
+  /requireDatabaseUrl\([\s\S]*requireDirectUrl\([\s\S]*spawnSync\(/.test(md),
+  "validation does not precede the spawn");
+check("the child's non-zero exit is propagated, not swallowed",
+  /process\.exit\(\s*result\.status\s*\?\?\s*1\s*\)/.test(md), "");
+check("a spawn error exits non-zero rather than continuing",
+  /result\.error[\s\S]{0,120}process\.exit\(1\)/.test(md), "");
+check("only the host is ever logged, never a connection string",
+  /new URL\(\s*direct\s*\)\.hostname/.test(md) &&
+  !/console\.(log|error)\([^)]*\b(DATABASE_URL|DIRECT_URL)\b/.test(md) &&
+  !/console\.log\(\s*(direct|url)\s*\)/.test(md), "a credential may be logged");
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("THE SEED IS A VERSION-B CREDENTIAL PATH, STATICALLY — H2B");
+//
+// prisma/seed.ts creates employees, so it is a credential-writing path and must obey Secure
+// Version B exactly as the application routes do. It is never run by a suite (running it would
+// require an explicitly enabled disposable target), so its rules are asserted from source.
+const seedSrc = stripComments(readFileSync(join(REPO, "prisma", "seed.ts"), "utf8"));
+
+sub("it writes Version B credentials, not the retired scheme");
+check("it bcrypts the derived verifier input", /hashSync\(\s*pinVerifierInput\(/.test(seedSrc), "");
+check("and never bcrypts a raw or literal PIN",
+  !/hashSync\(\s*"[0-9]/.test(seedSrc) && !/hashSync\(\s*pin\s*[,)]/.test(seedSrc), "a raw-PIN bcrypt is present");
+check("it writes the keyed lookup", /pinLookup:\s*pinLookup\(/.test(seedSrc), "");
+check("it does NOT write the legacy pinHash", !/pinHash/.test(seedSrc), "the seed writes pinHash");
+check("no four-digit PIN literal survives",
+  !/"1234"|"2345"|"3456"|"4567"|"5678"/.test(seedSrc), "a legacy four-digit PIN literal is present");
+check("PINs are validated by the shared six-digit policy", /validatePin\(/.test(seedSrc), "");
+check("the lookup secret is required, not defaulted", /requirePinLookupSecret\(/.test(seedSrc), "");
+
+sub("it is fail-closed on its target");
+check("it requires a real PostgreSQL URL — no SQLite fallback",
+  /requireDatabaseUrl\(/.test(seedSrc) && !/PrismaLibSql/.test(seedSrc) && !/file:\.\/prisma\/dev\.db/.test(seedSrc), "");
+check("it refuses to run unless explicitly enabled", /ERP_SEED_ENABLED/.test(seedSrc), "");
+check("and it refuses the Production endpoint by name",
+  /ep-icy-field-aq4upc3z/.test(seedSrc), "the seed does not block Production");
+
 // ─────────────────────────────────────────────────────────────────────────────
 section("HARNESS SELF-TEST");
 console.log(`${pass} passed, ${fail} failed`);

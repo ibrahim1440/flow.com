@@ -5,6 +5,8 @@ import { requireSub } from "@/lib/auth-server";
 import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
 import { evaluateResetAuthorization, resetRefusalBody } from "@/lib/reset-safety";
+import { validatePin } from "@/lib/pin-policy";
+import { pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 
 const CONFIRM_PHRASE = "CLEAR DEMO DATA";
 
@@ -50,8 +52,23 @@ export async function POST(request: Request) {
     }
 
     // Layer 3: admin PIN re-verify
+    // The re-verified PIN is shape-checked before it reaches bcrypt. Two reasons, and
+    // neither is cosmetic: compare() throws on a non-string, which on a destructive
+    // endpoint would surface as an unexplained 500 instead of a refusal; and this gate
+    // has to demand the SAME credential shape every path that sets a PIN now enforces,
+    // so a stale pre-cutover PIN cannot authorise a whole-database deletion.
+    // Counted as a failed attempt so a script cannot probe the endpoint for free.
+    const pinShape = validatePin(pin);
+    if (!pinShape.ok) {
+      await recordFailedAttempt(ipHash, identifierHash);
+      return NextResponse.json({ error: pinShape.message }, { status: 400 });
+    }
+    // Verified over pinVerifierInput, exactly as login and every other PIN path: the stored
+    // hash is bcrypt(pinVerifierInput(pin)), so a raw-PIN compare here would refuse the
+    // admin's own PIN and, on a legacy row, would be the one place a raw-PIN verifier crept
+    // back in — on the endpoint that clears the demo dataset.
     const admin = await prisma.employee.findUnique({ where: { id: user.id } });
-    if (!admin || !(await compare(pin, admin.pin))) {
+    if (!admin || !(await compare(pinVerifierInput(pinShape.pin, requirePinLookupSecret()), admin.pin))) {
       await recordFailedAttempt(ipHash, identifierHash);
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }

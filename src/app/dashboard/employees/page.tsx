@@ -10,6 +10,7 @@ import {
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
 import { useI18n } from "@/lib/i18n/context";
+import { PIN_LENGTH } from "@/lib/pin-policy";
 
 type Employee = {
   id: string; name: string; username: string | null; role: string;
@@ -322,8 +323,8 @@ export default function EmployeesPage() {
                   </label>
                   <input type="text" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, "") })}
                     className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors font-mono tracking-widest"
-                    {...(!editingId ? { required: true, minLength: 4 } : {})}
-                    inputMode="numeric" maxLength={8} placeholder="4–8 digits" />
+                    {...(!editingId ? { required: true, minLength: PIN_LENGTH } : {})}
+                    inputMode="numeric" maxLength={PIN_LENGTH} placeholder={`${PIN_LENGTH} digits`} />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-charcoal mb-1.5">

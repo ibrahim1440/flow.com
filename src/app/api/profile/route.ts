@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { compare, hash } from "bcryptjs";
-import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
 import { signToken, parsePermissions, buildDefaultPermissions } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
 import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
-
-const sha256Pin = (pin: string) => createHash("sha256").update(pin).digest("hex");
+import { validatePin } from "@/lib/pin-policy";
+import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 
 // GET — fetch current user's profile details (phone, language)
 export async function GET() {
@@ -88,9 +87,16 @@ export async function PUT(request: Request) {
   if (!currentPin || !newPin) {
     return NextResponse.json({ error: "Current PIN and new PIN are required" }, { status: 400 });
   }
-  if (newPin.length < 4 || newPin.length > 8 || !/^\d+$/.test(newPin)) {
-    return NextResponse.json({ error: "PIN must be 4–8 digits" }, { status: 400 });
+  // The shape the whole application now agrees on. currentPin is deliberately NOT
+  // shape-checked: bcrypt decides whether it is the right credential, and refusing a
+  // legacy-shaped PIN here would lock its owner out of ever changing it.
+  const pinShape = validatePin(newPin);
+  if (!pinShape.ok) {
+    return NextResponse.json({ error: pinShape.message }, { status: 400 });
   }
+  const nextPin = pinShape.pin;
+  const secret = requirePinLookupSecret();
+  const nextLookup = pinLookup(nextPin, secret);
 
   const ip = extractIp(request);
   const ipHash = hashRateLimitKey(ip);
@@ -106,8 +112,11 @@ export async function PUT(request: Request) {
   const employee = await prisma.employee.findUnique({ where: { id: user.id } });
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 
-  // Verify current PIN
-  if (!(await compare(currentPin, employee.pin))) {
+  // Verify the current PIN the same way login does: over pinVerifierInput, never the raw
+  // PIN. currentPin is not shape-checked — bcrypt decides whether it is the right
+  // credential — but it IS run through the verifier derivation, because the stored hash is
+  // bcrypt(pinVerifierInput(pin)) and a raw-PIN compare would reject the owner's own PIN.
+  if (!(await compare(pinVerifierInput(String(currentPin), secret), employee.pin))) {
     await recordFailedAttempt(ipHash, identifierHash);
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
@@ -115,7 +124,7 @@ export async function PUT(request: Request) {
   await clearAttempts(ipHash, identifierHash);
 
   const taken = await prisma.employee.findFirst({
-    where: { pinHash: sha256Pin(newPin), id: { not: user.id } },
+    where: { pinLookup: nextLookup, id: { not: user.id } },
     select: { id: true },
   });
   if (taken) {
@@ -125,7 +134,17 @@ export async function PUT(request: Request) {
   try {
     await prisma.employee.update({
       where: { id: user.id },
-      data: { pin: await hash(newPin, 10), pinHash: sha256Pin(newPin) },
+      // Version B writes the two live credential columns together:
+      //   pin       bcrypt(pinVerifierInput(pin)) — the proof, over the keyed derivation and
+      //             never the raw PIN, so a stolen row cannot be attacked offline
+      //   pinLookup keyed HMAC selector — what login actually searches on
+      // The legacy pinHash column is deliberately NOT written: it is inert under Version B
+      // (read by nothing, written by nothing) and migration #19 removes it. Refreshing it
+      // here would keep a precomputable selector alive alongside the keyed one.
+      data: {
+        pin: await hash(pinVerifierInput(nextPin, secret), 10),
+        pinLookup: nextLookup,
+      },
     });
     return NextResponse.json({ success: true });
   } catch (err) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Truck, Search, AlertTriangle, Info, Layers } from "lucide-react";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
@@ -31,6 +31,26 @@ type OrderItem = {
   deliveredUnits: number;
   productSku: { id: string; skuCode: string; weightGrams: number } | null;
 };
+
+/**
+ * One dispatch, one key.
+ *
+ * The server refuses a delivery without an Idempotency-Key, and uses it to tell a retry
+ * of one dispatch apart from a second dispatch that happens to look identical. Only the
+ * client knows which of those the operator meant, so the key is minted here — once per
+ * opened dispatch form — and deliberately survives a failed attempt.
+ *
+ * randomUUID needs a secure context; a shop-floor tablet on plain http over the LAN would
+ * not have it. getRandomValues is available either way, so the fallback keeps the same 128
+ * bits of entropy rather than degrading to something guessable.
+ */
+function newIdempotencyKey(): string {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  const bytes = new Uint8Array(16);
+  c.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /** A SKU line ships units; a legacy line ships kilograms. */
 const isUnitLine = (i: OrderItem | null): boolean => !!i && i.quantityUnits !== null && !!i.productSku;
@@ -97,6 +117,9 @@ export default function DispatchPage() {
   const [lotsLoading,   setLotsLoading]   = useState(false);
   const [submitError,   setSubmitError]   = useState("");
   const [submitting,    setSubmitting]    = useState(false);
+  // Not state: changing it must never re-render, and a retry has to read the value the
+  // previous attempt used, not one a render cycle may not have committed yet.
+  const requestKeyRef = useRef<string | null>(null);
 
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => { loadData(); }, []);
@@ -129,6 +152,8 @@ export default function DispatchPage() {
     });
     setLotId("");
     setSubmitError("");
+    // A new intended dispatch starts here.
+    requestKeyRef.current = newIdempotencyKey();
     setShowForm(true);
 
     // What this specific item can ship from. Filtering the global lot list by free
@@ -159,6 +184,7 @@ export default function DispatchPage() {
   }
 
   function closeModal() {
+    requestKeyRef.current = null;
     setShowForm(false);
     setSelectedItem(null);
     setLots([]);
@@ -169,31 +195,72 @@ export default function DispatchPage() {
   // ── Submit delivery ───────────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // A second submit while the first is still open would be a second POST under the same
+    // key: the server would answer it correctly, but the two responses would race to set
+    // this component’s state. Refuse it here instead.
+    if (submitting) return;
+
+    // Normally openModal minted this when the operator opened the form. It is null in exactly
+    // one case: the previous attempt was definitively refused (see below), which released it.
+    // Minting a fresh one then is correct — this is a new intent, not a retry of a dead one.
+    const requestKey = requestKeyRef.current ?? (requestKeyRef.current = newIdempotencyKey());
+
     setSubmitError("");
     setSubmitting(true);
-    const res = await fetch("/api/deliveries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderItemId:        selectedItem!.id,
-        // The same input box carries units for a SKU line and kilograms for a legacy one;
-        // the server branches on the line, so send the field it will actually read.
-        ...(isUnitLine(selectedItem)
-          ? { quantityUnits: Math.trunc(form.quantityKg) }
-          : { quantityKg: form.quantityKg }),
-        deliveryType:       form.deliveryType,
-        notes:              form.notes || null,
-        finishedGoodsLotId: lotId || null,
-      }),
-    });
-    setSubmitting(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setSubmitError(data.error || "Delivery failed");
-      return;
+    try {
+      const res = await fetch("/api/deliveries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": requestKey,
+        },
+        body: JSON.stringify({
+          orderItemId:        selectedItem!.id,
+          // The same input box carries units for a SKU line and kilograms for a legacy one;
+          // the server branches on the line, so send the field it will actually read.
+          ...(isUnitLine(selectedItem)
+            ? { quantityUnits: Math.trunc(form.quantityKg) }
+            : { quantityKg: form.quantityKg }),
+          deliveryType:       form.deliveryType,
+          notes:              form.notes || null,
+          finishedGoodsLotId: lotId || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // ── What the key does after a failure ────────────────────────────────
+        // Only two outcomes exist on this route: it committed and answered 200/201, or it
+        // rolled back entirely. A 4xx is therefore a decision — no delivery, no stock
+        // drawn — and the intent it refused is dead, so the key is released and a
+        // corrected resubmission is judged on its own terms instead of colliding with a
+        // claim for the dispatch the operator has just changed.
+        //
+        // A 5xx is the opposite: the request may have committed and the answer been lost.
+        // Keeping the key is what makes the retry a replay of that dispatch rather than a
+        // second one, which is the entire reason this header exists.
+        if (res.status >= 500) {
+          setSubmitError(data.error || "Delivery could not be confirmed. Try again.");
+        } else {
+          requestKeyRef.current = null;
+          setSubmitError(data.error || "Delivery failed");
+        }
+        return;
+      }
+
+      // 200 (the server replayed an earlier identical dispatch) and 201 (it created one)
+      // both mean exactly one delivery exists and it is the one that was asked for.
+      closeModal();
+      loadData();
+    } catch {
+      // The request never produced an answer, so whether it reached the server is unknown.
+      // The key stays; the operator retries the same dispatch.
+      setSubmitError("Could not reach the server. Check the connection and try again.");
+    } finally {
+      // Reached on every path — including the throw above, which previously left the
+      // button disabled with no way back except a reload.
+      setSubmitting(false);
     }
-    closeModal();
-    loadData();
   }
 
   // ── Ready items list ──────────────────────────────────────────────────────

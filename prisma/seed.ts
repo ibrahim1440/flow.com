@@ -1,35 +1,81 @@
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { hashSync } from "bcryptjs";
+import { requireDatabaseUrl } from "../src/lib/db-config.js";
+import { requirePinLookupSecret, pinLookup, pinVerifierInput } from "../src/lib/pin-lookup.js";
+import { validatePin } from "../src/lib/pin-policy.js";
 
-const url = process.env.DATABASE_URL || "file:./prisma/dev.db";
+// ── Where the seed is allowed to run ─────────────────────────────────────────
+// The seed writes demo employees and a demo dataset, so it is fail-closed on its target the
+// same way the runtime and the destructive-reset guard are:
+//   • a real PostgreSQL URL is required — no silent SQLite fallback (see src/lib/db-config.ts),
+//     which is the same data-loss hazard that guard was created to remove;
+//   • ERP_SEED_ENABLED must be exactly "true", so the seed never runs by accident;
+//   • Production and Demo are refused by name, even if the flag is set against them.
+// It is a demo/training seed and nothing else.
+const PROTECTED_ENDPOINTS = [
+  "ep-icy-field-aq4upc3z", // Production — never
+  "ep-dawn-dust-aqn1u1uf", // Demo — never from this path
+];
+
+function seedDatabaseUrl(): string {
+  const url = requireDatabaseUrl(process.env); // throws on missing / malformed / non-PostgreSQL
+  if (process.env.ERP_SEED_ENABLED !== "true") {
+    throw new Error(
+      "Refusing to seed: set ERP_SEED_ENABLED=true to confirm this database is a disposable " +
+        "seed/demo target. The seed writes demo employees and data and must never run casually.",
+    );
+  }
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    throw new Error("Refusing to seed: DATABASE_URL could not be parsed.");
+  }
+  if (PROTECTED_ENDPOINTS.some((ep) => host.includes(ep))) {
+    throw new Error("Refusing to seed: the configured database is a protected environment.");
+  }
+  return url;
+}
 
 function createClient() {
-  if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
-    const { Pool } = require("pg");
-    const { PrismaPg } = require("@prisma/adapter-pg");
-    return new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: url })) });
-  }
-  const path = require("path");
-  const { PrismaLibSql } = require("@prisma/adapter-libsql");
-  const resolved = url.startsWith("file:./") || url.startsWith("file:../")
-    ? `file:${path.resolve(url.slice(5))}` : url || `file:${path.resolve("prisma/dev.db")}`;
-  return new PrismaClient({ adapter: new PrismaLibSql({ url: resolved }) });
+  const { Pool } = require("pg");
+  const { PrismaPg } = require("@prisma/adapter-pg");
+  return new PrismaClient({ adapter: new PrismaPg(new Pool({ connectionString: seedDatabaseUrl() })) });
 }
 
 const prisma = createClient();
 
 async function main() {
-  // Employees
-  const employees = [
-    { name: "Admin", pin: hashSync("1234", 10), role: "admin" },
-    { name: "Ibrahim (Inventory)", pin: hashSync("2345", 10), role: "inventory" },
-    { name: "Ahmed (Roaster)", pin: hashSync("3456", 10), role: "roasting" },
-    { name: "Khalid (QC)", pin: hashSync("4567", 10), role: "qc" },
-    { name: "Omar (Dispatch)", pin: hashSync("5678", 10), role: "dispatch" },
+  // Employees — Secure Version B credentials, PINs supplied by the environment.
+  //
+  // No PIN is hard-coded: each comes from an explicitly named six-digit seed variable and is
+  // validated by the same policy the application enforces. Each row stores bcrypt over the
+  // derived verifier input and the keyed lookup — never the raw PIN, and never the legacy
+  // pinHash (inert under Version B, removed by migration #19).
+  const secret = requirePinLookupSecret(); // fail closed if PIN_LOOKUP_SECRET is missing/weak
+  const seedEmployees = [
+    { name: "Admin", role: "admin", pinEnv: "SEED_PIN_ADMIN" },
+    { name: "Ibrahim (Inventory)", role: "inventory", pinEnv: "SEED_PIN_INVENTORY" },
+    { name: "Ahmed (Roaster)", role: "roasting", pinEnv: "SEED_PIN_ROASTING" },
+    { name: "Khalid (QC)", role: "qc", pinEnv: "SEED_PIN_QC" },
+    { name: "Omar (Dispatch)", role: "dispatch", pinEnv: "SEED_PIN_DISPATCH" },
   ];
-  for (const e of employees) {
-    await prisma.employee.create({ data: e });
+  for (const emp of seedEmployees) {
+    const shape = validatePin(process.env[emp.pinEnv]);
+    if (!shape.ok) {
+      throw new Error(
+        `${emp.pinEnv} must be a six-digit PIN for the "${emp.role}" seed employee. ${shape.message}`,
+      );
+    }
+    await prisma.employee.create({
+      data: {
+        name: emp.name,
+        role: emp.role,
+        pin: hashSync(pinVerifierInput(shape.pin, secret), 10),
+        pinLookup: pinLookup(shape.pin, secret),
+      },
+    });
   }
 
   // Customers (from B2B tracking)

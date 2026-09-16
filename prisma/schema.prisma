@@ -11,8 +11,20 @@ model Employee {
   id                String         @id @default(cuid())
   name              String
   username          String?        @unique
+  /// Secure Version B: bcrypt(pinVerifierInput(pin)), where pinVerifierInput is
+  /// base64(HMAC-SHA384(PIN_LOOKUP_SECRET, "pin:verify:v1:" + pin)). bcrypt is over the keyed
+  /// derivation, never the raw PIN, so a stolen row cannot be brute-forced offline without the
+  /// application secret and the raw PIN never verifies directly.
   pin               String
+  /// Legacy unsalted SHA-256 selector. Inert under Version B — written by nothing, read by
+  /// nothing. Kept only so a rollback to the previous application version can still find rows;
+  /// migration #19 removes it.
   pinHash           String?        @unique
+  /// HMAC-SHA256(PIN_LOOKUP_SECRET, "pin:lookup:v1:" + pin), base64. The login selector:
+  /// unforgeable and unsearchable without the application secret, so a database copy no longer
+  /// yields working PINs. Selector only — bcrypt on `pin` remains the proof. Nullable until
+  /// every PIN has been reissued.
+  pinLookup         String?        @unique
   password          String?
   role              String // admin, inventory, roasting, qc, dispatch, custom
   permissions       String         @default("{}")
@@ -285,6 +297,15 @@ model Delivery {
   // quantityKg stays populated in both cases (derived from units for SKU lines) so
   // dispatch history and the inventory ledger keep reading one field.
   quantityUnits Int?
+
+  /// Client-supplied Idempotency-Key for the dispatch this row records. Nullable so the
+  /// previous application version, which sends none, keeps inserting deliveries while this
+  /// column already exists; unique so two concurrent retries of one dispatch collapse to a
+  /// single shipment.
+  requestKey    String? @unique
+  /// SHA-256 over a fixed-position array of the normalized dispatch intent. The same key
+  /// carrying a different intent is a client error, not a second shipment.
+  intentHash    String?
 
   @@index([date])
 }

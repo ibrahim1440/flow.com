@@ -4,12 +4,16 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Delete, ArrowRight, Eye, EyeOff } from "lucide-react";
 
+import { PIN_LENGTH } from "@/lib/pin-policy";
+
 type Mode = "pin" | "password";
 
-// PINs of exactly this length trigger auto-submit.
-// Employees with longer PINs use the → button instead.
-const PIN_AUTO_SUBMIT_LENGTH = 4;
-const PIN_MAX_LENGTH = 8;
+// The pad is now fixed-length, which is what lets it submit on the last digit without
+// guessing whether the operator has finished. Both constants come from the single PIN
+// rule the server enforces, so a pad that fills up is a pad holding a PIN the server
+// will accept the shape of — the screen can no longer offer a length the API refuses.
+const PIN_AUTO_SUBMIT_LENGTH = PIN_LENGTH;
+const PIN_MAX_LENGTH = PIN_LENGTH;
 
 export default function LoginPage() {
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
@@ -196,7 +200,7 @@ export default function LoginPage() {
                         key="submit"
                         type="button"
                         onClick={() => submitPin(pin)}
-                        disabled={pin.length < 4 || loading}
+                        disabled={pin.length < PIN_LENGTH || loading}
                         className="w-16 h-16 rounded-full bg-orange hover:bg-orange-dark text-white disabled:opacity-30 active:scale-90 transition-all duration-100 shadow-lg shadow-orange/25 select-none flex items-center justify-center"
                       >
                         {loading
