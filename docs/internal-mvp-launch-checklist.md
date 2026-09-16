@@ -28,9 +28,28 @@ This checklist covers the internal MVP launch of the Hiqbah Coffee ERP only.
 Run these checks on launch day, against the production environment, before opening access to users.
 
 **Environment confirmation**
-- [ ] Confirm active `DATABASE_URL` endpoint ID is: `ep-icy-field-aq4upc3z` — do not print credentials
-- [ ] Confirm host: `ep-icy-field-aq4upc3z.c-8.us-east-1.aws.neon.tech`
+
+> ⚠ **Corrected 2026-09-16.** This checklist previously named `ep-icy-field-aq4upc3z` as the
+> Production endpoint. Verified against the Neon control plane, **that endpoint exists in no
+> project of this organization** — the guard and the checklist were both pointing at nothing.
+> The real endpoints in project `dark-lab-61530722` ("hiqbah") are:
+>
+> | Endpoint | Neon branch | Role |
+> |---|---|---|
+> | `ep-jolly-feather-aqne6cp1` | `production` (primary, default) | Production data |
+> | `ep-dawn-dust-aqn1u1uf` | `hiqbah-demo-training-20260529` | Demo / training |
+> | `ep-wandering-leaf-aqjtuin5` | `erp-regression-r1` | Regression only |
+>
+> **Still unverified:** which of these the live `www.beanflow.net` deployment actually uses.
+> Vercel's Production `DATABASE_URL` has not been readable programmatically, and Neon activity
+> timestamps alone are not proof. Confirm on screen before launch (below) and record the answer.
+
+- [ ] Confirm which Vercel project serves `www.beanflow.net`, and its configured Production Branch
+- [ ] Confirm active `DATABASE_URL` endpoint ID — expected `ep-jolly-feather-aqne6cp1` — do not print credentials
+- [ ] Confirm host: `ep-jolly-feather-aqne6cp1.c-8.us-east-1.aws.neon.tech`
 - [ ] Confirm database: `neondb`
+- [ ] **If the endpoint is `ep-dawn-dust-aqn1u1uf` instead, STOP** — the live site is running on the demo/training branch and the Go-Live plan must be re-scoped before anything else proceeds
+- [ ] Confirm `DIRECT_URL` (if set) names the same branch, non-pooled
 
 **Migration status**
 - [ ] Run: `npx prisma migrate status`

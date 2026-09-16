@@ -455,8 +455,8 @@ check("DENIED on a completely unconfigured environment (the production case)",
 // configuration that authorizes the regression branch. Named explicitly because these are
 // the two databases the whole guard exists to protect.
 for (const [name, host] of [
-  ["demo", "ep-dawn-dust-aqn1u1uf.eu-central-1.aws.neon.tech"],
-  ["production", "ep-icy-field-aq4upc3z.eu-central-1.aws.neon.tech"],
+  ["demo", "ep-dawn-dust-aqn1u1uf.c-8.us-east-1.aws.neon.tech"],
+  ["production", "ep-jolly-feather-aqne6cp1.c-8.us-east-1.aws.neon.tech"],
 ]) {
   const verdict = evaluateResetAuthorization({
     ...OK_ENV,
@@ -1176,7 +1176,9 @@ check("it requires a real PostgreSQL URL — no SQLite fallback",
   /requireDatabaseUrl\(/.test(seedSrc) && !/PrismaLibSql/.test(seedSrc) && !/file:\.\/prisma\/dev\.db/.test(seedSrc), "");
 check("it refuses to run unless explicitly enabled", /ERP_SEED_ENABLED/.test(seedSrc), "");
 check("and it refuses the Production endpoint by name",
-  /ep-icy-field-aq4upc3z/.test(seedSrc), "the seed does not block Production");
+  /ep-jolly-feather-aqne6cp1/.test(seedSrc), "the seed does not block Production");
+check("and it no longer names the endpoint that does not exist",
+  !/ep-icy-field-aq4upc3z/.test(seedSrc), "the stale Production endpoint is still in the guard");
 
 // ─────────────────────────────────────────────────────────────────────────────
 section("THE SERVER ENVIRONMENT GATE — GL-09");

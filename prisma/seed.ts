@@ -13,9 +13,13 @@ import { validatePin } from "../src/lib/pin-policy.js";
 //   • ERP_SEED_ENABLED must be exactly "true", so the seed never runs by accident;
 //   • Production and Demo are refused by name, even if the flag is set against them.
 // It is a demo/training seed and nothing else.
+// Verified against the Neon control plane on 2026-09-16: these are the real endpoint IDs of
+// the "production" and "hiqbah-demo-training-20260529" branches of project dark-lab-61530722.
+// An earlier list named ep-icy-field-aq4upc3z as Production; that endpoint exists in no
+// project of this organization, so the guard was protecting nothing.
 const PROTECTED_ENDPOINTS = [
-  "ep-icy-field-aq4upc3z", // Production — never
-  "ep-dawn-dust-aqn1u1uf", // Demo — never from this path
+  "ep-jolly-feather-aqne6cp1", // Production branch (production-primary) — never
+  "ep-dawn-dust-aqn1u1uf", // Demo / training — never from this path
 ];
 
 function seedDatabaseUrl(): string {
