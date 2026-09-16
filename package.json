@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "prisma generate && next build",
+    "dev": "prisma generate && next dev --webpack",
+    "build": "tsx scripts/validate-env.ts && prisma generate && next build",
+    "validate:env": "tsx scripts/validate-env.ts",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate",
-    "seed": "npx tsx prisma/seed.ts",
+    "seed": "prisma generate && tsx prisma/seed.ts",
     "db:push:local": "prisma db push",
     "db:migrate:deploy": "node scripts/migrate-deploy.mjs",
     "db:studio": "prisma studio",
@@ -22,7 +22,8 @@
     "e2e:legacy:reset": "node scripts/e2e/reset.mjs",
     "uat": "playwright test",
     "uat:desktop": "playwright test --project=desktop",
-    "uat:report": "playwright show-report"
+    "uat:report": "playwright show-report",
+    "db:generate": "prisma generate"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

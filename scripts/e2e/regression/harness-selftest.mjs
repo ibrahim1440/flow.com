@@ -59,7 +59,8 @@ import {
   readDeliveryRequestKey, normalizeDeliveryIntent, deliveryIntentHash, roundKg,
 } from "../../../src/lib/services/delivery-idempotency.ts";
 import { createHash, createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -1176,6 +1177,136 @@ check("it requires a real PostgreSQL URL — no SQLite fallback",
 check("it refuses to run unless explicitly enabled", /ERP_SEED_ENABLED/.test(seedSrc), "");
 check("and it refuses the Production endpoint by name",
   /ep-icy-field-aq4upc3z/.test(seedSrc), "the seed does not block Production");
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("THE SERVER ENVIRONMENT GATE — GL-09");
+//
+// PIN_LOOKUP_SECRET used to be read only inside request handlers, so a deployment missing it
+// installed, built, started, and answered /api/health with 200 — and then returned 500 on the
+// first PIN login, possibly hours later at a wall-mounted pad.
+//
+// The rules live in evaluateDatabaseUrl and evaluatePinLookupSecret; src/lib/server-env.ts
+// aggregates them; src/instrumentation.ts runs that aggregate at server startup and
+// scripts/validate-env.ts runs it before the build compiles anything.
+//
+// This suite deliberately does NOT import src/lib/server-env.ts. That module imports other
+// TypeScript modules, so importing it from a plain-Node .mjs would only work while Node keeps
+// stripping types natively — the very coupling this correction removed from the build. The
+// aggregate is proved two honest ways instead: the rules are exercised directly, and the
+// SHIPPED validator is executed as a child process exactly as `npm run build` executes it.
+
+const GOOD_DB = "postgresql://user:pw@db.example.com/appdb";
+const GOOD_SECRET = "Z".repeat(48);
+
+sub("the rules the gate aggregates");
+check("a valid database URL passes", evaluateDatabaseUrl({ DATABASE_URL: GOOD_DB }).ok === true, "");
+check("a missing database URL fails", evaluateDatabaseUrl({}).ok === false, "");
+check("a valid secret passes", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: GOOD_SECRET }).ok === true, "");
+check("a missing secret fails", evaluatePinLookupSecret({}).ok === false, "");
+check("a blank secret fails", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "   " }).ok === false, "");
+check("31 characters is too short", evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "x".repeat(31) }).ok === false, "");
+check("a known placeholder is refused",
+  evaluatePinLookupSecret({ PIN_LOOKUP_SECRET: "hiqbah-fallback-secret" }).ok === false, "");
+
+sub("the aggregate names both variables and restates neither rule");
+const serverEnvSrc = stripComments(readFileSync(join(REPO, "src", "lib", "server-env.ts"), "utf8"));
+check("it delegates to the database evaluator", /evaluateDatabaseUrl\(/.test(serverEnvSrc), "");
+check("and to the PIN lookup evaluator", /evaluatePinLookupSecret\(/.test(serverEnvSrc), "");
+check("it contains no copy of the length rule", !/32/.test(serverEnvSrc), "a duplicated rule constant is present");
+check("and no copy of the placeholder blocklist", !/hiqbah-fallback-secret/.test(serverEnvSrc), "");
+check("it exports both an evaluator and an assertion",
+  /export function evaluateServerEnv/.test(serverEnvSrc) && /export function assertServerEnv/.test(serverEnvSrc), "");
+check("it does not import server-only, so the build validator can load it",
+  !/server-only/.test(serverEnvSrc), "");
+
+sub("the SHIPPED validator, run exactly as the build runs it");
+// node_modules/tsx/dist/cli.mjs is the binary `tsx` resolves to; invoking it through
+// process.execPath keeps this shell-free and independent of PATH.
+const TSX_CLI = join(REPO, "node_modules", "tsx", "dist", "cli.mjs");
+const VALIDATOR = join(REPO, "scripts", "validate-env.ts");
+function runValidator(env) {
+  return spawnSync(process.execPath, [TSX_CLI, VALIDATOR], {
+    cwd: REPO,
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...env },
+  });
+}
+check("the validator ships as TypeScript, not as a plain-Node .mjs",
+  /\.ts$/.test(VALIDATOR) && readFileSync(VALIDATOR, "utf8").length > 0, "");
+const okRun = runValidator({ DATABASE_URL: GOOD_DB, PIN_LOOKUP_SECRET: GOOD_SECRET });
+check("a valid environment exits 0", okRun.status === 0, "status=" + okRun.status + " " + (okRun.stderr ?? ""));
+
+const REFUSED_VALUE = "hunter2-but-far-too-short";
+const badRun = runValidator({ DATABASE_URL: GOOD_DB, PIN_LOOKUP_SECRET: REFUSED_VALUE });
+const badOut = (badRun.stdout ?? "") + (badRun.stderr ?? "");
+check("a weak secret exits non-zero", badRun.status === 1, "status=" + badRun.status);
+check("the refusal names the variable", /PIN_LOOKUP_SECRET/.test(badOut), "");
+check("and never prints the value it refused", !badOut.includes(REFUSED_VALUE), "the secret leaked into output");
+
+const missingRun = runValidator({});
+const missingOut = (missingRun.stdout ?? "") + (missingRun.stderr ?? "");
+check("a wholly unconfigured environment exits non-zero", missingRun.status === 1, "status=" + missingRun.status);
+check("and reports BOTH variables, not just the first",
+  /DATABASE_URL/.test(missingOut) && /PIN_LOOKUP_SECRET/.test(missingOut), missingOut.slice(0, 120));
+
+sub("install, build and migration stay separated");
+check("npm run build validates the environment before compiling anything",
+  /validate-env\.ts[\s\S]*prisma generate[\s\S]*next build/.test(pkg.scripts.build), pkg.scripts.build);
+check("the validator runs through the locally installed tsx, not npx",
+  /^tsx /.test(pkg.scripts.build) && !/npx/.test(pkg.scripts.build), pkg.scripts.build);
+check("tsx is a declared direct devDependency, so that binary exists",
+  Boolean((pkg.devDependencies ?? {}).tsx), "");
+check("npm run build still runs NO migration",
+  !/migrate|db push/.test(pkg.scripts.build), pkg.scripts.build);
+check("installing dependencies needs no application secret: there is no postinstall",
+  pkg.scripts.postinstall === undefined, String(pkg.scripts.postinstall));
+check("Prisma generation is available as an explicit supported step",
+  pkg.scripts["db:generate"] === "prisma generate", String(pkg.scripts["db:generate"]));
+check("the workflows that need a generated client generate it themselves",
+  /prisma generate/.test(pkg.scripts.dev) && /prisma generate/.test(pkg.scripts.seed), "");
+check("migration remains an explicit operator action",
+  /migrate-deploy\.mjs/.test(pkg.scripts["db:migrate:deploy"]), "");
+
+sub("no native-TypeScript coupling is left in the build path");
+const tsconfigRaw = readFileSync(join(REPO, "tsconfig.json"), "utf8");
+check("tsconfig no longer relaxes .ts imports for the validator",
+  !/allowImportingTsExtensions/.test(tsconfigRaw), "the compiler relaxation is still present");
+check("the aggregate imports its dependencies without a .ts extension",
+  !/from\s+["'][^"']*\.ts["']/.test(serverEnvSrc), "");
+const validatorSrc = stripComments(readFileSync(VALIDATOR, "utf8"));
+check("the validator imports the shared aggregate", /evaluateServerEnv\(/.test(validatorSrc), "");
+check("and exits non-zero so the build stops", /process\.exit\(1\)/.test(validatorSrc), "");
+
+sub("the gate still runs at server startup");
+const instrSrc = stripComments(readFileSync(join(REPO, "src", "instrumentation.ts"), "utf8"));
+check("instrumentation exports register()", /export async function register\s*\(/.test(instrSrc), "");
+check("it asserts the server environment", /assertServerEnv\s*\(/.test(instrSrc), "");
+check("scoped to the Node runtime, so an Edge instance never loads it",
+  /NEXT_RUNTIME/.test(instrSrc), "");
+
+sub("the secrets are server-only and never cross the client boundary");
+function walkSrc(dir, acc = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "generated" || entry.name === "node_modules") continue;
+      walkSrc(full, acc);
+    } else if (/\.(ts|tsx)$/.test(entry.name)) acc.push(full);
+  }
+  return acc;
+}
+const srcFiles = walkSrc(join(REPO, "src"));
+const srcTexts = new Map(srcFiles.map((f) => [f, readFileSync(f, "utf8")]));
+const allSrcText = [...srcTexts.values()].join("\n");
+check("no NEXT_PUBLIC variant of any secret exists anywhere in src",
+  !/NEXT_PUBLIC_[A-Z0-9_]*(PIN_LOOKUP|JWT_SECRET|DATABASE_URL|DIRECT_URL)/.test(allSrcText), "");
+const clientFiles = srcFiles.filter((f) => /^\s*['"]use client['"]/m.test(srcTexts.get(f)));
+check("there is at least one client component, so the next check means something",
+  clientFiles.length > 0, String(clientFiles.length));
+const leaking = clientFiles.filter((f) =>
+  /from\s+["'][^"']*(server-env|pin-lookup|db-config)["']/.test(srcTexts.get(f)));
+check("no use-client module imports the server env or the PIN/database config",
+  leaking.length === 0, leaking.map((f) => f.replace(REPO, "")).join(", "));
 
 // ─────────────────────────────────────────────────────────────────────────────
 section("HARNESS SELF-TEST");

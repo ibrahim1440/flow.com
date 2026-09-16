@@ -114,6 +114,74 @@ Verify via the application UI or Prisma Studio. No code or schema changes requir
 
 ---
 
+## 3b. Secure Version B PIN Cutover — Operating Rules
+
+These three clarifications exist because each one is easy to get wrong and expensive to get
+wrong. They describe the **current certified implementation**, not an aspiration.
+
+### A. The Secure Version B deploy is NOT a maintenance mode
+
+Deploying Secure Version B pauses **PIN login** — every pre-cutover employee row has a null
+`pinLookup`, so no PIN can select a row until that employee is reissued. It does **not** pause
+the application:
+
+- **Existing JWT sessions remain usable.** A token proves identity for 8 hours; `active`,
+  `role` and `permissions` are re-read from the row on every request, but the session itself
+  is not revoked by a deploy or by a PIN change.
+- A staff member already logged in keeps working normally throughout the cutover.
+
+There is no maintenance-mode feature, and **none needs to be built**. Instead the window runs
+under an **operational change freeze**:
+
+- [ ] **One** designated admin performs all credential reissues
+- [ ] **No** concurrent admin credential edits by anyone else
+- [ ] **No** self-service PIN changes (`/dashboard/profile`) during the window
+- [ ] Staff instructed to **hard refresh** after the deploy (a tab loaded before it still
+      posts dispatches without an `Idempotency-Key` and will be refused with 400)
+- [ ] Existing operational sessions may remain active **only if explicitly allowed** by the
+      person running the cutover; otherwise deactivate/reactivate to force re-authentication
+- [ ] **Do not rotate `JWT_SECRET` during the window** — it invalidates *every* session,
+      including the admin's own bootstrap session
+
+### B. Admin access: demonstrate first, break glass never-by-default
+
+- [ ] **Preferred and expected:** demonstrate a **working admin password login** (an actual
+      authenticated session) **before** the cutover begins, and again immediately before the
+      Secure Version B deploy. Between the deploy and the first reissue, password login is the
+      **only** way into the system.
+- [ ] Be aware the password path shares the per-IP rate-limit budget with PIN failures
+      (30 attempts / 15-minute sliding window). Thirty failed PIN attempts from the site's
+      egress IP will return **429 to the admin password login from that same IP.** Establish
+      the admin session *before* staff PIN activity, or bootstrap from a different network.
+
+A **direct database password reset is BREAK-GLASS ONLY** and must never become routine. It
+requires, without exception: explicit approval; a confirmed backup/restore point; a named
+controlled operator; exact verification of the target database *before* the write; a securely
+generated bcrypt hash; **no plaintext in any log, ticket or shell history**; and a
+post-action audit reconciliation. **No break-glass tooling is provided**, deliberately.
+
+### C. How "this employee has been reissued" is proven
+
+For the current implementation and the initial #18 cutover, the criterion is:
+
+> An **active** employee whose `pinLookup IS NOT NULL` has had a Secure Version B credential
+> write.
+
+This holds because **all three** credential writers — employee create, admin employee edit and
+self-service PIN change — update `Employee.pin` and `Employee.pinLookup` **atomically in the
+same write**, and there is **no independent `pinLookup` backfill writer** anywhere in the
+application.
+
+- [ ] Coverage proof: `SELECT count(*) FROM "Employee" WHERE active AND "pinLookup" IS NULL`
+      returns **0**
+
+> ⚠ This is a **property of the current code, not a schema-enforced invariant.** Any future
+> direct writer, backfill script or manual SQL that sets `pinLookup` without rewriting the
+> verifier would silently invalidate it. If that ever becomes a risk, the honest fix is an
+> explicit credential-version column — deliberately **not** added in this phase.
+
+---
+
 ## 4. Backup and Rollback
 
 Complete this section before any smoke testing or user access is opened.

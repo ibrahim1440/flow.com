@@ -1,6 +1,44 @@
 # Migration Drift and Manual DB Constraints
 
-> **Status: Migration baseline established 2026-05-22. Schema drift resolved. `prisma migrate deploy` is now the production deployment command. `_prisma_migrations` contains three applied migrations: `20260522000000_baseline`, `20260526115344_add_qc_final_decision_reason`, `20260528084853_add_rate_limit`. Old migrations archived at `prisma/migrations_archive_before_baseline_20260522/`.**
+> **⚠ CURRENT BEHAVIOUR — READ THIS FIRST (supersedes anything below that disagrees).**
+>
+> **The application build does NOT run migrations.**
+>
+> ```
+> npm run build   ->  tsx scripts/validate-env.ts && prisma generate && next build
+> ```
+>
+> That is environment validation, client generation and an application build. It executes no
+> migration, no `db push`, and no schema write of any kind. **A Vercel deployment therefore
+> does NOT apply pending migrations.**
+>
+> **Applying a migration is an explicit operator action, and the only one:**
+>
+> ```
+> npm run db:migrate:deploy   ->  node scripts/migrate-deploy.mjs
+> ```
+>
+> which requires `DATABASE_URL`, requires `DIRECT_URL` (the non-pooled endpoint), validates
+> both before doing anything, runs `prisma migrate deploy`, propagates the child exit code,
+> and prints only the target host — never a connection string.
+>
+> **Required ordering for any release that contains a schema change:**
+>
+> 1. migration reviewed and approved,
+> 2. backup / restore point confirmed,
+> 3. **explicit migration operation** (`npm run db:migrate:deploy`),
+> 4. **then** application deployment.
+>
+> Migrations are additive-first, so step 3 before step 4 keeps the previous application
+> version running against the new schema throughout.
+>
+> *Historical note:* `build` previously was `prisma generate && prisma migrate deploy &&
+> next build`. That coupling was removed deliberately — it meant every deployment mutated the
+> database as a side effect of compiling TypeScript, with nobody approving the migration and
+> nothing snapshotted first. Passages below describing that arrangement are **history, not
+> current behaviour.**
+
+> **Status: Migration baseline established 2026-05-22. Schema drift resolved. `_prisma_migrations` contains three applied migrations: `20260522000000_baseline`, `20260526115344_add_qc_final_decision_reason`, `20260528084853_add_rate_limit`. Old migrations archived at `prisma/migrations_archive_before_baseline_20260522/`.**
 
 ## 1. Current Status
 
@@ -62,7 +100,7 @@ the composite index; the old single-column index is not present.
 | Command | Why it is dangerous |
 |---|---|
 | `prisma migrate dev` | **Safe for local development as of 2026-05-22.** The baseline is in sync. Use this to generate new tracked migration files for schema changes. Review generated SQL before committing. Never run in production. |
-| `prisma migrate deploy` | **Production deployment command as of 2026-05-22.** Used in `package.json build`. The baseline ensures no pending migrations fail. Safe in CI/CD. |
+| `prisma migrate deploy` | **The production migration command as of 2026-05-22 — invoked ONLY by the explicit operator action `npm run db:migrate:deploy`, never by `npm run build` and never by a Vercel deployment.** The baseline ensures no pending migrations fail. |
 | `prisma migrate reset` | Drops and recreates the entire database — all data is destroyed |
 | `prisma db push` (without explicit approval) | Continues to worsen migration-history drift. Must not be used as a routine schema change tool going forward |
 
@@ -241,7 +279,7 @@ were performed in order:
    # Output: -- This is an empty migration.
    ```
 10. **`package.json` build script updated:**
-    - `"build"`: `prisma generate && prisma migrate deploy && next build`
+    - `"build"`: `prisma generate && prisma migrate deploy && next build` — *(historical: this coupling was later removed; the build no longer migrates. See the banner at the top of this document.)*
     - `"db:push"` → renamed to `"db:push:local"`: `prisma db push` (local/prototype only)
 
 ### Baseline SQL Review Checklist (Executed)
@@ -299,7 +337,7 @@ These items were verified before the baseline was marked applied:
 | `npx prisma migrate diff --from-empty --to-schema ... --script` | Read-only | Generates full schema SQL for review |
 | `npx prisma db execute --stdin` | Write — requires explicit approval | Used for targeted SQL not representable in schema.prisma (e.g., CHECK constraints) |
 | `npx prisma migrate resolve --applied <name>` | Write — requires explicit approval | Records a migration as applied without running it; only use after full SQL review |
-| `npx prisma migrate deploy` | **Production command** — used in `build` script | Safe. Baseline ensures no pending migrations fail. Use in CI/CD and production deploys. |
+| `npx prisma migrate deploy` | **Production migration command** — run explicitly via `npm run db:migrate:deploy`; **not** part of `build` | Safe. Baseline ensures no pending migrations fail. Requires DATABASE_URL and DIRECT_URL. |
 | `npx prisma migrate dev` | **Safe for local development** | Generates tracked migration files for schema changes. Review generated SQL before committing. Never run in production. |
 | `npx prisma studio` | Read-only UI | Safe to run at any time |
 
@@ -316,7 +354,7 @@ It has no rollback capability, creates no audit trail, and makes `prisma migrate
 
 **These consequences existed before 2026-05-22 and are now resolved by the baseline:**
 - ~~Half the database schema had no migration coverage~~ — all 22 tables covered by `20260522000000_baseline`.
-- ~~`migrate deploy` would fail in CI or a fresh environment~~ — `migrate deploy` is the production build command.
+- ~~`migrate deploy` would fail in CI or a fresh environment~~ — `migrate deploy` succeeds against a fresh environment; it is run as an explicit operator step, not as part of the build.
 - ~~A future database restore from migrations would produce an incomplete schema~~ — the baseline covers the full schema.
 - ~~Automated rollback of a bad deploy is not possible via the migration system~~ — the Neon snapshot `before-migration-baseline-20260522` provides a restore point; future migrations are tracked and reversible.
 
