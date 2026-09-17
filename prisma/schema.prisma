@@ -16,10 +16,6 @@ model Employee {
   /// derivation, never the raw PIN, so a stolen row cannot be brute-forced offline without the
   /// application secret and the raw PIN never verifies directly.
   pin               String
-  /// Legacy unsalted SHA-256 selector. Inert under Version B — written by nothing, read by
-  /// nothing. Kept only so a rollback to the previous application version can still find rows;
-  /// migration #19 removes it.
-  pinHash           String?        @unique
   /// HMAC-SHA256(PIN_LOOKUP_SECRET, "pin:lookup:v1:" + pin), base64. The login selector:
   /// unforgeable and unsearchable without the application secret, so a database copy no longer
   /// yields working PINs. Selector only — bcrypt on `pin` remains the proof. Nullable until

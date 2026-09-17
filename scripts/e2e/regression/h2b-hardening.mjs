@@ -126,8 +126,11 @@ const same = (a, b) =>
   a.deliveries === b.deliveries && a.deliveredUnits === b.deliveredUnits &&
   a.lotUnits === b.lotUnits && a.movements === b.movements;
 
+// pinHash is not selected: migration #19 dropped the column. The assertions that used to
+// read it checked that Version B never wrote it — a property the schema now enforces
+// outright, and which P13b below proves once by asserting the column is gone.
 const employeeCreds = (id) => one(
-  `SELECT pin, "pinHash", "pinLookup" FROM "Employee" WHERE id=$1`, [id]);
+  `SELECT pin, "pinLookup" FROM "Employee" WHERE id=$1`, [id]);
 
 const attemptRows = () => all(
   `SELECT "ipHash", "identifierHash" FROM "LoginAttempt" ORDER BY "createdAt"`);
@@ -441,7 +444,17 @@ async function sectionP() {
   // ── Live credential paths ────────────────────────────────────────────────
   await loginAs(ADMIN_PIN);
 
-  sub("P14. creating an employee writes the verifier and the keyed lookup — and no pinHash");
+  sub("P13b. the legacy PIN selector is gone from the schema, not merely unused");
+  // Migration #19 dropped Employee.pinHash. It was an unsalted SHA-256 of a six-digit PIN —
+  // a keyspace of one million — so while the column existed a stolen table still yielded
+  // every PIN regardless of what the application did with it. The cases below therefore no
+  // longer check it is null; there is nothing left to be null.
+  const pinHashCol = await one(
+    `SELECT count(*)::int n FROM information_schema.columns
+      WHERE table_name='Employee' AND column_name='pinHash'`);
+  check("Employee.pinHash no longer exists", num(pinHashCol?.n) === 0, `columns=${pinHashCol?.n}`);
+
+  sub("P14. creating an employee writes the verifier and the keyed lookup");
   const created = await api("/api/employees", {
     method: "POST",
     body: {
@@ -459,11 +472,9 @@ async function sectionP() {
     bcrypt.compareSync("661001", c14?.pin ?? "") === false);
   check("pinLookup holds the keyed selector", c14?.pinLookup === pinLookupValue("661001"),
     String(c14?.pinLookup));
-  check("pinHash is left inert by Version B, not written", c14?.pinHash === null,
-    String(c14?.pinHash));
   check("and the PIN logs in", (await rawLogin(null, { method: "pin", pin: "661001" })).status === 200);
 
-  sub("P15. an admin PIN change rewrites the verifier and the lookup, retires the old PIN, leaves pinHash inert");
+  sub("P15. an admin PIN change rewrites the verifier and the lookup and retires the old PIN");
   const edited = await api(`/api/employees/${empId}`, {
     method: "PUT", body: { name: `${P} Credential`, role: "qc", pin: "661002" },
   });
@@ -475,12 +486,11 @@ async function sectionP() {
   check("the new raw PIN still does not verify directly",
     bcrypt.compareSync("661002", c15?.pin ?? "") === false);
   check("the lookup is the new PIN's", c15?.pinLookup === pinLookupValue("661002"), String(c15?.pinLookup));
-  check("pinHash is still inert — not refreshed", c15?.pinHash === null, String(c15?.pinHash));
   check("the old PIN no longer authenticates",
     (await rawLogin(null, { method: "pin", pin: "661001" })).status === 401);
   check("the new PIN does", (await rawLogin(null, { method: "pin", pin: "661002" })).status === 200);
 
-  sub("P16. a self-service change rewrites the verifier and the lookup, leaves pinHash inert");
+  sub("P16. a self-service change rewrites the verifier and the lookup");
   await loginAs("661002");
   const selfChange = await api("/api/profile", {
     method: "PUT", body: { currentPin: "661002", newPin: "661003" },
@@ -490,7 +500,6 @@ async function sectionP() {
   check("the verifier is bcrypt over the new PIN's verifier input",
     bcrypt.compareSync(pinVerifierInput("661003"), c16?.pin ?? ""));
   check("the lookup follows the new PIN", c16?.pinLookup === pinLookupValue("661003"), String(c16?.pinLookup));
-  check("pinHash stays inert", c16?.pinHash === null, String(c16?.pinHash));
   check("and the new PIN logs in", (await rawLogin(null, { method: "pin", pin: "661003" })).status === 200);
   const selfBadShape = await api("/api/profile", {
     method: "PUT", body: { currentPin: "661003", newPin: "1234" },
@@ -503,8 +512,6 @@ async function sectionP() {
   await db.query('UPDATE "Employee" SET "pinLookup"=NULL WHERE id=$1', [empId]);
   const inert = await employeeCreds(empId);
   check("the row still carries a valid verifier", /^\$2[aby]\$/.test(inert?.pin ?? ""));
-  check("and pinHash was never a live credential — still null", inert?.pinHash === null,
-    String(inert?.pinHash));
   const noLookup = await rawLogin(null, { method: "pin", pin: "661003" });
   check("but with no lookup the PIN is refused", noLookup.status === 401,
     `status=${noLookup.status} ${S(noLookup.json)}`);
