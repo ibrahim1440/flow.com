@@ -11,7 +11,8 @@
 // authority, and the server is what has to refuse a hand-rolled request.
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { BASE, DB_URL } from "./harness.mjs";  // importing enforces the test-database allowlist
+// importing enforces the test-database allowlist
+import { BASE, DB_URL, pinVerifierInput, pinLookupValue } from "./harness.mjs";
 
 const req = createRequire(import.meta.url);
 const { Client } = req("pg");
@@ -44,9 +45,21 @@ const one = async (s, p) => (await db.query(s, p)).rows[0];
 const S = (v) => { try { return JSON.stringify(v) ?? String(v); } catch { return String(v); } };
 
 let cookie = "";
-async function api(path, { method = "GET", body } = {}) {
+// Dispatch is idempotent as of migration #18: POST /api/deliveries refuses a request that
+// carries no Idempotency-Key with a 400, so a suite written before that cutover never
+// delivered anything and every completion assertion behind it read as a shortfall. One
+// fresh key per call is the right default here — each deliver() in this file is a distinct
+// dispatch; the replay semantics themselves are owned by the delivery suite.
+let idemSeq = 0;
+async function api(path, { method = "GET", body, idempotencyKey } = {}) {
+  const needsKey = method === "POST" && path.startsWith("/api/deliveries");
   const res = await fetch(BASE + path, {
-    method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(cookie ? { cookie } : {}),
+      ...(needsKey ? { "Idempotency-Key": idempotencyKey ?? `${TAG}-idem-${Date.now()}-${++idemSeq}` } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   for (const c of res.headers.getSetCookie?.() ?? []) if (c.startsWith("token=")) cookie = c.split(";")[0];
@@ -78,6 +91,10 @@ async function cleanup() {
   await db.query(`DELETE FROM "InventoryMovement" WHERE notes LIKE $1 OR "sourceDocId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1) OR "referenceEntityId" IN (SELECT id FROM "MaterialItem" WHERE code LIKE $1) OR "referenceEntityId" = $2 OR "referenceEntityId" IN (SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1))`, [TAG + "%", BEAN]);
   await db.query(`DELETE FROM "FinishedGoodsLot" WHERE "packedFromBatchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [TAG + "%"]);
   await db.query(`DELETE FROM "ProductionOrder" WHERE "sourceOrderItemId" IN (SELECT oi.id FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o.notes LIKE $1)`, [TAG + "%"]);
+  // Migration #17 added PackagingOperation, whose batchId FK is RESTRICT — it pins the
+  // batch down and has to go first. This teardown predates that table, so it only began
+  // failing once the suite packed anything and left an operation row behind.
+  await db.query(`DELETE FROM "PackagingOperation" WHERE "batchId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE $1)`, [TAG + "%"]);
   await db.query(`DELETE FROM "RoastingBatch" WHERE "batchNumber" LIKE $1`, [TAG + "%"]);
   await db.query(`DELETE FROM "Order" WHERE notes LIKE $1`, [TAG + "%"]);
   await db.query(`DELETE FROM "BomComponent" WHERE "productSkuId" IN (SELECT id FROM "ProductSKU" WHERE "skuCode" LIKE $1)`, [TAG + "%"]);
@@ -89,10 +106,18 @@ async function cleanup() {
   await db.query(`DELETE FROM "Employee" WHERE id = ANY($1)`, [[EMP, EMP_NOSTATUS, EMP_NOTOWNER]]);
 }
 
+// Secure Version B. This suite arrived from a branch that predates the PIN cutover and
+// seeded bcrypt(raw PIN) plus a sha256 pinHash — a shape login can no longer authenticate,
+// because it searches by the keyed lookup and proves by bcrypt(pinVerifierInput(pin)).
+// Every sign-in here failed with "Not authenticated".
+//
+// The derivations come from the harness so there is one definition of them; the INSERT
+// stays local because this suite owns its own connection. pinHash is deliberately not
+// written: it is inert under Version B and migration #19 removes it.
 const mkEmployee = (id, name, perms, pin, role = "admin") =>
-  db.query(`INSERT INTO "Employee" (id,name,pin,"pinHash",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
+  db.query(`INSERT INTO "Employee" (id,name,pin,"pinLookup",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
             VALUES ($1,$2,$3,$4,$5,$6,'/dashboard',true,'en',now(),now())`,
-    [id, name, bcrypt.hashSync(pin, 10), createHash("sha256").update(pin).digest("hex"), role, JSON.stringify(perms)]);
+    [id, name, bcrypt.hashSync(pinVerifierInput(pin), 10), pinLookupValue(pin), role, JSON.stringify(perms)]);
 
 async function main() {
   await db.connect();
