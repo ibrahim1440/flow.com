@@ -121,12 +121,6 @@ export async function openOrderCard(page: Page, orderNumber: number) {
   return card;
 }
 
-export async function approveOrder(page: Page, orderNumber: number) {
-  const card = await openOrderCard(page, orderNumber);
-  await card.getByRole("button", { name: /^Approve$/i }).first().click();
-  await expect(card.getByRole("button", { name: /^Approve$/i })).toBeHidden({ timeout: 60_000 });
-}
-
 // ─── Preparation workstation ────────────────────────────────────────────────
 
 export async function openWorkstationOrder(page: Page, orderNumber: number) {
@@ -136,31 +130,47 @@ export async function openWorkstationOrder(page: Page, orderNumber: number) {
   // The whole card header is the expand control, and it also contains the status badge —
   // so it must be clicked by position, never by a text match, or a later "Review" lookup
   // will hit the header and collapse the card again.
-  const saveBtn = card.getByRole("button", { name: /Save Preparation Review/i });
-  if (!(await saveBtn.isVisible().catch(() => false))) {
+  const commitBtn = card.getByRole("button", { name: /Commit Allocation/i });
+  if (!(await commitBtn.isVisible().catch(() => false))) {
     await card.locator("button").first().click();
   }
   return card;
 }
 
 /**
- * Do a preparation review the way the reviewer does it.
+ * Commit the allocation the way the reviewer does it.
  *
- * Every line starts as "Not Reviewed" and the Save button stays disabled until a decision
- * is chosen for at least one of them — a deliberate confirmation step, not a defect. Any
- * choice other than Blocked collapses to "include this line" and lets the server work out
- * the shelf-versus-production split, so the option picked here is simply the reviewer
- * saying the line is in scope.
+ * There is no per-line decision to choose any more. The derived result is computed by the
+ * server from what the shelf can actually cover and is read-only in the UI, so the
+ * reviewer's only normal input is whether to block a line. That leaves one primary
+ * action, enabled as soon as the stock preview has loaded.
  */
-export async function submitPreparationReview(card: Locator, choice = "Available on Shelf") {
-  const selects = card.locator("table select");
-  const rows = await selects.count();
-  for (let i = 0; i < rows; i++) await selects.nth(i).selectOption(choice);
+export async function submitPreparationReview(card: Locator) {
+  const commit = card.getByRole("button", { name: /Commit Allocation/i });
+  await expect(commit, "the allocation commits once the stock preview has loaded").toBeEnabled({
+    timeout: 30_000,
+  });
+  await commit.click();
+  await expect(commit).toBeEnabled({ timeout: 60_000 });
+}
 
-  const save = card.getByRole("button", { name: /Save Preparation Review/i });
-  await expect(save, "the review can be saved once a decision is chosen").toBeEnabled({ timeout: 30_000 });
-  await save.click();
-  await expect(save).toBeEnabled({ timeout: 60_000 });
+/**
+ * Block one line, supply the reason the server requires, and commit.
+ *
+ * Blocking is the single manual exception left in preparation: everything else about the
+ * outcome is derived. The reason is mandatory — the commit stays disabled without it,
+ * which is asserted here rather than assumed.
+ */
+export async function blockLineAndCommit(card: Locator, reason: string) {
+  await card.getByRole("button", { name: /Block Item/i }).first().click();
+  const commit = card.getByRole("button", { name: /Commit Allocation/i });
+  await expect(commit, "a blocked line cannot commit without a reason").toBeDisabled({
+    timeout: 30_000,
+  });
+  await card.locator("textarea").first().fill(reason);
+  await expect(commit).toBeEnabled({ timeout: 30_000 });
+  await commit.click();
+  await expect(commit).toBeEnabled({ timeout: 60_000 });
 }
 
 // ─── Production orders ──────────────────────────────────────────────────────
@@ -197,6 +207,16 @@ export async function roastForOrder(
   roastedKg: number,
   opts: { acceptSurplus?: boolean } = {}
 ): Promise<string> {
+  // Counted BEFORE the roast is entered. Waiting for a batch to merely exist is enough for
+  // the first roast against a line and wrong for every one after it: the poll below would
+  // return the previous batch immediately and the caller would carry on before this roast
+  // had committed — or, worse, after it had been refused outright.
+  const { one: countOne } = await import("./db");
+  const before = Number((await countOne<{ n: number }>(
+    `SELECT COUNT(*)::int n FROM "RoastingBatch" rb
+       JOIN "OrderItem" oi ON oi.id = rb."orderItemId"
+       JOIN "Order" o ON o.id = oi."orderId"
+      WHERE o."orderNumber" = $1`, [orderNumber])).n);
   await page.goto("/dashboard/production");
   // The pending list is fetched after the shell renders; wait for the screen to settle
   // before looking for the order, or a second roast races the reload from the first.
@@ -218,6 +238,11 @@ export async function roastForOrder(
   // Deliberate over-production has to be confirmed; an on-target roast never asks.
   const surplus = page.getByRole("button", { name: /Add as Surplus/i });
   if (opts.acceptSurplus && (await surplus.isVisible({ timeout: 8_000 }).catch(() => false))) {
+    // The server refuses surplus authorization without a written reason — an admin included
+    // — so the dialog asks for one and keeps the button disabled until it is given.
+    const dialog = page.locator("div.fixed").filter({ hasText: /Add as Surplus/i }).last();
+    await dialog.locator("textarea").first().fill("UAT authorised surplus for shelf stock");
+    await expect(surplus, "a written reason is what authorizes the surplus").toBeEnabled();
     await surplus.click();
   }
 
@@ -225,17 +250,17 @@ export async function roastForOrder(
   let batchNumber = "";
   await expect
     .poll(async () => {
-      const row = await one<{ b: string }>(
+      const rows = await (await import("./db")).all<{ b: string }>(
         `SELECT rb."batchNumber" b FROM "RoastingBatch" rb
            JOIN "OrderItem" oi ON oi.id = rb."orderItemId"
            JOIN "Order" o ON o.id = oi."orderId"
-          WHERE o."orderNumber" = $1 ORDER BY rb."createdAt" DESC LIMIT 1`,
+          WHERE o."orderNumber" = $1 ORDER BY rb."createdAt" DESC`,
         [orderNumber]
       );
-      batchNumber = row?.b ?? "";
-      return batchNumber;
+      batchNumber = rows[0]?.b ?? "";
+      return rows.length;
     }, { timeout: 60_000 })
-    .not.toBe("");
+    .toBe(before + 1);
   return batchNumber;
 }
 
@@ -268,7 +293,10 @@ export async function packIntoSku(page: Page, batchNumber: string, skuId: string
   await page.goto("/dashboard/packaging");
   const card = packBatch(page, batchNumber);
   await expect(card).toBeVisible({ timeout: 60_000 });
-  await card.getByRole("button", { name: /Pack as product/i }).click();
+  // The card carries ONE packaging action, named for the state it is in — the frozen UX
+  // replaced the old pair of competing method buttons with a single derived one. "Pack as
+  // product" now names only the modal's commit button, below.
+  await card.getByRole("button", { name: /Start Packaging|Continue Packaging/i }).click();
 
   const modal = page.locator("div.fixed").filter({ hasText: /Pack into finished product/i }).last();
   await modal.locator("select").first().selectOption(skuId);

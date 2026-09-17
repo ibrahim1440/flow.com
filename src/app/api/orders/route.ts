@@ -44,9 +44,11 @@ export async function GET(request: Request) {
           productSku: true,
           // Which production plans this line has open. The production screen needs it to
           // attribute a roast to the plan it is being made for; without it every roast
-          // started from a plan was stored with no link back to it. id and status only:
-          // this response is loaded by four screens and has been trimmed before for size.
-          productionOrders: { select: { id: true, status: true } },
+          // started from a plan was stored with no link back to it. productionNumber is the
+          // operator-facing reference: the queue prints it on the same task card, and the
+          // roast-form picker listed opaque cuids without it. Three scalars only — this
+          // response is loaded by four screens and has been trimmed before for size.
+          productionOrders: { select: { id: true, productionNumber: true, status: true } },
         },
       },
       // Order Operations S0: minimal owner projection — no permissions/pin/credential fields.
@@ -190,6 +192,13 @@ export async function POST(request: Request) {
           data: {
             ...orderData,
             orderNumber: nextNumber,
+            // Routine approval is not part of the normal path any more, so a new order goes
+            // straight to the state Commit Allocation runs from. Written explicitly rather
+            // than left to the column default ("Waiting Approval"), because the default
+            // still describes the legacy workflow and existing rows in it must keep their
+            // meaning. Written after the spread so it wins regardless; orderData is an
+            // explicit four-field allowlist and cannot carry an operational status.
+            status: "Waiting Preparation Review",
             items: {
               create: resolvedItems,
             },

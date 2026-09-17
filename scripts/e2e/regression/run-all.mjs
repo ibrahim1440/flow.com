@@ -19,7 +19,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // order-to-delivery run twenty minutes later.
 const SUITES = [
   "harness-selftest",        // proves the detector fires and the runner rejects dead suites — pure, no DB
-  "production-gate",         // Production Entry Gate: approval/review required before production
+  "production-gate",
+  "workflow-alignment",   // normal path after routine approval was removed: entry, ownership, gates         // Production Entry Gate: approval/review required before production
   "production-concurrency",  // the gate under concurrent lifecycle transitions
   "lifecycle-locks",         // canonical lock order; deadlock freedom
   "reservation-cas",         // reservation compare-and-swap; no double reservation

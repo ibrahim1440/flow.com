@@ -19,6 +19,29 @@ import {
 } from "@/lib/services/order-operations";
 
 /**
+ * The single live production order raised from this order line, or null when there is
+ * none — or more than one, which is a choice this function refuses to make silently.
+ *
+ * Used only to decide how much of the line's scheduled work this roast may be credited
+ * with. The stricter, throwing resolution of the SAME question lives in the transaction
+ * below, where the batch actually gets its link.
+ */
+async function soleLiveProductionOrderId(
+  db: Prisma.TransactionClient | typeof prisma,
+  orderItemId: string,
+): Promise<string | null> {
+  const candidates = await db.productionOrder.findMany({
+    where: {
+      sourceOrderItemId: orderItemId,
+      status: { in: ["PENDING", "IN_PRODUCTION"] },
+    },
+    select: { id: true },
+    take: 2,
+  });
+  return candidates.length === 1 ? candidates[0].id : null;
+}
+
+/**
  * Authorization to roast past the ceiling.
  *
  * Being an admin used to be the whole test: `excess > 0 && user.role !== "admin"` let an
@@ -238,7 +261,17 @@ export async function POST(request: Request) {
   // production, and its reserved term was computed by reservedForItem, which only sums
   // kilogram-denominated allocations — on a SKU line, where every allocation is in units,
   // that silently evaluated to zero and the gate believed nothing was covered.
-  const ceiling = isStockBatch ? null : await roastingCeilingForItem(prisma, orderItemId);
+  // The plan this roast is being made for, resolved the same way the transaction below
+  // resolves it: what the caller named, or the single live plan of this line. Passing it to
+  // the ceiling is what stops a plan covering the whole line from making the roast that
+  // executes it look like surplus. Ambiguity is not resolved here — two live plans simply
+  // credit nothing, and the transaction refuses the roast outright with an explanation.
+  const creditPoId = isStockBatch
+    ? null
+    : ((productionOrderId as string | undefined) ?? (await soleLiveProductionOrderId(prisma, orderItemId as string)));
+  const ceiling = isStockBatch
+    ? null
+    : await roastingCeilingForItem(prisma, orderItemId, creditPoId);
   if (!isStockBatch && !ceiling) {
     return NextResponse.json({ error: "Order item not found." }, { status: 404 });
   }
@@ -314,7 +347,13 @@ export async function POST(request: Request) {
 
       // Re-asked now that this transaction is the only one that can be asking. Everything
       // before the transaction was advisory; this is the answer that counts.
-      const live = await roastingCeilingForItem(tx, orderItemId as string);
+      // Re-resolved inside the lock: another transaction may have raised or completed a
+      // plan since the pre-check, and the credit has to match the world this roast commits
+      // into rather than the one it arrived in.
+      const liveCreditPoId =
+        (productionOrderId as string | undefined) ??
+        (await soleLiveProductionOrderId(tx, orderItemId as string));
+      const live = await roastingCeilingForItem(tx, orderItemId as string, liveCreditPoId);
       if (!live) throw new AppError(404, "Order item not found.");
       const liveExcess = +(roastedQty - live.ceilingKg).toFixed(3);
       if (liveExcess > 0) {

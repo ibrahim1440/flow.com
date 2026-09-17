@@ -14,11 +14,22 @@ import {
 } from "@/components/OrderLifecyclePanel";
 import { ProductionRequirementPanel } from "@/components/ProductionRequirementPanel";
 
-// Only these statuses represent orders currently relevant to Preparation/Production —
-// approved but not yet finished, or paused. Waiting Approval, Rejected, Cancelled, and
-// Completed are deliberately excluded (per S0 scope: this is a simplified operational
-// view, not a full order list).
-const VISIBLE_STATUSES = new Set(["Waiting Preparation Review", "Preparing", "Ready for Shipping", "On Hold"]);
+// Orders currently relevant to Preparation — live or paused, not finished.
+//
+// "Waiting Approval" is included, and it is not a leftover. Routine approval was removed
+// from the normal path, so nothing new lands there, but orders created under the old
+// workflow still sit in it and can now commit an allocation directly. Excluding them from
+// this screen would strand exactly the orders the compatibility rule exists to rescue.
+//
+// Rejected, Cancelled and Completed stay excluded: this is a simplified operational view,
+// not a full order list.
+const VISIBLE_STATUSES = new Set([
+  "Waiting Approval",
+  "Waiting Preparation Review",
+  "Preparing",
+  "Ready for Shipping",
+  "On Hold",
+]);
 
 // Deliberately lean: no pricing, discount, VAT, payment, or accounting fields exist on
 // this type, and GET /api/orders never includes product/SKU pricing data in the first

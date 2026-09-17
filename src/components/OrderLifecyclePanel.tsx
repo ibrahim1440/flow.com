@@ -118,22 +118,30 @@ export function orderOwnerDisplayName(owner: { name: string } | null): string | 
 }
 
 // ─── Progress Stepper ─────────────────────────────────────────────────────────
-// NOT the Activity Timeline — this shows lifecycle *milestones* (Created → Approved
-// → Preparation → Ready for Shipping → Completed), not a log of every event.
-
-const STEPPER_STAGES = ["Created", "Approved", "Preparation", "Ready for Shipping", "Completed"] as const;
+// NOT the Activity Timeline — this shows lifecycle *milestones*, not a log of every
+// event.
+//
+// The displayed lifecycle is exactly four stages:
+//
+//     Created → Preparation → Ready for Shipping → Completed
+//
+// Approval is NOT one of them. Routine approval was removed from the normal path, so a
+// stage for it would be permanently unreachable — an order now goes straight from Created
+// into Preparation. Production is not one either: it is work that happens INSIDE
+// Preparation, not a milestone an order passes through. Both are deliberate.
+//
+// The internal statuses are unchanged and remain more granular than this; the map below is
+// a display projection of them, and nothing here writes or renames a status.
+const STEPPER_STAGES = ["Created", "Preparation", "Ready for Shipping", "Completed"] as const;
 type StepperStage = typeof STEPPER_STAGES[number];
 // "active"  — a stage with genuine work happening right now (Preparation while
 //             Preparing, Ready while Ready for Shipping).
-// "pending" — a yes/no gate that hasn't been decided yet (Approved while Waiting
-//             Approval). Deliberately styled like an upcoming step, never like
-//             "active" or "complete" — nothing is in progress on a gate that
-//             hasn't been reached.
+// "pending" — retained for the stage treatments below; no normal-path stage uses it now
+//             that the approval gate is gone.
 type StageState = "complete" | "active" | "pending" | "future" | "paused" | "negative";
 
 const STAGE_LABEL_KEY: Record<StepperStage, TranslationKey> = {
   "Created": "stepperCreated",
-  "Approved": "stepperApproved",
   "Preparation": "stepperPreparation",
   "Ready for Shipping": "stepperReadyForShipping",
   "Completed": "stepperCompleted",
@@ -152,53 +160,49 @@ function computeProgressStages(order: {
   const hasAnyDecision = order.items.some((i) => i.preparationDecision);
   const allDecided = order.items.length > 0 && order.items.every((i) => i.preparationDecision);
 
-  // "Approved complete" is only ever asserted from one of two reliable signals:
-  // the explicit approvalStatus field when the caller has it, or the state-machine
-  // invariant that these statuses are unreachable without prior approval — never a
-  // generic guess.
-  const APPROVAL_IMPLIED_BY_STATUS = new Set([
-    "Waiting Preparation Review", "Preparing", "Ready for Shipping", "Completed", "On Hold",
-  ]);
-  const isApproved = order.approvalStatus !== undefined
-    ? order.approvalStatus === "Yes"
-    : APPROVAL_IMPLIED_BY_STATUS.has(order.status);
+  // Stage indices: 0 Created, 1 Preparation, 2 Ready for Shipping, 3 Completed.
+  // "Created" is complete for every order that exists, which is every order this renders.
+  const CREATED = 0, PREPARATION = 1, READY = 2;
 
   if (order.status === "Completed") {
     return { states: STEPPER_STAGES.map(() => "complete") };
   }
   if (order.status === "Rejected") {
+    // Rejection is now only reachable through the exceptional approval route, which is off
+    // the normal path. It still has to render honestly when it appears on historical data:
+    // the order was created, and it stopped at Preparation.
     return {
-      states: STEPPER_STAGES.map((_, i) => (i === 0 ? "complete" : i === 1 ? "negative" : "future")),
+      states: STEPPER_STAGES.map((_, i) =>
+        i === CREATED ? "complete" : i === PREPARATION ? "negative" : "future"),
       negativeKind: "rejected",
     };
   }
-  if (order.status === "Waiting Approval") {
-    return { states: STEPPER_STAGES.map((_, i) => (i === 0 ? "complete" : i === 1 ? "pending" : "future")) };
-  }
   if (order.status === "On Hold") {
-    // Hold is only reachable from Waiting Preparation Review / Preparing / Ready for
-    // Shipping — Approved is therefore always already complete (isApproved is
-    // guaranteed true here regardless of which signal was available).
-    const base = hasAnyDecision ? (allDecided ? 3 : 2) : 2;
+    // Hold is reachable from Waiting Preparation Review / Preparing / Ready for Shipping.
+    const base = allDecided ? READY : PREPARATION;
     return { states: STEPPER_STAGES.map((_, i) => (i < base ? "complete" : i === base ? "paused" : "future")) };
   }
   if (order.status === "Cancelled") {
-    // Cancel is allowed from almost any non-terminal status, so the "reached" stage
-    // is genuinely ambiguous — infer the furthest confirmed milestone from existing
-    // data (isApproved, item decisions) rather than fabricating precision.
-    const base = hasAnyDecision ? (allDecided ? 3 : 2) : isApproved ? 2 : 1;
+    // Cancel is allowed from almost any non-terminal status, so the reached stage is
+    // genuinely ambiguous — infer the furthest confirmed milestone from the item decisions
+    // rather than fabricating precision.
+    const base = hasAnyDecision ? (allDecided ? READY : PREPARATION) : PREPARATION;
     return {
       states: STEPPER_STAGES.map((_, i) => (i < base ? "complete" : i === base ? "negative" : "future")),
       negativeKind: "cancelled",
     };
   }
 
+  // The normal path. "Waiting Approval" is included because legacy orders are still in it
+  // and they are, in displayed terms, simply waiting to be prepared — there is no approval
+  // stage left for them to sit on.
   const STATUS_BASE: Record<string, number> = {
-    "Waiting Preparation Review": 2,
-    "Preparing": 2,
-    "Ready for Shipping": 3,
+    "Waiting Approval": PREPARATION,
+    "Waiting Preparation Review": PREPARATION,
+    "Preparing": PREPARATION,
+    "Ready for Shipping": READY,
   };
-  const base = STATUS_BASE[order.status] ?? (hasAnyDecision ? (allDecided ? 3 : 2) : (isApproved ? 2 : 1));
+  const base = STATUS_BASE[order.status] ?? (allDecided ? READY : PREPARATION);
   return { states: STEPPER_STAGES.map((_, i) => (i < base ? "complete" : i === base ? "active" : "future")) };
 }
 
@@ -573,8 +577,9 @@ const DECISION_OPTIONS: { value: string; labelKey: TranslationKey }[] = [
   { value: "Blocked", labelKey: "prepDecisionBlocked" },
 ];
 
-// Read-only decision-badge icon/token pairing (Phase A — visual only; the
-// editable <select> below is untouched). "" represents Not Reviewed.
+// Read-only decision-badge icon/token pairing. The editable <select> this once sat
+// beside is gone: the outcome is derived by the server and the only manual exception is
+// the Block toggle. "" represents Not Reviewed.
 const DECISION_ICON: Record<string, React.ElementType> = {
   "": CircleDashed,
   "Available on Shelf": CheckCircle2,
@@ -683,22 +688,60 @@ export function PreparationReviewTable({
     };
   }
 
-  const reviewedEntries = items
-    .map((item) => ({ item, selection: draft[item.id] ?? ("" as Selection) }))
-    .filter(({ selection }) => selection !== "");
+  // Every line already carries a stored decision, i.e. this order has been committed at
+  // least once. Drives the third column's heading: intention before, ownership after.
+  const allCommitted = items.length > 0 && items.every((i) => i.preparationDecision !== null);
+
+  // Every line on the order is in scope. The draft records only the EXCEPTION — a line the
+  // reviewer has blocked — because the outcome itself is derived by the server from what
+  // the shelf can cover, and there is nothing else for the reviewer to choose.
+  //
+  // This used to filter to lines carrying a draft selection, which was right when a
+  // <select> per row was the thing that populated the draft. That control is gone, so the
+  // filter matched nothing on a new order: Commit Allocation could never enable, and had it
+  // enabled it would have posted an empty item list. The scope is the order, not the draft.
+  const entries = items.map((item) => ({ item, selection: draft[item.id] ?? ("" as Selection) }));
 
   // Usability-only validation — the backend remains authoritative and re-validates
   // everything server-side regardless of what this allows through. The quantity checks
   // that used to live here are gone: the numbers are no longer typed, so they cannot
   // disagree with each other.
-  const blockedWithoutNote = reviewedEntries.some(
+  const blockedWithoutNote = entries.some(
     ({ selection }) => selection === "Blocked" && !note.trim()
   );
-  // A row with no stock data renders as "Not Reviewed" but would still have been sent,
-  // silently re-deciding an item the reviewer could not see. Refuse to submit instead.
-  const missingStock = reviewedEntries.some(({ item }) => !stock[item.id]);
+  // Refuse to commit an allocation the reviewer cannot see. A row whose stock preview did
+  // not load shows no numbers, and committing it would reserve against figures nobody read.
+  const missingStock = entries.some(({ item }) => !stock[item.id]);
   const canSave =
-    canEdit && reviewedEntries.length > 0 && !blockedWithoutNote && !stockLoading && !missingStock;
+    canEdit && entries.length > 0 && !blockedWithoutNote && !stockLoading && !missingStock;
+
+  // What pressing Commit Allocation is expected to do, summarised at order level from the
+  // same derived per-item view the table shows. A PREVIEW: these figures are read from the
+  // shelf as it was a moment ago and reserve nothing. The server recomputes everything when
+  // the commit runs, so the outcome can legitimately differ if another order took stock in
+  // between — which is exactly why the caption below says so.
+  const commitSummary = useMemo(() => {
+    let toReserve = 0, productionNeeded = 0, fullyCovered = 0, blocked = 0;
+    for (const item of items) {
+      const selection = draft[item.id] ?? "";
+      if (selection === "") continue;
+      const v = viewFor(item.id);
+      if (v.decision === "Blocked") { blocked++; continue; }
+      toReserve += Number(v.available || 0);
+      productionNeeded += Number(v.required || 0);
+      if (v.decision === "Available on Shelf") fullyCovered++;
+    }
+    return {
+      toReserve: roundKg(toReserve),
+      productionNeeded: roundKg(productionNeeded),
+      fullyCovered,
+      blocked,
+      // Ready for Shipping only when nothing is blocked and nothing needs producing.
+      expectedReady: blocked === 0 && productionNeeded === 0 && fullyCovered > 0,
+    };
+    // viewFor closes over draft and stock, which are both in the dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, draft, stock]);
 
   async function handleSave() {
     if (submitting || !canSave) return;
@@ -709,7 +752,7 @@ export function PreparationReviewTable({
     // Only Blocked is asserted. Every other item is sent bare so the server reserves
     // whatever the shelf can cover at the moment it runs — the preview shown here may
     // be seconds old, and another order may have taken the stock in between.
-    const payloadItems: PreparationReviewItemInput[] = reviewedEntries.map(({ item, selection }) =>
+    const payloadItems: PreparationReviewItemInput[] = entries.map(({ item, selection }) =>
       selection === "Blocked"
         ? { orderItemId: item.id, decision: "Blocked" as const }
         : { orderItemId: item.id }
@@ -760,15 +803,22 @@ export function PreparationReviewTable({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm stack-table">
           <thead>
             <tr className="text-xs text-brown/60">
               <th className="text-start px-2 py-1 font-semibold">{t("beanType")}</th>
-              <th className="text-end px-2 py-1 font-semibold">{t("requestedQtyLabel")}</th>
-              <th className="text-end px-2 py-1 font-semibold">{t("onShelfFreeLabel")}</th>
-              <th className="text-end px-2 py-1 font-semibold">{t("availableQuantityLabel")}</th>
-              <th className="text-end px-2 py-1 font-semibold">{t("productionRequiredQuantityLabel")}</th>
-              <th className="text-center px-2 py-1 font-semibold">{t("preparationReviewLabel")}</th>
+              <th className="text-end px-2 py-1 font-semibold">{t("prepColRequired")}</th>
+              <th className="text-end px-2 py-1 font-semibold">{t("prepColAvailableNow")}</th>
+              {/* Flips once every line has been committed: before the commit this column is
+                  an intention ("To Allocate"), after it the quantity genuinely belongs to
+                  this order ("Allocated to this Order"). Committed stock is never called
+                  "available" — that word is reserved for the shared pool in the column to
+                  its left. */}
+              <th className="text-end px-2 py-1 font-semibold">
+                {allCommitted ? t("allocatedToThisOrder") : t("prepColToAllocate")}
+              </th>
+              <th className="text-end px-2 py-1 font-semibold">{t("prepColRequiredForProduction")}</th>
+              <th className="text-center px-2 py-1 font-semibold">{t("prepColDerivedResult")}</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -788,9 +838,9 @@ export function PreparationReviewTable({
                 return (
                   <Fragment key={item.id}>
                     <tr>
-                      <td className="px-2 py-1.5">{item.beanTypeName}</td>
-                      <td className="px-2 py-1.5 text-end font-medium">{item.quantityKg}</td>
-                      <td className="px-2 py-1.5 text-end tabular-nums">
+                      <td className="px-2 py-1.5" data-label={t("beanType")}>{item.beanTypeName}</td>
+                      <td className="px-2 py-1.5 text-end font-medium" data-label={t("prepColRequired")}>{item.quantityKg}</td>
+                      <td className="px-2 py-1.5 text-end tabular-nums" data-label={t("prepColAvailableNow")}>
                         {stockLoading && !s ? (
                           <span className="text-brown/40">…</span>
                         ) : s ? (
@@ -801,26 +851,48 @@ export function PreparationReviewTable({
                           <span className="text-brown/40">—</span>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-end tabular-nums">
-                        <span className={isBlocked ? "text-brown/40" : undefined}>{isBlocked ? "0" : d.available || "0"}</span>
+                      {/* A committed, unblocked line shows stock this order actually holds,
+                          so it is styled as owned rather than as a projection. */}
+                      <td className="px-2 py-1.5 text-end tabular-nums" data-label={allCommitted ? t("allocatedToThisOrder") : t("prepColToAllocate")}>
+                        <span
+                          className={
+                            isBlocked
+                              ? "text-brown/40"
+                              : item.preparationDecision
+                                ? "font-bold text-oo-status-ready"
+                                : undefined
+                          }
+                          title={!isBlocked && item.preparationDecision ? t("allocatedToThisOrder") : undefined}
+                        >
+                          {isBlocked ? "0" : d.available || "0"}
+                        </span>
                       </td>
-                      <td className="px-2 py-1.5 text-end tabular-nums">
+                      <td className="px-2 py-1.5 text-end tabular-nums" data-label={t("prepColRequiredForProduction")}>
                         <span>{d.required || "0"}</span>
                       </td>
-                      <td className="px-2 py-1.5 text-center">
-                        {canEdit ? (
-                          <select
-                            value={d.decision}
-                            onChange={(e) => setItemDecision(item.id, e.target.value)}
-                            className="px-2 py-1.5 border-2 border-border rounded-lg text-xs bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-                          >
-                            {DECISION_OPTIONS.map((o) => (
-                              <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
-                            ))}
-                          </select>
-                        ) : (
+                      {/* Derived Result is read-only: Available / Partially Available /
+                          Needs Production are computed by the server from what the shelf can
+                          actually cover, never chosen by the operator. The one human
+                          exception is blocking the item, which is a button, not an option in
+                          a list of outcomes. */}
+                      <td className="px-2 py-1.5 text-center stack-action" data-label={t("prepColDerivedResult")}>
+                        <div className="flex items-center justify-center gap-2 flex-wrap">
                           <DecisionBadge decision={d.decision} />
-                        )}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => setItemDecision(item.id, isBlocked ? "auto" : "Blocked")}
+                              aria-pressed={isBlocked}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                                isBlocked
+                                  ? "text-oo-text-muted bg-white border-oo-border-default hover:bg-cream"
+                                  : "text-oo-status-blocked bg-oo-status-blocked-bg border-oo-status-blocked/30 hover:bg-oo-status-blocked/10"
+                              }`}
+                            >
+                              {isBlocked ? t("prepUnblockItem") : t("prepBlockItem")}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {canEdit && isBlocked && item.id === noteAnchorId && (
@@ -874,13 +946,49 @@ export function PreparationReviewTable({
           {!stockLoading && (stockError || missingStock) && (
             <p className="text-xs font-bold text-red-600">{t("stockPreviewUnavailable")}</p>
           )}
+          {/* Order-level summary of what committing will do. Everything above is a PREVIEW
+              read from the shelf a moment ago: nothing is reserved until this button is
+              pressed, and another order may take the stock in between. */}
+          <div className="rounded-xl border border-oo-border-default bg-white px-3 py-2.5 space-y-1.5">
+            <p className="text-xs font-bold text-oo-text-muted uppercase tracking-wide">
+              {t("prepSummaryTitle")}
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+              <div>
+                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryToReserve")}</span>
+                <span className="font-bold tabular-nums">{commitSummary.toReserve}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryProductionNeeded")}</span>
+                <span className="font-bold tabular-nums">{commitSummary.productionNeeded}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryFullyCovered")}</span>
+                <span className="font-bold tabular-nums">{commitSummary.fullyCovered}</span>
+              </div>
+              <div>
+                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryBlocked")}</span>
+                <span className={`font-bold tabular-nums ${commitSummary.blocked > 0 ? "text-oo-status-blocked" : ""}`}>
+                  {commitSummary.blocked}
+                </span>
+              </div>
+            </div>
+            <p className="text-[11px] text-oo-text-muted">
+              {t("prepSummaryExpectedState")}:{" "}
+              <span className="font-semibold">
+                {commitSummary.expectedReady ? t("orderStatusReadyForShipping") : t("orderStatusPreparing")}
+              </span>
+            </p>
+            <p className="text-[11px] text-oo-text-muted italic">{t("prepPreviewNotReserved")}</p>
+          </div>
+
           <button
             onClick={handleSave}
             disabled={submitting || !canSave}
-            className="flex items-center gap-1.5 px-4 py-2 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
+            className="w-full xl:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
           >
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
-            {t("savePreparationReview")}
+            {t("commitAllocation")}
           </button>
         </>
       )}

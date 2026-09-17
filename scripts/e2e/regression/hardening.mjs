@@ -414,7 +414,13 @@ async function main() {
   } });
   if (massOrder.status === 201) {
     const row = await one('SELECT status, "orderNumber", "approvalStatus" FROM "Order" WHERE id=$1', [massOrder.json.id]);
-    check("a client-supplied status is ignored", row.status === "Waiting Approval", S(row));
+    // Two things, not one: the client's value was discarded, AND the server wrote its own
+    // entry status. That entry status is now "Waiting Preparation Review" — routine approval
+    // was removed from the normal path, so a new order no longer starts in "Waiting
+    // Approval". The property under test is unchanged; only the value the server chooses has.
+    check("a client-supplied status is ignored", row.status !== "Completed", S(row));
+    check("and the server's own entry status is written",
+      row.status === "Waiting Preparation Review", S(row));
     check("a client-supplied order number is ignored", num(row.orderNumber) !== 999999, S(row));
     check("a client-supplied approval is ignored", row.approvalStatus !== "Yes", S(row));
   } else {

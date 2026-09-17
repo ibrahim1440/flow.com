@@ -102,9 +102,14 @@ export async function POST(request: Request, { params }: Params) {
       };
 
       if (decision === "Yes") {
-        // Fresh approval or reconsidering a prior rejection: ownership transfers to
-        // whoever approved it (no dedicated Operations Coordinator pool exists yet).
-        data.ownerId = user.id;
+        // Ownership is deliberately NOT touched here any more.
+        //
+        // Approving used to make the approver the owner. Under the frozen workflow the
+        // operational owner is whoever first successfully commits an allocation, assigned
+        // in that transaction (see the preparation-review route). Assigning here as well
+        // would let an exceptional approval quietly take an order away from the operator
+        // already preparing it. Historical owners are preserved untouched: `data.ownerId`
+        // was initialised from `existing.ownerId` above.
       } else if (decision === "No") {
         const auditLine = `[Approval Rejected] ${new Date().toISOString()} by ${user.id}: ${trimmedReason}`;
         data.notes = existing.notes ? `${existing.notes}\n${auditLine}` : auditLine;

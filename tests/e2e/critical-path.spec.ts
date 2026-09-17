@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAs, createOrder, approveOrder, openWorkstationOrder, openProductionOrder, submitPreparationReview, qcBatch, packBatch, dispatchRow, roastItem, collectPageProblems, catalog } from "./support/app";
+import { loginAs, createOrder, openWorkstationOrder, openProductionOrder, submitPreparationReview, qcBatch, packBatch, dispatchRow, roastItem, collectPageProblems, catalog } from "./support/app";
 import { one, all, num, near } from "./support/db";
 
 // Scenario B — nothing on the shelf, so the whole order must be produced.
@@ -16,7 +16,7 @@ let orderNumber: number;
 let productionNumber: string;
 let batchNumber: string;
 
-test("Sales raises and approves an order for a product with no stock", async ({ page }) => {
+test("Sales raises an order for a product with no stock and it enters preparation", async ({ page }) => {
   const problems = collectPageProblems(page);
   await loginAs(page, "sales");
 
@@ -27,12 +27,16 @@ test("Sales raises and approves an order for a product with no stock", async ({ 
     `SELECT o.status, oi."quantityUnits" qty FROM "Order" o JOIN "OrderItem" oi ON oi."orderId"=o.id WHERE o."orderNumber"=$1`,
     [orderNumber]
   );
-  expect(created.status).toBe("Waiting Approval");
+  expect(created.status, "a new order enters preparation directly").toBe("Waiting Preparation Review");
   expect(num(created.qty)).toBe(24);
 
-  await approveOrder(page, orderNumber);
-  const approved = await one<{ status: string }>(`SELECT status FROM "Order" WHERE "orderNumber"=$1`, [orderNumber]);
-  expect(approved.status).toBe("Waiting Preparation Review");
+  // Routine approval is gone from the normal path, so nothing may park the order in the
+  // legacy approval status and no approval activity may be written behind the scenes.
+  const approvals = await all<{ type: string }>(
+    `SELECT a.type FROM "OrderActivity" a JOIN "Order" o ON o.id=a."orderId"
+      WHERE o."orderNumber"=$1 AND a.type='ORDER_APPROVED'`, [orderNumber]
+  );
+  expect(approvals.length, "no approval step runs on the normal path").toBe(0);
 
   expect(problems.failedRequests, "no server faults").toEqual([]);
 });
@@ -45,7 +49,7 @@ test("Sales reviews preparation and the screen reports the shortfall", async ({ 
   await submitPreparationReview(card);
   // The decision is shown as the value of the row select, so that is what is asserted —
   // matching the text would hit the hidden <option> elements instead.
-  await expect(card.locator("table select").first()).toHaveValue("Needs Production", { timeout: 60_000 });
+  await expect(card.getByText(/Needs Production/).first(), "the shortfall is derived, not chosen").toBeVisible({ timeout: 60_000 });
 
   const item = await one<{ decision: string; status: string }>(
     `SELECT oi."preparationDecision" decision, o.status FROM "OrderItem" oi JOIN "Order" o ON o.id=oi."orderId" WHERE o."orderNumber"=$1`,
@@ -202,7 +206,8 @@ test("Packaging packs the batch into finished goods through the bill of material
   await expect(page.getByText(batchNumber).first()).toBeVisible({ timeout: 60_000 });
 
   const packCard = packBatch(page, batchNumber);
-  await packCard.getByRole("button", { name: /Pack as product/i }).click();
+  // One packaging action per card; the method is derived, not chosen from two buttons.
+  await packCard.getByRole("button", { name: /Start Packaging|Continue Packaging/i }).click();
 
   const modal = page.locator("div.fixed").last();
   await expect(modal.getByText(/Pack into finished product/i)).toBeVisible();
@@ -238,7 +243,7 @@ test("Sales re-reviews and the finished goods are reserved to the order", async 
   const card = await openWorkstationOrder(page, orderNumber);
 
   await submitPreparationReview(card);
-  await expect(card.locator("table select").first()).toHaveValue("Available on Shelf", { timeout: 60_000 });
+  await expect(card.getByText(/Available on Shelf/).first(), "full cover is derived, not chosen").toBeVisible({ timeout: 60_000 });
 
   const state = await one<{ status: string; decision: string; reserved: number }>(
     `SELECT o.status, oi."preparationDecision" decision,

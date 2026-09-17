@@ -101,12 +101,9 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge ${cls}`}>{label}</span>;
 }
 
-function ApprovalBadge({ approvalStatus }: { approvalStatus: string }) {
-  const { t } = useI18n();
-  const cls = approvalStatus === "Yes" ? "status-completed" : approvalStatus === "No" ? "status-not-paid" : "status-pending";
-  const label = approvalStatus === "Yes" ? t("approvalApproved") : approvalStatus === "No" ? t("approvalRejected") : t("approvalPending");
-  return <span className={`status-badge ${cls}`}>{label}</span>;
-}
+// ApprovalBadge removed with the routine approval UI: approval is no longer part of the
+// normal order path, so the row shows the lifecycle status instead. The approval API and
+// its historical data are untouched.
 
 export default function OrdersPage() {
   const user = useUser();
@@ -114,7 +111,6 @@ export default function OrdersPage() {
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
-  const canApproveOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "approve");
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
@@ -316,28 +312,9 @@ export default function OrdersPage() {
     loadData();
   }
 
-  async function submitApprovalDecision(orderId: string, decision: "Yes" | "No" | "Pending", reason?: string) {
-    const res = await fetch(`/api/orders/${orderId}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(reason !== undefined ? { decision, reason } : { decision }),
-    });
-    if (!res.ok) {
-      const body = await res.json();
-      alert(body.error || "Failed to update approval status.");
-      return;
-    }
-    loadData();
-  }
-
-  function rejectOrder(orderId: string) {
-    const reason = window.prompt(t("rejectReasonPrompt"))?.trim();
-    if (!reason) {
-      if (reason === "") alert(t("reasonRequiredError"));
-      return;
-    }
-    submitApprovalDecision(orderId, "No", reason);
-  }
+  // submitApprovalDecision removed with the routine approval UI. POST
+  // /api/orders/[id]/approve still exists for exceptional policy work; it simply has no
+  // entry point on the normal operator path any more.
 
   async function createCustomer() {
     if (!newCustomer.name.trim()) return;
@@ -606,8 +583,9 @@ export default function OrdersPage() {
                   </p>
                 </div>
               </div>
+              {/* Approval is no longer part of the normal path, so its badge is gone from the
+                  row. The lifecycle badge below is the operator's status of record. */}
               <div className="flex items-center gap-3">
-                <ApprovalBadge approvalStatus={order.approvalStatus} />
                 <StatusBadge status={order.items.every((i) => i.productionStatus === "Completed") ? "Completed" : order.items.some((i) => i.productionStatus === "In Production") ? "In Production" : "Pending"} />
                 <OrderStatusBadge status={order.status} />
                 {expanded === order.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -616,25 +594,13 @@ export default function OrdersPage() {
 
             {expanded === order.id && (
               <div className="border-t border-border p-3.5 bg-cream">
+                {/* Approve / Reject / Reset-to-Pending are deliberately absent. Routine
+                    approval is not part of the normal order path any more: an order goes
+                    from Created straight into Preparation, and the operator's next action
+                    is Commit Allocation on the preparation screen, not a decision here.
+                    The approval API and its historical data are untouched — only this
+                    routine entry point into it is gone. */}
                 <div className="flex justify-end gap-2 mb-3">
-                  {canApproveOrder && order.approvalStatus !== "Yes" && (
-                    <button onClick={() => submitApprovalDecision(order.id, "Yes")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100">
-                      {t("approveOrder")}
-                    </button>
-                  )}
-                  {canApproveOrder && order.approvalStatus !== "No" && (
-                    <button onClick={() => rejectOrder(order.id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
-                      {t("rejectOrder")}
-                    </button>
-                  )}
-                  {canApproveOrder && order.approvalStatus !== "Pending" && (
-                    <button onClick={() => submitApprovalDecision(order.id, "Pending")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-brown bg-white border border-border rounded-lg hover:bg-cream">
-                      {t("resetToPending")}
-                    </button>
-                  )}
                   {canEditOrder && editingId !== order.id && (
                     <button onClick={() => startEdit(order)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-orange bg-orange-light border border-orange/20 rounded-lg hover:bg-orange/10">

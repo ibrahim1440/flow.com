@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { requirePinLookupSecret, pinLookup, pinVerifierInput } from "../../../src/lib/pin-lookup";
 import { hashSync } from "bcryptjs";
 import { withDb, assertTestDatabase } from "./db";
 import { ROLES } from "./roles";
@@ -71,6 +71,10 @@ async function teardown() {
     await q(`DELETE FROM "QcRecord" WHERE "batchId" IN (${BATCHES})`);
     await q(`DELETE FROM "BatchSerialHistory" WHERE "batchId" IN (${BATCHES})`);
     await q(`DELETE FROM "BlendIngredient" WHERE "sourceBatchId" IN (${BATCHES}) OR "targetBlendBatchId" IN (${BATCHES})`);
+    // Migration #17 added PackagingOperation, whose batchId FK is RESTRICT — it holds the
+    // batch down and must go first. The teardown predates that table, so it only started
+    // failing once packing actually succeeded in this suite and left rows behind.
+    await q(`DELETE FROM "PackagingOperation" WHERE "batchId" IN (${BATCHES})`);
     // Blend outputs point at their inputs, so clear the parent link before deleting.
     await q(`UPDATE "RoastingBatch" SET "parentBatchId" = NULL WHERE id IN (${BATCHES})`);
     await q(`DELETE FROM "RoastingBatch" WHERE id IN (${BATCHES})`);
@@ -91,14 +95,22 @@ export default async function globalSetup() {
   await teardown();
 
   // ── Employees ────────────────────────────────────────────────────────────
+  // Fails loudly rather than seeding rows this deployment could never verify.
+  const pinSecret = requirePinLookupSecret();
   await withDb(async (db) => {
     for (const [key, r] of Object.entries(ROLES)) {
       await db.query(
-        `INSERT INTO "Employee" (id,name,pin,"pinHash",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
+        `INSERT INTO "Employee" (id,name,pin,"pinLookup",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
          VALUES ($1,$2,$3,$4,$5,$6,'/dashboard',true,'en',now(),now())`,
         [
-          `${TAG}_emp_${key}`, r.name, hashSync(r.pin, 10),
-          createHash("sha256").update(r.pin).digest("hex"),
+          // Secure Version B: the stored verifier is bcrypt over a KEYED derivation of the
+          // PIN, and pinLookup is the keyed selector login searches on. Seeding a bcrypt of
+          // the raw PIN (plus a sha256 pinHash) is the pre-H2B scheme — every sign-in in this
+          // suite failed against it, because no row could be selected and the raw PIN is not
+          // what the verifier is built from. pinHash is left null: it is inert under
+          // Version B and migration #19 removes it.
+          `${TAG}_emp_${key}`, r.name, hashSync(pinVerifierInput(r.pin, pinSecret), 10),
+          pinLookup(r.pin, pinSecret),
           r.role, JSON.stringify(r.permissions),
         ]
       );

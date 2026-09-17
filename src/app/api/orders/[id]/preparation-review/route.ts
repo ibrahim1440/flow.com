@@ -383,10 +383,38 @@ export async function POST(request: Request, { params }: Params) {
         throw { _appCode: 409, message: "Order status changed during review. Please reload and retry." };
       }
 
+      // ── Operational ownership ────────────────────────────────────────────
+      // The first successful Commit Allocation claims the order for whoever ran it.
+      // Approving no longer assigns an owner, so this is the only place ownership is
+      // established on the normal path.
+      //
+      // Deliberately after the status guard above: a commit that could not be applied has
+      // already thrown, and this whole block is one transaction, so a failed commit never
+      // leaves an owner behind.
+      //
+      // `ownerId: null` in the predicate is what makes it claim-once under concurrency.
+      // Two operators committing at the same instant both try this; the row is already
+      // locked by the status write above, so the second waits, and PostgreSQL re-checks
+      // the predicate against the committed row before updating. It then matches nothing
+      // and the first owner stands. No last-writer reassignment, no oscillation — and a
+      // later commit by anyone else is the same no-op, which is what preserves both a
+      // historical owner and the one claimed here.
+      //
+      // Same row, already held, so it introduces no new lock and no inversion: Order stays
+      // the final acquisition of this transaction.
+      const ownerClaim = await tx.order.updateMany({
+        where: { id, ownerId: null },
+        data: { ownerId: user.id },
+      });
+      const claimedOwnership = ownerClaim.count === 1;
+
       await appendOrderActivity(tx, {
         orderId: id,
         type: "PREPARATION_REVIEWED",
-        message: `Preparation review submitted by ${user.name} for ${parsedItems.length} item(s). Order status set to ${newStatus}.`,
+        message:
+          `Preparation review submitted by ${user.name} for ${parsedItems.length} item(s). ` +
+          `Order status set to ${newStatus}.` +
+          (claimedOwnership ? ` Order claimed by ${user.name}.` : ""),
         department: "Preparation",
         authorId: user.id,
         authorName: user.name,

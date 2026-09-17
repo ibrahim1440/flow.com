@@ -139,6 +139,18 @@ export async function POST(request: Request) {
         };
       }
 
+      // Blocking a line is the operator saying this item cannot be prepared. It receives no
+      // allocation and it holds the order out of Ready for Shipping — but the order itself
+      // stays in "Preparing", which the status check above allows, so without this a blocked
+      // line on an otherwise live order could still be dispatched. Line-level, because
+      // blocking is a line-level decision.
+      if (orderItem.preparationDecision === "Blocked") {
+        throw {
+          _appCode: 409,
+          message: "Cannot record a delivery for a blocked line. Unblock it in preparation first.",
+        };
+      }
+
       // ── SKU lines ship whole units ────────────────────────────────────────
       // The kilogram path below draws on availableQty/reservedQty, which stay at 0 on a
       // unit-tracked lot — so it could never ship a SKU line at all, and the units the

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
-  loginAs, createOrder, approveOrder, openWorkstationOrder, submitPreparationReview,
+  loginAs, createOrder, openWorkstationOrder, submitPreparationReview,
   openProductionOrder, roastForOrder, qcPass, packIntoSku, deliverUnits,
   orderCard, answerNativeDialogs, catalog,
 } from "./support/app";
@@ -36,7 +36,6 @@ const decisionFor = async (orderNumber: number) =>
 test("Groundwork: an administrator authorises surplus production to stock the shelf", async ({ page }) => {
   await loginAs(page, "admin");
   stockOrder = await createOrder(page, "hotel", "UAT-STOCK", [{ sku: "col500", units: 10 }]);
-  await approveOrder(page, stockOrder);
 
   const card = await openWorkstationOrder(page, stockOrder);
   await submitPreparationReview(card);
@@ -56,11 +55,10 @@ test("Groundwork: an administrator authorises surplus production to stock the sh
 test("Scenario A — stock fully available: the review covers the line with no production", async ({ page }) => {
   await loginAs(page, "sales");
   const n = await createOrder(page, "bakery", "UAT-SC-A", [{ sku: "col500", units: 8 }]);
-  await approveOrder(page, n);
 
   const card = await openWorkstationOrder(page, n);
   await submitPreparationReview(card);
-  await expect(card.locator("table select").first()).toHaveValue("Available on Shelf", { timeout: 60_000 });
+  await expect(card.getByText(/Available on Shelf/).first(), "full cover is derived by the server").toBeVisible({ timeout: 60_000 });
 
   const rows = await decisionFor(n);
   expect(rows[0].d).toBe("Available on Shelf");
@@ -101,7 +99,6 @@ test("Scenario D — a multi-SKU order where one line is covered and one is not"
     { sku: "col500", units: 2 },   // shelf still has a little Colombia
     { sku: "ken1kg", units: 5 },   // no Kenya has ever been packed
   ]);
-  await approveOrder(page, n);
   const card = await openWorkstationOrder(page, n);
   await submitPreparationReview(card);
 
@@ -121,7 +118,6 @@ test("Scenario C — partial stock: only the shortfall is scheduled for producti
 
   await loginAs(page, "sales");
   const n = await createOrder(page, "roastery", "UAT-SC-C", [{ sku: "col500", units: ordered }]);
-  await approveOrder(page, n);
   const card = await openWorkstationOrder(page, n);
   await submitPreparationReview(card);
 
@@ -186,7 +182,6 @@ async function openOrderCardExpanded(page: import("@playwright/test").Page, orde
 test("Scenario G — cancelling before production returns the reserved stock", async ({ page }) => {
   await loginAs(page, "admin");
   const n = await createOrder(page, "hotel", "UAT-SC-G", [{ sku: "col500", units: 2 }]);
-  await approveOrder(page, n);
   const card = await openWorkstationOrder(page, n);
   await submitPreparationReview(card);
 
@@ -215,7 +210,6 @@ test("Scenario G — cancelling before production returns the reserved stock", a
 test("Scenario H — cancelling after partial production keeps what was made", async ({ page }) => {
   await loginAs(page, "admin");
   const n = await createOrder(page, "roastery", "UAT-SC-H", [{ sku: "ken1kg", units: 8 }]);
-  await approveOrder(page, n);
   let card = await openWorkstationOrder(page, n);
   await submitPreparationReview(card);
 
@@ -256,7 +250,6 @@ test("Scenario H — cancelling after partial production keeps what was made", a
 test("Scenario J — one production order fulfilled by several roasting batches", async ({ page }) => {
   await loginAs(page, "admin");
   const n = await createOrder(page, "bakery", "UAT-SC-J", [{ sku: "yem500", units: 30 }]);
-  await approveOrder(page, n);
   const card = await openWorkstationOrder(page, n);
   await submitPreparationReview(card);
 
@@ -290,24 +283,19 @@ test("Scenario J — one production order fulfilled by several roasting batches"
   )).n);
   expect(linked, "separate roasts serve the one requirement").toBe(2);
 
-  // Attach them to the production order through its own screen, one at a time. The
-  // candidate list is fetched alongside the order, so the picker has to be waited for —
-  // reading it immediately finds no control at all.
-  for (let i = 0; i < 2; i++) {
-    const linkBtn = page.getByRole("button", { name: /^Link$/i });
-    await expect(linkBtn, "the batch picker is offered").toBeVisible({ timeout: 60_000 });
-    const picker = page.locator("select").last();
-    await expect
-      .poll(async () => picker.locator("option").count(), { timeout: 60_000, message: "candidate batches appear in the picker" })
-      .toBeGreaterThan(1);
-    await picker.selectOption({ index: 1 });
-    await expect(linkBtn).toBeEnabled();
-    await linkBtn.click();
-    // The batches table only exists once something is linked; wait for the row count to grow.
-    await expect
-      .poll(async () => page.locator("table tbody tr").count(), { timeout: 60_000 })
-      .toBeGreaterThan(i);
-  }
+  // No manual attaching. A roast raised against a line with exactly one live plan is
+  // credited to that plan by the server, which is the whole point of the R2 linkage work —
+  // the screen used to send no production order id at all and every batch was stored
+  // orphaned from the plan it was made for. The manual picker still exists for the
+  // genuinely ambiguous case (more than one live plan), and there is nothing to pick here.
+  await expect(page.getByRole("button", { name: /^Link$/i }), "nothing is left to link by hand")
+    .toHaveCount(0);
+  await expect
+    .poll(async () => page.locator("table tbody tr").count(), {
+      timeout: 60_000,
+      message: "the production order screen lists both roasts that served it",
+    })
+    .toBeGreaterThanOrEqual(2);
 
   const attached = num((await one<{ n: number }>(
     `SELECT COUNT(*)::int n FROM "RoastingBatch" WHERE "productionOrderId"=$1`, [po.id]

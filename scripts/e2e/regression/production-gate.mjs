@@ -92,19 +92,25 @@ async function main() {
   const line = (units = 20) => [{ productSkuId: C.skus.bra250.id, quantityUnits: units }];
 
   // ═══════════════════════════════════════════════════════════════════════
-  section("A — UNAPPROVED ORDER (the reported defect)");
+  section("A — ORDER THAT HAS NOT COMMITTED ALLOCATION (the reported defect)");
 
-  sub("A1. Waiting Approval — production requirement must be refused");
-  const oA = await createOrder(C.customers.cafe.id, "waiting approval", line());
-  check("order starts in Waiting Approval", (await orderStatus(oA.id)) === "Waiting Approval", await orderStatus(oA.id));
+  // The defect was production running against an order nobody had prepared. Routine
+  // approval has since been removed from the normal path, so a new order is created
+  // directly into "Waiting Preparation Review" rather than "Waiting Approval" — but it is
+  // still an order no operator has committed an allocation for, which is what the gate
+  // exists to refuse. The refusal is unchanged; only the status it names has.
+  sub("A1. before Commit Allocation — production requirement must be refused");
+  const oA = await createOrder(C.customers.cafe.id, "not yet prepared", line());
+  check("a new order starts in Waiting Preparation Review, not Waiting Approval",
+    (await orderStatus(oA.id)) === "Waiting Preparation Review", await orderStatus(oA.id));
   const reqA = await requirementPost(oA.items[0].id);
   check("requirement refused with 409", reqA.status === 409, `status=${reqA.status} ${S(reqA.json).slice(0, 140)}`);
-  check("  and names the status", /in status .{0,2}Waiting Approval/i.test(S(reqA.json)), S(reqA.json).slice(0, 160));
+  check("  and names the status", /in status .{0,2}Waiting Preparation Review/i.test(S(reqA.json)), S(reqA.json).slice(0, 160));
   check("no production order was created", (await all(
     'SELECT id FROM "ProductionOrder" WHERE "sourceOrderItemId"=$1', [oA.items[0].id])).length === 0, "a production order exists");
 
-  sub("A2. Waiting Approval — roast must be refused, and must move nothing");
-  await refusedRoastMovesNothing("unapproved", oA.items[0], /in status .{0,2}Waiting Approval/i);
+  sub("A2. before Commit Allocation — roast must be refused, and must move nothing");
+  await refusedRoastMovesNothing("not yet prepared", oA.items[0], /in status .{0,2}Waiting Preparation Review/i);
 
   // ═══════════════════════════════════════════════════════════════════════
   section("B — APPROVED BUT NOT REVIEWED");
@@ -235,17 +241,20 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════════
   section("F — THE UI QUEUE MUST AGREE WITH THE SERVER");
 
-  sub("F1. an unapproved order is not in the actionable production queue");
+  sub("F1. an order that has not committed allocation is not in the actionable queue");
   // Mirrors canStartProduction in order-operations-client against the very payload the
   // Production screen loads, so the filter cannot drift from the gate without failing here.
+  // Approval is deliberately NOT part of the mirror any more — it is not part of the gate.
   const listed = await api("/api/orders");
   check("orders list readable", listed.status === 200, `status=${listed.status}`);
   const actionable = (listed.json ?? []).flatMap((o) =>
-    !["Preparing", "Ready for Shipping"].includes(o.status) || o.approvalStatus !== "Yes"
+    !["Preparing", "Ready for Shipping"].includes(o.status)
       ? []
-      : (o.items ?? []).filter((i) => i.preparationDecision != null).map((i) => ({ n: o.orderNumber, id: i.id }))
+      : (o.items ?? [])
+          .filter((i) => i.preparationDecision != null && i.preparationDecision !== "Blocked")
+          .map((i) => ({ n: o.orderNumber, id: i.id }))
   );
-  check("the unapproved order (A) is absent from the queue",
+  check("the un-prepared order (A) is absent from the queue",
     !actionable.some((x) => x.n === oA.orderNumber), `#${oA.orderNumber} is listed`);
   check("the approved-but-unreviewed order (B) is absent",
     !actionable.some((x) => x.n === oB.orderNumber), `#${oB.orderNumber} is listed`);

@@ -455,9 +455,62 @@ export async function roastedKgForItem(
   };
 }
 
+/**
+ * Kilograms that ONE production order still owes, or 0 if that plan is not a live plan of
+ * this very line.
+ *
+ * Two subtractions, for two different reasons:
+ *
+ *   units already PACKED against the plan — the plan has delivered that much of its target;
+ *   kilograms already ROASTED against the plan — work in flight that has not been packed.
+ *
+ * The second matters because a plan's progress only moves when finished units are packed,
+ * so without it one plan would fund an unlimited number of roasts: every roast would find
+ * the plan still owing its full target and be waved through.
+ *
+ * Scoped deliberately: a plan belonging to another line, or one already COMPLETED or
+ * CANCELLED, owes nothing here. That scope is what stops the credit being borrowed.
+ */
+async function unbuiltKgOfPlan(
+  tx: PrismaTx,
+  orderItemId: string,
+  productionOrderId: string,
+): Promise<number> {
+  const po = await tx.productionOrder.findFirst({
+    where: {
+      id: productionOrderId,
+      sourceOrderItemId: orderItemId,
+      status: { in: ["PENDING", "IN_PRODUCTION"] },
+    },
+    select: { id: true, targetUnits: true, targetWeightKg: true },
+  });
+  if (!po || po.targetUnits <= 0) return 0;
+
+  const progress = await productionProgressMany(tx, [po]);
+  const unitsLeft = Math.max(0, po.targetUnits - (progress.get(po.id)?.producedUnits ?? 0));
+  const kgOwed = (po.targetWeightKg * unitsLeft) / po.targetUnits;
+
+  const roastedForPlan = await tx.roastingBatch.aggregate({
+    where: { productionOrderId: po.id, isBlend: false, status: { not: "Rejected" } },
+    _sum: { roastedBeanQuantity: true },
+  });
+
+  return Math.max(0, roundKg(kgOwed - (roastedForPlan._sum.roastedBeanQuantity ?? 0)));
+}
+
 export async function roastingCeilingForItem(
   tx: PrismaTx,
   orderItemId: string,
+  /**
+   * A production order this roast is being made FOR.
+   *
+   * Scheduled work is subtracted from demand because it is already planned, which is right
+   * for judging NEW demand but wrong for the roast that executes the plan: without this
+   * credit a plan covering the whole line drives the ceiling to zero and every roast
+   * against it reads as surplus, so only an admin could build what was already authorised.
+   * The credited amount is only ever the unbuilt remainder of a live plan of this line.
+   */
+  creditProductionOrderId?: string | null,
 ): Promise<RoastingCeiling | null> {
   const item = await tx.orderItem.findUnique({
     where: { id: orderItemId },
@@ -482,7 +535,12 @@ export async function roastingCeilingForItem(
       quantityUnits: item.quantityUnits,
       deliveredUnits: item.deliveredUnits,
     });
-    const outstandingKg = kgForUnits(item.productSku, demand.outstandingUnits);
+    // Credited in kilograms, not units: what the plan still owes can be a part-unit once
+    // roasted output in flight is taken off it.
+    const creditKg = creditProductionOrderId
+      ? await unbuiltKgOfPlan(tx, orderItemId, creditProductionOrderId)
+      : 0;
+    const outstandingKg = kgForUnits(item.productSku, demand.outstandingUnits) + creditKg;
     return {
       ceilingKg: Math.max(0, roundKg(outstandingKg - unaccountedRoastedKg)),
       basis: "units",
@@ -491,6 +549,8 @@ export async function roastingCeilingForItem(
     };
   }
 
+  // No plan credit below: the legacy branch never subtracts scheduled production in the
+  // first place, so there is nothing for a plan to give back.
   // Legacy bean-based line: no SKU, no units, so demand really is kilograms. Delivered is
   // subtracted here for the first time — a line that has already shipped most of its
   // quantity was previously treated as though none of it had left.

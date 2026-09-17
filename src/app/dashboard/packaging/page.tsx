@@ -60,6 +60,61 @@ function isBulkCustom(batch: Batch): boolean {
   return !batch.productId && !(batch.orderItem?.productId ?? null);
 }
 
+/**
+ * Which packaging method a batch uses, whether that choice is now fixed, and whether the
+ * batch is one of the few where the data genuinely does not decide it.
+ *
+ * The two paths are mutually exclusive and the server enforces it in both directions:
+ * pack-sku refuses a batch that already carries a legacy kilogram lot, and the kilogram
+ * route refuses one that already has finished units. This screen used to offer both
+ * buttons side by side until the kilogram path had been used, so an operator could pick
+ * the path the server was about to refuse, and a part-packed batch never showed which
+ * path it was already committed to.
+ *
+ * Derivation, in order:
+ *   1. A first operation has run — locked to whichever one ran.
+ *   2. The line was ordered as a SKU — finished units.
+ *   3. The line was ordered against a product but not a SKU — the legacy kilogram flow.
+ *   4. A roast made for the shelf against a product — both are genuinely open, so the
+ *      operator is asked, once, and the answer stands until a first operation locks it.
+ *   5. No product anywhere — kilograms; there is no SKU context to pack into.
+ */
+type PackMethod = "sku" | "bulk";
+
+function packMethodFor(batch: Batch): { method: PackMethod; locked: boolean; ambiguous: boolean } {
+  const bulkKg = packagedKg(batch);
+  if (bulkKg > 0) return { method: "bulk", locked: true, ambiguous: false };
+
+  // Coffee drawn off the batch that the bag counters do not account for was taken by the
+  // finished-unit path. Tested above a gram to stay clear of float noise in the kg columns.
+  //
+  // The status check is not redundant. This screen only ever loads Passed and Partially
+  // Packaged batches, and a real part-finished SKU run always lands on Partially Packaged —
+  // pack-sku marks a batch Packaged once under 0.05kg is left, and Packaged batches are not
+  // in this list. A Passed batch showing drawn-off coffee is instead an old blend written
+  // before blend/route.ts conserved mass, whose roastedAvailableKg was left at 0. Neither
+  // path can run on one of those, so it is not locked to either.
+  const skuKg = +(batch.roastedBeanQuantity - batch.roastedAvailableKg - bulkKg).toFixed(3);
+  if (skuKg > 0.001 && batch.status === "Partially Packaged") {
+    return { method: "sku", locked: true, ambiguous: false };
+  }
+
+  if (batch.orderItem) {
+    return {
+      method: batch.orderItem.productSkuId ? "sku" : "bulk",
+      locked: false,
+      ambiguous: false,
+    };
+  }
+
+  // A stock roast. With a product behind it both paths are real work an operator might
+  // legitimately want, and nothing in the data prefers one — this is the only case the
+  // frozen contract asks the operator to settle.
+  if (batch.productId) return { method: "sku", locked: false, ambiguous: true };
+
+  return { method: "bulk", locked: false, ambiguous: false };
+}
+
 export default function PackagingPage() {
   const user = useUser();
   const { t } = useI18n();
@@ -97,6 +152,13 @@ export default function PackagingPage() {
   const [selectedSkuId, setSelectedSkuId] = useState("");
 
   // ── Pack as finished product (step 12) ───────────────────────────────────
+
+  // Operator override of the derived packing method, per batch, before anything has been
+  // packed. The method is only LOCKED once a first operation has run; until then the
+  // derivation is a default, not a ruling, and a product-linked roast the floor needs to
+  // bag by weight has to stay reachable. Kept out of the card as a quiet secondary link so
+  // there is still exactly one primary action per batch.
+  const [methodOverride, setMethodOverride] = useState<Record<string, PackMethod>>({});
   const [packBatch, setPackBatch] = useState<Batch | null>(null);
   const [catalog, setCatalog] = useState<CatalogSku[]>([]);
   const [packSkuId, setPackSkuId] = useState("");
@@ -366,9 +428,9 @@ export default function PackagingPage() {
             const remaining = +(total - packed).toFixed(3);
             return (
               <div key={batch.id} data-testid={`pack-batch-${batch.batchNumber}`} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <div className="flex items-center gap-2">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
                       {canEditDate && (
                         <button
@@ -396,28 +458,71 @@ export default function PackagingPage() {
                       {batch.roastProfile && ` | ${batch.roastProfile}`}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     {canCancelBatch && (
                       <button onClick={() => setCancelBatch(batch)}
                         className="p-2 rounded-xl text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
                         <Trash2 size={16} />
                       </button>
                     )}
-                    {/* Step 12 — pack this roast into whole units of a finished SKU,
-                        consuming its BOM. Hidden once the batch has been packed the
-                        legacy kilogram way, since the two paths are mutually exclusive
-                        (the server refuses it too — this just avoids offering a dead
-                        button). */}
-                    {packagedKg(batch) === 0 && (
-                      <button onClick={() => openPackSku(batch)}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-action-primary text-white rounded-xl text-sm font-bold hover:bg-oo-action-primary-hover active:scale-[0.98] transition-all">
-                        <Boxes size={16} /> {t("packSkuBtn")}
-                      </button>
-                    )}
-                    <button onClick={() => openPackage(batch)}
-                      className="flex items-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all">
-                      <Package size={16} /> {batch.status === "Partially Packaged" ? t("continueProd") : t("packageBtn")}
-                    </button>
+                    {/* Step 12 — ONE packaging action per batch. Which path it opens is
+                        derived by packMethodFor and fixed after the first operation, so the
+                        operator is never shown two competing primary buttons for one job,
+                        and a part-packed batch continues in the method it is committed to.
+
+                        The one exception is a stock roast with a product behind it, where
+                        both paths are genuinely open and nothing in the data prefers one.
+                        That is asked once, as a choice rather than as two primary actions,
+                        and the answer then behaves exactly like a derived method. */}
+                    {(() => {
+                      const { method: derived, locked, ambiguous } = packMethodFor(batch);
+                      const answer = methodOverride[batch.id];
+                      const mustAsk = ambiguous && !locked && !answer;
+                      // The answer only applies while the method is still open. Once a first
+                      // operation has run the server refuses the other path anyway, so a
+                      // stale answer must not be able to open a dead form.
+                      const method = locked ? derived : (answer ?? derived);
+                      const partial = batch.status === "Partially Packaged";
+
+                      if (mustAsk) {
+                        return (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-[10px] font-semibold text-brown/60 text-end">
+                              {t("pkgChooseMethod")}
+                            </span>
+                            <div className="flex gap-2">
+                              {(["sku", "bulk"] as const).map((m) => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => setMethodOverride((prev) => ({ ...prev, [batch.id]: m }))}
+                                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold border-2 border-border text-brown bg-white hover:border-orange/60 hover:text-orange active:scale-[0.98] transition-all"
+                                >
+                                  {m === "sku" ? <Boxes size={15} /> : <Package size={15} />}
+                                  {m === "sku" ? t("pkgMethodSku") : t("pkgMethodBulk")}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="flex flex-col items-end gap-1 w-full xl:w-auto">
+                          <button
+                            onClick={() => (method === "sku" ? openPackSku(batch) : openPackage(batch))}
+                            className="flex items-center justify-center gap-1.5 w-full xl:w-auto px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
+                          >
+                            {method === "sku" ? <Boxes size={16} /> : <Package size={16} />}
+                            {partial ? t("continuePackaging") : t("startPackaging")}
+                          </button>
+                          <span className="text-[10px] font-semibold text-brown/60 text-end">
+                            {method === "sku" ? t("pkgMethodSku") : t("pkgMethodBulk")}
+                            {locked && <> · {t("pkgMethodLocked")}</>}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 {/* Progress bar */}
@@ -454,6 +559,13 @@ export default function PackagingPage() {
           <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("packageBatchTitle")}</h2>
             <p className="text-sm text-brown font-medium mb-1">{selectedBatch.batchNumber} — {selectedBatch.greenBean?.beanType || (selectedBatch.orderItem?.beanTypeName ?? "")}</p>
+            {/* The method this batch is being packed in, named on the form itself. A
+                continuation has to say which path it is continuing — the card that opened
+                it is behind a modal by then. */}
+            <p className="text-[11px] font-bold text-brown/60 mb-2">
+              {t("pkgMethodBulk")}
+              {packMethodFor(selectedBatch).locked && <> · {t("pkgMethodLocked")}</>}
+            </p>
             {(() => {
               const alreadyPacked = packagedKg(selectedBatch);
               const remainingCapacity = +(selectedBatch.roastedBeanQuantity - alreadyPacked).toFixed(3);
@@ -546,6 +658,16 @@ export default function PackagingPage() {
                       {exceeded && ` — ${t("exceedsCapacity")}`}
                       {empty && ` — ${t("enterAtLeastOne")}`}
                     </div>
+                    {/* The closing warning, next to the button that would close the batch.
+                        Packaging the last of a roast finalises it, and the screen said
+                        nothing about that until it had already happened. 0.05kg is the same
+                        slack the server uses to decide a batch is finished. */}
+                    {!invalid && newTotalKg >= selectedBatch.roastedBeanQuantity - 0.05 && (
+                      <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-1.5">
+                        <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
+                        {t("pkgClosingWarning")}
+                      </p>
+                    )}
                     <div className="flex gap-3 pt-2">
                       <button type="submit" disabled={invalid}
                         className={`flex-1 py-3 rounded-xl font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${invalid ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
@@ -636,6 +758,32 @@ export default function PackagingPage() {
           ? Math.floor((packBatch.roastedAvailableKg + 0.0005) / coffeePerUnit)
           : 0;
         const overCapacity = packUnits > maxUnits;
+        // What the floor can actually make right now, and what is missing if the operator
+        // asked for more. Reported as three separate numbers — requested, possible, missing
+        // — because collapsing them into one auto-corrected figure is exactly the silent
+        // substitution the frozen contract forbids: the operator must change the request
+        // themselves, or the pack sheet and the shelf stop agreeing about what was made.
+        //
+        // Availability is the snapshot this modal loaded. The server still holds the real
+        // reservation and can refuse a run this preview thought was fine.
+        // MATERIALS only — bags, labels, boxes. The BOM's roasted-coffee line is drawn from
+        // THIS batch, not from a shelf, so it is not a material that can be short: its
+        // ceiling is roastedAvailableKg and is already enforced by maxUnits/overCapacity
+        // above. Counting it here read the coffee as missing stock and blocked a pack the
+        // batch could fully cover. Split on the same test coffeePerUnit uses, so the two
+        // halves of the BOM cannot drift apart.
+        const materialLines = packBom.filter((b) => b.unitOfMeasure !== "KG");
+        const materialCap = materialLines.length > 0
+          ? Math.min(...materialLines.map((b) => (b.quantityPerUnit > 0 ? Math.floor((b.quantityAvailable + 0.0005) / b.quantityPerUnit) : Infinity)))
+          : Infinity;
+        const maxPossibleUnits = Math.max(0, Math.min(maxUnits, Number.isFinite(materialCap) ? materialCap : maxUnits));
+        const shortLines = packUnits > 0
+          ? materialLines
+              .map((b) => ({ ...b, need: +(b.quantityPerUnit * packUnits).toFixed(3) }))
+              .filter((b) => b.need > b.quantityAvailable + 0.0005)
+          : [];
+        // Confirmation is blocked, not adjusted.
+        const blockedByShortage = packUnits > 0 && shortLines.length > 0;
         return (
           <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto">
             <form onSubmit={handlePackSku} className="bg-white rounded-2xl w-full max-w-lg my-8 shadow-xl">
@@ -650,9 +798,26 @@ export default function PackagingPage() {
               </div>
 
               <div className="p-4 space-y-3">
-                <div className="rounded-xl bg-oo-bg-subtle px-3 py-2 text-sm">
-                  <span className="text-oo-text-secondary">{t("roastedAvailableLabel")}: </span>
-                  <b className="text-oo-text-primary">{packBatch.roastedAvailableKg} kg</b>
+                {/* What this run is continuing: the locked method, what the batch has
+                    already given up, and what is left to pack. A continuation form that
+                    showed only the remainder made a second pass look like a first one. */}
+                <div className="rounded-xl bg-oo-bg-subtle px-3 py-2 text-sm space-y-0.5">
+                  <p className="text-[11px] font-bold text-oo-text-muted">
+                    {t("pkgMethodSku")}
+                    {packMethodFor(packBatch).locked && <> · {t("pkgMethodLocked")}</>}
+                  </p>
+                  {packBatch.roastedBeanQuantity - packBatch.roastedAvailableKg > 0.001 && (
+                    <p>
+                      <span className="text-oo-text-secondary">{t("alreadyPackaged")} </span>
+                      <b className="text-oo-text-primary">
+                        {+(packBatch.roastedBeanQuantity - packBatch.roastedAvailableKg).toFixed(3)} kg
+                      </b>
+                    </p>
+                  )}
+                  <p>
+                    <span className="text-oo-text-secondary">{t("roastedAvailableLabel")}: </span>
+                    <b className="text-oo-text-primary">{packBatch.roastedAvailableKg} kg</b>
+                  </p>
                 </div>
 
                 {sellable.length === 0 ? (
@@ -718,6 +883,44 @@ export default function PackagingPage() {
                           </div>
                         )}
 
+                        {/* Material shortage, as its own panel and in three separate
+                            figures: what was requested, what is actually possible right now,
+                            and what is missing. The requested number is never rewritten to
+                            the possible one — quietly packing fewer units than an operator
+                            asked for is the one outcome that leaves the floor and the system
+                            disagreeing about what was made. Confirmation is blocked instead,
+                            so changing the request stays a deliberate act. */}
+                        {blockedByShortage && (
+                          <div className="rounded-xl border border-oo-status-blocked/40 bg-red-50 p-2.5" role="alert">
+                            <p className="text-[11px] font-bold text-oo-status-blocked uppercase mb-1.5 flex items-center gap-1.5">
+                              <AlertTriangle size={13} /> {t("pkgShortageTitle")}
+                            </p>
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1 mb-2">
+                              <span className="text-[11px] text-oo-text-muted">{t("pkgShortageRequested")}</span>
+                              <span className="text-xs font-bold tabular-nums text-end">{packUnits}</span>
+                              <span className="text-[11px] text-oo-text-muted">{t("pkgShortageMaxPossible")}</span>
+                              <span className="text-xs font-bold tabular-nums text-end">{maxPossibleUnits}</span>
+                            </div>
+                            <p className="text-[11px] font-bold text-oo-status-blocked uppercase mb-1">
+                              {t("pkgShortageMissing")}
+                            </p>
+                            <ul className="space-y-0.5 mb-1.5">
+                              {shortLines.map((b, i) => (
+                                <li key={i} className="text-xs text-oo-text-secondary">
+                                  {b.label}:{" "}
+                                  <span className="text-oo-status-blocked font-semibold">
+                                    {+(b.need - b.quantityAvailable).toFixed(3)} {b.unitOfMeasure === "KG" ? "kg" : "pcs"}
+                                  </span>{" "}
+                                  <span className="text-oo-text-muted">
+                                    ({t("pkgShortageRequested")} {b.need} · {t("pkgShortageAvailable")} {b.quantityAvailable})
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="text-[11px] font-semibold text-oo-text-muted">{t("pkgShortageNoChange")}</p>
+                          </div>
+                        )}
+
                         {overCapacity && (
                           <p className="text-xs font-semibold text-oo-status-blocked">
                             {t("roastedAvailableLabel")}: {packBatch.roastedAvailableKg} kg — {t("maxUnitsLabel")}: {maxUnits}
@@ -726,6 +929,18 @@ export default function PackagingPage() {
                       </>
                     )}
                   </>
+                )}
+
+                {/* Closing warning, kept inside the scrolling body immediately above the
+                    footer so it sits next to the action that would close the batch. The
+                    0.05kg threshold is the one pack-sku itself uses to mark a batch
+                    Packaged, so this fires exactly when the batch will actually close. */}
+                {packUnits > 0 && !blockedByShortage && !overCapacity && coffeePerUnit > 0 &&
+                  packBatch.roastedAvailableKg - packUnits * coffeePerUnit < 0.05 && (
+                  <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-1.5">
+                    <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
+                    {t("pkgClosingWarning")}
+                  </p>
                 )}
 
                 {packError && (
@@ -738,7 +953,7 @@ export default function PackagingPage() {
               <div className="flex gap-3 p-4 border-t border-oo-border-default">
                 <button
                   type="submit"
-                  disabled={packing || !packSkuId || packUnits <= 0 || overCapacity}
+                  disabled={packing || !packSkuId || packUnits <= 0 || overCapacity || blockedByShortage}
                   className="flex-1 py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {packing ? "…" : t("packSkuBtn")}

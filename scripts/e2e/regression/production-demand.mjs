@@ -187,14 +187,54 @@ async function main() {
   check("still exactly one production order", posB.length === 1, `${posB.length} orders`);
 
   sub("B3. the ROASTING GATE must not ignore scheduled production either");
+  // The gate must not let a plan and a fresh roast cover the same demand twice, so a roast
+  // that goes BEYOND what the open plan still owes is surplus and is refused.
+  //
+  // It used to refuse the whole amount, plan included, which made the plan impossible to
+  // execute: the roaster who opened the task the plan created was told only an admin could
+  // authorize it. The ceiling now credits the unbuilt remainder of the plan the roast
+  // belongs to, so the line below is one kilogram past that remainder rather than at it.
   const skuKgB = C.skus.eth250.grams / 1000;
-  await topUpGreen(C.beans.ethiopia.id, 10 * skuKgB + 3);
+  const planKgB = 10 * skuKgB;
+  const beyondPlanKgB = +(planKgB + 1).toFixed(3);
+  await topUpGreen(C.beans.ethiopia.id, beyondPlanKgB + 3);
   await asRoaster();
-  const gateB = await roastFor(oB.items[0], C.beans.ethiopia, 10 * skuKgB + 3, 10 * skuKgB);
+  const gateB = await roastFor(oB.items[0], C.beans.ethiopia, beyondPlanKgB + 3, beyondPlanKgB);
   await asAdmin();
-  console.log(`    roast the whole order again while 10 units are on an open PO -> ${gateB.status} ${S(gateB.json).slice(0, 120)}`);
-  check("roasting a fully scheduled line again is refused", gateB.status === 422,
+  console.log(`    roast ${beyondPlanKgB}kg while ${planKgB}kg is on an open PO -> ${gateB.status} ${S(gateB.json).slice(0, 120)}`);
+  check("roasting past what the open plan still owes is refused", gateB.status === 422,
     `status=${gateB.status} ${S(gateB.json).slice(0, 140)}`);
+  check("and no batch was created for the scheduled line", (await batchesFor(oB.items[0].id)).length === 0,
+    `${(await batchesFor(oB.items[0].id)).length} batches`);
+
+  sub("B3b. but the plan itself can be executed, by the roaster who was given the task");
+  // The other half of the same rule, and the one the browser UAT caught missing: roasting
+  // exactly what an open plan still owes is the plan being carried out, not surplus. Its own
+  // order line, so section C still finds oB with no roasted output behind it.
+  const oB2 = await orderFor(C.skus.eth250.id, 10, "plan is executable");
+  const schedB3 = await scheduleProduction(oB2.items[0].id);
+  check("a production order is raised for the whole line", schedB3.status === 201, S(schedB3.json).slice(0, 130));
+  await topUpGreen(C.beans.ethiopia.id, planKgB + 3);
+  await asRoaster();
+  const planRoast = await roastFor(oB2.items[0], C.beans.ethiopia, planKgB + 3, planKgB);
+  await asAdmin();
+  console.log(`    roast exactly the ${planKgB}kg the plan owes -> ${planRoast.status} ${S(planRoast.json).slice(0, 120)}`);
+  check("a roaster may roast exactly what the open plan owes", planRoast.status === 201,
+    `status=${planRoast.status} ${S(planRoast.json).slice(0, 160)}`);
+  const linked = await one('SELECT "productionOrderId" poid FROM "RoastingBatch" WHERE id=$1', [planRoast.json?.id]);
+  check("and the batch is credited to that plan, not left unattached",
+    linked?.poid === schedB3.json?.productionOrder?.id, `productionOrderId=${linked?.poid}`);
+  // A plan's progress only moves when finished units are PACKED, so it still reads as
+  // scheduled here — correct, and the reason the credit has to net off roasted output in
+  // flight rather than trust the plan's own progress. Without that, this same plan would
+  // wave through a second roast, and the line would end up with twice what was planned.
+  await asRoaster();
+  const secondRoast = await roastFor(oB2.items[0], C.beans.ethiopia, planKgB + 3, planKgB);
+  await asAdmin();
+  check("the same plan cannot fund a second roast of the same work", secondRoast.status === 422,
+    `status=${secondRoast.status} ${S(secondRoast.json).slice(0, 160)}`);
+  check("so the line still holds exactly one batch", (await batchesFor(oB2.items[0].id)).length === 1,
+    `${(await batchesFor(oB2.items[0].id)).length} batches`);
 
   // ═══════════════════════════════════════════════════════════════════════
   section("C — A CANCELLED PRODUCTION ORDER COVERS NOTHING");

@@ -37,8 +37,15 @@ type OrderItem = {
   availableQuantity: number | null;
   greenBeanId: string | null; greenBean: { id: string; beanType: string; quantityKg: number } | null;
   order: { orderNumber: number; customer: { name: string; roastPreferences: CustomerPref[] } };
-  roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; isBlend: boolean }[];
-  productionOrders?: { id: string; status: string }[];
+  // `status` is already returned by GET /api/orders (the include selects every scalar on the
+  // batch); it was simply not declared here, so the screen could not tell a rejected roast
+  // from a good one and counted both as produced progress. See producedFinishedKg below.
+  roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; isBlend: boolean; status: string }[];
+  // The sellable unit this line was ordered in, when it was ordered as one. Already in the
+  // GET /api/orders payload (the item include selects productSku); it was simply not
+  // declared here, so a line ordered as 240 x 250g bags could only be shown as 60kg.
+  productSku?: { skuCode: string; weightGrams: number } | null;
+  productionOrders?: { id: string; productionNumber: string; status: string }[];
 };
 
 type GreenBean = { id: string; beanType: string; quantityKg: number; serialNumber: string };
@@ -121,6 +128,10 @@ export default function ProductionPage() {
 
   // Overproduction confirmation
   const [overproductionExcess, setOverproductionExcess] = useState<number | null>(null);
+  // The server will not authorize surplus production on the strength of a click: it wants
+  // surplusOverride together with a written reason, and refuses an admin without one. The
+  // dialog used to send neither, so Add as Surplus could not authorize anything at all.
+  const [surplusReason, setSurplusReason] = useState("");
   const [surplusError, setSurplusError] = useState<string | null>(null);
 
   // Cancel batch modal
@@ -172,8 +183,10 @@ export default function ProductionPage() {
     // Converting finished demand to a green weight needs the coffee's roast loss, which this
     // screen does not have. The operator weighs what goes into the roaster, so the green
     // field is left for them to fill; the remaining demand is shown beside it as context.
+    // A rejected roast produced nothing usable, so it is not progress. Counting it made the
+    // line look partly covered and hid the work that still has to be done again.
     const producedFinishedKg = item.roastingBatches
-      .filter((b) => !b.isBlend)
+      .filter((b) => !b.isBlend && b.status !== "Rejected")
       .reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
     const coveredFromShelf = item.availableQuantity ?? 0;
     const remainingFinishedKg = Number(
@@ -211,7 +224,7 @@ export default function ProductionPage() {
    * between them is not something a screen should do silently, and the server refuses a
    * mismatched pairing anyway.
    */
-  function livePosFor(item: OrderItem | null): { id: string; status: string }[] {
+  function livePosFor(item: OrderItem | null): { id: string; productionNumber: string; status: string }[] {
     return (item?.productionOrders ?? []).filter(
       (p) => p.status === "PENDING" || p.status === "IN_PRODUCTION",
     );
@@ -238,6 +251,7 @@ export default function ProductionPage() {
       const excess = +(roastForm.roastedBeanQuantity - remainingFinishedKg).toFixed(2);
       if (excess > 0) {
         setOverproductionExcess(excess);
+        setSurplusReason("");
         return;
       }
     }
@@ -261,6 +275,8 @@ export default function ProductionPage() {
         // and derives it anyway when it is unambiguous, so this is the screen stating what
         // it is looking at rather than the only route to the link.
         productionOrderId: stockMode ? undefined : (poChoice || undefined),
+        // Only on the deliberate second submit, and only ever what the operator typed.
+        ...(forceSubmit ? { surplusOverride: true, surplusReason: surplusReason.trim() } : {}),
       }),
     });
 
@@ -351,13 +367,23 @@ export default function ProductionPage() {
 
   // Defence in depth only — the backend is the authority (see productionGateRefusal in
   // services/order-operations). An operator must not be offered Start Production for work
-  // the server will refuse, so the same three conditions are applied here: the order is in
-  // a production-entry status, it is approved, and this line has been through preparation
-  // review. Every field is already in the /api/orders payload; nothing was added to it.
+  // the server will refuse, so canStartProduction applies the same conditions the gate
+  // does: the order is in a production-entry status, the line has been through preparation
+  // review, and it is not blocked. Approval is NOT among them — it no longer gates the
+  // normal path. Every field is already in the /api/orders payload; nothing was added to it.
   const pendingItems = orders.flatMap((o: any) =>
     o.items
       .filter((i: { preparationDecision: string | null }) => canStartProduction(o, i))
       .filter((i: any) => i.productionStatus !== "Completed" && i.productionStatus !== "Order cancelled")
+      // A line preparation covered entirely from the shelf is not production work, and
+      // listing it here invented a roasting task for coffee the order already holds.
+      //
+      // Display only. The server gate deliberately does not refuse these (see
+      // productionGateRefusal: productionRequiredQuantity goes stale, so the live shortfall
+      // is recomputed per caller), and canStartProduction still mirrors the gate exactly.
+      // If coverage later evaporates, preparation review is re-run and the line reappears
+      // here with a decision that reflects the shortfall.
+      .filter((i: { preparationDecision: string | null }) => i.preparationDecision !== "Available on Shelf")
       .map((i: any) => ({
         ...i,
         order: {
@@ -372,8 +398,10 @@ export default function ProductionPage() {
         // Roasted output against ordered finished weight. Summing greenBeanQuantity here
         // compared roaster INPUT against customer OUTPUT and hid lines that still needed
         // roasting, because the green figure is always the larger of the two.
+        // Rejected roasts are not progress — a line whose only roast failed QC must stay in
+        // the queue rather than disappearing from it as though it were covered.
         const producedFinishedKg = (i.roastingBatches ?? [])
-          .filter((b: any) => !b.isBlend)
+          .filter((b: any) => !b.isBlend && b.status !== "Rejected")
           .reduce((s: number, b: any) => s + b.roastedBeanQuantity, 0);
         return i.quantityKg - producedFinishedKg > 0;
       })
@@ -495,17 +523,57 @@ export default function ProductionPage() {
               {filteredPending.map((item: OrderItem) => {
                 // Both sides finished weight. Charting green input against a finished target
                 // overstated progress on every line, since green is always heavier.
-                const produced = item.roastingBatches.filter((b) => !b.isBlend).reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
+                const produced = item.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
                 const remaining = item.quantityKg - produced;
                 const progress = item.quantityKg > 0 ? (produced / item.quantityKg) * 100 : 0;
+                // Required / Produced / Remaining in the unit the line was ORDERED in. A
+                // line sold as 240 x 250g bags is worked in bags; only a legacy line with no
+                // SKU behind it is worked in kilograms. Roasting still happens by weight, so
+                // the kilogram figure stays on the card as an explicitly-labelled aside
+                // rather than as one of the three numbers.
+                const unitKg = item.productSku && item.productSku.weightGrams > 0 ? item.productSku.weightGrams / 1000 : 0;
+                const inUnits = unitKg > 0;
+                // Whole units only: a part-filled bag is not a produced bag.
+                const requiredDisp = inUnits ? Math.round(item.quantityKg / unitKg) : item.quantityKg;
+                const producedDisp = inUnits ? Math.floor(produced / unitKg) : produced;
+                const remainingDisp = inUnits ? Math.max(0, requiredDisp - producedDisp) : Math.max(0, remaining);
+                // A roast that failed QC no longer counts as progress (see producedFinishedKg),
+                // which is correct but silent: the line simply stayed in the queue with no
+                // explanation. Surfaced here so the reason for the outstanding work is visible.
+                const rejectedCount = item.roastingBatches.filter((b) => !b.isBlend && b.status === "Rejected").length;
                 return (
                   <div key={item.id} data-testid={`roast-item-${item.order.orderNumber}`} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
+                    <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+                      <div className="min-w-0 flex-1">
                         <p className="font-bold text-charcoal">#{item.order.orderNumber} — {item.order.customer.name}</p>
                         {/* The translation already carries the unit ("kg ordered"), so the
                             literal kg here was rendering "12kg kg ordered". */}
-                        <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg} {t("kgOrdered")}</p>
+                        <p className="text-sm text-brown font-medium">{item.beanTypeName} — {inUnits ? <>{requiredDisp} × {item.productSku!.skuCode}</> : <>{item.quantityKg} {t("kgOrdered")}</>}</p>
+                        {/* The plan this work belongs to, printed on the task itself. A
+                            separate production-order card would have been a second copy of
+                            the same job, and the operator would have had to match them by
+                            hand. Every live plan is listed: when there is more than one the
+                            roast form asks which, and hiding the extras here would make that
+                            question arrive from nowhere. */}
+                        {livePosFor(item).length > 0 && (
+                          <p className="flex flex-wrap items-center gap-1 mt-1">
+                            {livePosFor(item).map((p) => (
+                              <span
+                                key={p.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-300 font-mono"
+                              >
+                                {t("prodOrderRef")} {p.productionNumber}
+                              </span>
+                            ))}
+                          </p>
+                        )}
+                        {rejectedCount > 0 && (
+                          <p className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800 border border-red-300">
+                              <AlertTriangle size={11} aria-hidden="true" /> {rejectedCount} {t("prodRejectedRoasts")}
+                            </span>
+                          </p>
+                        )}
                         {/* Customer roast profile badge */}
                         {editingProfileId === item.id ? (
                           <div className="flex items-center gap-2 mt-1">
@@ -565,20 +633,32 @@ export default function ProductionPage() {
                       </div>
                       {canStartBatch && (
                         <button onClick={() => startProduction(item)}
-                          className="px-4 py-2 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200">
+                          className="w-full xl:w-auto flex items-center justify-center flex-shrink-0 px-4 py-2 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200">
                           {produced > 0 ? t("continueProd") : t("startProduction")}
                         </button>
                       )}
                     </div>
-                    {produced > 0 && (
-                      <div>
-                        <div className="flex justify-between text-xs text-brown mb-1">
-                          <span>{formatKg(produced)}kg {t("producedKg")}</span>
-                          <span>{formatKg(remaining)}kg {t("remainingKg")}</span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div className="bg-orange h-2 rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
-                        </div>
+                    {/* Required / Produced / Remaining — always shown, always in finished
+                        kilograms. These figures used to appear only once a first roast
+                        existed, so a fresh task carried no number an operator could act on. */}
+                    <div>
+                      <div className="flex justify-between gap-2 text-xs text-brown mb-1">
+                        <span>{inUnits ? `${requiredDisp} ${t("unitsRequired")}` : `${formatKg(item.quantityKg)}kg ${t("requiredKg")}`}</span>
+                        <span>{inUnits ? `${producedDisp} ${t("unitsProduced")}` : `${formatKg(produced)}kg ${t("producedKg")}`}</span>
+                        <span className="font-bold text-charcoal">{inUnits ? `${remainingDisp} ${t("unitsRemaining")}` : `${formatKg(Math.max(0, remaining))}kg ${t("remainingKg")}`}</span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div className="bg-orange h-2 rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
+                      </div>
+                      {/* Roasting is done by weight whatever the line was sold in, so the
+                          kilograms stay on the card — labelled as the roasting figure, not
+                          mixed in with the three numbers above. */}
+                      {inUnits && remaining > 0 && (
+                        <p className="text-[11px] text-brown/50 mt-1">
+                          ≈ {formatKg(Math.max(0, remaining))}kg {t("toRoastAside")}
+                        </p>
+                      )}
+                      {produced > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {item.roastingBatches.map((b) => {
                             const fullBatch = canEditDate
@@ -599,8 +679,8 @@ export default function ProductionPage() {
                             );
                           })}
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -630,8 +710,8 @@ export default function ProductionPage() {
           ) : (
             batches.map((batch) => (
               <div key={batch.id} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
                       {canEditDate && (
@@ -665,7 +745,7 @@ export default function ProductionPage() {
                       {batch.roastProfile && ` | ${batch.roastProfile}`}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-shrink-0">
                     {canCancelBatch && (
                       <button onClick={() => setCancelBatch(batch)}
                         className="p-2 rounded-xl text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
@@ -726,7 +806,7 @@ export default function ProductionPage() {
                 </p>
                 <p className="text-xs text-brown/60 mt-2">
                   {t("requiredQtyLabel")}: {selectedItem.quantityKg}kg — {t("totalProducedLabel")}: {+(
-                    selectedItem.roastingBatches.filter((b) => !b.isBlend).reduce((s, b) => s + b.roastedBeanQuantity, 0) +
+                    selectedItem.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s, b) => s + b.roastedBeanQuantity, 0) +
                     roastForm.roastedBeanQuantity
                   ).toFixed(2)}kg
                 </p>
@@ -744,14 +824,28 @@ export default function ProductionPage() {
                 </button>
               </div>
             ) : (
+              <>
+              <label className="block mb-3">
+                <span className="block text-xs font-bold text-charcoal mb-1">
+                  {t("surplusReasonLabel")} <span className="text-red-500">*</span>
+                </span>
+                <textarea
+                  value={surplusReason}
+                  onChange={(e) => setSurplusReason(e.target.value)}
+                  rows={2}
+                  placeholder={t("surplusReasonPlaceholder")}
+                  className="w-full px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors resize-none"
+                />
+              </label>
               <div className="flex gap-3">
                 <button
+                  disabled={surplusReason.trim().length < 8}
                   onClick={async () => {
                     setSurplusError(null);
                     const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
                     await handleRoastSubmit(fakeEvent, true);
                   }}
-                  className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 active:scale-[0.98] transition-all shadow-md">
+                  className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 active:scale-[0.98] transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
                   {t("addAsSurplus")}
                 </button>
                 <button
@@ -760,6 +854,7 @@ export default function ProductionPage() {
                   {t("cancel")}
                 </button>
               </div>
+              </>
             )}
           </div>
         </div>
@@ -822,7 +917,7 @@ export default function ProductionPage() {
                   >
                     <option value="">Select which production order this roast is for…</option>
                     {livePosFor(selectedItem).map((p) => (
-                      <option key={p.id} value={p.id}>{p.id} — {p.status}</option>
+                      <option key={p.id} value={p.id}>{p.productionNumber} — {p.status}</option>
                     ))}
                   </select>
                 </div>

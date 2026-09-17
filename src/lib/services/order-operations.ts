@@ -26,9 +26,20 @@ export function isOrderStatus(value: unknown): value is OrderStatus {
   return typeof value === "string" && (ORDER_STATUSES as readonly string[]).includes(value);
 }
 
-// Statuses from which preparation-review may run. Excludes "Waiting Approval" (not yet
-// approved), "On Hold" (must be resumed first — business rule 5), and all terminal states.
+// Statuses from which preparation-review (Commit Allocation) may run.
+//
+// "Waiting Approval" is included, and that is the whole of the legacy-compatibility story.
+// Routine approval has been removed from the normal path: a new order is created directly
+// into "Waiting Preparation Review", so nothing NEW ever lands in "Waiting Approval" again.
+// But orders created under the old workflow are still sitting in it, and stranding them
+// would mean either a bulk data update or an approval click the UX no longer offers.
+// Letting them commit allocation moves them onto the same derived status as everything
+// else, one order at a time, as operators reach them.
+//
+// Still excluded, each for its own reason: "On Hold" must be resumed first (business
+// rule 5), and the terminal states are terminal.
 export const PREPARATION_REVIEW_ENTRY_STATUSES: OrderStatus[] = [
+  "Waiting Approval",
   "Waiting Preparation Review",
   "Preparing",
   "Ready for Shipping",
@@ -202,7 +213,9 @@ export function isProductionAllowedFrom(status: OrderStatus): boolean {
 /** The fields the production gate needs. Loaded by the caller; this function does no I/O. */
 export type ProductionGateSubject = {
   preparationDecision: string | null;
-  order: { status: string; approvalStatus: string };
+  // approvalStatus is still selected by some callers and still exists on the model, but it
+  // no longer gates anything on the normal path — see productionGateRefusal.
+  order: { status: string; approvalStatus?: string };
 };
 
 /**
@@ -233,15 +246,12 @@ export function productionGateRefusal(
     };
   }
 
-  // Belt and braces. status and approvalStatus are separate columns written by the same
-  // route, so a disagreement between them means something wrote one without the other.
-  if (order.approvalStatus !== "Yes") {
-    return {
-      _appCode: 409,
-      message: `Cannot ${verb} production: this order has not been approved (approval is "${order.approvalStatus}").`,
-    };
-  }
-
+  // Approval is deliberately NOT checked here any more. Routine approval was removed from
+  // the normal order path, so `approvalStatus` stays "Pending" for every order created
+  // under the current workflow; gating on it would refuse all production. What actually
+  // establishes that this line may be produced is unchanged and checked below: an order
+  // status production is allowed from, and a line that has been through Commit Allocation.
+  //
   // Per line, because a roast targets one line and the order-level status is a derived
   // column. A null decision means preparation review never ran for this line, so nothing
   // has reserved shelf stock against it and no shortfall has been established.
@@ -249,6 +259,17 @@ export function productionGateRefusal(
     return {
       _appCode: 409,
       message: `Cannot ${verb} production: this line has not completed preparation review.`,
+    };
+  }
+
+  // A blocked line is one the operator deliberately refused to prepare. It receives no
+  // allocation, it holds the order out of Ready for Shipping, and it must not quietly
+  // become the reason a roast is started — producing for it would create stock nobody
+  // asked for against a line that is not going to ship.
+  if (preparationDecision === "Blocked") {
+    return {
+      _appCode: 409,
+      message: `Cannot ${verb} production: this line is blocked.`,
     };
   }
 
@@ -388,11 +409,14 @@ export function isReservationAllowedFrom(status: string): boolean {
  */
 export function canReserveToOrderLine(subject: {
   preparationDecision: string | null;
-  order: { status: string; approvalStatus: string };
+  order: { status: string; approvalStatus?: string };
 }): boolean {
   return (
     isReservationAllowedFrom(subject.order.status) &&
-    subject.order.approvalStatus === "Yes" &&
+    // Approval is deliberately not consulted: it is "Pending" on every order created under
+    // the current workflow, so requiring it would silently stop packaging output ever
+    // reserving to the order that asked for it. The reviewed states above are what make a
+    // reservation legitimate.
     subject.preparationDecision !== null &&
     // A blocked line is one the reviewer deliberately refused to promise stock to.
     subject.preparationDecision !== "Blocked"

@@ -43,31 +43,7 @@ test("Double-clicking Create Order creates exactly one order", async ({ page }) 
   expect(problems.failedRequests).toEqual([]);
 });
 
-test("Hammering Approve does not approve twice or corrupt the status", async ({ page }) => {
-  await loginAs(page, "sales");
-  await page.goto("/dashboard/orders");
-
-  const row = orderCard(page, orderNumber);
-  await expect(row).toBeVisible({ timeout: 60_000 });
-  await row.locator("div.cursor-pointer").first().click();
-
-  const approve = row.getByRole("button", { name: /^Approve$/i }).first();
-  await expect(approve).toBeVisible();
-  // Five clicks in a row. Only the first can be legal; the rest must be absorbed.
-  for (let i = 0; i < 5; i++) await approve.click({ force: true, timeout: 5_000 }).catch(() => {});
-
-  await expect
-    .poll(async () => (await one<{ s: string }>(`SELECT status s FROM "Order" WHERE "orderNumber"=$1`, [orderNumber])).s, { timeout: 60_000 })
-    .toBe("Waiting Preparation Review");
-
-  const activities = await all<{ type: string }>(
-    `SELECT a.type FROM "OrderActivity" a JOIN "Order" o ON o.id=a."orderId"
-      WHERE o."orderNumber"=$1 AND a.type='ORDER_APPROVED'`, [orderNumber]
-  );
-  expect(activities.length, "the approval is recorded once, not five times").toBe(1);
-});
-
-test("Hammering Save Preparation Review reserves stock only once", async ({ page }) => {
+test("Hammering Commit Allocation reserves stock only once", async ({ page }) => {
   await loginAs(page, "sales");
   const card = await openWorkstationOrder(page, orderNumber);
 
@@ -76,14 +52,12 @@ test("Hammering Save Preparation Review reserves stock only once", async ({ page
   // holds no matter how badly the saves race, which is exactly how a double reservation
   // went unnoticed. Getting stock here needs the full chain, in this order:
   //   review once  -> the order leaves "Waiting Preparation Review" and enters the
-  //                   production queue (production is gated on a reviewed, approved order)
+  //                   production queue (production is gated on a reviewed, unblocked line)
   //   roast, QC, pack -> 8 units of KEN-1KG on the shelf
   // 8 against a 6-unit line leaves room to over-reserve if the guard fails.
-  const first = card.locator("table select");
-  for (let i = 0; i < (await first.count()); i++) await first.nth(i).selectOption("Available on Shelf");
-  const firstSave = card.getByRole("button", { name: /Save Preparation Review/i });
-  await expect(firstSave).toBeEnabled();
-  await firstSave.click();
+  const firstCommit = card.getByRole("button", { name: /Commit Allocation/i });
+  await expect(firstCommit).toBeEnabled({ timeout: 30_000 });
+  await firstCommit.click();
   await expect
     .poll(async () => (await one<{ s: string }>(`SELECT status s FROM "Order" WHERE "orderNumber"=$1`, [orderNumber])).s,
       { timeout: 60_000 })
@@ -98,10 +72,8 @@ test("Hammering Save Preparation Review reserves stock only once", async ({ page
 
   await loginAs(page, "sales");
   const stocked = await openWorkstationOrder(page, orderNumber);
-  const selects2 = stocked.locator("table select");
-  for (let i = 0; i < (await selects2.count()); i++) await selects2.nth(i).selectOption("Available on Shelf");
 
-  const save = stocked.getByRole("button", { name: /Save Preparation Review/i });
+  const save = stocked.getByRole("button", { name: /Commit Allocation/i });
   await expect(save).toBeEnabled();
   for (let i = 0; i < 4; i++) await save.click({ force: true, timeout: 5_000 }).catch(() => {});
 

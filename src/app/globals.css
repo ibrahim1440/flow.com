@@ -207,3 +207,87 @@ h1, h2, h3, h4, h5, h6 {
   --color-oo-status-cancelled: var(--oo-status-cancelled);
   --color-oo-status-cancelled-bg: var(--oo-status-cancelled-bg);
 }
+
+/* ── Stacked-card tables on tablet ────────────────────────────────────────
+   A workstation table that reads well on a desk monitor turns into a
+   horizontal scroll on a 1024 tablet, which is the width the floor actually
+   works at: the operator loses the row they are reading as soon as they reach
+   the column they need. Below the xl breakpoint each row becomes its own card
+   and every cell carries its column name inline, so nothing is off-screen and
+   no header has to be remembered.
+
+   One DOM tree, not two. Rendering a table and a card list side by side and
+   hiding one would duplicate every control and every element id in the page. */
+@media (max-width: 1279px) {
+  .stack-table,
+  .stack-table tbody,
+  .stack-table tr,
+  .stack-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .stack-table thead {
+    display: none;
+  }
+
+  .stack-table tbody {
+    /* The divide-y borders belong to the table layout; the cards carry their own. */
+    border: 0;
+  }
+
+  .stack-table tr {
+    border: 1px solid var(--oo-border-default);
+    border-radius: 0.75rem;
+    background: var(--oo-bg-elevated);
+    padding: 0.25rem 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .stack-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: end;
+    padding-inline: 0;
+  }
+
+  /* The column name the cell would have sat under. Cells without a data-label
+     (the full-width blocked-reason editor) stay as they are. */
+  .stack-table td[data-label]::before {
+    content: attr(data-label);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--oo-text-muted);
+    text-align: start;
+    flex-shrink: 0;
+  }
+
+  /* A cell spanning the row is a panel, not a labelled value. */
+  .stack-table td[colspan] {
+    display: block;
+    text-align: start;
+  }
+}
+
+/* The row's action, given the full width of the stacked card rather than being
+   squeezed alongside its own label. The frozen tablet layout puts Block Item (or
+   whatever the row's action is) on its own full-width line under the values. */
+@media (max-width: 1279px) {
+  .stack-table td.stack-action {
+    display: block;
+    text-align: start;
+    padding-top: 0.5rem;
+  }
+
+  .stack-table td.stack-action > div {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .stack-table td.stack-action button {
+    flex: 1 1 auto;
+    min-height: 2.25rem;
+  }
+}

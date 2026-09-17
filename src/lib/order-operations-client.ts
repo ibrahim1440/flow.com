@@ -214,18 +214,23 @@ const PRODUCTION_FROM_STATUSES = new Set(["Preparing", "Ready for Shipping"]);
 /**
  * Whether the Production screen should offer this line as actionable.
  *
- * Defence in depth for the production entry gate: the same three conditions the backend
- * enforces in productionGateRefusal — an allowed order status, an approved order, and a
- * line that has been through preparation review. Showing an action the server will refuse
- * is how an unapproved order came to appear in the production queue in the first place.
+ * Defence in depth for the production entry gate: the same conditions the backend enforces
+ * in productionGateRefusal — an allowed order status, a line that has been through Commit
+ * Allocation, and a line that is not blocked. Showing an action the server will refuse is
+ * how an ineligible order came to appear in the production queue in the first place.
+ *
+ * Approval is not among them: it was removed from the normal path, so requiring it here
+ * would empty the production queue instead of filtering it.
  */
 export function canStartProduction(
-  order: { status: string; approvalStatus: string },
+  order: { status: string; approvalStatus?: string },
   item: { preparationDecision: string | null }
 ): boolean {
   return (
     PRODUCTION_FROM_STATUSES.has(order.status) &&
-    order.approvalStatus === "Yes" &&
-    item.preparationDecision != null
+    // Mirrors productionGateRefusal: approval no longer gates the normal path, and a
+    // blocked line is not producible.
+    item.preparationDecision != null &&
+    item.preparationDecision !== "Blocked"
   );
 }
