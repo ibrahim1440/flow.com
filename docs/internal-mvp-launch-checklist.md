@@ -67,11 +67,30 @@ Run these checks on launch day, against the production environment, before openi
 - [ ] Run: `npx tsc --noEmit`
       Expected: exit 0, no errors, no output
 
+**Database migration (explicit — before the application is deployed or started)**
+- [ ] Positively verify the target database first: host, database name and environment are
+      the intended ones. Do not trust whatever `DATABASE_URL` happens to be set to.
+- [ ] Run: `npm run db:migrate`
+      Expected: `No pending migrations to apply.`, or exactly the intended migrations applied
+- [ ] Confirm the command was `prisma migrate deploy` — never `prisma migrate dev`,
+      `prisma migrate reset` or `prisma db push`
+
 **Production build**
 - [ ] Run: `npm run build`
-      Expected: `prisma generate` succeeds + `No pending migrations to apply.` + Next.js build succeeds + TypeScript 0 errors
-- [ ] Confirm build script is: `prisma generate && prisma migrate deploy && next build`
-- [ ] Confirm build script does **not** contain: `db push` or `--accept-data-loss`
+      Expected: `prisma generate` succeeds + Next.js build succeeds + TypeScript 0 errors.
+      No migration output: the build does not apply migrations.
+- [ ] Confirm build script is: `prisma generate && next build`
+- [ ] Confirm build script does **not** contain: `prisma migrate deploy`, `db push` or
+      `--accept-data-loss` — building must never apply a migration
+- [ ] Build with a **non-sensitive** PostgreSQL-shaped `DATABASE_URL`. Production database
+      credentials must never be required merely to compile. Because of RP-2 the build needs
+      the value to *look* like a postgres URL so the correct adapter is selected, but it opens
+      no connection — an intentionally unreachable value such as
+      `postgresql://nouser:nopass@127.0.0.1:1/nodb` is sufficient, and is the safer default.
+      See "RP-2 — build-time datasource shape dependency" in
+      `docs/migration-drift-and-db-constraints.md`.
+- [ ] The real `DATABASE_URL` is supplied only to `npm run db:migrate` and at runtime —
+      never as a precondition of compiling
 
 **Environment variables**
 - [ ] `JWT_SECRET` is set to a strong value (≥ 32 characters) in production `.env`

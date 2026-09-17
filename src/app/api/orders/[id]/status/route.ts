@@ -7,6 +7,7 @@ import { releaseFinishedUnits } from "@/lib/services/finished-products";
 import {
   appendOrderActivity,
   aggregatePreparationStatus,
+  completionRefusal,
   isStatusAction,
   isCancelAllowedFrom,
   HOLD_FROM_STATUSES,
@@ -119,6 +120,51 @@ export async function POST(request: Request, { params }: Params) {
       // locking them would serialise those against unrelated work for nothing.
       if (action === "cancel" || action === "complete") {
         await lockOrderLifecycleResources(tx, id);
+      }
+
+      // ── Completion integrity gate ───────────────────────────────────────────
+      // Both reads happen AFTER lockOrderLifecycleResources, which has just taken
+      // FOR UPDATE across StockAllocation → FinishedGoodsLot → OrderItem for this order.
+      // That ordering is the whole point, and it is why this gate acquires NO lock of its
+      // own: it reads rows the transaction already holds, so it adds no edge to the lock
+      // graph and cannot introduce the OrderItem → StockAllocation inversion.
+      //
+      // Why a reservation can neither appear nor vanish between this check and the status
+      // write. Every operational writer of StockAllocation — preparation review, the legacy
+      // packaging reservation, delivery, cancel/complete, and order edit/delete — must
+      // write an OrderItem row of this order in the same transaction before it can commit
+      // (review and packaging through casUpdateOrderItem, delivery through its conditional
+      // deliveredUnits claim, edit/delete through the row deletion itself). Holding every
+      // OrderItem row therefore blocks all of them: one that committed earlier is visible
+      // to these fresh statement snapshots, and one still in flight cannot commit until
+      // this transaction ends — at which point its own guard sees a Completed order and
+      // refuses. The single writer not serialised this way is the admin factory/training
+      // reset, which deletes every allocation in the database and is not an operational
+      // path a single order can race against.
+      //
+      // Throwing rolls the transaction back, so a refused completion releases nothing,
+      // writes no status and records no activity.
+      if (action === "complete") {
+        const lines = await tx.orderItem.findMany({
+          where: { orderId: id },
+          select: {
+            quantityUnits: true,
+            deliveredUnits: true,
+            quantityKg: true,
+            deliveredQty: true,
+          },
+        });
+        const held = await tx.stockAllocation.aggregate({
+          where: { orderItem: { orderId: id }, status: "RESERVED" },
+          _count: { _all: true },
+          _sum: { quantityUnits: true, quantityKg: true },
+        });
+        const refusal = completionRefusal(lines, {
+          rows: held._count._all,
+          units: held._sum.quantityUnits ?? 0,
+          kg: held._sum.quantityKg ?? 0,
+        });
+        if (refusal) throw refusal;
       }
 
       // Conditional guard: re-checks the same expected-from set atomically, so a

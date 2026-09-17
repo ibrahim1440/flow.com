@@ -190,12 +190,26 @@ async function main() {
   check(`ETH-1KG reservations returned (${beforeCancel.reserved} -> ${afterCancel.reserved})`, afterCancel.reserved === 0, S(afterCancel));
   check("free stock rose by exactly what was released", afterCancel.free === beforeCancel.free + beforeCancel.reserved, `${S(beforeCancel)} -> ${S(afterCancel)}`);
 
-  sub("16:30 — completing the cafe order releases its undelivered remainder");
+  sub("16:30 — the cafe order cannot be completed while a line is still owed");
+  // DEF-001 regression guard, in its multi-line form. The cafe order has two lines: 25 of
+  // 40 shipped on the first, nothing at all on the second. This step used to complete it
+  // and assert that completion released the undelivered remainder — closing an order as
+  // fulfilled while 39 units were still owed to the customer. Completion now refuses, and
+  // cancelling is the mechanism that legitimately closes an order and returns its stock.
   const cafeResBefore = num((await one(`SELECT COALESCE(SUM("quantityUnits"),0)::int u FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED'`, [oCafe.items[0].id])).u);
   const doneCafe = await api(`/api/orders/${oCafe.id}/status`, { method: "POST", body: { action: "complete" } });
-  check("cafe order completed", doneCafe.status === 200, "status=" + doneCafe.status);
+  check("completing a partly-delivered multi-line order refused -> 409", doneCafe.status === 409, "status=" + doneCafe.status);
+  if (doneCafe.status === 200) issue("HIGH", "Order completed with lines still undelivered", "A multi-line order was closed as fulfilled while one line had shipped nothing.");
+  const cafeStatusAfter = await one('SELECT status FROM "Order" WHERE id=$1', [oCafe.id]);
+  check("the refused completion left the order open", cafeStatusAfter.status !== "Completed", cafeStatusAfter.status);
+  const cafeResStill = num((await one(`SELECT COALESCE(SUM("quantityUnits"),0)::int u FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED'`, [oCafe.items[0].id])).u);
+  check("the refused completion released nothing", cafeResStill === cafeResBefore, `before=${cafeResBefore} after=${cafeResStill}`);
+
+  sub("16:45 — cancelling the cafe order is what returns its undelivered remainder");
+  const cancelCafe = await api(`/api/orders/${oCafe.id}/status`, { method: "POST", body: { action: "cancel", reason: P + " cannot fulfil the remainder today" } });
+  check("cafe order cancelled", cancelCafe.status === 200, "status=" + cancelCafe.status);
   const cafeResAfter = num((await one(`SELECT COALESCE(SUM("quantityUnits"),0)::int u FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED'`, [oCafe.items[0].id])).u);
-  check(`completing released the ${cafeResBefore} undelivered units`, cafeResAfter === 0, `before=${cafeResBefore} after=${cafeResAfter}`);
+  check(`cancelling released the ${cafeResBefore} undelivered units`, cafeResAfter === 0, `before=${cafeResBefore} after=${cafeResAfter}`);
 
   // The status gate deliberately allows "Preparing" — a mixed order whose other line
   // still needs production must still be able to dispatch the line the shelf covers.

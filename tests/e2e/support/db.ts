@@ -4,13 +4,41 @@ import { Client } from "pg";
 // This suite creates orders, consumes stock and deliberately attempts invalid
 // operations. That is only acceptable against the throwaway database, so refuse to start
 // anywhere else rather than trusting whoever set the environment.
+/**
+ * The only databases this suite may touch, by exact name.
+ *
+ * Deliberately a fixed literal rather than anything the environment can widen: this is a
+ * safety boundary, and a boundary that whoever sets the variables can move is not one.
+ * No wildcard and no prefix match — "erp_mvp_preprod" must not pass merely because it
+ * begins with "erp_mvp" — and an unrecognised name is refused rather than allowed.
+ */
+const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e"];
+
+function refuseTestDatabase(why: string): Error {
+  return new Error(
+    `REFUSING TO RUN: ${why}\n` +
+      "The browser UAT writes freely and must never point at real data.\n" +
+      `DATABASE_URL must name exactly one of: ${ALLOWED_TEST_DATABASES.join(", ")}.`
+  );
+}
+
 export function assertTestDatabase(): string {
   const url = process.env.DATABASE_URL;
-  if (!url || !/\/erp_mvp_test(\?|$)/.test(url)) {
-    throw new Error(
-      "REFUSING TO RUN: DATABASE_URL is not the isolated test database (erp_mvp_test).\n" +
-        "The browser UAT writes freely and must never point at real data."
-    );
+  if (!url) throw refuseTestDatabase("DATABASE_URL is not set.");
+  // Resolved by asking pg itself, rather than by a URL parse of our own, so the name
+  // checked here is by construction the name pg will actually open. Constructing a Client
+  // performs no I/O — it only resolves the connection string. Any separate parse can
+  // disagree with pg, and a guard that disagrees with the client it guards is not a guard:
+  // `socket:/erp_e2e?db=erp_mvp_preprod` has an approved-looking URL path while pg
+  // connects to erp_mvp_preprod.
+  let name: string | undefined;
+  try {
+    name = new Client({ connectionString: url }).database;
+  } catch {
+    throw refuseTestDatabase("DATABASE_URL is not a usable connection string.");
+  }
+  if (!name || !ALLOWED_TEST_DATABASES.includes(name)) {
+    throw refuseTestDatabase(`database "${name || "<none>"}" is not an approved test database.`);
   }
   return url;
 }

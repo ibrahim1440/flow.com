@@ -23,6 +23,7 @@ const SUITES = [
   "workflow-alignment",   // normal path after routine approval was removed: entry, ownership, gates         // Production Entry Gate: approval/review required before production
   "production-concurrency",  // the gate under concurrent lifecycle transitions
   "lifecycle-locks",         // canonical lock order; deadlock freedom
+  "completion-gate",         // DEF-001: an order completes only once every line has shipped
   "reservation-cas",         // reservation compare-and-swap; no double reservation
   "packaging-stock",         // kilogram packaging arithmetic, roasted draw-down, availability
   "packaging-concurrency",   // canonical lot lock order; one packaging method per roast

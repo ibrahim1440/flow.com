@@ -27,7 +27,7 @@ This document tracks the path from current state to internal MVP launch for the 
 | **Phase 1 (Pre-MVP)** | In progress — Google Drive triage remains |
 | **Migration baseline** | Established 2026-05-22; three migrations tracked |
 | **Active migrations** | 13 tracked. Baseline through `20260801111404_add_order_operations_s0`, plus `20260826090000_add_shelf_allocation`, `20260826120000_backfill_shelf_reservations` and `20260827090000_allow_roast_to_stock` — all three on the local test DB only, not yet deployed to demo or production. |
-| **Production deployment** | `prisma migrate deploy` in `package.json` build script |
+| **Production deployment** | `npm run db:migrate` (`prisma migrate deploy`) as an explicit step, run before deploying the build |
 | **Open Go/No-Go blockers** | Google Drive triage |
 
 ---
