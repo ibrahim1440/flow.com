@@ -25,7 +25,7 @@ import {
   ADMIN_PIN, db, api, check, section, sub, one, all, num, near, invariants, loginAs, results,
   DB_URL, Client, materialStock,
 } from "./harness.mjs";
-import { buildCatalog, teardown, roastAndPass } from "./catalog.mjs";
+import { buildCatalog, teardown, roastAndPass, seedLegacyKgLot } from "./catalog.mjs";
 
 const S = (v) => { try { return JSON.stringify(v) ?? String(v); } catch { return String(v); } };
 const P = "PKC";
@@ -48,8 +48,17 @@ const anyServerError = (...rs) => rs.filter((r) => r.status === 500);
 const stockBatch = (label, greenKg, roastedKg, wasteKg) =>
   roastAndPass(P, C.coffees.brazil, C.beans.brazil, greenKg, roastedKg, wasteKg, label);
 
-const pack = (batchId, body) => api(`/api/roasting-batches/${batchId}/package`, { method: "PUT", body });
-const packSku = (batchId, body) => api(`/api/roasting-batches/${batchId}/pack-sku`, { method: "POST", body });
+/** The one packaging operation, as the screen drives it. */
+const packV2 = (batchId, lines) => api(`/api/roasting-batches/${batchId}/pack`, {
+  method: "POST", body: { lines },
+  headers: { "Idempotency-Key": `${P}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
+});
+/** The compatibility adapter, which must take the very same lock. */
+const packSku = (batchId, body) => api(`/api/roasting-batches/${batchId}/pack-sku`, {
+  method: "POST", body,
+  headers: { "Idempotency-Key": `${P}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
+});
+const packed = (r) => r.status === 200 || r.status === 201;
 
 /** A legacy kilogram order line, the shape the kg shelf actually serves. */
 async function kgOrderLine(note, kg) {
@@ -77,13 +86,19 @@ const cancel = (orderId, why) => api(`/api/orders/${orderId}/status`, {
 const lotRow = async (id) => await one(
   `SELECT "availableQty" a, "reservedQty" r FROM "FinishedGoodsLot" WHERE id=$1`, [id]);
 
-/** Lots whose createdAt order is deliberately the OPPOSITE of their id order. */
+/**
+ * Lots whose createdAt order is deliberately the OPPOSITE of their id order.
+ *
+ * These are KILOGRAM lots on purpose: the allocator ordering under test is the one that
+ * serves legacy kilogram order lines, which is live for the lots Production already holds.
+ * The endpoint that used to create them is retired, so the fixture writes the rows the way
+ * history left them rather than driving a withdrawn write path to manufacture them.
+ */
 async function invertedLotPair(label, kgEach) {
   const b1 = await stockBatch(`${label}1`, kgEach + 2, kgEach, 2);
   const b2 = await stockBatch(`${label}2`, kgEach + 2, kgEach, 2);
-  const p1 = await pack(b1.id, { bags1kg: kgEach });
-  const p2 = await pack(b2.id, { bags1kg: kgEach });
-  if (p1.status !== 200 || p2.status !== 200) throw new Error(`invertedLotPair pack: ${p1.status}/${p2.status}`);
+  await seedLegacyKgLot(b1.id, C.coffees.brazil.id, kgEach);
+  await seedLegacyKgLot(b2.id, C.coffees.brazil.id, kgEach);
 
   const lots = await all(
     `SELECT id FROM "FinishedGoodsLot" WHERE "roastingBatchId" IN ($1,$2) ORDER BY id ASC`, [b1.id, b2.id]);
@@ -178,104 +193,89 @@ async function main() {
   await invariants("after the inverted-order races");
 
   // ═══════════════════════════════════════════════════════════════════════
-  section("B — ONE PACKAGING METHOD PER ROAST  (KG vs SKU)");
+  section("B — ONE OPERATION AT A TIME PER ROAST");
 
-  sub("B1. kilogram and unit packaging race the same batch, three rounds");
-  let wins = 0, losses = 0, serverErrors = 0, bothWon = 0;
+  // This section used to prove that the kilogram path and the unit path could never both
+  // run on one roast. That question is gone: there is one packaging operation now, and the
+  // kilogram path cannot write at all. What replaces it is the guarantee that still has to
+  // hold — two operations racing the same roast are SERIALISED on the batch row, so the
+  // same roasted coffee can never be spent twice — and one the old shape never asked: that
+  // the compatibility adapter takes that very same lock rather than slipping past it.
+
+  sub("B1. two packaging operations race the same roast, three rounds");
+  let serverErrors = 0, overdrawn = 0, bothWon = 0, singleWinner = 0;
   const bagBefore = await materialStock(C.materials.bag1kg.id);
+  let expectedPackages = 0;
 
   for (let round = 1; round <= 3; round++) {
+    // 10 kg roasted, two operations of 6 kg each: they cannot both fit, so serialisation is
+    // the difference between one refusal and six kilograms conjured out of nothing.
     const b = await stockBatch(`B0${round}`, 12, 10, 2);
     const releaseBatch = await holdRow("RoastingBatch", b.id);
-    const kg = pack(b.id, { bags1kg: 5 });
-    const sku = packSku(b.id, { productSkuId: C.skus.bra1kg.id, units: 5 });
+    const first = packV2(b.id, [{ kind: "pack", productSkuId: C.skus.bra1kg.id, packages: 6 }]);
+    const second = packV2(b.id, [{ kind: "pack", productSkuId: C.skus.bra1kg.id, packages: 6 }]);
     await sleep(800);              // both are provably queued on the batch row
     await releaseBatch();
-    const [kgRes, skuRes] = await Promise.all([kg, sku]);
+    const [r1, r2] = await Promise.all([first, second]);
 
-    const ok = [kgRes.status === 200, skuRes.status === 201].filter(Boolean).length;
-    if (ok === 1) wins++; if (ok === 2) bothWon++;
-    losses += [kgRes, skuRes].filter((r) => r.status >= 400 && r.status < 500).length;
-    serverErrors += anyServerError(kgRes, skuRes).length;
+    const won = [r1, r2].filter(packed).length;
+    if (won === 1) singleWinner++;
+    if (won === 2) bothWon++;
+    expectedPackages += won * 6;
+    serverErrors += anyServerError(r1, r2).length;
 
-    const shapes = await one(
-      `SELECT (SELECT COUNT(*) FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1)::int kglots,
-              (SELECT COUNT(*) FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1)::int unitlots`, [b.id]);
-    const bat = await one(
-      `SELECT "roastedAvailableKg" rak, "bags1kg" b1 FROM "RoastingBatch" WHERE id=$1`, [b.id]);
-    const moves = num((await one(
-      `SELECT COUNT(*)::int n FROM "InventoryMovement" WHERE "sourceDocId"=$1 AND category='FINISHED_GOODS'`,
-      [b.id])).n);
-
-    console.log(`    round ${round}: kg ${kgRes.status}, sku ${skuRes.status} -> kg-lots ${shapes.kglots}, unit-lots ${shapes.unitlots}, roasted left ${bat.rak}, finished movements ${moves}`);
-
-    check(`round ${round}: exactly one packaging method succeeded`, ok === 1,
-      `kg ${kgRes.status} ${S(kgRes.json).slice(0, 80)} | sku ${skuRes.status} ${S(skuRes.json).slice(0, 80)}`);
-    check(`round ${round}: only one lot shape exists for the batch`,
-      num(shapes.kglots) + num(shapes.unitlots) === 1,
-      `kg-lots ${shapes.kglots}, unit-lots ${shapes.unitlots}`);
-    check(`round ${round}: the roast was drawn down exactly once (10 - 5 = 5)`,
-      near(num(bat.rak), 5), `roastedAvailableKg ${bat.rak}`);
-    check(`round ${round}: one finished-goods movement, from the winner only`, moves === 1,
-      `${moves} movements`);
-    // The loser must leave no trace on the other model's counters.
-    if (num(shapes.unitlots) === 1) {
-      check(`round ${round}: the unit winner left the bag counters untouched`, num(bat.b1) === 0,
-        `bags1kg ${bat.b1}`);
-    } else {
-      check(`round ${round}: the kilogram winner recorded its bags`, num(bat.b1) === 5,
-        `bags1kg ${bat.b1}`);
-    }
+    const row = await one(
+      `SELECT "roastedAvailableKg" rak, "roastedBeanQuantity" rbq FROM "RoastingBatch" WHERE id=$1`, [b.id]);
+    if (num(row.rak) < -0.0005) overdrawn++;
+    const units = num((await one(
+      `SELECT COALESCE(SUM("unitsProduced"),0)::int u FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`,
+      [b.id])).u);
+    console.log(`    round ${round}: ${r1.status}/${r2.status} -> ${won} accepted, roasted left ${row.rak}, units ${units}`);
+    if (units * 1 > num(row.rbq) + 0.0005) overdrawn++;
   }
 
-  check("no round let both methods through", bothWon === 0, `${bothWon} round(s) double-packed`);
+  check("no round let both operations through on coffee that only covers one",
+    bothWon === 0, `${bothWon} round(s) double-drew the same roast`);
+  check("every round produced exactly one winner", singleWinner === 3, `${singleWinner} of 3 rounds`);
   check("no round produced a server error", serverErrors === 0, `${serverErrors} server error(s)`);
-  check("every round produced exactly one loser with a domain-safe 4xx", losses === 3, `${losses} 4xx of 3 expected`);
+  check("no round drew more coffee than the roast held", overdrawn === 0, `${overdrawn} overdraw(s)`);
 
-  // The race above was won by the unit path every round, which on its own would be equally
-  // consistent with the kilogram path being broken and always refusing. These two prove
-  // the exclusivity is mutual: each method can win, and whichever gets there first locks
-  // the other out — the outcome depends on who arrives first, not on which method it is.
-  sub("B2. exclusivity is mutual — whichever arrives first wins");
-  const bKg = await stockBatch("B-KG", 12, 10, 2);
-  const kgFirst = await pack(bKg.id, { bags1kg: 5 });
-  const skuSecond = await packSku(bKg.id, { productSkuId: C.skus.bra1kg.id, units: 5 });
-  const kgShapes = await one(
-    `SELECT (SELECT COUNT(*) FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1)::int kglots,
-            (SELECT COUNT(*) FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1)::int unitlots`, [bKg.id]);
-  console.log(`    kg first -> ${kgFirst.status}, then sku -> ${skuSecond.status}  (kg-lots ${kgShapes.kglots}, unit-lots ${kgShapes.unitlots})`);
-  check("the kilogram path CAN win", kgFirst.status === 200, `status=${kgFirst.status} ${S(kgFirst.json).slice(0, 100)}`);
-  check("and then locks the unit path out with a 4xx",
-    skuSecond.status >= 400 && skuSecond.status < 500, `status=${skuSecond.status} ${S(skuSecond.json).slice(0, 100)}`);
-  check("only the kilogram lot shape exists",
-    num(kgShapes.kglots) === 1 && num(kgShapes.unitlots) === 0,
-    `kg-lots ${kgShapes.kglots}, unit-lots ${kgShapes.unitlots}`);
+  sub("B2. the compatibility adapter contends on the same row, not beside it");
+  // pack-sku no longer implements packaging — it reshapes the request and hands it to the
+  // same route. If it had kept its own transaction it would take its own lock, and these
+  // two would draw the same coffee concurrently instead of queueing.
+  const bMix = await stockBatch("B-MIX", 12, 10, 2);
+  const releaseMix = await holdRow("RoastingBatch", bMix.id);
+  const direct = packV2(bMix.id, [{ kind: "pack", productSkuId: C.skus.bra1kg.id, packages: 6 }]);
+  const viaAdapter = packSku(bMix.id, { productSkuId: C.skus.bra1kg.id, units: 6 });
+  await sleep(800);
+  await releaseMix();
+  const [dRes, aRes] = await Promise.all([direct, viaAdapter]);
+  const mixWon = [dRes, aRes].filter(packed).length;
+  const mixRow = await one(
+    `SELECT "roastedAvailableKg" rak FROM "RoastingBatch" WHERE id=$1`, [bMix.id]);
+  const mixUnits = num((await one(
+    `SELECT COALESCE(SUM("unitsProduced"),0)::int u FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`,
+    [bMix.id])).u);
+  console.log(`    direct ${dRes.status}, adapter ${aRes.status} -> ${mixWon} accepted, roasted left ${mixRow.rak}, units ${mixUnits}`);
+  expectedPackages += mixWon * 6;
 
-  const bSku = await stockBatch("B-SKU", 12, 10, 2);
-  const skuFirst = await packSku(bSku.id, { productSkuId: C.skus.bra1kg.id, units: 5 });
-  const kgSecond = await pack(bSku.id, { bags1kg: 5 });
-  const skuShapes = await one(
-    `SELECT (SELECT COUNT(*) FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1)::int kglots,
-            (SELECT COUNT(*) FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1)::int unitlots`, [bSku.id]);
-  console.log(`    sku first -> ${skuFirst.status}, then kg -> ${kgSecond.status}  (kg-lots ${skuShapes.kglots}, unit-lots ${skuShapes.unitlots})`);
-  check("the unit path CAN win", skuFirst.status === 201, `status=${skuFirst.status} ${S(skuFirst.json).slice(0, 100)}`);
-  check("and then locks the kilogram path out with a 4xx",
-    kgSecond.status >= 400 && kgSecond.status < 500, `status=${kgSecond.status} ${S(kgSecond.json).slice(0, 100)}`);
-  check("only the unit lot shape exists",
-    num(skuShapes.kglots) === 0 && num(skuShapes.unitlots) === 1,
-    `kg-lots ${skuShapes.kglots}, unit-lots ${skuShapes.unitlots}`);
+  check("exactly one of the two was accepted", mixWon === 1,
+    `direct ${dRes.status} ${S(dRes.json).slice(0, 80)} | adapter ${aRes.status} ${S(aRes.json).slice(0, 80)}`);
+  check("the loser was refused with a domain 4xx, not a server error",
+    [dRes, aRes].some((r) => r.status >= 400 && r.status < 500) && anyServerError(dRes, aRes).length === 0,
+    `${dRes.status}/${aRes.status}`);
+  check("only six packages exist, not twelve", mixUnits === 6, `units ${mixUnits}`);
+  check("and the roast was drawn exactly once", near(num(mixRow.rak), 4), `roastedAvailableKg ${mixRow.rak}`);
 
-  sub("B3. packaging materials were consumed only by the winners");
+  sub("B3. packaging materials were consumed only by the operations that succeeded");
   const bagAfter = await materialStock(C.materials.bag1kg.id);
-  const unitWins = num((await one(
-    `SELECT COUNT(*)::int n FROM "FinishedGoodsLot" f
-       JOIN "RoastingBatch" rb ON rb.id = f."packedFromBatchId"
-      WHERE rb."batchNumber" LIKE $1`, [`${P}-B%`])).n);
-  console.log(`    1kg bags ${bagBefore} -> ${bagAfter} (consumed ${bagBefore - bagAfter}); unit-path winners ${unitWins}`);
-  check("bags were drawn only for the rounds the unit path won",
-    near(bagBefore - bagAfter, unitWins * 5), `consumed ${bagBefore - bagAfter}, expected ${unitWins * 5}`);
+  console.log(`    1kg bags ${bagBefore} -> ${bagAfter} (consumed ${bagBefore - bagAfter}); packages made ${expectedPackages}`);
+  check("one bag per package that was actually made, and none for the refusals",
+    near(bagBefore - bagAfter, expectedPackages),
+    `consumed ${bagBefore - bagAfter}, expected ${expectedPackages}`);
 
-  await invariants("after the packaging-method races");
+  await invariants("after the packaging concurrency races");
 
   section("PACKAGING CONCURRENCY RESULT");
   console.log(`${results.pass} passed, ${results.fail} failed`);

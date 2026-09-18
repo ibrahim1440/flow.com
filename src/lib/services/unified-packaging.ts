@@ -43,7 +43,10 @@ export function kgFromGrams(grams: number): number {
  * coffee but no new materials.
  */
 export type PackagingLine =
-  | { kind: "pack"; productSkuId: string; packages: number; gramsEach: number }
+  // gramsEach omitted means "filled to this SKU's nominal weight". Resolved here, from the
+  // SKU, rather than by any caller: a caller that picks its own idea of a full package is a
+  // second opinion about what "complete" means, and the two would eventually disagree.
+  | { kind: "pack"; productSkuId: string; packages: number; gramsEach?: number | null }
   | { kind: "topUp"; lotId: string; gramsAdded: number }
   | { kind: "loss"; grams: number; reason: string };
 
@@ -151,9 +154,19 @@ export async function previewPackaging(
     lines: PackagingLine[];
     skus: Map<string, SkuFacts>;
     partialLots: Map<string, { id: string; productSkuId: string | null; actualContentGrams: number | null; nominalContentGrams: number | null; status: string; productId: string }>;
+    /**
+     * Which coffee this roast actually is, proved from backend records by
+     * resolveBatchCoffeeIdentity — never taken from the caller.
+     *
+     * batch.productId is NULL on every order-backed roast, so a guard written against it
+     * silently matches nothing on exactly the batches it exists to protect. The resolved
+     * identity is passed in because only the route holds the locked row with the order and
+     * production-order links the resolver needs.
+     */
+    identityProductId: string | null;
   },
 ): Promise<PackagingPreview> {
-  const { batch, lines, skus, partialLots } = args;
+  const { batch, lines, skus, partialLots, identityProductId } = args;
   const problems: string[] = [];
   const availableGrams = gramsFromKg(batch.roastedAvailableKg);
 
@@ -179,14 +192,27 @@ export async function previewPackaging(
         );
         continue;
       }
-      if (!Number.isInteger(line.gramsEach) || line.gramsEach < 1) {
+      const nominalOfSku = Math.round(sku.weightGrams);
+      const gramsEach = line.gramsEach ?? nominalOfSku;
+      if (!Number.isInteger(gramsEach) || gramsEach < 1) {
         problems.push(`Line ${n}: the fill weight must be a whole number of grams, greater than zero.`);
         continue;
       }
 
-      const nominalGrams = Math.round(sku.weightGrams);
-      const classification = classifyFill(line.gramsEach, nominalGrams);
-      const gramsConsumed = line.gramsEach * line.packages;
+      // A roast may only be packed into a SKU made from the coffee it actually is.
+      // Without this, a Yemen roast could be bagged and sold as Colombia — the label would
+      // be a lie, the lineage would say otherwise, and no later check would catch it
+      // because every downstream path trusts the lot's SKU.
+      if (identityProductId && sku.productId !== identityProductId) {
+        problems.push(
+          `Line ${n}: "${sku.skuCode}" is not made from the coffee on this roast, so it cannot be packed from it.`,
+        );
+        continue;
+      }
+
+      const nominalGrams = nominalOfSku;
+      const classification = classifyFill(gramsEach, nominalGrams);
+      const gramsConsumed = gramsEach * line.packages;
 
       outcomes.push({
         lineIndex: index,
@@ -194,7 +220,7 @@ export async function previewPackaging(
         productSkuId: sku.id,
         skuCode: sku.skuCode,
         nominalGrams,
-        actualGramsEach: line.gramsEach,
+        actualGramsEach: gramsEach,
         packages: line.packages,
         gramsConsumed,
         classification,
@@ -206,6 +232,16 @@ export async function previewPackaging(
       // roasted-coffee line is deliberately ignored here — the coffee drawn is the weight
       // the operator actually put in, not the SKU's nominal figure.
       const bom = await explodeBom(tx, sku.id, line.packages);
+      // A product whose components were never defined cannot be packed. Allowing it would
+      // put finished goods on the shelf having drawn no bag, no label and no valve — the
+      // packaging really did consume them, and the material stock would quietly overstate
+      // itself from then on. The legacy route refused this and V2 must not be laxer.
+      if (bom.length === 0) {
+        problems.push(
+          `Line ${n}: "${sku.skuCode}" has no bill of materials. Define its components before packing.`,
+        );
+        continue;
+      }
       for (const req of bom) {
         if (req.type !== "MATERIAL" || !req.materialItemId) continue;
         materialNeed.set(req.materialItemId, (materialNeed.get(req.materialItemId) ?? 0) + req.quantityRequired);
@@ -365,7 +401,9 @@ export type CommitResult = {
   /** Of gramsConsumed, what the operator declared as lost rather than packaged. */
   lossGrams: number;
   remainingGrams: number;
-  lots: { id: string; skuCode: string; classification: "STANDARD" | "PARTIAL"; units: number; actualGrams: number }[];
+  // productSkuId travels with each lot so the caller can match what was made against an
+  // order line's SKU without re-reading the rows it just wrote.
+  lots: { id: string; productSkuId: string; skuCode: string; classification: "STANDARD" | "PARTIAL"; units: number; actualGrams: number }[];
   materialsConsumed: { materialItemId: string; label: string; quantity: number }[];
 };
 
@@ -553,6 +591,7 @@ export async function commitPackaging(
       }
       lots.push({
         id: line.lotId,
+        productSkuId: line.productSkuId,
         skuCode: line.skuCode,
         // Stated from what the top-up DID, not copied from the widened line classification:
         // a lot is never a loss, and the two types must not be conflated to satisfy one.
@@ -613,6 +652,7 @@ export async function commitPackaging(
       standardUnitsCreated += line.packages;
       lots.push({
         id: lot.id,
+        productSkuId: sku.id,
         skuCode: sku.skuCode,
         classification: "STANDARD",
         units: line.packages,
@@ -670,6 +710,7 @@ export async function commitPackaging(
       partialPackagesCreated += 1;
       lots.push({
         id: lot.id,
+        productSkuId: sku.id,
         skuCode: sku.skuCode,
         classification: "PARTIAL",
         units: 0,

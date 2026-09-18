@@ -90,6 +90,45 @@ export async function buildCatalog(prefix) {
   return { beans, coffees, materials, skus, customers };
 }
 
+/**
+ * Seed a legacy kilogram lot the way history left one behind.
+ *
+ * The endpoint that used to create these is retired — kilogram packaging is not something
+ * the system does any more. But the lots it created are still REAL: Production holds four
+ * of them, 19.710 kg, and they still serve the legacy bean-based order lines that reserve
+ * and ship in kilograms. That behaviour is live and must stay tested.
+ *
+ * So the fixture writes the row directly, exactly as the old route shaped it — kg-tracked,
+ * the unique 1:1 roastingBatchId link, availableQty carrying the balance, units all zero —
+ * and draws the roast down to match. Driving a retired write path to build a fixture would
+ * be testing the wrong thing; this seeds the DATA whose behaviour is under test.
+ */
+export async function seedLegacyKgLot(batchId, productId, kg, opts = {}) {
+  const b = await one(
+    'SELECT "batchNumber" bn, "roastedBeanQuantity" rq, "roastedAvailableKg" ra FROM "RoastingBatch" WHERE id=$1',
+    [batchId]);
+  if (!b) throw new Error("seedLegacyKgLot: batch not found");
+
+  const r = await db.query(
+    `INSERT INTO "FinishedGoodsLot"
+       (id,"productId","productSkuId","batchNumber","roastingBatchId","quantityKg","availableQty",
+        "reservedQty","isUnitTracked","unitsProduced","unitsAvailable","unitsReserved",status,"createdAt")
+     VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,$6,0,false,0,0,0,'AVAILABLE',now())
+     RETURNING id`,
+    [productId, opts.productSkuId ?? null, b.bn, batchId, Number(b.rq), kg]);
+
+  // The roast gave the coffee up, exactly as it would have then.
+  await db.query(
+    `UPDATE "RoastingBatch"
+        SET "roastedAvailableKg" = GREATEST(0, "roastedAvailableKg" - $2),
+            "bags1kg" = "bags1kg" + $3,
+            status = CASE WHEN ("roastedAvailableKg" - $2) < 0.05 THEN 'Packaged' ELSE 'Partially Packaged' END
+      WHERE id = $1`,
+    [batchId, kg, Math.round(kg)]);
+
+  return r.rows[0].id;
+}
+
 /** Remove everything a prefix created, in FK-safe order. */
 export async function teardown(prefix) {
   const p = prefix + "%";

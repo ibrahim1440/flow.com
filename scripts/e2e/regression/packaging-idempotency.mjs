@@ -47,8 +47,28 @@ async function keyed(path, { method = "POST", body, key } = {}) {
   return { status: res.status, json, replay: res.headers.get("x-idempotent-replay") };
 }
 
+/**
+ * Pack N one-kilogram packages under a named key.
+ *
+ * Written against the kilogram route when this suite was first certified. That route is
+ * retired — it was a second implementation of inventory mutation — but the idempotency
+ * contract it was proving is not kilogram-specific: it is the same guardIdempotency, the
+ * same batch-row lock and the same PackagingOperation row that V2 uses. So the cases are
+ * driven through V2 rather than deleted, and `bags1kg: N` becomes N packages of the 1 KG
+ * SKU at nominal weight.
+ *
+ * Bodies are still passed in the old shape so the key-identity cases keep their point:
+ * two objects written with their properties in a different order must still hash alike.
+ */
 const packKg = (batchId, body, key) =>
-  keyed(`/api/roasting-batches/${batchId}/package`, { method: "PUT", body, key });
+  keyed(`/api/roasting-batches/${batchId}/pack`, {
+    method: "POST",
+    body: { lines: [{ kind: "pack", productSkuId: C.skus.bra1kg.id, packages: body.bags1kg }] },
+    key,
+  });
+
+/** Accepted, whichever success code the route answers with. */
+const packed = (r) => r.status === 200 || r.status === 201;
 const packSku = (batchId, body, key) =>
   keyed(`/api/roasting-batches/${batchId}/pack-sku`, { method: "POST", body, key });
 
@@ -71,10 +91,34 @@ const stockBatch = async (label, greenKg, roastedKg, wasteKg) => {
   return b;
 };
 
-const batchRow = async (id) => await one(
-  `SELECT "roastedAvailableKg" rak, "bags1kg" b1, status FROM "RoastingBatch" WHERE id=$1`, [id]);
-const kgLot = async (batchId) => await one(
-  `SELECT id, "availableQty" a FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1`, [batchId]);
+/**
+ * `b1` used to be the kilogram path's bag counter. V2 does not write it, so it is derived
+ * from what the roast actually gave up — which is what every assertion on it meant: how
+ * many kilograms this batch has been packed out into.
+ */
+const batchRow = async (id) => {
+  const r = await one(
+    `SELECT "roastedAvailableKg" rak, "roastedBeanQuantity" rbq, status FROM "RoastingBatch" WHERE id=$1`, [id]);
+  return { ...r, b1: Math.round((num(r.rbq) - num(r.rak)) * 1000) / 1000 };
+};
+/**
+ * What the roast put on the shelf, in kilograms.
+ *
+ * Summed across lots: V2 writes one per packaging line rather than keeping a single row per
+ * roast and moving its balance. The figure is the kg-equivalent of the units produced, so
+ * the assertions below still read in kilograms and still mean "what this pack produced".
+ */
+const kgLot = async (batchId) => {
+  const r = await one(
+    `SELECT COALESCE(SUM("unitsProduced" * COALESCE("nominalContentGrams", 0)) / 1000.0, 0)::float8 a,
+            COUNT(*)::int n
+       FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1 AND status <> 'PARTIAL'`, [batchId]);
+  if (!r || num(r.n) === 0) return undefined;
+  const newest = await one(
+    `SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1 AND status <> 'PARTIAL'
+      ORDER BY "createdAt" DESC LIMIT 1`, [batchId]);
+  return { id: newest?.id, a: r.a };
+};
 const unitLot = async (batchId) => await one(
   `SELECT id, "unitsProduced" p, "unitsAvailable" a FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`, [batchId]);
 const finishedMoves = async (batchId) => num((await one(
@@ -108,7 +152,7 @@ async function main() {
   const afterFirst = await batchRow(bA.id);
   const lotFirst = await kgLot(bA.id);
   const movesFirst = await finishedMoves(bA.id);
-  check("the first pack is accepted", a1.status === 200, `status=${a1.status} ${S(a1.json).slice(0, 100)}`);
+  check("the first pack is accepted", packed(a1), `status=${a1.status} ${S(a1.json).slice(0, 100)}`);
   check("it is not marked as a replay", a1.replay !== "true", `x-idempotent-replay=${a1.replay}`);
 
   const a2 = await packKg(bA.id, bodyA, keyA);
@@ -119,7 +163,7 @@ async function main() {
   console.log(`    replay(${a2.status}): bags ${afterReplay.b1}, shelf ${lotReplay?.a}, roasted ${afterReplay.rak}, movements ${movesReplay}`);
 
   check("the replay is answered without packing again",
-    a2.status === 200 && a2.replay === "true",
+    packed(a2) && a2.replay === "true",
     `status=${a2.status} replay=${a2.replay} ${S(a2.json).slice(0, 90)}`);
   check("bag counters did not move on replay", num(afterReplay.b1) === num(afterFirst.b1),
     `${afterFirst.b1} -> ${afterReplay.b1}`);
@@ -244,7 +288,7 @@ async function main() {
   const gLot = await kgLot(bG.id);
   const gMoves = await finishedMoves(bG.id);
   console.log(`    ${g1.status} then ${g2.status} -> bags ${gRow.b1}, shelf ${gLot?.a}, roasted ${gRow.rak}, movements ${gMoves}`);
-  check("both partial packs were accepted", g1.status === 200 && g2.status === 200,
+  check("both partial packs were accepted", packed(g1) && packed(g2),
     `${g1.status}/${g2.status}`);
   check("neither was treated as a replay", g1.replay !== "true" && g2.replay !== "true",
     `${g1.replay}/${g2.replay}`);
@@ -288,7 +332,7 @@ async function main() {
   const iRow = await batchRow(bI.id);
   console.log(`    ${i1.status} then reordered ${i2.status} (replay ${i2.replay}) -> bags ${iRow.b1}`);
   check("the reordered resend is recognised as a replay, not a mismatch",
-    i2.status === 200 && i2.replay === "true", `status=${i2.status} replay=${i2.replay}`);
+    packed(i2) && i2.replay === "true", `status=${i2.status} replay=${i2.replay}`);
   check("and it packed once, not twice", num(iRow.b1) === 2 && near(num(iRow.rak), 8),
     `bags1kg ${iRow.b1}, roastedAvailableKg ${iRow.rak}`);
 
@@ -303,7 +347,7 @@ async function main() {
   const jOps = await operations(bJ.id);
   const jRow = await batchRow(bJ.id);
   console.log(`    ${j1.status}/${j2.status} -> bags ${jRow.b1}, ${jOps.length} operation rows`);
-  check("a keyless pack is accepted", j1.status === 200 && j2.status === 200,
+  check("a keyless pack is accepted", packed(j1) && packed(j2),
     `${j1.status}/${j2.status}`);
   check("it is recorded under a server-generated key",
     jOps.length === 2 && jOps.every((o) => o.k.startsWith("srv-")),
@@ -360,11 +404,14 @@ async function main() {
   console.log(`    ${S(opsA[0]).slice(0, 190)}`);
   check("one row for one operation, despite the replay", opsA.length === 1, `${opsA.length} rows`);
   check("it names the method and the quantity that moved",
-    opsA[0]?.method === "KG" && near(num(opsA[0]?.qkg), 3) && opsA[0]?.qu === null,
+    // PACK, and a unit count: the operation record describes what V2 committed rather
+    // than the retired kilogram shape. quantityKg stays null because grams, not kilograms,
+    // are what this model moves.
+    opsA[0]?.method === "PACK" && num(opsA[0]?.qu) === 3 && opsA[0]?.qkg === null,
     `method=${opsA[0]?.method} kg=${opsA[0]?.qkg} units=${opsA[0]?.qu}`);
   check("it points at the lot the stock landed on", opsA[0]?.lot === lotFirst?.id,
     `${opsA[0]?.lot} vs lot ${lotFirst?.id}`);
-  check("it stores the status the caller was answered with", num(opsA[0]?.rs) === 200, `${opsA[0]?.rs}`);
+  check("it stores the status the caller was answered with", num(opsA[0]?.rs) === 201, `${opsA[0]?.rs}`);
   check("it attributes the operation to the same actor as the ledger",
     Boolean(opsA[0]?.uid) && opsA[0]?.uid === movementActor,
     `operation ${opsA[0]?.uid} vs movement ${movementActor}`);
@@ -380,7 +427,7 @@ async function main() {
   const lRow = await batchRow(bL.id);
   console.log(`    same key on two batches: ${l1.status} / ${l2.status} (replay ${l2.replay})`);
   check("the second batch is packed, not answered with the first batch's result",
-    l2.status === 200 && l2.replay !== "true", `status=${l2.status} replay=${l2.replay}`);
+    packed(l2) && l2.replay !== "true", `status=${l2.status} replay=${l2.replay}`);
   check("and its own stock actually moved", num(lRow.b1) === 1 && near(num(lRow.rak), 9),
     `bags1kg ${lRow.b1}, roastedAvailableKg ${lRow.rak}`);
 

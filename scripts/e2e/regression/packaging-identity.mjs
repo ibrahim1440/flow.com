@@ -260,16 +260,33 @@ async function main() {
     "lot exists");
   check("no packaging operation was recorded", (await opsFor(bE)) === 0, `${await opsFor(bE)} rows`);
 
-  sub("E2. the same claim, agreeing with the backend, is accepted");
-  const eOk = await packKg(bE, { bags1kg: 2, productId: C.coffees.brazil.id }, newKey("e2"));
-  check("an agreeing assertion packs normally", eOk.status === 200,
-    `status=${eOk.status} ${S(eOk.json).slice(0, 110)}`);
+  // E1 above now passes for a stronger reason than it used to: the kilogram path does not
+  // merely refuse a contradicting claim, it refuses every claim, because it can no longer
+  // write inventory at all. The cases below move to the path that CAN, and assert the
+  // protection survived the move rather than leaving with the route.
 
-  sub("E3. a SKU belonging to another coffee is still refused on the kilogram path");
+  sub("E2. V2 takes no coffee claim from the caller at all");
+  // There is no field to lie in. The coffee is resolved from backend records and the SKU is
+  // checked against it, so a productId in the body is not validated — it is not read. Packing
+  // the roast's own coffee is simply accepted, with or without the decoration.
+  const eOk = await packSku(bE, { productSkuId: C.skus.bra1kg.id, units: 2, productId: C.coffees.ethiopia.id }, newKey("e2"));
+  check("packing the roast's own coffee is accepted", eOk.status === 201,
+    `status=${eOk.status} ${S(eOk.json).slice(0, 110)}`);
+  const eLot = await one(
+    `SELECT "productId" p FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1 ORDER BY "createdAt" DESC LIMIT 1`,
+    [bE]);
+  check("and the lot carries the coffee the backend proved, not the one the body claimed",
+    eLot?.p === C.coffees.brazil.id, `productId ${eLot?.p}`);
+
+  sub("E3. a SKU belonging to another coffee is still refused");
   const bE3 = await stockRoast(C.coffees.brazil, C.beans.brazil, "E03");
-  const e3 = await packKg(bE3, { bags1kg: 1, productSkuId: C.skus.eth250.id }, newKey("e3"));
-  check("SEC-1 protection is preserved", e3.status >= 400 && e3.status < 500,
+  const e3 = await packSku(bE3, { productSkuId: C.skus.eth250.id, units: 1 }, newKey("e3"));
+  check("SEC-1 protection is preserved on the path that writes", e3.status >= 400 && e3.status < 500,
     `status=${e3.status} ${S(e3.json).slice(0, 110)}`);
+  check("and it says why", /not made from the coffee/i.test(S(e3.json)), S(e3.json).slice(0, 140));
+  check("nothing was drawn by the refused pack",
+    (await one(`SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`, [bE3])) === undefined,
+    "a lot was created for a refused pack");
 
   // ═══════════════════════════════════════════════════════════════════════
   section("F — FRESHLY PACKED UNITS ARE CLAIMED BY THE ORDER THEY WERE ROASTED FOR");
@@ -353,13 +370,25 @@ async function main() {
   // different SKU.
   const oI = await orderFor(C.skus.bra1kg.id, 5, "sku mismatch");
   const bI = await orderBackedRoast(oI.items[0], C.beans.brazil, "I01");
+  // Measured as a DELTA, not as an absolute zero.
+  //
+  // The line may legitimately already hold reservations: it ordered 1 KG units, and the
+  // preparation review promises it any free 1 KG stock the shelf happens to carry — which
+  // earlier sections of this suite now leave behind. Asserting "zero reserved" quietly
+  // tested that the shelf was empty rather than that the 250 g pack was excluded, and it
+  // only passed while nothing upstream produced sellable 1 KG units. What this case is
+  // actually about is that THIS pack adds nothing to that line.
+  const reservedBeforeI = await reservedUnits(oI.items[0].id);
   const packI = await packSku(bI, { productSkuId: C.skus.bra250.id, units: 4 }, newKey("i"));
   const lotI = await unitLot(bI);
   const reservedI = await reservedUnits(oI.items[0].id);
-  console.log(`    packed 4 x 250g against a 1kg line -> ${packI.status}, reserved=${reservedI}`);
+  console.log(`    packed 4 x 250g against a 1kg line -> ${packI.status}, reserved ${reservedBeforeI} -> ${reservedI}`);
   check("the coffee is the same, so packing is allowed", packI.status === 201,
     `status=${packI.status} ${S(packI.json).slice(0, 120)}`);
-  check("but nothing is reserved to the 1 kg line", reservedI === 0, `${reservedI} units`);
+  check("but the 250 g units are not promised to the 1 kg line",
+    reservedI === reservedBeforeI, `${reservedBeforeI} -> ${reservedI} units`);
+  check("and the pack itself reports reserving nothing",
+    num(packI.json?.reservedUnits) === 0, `reservedUnits=${packI.json?.reservedUnits}`);
   check("the units land free on the shelf", num(lotI?.a) === 4 && num(lotI?.r) === 0,
     `available=${lotI?.a} reserved=${lotI?.r}`);
   check("and the response says so", num(packI.json?.reservedUnits) === 0,

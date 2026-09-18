@@ -17,6 +17,20 @@ import {
   type PackagingLine,
   type SkuFacts,
 } from "@/lib/services/unified-packaging";
+import {
+  resolveBatchCoffeeIdentity,
+  resolvePackagingReservationTarget,
+  outstandingUnitsForLine,
+} from "@/lib/services/batch-identity";
+import { reserveFinishedUnitsFromLot } from "@/lib/services/finished-products";
+import {
+  canReserveToOrderLine,
+  casUpdateOrderItem,
+  assertOrderStillAcceptsReservation,
+  appendOrderActivity,
+} from "@/lib/services/order-operations";
+import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -78,7 +92,10 @@ export async function POST(request: Request, { params }: Params) {
       kind: "pack",
       productSkuId: raw.productSkuId,
       packages: Number(raw.packages),
-      gramsEach: Number(raw.gramsEach),
+      // Left undefined when the caller does not state one, which the service reads as
+      // "filled to this SKU's nominal weight". Number(undefined) is NaN and would have been
+      // refused as a malformed fill instead of resolved.
+      gramsEach: raw.gramsEach === undefined || raw.gramsEach === null ? undefined : Number(raw.gramsEach),
     });
   }
 
@@ -87,11 +104,13 @@ export async function POST(request: Request, { params }: Params) {
     try {
       const prepared = await loadPreviewInputs(prisma, id, lines);
       if ("error" in prepared) return NextResponse.json({ error: prepared.error }, { status: prepared.status });
+      const identity = await resolveBatchCoffeeIdentity(prisma, prepared.identifiable);
       const preview = await previewPackaging(prisma, {
         batch: prepared.batch,
         lines,
         skus: prepared.skus,
         partialLots: prepared.partialLots,
+        identityProductId: identity.ok ? identity.productId : null,
       });
       return NextResponse.json(preview);
     } catch (err) {
@@ -104,7 +123,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const intentLines: PackIntentLine[] = lines.map((l) => {
     if (l.kind === "pack") {
-      return { kind: "pack", productSkuId: l.productSkuId, packages: l.packages, gramsEach: l.gramsEach };
+      return { kind: "pack", productSkuId: l.productSkuId, packages: l.packages, gramsEach: l.gramsEach ?? null };
     }
     if (l.kind === "topUp") return { kind: "topUp", lotId: l.lotId, gramsAdded: l.gramsAdded };
     return { kind: "loss", grams: l.grams, reason: l.reason };
@@ -140,12 +159,18 @@ export async function POST(request: Request, { params }: Params) {
       const prepared = await loadPreviewInputs(tx, batch.id, lines, batch);
       if ("error" in prepared) throw { _appCode: prepared.status, message: prepared.error };
 
+      // Which coffee this roast is, proved from backend records under the lock. Fail-closed:
+      // if the records disagree with each other the pack is refused rather than guessed at.
+      const identity = await resolveBatchCoffeeIdentity(tx, prepared.identifiable);
+      if (!identity.ok) throw { _appCode: identity.status, message: identity.message };
+
       // Re-reconciled against the state this transaction sees, not the state the screen saw.
       const preview = await previewPackaging(tx, {
         batch: prepared.batch,
         lines,
         skus: prepared.skus,
         partialLots: prepared.partialLots,
+        identityProductId: identity.productId,
       });
 
       const committed = await commitPackaging(tx, {
@@ -155,6 +180,71 @@ export async function POST(request: Request, { params }: Params) {
         userId: user.id,
         operationId: null,
       });
+
+      // ── Claim the new units for the order they were roasted for ───────────
+      // Packing to fulfil a specific order used to land free-to-promise on this path:
+      // the operation created the lots and stopped, so preparation review still reported
+      // the line as needing production and any other order could be promised the units
+      // first. Gated, never assumed — a roast to stock has no owner, a line that ordered a
+      // different SKU is not fulfilled by these units, and an order that has stopped
+      // accepting stock gets nothing.
+      //
+      // Runs AFTER the lot work so StockAllocation -> FinishedGoodsLot -> OrderItem is
+      // preserved, which is the certified lock order.
+      let reservedUnits = 0;
+      let reservedToOrderItemId: string | null = null;
+      let reservedOrderId: string | null = null;
+      const ownerId = await resolvePackagingReservationTarget(tx, prepared.identifiable);
+      if (ownerId) {
+        const owner = await tx.orderItem.findUnique({
+          where: { id: ownerId },
+          select: {
+            id: true, orderId: true, productSkuId: true, updatedAt: true,
+            quantityUnits: true, deliveredUnits: true, deliveredQty: true,
+            preparationDecision: true,
+            order: { select: { status: true, approvalStatus: true } },
+          },
+        });
+        if (owner && owner.quantityUnits !== null && owner.productSkuId && canReserveToOrderLine(owner)) {
+          let outstanding = await outstandingUnitsForLine(tx, {
+            id: owner.id,
+            quantityUnits: owner.quantityUnits,
+            deliveredUnits: owner.deliveredUnits,
+          });
+          for (const made of committed.lots) {
+            if (outstanding <= 0) break;
+            if (made.classification !== "STANDARD" || made.units <= 0) continue;
+            const skuFacts = prepared.skus.get(made.productSkuId);
+            if (!skuFacts || skuFacts.id !== owner.productSkuId) continue;
+            const take = Math.min(made.units, outstanding);
+            const got = await reserveFinishedUnitsFromLot(
+              tx,
+              { id: owner.id, productSkuId: skuFacts.id, productSku: { weightGrams: skuFacts.weightGrams } },
+              made.id,
+              take,
+              user.id,
+            );
+            reservedUnits += got;
+            outstanding -= got;
+          }
+          if (reservedUnits > 0) {
+            reservedOrderId = owner.orderId;
+            // Compare-and-swap on the line the ceiling was computed from, making the
+            // reservation atomic with respect to the demand behind it.
+            await casUpdateOrderItem(
+              tx,
+              {
+                id: owner.id,
+                updatedAt: owner.updatedAt,
+                deliveredUnits: owner.deliveredUnits,
+                deliveredQty: owner.deliveredQty,
+              },
+              {},
+            );
+            reservedToOrderItemId = owner.id;
+          }
+        }
+      }
 
       // Mark the roast packed out once nothing meaningful is left (under 50 g), matching the
       // threshold the existing packaging paths use.
@@ -177,6 +267,8 @@ export async function POST(request: Request, { params }: Params) {
         partialPackagesCompleted: committed.partialPackagesCompleted,
         gramsConsumed: committed.gramsConsumed,
         lossGrams: committed.lossGrams,
+        reservedUnits,
+        reservedToOrderItemId,
         remainingGrams: committed.remainingGrams,
         lots: committed.lots,
         materialsConsumed: committed.materialsConsumed,
@@ -195,6 +287,32 @@ export async function POST(request: Request, { params }: Params) {
         responseBody,
         userId: user.id,
       });
+
+      // ── Derived state, in the certified acquisition order ──────────────────
+      // Packing is what completes production for a unit line, so the line's own status is
+      // recalculated first, at the OrderItem tier; then the production order; then the
+      // Order barrier last, because the activity row's foreign key locks Order. Every path
+      // that touches both takes ProductionOrder before Order, and this one must not be the
+      // exception that inverts it.
+      const links = prepared.identifiable;
+      if (links.orderItemId) await recalcOrderItemStatus(links.orderItemId, tx);
+      if (links.productionOrderId) await recalcProductionOrderStatus(links.productionOrderId, tx);
+
+      if (reservedToOrderItemId && reservedOrderId) {
+        await assertOrderStillAcceptsReservation(tx, reservedToOrderItemId);
+        // Packaging that promises stock is a decision somebody will later ask about, so it
+        // leaves a trace on the order's timeline rather than only in the stock tables.
+        await appendOrderActivity(tx, {
+          orderId: reservedOrderId,
+          type: "STOCK_RESERVED_FROM_PACKAGING",
+          message:
+            `${reservedUnits} unit(s) reserved to this order straight from packaging ` +
+            `batch ${batch.batchNumber}, by ${user.name}.`,
+          authorId: user.id,
+          authorName: user.name,
+          metadata: { orderItemId: reservedToOrderItemId, batchId: batch.id, units: reservedUnits },
+        });
+      }
 
       return responseBody;
     }, TX_OPTS);
@@ -238,6 +356,15 @@ async function loadPreviewInputs(
     }));
   if (!batch) return { error: "Batch not found.", status: 404 as const };
 
+  // The identity resolver needs the order and production-order links, which the locked row
+  // does not carry. Read once here so both the preview and the commit path ask the same
+  // question of the same record.
+  const links = await db.roastingBatch.findUnique({
+    where: { id: batchId },
+    select: { productId: true, orderItemId: true, productionOrderId: true },
+  });
+  const identifiable = links ?? { productId: batch.productId, orderItemId: null, productionOrderId: null };
+
   const skuIds = [...new Set(lines.flatMap((l) => (l.kind === "pack" ? [l.productSkuId] : [])))];
   const lotIds = [...new Set(lines.flatMap((l) => (l.kind === "topUp" ? [l.lotId] : [])))];
 
@@ -274,7 +401,7 @@ async function loadPreviewInputs(
   }
   const partialLots = new Map(lotRows.map((l) => [l.id, { ...l, status: String(l.status) }]));
 
-  return { batch, skus, partialLots };
+  return { batch, skus, partialLots, identifiable };
 }
 
 /**

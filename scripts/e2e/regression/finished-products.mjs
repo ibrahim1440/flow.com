@@ -173,8 +173,13 @@ async function main() {
   check("kg equivalent derived from units (5 x 1kg)", Number(lot.quantityKg) === 5, "quantityKg=" + lot.quantityKg);
   check("unit lot uses packedFromBatchId, not the legacy 1:1 link", lot.roastingBatchId === null && lot.packedFromBatchId === batchId, JSON.stringify({ r: lot.roastingBatchId, p: lot.packedFromBatchId }));
 
+  // The kilogram path is retired, so this is refused for a stronger reason than it used to
+  // be: not "this batch is already unit-packed", but "this endpoint can no longer write
+  // inventory at all". 410 Gone rather than 404, so a caller still speaking the old shape
+  // is told the endpoint was withdrawn rather than left guessing at a deployment fault.
   const legacyBlocked = await api(`/api/roasting-batches/${batchId}/package`, { method: "PUT", body: { bags1kg: 1 } });
-  check("legacy kg packing refused on a unit-packed batch -> 409", legacyBlocked.status === 409, "status=" + legacyBlocked.status);
+  check("legacy kg packing is retired -> 410", legacyBlocked.status === 410, "status=" + legacyBlocked.status);
+  check("and it names the operation that replaced it", JSON.stringify(legacyBlocked.json).includes("/pack"), JSON.stringify(legacyBlocked.json).slice(0, 140));
 
   section("6. SALES ORDER - customer + product + quantity, nothing else");
   const beanLine = await api("/api/orders", { method: "POST", body: {

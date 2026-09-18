@@ -77,24 +77,32 @@ async function main() {
   const b = await roastAndPass(P, C.coffees.brazil, C.beans.brazil, 12, 10, 2, "A01");
   if (!b.id) throw new Error("fixture roast failed: " + S(b.error?.json ?? b));
 
-  const packed = await api(`/api/roasting-batches/${b.id}/package`, {
-    method: "PUT", body: { bags1kg: 3 },
+  // Packed through the one packaging operation. The kilogram route this used to call is
+  // retired; what the fixture needs is a batch with real packaging history behind it, and
+  // V2 is what creates that now.
+  const packed = await api(`/api/roasting-batches/${b.id}/pack`, {
+    method: "POST",
+    body: { lines: [{ kind: "pack", productSkuId: C.skus.bra1kg.id, packages: 3 }] },
+    headers: { "Idempotency-Key": `${P}-fixture-${Date.now()}` },
   });
-  check("the fixture batch packs", packed.status === 200, `status=${packed.status} ${S(packed.json).slice(0, 90)}`);
+  check("the fixture batch packs", packed.status === 200 || packed.status === 201,
+    `status=${packed.status} ${S(packed.json).slice(0, 90)}`);
 
   const opsBefore = await num((await one(
     `SELECT COUNT(*)::int n FROM "PackagingOperation" WHERE "batchId"=$1`, [b.id])).n);
   check("it left a packaging operation on the record", opsBefore === 1, `${opsBefore} rows`);
 
+  // V2 writes unit-tracked lots keyed on packedFromBatchId; the unique 1:1 roastingBatchId
+  // link belongs to the retired kilogram shape and is null on everything it produces.
   const lotBefore = await one(
-    `SELECT id, "availableQty" a FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1`, [b.id]);
+    `SELECT id, "unitsAvailable" a FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`, [b.id]);
 
   const del = await api(`/api/roasting-batches/${b.id}`, { method: "DELETE" });
   const stillThere = await one('SELECT id FROM "RoastingBatch" WHERE id=$1', [b.id]);
   const opsAfter = num((await one(
     `SELECT COUNT(*)::int n FROM "PackagingOperation" WHERE "batchId"=$1`, [b.id])).n);
   const lotAfter = await one(
-    `SELECT id, "availableQty" a FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1`, [b.id]);
+    `SELECT id, "unitsAvailable" a FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`, [b.id]);
   console.log(`    DELETE -> ${del.status} ${S(del.json).slice(0, 100)}`);
 
   check("a packed batch is refused with 409", del.status === 409, `status=${del.status}`);

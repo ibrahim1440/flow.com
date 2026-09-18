@@ -163,55 +163,63 @@ async function main() {
     num(afterC.d) + num(afterC.r) <= num(afterC.q), `${afterC.d} + ${afterC.r} > ${afterC.q}`);
 
   // ═══════════════════════════════════════════════════════════════════════
-  section("C — LEGACY KILOGRAM PACKAGING  (the only shape that reaches that code)");
+  section("C — PACKAGING AUTO-RESERVATION  (the one path that reaches that code)");
 
-  // A kg line cannot be created through the order API any more, so one is written directly.
-  // This is fixture construction, not a workflow step.
+  // These cases used to drive the kilogram route, which was the only path that reserved
+  // freshly packed stock to the order it was made for. That route is retired, and Unified
+  // Packaging V2 now does the reserving — so the rules move with the behaviour rather than
+  // retiring alongside the endpoint. They matter more here, not less: V2 reserves to UNIT
+  // lines, which is every line a customer can actually place today.
+
+  const packUnits = (batchId, units) => api(`/api/roasting-batches/${batchId}/pack`, {
+    method: "POST",
+    body: { lines: [{ kind: "pack", productSkuId: C.skus.bra250.id, packages: units }] },
+    headers: { "Idempotency-Key": `${P}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
+  });
+  const reservedUnitsOn = async (itemId) => num((await one(
+    `SELECT COALESCE(SUM("quantityUnits"),0)::int n FROM "StockAllocation"
+      WHERE "orderItemId"=$1 AND status='RESERVED'`, [itemId])).n);
+
   sub("C1. packaging auto-reservation is refused on an invalid order lifecycle");
-  const kgOrder = await mkOrder(C.customers.cafe.id, "legacy holder", 4);
-  await db.query(
-    `UPDATE "OrderItem" SET "quantityUnits"=NULL, "quantityKg"=5, "deliveredQty"=0,
-        "preparationDecision"='Needs Production' WHERE id=$1`, [kgOrder.items[0].id]);
-  await db.query(`UPDATE "Order" SET status='On Hold' WHERE id=$1`, [kgOrder.id]);
+  const holdOrder = await mkOrder(C.customers.cafe.id, "hold holder", 4);
+  await db.query(`UPDATE "Order" SET status='On Hold' WHERE id=$1`, [holdOrder.id]);
   const batchHold = await roastAndPass(P, C.coffees.brazil, C.beans.brazil, 6, 5, 1, "PKGH");
-  await db.query(`UPDATE "RoastingBatch" SET "orderItemId"=$1 WHERE id=$2`, [kgOrder.items[0].id, batchHold.id]);
-  const packHold = await api(`/api/roasting-batches/${batchHold.id}/package`, {
-    method: "PUT", body: { bags1kg: 5 } });
-  const resHold = num((await one(
-    `SELECT COALESCE(SUM("quantityKg"),0)::numeric(12,3) n FROM "StockAllocation"
-      WHERE "orderItemId"=$1 AND status='RESERVED'`, [kgOrder.items[0].id])).n);
-  console.log(`    package -> ${packHold.status}   order On Hold   reserved kg ${resHold}`);
+  await db.query(`UPDATE "RoastingBatch" SET "orderItemId"=$1 WHERE id=$2`, [holdOrder.items[0].id, batchHold.id]);
+  const packHold = await packUnits(batchHold.id, 4);
+  const resHold = await reservedUnitsOn(holdOrder.items[0].id);
+  console.log(`    pack -> ${packHold.status}   order On Hold   reserved units ${resHold}`);
   check("packaging itself still succeeded", packHold.status === 200 || packHold.status === 201,
     `status=${packHold.status} ${S(packHold.json).slice(0, 120)}`);
-  check("but nothing was reserved to the On Hold order", num(resHold) === 0, `reserved ${resHold} kg`);
+  check("but nothing was reserved to the On Hold order", resHold === 0, `reserved ${resHold} units`);
+  check("and the operation says so itself", num(packHold.json?.reservedUnits) === 0,
+    `reservedUnits=${packHold.json?.reservedUnits}`);
 
   sub("C2. packaging-to-stock with no owner order is unaffected");
   const stockBatch = await roastAndPass(P, C.coffees.brazil, C.beans.brazil, 4, 3, 1, "PKGS");
-  const packStock = await api(`/api/roasting-batches/${stockBatch.id}/package`, {
-    method: "PUT", body: { bags1kg: 3 } });
-  console.log(`    package-to-stock -> ${packStock.status}`);
+  const packStock = await packUnits(stockBatch.id, 4);
+  console.log(`    pack-to-stock -> ${packStock.status}`);
   check("a batch with no order item still packages", packStock.status === 200 || packStock.status === 201,
     `status=${packStock.status} ${S(packStock.json).slice(0, 120)}`);
+  check("and reserves to nobody", num(packStock.json?.reservedUnits) === 0,
+    `reservedUnits=${packStock.json?.reservedUnits}`);
 
-  sub("C3. packaging on a valid kg order reserves, and concurrent packaging cannot double it");
-  const kgOk = await mkOrder(C.customers.cafe.id, "legacy valid", 4);
-  await db.query(
-    `UPDATE "OrderItem" SET "quantityUnits"=NULL, "quantityKg"=5, "deliveredQty"=0,
-        "preparationDecision"='Needs Production' WHERE id=$1`, [kgOk.items[0].id]);
-  await db.query(`UPDATE "Order" SET status='Preparing', "approvalStatus"='Yes' WHERE id=$1`, [kgOk.id]);
+  sub("C3. packaging on a valid order reserves, and concurrent packaging cannot double it");
+  const okOrder = await mkOrder(C.customers.cafe.id, "valid holder", 5);
+  await db.query(`UPDATE "OrderItem" SET "preparationDecision"='Needs Production' WHERE id=$1`,
+    [okOrder.items[0].id]);
+  await db.query(`UPDATE "Order" SET status='Preparing', "approvalStatus"='Yes' WHERE id=$1`, [okOrder.id]);
   const b1 = await roastAndPass(P, C.coffees.brazil, C.beans.brazil, 4, 3, 1, "PKGA");
   const b2 = await roastAndPass(P, C.coffees.brazil, C.beans.brazil, 4, 3, 1, "PKGB");
-  await db.query(`UPDATE "RoastingBatch" SET "orderItemId"=$1 WHERE id IN ($2,$3)`, [kgOk.items[0].id, b1.id, b2.id]);
-  const [pa, pb] = await Promise.all([
-    api(`/api/roasting-batches/${b1.id}/package`, { method: "PUT", body: { bags1kg: 3 } }),
-    api(`/api/roasting-batches/${b2.id}/package`, { method: "PUT", body: { bags1kg: 3 } }),
-  ]);
-  const resOk = num((await one(
-    `SELECT COALESCE(SUM("quantityKg"),0)::numeric(12,3) n FROM "StockAllocation"
-      WHERE "orderItemId"=$1 AND status='RESERVED'`, [kgOk.items[0].id])).n);
-  console.log(`    package A -> ${pa.status}   package B -> ${pb.status}   reserved kg ${resOk} of 5 demanded`);
-  noDeadlock("package|package", pa, pb);
-  check("reserved never exceeds the line's outstanding demand", num(resOk) <= 5.0005, `reserved ${resOk} kg vs 5 kg`);
+  await db.query(`UPDATE "RoastingBatch" SET "orderItemId"=$1 WHERE id IN ($2,$3)`,
+    [okOrder.items[0].id, b1.id, b2.id]);
+  const [pa, pb] = await Promise.all([packUnits(b1.id, 4), packUnits(b2.id, 4)]);
+  const resOk = await reservedUnitsOn(okOrder.items[0].id);
+  console.log(`    pack A -> ${pa.status}   pack B -> ${pb.status}   reserved ${resOk} of 5 demanded`);
+  noDeadlock("pack|pack", pa, pb);
+  check("reserved never exceeds the line's outstanding demand", resOk <= 5, `reserved ${resOk} units vs 5`);
+  check("and the two operations between them reserved exactly what the line got",
+    num(pa.json?.reservedUnits ?? 0) + num(pb.json?.reservedUnits ?? 0) === resOk,
+    `${pa.json?.reservedUnits} + ${pb.json?.reservedUnits} vs ${resOk}`);
 
   await invariants("after the reservation CAS suite");
 

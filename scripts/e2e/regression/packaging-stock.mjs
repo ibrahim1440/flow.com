@@ -23,8 +23,8 @@
 //
 // Every assertion is on state read back from the database, never on the response body.
 import {
-  ADMIN_PIN, db, api, check, section, sub, one, num, near, invariants, loginAs, results, concurrently,
-  DB_URL, Client,
+  ADMIN_PIN, db, api, check, section, sub, one, all, num, near, invariants, loginAs, results, concurrently,
+  DB_URL, Client, freshIdempotencyKey,
 } from "./harness.mjs";
 import { buildCatalog, teardown, roastAndPass } from "./catalog.mjs";
 
@@ -74,7 +74,51 @@ async function kgOrderLine(note, kg, coffeeId) {
   return { orderId: r.json.id, itemId };
 }
 
-const pack = (batchId, body) => api(`/api/roasting-batches/${batchId}/package`, { method: "PUT", body });
+/**
+ * Pack N one-kilogram packages, through the ONE packaging operation.
+ *
+ * This suite was written against the kilogram route, which has since been retired: it was
+ * a second implementation of inventory mutation and could write stock V2 knew nothing
+ * about. The invariants it guarded are not obsolete, so they are driven through V2 here
+ * instead of deleted. `bags1kg: N` becomes N packages of the 1 KG SKU filled to nominal,
+ * which is the same physical work described in the model that survived.
+ *
+ * The status is passed through untouched. Mapping V2's 201 onto the old 200 inside this
+ * helper would hide exactly the kind of change these tests exist to notice.
+ */
+/**
+ * A unit order line — the shape every new order actually takes.
+ *
+ * The kilogram line above is still built for the sections exercising legacy kg behaviour,
+ * which stays live for the lots Production already holds. This one is for stock packed by
+ * V2, which is unit-tracked and cannot be shipped against a kilogram line.
+ */
+async function unitOrderLine(note, units, skuId) {
+  const r = await api("/api/orders", { method: "POST", body: {
+    customerId: C.customers.cafe.id, notes: `${P} ${note}`,
+    items: [{ productSkuId: skuId, quantityUnits: units }],
+  }});
+  if (r.status !== 201) throw new Error(`unitOrderLine: ${r.status} ${S(r.json)}`);
+  await api(`/api/orders/${r.json.id}/approve`, { method: "POST", body: { decision: "Yes" } });
+  await db.query(`UPDATE "Order" SET status='Preparing', "approvalStatus"='Yes' WHERE id=$1`, [r.json.id]);
+  return { orderId: r.json.id, itemId: r.json.items[0].id };
+}
+
+const pack = (batchId, body) =>
+  api(`/api/roasting-batches/${batchId}/pack`, {
+    method: "POST",
+    body: {
+      lines: [{
+        kind: "pack",
+        productSkuId: body.productSkuId ?? C.skus.bra1kg.id,
+        packages: body.bags1kg,
+      }],
+    },
+    headers: { "Idempotency-Key": freshIdempotencyKey(P) },
+  });
+
+/** Accepted, whichever success code the route answers with. */
+const packed = (r) => r.status === 200 || r.status === 201;
 
 /**
  * Hold one row so both racers are forced to meet on it.
@@ -100,23 +144,66 @@ const deadlocked = (...rs) => rs.some((r) => r.status === 500);
 
 // ── readers ─────────────────────────────────────────────────────────────────
 
-const kgLot = async (batchId) => await one(
-  `SELECT id, "availableQty" a, "reservedQty" r, "productSkuId" sku, "quantityKg" q
-     FROM "FinishedGoodsLot" WHERE "roastingBatchId"=$1`, [batchId]);
+/**
+ * What this roast has on the shelf, in kilograms.
+ *
+ * The kilogram route kept ONE lot per roast and moved its availableQty balance, so the
+ * shelf was a single row. V2 writes a new unit-tracked lot per packaging line, which is
+ * why the balance is summed across them rather than read from one. The figure is the
+ * kg-equivalent of the free units, so every assertion below still reads in kilograms and
+ * still means the same thing: what is physically packed and not yet shipped.
+ *
+ * `id` is the most recent lot, which is what the ledger readers key on.
+ */
+const kgLot = async (batchId) => {
+  const r = await one(
+    `SELECT COALESCE(SUM("unitsAvailable" * COALESCE(f."nominalContentGrams", 0)) / 1000.0, 0)::float8 a,
+            COALESCE(SUM("unitsReserved" * COALESCE(f."nominalContentGrams", 0)) / 1000.0, 0)::float8 r,
+            MAX(f."productSkuId") sku,
+            COALESCE(SUM(f."quantityKg"), 0)::float8 q,
+            COUNT(*)::int n
+       FROM "FinishedGoodsLot" f
+      WHERE f."packedFromBatchId"=$1 AND f.status <> 'PARTIAL'`, [batchId]);
+  if (!r || num(r.n) === 0) return undefined;
+  const newest = await one(
+    `SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1 AND status <> 'PARTIAL'
+      ORDER BY "createdAt" DESC LIMIT 1`, [batchId]);
+  return { ...r, id: newest?.id };
+};
+
+/** Every finished-goods lot this roast produced — the ledger spans all of them. */
+const lotIdsFor = async (batchId) =>
+  (await all(`SELECT id FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`, [batchId])).map((x) => x.id);
 
 const batchRow = async (id) => await one(
   `SELECT status, "roastedAvailableKg" rak, "roastedBeanQuantity" rbq,
           "bags3kg" b3, "bags1kg" b1, "bags250g" b250, "bags150g" b150, "samplesGrams" sg
      FROM "RoastingBatch" WHERE id=$1`, [id]);
 
-/** Net of every finished-goods movement against this lot — what the ledger says it holds. */
-const ledgerNet = async (lotId) => num((await one(
-  `SELECT COALESCE(SUM("quantityChanged"),0)::float8 n FROM "InventoryMovement"
-     WHERE "referenceEntityId"=$1 AND category='FINISHED_GOODS'`, [lotId])).n);
+/**
+ * Net of every finished-goods movement for a ROAST — what the ledger says it holds.
+ *
+ * Keyed on the batch rather than on one lot id. Under V2 a roast's stock is spread across
+ * as many lots as there were packing lines, so a single-lot query would report a fraction
+ * of the ledger and quietly agree with a wrong balance.
+ */
+const ledgerNetForBatch = async (batchId) => {
+  const ids = await lotIdsFor(batchId);
+  if (ids.length === 0) return 0;
+  return num((await one(
+    `SELECT COALESCE(SUM("quantityChanged"),0)::float8 n FROM "InventoryMovement"
+       WHERE "referenceEntityId" = ANY($1::text[]) AND category='FINISHED_GOODS'`, [ids])).n);
+};
+const ledgerNet = async (batchId) => ledgerNetForBatch(batchId);
 
-const packingIn = async (lotId) => num((await one(
-  `SELECT COALESCE(SUM("quantityChanged"),0)::float8 n FROM "InventoryMovement"
-     WHERE "referenceEntityId"=$1 AND category='FINISHED_GOODS' AND "sourceDocType"='PACKING'`, [lotId])).n);
+const packingIn = async (batchId) => {
+  const ids = await lotIdsFor(batchId);
+  if (ids.length === 0) return 0;
+  return num((await one(
+    `SELECT COALESCE(SUM("quantityChanged"),0)::float8 n FROM "InventoryMovement"
+       WHERE "referenceEntityId" = ANY($1::text[]) AND category='FINISHED_GOODS'
+         AND "sourceDocType"='PACKING'`, [ids])).n);
+};
 
 const reservedKg = async (itemId) => num((await one(
   `SELECT COALESCE(SUM("quantityKg"),0)::float8 n FROM "StockAllocation"
@@ -141,30 +228,32 @@ async function main() {
   sub("A1. roast 10, pack 6, dispatch 4, pack 4 more — the shelf holds 6, not 10");
   const bA = await stockBatch("A01", 12, 10, 2);
   const p1 = await pack(bA.id, { bags1kg: 6 });
-  check("first pack accepted", p1.status === 200, `status=${p1.status} ${S(p1.json).slice(0, 110)}`);
+  check("first pack accepted", packed(p1), `status=${p1.status} ${S(p1.json).slice(0, 110)}`);
 
   const lotA = await kgLot(bA.id);
   check("lot holds the 6 kg just packed", near(num(lotA.a), 6), `availableQty ${lotA.a}`);
 
-  // Ship 4 kg off that lot through a legacy kilogram line.
-  const lineA = await kgOrderLine("dispatch then repack", 4, C.coffees.brazil.id);
+  // Ship 4 of those units off the lot they were packed into. The legacy kilogram line this
+  // used to ship through can no longer be packed into, and the invariant was never about the
+  // line shape — it is that dispatched stock must not come back when more is packed after it.
+  const lineA = await unitOrderLine("dispatch then repack", 4, C.skus.bra1kg.id);
   const ship = await api("/api/deliveries", { method: "POST", body: {
-    orderItemId: lineA.itemId, quantityKg: 4, deliveryType: "partial", finishedGoodsLotId: lotA.id,
-  }});
+    orderItemId: lineA.itemId, quantityUnits: 4, deliveryType: "partial", finishedGoodsLotId: lotA.id,
+  }, headers: { "Idempotency-Key": freshIdempotencyKey(P) } });
   check("4 kg dispatched", ship.status === 201, `status=${ship.status} ${S(ship.json).slice(0, 110)}`);
   const afterShip = await kgLot(bA.id);
   check("shelf is down to 2 kg after the shipment", near(num(afterShip.a), 2), `availableQty ${afterShip.a}`);
 
   const p2 = await pack(bA.id, { bags1kg: 4 });
-  check("second pack accepted", p2.status === 200, `status=${p2.status} ${S(p2.json).slice(0, 110)}`);
+  check("second pack accepted", packed(p2), `status=${p2.status} ${S(p2.json).slice(0, 110)}`);
 
   const finalA = await kgLot(bA.id);
   console.log(`    packed 6 + 4 = 10, dispatched 4  ->  shelf ${finalA.a} kg`);
   check("THE DEFECT: shelf holds 6 kg, not the 10 kg ever packed",
     near(num(finalA.a), 6), `availableQty ${finalA.a} (10 means dispatched stock was resurrected)`);
 
-  const netA = await ledgerNet(finalA.id);
-  const inA = await packingIn(finalA.id);
+  const netA = await ledgerNet(bA.id);
+  const inA = await packingIn(bA.id);
   console.log(`    ledger: packed in ${inA}, net ${netA}`);
   check("ledger records 10 kg packed in", near(inA, 10), `packing IN ${inA}`);
   check("ledger net equals the lot balance", near(netA, num(finalA.a)), `net ${netA} vs lot ${finalA.a}`);
@@ -181,7 +270,7 @@ async function main() {
     const r = await pack(bB.id, { bags1kg: step });
     expected += step;
     const lot = await kgLot(bB.id);
-    const ok = r.status === 200 && near(num(lot.a), expected);
+    const ok = packed(r) && near(num(lot.a), expected);
     if (!ok) okB = false;
     console.log(`    +${step} kg -> status ${r.status}, shelf ${lot?.a} (expected ${expected})`);
   }
@@ -189,7 +278,7 @@ async function main() {
   const lotB = await kgLot(bB.id);
   check("lot balance equals the sum of the deltas, not a re-derived total",
     near(num(lotB.a), 6), `availableQty ${lotB.a}`);
-  check("ledger net agrees with the lot", near(await ledgerNet(lotB.id), num(lotB.a)), `net vs lot`);
+  check("ledger net agrees with the lot", near(await ledgerNet(bB.id), num(lotB.a)), `net vs lot`);
 
   // ═══════════════════════════════════════════════════════════════════════
   section("C — TWO PACKERS, ONE BATCH  (A-2)");
@@ -197,7 +286,7 @@ async function main() {
   sub("C1. three concurrent 2 kg packs on the same roast");
   const bC = await stockBatch("C01", 12, 10, 2);
   const race = await concurrently(3, () => pack(bC.id, { bags1kg: 2 }));
-  const okCount = race.filter((r) => r.status === 200).length;
+  const okCount = race.filter(packed).length;
   const codes = race.map((r) => r.status);
   console.log(`    statuses ${S(codes)}  ->  ${okCount} accepted`);
 
@@ -208,12 +297,18 @@ async function main() {
   const expectedKg = okCount * 2;
   console.log(`    bags1kg ${rowC.b1}, shelf ${lotC?.a}, roasted left ${rowC.rak}`);
 
-  check(`bag counters record every accepted pack (${okCount} x 2 = ${expectedKg})`,
-    num(rowC.b1) === okCount * 2, `bags1kg ${rowC.b1}, expected ${okCount * 2}`);
+  // The bag counters this used to read belong to the retired kilogram path; V2 does not
+  // write them. "Recorded every accepted pack" now means the sellable units on the shelf,
+  // which is the figure anyone actually spends.
+  const unitsC = num((await one(
+    `SELECT COALESCE(SUM("unitsProduced"),0)::int u FROM "FinishedGoodsLot" WHERE "packedFromBatchId"=$1`,
+    [bC.id])).u);
+  check(`the shelf records every accepted pack (${okCount} x 2 = ${expectedKg})`,
+    unitsC === okCount * 2, `units ${unitsC}, expected ${okCount * 2}`);
   check("shelf balance equals the accepted packs, with nothing lost",
     near(num(lotC.a), expectedKg), `availableQty ${lotC.a}, expected ${expectedKg}`);
   check("ledger net equals the shelf balance",
-    near(await ledgerNet(lotC.id), num(lotC.a)), `net ${await ledgerNet(lotC.id)} vs lot ${lotC.a}`);
+    near(await ledgerNet(bC.id), num(lotC.a)), `net ${await ledgerNet(bC.id)} vs lot ${lotC.a}`);
   check("roasted stock never went negative", num(rowC.rak) >= -0.0005, `roastedAvailableKg ${rowC.rak}`);
   check("coffee consumed never exceeded what was roasted",
     num(rowC.rak) <= num(rowC.rbq) + 0.0005 && expectedKg <= num(rowC.rbq) + 0.0005,
@@ -239,7 +334,7 @@ async function main() {
 
   sub("D2. packing beyond the remaining roasted balance is refused, atomically");
   const lotDBefore = await kgLot(bD.id);
-  const netDBefore = await ledgerNet(lotDBefore.id);
+  const netDBefore = await ledgerNet(bD.id);
   const over = await pack(bD.id, { bags1kg: 5 });
   const d3 = await batchRow(bD.id);
   const lotDAfter = await kgLot(bD.id);
@@ -250,7 +345,7 @@ async function main() {
   check("shelf is untouched by the refused pack",
     near(num(lotDAfter.a), num(lotDBefore.a)), `${lotDBefore.a} -> ${lotDAfter.a}`);
   check("no ledger row was left behind by the refused pack",
-    near(await ledgerNet(lotDAfter.id), netDBefore), `net ${netDBefore} -> ${await ledgerNet(lotDAfter.id)}`);
+    near(await ledgerNet(bD.id), netDBefore), `net ${netDBefore} -> ${await ledgerNet(bD.id)}`);
 
   await invariants("after packaging arithmetic");
 
@@ -340,7 +435,7 @@ async function main() {
   sub("G3. the batch's own SKU is accepted and recorded");
   const right = await pack(bG.id, { bags1kg: 3, productSkuId: C.skus.bra1kg.id });
   const lotG = await kgLot(bG.id);
-  check("a matching SKU is accepted", right.status === 200, `status=${right.status} ${S(right.json).slice(0, 110)}`);
+  check("a matching SKU is accepted", packed(right), `status=${right.status} ${S(right.json).slice(0, 110)}`);
   check("the lot carries that SKU", lotG?.sku === C.skus.bra1kg.id, `productSkuId ${lotG?.sku}`);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -372,7 +467,7 @@ async function main() {
   const packH1Res = await packH1;
   console.log(`    after release -> pack ${packH1Res.status}`);
   check("and completes cleanly once the line is released, with no deadlock",
-    packH1Res.status === 200, `status=${packH1Res.status} ${S(packH1Res.json).slice(0, 110)}`);
+    packed(packH1Res), `status=${packH1Res.status} ${S(packH1Res.json).slice(0, 110)}`);
 
   sub("H2. packaging vs cancellation, both released from the same held row");
   const h2 = await kgOrderLine("barrier cancel", 5, C.coffees.brazil.id);
@@ -395,7 +490,7 @@ async function main() {
     stH2 !== "Cancelled" || near(heldH2, 0), `order ${stH2}, reserved ${heldH2} kg`);
   const bH2row = await batchRow(bH2.id);
   const lotH2 = await kgLot(bH2.id);
-  const packedH2 = pH2.status === 200;
+  const packedH2 = packed(pH2);
   check("packaging was applied in full or not at all — never half",
     packedH2
       ? near(num(bH2row.rak), 0) && near(num(lotH2?.a ?? -1), 5)
@@ -408,7 +503,14 @@ async function main() {
   sub("H3. packaging vs a roast on the same production order — the PO/Order pair");
   const h3 = await api("/api/orders", { method: "POST", body: {
     customerId: C.customers.cafe.id, notes: `${P} po inversion`,
-    items: [{ productSkuId: C.skus.bra1kg.id, quantityUnits: 6 },
+    // Deliberately far more than anything earlier in this suite could have left free.
+    //
+    // It used to ask for 6, which worked while sections A-G produced KILOGRAM lots: those
+    // could never cover a unit line, so the review always reported a shortfall and a
+    // production order was always raised. Under V2 those same sections produce unit lots of
+    // exactly this SKU, the review covers the line from the shelf, and the fixture silently
+    // stopped building the production order the barrier test needs.
+    items: [{ productSkuId: C.skus.bra1kg.id, quantityUnits: 400 },
             { productSkuId: C.skus.bra250.id, quantityUnits: 4 }],
   }});
   await api(`/api/orders/${h3.json.id}/approve`, { method: "POST", body: { decision: "Yes" } });
@@ -453,7 +555,7 @@ async function main() {
     // coffee, a rejected production order — then neither ever reached the contended pair
     // and the deadlock assertion below would pass without testing anything.
     check("the packaging actually ran (so the contended path was reached)",
-      pH3.status === 200, `status=${pH3.status} ${S(pH3.json).slice(0, 120)}`);
+      packed(pH3), `status=${pH3.status} ${S(pH3.json).slice(0, 120)}`);
     check("the competing roast actually ran (so the contended path was reached)",
       rH3.status === 201, `status=${rH3.status} ${S(rH3.json).slice(0, 120)}`);
     check("no deadlock between packaging and a roast on the same production order",

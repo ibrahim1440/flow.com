@@ -30,6 +30,7 @@ const SUITES = [
   "packaging-idempotency",   // operation identity: replay, mismatch, retry-after-rollback
   "packaging-identity",      // coffee identity fail-closed; SKU auto-reservation to the owning line
   "unified-packaging",       // one workflow: standard vs partial packages, top-up, gram reconciliation
+  "legacy-packaging-routes", // P0: the old write paths cannot reach inventory except through V2
   "production-demand",       // canonical demand truth; surplus gate; green-vs-finished; PO traceability
   "blend-integrity",         // blend as a stock transformation: conservation, ledger, provenance
   "po-lifecycle",            // Production Order state machine, batches, cancellation

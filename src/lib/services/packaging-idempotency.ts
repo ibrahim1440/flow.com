@@ -91,7 +91,7 @@ export type UnitIntent = {
  * are sorted into a canonical order before hashing for exactly that reason.
  */
 export type PackIntentLine =
-  | { kind: "pack"; productSkuId: string; packages: number; gramsEach: number }
+  | { kind: "pack"; productSkuId: string; packages: number; gramsEach: number | null }
   | { kind: "topUp"; lotId: string; gramsAdded: number }
   | { kind: "loss"; grams: number; reason: string };
 
