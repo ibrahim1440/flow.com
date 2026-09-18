@@ -62,6 +62,7 @@ type BatchPackState = {
 // shown and what the server will enforce come from one implementation. A second, local
 // arithmetic here would be a second opinion, and the two would eventually disagree.
 type LineOutcome = {
+  lineIndex: number;
   kind: "pack" | "topUp" | "loss";
   productSkuId: string;
   skuCode: string;
@@ -586,8 +587,13 @@ export default function PackagingPage() {
                   {/* ── The packaging sheet ───────────────────────────────── */}
                   <div className="space-y-2">
                     {lines.map((line, idx) => {
+                      // Matched by the index the server reports, never by position in the
+                      // returned array: a line the server refused produces no outcome, and
+                      // position-matching would then show each later row its neighbour's verdict.
                       const completeIdx = completeLines.findIndex((c) => c.uid === line.uid);
-                      const outcome = completeIdx >= 0 ? preview?.lines[completeIdx] : undefined;
+                      const outcome = completeIdx >= 0
+                        ? preview?.lines.find((o) => o.lineIndex === completeIdx)
+                        : undefined;
                       const sku = line.kind === "pack" ? catalog.find((c) => c.id === line.productSkuId) : undefined;
                       const partial = line.kind === "topUp"
                         ? packState?.openPartials.find((p) => p.lotId === line.lotId)
@@ -596,7 +602,7 @@ export default function PackagingPage() {
                         <div key={line.uid} data-testid={`pack-line-${idx}`} className="rounded-xl border border-border p-3 space-y-2">
                           <div className="flex items-center gap-2">
                             <select
-                              aria-label={t("pkgAddLine")}
+                              aria-label={t("pkgLineType")}
                               value={line.kind}
                               onChange={(e) => changeLineKind(line.uid, e.target.value as UiLine["kind"])}
                               className="px-2 py-1.5 rounded-lg border-2 border-border text-xs font-bold"
@@ -739,7 +745,7 @@ export default function PackagingPage() {
 
                           {/* What this row will actually produce, decided by the server. */}
                           {outcome && (
-                            <div className="flex items-center gap-2 flex-wrap text-[11px] font-bold">
+                            <div data-testid="line-outcome" className="flex items-center gap-2 flex-wrap text-[11px] font-bold">
                               {outcome.classification === "STANDARD" && (
                                 <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-800">
                                   {outcome.kind === "topUp" ? t("pkgWillComplete") : t("pkgCompletePackage")}

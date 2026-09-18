@@ -29,6 +29,15 @@ let partialLotId = "";
 const dialog = (page: Page) => page.getByTestId("packaging-dialog");
 const row = (page: Page, i: number) => dialog(page).getByTestId(`pack-line-${i}`);
 const confirmBtn = (page: Page) => dialog(page).getByRole("button", { name: /Confirm packaging/i });
+/**
+ * What the server decided about a row, as the row reports it.
+ *
+ * Deliberately a test id rather than the badge's words. The line-kind picker on the same
+ * row carries the same vocabulary — "Complete a partial package", "Declared loss" — so a
+ * text locator matches a hidden <option> as readily as the badge, and the assertion then
+ * fails for a reason that has nothing to do with the behaviour under test.
+ */
+const outcome = (page: Page, i: number) => row(page, i).getByTestId("line-outcome");
 
 /** Open the one packaging action on a batch's card. */
 async function openPackaging(page: Page, batch: string) {
@@ -134,7 +143,7 @@ test("P4 — a full fill reads as a complete package and every gram reconciles",
 
   const recon = dialog(page).getByTestId("packaging-reconciliation");
   await expect(recon).toBeVisible({ timeout: 60_000 });
-  await expect(row(page, 0).getByText(/Complete package/i)).toBeVisible();
+  await expect(outcome(page, 0)).toContainText(/Complete package/i);
   await expect(recon.getByText(/Every gram is accounted for/i)).toBeVisible();
   // 4 x 500 g out of 6000 g leaves 4000 g on the roast.
   await expect(recon.getByText(/4000 g/).first()).toBeVisible();
@@ -147,7 +156,7 @@ test("P5 — dropping below the nominal weight turns the row into a partial pack
   await openPackaging(page, batchNumber);
   await fillPackRow(row(page, 0), SKU.id, 1, 300);
 
-  await expect(row(page, 0).getByText(/Partial package/i)).toBeVisible({ timeout: 60_000 });
+  await expect(outcome(page, 0)).toContainText(/Partial package/i, { timeout: 60_000 });
   await expect(dialog(page).getByText(/This will create partial packages/i)).toBeVisible();
   await expect(
     dialog(page).getByText(/cannot be sold, reserved or dispatched as a full unit/i),
@@ -230,7 +239,7 @@ test("P10 — the open package is offered for top-up, short by exactly what it l
 
   // Defaulted to what finishes the bag: 500 g nominal less the 300 g already in it.
   await expect(row(page, 0).locator('input[type="number"]').first()).toHaveValue("200");
-  await expect(row(page, 0).getByText(/will become complete/i)).toBeVisible({ timeout: 60_000 });
+  await expect(outcome(page, 0)).toContainText(/will become complete/i, { timeout: 60_000 });
 });
 
 // ── P11 ────────────────────────────────────────────────────────────────────
@@ -270,7 +279,7 @@ test("P12 — a declared loss needs a reason before it counts as a line", async 
   await expect(confirmBtn(page)).toBeDisabled();
 
   await row(page, 0).locator('input[type="text"]').first().fill("spilled at the hopper");
-  await expect(row(page, 0).getByText(/Declared loss/i).first()).toBeVisible({ timeout: 60_000 });
+  await expect(outcome(page, 0)).toContainText(/Declared loss/i, { timeout: 60_000 });
   await expect(confirmBtn(page)).toBeEnabled({ timeout: 60_000 });
 });
 

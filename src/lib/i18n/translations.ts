@@ -891,6 +891,7 @@ export const translations = {
   pkgLossGramsLabel:      { en: "Lost weight (g)",                  ar: "الوزن الفاقد (غ)" },
   pkgLossReasonLabel:     { en: "Reason for the loss",              ar: "سبب الفاقد" },
   pkgAddLine:             { en: "Add line",                         ar: "إضافة سطر" },
+  pkgLineType:            { en: "Line type",                        ar: "نوع السطر" },
   pkgRemoveLine:          { en: "Remove line",                      ar: "حذف السطر" },
   pkgLineIncomplete:      { en: "Complete or remove every line before confirming.", ar: "أكمل كل سطر أو احذفه قبل التأكيد." },
   pkgChoosePackage:       { en: "Choose a package",                 ar: "اختر عبوة" },

@@ -48,6 +48,14 @@ export type PackagingLine =
   | { kind: "loss"; grams: number; reason: string };
 
 export type LineOutcome = {
+  /**
+   * Which submitted line this outcome belongs to, zero-based.
+   *
+   * Reported rather than implied by array position, because a line carrying a problem
+   * produces no outcome at all. Position-matching therefore slides every later outcome one
+   * row up the operator's screen, so a package would be labelled with a neighbour's verdict.
+   */
+  lineIndex: number;
   kind: "pack" | "topUp" | "loss";
   productSkuId: string;
   skuCode: string;
@@ -181,6 +189,7 @@ export async function previewPackaging(
       const gramsConsumed = line.gramsEach * line.packages;
 
       outcomes.push({
+        lineIndex: index,
         kind: "pack",
         productSkuId: sku.id,
         skuCode: sku.skuCode,
@@ -222,6 +231,7 @@ export async function previewPackaging(
         continue;
       }
       outcomes.push({
+        lineIndex: index,
         kind: "loss",
         productSkuId: "",
         skuCode: "—",
@@ -264,6 +274,7 @@ export async function previewPackaging(
     const classification = classifyFill(after, nominalGrams);
 
     outcomes.push({
+      lineIndex: index,
       kind: "topUp",
       productSkuId: lot.productSkuId ?? "",
       skuCode: sku?.skuCode ?? "—",

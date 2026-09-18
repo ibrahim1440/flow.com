@@ -644,6 +644,26 @@ async function main() {
   check("and never offer the partial package",
     !S(foAO.json).includes(lotAO), S(foAO.json).slice(0, 220));
 
+  sub("AR. an outcome names the line it belongs to, so a refused line cannot shift the rest");
+  // The screen labels each row with the server's verdict. A line the server refuses yields
+  // no outcome, so matching by position in the returned array would slide every later
+  // verdict one row up — and a complete package would be labelled partial, or the reverse.
+  const bAR = await roast("AR", C.coffees.brazil, C.beans.brazil, 4.0, 3.2);
+  const pvAR = await preview(bAR, [
+    { kind: "pack", productSkuId: "no-such-sku", packages: 1, gramsEach: 1000 },
+    { kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 1000 },
+    { kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 400 },
+  ]);
+  check("the preview answers", pvAR.status === 200, `${pvAR.status} ${S(pvAR.json).slice(0, 140)}`);
+  check("the unknown product is reported as a problem", (pvAR.json?.problems ?? []).length >= 1,
+    S(pvAR.json?.problems).slice(0, 180));
+  check("and produces no outcome of its own", (pvAR.json?.lines ?? []).length === 2,
+    S((pvAR.json?.lines ?? []).length));
+  const byIndexAR = Object.fromEntries((pvAR.json?.lines ?? []).map((l) => [l.lineIndex, l]));
+  check("line 1 is reported against index 1", byIndexAR[1]?.classification === "STANDARD", S(byIndexAR[1]));
+  check("line 2 is reported against index 2", byIndexAR[2]?.classification === "PARTIAL", S(byIndexAR[2]));
+  check("and nothing claims the refused line's index", byIndexAR[0] === undefined, S(byIndexAR[0]));
+
   await invariants("after the unified packaging suite");
   await teardown(P);
 
