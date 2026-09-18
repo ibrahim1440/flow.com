@@ -44,10 +44,11 @@ export function kgFromGrams(grams: number): number {
  */
 export type PackagingLine =
   | { kind: "pack"; productSkuId: string; packages: number; gramsEach: number }
-  | { kind: "topUp"; lotId: string; gramsAdded: number };
+  | { kind: "topUp"; lotId: string; gramsAdded: number }
+  | { kind: "loss"; grams: number; reason: string };
 
 export type LineOutcome = {
-  kind: "pack" | "topUp";
+  kind: "pack" | "topUp" | "loss";
   productSkuId: string;
   skuCode: string;
   nominalGrams: number;
@@ -56,13 +57,15 @@ export type LineOutcome = {
   packages: number;
   /** Grams this line draws from the roast. */
   gramsConsumed: number;
-  classification: "STANDARD" | "PARTIAL";
+  classification: "STANDARD" | "PARTIAL" | "LOSS";
   /** Sellable units this line creates. A partial package creates none. */
   standardUnitsCreated: number;
   /** Set for topUp lines: the package being finished. */
   lotId?: string;
   /** True when a topUp carries the package over its nominal weight. */
   becomesStandard?: boolean;
+  /** Set for loss lines: why the coffee did not reach a package. */
+  reason?: string;
 };
 
 export type MaterialRequirement = {
@@ -79,6 +82,8 @@ export type PackagingPreview = {
   totalConsumedGrams: number;
   standardGrams: number;
   partialGrams: number;
+  /** Coffee the operator declared as lost. Never inferred from a gap in the arithmetic. */
+  lossGrams: number;
   remainingGrams: number;
   standardUnits: number;
   partialPackages: number;
@@ -177,6 +182,34 @@ export async function previewPackaging(
       continue;
     }
 
+    if (line.kind === "loss") {
+      // Loss is DECLARED, never derived. The alternative — treating whatever the packages
+      // did not account for as loss — cannot tell spilled coffee apart from a mistyped fill
+      // weight, and would quietly absorb an arithmetic error into shrinkage.
+      if (!Number.isInteger(line.grams) || line.grams < 1) {
+        problems.push(`Line ${n}: the lost weight must be a whole number of grams, greater than zero.`);
+        continue;
+      }
+      const reason = (line.reason ?? "").trim();
+      if (reason.length < 3) {
+        problems.push(`Line ${n}: recording a loss needs a reason.`);
+        continue;
+      }
+      outcomes.push({
+        kind: "loss",
+        productSkuId: "",
+        skuCode: "—",
+        nominalGrams: 0,
+        actualGramsEach: 0,
+        packages: 0,
+        gramsConsumed: line.grams,
+        classification: "LOSS",
+        standardUnitsCreated: 0,
+        reason,
+      });
+      continue;
+    }
+
     // ── top-up ────────────────────────────────────────────────────────────
     const lot = partialLots.get(line.lotId);
     if (!lot) { problems.push(`Line ${n}: that package no longer exists.`); continue; }
@@ -220,9 +253,15 @@ export async function previewPackaging(
     // No materials: the bag, label and valve were consumed when the package was first made.
   }
 
+  // Summed per class rather than by subtraction. Deriving one bucket as "everything that
+  // is not the other" is what lets a third kind of gram hide inside it — which is exactly
+  // what declared loss would have done to the partial figure.
+  const gramsIn = (c: LineOutcome["classification"]) =>
+    outcomes.filter((o) => o.classification === c).reduce((s, o) => s + o.gramsConsumed, 0);
   const totalConsumedGrams = outcomes.reduce((s, o) => s + o.gramsConsumed, 0);
-  const standardGrams = outcomes.filter((o) => o.classification === "STANDARD").reduce((s, o) => s + o.gramsConsumed, 0);
-  const partialGrams = totalConsumedGrams - standardGrams;
+  const standardGrams = gramsIn("STANDARD");
+  const partialGrams = gramsIn("PARTIAL");
+  const lossGrams = gramsIn("LOSS");
 
   if (outcomes.length === 0 && problems.length === 0) {
     problems.push("Nothing was entered to package.");
@@ -259,6 +298,7 @@ export async function previewPackaging(
     totalConsumedGrams,
     standardGrams,
     partialGrams,
+    lossGrams,
     remainingGrams: Math.max(0, availableGrams - totalConsumedGrams),
     standardUnits: outcomes.reduce((s, o) => s + o.standardUnitsCreated, 0),
     partialPackages: outcomes.filter((o) => o.kind === "pack" && o.classification === "PARTIAL")
@@ -275,6 +315,8 @@ export type CommitResult = {
   partialPackagesCreated: number;
   partialPackagesCompleted: number;
   gramsConsumed: number;
+  /** Of gramsConsumed, what the operator declared as lost rather than packaged. */
+  lossGrams: number;
   remainingGrams: number;
   lots: { id: string; skuCode: string; classification: "STANDARD" | "PARTIAL"; units: number; actualGrams: number }[];
   materialsConsumed: { materialItemId: string; label: string; quantity: number }[];
@@ -328,20 +370,49 @@ export async function commitPackaging(
     };
   }
 
-  await tx.inventoryMovement.create({
-    data: {
-      type: "OUT",
-      category: "ROASTED_COFFEE",
-      referenceEntityId: batch.id,
-      quantityChanged: -consumedKg,
-      previousQuantity: batch.roastedAvailableKg,
-      newQuantity: roundKg(batch.roastedAvailableKg - consumedKg),
-      sourceDocType: "PACKING",
-      sourceDocId: batch.id,
-      userId,
-      notes: `Unified packaging: ${preview.totalConsumedGrams} g across ${preview.lines.length} line(s)`,
-    },
-  });
+  // The draw is ONE conditional UPDATE above but TWO kinds of ledger entry, because the
+  // coffee left for two different reasons. Booking it all as a single OUT would leave the
+  // loss to be inferred from the gap between that row and the finished-goods INs — the
+  // inference this feature exists to remove. The rows below sum to exactly consumedKg.
+  let runningKg = batch.roastedAvailableKg;
+  const packedGrams = preview.standardGrams + preview.partialGrams;
+  if (packedGrams > 0) {
+    const kg = kgFromGrams(packedGrams);
+    await tx.inventoryMovement.create({
+      data: {
+        type: "OUT",
+        category: "ROASTED_COFFEE",
+        referenceEntityId: batch.id,
+        quantityChanged: -kg,
+        previousQuantity: runningKg,
+        newQuantity: roundKg(runningKg - kg),
+        sourceDocType: "PACKING",
+        sourceDocId: batch.id,
+        userId,
+        notes: `Unified packaging: ${packedGrams} g into packages across ${preview.lines.length} line(s)`,
+      },
+    });
+    runningKg = roundKg(runningKg - kg);
+  }
+  for (const line of preview.lines) {
+    if (line.kind !== "loss") continue;
+    const kg = kgFromGrams(line.gramsConsumed);
+    await tx.inventoryMovement.create({
+      data: {
+        type: "LOSS",
+        category: "ROASTED_COFFEE",
+        referenceEntityId: batch.id,
+        quantityChanged: -kg,
+        previousQuantity: runningKg,
+        newQuantity: roundKg(runningKg - kg),
+        sourceDocType: "PACKING",
+        sourceDocId: batch.id,
+        userId,
+        notes: `Packaging loss: ${line.gramsConsumed} g — ${line.reason ?? ""}`,
+      },
+    });
+    runningKg = roundKg(runningKg - kg);
+  }
 
   // ── Draw the packaging materials ──────────────────────────────────────────
   const materialsConsumed: CommitResult["materialsConsumed"] = [];
@@ -383,6 +454,9 @@ export async function commitPackaging(
   let partialPackagesCompleted = 0;
 
   for (const line of preview.lines) {
+    // Already booked to the ledger above, and it produces nothing to put on a shelf.
+    if (line.kind === "loss") continue;
+
     if (line.kind === "topUp" && line.lotId) {
       // Claim the package by its CURRENT state. If a concurrent submit finished the same
       // package first this matches nothing, and the operation fails rather than producing a
@@ -433,7 +507,9 @@ export async function commitPackaging(
       lots.push({
         id: line.lotId,
         skuCode: line.skuCode,
-        classification: line.classification,
+        // Stated from what the top-up DID, not copied from the widened line classification:
+        // a lot is never a loss, and the two types must not be conflated to satisfy one.
+        classification: line.becomesStandard ? "STANDARD" : "PARTIAL",
         units: line.becomesStandard ? 1 : 0,
         actualGrams: line.actualGramsEach,
       });
@@ -565,6 +641,7 @@ export async function commitPackaging(
     partialPackagesCreated,
     partialPackagesCompleted,
     gramsConsumed: preview.totalConsumedGrams,
+    lossGrams: preview.lossGrams,
     remainingGrams: gramsFromKg(after.roastedAvailableKg),
     lots,
     materialsConsumed,

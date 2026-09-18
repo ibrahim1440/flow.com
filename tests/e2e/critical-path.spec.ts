@@ -206,20 +206,24 @@ test("Packaging packs the batch into finished goods through the bill of material
   await expect(page.getByText(batchNumber).first()).toBeVisible({ timeout: 60_000 });
 
   const packCard = packBatch(page, batchNumber);
-  // One packaging action per card; the method is derived, not chosen from two buttons.
+  // ONE packaging action per card. There is no method to pick and no second dialog.
   await packCard.getByRole("button", { name: /Start Packaging|Continue Packaging/i }).click();
 
-  const modal = page.locator("div.fixed").last();
-  await expect(modal.getByText(/Pack into finished product/i)).toBeVisible();
+  const modal = page.getByTestId("packaging-dialog");
+  await expect(modal).toBeVisible({ timeout: 60_000 });
+  const line = modal.getByTestId("pack-line-0");
   // The picker defaults to the first product in the catalogue, which is not necessarily
   // this batch's coffee — choosing by SKU id is what selecting the right row does.
-  await modal.locator("select").first().selectOption(catalog.skus.yem500.id);
-  await modal.locator('input[type="number"]').first().fill("24");
+  await line.locator("select").nth(1).selectOption(catalog.skus.yem500.id);
+  await line.locator('input[type="number"]').first().fill("24");
 
-  // The modal states what the pack will consume before it is committed.
-  await expect(modal.getByText(/Will consume/i)).toBeVisible();
-  const pack = modal.getByRole("button", { name: /Pack as product/i });
-  await expect(pack, "24 x 500 g is exactly the 12 kg this batch holds").toBeEnabled();
+  // Every gram is accounted for before anything is committed, and the screen says where
+  // each one goes rather than only what will be consumed.
+  await expect(modal.getByTestId("packaging-reconciliation")).toBeVisible({ timeout: 60_000 });
+  await expect(modal.getByText(/Every gram is accounted for/i)).toBeVisible();
+  await expect(modal.getByText(/Materials this run consumes/i)).toBeVisible();
+  const pack = modal.getByRole("button", { name: /Confirm packaging/i });
+  await expect(pack, "24 x 500 g is exactly the 12 kg this batch holds").toBeEnabled({ timeout: 60_000 });
   await pack.click();
 
   await expect.poll(async () => {

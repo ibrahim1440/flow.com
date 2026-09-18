@@ -4,6 +4,7 @@ import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import {
   availableUnitsBySku,
+  partialPackagesBySku,
   skuDisplayName,
   packSizeLabel,
 } from "@/lib/services/finished-products";
@@ -62,10 +63,11 @@ export async function GET(request: Request) {
       take: 500,
     });
 
-    const availability = await availableUnitsBySku(
-      prisma,
-      skus.map((s) => s.id)
-    );
+    const skuIds = skus.map((s) => s.id);
+    const availability = await availableUnitsBySku(prisma, skuIds);
+    // Read separately and reported separately. Partial packages are stock the floor can
+    // see and top up, but they are not free-to-promise and must never be summed with it.
+    const partials = await partialPackagesBySku(prisma, skuIds);
 
     return NextResponse.json(
       skus.map((s) => ({
@@ -87,6 +89,8 @@ export async function GET(request: Request) {
         hasBom: s._count.bomComponents > 0,
         availableUnits: availability.get(s.id)?.unitsFree ?? 0,
         reservedUnits: availability.get(s.id)?.unitsReserved ?? 0,
+        partialPackages: partials.get(s.id)?.packages ?? 0,
+        partialGrams: partials.get(s.id)?.grams ?? 0,
       }))
     );
   } catch (err) {

@@ -38,6 +38,11 @@ type Product = {
   hasBom: boolean;
   availableUnits: number;
   reservedUnits: number;
+  // Real stock that is NOT free to promise. Shown beside the sellable figure and never
+  // added to it: a partial package exists on the shelf and someone has to be able to see
+  // it, but it cannot be sold, reserved or dispatched until it is topped up.
+  partialPackages: number;
+  partialGrams: number;
 };
 
 type Material = {
@@ -323,6 +328,14 @@ function ProductTable({
                 {p.reservedUnits > 0 && (
                   <div className="text-[11px] text-oo-text-muted">
                     {p.reservedUnits} {t("unitsLabel")} reserved
+                  </div>
+                )}
+                {p.partialPackages > 0 && (
+                  <div
+                    className="text-[11px] font-semibold text-amber-700"
+                    title={t("pkgPartialWarnBody")}
+                  >
+                    + {p.partialPackages} {t("pkgPartialOnShelf")} ({p.partialGrams} g)
                   </div>
                 )}
               </td>

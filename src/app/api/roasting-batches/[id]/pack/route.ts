@@ -13,6 +13,7 @@ import {
 import {
   previewPackaging,
   commitPackaging,
+  gramsFromKg,
   type PackagingLine,
   type SkuFacts,
 } from "@/lib/services/unified-packaging";
@@ -59,6 +60,10 @@ export async function POST(request: Request, { params }: Params) {
 
   const lines: PackagingLine[] = [];
   for (const raw of b.lines as Record<string, unknown>[]) {
+    if (raw?.kind === "loss") {
+      lines.push({ kind: "loss", grams: Number(raw.grams), reason: String(raw.reason ?? "") });
+      continue;
+    }
     if (raw?.kind === "topUp") {
       if (typeof raw.lotId !== "string" || !raw.lotId) {
         return NextResponse.json({ error: "Each top-up line needs the package it continues." }, { status: 400 });
@@ -97,11 +102,13 @@ export async function POST(request: Request, { params }: Params) {
   const key = readRequestKey(request);
   if (!key.ok) return NextResponse.json({ error: key.message }, { status: 400 });
 
-  const intentLines: PackIntentLine[] = lines.map((l) =>
-    l.kind === "pack"
-      ? { kind: "pack", productSkuId: l.productSkuId, packages: l.packages, gramsEach: l.gramsEach }
-      : { kind: "topUp", lotId: l.lotId, gramsAdded: l.gramsAdded },
-  );
+  const intentLines: PackIntentLine[] = lines.map((l) => {
+    if (l.kind === "pack") {
+      return { kind: "pack", productSkuId: l.productSkuId, packages: l.packages, gramsEach: l.gramsEach };
+    }
+    if (l.kind === "topUp") return { kind: "topUp", lotId: l.lotId, gramsAdded: l.gramsAdded };
+    return { kind: "loss", grams: l.grams, reason: l.reason };
+  });
   const requestHash = packagingRequestHash({ method: "PACK", batchId: id, lines: intentLines });
 
   try {
@@ -169,6 +176,7 @@ export async function POST(request: Request, { params }: Params) {
         partialPackagesCreated: committed.partialPackagesCreated,
         partialPackagesCompleted: committed.partialPackagesCompleted,
         gramsConsumed: committed.gramsConsumed,
+        lossGrams: committed.lossGrams,
         remainingGrams: committed.remainingGrams,
         lots: committed.lots,
         materialsConsumed: committed.materialsConsumed,
@@ -267,4 +275,66 @@ async function loadPreviewInputs(
   const partialLots = new Map(lotRows.map((l) => [l.id, { ...l, status: String(l.status) }]));
 
   return { batch, skus, partialLots };
+}
+
+/**
+ * GET /api/roasting-batches/[id]/pack — what the packaging screen needs to open.
+ *
+ * The unpacked coffee on the roast, and the open partial packages this roast may legally be
+ * poured into. Eligibility is decided here with the SAME rule previewPackaging enforces —
+ * two coffees may only meet inside one package if the ERP already calls them the same
+ * product — so the screen cannot offer a top-up the commit would refuse.
+ */
+export async function GET(_request: Request, { params }: Params) {
+  const { error } = await requireEdit("packaging");
+  if (error) return error;
+
+  const { id } = await params;
+
+  try {
+    const batch = await prisma.roastingBatch.findUnique({
+      where: { id },
+      select: { id: true, batchNumber: true, status: true, productId: true, roastedAvailableKg: true },
+    });
+    if (!batch) return NextResponse.json({ error: "Batch not found." }, { status: 404 });
+
+    const partials = await prisma.finishedGoodsLot.findMany({
+      where: {
+        status: "PARTIAL",
+        // Mirrors the commit-side guard exactly. A roast with no product of its own is not
+        // narrowed here, because the validator does not narrow it either.
+        ...(batch.productId ? { productId: batch.productId } : {}),
+      },
+      select: {
+        id: true,
+        batchNumber: true,
+        actualContentGrams: true,
+        nominalContentGrams: true,
+        createdAt: true,
+        packedFromBatchId: true,
+        productSku: { select: { id: true, skuCode: true, weightGrams: true } },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+    });
+
+    return NextResponse.json({
+      batchNumber: batch.batchNumber,
+      status: batch.status,
+      availableGrams: gramsFromKg(batch.roastedAvailableKg),
+      openPartials: partials.map((p) => ({
+        lotId: p.id,
+        batchNumber: p.batchNumber,
+        skuId: p.productSku?.id ?? null,
+        skuCode: p.productSku?.skuCode ?? "—",
+        actualGrams: p.actualContentGrams ?? 0,
+        nominalGrams: p.nominalContentGrams ?? Math.round(p.productSku?.weightGrams ?? 0),
+        // True when the package was first filled from THIS roast. A top-up from another
+        // roast of the same coffee is legitimate, so this informs rather than restricts.
+        fromThisBatch: p.packedFromBatchId === batch.id,
+      })),
+    });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

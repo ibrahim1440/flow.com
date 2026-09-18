@@ -873,13 +873,57 @@ export const translations = {
   activityProductionBatchLinked:    { en: "Batch linked to production", ar: "تم ربط دفعة بالإنتاج" },
   activityProductionBatchUnlinked:  { en: "Batch unlinked from production", ar: "تم إلغاء ربط دفعة" },
 
-  // ── Packaging method and material shortage ─────────────────────────────
-  // The method is derived per batch and locked by the first operation; the shortage
-  // panel reports material gaps without touching the quantity the operator entered.
-  pkgMethodSku:           { en: "Finished units",                   ar: "وحدات جاهزة" },
-  pkgMethodBulk:          { en: "Bulk bags",                        ar: "أكياس سائبة" },
-  pkgMethodLocked:        { en: "method locked",                    ar: "الطريقة مثبّتة" },
-  pkgChooseMethod:        { en: "Choose packing method",          ar: "اختر طريقة التعبئة" },
+  // ── Unified packaging ──────────────────────────────────────────────────
+  // There is ONE packaging workflow. The old kilogram-versus-SKU method vocabulary is
+  // gone from the interface on purpose: it named an internal storage distinction, never
+  // anything the operator does differently at the bench. What is left describes the
+  // physical work — packages, their real weight, and what happens to every gram.
+  pkgLineTypeNew:         { en: "New packages",                     ar: "عبوات جديدة" },
+  pkgLineTypeTopUp:       { en: "Complete a partial package",       ar: "إكمال عبوة جزئية" },
+  pkgLineTypeLoss:        { en: "Declared loss",                    ar: "فاقد معلن" },
+  pkgNominalWeight:       { en: "Nominal weight",                   ar: "الوزن الاسمي" },
+  pkgActualWeight:        { en: "Actual weight",                    ar: "الوزن الفعلي" },
+  pkgCompletePackage:     { en: "Complete package",                 ar: "عبوة مكتملة" },
+  pkgPartialPackage:      { en: "Partial package",                  ar: "عبوة جزئية" },
+  pkgPackagesCount:       { en: "Number of packages",               ar: "عدد العبوات" },
+  pkgGramsEach:           { en: "Actual weight per package (g)",    ar: "الوزن الفعلي لكل عبوة (غ)" },
+  pkgGramsAdded:          { en: "Weight added (g)",                 ar: "الوزن المضاف (غ)" },
+  pkgLossGramsLabel:      { en: "Lost weight (g)",                  ar: "الوزن الفاقد (غ)" },
+  pkgLossReasonLabel:     { en: "Reason for the loss",              ar: "سبب الفاقد" },
+  pkgAddLine:             { en: "Add line",                         ar: "إضافة سطر" },
+  pkgRemoveLine:          { en: "Remove line",                      ar: "حذف السطر" },
+  pkgLineIncomplete:      { en: "Complete or remove every line before confirming.", ar: "أكمل كل سطر أو احذفه قبل التأكيد." },
+  pkgChoosePackage:       { en: "Choose a package",                 ar: "اختر عبوة" },
+  pkgNoOpenPartials:      { en: "No open partial packages for this coffee.", ar: "لا توجد عبوات جزئية مفتوحة لهذا البن." },
+  pkgFromBatch:           { en: "from batch",                       ar: "من الدفعة" },
+  pkgThisBatch:           { en: "this roast",                       ar: "هذه التحميصة" },
+  pkgWillComplete:        { en: "will become complete",             ar: "ستصبح مكتملة" },
+  pkgStaysPartial:        { en: "stays partial",                    ar: "تبقى جزئية" },
+  pkgSellableUnits:       { en: "sellable units",                   ar: "وحدات قابلة للبيع" },
+  pkgPackagesWord:        { en: "packages",                         ar: "عبوات" },
+
+  // The reconciliation panel. Every gram this roast gives up is in exactly one of four
+  // buckets, and the screen states all four rather than leaving loss to be inferred.
+  pkgReconTitle:          { en: "Where every gram goes",            ar: "إلى أين يذهب كل غرام" },
+  pkgReconAvailable:      { en: "Unpacked coffee on this roast",    ar: "البن غير المعبأ في هذه التحميصة" },
+  pkgReconStandard:       { en: "Into complete packages",           ar: "إلى عبوات مكتملة" },
+  pkgReconPartial:        { en: "Into partial packages",            ar: "إلى عبوات جزئية" },
+  pkgReconLoss:           { en: "Declared loss",                    ar: "فاقد معلن" },
+  pkgReconRemaining:      { en: "Left unpacked on the roast",       ar: "يبقى غير معبأ في التحميصة" },
+  pkgReconBalanced:       { en: "Every gram is accounted for.",     ar: "كل غرام مُحتسب." },
+  pkgReconUnbalanced:     { en: "These weights do not reconcile. Nothing will be committed.", ar: "هذه الأوزان غير متطابقة. لن يتم تنفيذ أي عملية." },
+  pkgAlreadyPackedLabel:  { en: "Already packed from this roast",   ar: "معبّأ من هذه التحميصة" },
+
+  // The partial-package acknowledgement. A partial package is genuine stock, so it is
+  // never refused — but it is not sellable, and the operator says so before committing.
+  pkgPartialWarnTitle:    { en: "This will create partial packages", ar: "ستؤدي هذه العملية إلى إنشاء عبوات جزئية" },
+  pkgPartialWarnBody:     { en: "A partial package is real stock, but it cannot be sold, reserved or dispatched as a full unit until it is topped up to its nominal weight.", ar: "العبوة الجزئية مخزون حقيقي، لكن لا يمكن بيعها أو حجزها أو شحنها كوحدة كاملة حتى تُستكمل إلى وزنها الاسمي." },
+  pkgPartialWarnConfirm:  { en: "I confirm these packages are incomplete", ar: "أؤكد أن هذه العبوات غير مكتملة" },
+  pkgPartialOnShelf:      { en: "partial",                          ar: "جزئية" },
+  pkgMaterialsTitle:      { en: "Materials this run consumes",      ar: "المواد المستهلكة في هذه التعبئة" },
+  pkgConfirmBtn:          { en: "Confirm packaging",                ar: "تأكيد التعبئة" },
+  pkgDone:                { en: "Packaging recorded",               ar: "تم تسجيل التعبئة" },
+
   pkgClosingWarning:      { en: "This will pack the last of the roast and close the batch. No further packaging will be possible on it.", ar: "ستؤدي هذه العملية إلى تعبئة ما تبقى من التحميصة وإغلاق الدفعة. لن يكون بالإمكان تعبئة أي كمية أخرى منها." },
   startPackaging:         { en: "Start Packaging",                 ar: "بدء التعبئة" },
   continuePackaging:      { en: "Continue Packaging",              ar: "متابعة التعبئة" },

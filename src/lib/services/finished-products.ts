@@ -73,6 +73,40 @@ export type SkuAvailability = {
 const EMPTY_AVAILABILITY: SkuAvailability = { unitsAvailable: 0, unitsReserved: 0, unitsFree: 0 };
 
 /**
+ * Partial packages per SKU — real stock that may NOT be promised to anyone.
+ *
+ * Deliberately a separate function returning separate numbers, never a field folded into
+ * SkuAvailability. A partial package is physically on the shelf and has to be visible, but
+ * the moment its count travels in the same shape as free-to-promise units, some caller
+ * somewhere adds the two together and sells a half-full bag as a full one. The type system
+ * is doing the work here: there is no field on SkuAvailability that could carry this.
+ */
+export async function partialPackagesBySku(
+  tx: PrismaTx,
+  skuIds: string[],
+): Promise<Map<string, { packages: number; grams: number }>> {
+  const out = new Map<string, { packages: number; grams: number }>();
+  if (skuIds.length === 0) return out;
+
+  const grouped = await tx.finishedGoodsLot.groupBy({
+    by: ["productSkuId"],
+    where: { productSkuId: { in: skuIds }, status: "PARTIAL" },
+    _count: { _all: true },
+    _sum: { actualContentGrams: true },
+  });
+
+  for (const row of grouped) {
+    if (!row.productSkuId) continue;
+    out.set(row.productSkuId, {
+      packages: row._count._all,
+      grams: row._sum.actualContentGrams ?? 0,
+    });
+  }
+  for (const id of skuIds) if (!out.has(id)) out.set(id, { packages: 0, grams: 0 });
+  return out;
+}
+
+/**
  * Free-to-promise finished stock per SKU, in whole units.
  *
  * Only unit-tracked lots are counted. The legacy kilogram lots are deliberately excluded:

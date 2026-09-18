@@ -288,21 +288,33 @@ export async function qcPass(page: Page, batchNumber: string) {
     .toBe("Passed");
 }
 
-/** Pack a passed batch into finished goods through the bill of materials. */
+/**
+ * Pack a passed batch into complete packages of a SKU.
+ *
+ * Drives the ONE packaging operation. There is no method to choose and no second dialog:
+ * a row names a product, how many packages, and what actually went into each. Leaving the
+ * fill at the SKU's nominal weight — which the screen fills in on selection — is what makes
+ * these complete, sellable packages rather than partial ones.
+ */
 export async function packIntoSku(page: Page, batchNumber: string, skuId: string, units: number) {
   await page.goto("/dashboard/packaging");
   const card = packBatch(page, batchNumber);
   await expect(card).toBeVisible({ timeout: 60_000 });
-  // The card carries ONE packaging action, named for the state it is in — the frozen UX
-  // replaced the old pair of competing method buttons with a single derived one. "Pack as
-  // product" now names only the modal's commit button, below.
   await card.getByRole("button", { name: /Start Packaging|Continue Packaging/i }).click();
 
-  const modal = page.locator("div.fixed").filter({ hasText: /Pack into finished product/i }).last();
-  await modal.locator("select").first().selectOption(skuId);
-  await modal.locator('input[type="number"]').first().fill(String(units));
-  const pack = modal.getByRole("button", { name: /Pack as product/i });
-  await expect(pack).toBeEnabled();
+  const modal = page.getByTestId("packaging-dialog");
+  await expect(modal).toBeVisible({ timeout: 60_000 });
+
+  const line = modal.getByTestId("pack-line-0");
+  // nth(1): the first select on the row chooses what KIND of line it is, and it already
+  // says "New packages". The second names the product.
+  await line.locator("select").nth(1).selectOption(skuId);
+  await line.locator('input[type="number"]').first().fill(String(units));
+
+  // The reconciliation is answered by the server, so the commit button only enables once
+  // the screen and the server agree about what this run will do.
+  const pack = modal.getByRole("button", { name: /Confirm packaging/i });
+  await expect(pack).toBeEnabled({ timeout: 60_000 });
   await pack.click();
   await expect(modal).toBeHidden({ timeout: 60_000 });
 }

@@ -92,7 +92,8 @@ export type UnitIntent = {
  */
 export type PackIntentLine =
   | { kind: "pack"; productSkuId: string; packages: number; gramsEach: number }
-  | { kind: "topUp"; lotId: string; gramsAdded: number };
+  | { kind: "topUp"; lotId: string; gramsAdded: number }
+  | { kind: "loss"; grams: number; reason: string };
 
 export type PackIntent = {
   method: "PACK";
@@ -103,11 +104,13 @@ export type PackIntent = {
 /** A stable ordering for intent lines, independent of entry order. */
 function canonicalLines(lines: PackIntentLine[]): string[] {
   return lines
-    .map((l) =>
-      l.kind === "pack"
-        ? JSON.stringify(["pack", l.productSkuId, l.packages, l.gramsEach])
-        : JSON.stringify(["topUp", l.lotId, l.gramsAdded]),
-    )
+    .map((l) => {
+      if (l.kind === "pack") return JSON.stringify(["pack", l.productSkuId, l.packages, l.gramsEach]);
+      if (l.kind === "topUp") return JSON.stringify(["topUp", l.lotId, l.gramsAdded]);
+      // The reason is part of the intent, not decoration: the same grams written off for a
+      // different stated reason is a different declaration and must not replay as the first.
+      return JSON.stringify(["loss", l.grams, (l.reason ?? "").trim()]);
+    })
     .sort();
 }
 

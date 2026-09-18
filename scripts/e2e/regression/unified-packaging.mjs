@@ -393,6 +393,140 @@ async function main() {
   check("the line is classified PARTIAL up front", pv2.json?.lines?.[0]?.classification === "PARTIAL", S(pv2.json?.lines));
   check("and it promises no sellable unit", pv2.json?.standardUnits === 0, S(pv2.json?.standardUnits));
 
+  // ═══════════════════════════════════════════════════════════════════════
+  section("DECLARED LOSS — THE FOURTH PLACE A GRAM CAN GO");
+
+  sub("AA. coffee that never reaches a package is declared, not inferred");
+  const bAA = await roast("AA", C.coffees.brazil, C.beans.brazil, 3.0, 2.5);
+  const lotsBeforeAA = (await lotsFor(bAA)).length;
+  const rAA = await pack(bAA, [
+    { kind: "pack", productSkuId: KG1.id, packages: 2, gramsEach: 1000 },
+    { kind: "loss", grams: 400, reason: "spilled at the hopper" },
+  ]);
+  check("the operation is accepted", rAA.status === 201, `${rAA.status} ${S(rAA.json).slice(0, 180)}`);
+  check("two sellable units were made", rAA.json?.standardUnitsCreated === 2, S(rAA.json?.standardUnitsCreated));
+  check("400 g is reported as declared loss", rAA.json?.lossGrams === 400, S(rAA.json?.lossGrams));
+  check("2400 g left the roast in total", rAA.json?.gramsConsumed === 2400, S(rAA.json?.gramsConsumed));
+  check("and 100 g is still unpacked", (await availableGrams(bAA)) === 100, `${await availableGrams(bAA)}`);
+  const lotsAA = await lotsFor(bAA);
+  check("the loss made no lot of its own", lotsAA.length === lotsBeforeAA + 1, S(lotsAA.length));
+
+  sub("AA2. the ledger states the loss instead of leaving a gap");
+  const mvAA = await all(
+    `SELECT type::text t, category::text c, "quantityChanged" q, notes
+       FROM "InventoryMovement" WHERE "sourceDocId"=$1 ORDER BY "timestamp"`, [bAA]);
+  const outAA = mvAA.filter((r) => r.c === "ROASTED_COFFEE" && r.t === "OUT");
+  const lossAA = mvAA.filter((r) => r.c === "ROASTED_COFFEE" && r.t === "LOSS");
+  check("packaging draws roasted coffee as OUT", outAA.length === 1, S(outAA).slice(0, 200));
+  check("for exactly the 2000 g that became packages",
+    Math.abs(num(outAA[0]?.q) + 2.0) < 0.0005, S(outAA[0]?.q));
+  check("the loss is its own LOSS row", lossAA.length === 1, S(lossAA).slice(0, 200));
+  check("for exactly the 400 g declared", Math.abs(num(lossAA[0]?.q) + 0.4) < 0.0005, S(lossAA[0]?.q));
+  check("carrying the operator's stated reason", /spilled at the hopper/.test(S(lossAA[0]?.notes)),
+    S(lossAA[0]?.notes));
+  check("and the two rows sum to what was drawn",
+    Math.abs(num(outAA[0]?.q) + num(lossAA[0]?.q) + 2.4) < 0.0005,
+    `${outAA[0]?.q} + ${lossAA[0]?.q}`);
+
+  sub("AB. a loss with no reason is refused");
+  const bAB = await roast("AB", C.coffees.brazil, C.beans.brazil, 2.0, 1.6);
+  const rAB = await pack(bAB, [{ kind: "loss", grams: 200, reason: "" }]);
+  check("refused", rAB.status === 409, `${rAB.status} ${S(rAB.json).slice(0, 160)}`);
+  check("and it says a reason is required", /reason/i.test(S(rAB.json)), S(rAB.json).slice(0, 160));
+  check("nothing was drawn", (await availableGrams(bAB)) === 1600, `${await availableGrams(bAB)}`);
+
+  sub("AC. a loss cannot exceed what the roast still holds");
+  const rAC = await pack(bAB, [{ kind: "loss", grams: 5000, reason: "claimed total spill" }]);
+  check("refused", rAC.status === 409, `${rAC.status} ${S(rAC.json).slice(0, 160)}`);
+  check("still nothing drawn", (await availableGrams(bAB)) === 1600, `${await availableGrams(bAB)}`);
+
+  sub("AD. the stated reason is part of the operation's identity");
+  const keyAD = freshIdempotencyKey(P);
+  const rAD1 = await pack(bAB, [{ kind: "loss", grams: 100, reason: "spilled at the hopper" }], { key: keyAD });
+  check("the first declaration is accepted", rAD1.status === 201, `${rAD1.status} ${S(rAD1.json).slice(0, 160)}`);
+  const rAD2 = await pack(bAB, [{ kind: "loss", grams: 100, reason: "written off after QC" }], { key: keyAD });
+  check("the same key with a different reason is a conflict, not a replay",
+    rAD2.status === 422, `${rAD2.status} ${S(rAD2.json).slice(0, 160)}`);
+  const rAD3 = await pack(bAB, [{ kind: "loss", grams: 100, reason: "spilled at the hopper" }], { key: keyAD });
+  check("and resending the original replays it", rAD3.status === 201, `${rAD3.status}`);
+  check("drawing the coffee only once", (await availableGrams(bAB)) === 1500, `${await availableGrams(bAB)}`);
+
+  sub("AE. every gram lands in exactly one of the four buckets");
+  const bAE = await roast("AE", C.coffees.brazil, C.beans.brazil, 4.0, 3.3);
+  const pvAE = await preview(bAE, [
+    { kind: "pack", productSkuId: KG1.id, packages: 2, gramsEach: 1000 },
+    { kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 800 },
+    { kind: "loss", grams: 150, reason: "dust and fines" },
+  ]);
+  const a = pvAE.json ?? {};
+  check("available 3300 g", a.availableGrams === 3300, S(a.availableGrams));
+  check("standard 2000 g", a.standardGrams === 2000, S(a.standardGrams));
+  check("partial 800 g", a.partialGrams === 800, S(a.partialGrams));
+  check("loss 150 g", a.lossGrams === 150, S(a.lossGrams));
+  check("remaining 350 g", a.remainingGrams === 350, S(a.remainingGrams));
+  check("standard + partial + loss + remaining = available",
+    a.standardGrams + a.partialGrams + a.lossGrams + a.remainingGrams === a.availableGrams, S(a));
+  check("loss is not miscounted as partial", a.partialGrams === 800 && a.partialPackages === 1, S(a));
+
+  sub("AF. a loss line consumes no packaging material");
+  const bagBeforeAF = await materialOnHand(C.materials.bag1kg.id);
+  const bAF = await roast("AF", C.coffees.brazil, C.beans.brazil, 2.0, 1.5);
+  const rAF = await pack(bAF, [{ kind: "loss", grams: 300, reason: "floor sweepings" }]);
+  check("accepted", rAF.status === 201, `${rAF.status} ${S(rAF.json).slice(0, 160)}`);
+  check("no bag was consumed", (await materialOnHand(C.materials.bag1kg.id)) === bagBeforeAF,
+    `${await materialOnHand(C.materials.bag1kg.id)} vs ${bagBeforeAF}`);
+  check("and no lot was created", (await lotsFor(bAF)).length === 0, S((await lotsFor(bAF)).length));
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section("PARTIAL PACKAGES ARE VISIBLE STOCK, NOT SELLABLE STOCK");
+
+  sub("AG. a partial package is reported separately from free-to-promise units");
+  const bAG = await roast("AG", C.coffees.brazil, C.beans.brazil, 2.0, 1.6);
+  const freeBeforeAG = await skuFreeUnits(KG1.id);
+  const catBefore = await api("/api/products");
+  const rowBefore = (catBefore.json ?? []).find((s) => s.id === KG1.id) ?? {};
+  const rAG = await pack(bAG, [{ kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 600 }]);
+  check("the partial is accepted", rAG.status === 201, `${rAG.status} ${S(rAG.json).slice(0, 160)}`);
+  const catAfter = await api("/api/products");
+  const rowAfter = (catAfter.json ?? []).find((s) => s.id === KG1.id) ?? {};
+  check("free-to-promise units did not move", (await skuFreeUnits(KG1.id)) === freeBeforeAG,
+    `${await skuFreeUnits(KG1.id)} vs ${freeBeforeAG}`);
+  check("and the catalogue's sellable figure did not move",
+    rowAfter.availableUnits === rowBefore.availableUnits,
+    `${rowAfter.availableUnits} vs ${rowBefore.availableUnits}`);
+  check("but the partial package is visible",
+    num(rowAfter.partialPackages) === num(rowBefore.partialPackages) + 1,
+    `${rowAfter.partialPackages} vs ${rowBefore.partialPackages}`);
+  check("with its real contents, in grams",
+    num(rowAfter.partialGrams) === num(rowBefore.partialGrams) + 600,
+    `${rowAfter.partialGrams} vs ${rowBefore.partialGrams}`);
+
+  sub("AH. the packaging screen is offered exactly the packages it may top up");
+  const stAG = await api(`/api/roasting-batches/${bAG}/pack`);
+  check("the batch's packing state is readable", stAG.status === 200, `${stAG.status}`);
+  check("it reports the unpacked remainder in grams", stAG.json?.availableGrams === 1000,
+    S(stAG.json?.availableGrams));
+  const openAG = (stAG.json?.openPartials ?? []).find((p) => p.lotId === rAG.json?.lots?.[0]?.id);
+  check("the new partial package is offered for top-up", !!openAG, S(stAG.json?.openPartials).slice(0, 200));
+  check("stated as what it holds against what it should", openAG?.actualGrams === 600 && openAG?.nominalGrams === 1000,
+    S(openAG));
+  check("and marked as belonging to this roast", openAG?.fromThisBatch === true, S(openAG));
+
+  sub("AI. a completed package stops being offered");
+  const rAI = await pack(bAG, [{ kind: "topUp", lotId: openAG.lotId, gramsAdded: 400 }]);
+  check("the top-up completes it", rAI.status === 201, `${rAI.status} ${S(rAI.json).slice(0, 160)}`);
+  const stAI = await api(`/api/roasting-batches/${bAG}/pack`);
+  check("it is no longer on offer",
+    !(stAI.json?.openPartials ?? []).some((p) => p.lotId === openAG.lotId),
+    S(stAI.json?.openPartials).slice(0, 200));
+  const catFinal = await api("/api/products");
+  const rowFinal = (catFinal.json ?? []).find((s) => s.id === KG1.id) ?? {};
+  check("the catalogue drops it from partials", num(rowFinal.partialPackages) === num(rowBefore.partialPackages),
+    `${rowFinal.partialPackages} vs ${rowBefore.partialPackages}`);
+  check("and counts it as sellable exactly once",
+    num(rowFinal.availableUnits) === num(rowBefore.availableUnits) + 1,
+    `${rowFinal.availableUnits} vs ${rowBefore.availableUnits}`);
+
   await invariants("after the unified packaging suite");
   await teardown(P);
 
