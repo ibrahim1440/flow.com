@@ -592,6 +592,58 @@ async function main() {
     afterAN.some((l) => l.id !== partialAN && l.status === "AVAILABLE" && num(l.ua) === 1),
     S(afterAN).slice(0, 300));
 
+  // ═══════════════════════════════════════════════════════════════════════
+  section("A PARTIAL PACKAGE IS UNREACHABLE FROM EVERY SELLING PATH");
+
+  // The safety property this feature rests on is that a partial package cannot be promised
+  // or shipped. It holds today because every allocation path gates on status AVAILABLE —
+  // which is an argument, not a test. These cases attack the lot DIRECTLY, by id, through
+  // the real routes, so a future change that loosens one of those gates fails here rather
+  // than on a customer's pallet.
+  sub("AO. a partial package cannot be reserved to an order line");
+  const bAO = await roast("AO", C.coffees.brazil, C.beans.brazil, 3.0, 2.4);
+  const rAOp = await pack(bAO, [{ kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 400 }]);
+  check("the partial package exists", rAOp.status === 201, `${rAOp.status} ${S(rAOp.json).slice(0, 160)}`);
+  const lotAO = rAOp.json?.lots?.[0]?.id;
+
+  const orderAO = await api("/api/orders", {
+    method: "POST",
+    body: { customerId: C.customers.cafe.id, notes: `${P} partial-reach`, items: [{ productSkuId: KG1.id, quantityUnits: 1 }] },
+  });
+  check("an order for that SKU is created", orderAO.status === 201 || orderAO.status === 200,
+    `${orderAO.status} ${S(orderAO.json).slice(0, 160)}`);
+  const itemAO = orderAO.json?.items?.[0]?.id;
+  await api(`/api/orders/${orderAO.json.id}/approve`, { method: "POST", body: { decision: "Yes" } });
+  await api(`/api/orders/${orderAO.json.id}/preparation-review`, { method: "POST", body: { items: [{ orderItemId: itemAO }] } });
+
+  const heldAO = await one(
+    `SELECT COUNT(*)::int n FROM "StockAllocation" WHERE "finishedGoodsLotId"=$1 AND status='RESERVED'`, [lotAO]);
+  check("the review reserved nothing against the partial package", num(heldAO?.n) === 0, S(heldAO));
+  const lotRowAO = await one(
+    `SELECT status::text s, "unitsReserved" ur FROM "FinishedGoodsLot" WHERE id=$1`, [lotAO]);
+  check("and the package is still PARTIAL with nothing reserved",
+    lotRowAO?.s === "PARTIAL" && num(lotRowAO?.ur) === 0, S(lotRowAO));
+
+  sub("AP. a partial package cannot be dispatched even when named directly");
+  const dAO = await api("/api/deliveries", {
+    method: "POST",
+    body: { orderItemId: itemAO, quantityUnits: 1, deliveryType: "full", finishedGoodsLotId: lotAO },
+    headers: { "Idempotency-Key": freshIdempotencyKey(P) },
+  });
+  check("the dispatch is refused", dAO.status >= 400, `${dAO.status} ${S(dAO.json).slice(0, 180)}`);
+  const afterAO = await one(
+    `SELECT status::text s, "actualContentGrams" a, "unitsAvailable" ua FROM "FinishedGoodsLot" WHERE id=$1`, [lotAO]);
+  check("the package is untouched", afterAO?.s === "PARTIAL" && num(afterAO?.a) === 400 && num(afterAO?.ua) === 0,
+    S(afterAO));
+  const deliveredAO = await one(`SELECT "deliveredUnits" d FROM "OrderItem" WHERE id=$1`, [itemAO]);
+  check("and nothing was recorded as delivered", num(deliveredAO?.d) === 0, S(deliveredAO));
+
+  sub("AQ. it also does not count as free-to-promise anywhere it is reported");
+  const foAO = await api(`/api/order-items/${itemAO}/fulfillment-options`);
+  check("fulfillment options answer", foAO.status === 200, `${foAO.status}`);
+  check("and never offer the partial package",
+    !S(foAO.json).includes(lotAO), S(foAO.json).slice(0, 220));
+
   await invariants("after the unified packaging suite");
   await teardown(P);
 
