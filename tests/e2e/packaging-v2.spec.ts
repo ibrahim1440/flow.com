@@ -61,9 +61,22 @@ const unpackedGrams = async (batch: string) =>
   Math.round(num((await one<{ q: number }>(
     `SELECT "roastedAvailableKg" q FROM "RoastingBatch" WHERE "batchNumber"=$1`, [batch])).q) * 1000);
 
-const freeUnits = async (skuId: string) =>
+/**
+ * Sellable units on the shelf, whether or not they are already promised to an order.
+ *
+ * Deliberately NOT free-to-promise. Packing against a roast that was made FOR an order
+ * reserves the result to that order's line, so free-to-promise does not move even though a
+ * sellable unit was certainly created. Measuring free stock would report that as "nothing
+ * was made", which is the opposite of what happened.
+ */
+const sellableUnits = async (skuId: string) =>
   num((await one<{ n: number }>(
-    `SELECT COALESCE(SUM("unitsAvailable" - "unitsReserved"),0)::int n
+    `SELECT COALESCE(SUM("unitsAvailable"),0)::int n
+       FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND status='AVAILABLE'`, [skuId])).n);
+
+const reservedUnitsOn = async (skuId: string) =>
+  num((await one<{ n: number }>(
+    `SELECT COALESCE(SUM("unitsReserved"),0)::int n
        FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND status='AVAILABLE'`, [skuId])).n);
 
 const partialLots = async (skuId: string) =>
@@ -180,7 +193,7 @@ test("P6 — a partial package cannot be committed without acknowledging it", as
 // ── P7 ─────────────────────────────────────────────────────────────────────
 test("P7 — committing a partial creates real stock that is not sellable", async ({ page }) => {
   await loginAs(page, "packaging");
-  const freeBefore = await freeUnits(SKU.id);
+  const sellableBefore = await sellableUnits(SKU.id);
   const partialsBefore = await partialLots(SKU.id);
 
   await openPackaging(page, batchNumber);
@@ -192,7 +205,7 @@ test("P7 — committing a partial creates real stock that is not sellable", asyn
   await expect(dialog(page)).toBeHidden({ timeout: 60_000 });
 
   await expect.poll(async () => partialLots(SKU.id), { timeout: 60_000 }).toBe(partialsBefore + 1);
-  expect(await freeUnits(SKU.id), "nothing became sellable").toBe(freeBefore);
+  expect(await sellableUnits(SKU.id), "nothing became sellable").toBe(sellableBefore);
   expect(await unpackedGrams(batchNumber), "300 g left the roast").toBe(5700);
 
   const lot = await one<{ id: string; g: number }>(
@@ -245,7 +258,8 @@ test("P10 — the open package is offered for top-up, short by exactly what it l
 // ── P11 ────────────────────────────────────────────────────────────────────
 test("P11 — completing the top-up makes exactly one sellable unit from the same bag", async ({ page }) => {
   await loginAs(page, "packaging");
-  const freeBefore = await freeUnits(SKU.id);
+  const sellableBefore = await sellableUnits(SKU.id);
+  const reservedBefore = await reservedUnitsOn(SKU.id);
   const partialsBefore = await partialLots(SKU.id);
 
   await openPackaging(page, batchNumber);
@@ -255,8 +269,13 @@ test("P11 — completing the top-up makes exactly one sellable unit from the sam
   await confirmBtn(page).click();
   await expect(dialog(page)).toBeHidden({ timeout: 60_000 });
 
-  await expect.poll(async () => freeUnits(SKU.id), { timeout: 60_000 }).toBe(freeBefore + 1);
+  await expect.poll(async () => sellableUnits(SKU.id), { timeout: 60_000 }).toBe(sellableBefore + 1);
   expect(await partialLots(SKU.id), "the package is no longer partial").toBe(partialsBefore - 1);
+  // This roast was made for an order, so the finished unit is claimed by that order's line
+  // rather than left free for anyone — which is why the figure above is sellable stock and
+  // not free-to-promise.
+  expect(await reservedUnitsOn(SKU.id), "and it is claimed by the order it was roasted for")
+    .toBe(reservedBefore + 1);
   expect(await unpackedGrams(batchNumber), "only the 200 g top-up was drawn").toBe(5500);
 
   // One bag, not two: the top-up consumed coffee but no second set of materials.
@@ -286,7 +305,7 @@ test("P12 — a declared loss needs a reason before it counts as a line", async 
 // ── P13 ────────────────────────────────────────────────────────────────────
 test("P13 — one operation states all four destinations and commits as a single act", async ({ page }) => {
   await loginAs(page, "packaging");
-  const freeBefore = await freeUnits(SKU.id);
+  const sellableBefore = await sellableUnits(SKU.id);
   const partialsBefore = await partialLots(SKU.id);
 
   await openPackaging(page, batchNumber);
@@ -314,7 +333,7 @@ test("P13 — one operation states all four destinations and commits as a single
 
   // 2000 g complete + 200 g partial + 100 g loss = 2300 g off a roast holding 5500 g.
   await expect.poll(async () => unpackedGrams(batchNumber), { timeout: 60_000 }).toBe(3200);
-  expect(await freeUnits(SKU.id)).toBe(freeBefore + 4);
+  expect(await sellableUnits(SKU.id)).toBe(sellableBefore + 4);
   expect(await partialLots(SKU.id)).toBe(partialsBefore + 1);
 
   const loss = await one<{ n: number; notes: string | null }>(
