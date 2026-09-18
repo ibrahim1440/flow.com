@@ -194,7 +194,17 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     if (isReplaySignal(err)) {
-      return NextResponse.json(err._replayBody, { status: err._replayStatus });
+      return NextResponse.json(err._replayBody, {
+        status: err._replayStatus,
+        headers: { "X-Idempotent-Replay": "true" },
+      });
+    }
+    // Domain refusals carry the status they mean. Without this they fall through to the
+    // Prisma mapper and surface as 500s, which tells the operator nothing and makes a
+    // deliberate, correct refusal look like a server fault.
+    if (err && typeof err === "object" && "_appCode" in err) {
+      const e = err as { _appCode: number; message: string };
+      return NextResponse.json({ error: e.message }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }
