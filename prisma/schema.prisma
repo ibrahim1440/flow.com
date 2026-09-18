@@ -230,6 +230,9 @@ model RoastingBatch {
   blendOutputs          BlendIngredient[]     @relation("BlendSource")
   finishedGoodsLots     FinishedGoodsLot[]
   packedLots            FinishedGoodsLot[]    @relation("PackedFromBatch")
+  /// Grams this roast contributed to packaged lots, including top-ups of packages that were
+  /// originally filled from a different roast.
+  packagingSources      PackagingSource[]     @relation("PackagingSourceBatch")
   serialHistory         BatchSerialHistory[]
   packagingOperations   PackagingOperation[]
 
@@ -517,6 +520,18 @@ enum LotStatus {
   AVAILABLE
   RESERVED
   SHIPPED
+
+  /// A physical package that exists but is not a complete sellable unit — a 1 KG bag
+  /// holding 250 g, for instance. It is real inventory: the coffee left the roast and the
+  /// bag was used, and both are accounted for. It simply is not a sellable SKU yet.
+  ///
+  /// The status is what keeps it out of allocation. Every path that can promise or ship
+  /// stock — availableUnitsBySku, reserveFinishedUnits, consumeFinishedUnits, the shelf
+  /// allocator, fulfillment-options — already requires status = AVAILABLE, so a PARTIAL lot
+  /// is invisible to all of them without a line of change in any of them. Topping the
+  /// package up to its nominal weight flips it to AVAILABLE, and that is the only way it
+  /// becomes sellable.
+  PARTIAL
 }
 
 model FinishedGoodsLot {
@@ -572,11 +587,70 @@ model FinishedGoodsLot {
 
   packagingOperations PackagingOperation[]
 
+  // ─── Actual fill, in whole grams ─────────────────────────────────────────
+  // Integers, not Float. Packaging arithmetic decides whether a package is sellable, and
+  // "is 0.1 + 0.2 === 0.3" is not a question inventory may depend on. Grams are the
+  // smallest unit anyone weighs here, so an Int holds the exact figure and comparisons
+  // against the nominal weight are exact. Float stays where it already is elsewhere in the
+  // packaging domain; nothing here re-denominates existing columns.
+  //
+  // Both are null on legacy rows and on ordinary standard lots, where the SKU's nominal
+  // weight times the unit count is the whole truth.
+
+  /// What is physically inside the package(s) of this lot. For a PARTIAL lot this is the
+  /// under-nominal fill; for a standard lot recorded through the unified workflow it is the
+  /// real weight that went in, which may legitimately exceed nominal (1005 g in a 1 KG bag).
+  actualContentGrams Int?
+
+  /// The SKU's nominal net weight at the moment of packing, copied so a later change to
+  /// master data cannot retroactively reclassify a package that was correct when it was made.
+  nominalContentGrams Int?
+
+  /// Whether the physical packaging materials for this lot have already been drawn. Set on
+  /// first pack and never cleared: topping a partial package up consumes more coffee but not
+  /// a second bag, and this flag is what makes that decision from data rather than from
+  /// inference about the operation's shape.
+  materialsConsumed Boolean @default(false)
+
+  /// Where the coffee in this lot came from, in grams per contributing roast. A top-up may
+  /// draw from a different batch than the original fill, so lineage cannot be a single
+  /// column — packedFromBatchId still names the first roast, and this carries the full story.
+  sources PackagingSource[]
+
   @@index([status])
   @@index([createdAt])
   @@index([productSkuId, status])
   @@index([isUnitTracked, status])
   @@index([packedFromBatchId])
+}
+
+/// One roast's contribution to one packaged lot.
+///
+/// Packaging used to be one roast in, one lot out, so a single column carried the lineage.
+/// A partial package that is finished later from a second roast breaks that: the bag holds
+/// coffee from two batches and both have to remain traceable, with the grams each supplied.
+/// Rows are append-only — a correction adds a reversing packaging operation, it does not
+/// rewrite where the coffee came from.
+model PackagingSource {
+  id String @id @default(cuid())
+
+  finishedGoodsLotId String
+  finishedGoodsLot   FinishedGoodsLot @relation(fields: [finishedGoodsLotId], references: [id], onDelete: Cascade)
+
+  roastingBatchId String
+  roastingBatch   RoastingBatch @relation("PackagingSourceBatch", fields: [roastingBatchId], references: [id], onDelete: Restrict)
+
+  /// Whole grams this roast contributed. Integer for the same reason as the lot columns.
+  gramsContributed Int
+
+  /// The packaging operation that recorded this contribution, for audit join-up.
+  packagingOperationId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([finishedGoodsLotId])
+  @@index([roastingBatchId])
+  @@index([packagingOperationId])
 }
 
 enum AllocationStatus {
@@ -616,6 +690,13 @@ model StockAllocation {
 enum PackagingMethod {
   KG // the legacy kilogram bag path — PUT /api/roasting-batches/[id]/package
   UNIT // the finished-SKU path      — POST /api/roasting-batches/[id]/pack-sku
+
+  /// The unified workflow — POST /api/roasting-batches/[id]/pack.
+  ///
+  /// Not a third way of packaging: it is the only one an operator now sees. The two values
+  /// above are retained because they label operations that were already recorded, and an
+  /// audit row must keep saying what actually happened. New operations are always PACK.
+  PACK
 }
 
 /**

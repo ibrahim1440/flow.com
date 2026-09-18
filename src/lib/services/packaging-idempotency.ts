@@ -83,6 +83,35 @@ export type UnitIntent = {
 };
 
 /**
+ * The normalised intent of a unified packaging submit.
+ *
+ * One submit carries several lines, so the hash covers all of them — and must not depend on
+ * the order they were entered in. The same physical work described with its rows in a
+ * different order is the same intent: it has to replay, not be rejected as a conflict. Lines
+ * are sorted into a canonical order before hashing for exactly that reason.
+ */
+export type PackIntentLine =
+  | { kind: "pack"; productSkuId: string; packages: number; gramsEach: number }
+  | { kind: "topUp"; lotId: string; gramsAdded: number };
+
+export type PackIntent = {
+  method: "PACK";
+  batchId: string;
+  lines: PackIntentLine[];
+};
+
+/** A stable ordering for intent lines, independent of entry order. */
+function canonicalLines(lines: PackIntentLine[]): string[] {
+  return lines
+    .map((l) =>
+      l.kind === "pack"
+        ? JSON.stringify(["pack", l.productSkuId, l.packages, l.gramsEach])
+        : JSON.stringify(["topUp", l.lotId, l.gramsAdded]),
+    )
+    .sort();
+}
+
+/**
  * A deterministic hash of what the caller ASKED FOR.
  *
  * Hashed from a fixed-position array rather than an object, so JSON property order cannot
@@ -92,21 +121,25 @@ export type UnitIntent = {
  * inventory state. Two submissions with the same intent must hash the same however they were
  * serialised, and a submission whose intent differs must not.
  */
-export function packagingRequestHash(intent: KgIntent | UnitIntent): string {
-  const canonical =
-    intent.method === "KG"
-      ? JSON.stringify([
-          "KG",
-          intent.batchId,
-          intent.bags3kg,
-          intent.bags1kg,
-          intent.bags250g,
-          intent.bags150g,
-          intent.samplesGrams,
-          intent.productId,
-          intent.productSkuId,
-        ])
-      : JSON.stringify(["UNIT", intent.batchId, intent.productSkuId, intent.units]);
+export function packagingRequestHash(intent: KgIntent | UnitIntent | PackIntent): string {
+  let canonical: string;
+  if (intent.method === "KG") {
+    canonical = JSON.stringify([
+      "KG",
+      intent.batchId,
+      intent.bags3kg,
+      intent.bags1kg,
+      intent.bags250g,
+      intent.bags150g,
+      intent.samplesGrams,
+      intent.productId,
+      intent.productSkuId,
+    ]);
+  } else if (intent.method === "UNIT") {
+    canonical = JSON.stringify(["UNIT", intent.batchId, intent.productSkuId, intent.units]);
+  } else {
+    canonical = JSON.stringify(["PACK", intent.batchId, canonicalLines(intent.lines)]);
+  }
 
   return createHash("sha256").update(canonical).digest("hex");
 }
@@ -171,7 +204,7 @@ export async function recordOperation(
     batchId: string;
     requestKey: string;
     requestHash: string;
-    method: "KG" | "UNIT";
+    method: "KG" | "UNIT" | "PACK";
     quantityKg?: number | null;
     quantityUnits?: number | null;
     productSkuId?: string | null;
