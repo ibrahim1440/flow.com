@@ -96,6 +96,21 @@ export type PackagingPreview = {
 const KG_EPSILON = 0.0005;
 
 /**
+ * Bounds on how much one operation may create.
+ *
+ * A PARTIAL line writes one row PER PACKAGE, because each package must be independently
+ * top-uppable and therefore needs its own identity. That makes `packages` the only input
+ * in this service that multiplies into database rows, and an unbounded one would let a
+ * single authorised request ask for a hundred thousand inserts inside one transaction —
+ * a self-inflicted denial of service that no gram of coffee justifies. A real bench run
+ * is tens of packages; these ceilings are far above the work and far below the damage.
+ */
+const MAX_PACKAGES_PER_LINE = 1000;
+const MAX_PARTIAL_PACKAGES_PER_OPERATION = 200;
+/** Long enough for any real explanation, short enough that it cannot be used as storage. */
+const MAX_LOSS_REASON_LENGTH = 300;
+
+/**
  * Classify a fill against its SKU's nominal weight.
  *
  * At or above nominal is a complete sellable package — 1005 g in a 1 KG bag is one sellable
@@ -149,6 +164,13 @@ export async function previewPackaging(
         problems.push(`Line ${n}: the number of packages must be a whole number of at least one.`);
         continue;
       }
+      if (line.packages > MAX_PACKAGES_PER_LINE) {
+        problems.push(
+          `Line ${n}: ${line.packages} packages is more than one operation may record. ` +
+            `Record at most ${MAX_PACKAGES_PER_LINE} per line.`,
+        );
+        continue;
+      }
       if (!Number.isInteger(line.gramsEach) || line.gramsEach < 1) {
         problems.push(`Line ${n}: the fill weight must be a whole number of grams, greater than zero.`);
         continue;
@@ -193,6 +215,10 @@ export async function previewPackaging(
       const reason = (line.reason ?? "").trim();
       if (reason.length < 3) {
         problems.push(`Line ${n}: recording a loss needs a reason.`);
+        continue;
+      }
+      if (reason.length > MAX_LOSS_REASON_LENGTH) {
+        problems.push(`Line ${n}: the reason is too long (limit ${MAX_LOSS_REASON_LENGTH} characters).`);
         continue;
       }
       outcomes.push({
@@ -265,6 +291,16 @@ export async function previewPackaging(
 
   if (outcomes.length === 0 && problems.length === 0) {
     problems.push("Nothing was entered to package.");
+  }
+  const partialPackageCount = outcomes
+    .filter((o) => o.kind === "pack" && o.classification === "PARTIAL")
+    .reduce((s, o) => s + o.packages, 0);
+  if (partialPackageCount > MAX_PARTIAL_PACKAGES_PER_OPERATION) {
+    problems.push(
+      `${partialPackageCount} partial packages is more than one operation may create. ` +
+        `Each one is tracked separately so it can be topped up; record at most ` +
+        `${MAX_PARTIAL_PACKAGES_PER_OPERATION} at a time.`,
+    );
   }
   if (totalConsumedGrams > availableGrams) {
     problems.push(

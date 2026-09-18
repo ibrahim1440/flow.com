@@ -293,8 +293,19 @@ export async function POST(request: Request, { params }: Params) {
       // read, and availableQty/reservedQty stay at 0 because this lot is not kg-tracked.
       const producedKg = kgForUnits(sku, units);
 
+      // status AVAILABLE is not decoration. A PARTIAL lot — an under-filled package made
+      // by the unified workflow — is also unit-tracked and also carries this batch and
+      // this SKU, so without the filter it matches here and units get merged into a bag
+      // that does not hold them. The lot would then claim sellable units while its
+      // actualContentGrams still said 300 g of a 500 g package. Partial packages are
+      // completed by topping them up, never by adding units to them from another path.
       const existing = await tx.finishedGoodsLot.findFirst({
-        where: { packedFromBatchId: batch.id, productSkuId: sku.id, isUnitTracked: true },
+        where: {
+          packedFromBatchId: batch.id,
+          productSkuId: sku.id,
+          isUnitTracked: true,
+          status: "AVAILABLE",
+        },
         select: { id: true, unitsProduced: true, unitsAvailable: true, quantityKg: true },
       });
 

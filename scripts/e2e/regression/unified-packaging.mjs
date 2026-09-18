@@ -527,6 +527,71 @@ async function main() {
     num(rowFinal.availableUnits) === num(rowBefore.availableUnits) + 1,
     `${rowFinal.availableUnits} vs ${rowBefore.availableUnits}`);
 
+  // ═══════════════════════════════════════════════════════════════════════
+  section("BOUNDS — ONE REQUEST CANNOT ASK FOR UNBOUNDED WORK");
+
+  sub("AJ. a single line cannot ask for more packages than an operation may record");
+  const bAJ = await roast("AJ", C.coffees.brazil, C.beans.brazil, 2.0, 1.5);
+  const rAJ = await pack(bAJ, [{ kind: "pack", productSkuId: KG1.id, packages: 5000, gramsEach: 1 }]);
+  check("refused", rAJ.status === 409, `${rAJ.status} ${S(rAJ.json).slice(0, 160)}`);
+  check("and it says why", /more than one operation may record/i.test(S(rAJ.json)), S(rAJ.json).slice(0, 200));
+  check("nothing was drawn", (await availableGrams(bAJ)) === 1500, `${await availableGrams(bAJ)}`);
+  check("and no lot was created", (await lotsFor(bAJ)).length === 0, S((await lotsFor(bAJ)).length));
+
+  sub("AK. partial packages are capped across the whole operation, not just per line");
+  // Under the per-line ceiling, over the per-operation one. Each partial package is its
+  // own row, so this is the input that multiplies into database work.
+  const rAK = await pack(bAJ, [{ kind: "pack", productSkuId: KG1.id, packages: 201, gramsEach: 1 }]);
+  check("refused", rAK.status === 409, `${rAK.status} ${S(rAK.json).slice(0, 160)}`);
+  check("naming the partial-package ceiling", /partial packages is more than/i.test(S(rAK.json)),
+    S(rAK.json).slice(0, 200));
+  check("still nothing drawn", (await availableGrams(bAJ)) === 1500, `${await availableGrams(bAJ)}`);
+  check("and still no lots", (await lotsFor(bAJ)).length === 0, S((await lotsFor(bAJ)).length));
+
+  sub("AL. a loss reason cannot be used as storage");
+  const rAL = await pack(bAJ, [{ kind: "loss", grams: 10, reason: "x".repeat(5000) }]);
+  check("refused", rAL.status === 409, `${rAL.status} ${S(rAL.json).slice(0, 160)}`);
+  check("for being too long", /too long/i.test(S(rAL.json)), S(rAL.json).slice(0, 200));
+  check("nothing was drawn", (await availableGrams(bAJ)) === 1500, `${await availableGrams(bAJ)}`);
+
+  sub("AM. an ordinary run is nowhere near the ceilings");
+  const rAM = await pack(bAJ, [{ kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 1000 }]);
+  check("accepted", rAM.status === 201, `${rAM.status} ${S(rAM.json).slice(0, 160)}`);
+  check("and made one sellable unit", rAM.json?.standardUnitsCreated === 1, S(rAM.json?.standardUnitsCreated));
+
+  // ═══════════════════════════════════════════════════════════════════════
+  section("CROSS-PATH — THE LEGACY ROUTE MUST NOT REACH INTO A PARTIAL PACKAGE");
+
+  sub("AN. packing units the legacy way never merges into an under-filled package");
+  // The legacy pack-sku route reuses one lot per (batch, SKU) rather than making a new one
+  // each run. A partial package is also unit-tracked and carries the same batch and SKU, so
+  // it is a candidate for that reuse — and merging units into it would leave a lot claiming
+  // sellable units while its contents still said 300 g of a 1000 g package.
+  const bAN = await roast("AN", C.coffees.brazil, C.beans.brazil, 4.0, 3.2);
+  const rANp = await pack(bAN, [{ kind: "pack", productSkuId: KG1.id, packages: 1, gramsEach: 300 }]);
+  check("the partial package is created", rANp.status === 201, `${rANp.status} ${S(rANp.json).slice(0, 160)}`);
+  const partialAN = rANp.json?.lots?.[0]?.id;
+  check("and it is PARTIAL", (await lotsFor(bAN)).some((l) => l.id === partialAN && l.status === "PARTIAL"),
+    S(await lotsFor(bAN)).slice(0, 220));
+
+  const rANs = await api(`/api/roasting-batches/${bAN}/pack-sku`, {
+    method: "POST",
+    body: { productSkuId: KG1.id, units: 1 },
+    headers: { "Idempotency-Key": freshIdempotencyKey(P) },
+  });
+  check("the legacy pack is accepted on its own terms", rANs.status === 201,
+    `${rANs.status} ${S(rANs.json).slice(0, 160)}`);
+
+  const afterAN = await lotsFor(bAN);
+  const stillPartial = afterAN.find((l) => l.id === partialAN);
+  check("the partial package was not touched", stillPartial?.status === "PARTIAL", S(stillPartial));
+  check("it still holds exactly what was put in it", num(stillPartial?.actual) === 300, S(stillPartial?.actual));
+  check("and it still offers no sellable unit", num(stillPartial?.ua) === 0 && num(stillPartial?.up) === 0,
+    S(stillPartial));
+  check("the legacy units went to a lot of their own",
+    afterAN.some((l) => l.id !== partialAN && l.status === "AVAILABLE" && num(l.ua) === 1),
+    S(afterAN).slice(0, 300));
+
   await invariants("after the unified packaging suite");
   await teardown(P);
 
