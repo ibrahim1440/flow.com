@@ -33,6 +33,17 @@ model Employee {
   qcRecords         QcRecord[]
   cuppingScores     CuppingScore[]
   ownedOrders       Order[]        @relation("OrderOwner") // Order Operations S0 (additive)
+
+  // Sales CRM & commissions (additive). Relation fields only — no columns are added to
+  // this table, so the deployed build reads it unchanged.
+  leadsOwned           Lead[]                  @relation("LeadOwner")
+  opportunitiesOwned   Opportunity[]           @relation("OpportunityOwner")
+  opportunitySplits    OpportunityOwner[]      @relation("OpportunitySplitOwner")
+  activitiesOwned      Activity[]              @relation("ActivityOwner")
+  commissionAssignments CommissionAssignment[] @relation("CommissionAssignee")
+  commissionAccruals   CommissionAccrual[]     @relation("CommissionEarner")
+  commissionLedger     CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
+  salesTargets         SalesTarget[]           @relation("SalesTargetOwner")
 }
 
 model Customer {
@@ -46,6 +57,13 @@ model Customer {
   updatedAt        DateTime                  @updatedAt
   orders           Order[]
   roastPreferences CustomerRoastPreference[]
+
+  // Sales CRM (additive, relation fields only).
+  leadConversions  LeadConversion[]
+  opportunities    Opportunity[]
+  quotes           Quote[]
+  activities       Activity[]
+  collectionEvents CollectionEvent[]
 }
 
 model GreenBean {
@@ -106,6 +124,10 @@ model Order {
   owner   Employee? @relation("OrderOwner", fields: [ownerId], references: [id])
 
   activities OrderActivity[]
+
+  // Sales CRM (additive, relation fields only).
+  opportunityLinks OpportunityOrder[]
+  collectionEvents CollectionEvent[]
 
   @@index([createdAt])
   @@index([customerId, createdAt])
@@ -887,6 +909,10 @@ model ProductSKU {
   // Bill of materials — what one unit of this SKU consumes.
   bomComponents BomComponent[]
 
+  // Sales CRM (additive, relation fields only).
+  quoteLines      QuoteLine[]
+  sampleShipments SampleShipment[]
+
   @@index([isActive])
   @@index([category, isActive])
 }
@@ -1349,4 +1375,661 @@ model QoyodExportRecord {
 
   @@index([status])
   @@index([journalEntryId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SALES CRM & COMMISSIONS
+//
+//  Added whole, alongside the existing domain. Nothing above this line is altered:
+//  every table here is new, so the build currently in production keeps working
+//  against this schema unchanged.
+//
+//  Two conventions inherited deliberately from the existing schema:
+//    • money is Decimal(18,2), never Float — the same rule the accounting models
+//      state explicitly, and for the same reason;
+//    • state is a stable CODE, never a translated label, so an Arabic UI cannot
+//      change what a row means.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+}
+
+/// How a lead reached us. Extended by configuration, not by code.
+enum LeadSource {
+  WALK_IN
+  REFERRAL
+  PHONE
+  SOCIAL
+  EXHIBITION
+  WEBSITE
+  OTHER
+}
+
+model Lead {
+  id           String     @id @default(cuid())
+  /// Business name. The person is a contact ON this lead, because a café has many
+  /// people and none of them is the customer.
+  companyName  String
+  companyNameAr String?
+  contactName  String
+  phone        String?
+  email        String?
+  city         String?
+  address      String?
+  source       LeadSource @default(OTHER)
+  sourceNote   String?
+  status       LeadStatus @default(NEW)
+
+  /// Who is responsible. Ownership is the scoping key for every read and write.
+  ownerId      String
+  owner        Employee   @relation("LeadOwner", fields: [ownerId], references: [id])
+
+  /// The next commitment. A lead with no next step is the thing this screen exists
+  /// to make visible, so it is a first-class column rather than a derived guess.
+  nextFollowUpAt DateTime?
+
+  notes        String?
+
+  /// Normalised duplicate-detection keys. Written by the service, never by a client.
+  /// Deliberately NOT unique: two genuine contacts can share a company, and merging
+  /// on name similarity alone is how real customers get destroyed.
+  normalizedCompany String?
+  normalizedPhone   String?
+
+  conversion   LeadConversion?
+  activities   Activity[]
+
+  createdById  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([ownerId, status])
+  @@index([status, nextFollowUpAt])
+  @@index([normalizedCompany])
+  @@index([normalizedPhone])
+}
+
+/// The proof that a lead became a customer and an opportunity.
+///
+/// Unique on leadId: converting twice is impossible, which is what makes a
+/// double-clicked button harmless. Every conversion metric is computed from these
+/// rows — never from counting leads and opportunities in a period and dividing,
+/// which measures nothing when the two sets are unrelated.
+model LeadConversion {
+  id            String      @id @default(cuid())
+  leadId        String      @unique
+  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Restrict)
+
+  customerId    String
+  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  opportunityId String      @unique
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+
+  /// True when this conversion created the customer rather than linking an existing one.
+  customerCreated Boolean   @default(false)
+
+  convertedById String?
+  convertedAt   DateTime    @default(now())
+
+  @@index([customerId])
+  @@index([convertedAt])
+}
+
+/// A configurable pipeline column. Terminal outcomes are NOT stages — see Opportunity.
+model PipelineStage {
+  id          String        @id @default(cuid())
+  /// Stable identity. The label may be translated; this may not change.
+  code        String        @unique
+  nameEn      String
+  nameAr      String
+  position    Int
+  /// Default probability offered when a deal enters this stage. Advisory only.
+  probability Int           @default(0)
+  isActive    Boolean       @default(true)
+
+  opportunities Opportunity[]
+  stageEvents   OpportunityStageEvent[]
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([position])
+}
+
+/// Terminal result. Separate from stage on purpose: a deal is either still moving
+/// through the pipeline, or it is finished. Collapsing the two into one enum is how
+/// "Won" ends up being draggable back into "Negotiation".
+enum OpportunityOutcome {
+  OPEN
+  WON
+  LOST
+}
+
+model Opportunity {
+  id             String             @id @default(cuid())
+  title          String
+  customerId     String?
+  customer       Customer?          @relation(fields: [customerId], references: [id])
+
+  stageId        String
+  stage          PipelineStage      @relation(fields: [stageId], references: [id])
+
+  outcome        OpportunityOutcome @default(OPEN)
+  /// Required by the service whenever outcome becomes LOST.
+  lostReason     String?
+  closedAt       DateTime?
+
+  /// Expected value. Currency is explicit so a future multi-currency policy has
+  /// somewhere to land; the commission engine refuses anything but SAR today.
+  amount         Decimal            @default(0) @db.Decimal(18, 2)
+  currency       String             @default("SAR")
+  probability    Int                @default(0)
+  expectedCloseAt DateTime?
+  nextFollowUpAt DateTime?
+
+  ownerId        String
+  owner          Employee           @relation("OpportunityOwner", fields: [ownerId], references: [id])
+
+  conversion     LeadConversion?
+  owners         OpportunityOwner[]
+  stageEvents    OpportunityStageEvent[]
+  quotes         Quote[]
+  samples        SampleShipment[]
+  activities     Activity[]
+  orderLinks     OpportunityOrder[]
+
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([ownerId, outcome])
+  @@index([stageId, outcome])
+  @@index([outcome, closedAt])
+  @@index([nextFollowUpAt])
+}
+
+/// Split attribution. Percentages are stored, not inferred, and the service requires
+/// them to total 100 when any split exists.
+///
+/// Historical accruals are never re-pointed when ownership changes: a new split takes
+/// effect from its own effectiveFrom, and what was already earned stays earned.
+model OpportunityOwner {
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee    @relation("OpportunitySplitOwner", fields: [employeeId], references: [id])
+  /// 0–100, two decimals. 60.00 means sixty percent.
+  sharePercent  Decimal     @db.Decimal(5, 2)
+  effectiveFrom DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@unique([opportunityId, employeeId])
+  @@index([employeeId])
+}
+
+/// Every stage move, owner change and value change, kept for the pipeline-duration
+/// report and for answering "who moved this and when".
+model OpportunityStageEvent {
+  id            String        @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  fromStageId   String?
+  toStageId     String?
+  toStage       PipelineStage? @relation(fields: [toStageId], references: [id])
+
+  fromOutcome   OpportunityOutcome?
+  toOutcome     OpportunityOutcome?
+
+  reason        String?
+  actorId       String?
+  createdAt     DateTime      @default(now())
+
+  @@index([opportunityId, createdAt])
+}
+
+enum SampleStatus {
+  PREPARING
+  SENT
+  FEEDBACK_RECEIVED
+  CANCELLED
+}
+
+/// Sample tracking. Records what was promised and what came back.
+///
+/// Deliberately does NOT move stock: the roastery has a packaging and inventory
+/// path with its own guards, and a CRM screen must not become a second way to
+/// decrement a shelf.
+model SampleShipment {
+  id            String       @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  productSkuId  String?
+  productSku    ProductSKU?  @relation(fields: [productSkuId], references: [id])
+  description   String?
+  quantity      Decimal      @default(0) @db.Decimal(12, 3)
+  unit          String       @default("KG")
+
+  status        SampleStatus @default(PREPARING)
+  sentAt        DateTime?
+  feedbackAt    DateTime?
+  feedbackScore Int?
+  feedbackNotes String?
+
+  createdById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([opportunityId, status])
+}
+
+enum ActivityType {
+  CALL
+  VISIT
+  MEETING
+  NOTE
+  TASK
+  SAMPLE_FOLLOW_UP
+}
+
+/// A call, visit, note or task. Attaches to a lead or an opportunity, and survives
+/// conversion: the lead's history stays readable after it becomes a customer.
+///
+/// Recording that contact happened is NOT sending a message. Nothing here dispatches
+/// email, SMS or WhatsApp, and no screen implies it does.
+model Activity {
+  id            String       @id @default(cuid())
+  type          ActivityType
+  subject       String
+  body          String?
+
+  leadId        String?
+  lead          Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  customerId    String?
+  customer      Customer?    @relation(fields: [customerId], references: [id])
+
+  dueAt         DateTime?
+  completedAt   DateTime?
+
+  ownerId       String
+  owner         Employee     @relation("ActivityOwner", fields: [ownerId], references: [id])
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([ownerId, completedAt, dueAt])
+  @@index([leadId])
+  @@index([opportunityId])
+}
+
+enum QuoteStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  SUPERSEDED
+}
+
+model Quote {
+  id            String      @id @default(cuid())
+  /// Human reference, unique per revision chain.
+  quoteNumber   String      @unique
+  revision      Int         @default(1)
+  /// Points at the quote this one revises, so a chain is walkable in both directions.
+  supersedesId  String?     @unique
+  supersedes    Quote?      @relation("QuoteRevision", fields: [supersedesId], references: [id])
+  supersededBy  Quote?      @relation("QuoteRevision")
+
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  customerId    String?
+  customer      Customer?   @relation(fields: [customerId], references: [id])
+
+  status        QuoteStatus @default(DRAFT)
+  currency      String      @default("SAR")
+  validUntil    DateTime?
+
+  /// Totals computed on the server from the lines. Stored so an issued quote is a
+  /// fixed document: recomputing it later from live prices would change history.
+  subtotal      Decimal     @default(0) @db.Decimal(18, 2)
+  discountTotal Decimal     @default(0) @db.Decimal(18, 2)
+  taxTotal      Decimal     @default(0) @db.Decimal(18, 2)
+  grandTotal    Decimal     @default(0) @db.Decimal(18, 2)
+
+  /// Frozen copy of the lines and prices at the moment of issue.
+  issuedSnapshot Json?
+  issuedAt      DateTime?
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
+  rejectionNote String?
+
+  /// Set when a discount above the configured threshold was authorised.
+  discountApprovedById String?
+  discountApprovedAt   DateTime?
+
+  lines         QuoteLine[]
+  orderLinks    OpportunityOrder[]
+
+  createdById   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([opportunityId, status])
+  @@index([customerId])
+}
+
+model QuoteLine {
+  id           String     @id @default(cuid())
+  quoteId      String
+  quote        Quote      @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  productSkuId String?
+  productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
+  /// Free-text description for a line with no catalogue SKU (a bespoke blend, a service).
+  description  String?
+
+  /// Decimal(12,3) carries kilogram fractions honestly. Whether fractions are ALLOWED
+  /// is a product question the service asks the SKU, not something the column decides:
+  /// 1.5 kg of beans is ordinary, 1.5 retail bags is not.
+  quantity     Decimal    @db.Decimal(12, 3)
+  unit         String     @default("KG")
+
+  unitPrice    Decimal    @db.Decimal(18, 2)
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  taxRatePercent  Decimal @default(0) @db.Decimal(5, 2)
+
+  lineSubtotal Decimal    @default(0) @db.Decimal(18, 2)
+  lineTax      Decimal    @default(0) @db.Decimal(18, 2)
+  lineTotal    Decimal    @default(0) @db.Decimal(18, 2)
+
+  position     Int        @default(0)
+
+  @@index([quoteId, position])
+}
+
+/// The bridge from a won deal to the order system.
+///
+/// Unique on (quoteId, orderId) plus a unique requestKey: converting the same accepted
+/// quote twice returns the first order instead of creating a second. One deal may
+/// legitimately produce several orders over time — repeat business is not a defect —
+/// so this is a many-to-many link rather than a column on Opportunity.
+model OpportunityOrder {
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  quoteId       String?
+  quote         Quote?      @relation(fields: [quoteId], references: [id])
+  orderId       String
+  order         Order       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  /// Distinguishes the first order won from the repeat orders that follow it, which
+  /// the attribution policy may treat differently.
+  isFirstOrder  Boolean     @default(false)
+  requestKey    String      @unique
+
+  createdById   String?
+  createdAt     DateTime    @default(now())
+
+  @@unique([quoteId, orderId])
+  @@index([opportunityId])
+  @@index([orderId])
+}
+
+// ─── Commissions ───────────────────────────────────────────────────────────────
+
+enum CommissionBasis {
+  /// Net collected cash, excluding tax, refunds and non-qualifying lines.
+  NET_COLLECTION
+}
+
+enum CommissionTierMode {
+  /// Each tier's rate applies only to the portion of base inside that tier's band.
+  INCREMENTAL
+  /// The highest reached tier's rate applies to the whole base.
+  /// Declared so the concept is nameable; REFUSED at validation in this version
+  /// rather than half-implemented. See COMMISSION_RULES.md.
+  RETROACTIVE
+}
+
+model CommissionPlan {
+  id          String                  @id @default(cuid())
+  code        String                  @unique
+  name        String
+  nameAr      String?
+  description String?
+  isActive    Boolean                 @default(true)
+
+  versions    CommissionPlanVersion[]
+  assignments CommissionAssignment[]
+
+  createdById String?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+}
+
+/// A plan is versioned, and a version is immutable once anything has accrued against
+/// it. Editing a live rule in place would silently restate commissions people have
+/// already been told they earned.
+model CommissionPlanVersion {
+  id            String             @id @default(cuid())
+  planId        String
+  plan          CommissionPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  version       Int
+
+  basis         CommissionBasis    @default(NET_COLLECTION)
+  tierMode      CommissionTierMode @default(INCREMENTAL)
+  /// The flat rate applied when no tier matches, as a percentage: 1.500000 = 1.5%.
+  baseRatePercent Decimal          @db.Decimal(9, 6)
+  currency      String             @default("SAR")
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  tiers         CommissionTier[]
+  assignments   CommissionAssignment[]
+  accruals      CommissionAccrual[]
+
+  createdById   String?
+  createdAt     DateTime           @default(now())
+
+  @@unique([planId, version])
+  @@index([effectiveFrom])
+}
+
+/// One band. `fromAmount` inclusive, `toAmount` exclusive; a null `toAmount` is "and above".
+model CommissionTier {
+  id              String                @id @default(cuid())
+  planVersionId   String
+  planVersion     CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fromAmount      Decimal               @db.Decimal(18, 2)
+  toAmount        Decimal?              @db.Decimal(18, 2)
+  /// Added to the base rate for the portion inside this band, in percentage points:
+  /// 0.500000 means "half a point more on this slice".
+  ratePercent     Decimal               @db.Decimal(9, 6)
+  position        Int                   @default(0)
+
+  @@index([planVersionId, position])
+}
+
+model CommissionAssignment {
+  id            String                @id @default(cuid())
+  employeeId    String
+  employee      Employee              @relation("CommissionAssignee", fields: [employeeId], references: [id])
+  planId        String
+  plan          CommissionPlan        @relation(fields: [planId], references: [id])
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  createdById   String?
+  createdAt     DateTime              @default(now())
+
+  @@index([employeeId, effectiveFrom])
+}
+
+enum CollectionEventStatus {
+  RECORDED
+  REVERSED
+}
+
+/// SANDBOX COLLECTION SOURCE.
+///
+/// This system has no invoice, payment or receivables model — checked, not assumed.
+/// Commission is owed on money actually collected, so rather than invent a receivables
+/// ledger inside a CRM task, collection is an ADAPTER and this table is its one
+/// implementation: events entered through a clearly-labelled testing surface.
+///
+/// `sourceSystem` is stored on every row so a real integration can be added later and
+/// told apart from sandbox data without guessing. The UI states that the source is a
+/// sandbox; nothing here is described as a working financial integration.
+model CollectionEvent {
+  id            String                @id @default(cuid())
+  sourceSystem  String                @default("SANDBOX")
+  /// The source's own identifier, so a re-delivered webhook is recognised, not re-accrued.
+  externalRef   String
+  status        CollectionEventStatus @default(RECORDED)
+
+  customerId    String?
+  customer      Customer?             @relation(fields: [customerId], references: [id])
+  opportunityId String?
+  orderId       String?
+  order         Order?                @relation(fields: [orderId], references: [id])
+
+  /// Gross cash received, and the split that makes the qualifying base computable.
+  amountGross   Decimal               @db.Decimal(18, 2)
+  amountTax     Decimal               @default(0) @db.Decimal(18, 2)
+  /// Portion of the net that does not qualify (excluded products, freight, …).
+  amountNonQualifying Decimal         @default(0) @db.Decimal(18, 2)
+  currency      String                @default("SAR")
+
+  collectedAt   DateTime
+  reversedAt    DateTime?
+  reversalOfId  String?
+  note          String?
+
+  accruals      CommissionAccrual[]
+
+  createdById   String?
+  createdAt     DateTime              @default(now())
+
+  @@unique([sourceSystem, externalRef])
+  @@index([customerId, collectedAt])
+  @@index([collectedAt])
+}
+
+enum AccrualStatus {
+  PREVIEW
+  ACCRUED
+  APPROVED
+  PAID
+  REVERSED
+}
+
+/// What one employee earned from one collection event under one plan version.
+///
+/// Unique on (collectionEventId, employeeId, planVersionId): a re-delivered collection
+/// event cannot accrue a second time for the same person on the same rules. Corrections
+/// are new rows, never edits to an approved one.
+model CommissionAccrual {
+  id                String                @id @default(cuid())
+  collectionEventId String
+  collectionEvent   CollectionEvent       @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
+
+  employeeId        String
+  employee          Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
+  planVersionId     String
+  planVersion       CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
+
+  /// Period the accrual belongs to, as an Asia/Riyadh month, stored as the UTC instant
+  /// of that month's first moment in Riyadh.
+  periodStart       DateTime
+  periodEnd         DateTime
+
+  /// The qualifying base this row was computed from, and the share applied to it.
+  qualifyingBase    Decimal               @db.Decimal(18, 2)
+  sharePercent      Decimal               @default(100) @db.Decimal(5, 2)
+  /// Effective rate actually applied, after tiers — recorded so the figure can be
+  /// explained to the person who earned it without recomputing anything.
+  effectiveRatePercent Decimal            @db.Decimal(9, 6)
+  amount            Decimal               @db.Decimal(18, 2)
+  currency          String                @default("SAR")
+
+  status            AccrualStatus         @default(ACCRUED)
+  approvedById      String?
+  approvedAt        DateTime?
+
+  ledgerEntries     CommissionLedgerEntry[]
+
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([collectionEventId, employeeId, planVersionId])
+  @@index([employeeId, periodStart])
+  @@index([status, periodStart])
+}
+
+enum LedgerEntryType {
+  ACCRUAL
+  ADJUSTMENT
+  REVERSAL
+  PAYOUT
+}
+
+/// Append-only commission ledger. An approved figure is never rewritten; a correction
+/// is a new entry that references what it corrects and says who made it and why.
+model CommissionLedgerEntry {
+  id          String            @id @default(cuid())
+  type        LedgerEntryType
+  employeeId  String
+  employee    Employee          @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
+
+  accrualId   String?
+  accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id])
+  /// The entry this one corrects or reverses.
+  correctsId  String?
+
+  periodStart DateTime
+  amount      Decimal           @db.Decimal(18, 2)
+  currency    String            @default("SAR")
+  reason      String?
+
+  actorId     String?
+  createdAt   DateTime          @default(now())
+
+  @@index([employeeId, periodStart])
+  @@index([type, createdAt])
+}
+
+/// A monthly sales target for a person. Deliberately separate from commission: hitting
+/// a target may pay a bonus, but a target is not a commission rate and the two are not
+/// summed by accident.
+model SalesTarget {
+  id           String   @id @default(cuid())
+  employeeId   String
+  employee     Employee @relation("SalesTargetOwner", fields: [employeeId], references: [id])
+  periodStart  DateTime
+  periodEnd    DateTime
+  targetAmount Decimal  @db.Decimal(18, 2)
+  currency     String   @default("SAR")
+  bonusAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  note         String?
+
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([employeeId, periodStart])
+  @@index([periodStart])
 }

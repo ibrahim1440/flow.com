@@ -23,7 +23,8 @@
     "uat": "playwright test",
     "uat:desktop": "playwright test --project=desktop",
     "uat:report": "playwright show-report",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "build:test-domain": "tsc -p tsconfig.test-domain.json"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

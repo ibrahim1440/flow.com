@@ -56,3 +56,6 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /tests/e2e/support/catalog.json
+
+# Domain-only compile output for the pure-arithmetic test suites (see tsconfig.test-domain.json)
+.test-build/
