@@ -19,14 +19,33 @@ capabilities rather than rely on recollection. That inspection was done:
 | Is a Figma MCP server installed? | **Yes** — `plugin:figma:figma`, HTTP at `https://mcp.figma.com`. |
 | Is it authenticated? | **No.** Only two tools are exposed: `authenticate` and `complete_authentication`. |
 | Are any design tools available (create frame, component, variable, prototype)? | **No.** None are exposed while the server is unauthenticated, so its write capability could not be tested either way. |
-| Was an OAuth flow started? | **Yes.** `authenticate` was called and returned an authorisation URL, which was given to the account holder. |
-| Was it completed? | **No.** It requires the account holder to authorise in a browser. |
+| Was an OAuth flow started? | **Yes**, and again in the later session that built the screens. `authenticate` returns a fresh authorisation URL each time; the current one is in the session report. |
+| Was it completed? | **No.** It requires the account holder to authorise in a browser, on the machine the callback returns to (`localhost:44774`). |
 | Is there an alternative design surface? | A Claude design-system connector exists, but it manages code-based component libraries — it is not Figma and would not satisfy an "editable Figma file" requirement. |
 
 The account holder's instruction was explicit: their authorisation message does **not**
 replace the interactive OAuth step, and I must not bypass it, impersonate approval, or ask
 them to paste callback URLs or tokens into chat. So the flow is **left pending**, which is the
 correct end state rather than a failure to try.
+
+---
+
+## 1a. What has changed since this was first written
+
+Nothing about the blocker. What HAS changed is that there is now far more to hand to a
+designer than there was: the interface exists in full as a working reference implementation.
+
+Nine screens are built and driven by a 44-test browser suite — Leads, Pipeline, Deal detail,
+Follow-ups, Quotations list, Quotation editor, Sales targets, Reports, My commissions, plus
+Commission plans and Commission review. Every one carries the provisional banner, every one is
+RTL-correct and works at 390px, and `src/app/dashboard/sales/_components/ui.tsx` is effectively
+the component inventory a Figma library would need to mirror: banner, page header, alert, card,
+section title, empty state, spinner, four button variants, labelled field, text input, select,
+textarea, money, six pill tones, modal, scrolling table wrapper.
+
+So the design work is no longer "design this from a specification". It is **reconcile an
+editable Figma file with an implementation that already exists and is tested** — which is a
+better position to be in, and which is what §3 should be read as describing.
 
 ---
 

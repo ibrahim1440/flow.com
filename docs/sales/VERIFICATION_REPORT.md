@@ -53,8 +53,8 @@ Five suites, run with `npm run regression:sales` against `sales_crm_preview`.
 | `quotes-domain` | **112** | quotation pricing, the lifecycle table, and the whole CSV layer | nothing — pure |
 | `sales-commissions-db` | **23** | constraints exist, concurrency resolves, a rollback leaves nothing | PostgreSQL |
 | `sales-security` | **34** | what is refused — every case passes only if the server said no | running app |
-| `sales-workflow` | **182** | the ordinary path end to end, with rows checked after every step | running app |
-| | **399** | **0 failed** | |
+| `sales-workflow` | **201** | the ordinary path end to end, with rows checked after every step | running app |
+| | **418** | **0 failed** | |
 
 The two pure suites are the ones to trust most: every expected figure in them was worked out by
 hand and written as a literal, so none of them can pass by the code agreeing with itself.
@@ -62,8 +62,8 @@ hand and written as a literal, so none of them can pass by the code agreeing wit
 `sales-workflow` is the one that answers "can a user actually do this": lead → duplicate
 handling → conversion → activities → sample → quotation → discount refusal → issue → revision →
 acceptance → order → idempotent replay → won → collections → accrual → approval → refund →
-adjustment → payout → target → report → CSV import → CSV export. After each step it reads the
-database rather than believing the response.
+adjustment → payout → target → report → CSV import → CSV export → stage configuration →
+assignment lifecycle. After each step it reads the database rather than believing the response.
 
 ---
 
@@ -110,9 +110,9 @@ The full matrix is `REQUIREMENTS_MATRIX.md`. What is NOT built, gathered here:
 | **A screen to delete a lead** | The rule (never once it has history) is enforced on `DELETE /api/sales/leads/[id]`; no screen offers it. |
 | **Figma design and prototype** | See §5. |
 
-Two rules are implemented and enforced but have **no assertion of their own**: retiring a
-pipeline stage that still holds deals, and ending a commission assignment. Both are exercised
-incidentally by other tests. They are listed here rather than counted as covered.
+Every implemented rule in the matrix now has an assertion of its own. The two that did not —
+retiring a pipeline stage that still holds deals, and ending a commission assignment rather
+than deleting it — are covered by `flow I2` and `flow I3`.
 
 ---
 

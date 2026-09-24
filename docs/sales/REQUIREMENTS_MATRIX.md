@@ -43,8 +43,8 @@ Test identifiers:
 
 | # | Requirement | Service | API | Screen | Tests | Status |
 |---|---|---|---|---|---|---|
-| 2.1 | Configurable pipeline stages, ordered, bilingual | — | `GET/POST/PATCH /api/sales/stages` | — *(API only)* | flow fixtures | **PARTIAL** — configurable through the API; no settings screen |
-| 2.2 | A stage holding deals cannot be retired | — | `PATCH /api/sales/stages` | — | — | **PARTIAL** — enforced, not covered by a named test |
+| 2.1 | Configurable pipeline stages, ordered, bilingual | — | `GET/POST/PATCH /api/sales/stages` | — *(API only)* | flow I1 | **PARTIAL** — fully configurable through the API and tested; no settings screen drives it |
+| 2.2 | A stage holding deals cannot be retired | — | `PATCH /api/sales/stages` | — | flow I2 | **DONE** |
 | 2.3 | Kanban board of open deals | — | `GET /api/sales/opportunities` | Pipeline | ui 3.x | **DONE** |
 | 2.4 | Deal detail: value, probability, dates, customer, owner | — | `GET/PATCH /api/sales/opportunities/[id]` | Deal detail | ui 3.1, flow D5 | **DONE** |
 | 2.5 | Move between stages, with the move recorded | `transitionOpportunity` | `POST .../[id]/transition` | Deal detail stage row | ui 3.2 | **DONE** |
@@ -123,7 +123,7 @@ Test identifiers:
 | 6.6 | The plan is chosen by the date the CASH arrived | `selectPlanVersion` | — | — | engine H1 | **DONE** |
 | 6.7 | No overlapping assignments for one person | `findOverlappingAssignment` | `POST /assignments` | Assign dialog | engine H2, flow E1 | **DONE** |
 | 6.8 | Nobody puts themselves on a plan | `assignPlan` | same | — | flow E1 | **DONE** |
-| 6.9 | An assignment is ended, never deleted | `endAssignment` | `PATCH /assignments` | Commission plans | — | **PARTIAL** — enforced and driven by a screen; no named test |
+| 6.9 | An assignment is ended, never deleted | `endAssignment` | `PATCH /assignments` | Commission plans | flow I3 | **DONE** |
 | 6.10 | Partial collection accrues once; instalments add the difference | `recomputeEmployeePeriod` | sandbox adapter | My commissions | engine E1, flow E3/E5, ui 5.2/5.4 | **DONE** |
 | 6.11 | A re-delivered payment changes nothing | unique `(sourceSystem, externalRef)` | same | — | engine E2, db A2, flow E4, ui 5.2 | **DONE** |
 | 6.12 | Rounding across instalments totals exactly | `roundMoney` | — | — | engine E3, db C4 | **DONE** |
@@ -212,10 +212,11 @@ Nothing below is blocked by anything external. Each is work that was not done.
    the board reads them; there is no screen to reorder or rename them. (2.1, 2.2)
 3. **Report export.** Leads export; the reports do not. (8.11)
 4. **A screen for deleting a lead** raised in error. The rule is enforced server-side. (1.6)
-5. **Named tests for two enforced rules**: retiring a stage that still holds deals (2.2),
-   and ending a commission assignment (6.9). Both are implemented and both are exercised
-   incidentally; neither has an assertion of its own.
-6. **Figma design and prototype.** (10.8)
+5. **Figma design and prototype.** (10.8)
+
+Everything else in this matrix that is implemented now has an assertion of its own. The two
+rules that previously did not — retiring a stage that still holds deals, and ending a
+commission assignment rather than deleting it — are covered by `flow I2` and `flow I3`.
 
 ## 12. What is refused, and why
 

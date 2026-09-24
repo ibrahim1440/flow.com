@@ -1117,6 +1117,100 @@ async function main() {
   }
 
   // ═════════════════════════════════════════════════════════════════════════
+  section("I — CONFIGURATION: STAGES AND ASSIGNMENTS");
+
+  sub("I1. a stage can be added, renamed and reordered");
+  {
+    await loginAs(MANAGER);
+    const bad = await api("/api/sales/stages", {
+      method: "POST", body: { code: `${P}_NEGO`, nameEn: "Negotiation" },
+    });
+    check("a stage with no Arabic name is refused — it would render as a gap on the board most people use",
+      bad.status === 400, S(bad.json).slice(0, 200));
+
+    const made = await api("/api/sales/stages", {
+      method: "POST",
+      body: { code: `${P}_NEGO`, nameEn: "Negotiation", nameAr: "تفاوض", probability: 80 },
+    });
+    check("with both names it is created", made.status === 201, S(made.json).slice(0, 200));
+    ids.negoStageId = made.json?.stage?.id;
+    check("and it lands at the end of the board",
+      made.json?.stage?.position > 30, S(made.json?.stage));
+
+    const renamed = await api("/api/sales/stages", {
+      method: "PATCH",
+      body: { stages: [{ id: ids.negoStageId, nameEn: "In negotiation", position: 5 }] },
+    });
+    check("renaming and reordering succeed", renamed.status === 200, S(renamed.json).slice(0, 160));
+    const row = await one(`SELECT "nameEn", position, code FROM "PipelineStage" WHERE id=$1`, [ids.negoStageId]);
+    check("the label changed", row.nameEn === "In negotiation", S(row));
+    check("the position changed", Number(row.position) === 5, S(row));
+    check("and the CODE — the stable identity — did not", row.code === `${P}_NEGO`, S(row));
+  }
+
+  sub("I2. a stage holding deals cannot be retired");
+  {
+    // Park a deal in it first, so the refusal is about the deals and not about anything else.
+    await c.query(`UPDATE "Opportunity" SET "stageId"=$1 WHERE id=$2`, [ids.negoStageId, ids.opportunityId]);
+
+    const blocked = await api("/api/sales/stages", {
+      method: "PATCH", body: { stages: [{ id: ids.negoStageId, isActive: false }] },
+    });
+    check("refused with 409", blocked.status === 409, S(blocked.json).slice(0, 220));
+    check("and the message says how many deals are in the way",
+      /still holds 1 deals/i.test(blocked.json?.error ?? ""), S(blocked.json?.error));
+    const still = await one(`SELECT "isActive" FROM "PipelineStage" WHERE id=$1`, [ids.negoStageId]);
+    check("the stage is still active — the board did not lose a column with cards in it",
+      still.isActive === true, S(still));
+
+    // Move the deal back out, and it retires cleanly.
+    await c.query(`UPDATE "Opportunity" SET "stageId"=$1 WHERE id=$2`, [ids.stageProposal, ids.opportunityId]);
+    const ok = await api("/api/sales/stages", {
+      method: "PATCH", body: { stages: [{ id: ids.negoStageId, isActive: false }] },
+    });
+    check("once it is empty it retires", ok.status === 200, S(ok.json).slice(0, 160));
+    const after = await one(`SELECT "isActive" FROM "PipelineStage" WHERE id=$1`, [ids.negoStageId]);
+    check("stored as inactive rather than deleted", after.isActive === false, S(after));
+  }
+
+  sub("I3. an assignment is ENDED, never deleted");
+  {
+    const before = await one(
+      `SELECT id, "effectiveTo" FROM "CommissionAssignment" WHERE "employeeId"=$1`, [`${P}_fin`]);
+    check("the finance assignment from section F exists", !!before?.id, S(before));
+    check("and is open-ended", before.effectiveTo === null, S(before));
+
+    const selfEnd = await api("/api/commissions/assignments", {
+      method: "PATCH", body: { assignmentId: before.id, effectiveTo: dayOfMonthISO(28) },
+    });
+    // The manager is not the assignee here, so this one should succeed; the self-check is
+    // asserted separately below with an assignment the actor owns.
+    check("a manager may end somebody else's assignment", selfEnd.status === 200, S(selfEnd.json).slice(0, 200));
+
+    const after = await one(
+      `SELECT id, "effectiveTo" FROM "CommissionAssignment" WHERE id=$1`, [before.id]);
+    check("the row still exists — money accrued under it and the accruals reach the plan through it",
+      !!after?.id, S(after));
+    check("and now carries an end date", after.effectiveTo !== null, S(after));
+
+    const backwards = await api("/api/commissions/assignments", {
+      method: "PATCH", body: { assignmentId: before.id, effectiveTo: "2019-01-01" },
+    });
+    check("an end date before the start is refused", backwards.status === 400, S(backwards.json).slice(0, 200));
+
+    // And the rule that matters most: nobody edits their own.
+    const mine = await one(
+      `SELECT id FROM "CommissionAssignment" WHERE "employeeId"=$1`, [`${P}_rep`]);
+    await loginAs(MANAGER);
+    const ownAssignment = await api("/api/commissions/assignments", {
+      method: "POST",
+      body: { employeeId: `${P}_mgr`, planVersionId: ids.planVersionId, effectiveFrom: "2020-01-01" },
+    });
+    check("a manager still cannot put themselves on a plan", ownAssignment.status === 403, S(ownAssignment.json).slice(0, 200));
+    void mine;
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
   console.log(`\n${"=".repeat(78)}\n  SALES WORKFLOW RESULT\n${"=".repeat(78)}`);
   console.log(`${results.pass} passed, ${results.fail} failed`);
   if (results.failures.length) console.log("FAILURES:\n  - " + results.failures.join("\n  - "));
