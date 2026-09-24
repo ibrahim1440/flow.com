@@ -155,7 +155,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         dryRun: true,
         wouldImport: toInsert.length,
-        rowsRead: parsed.rows.length,
+        // What the FILE held, not what survived validation — see `rowsSeen`.
+        rowsRead: parsed.rowsSeen,
         problems: parsed.problems,
         duplicatesInFile: withinFile,
         duplicatesInSystem: strongDuplicates,
@@ -207,8 +208,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         imported: created.count,
-        rowsRead: parsed.rows.length,
-        skipped: parsed.rows.length - created.count,
+        rowsRead: parsed.rowsSeen,
+        skipped: parsed.rowsSeen - created.count,
         problems: parsed.problems,
         duplicatesInFile: withinFile,
         duplicatesInSystem: strongDuplicates,

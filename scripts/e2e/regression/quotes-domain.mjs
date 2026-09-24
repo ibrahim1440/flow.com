@@ -379,6 +379,7 @@ sub("I1. a clean file");
 {
   const r = parseLeadCsv("companyName,contactName,phone\nAl Waha,Sara,0501234567\n");
   check("one row read", r.rows.length === 1, JSON.stringify(r));
+  check("and one row seen", r.rowsSeen === 1, String(r.rowsSeen));
   check("no problems", r.problems.length === 0, JSON.stringify(r.problems));
   check("the phone came through", r.rows[0].phone === "0501234567", "");
 }
@@ -416,6 +417,10 @@ sub("I5. bad rows are reported by the row number the operator sees");
   );
   check("only the good row is kept", r.rows.length === 1, JSON.stringify(r.rows));
   check("four rows are reported", r.problems.length === 4, JSON.stringify(r.problems));
+  // The denominator the operator is shown. Counting only the rows that parsed turned a
+  // five-row file into "1 of 1", which reads as a file four lines short rather than as
+  // four lines refused.
+  check("and the count of rows the FILE held is five, not one", r.rowsSeen === 5, String(r.rowsSeen));
   // The header is row 1, so the first data row is row 2 — which is what the spreadsheet
   // shows. Reporting a zero-based index here sends the operator to the wrong line.
   check("the short company name is row 3", r.problems[0].row === 3, JSON.stringify(r.problems[0]));

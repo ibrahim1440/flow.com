@@ -43,6 +43,9 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
+      // The CRM suite has its own project; running it here as well would drive every one of
+      // its tests twice against one shared database.
+      testIgnore: /sales-crm\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1440, height: 900 } },
     },
     {
@@ -51,6 +54,14 @@ export default defineConfig({
       name: "tablet",
       use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1024, height: 768 } },
       testMatch: /responsive\.spec\.ts/,
+    },
+    {
+      // The CRM suite, run on its own so it can be driven without waiting for the whole
+      // operational UAT. It shares the fixtures and the teardown, and it sets its own
+      // viewport in the tests that care about one.
+      name: "sales",
+      use: { ...devices["Desktop Chrome"], channel: "chrome", viewport: { width: 1440, height: 900 } },
+      testMatch: /sales-crm\.spec\.ts/,
     },
   ],
 });

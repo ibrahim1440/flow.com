@@ -11,8 +11,14 @@ import { Client } from "pg";
  * safety boundary, and a boundary that whoever sets the variables can move is not one.
  * No wildcard and no prefix match — "erp_mvp_preprod" must not pass merely because it
  * begins with "erp_mvp" — and an unrecognised name is refused rather than allowed.
+ *
+ * `sales_crm_preview` was added when the CRM suites arrived. It is a database created
+ * EMPTY for that work, on a non-production branch, holding nothing that was copied from
+ * anywhere. It is named here in full for the same reason the other two are: so widening
+ * this boundary is a visible edit to a literal rather than a pattern quietly matching
+ * something new.
  */
-const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e"];
+const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e", "sales_crm_preview"];
 
 function refuseTestDatabase(why: string): Error {
   return new Error(

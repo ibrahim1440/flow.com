@@ -29,7 +29,9 @@ const base = (): Permissions =>
 
 const withBase = (p: Permissions): Permissions => ({ ...base(), dashboard: edit("dashboard"), ...p });
 
-export type RoleName = "sales" | "production" | "qc" | "packaging" | "dispatch" | "admin";
+export type RoleName =
+  | "sales" | "production" | "qc" | "packaging" | "dispatch" | "admin"
+  | "crmRep" | "crmManager" | "crmFinance";
 
 export const ROLES: Record<RoleName, { pin: string; name: string; role: string; permissions: Permissions }> = {
   // Sales raises and approves orders and runs the preparation review. It deliberately has
@@ -60,5 +62,59 @@ export const ROLES: Record<RoleName, { pin: string; name: string; role: string; 
   admin: {
     pin: "710066", name: "UAT Administrator", role: "admin",
     permissions: Object.fromEntries(ALL_MODULES.map((m) => [m, edit(m)])) as Permissions,
+  },
+
+  // ── The CRM roles ─────────────────────────────────────────────────────────
+  // Three people with genuinely different reach, because the interesting assertions are
+  // about the boundaries between them: what a rep may see of a colleague's pipeline, who
+  // may approve a discount, and who may sign off somebody's pay.
+
+  /**
+   * A salesperson. Owns leads and deals, raises quotations, and may place the order a
+   * signed quotation entitles the customer to.
+   *
+   * Deliberately WITHOUT `lead_assign` — which is the privilege that widens every read in
+   * the module from "mine" to "everyone's". A rep who could see the whole pipeline is a rep
+   * who can take the customer list with them.
+   */
+  crmRep: {
+    pin: "720011", name: "UAT Sales Rep", role: "custom",
+    permissions: withBase({
+      sales: edit("sales", ["lead_write", "lead_convert", "quote_write", "lead_import", "lead_export"]),
+      commissions: edit("commissions", ["view_own"]),
+      orders: edit("orders", ["create"]),
+      customers: view("customers"),
+    }),
+  },
+
+  /**
+   * A sales manager. Sees the whole pipeline, approves discounts, closes and reopens deals,
+   * configures the stages, and administers commission plans.
+   *
+   * Holds `sandbox_collections` because somebody has to be able to drive the synthetic
+   * collection source in a test environment; a rep does not, which is what stops a
+   * salesperson manufacturing a collection that looks verified and being paid on it.
+   */
+  crmManager: {
+    pin: "720022", name: "UAT Sales Manager", role: "custom",
+    permissions: withBase({
+      sales: edit("sales"),
+      commissions: edit("commissions", ["view_own", "view_team", "manage_plans", "sandbox_collections"]),
+      orders: edit("orders", ["create"]),
+      customers: edit("customers"),
+      inventory: view("inventory"),
+    }),
+  },
+
+  /**
+   * Finance. Approves and pays commission, and can see the team's figures — but holds no
+   * sales module at all, so they cannot read the pipeline, and no `manage_plans`, so they
+   * cannot change the rate they are approving against.
+   */
+  crmFinance: {
+    pin: "720033", name: "UAT Finance", role: "custom",
+    permissions: withBase({
+      commissions: edit("commissions", ["view_own", "view_team", "approve", "record_payout"]),
+    }),
   },
 };

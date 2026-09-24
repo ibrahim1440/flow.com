@@ -180,6 +180,14 @@ function canonicalHeader(raw: string): (typeof LEAD_IMPORT_COLUMNS)[number] | nu
 export type ParsedImport = {
   rows: LeadImportRow[];
   problems: ImportProblem[];
+  /**
+   * Data rows the FILE contained, rejected ones included.
+   *
+   * Deliberately not `rows.length`. The operator's question is "did it read my whole file",
+   * and answering it with the count that survived validation turns three rows into "2 of 2"
+   * — which reads as a file that was a line short rather than as a line that was refused.
+   */
+  rowsSeen: number;
   /** Header cells that were not recognised. Reported, never silently ignored. */
   unknownColumns: string[];
 };
@@ -204,7 +212,7 @@ export function parseLeadCsv(text: string): ParsedImport {
   const grid = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
 
   if (grid.length === 0) {
-    return { rows: [], problems: [{ row: 0, message: "The file is empty." }], unknownColumns: [] };
+    return { rows: [], problems: [{ row: 0, message: "The file is empty." }], rowsSeen: 0, unknownColumns: [] };
   }
 
   const headerRow = grid[0];
@@ -222,7 +230,7 @@ export function parseLeadCsv(text: string): ParsedImport {
         "The file needs a companyName column. Recognised headings are: " +
         LEAD_IMPORT_COLUMNS.join(", ") + ".",
     });
-    return { rows: [], problems, unknownColumns };
+    return { rows: [], problems, rowsSeen: Math.max(0, grid.length - 1), unknownColumns };
   }
 
   const body = grid.slice(1);
@@ -231,7 +239,7 @@ export function parseLeadCsv(text: string): ParsedImport {
       row: 0,
       message: `This file has ${body.length} rows; ${MAX_IMPORT_ROWS} is the most one import may carry. Split it.`,
     });
-    return { rows: [], problems, unknownColumns };
+    return { rows: [], problems, rowsSeen: body.length, unknownColumns };
   }
 
   const rows: LeadImportRow[] = [];
@@ -284,5 +292,5 @@ export function parseLeadCsv(text: string): ParsedImport {
     rows.push(row);
   });
 
-  return { rows, problems, unknownColumns };
+  return { rows, problems, rowsSeen: body.length, unknownColumns };
 }

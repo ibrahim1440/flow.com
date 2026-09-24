@@ -27,6 +27,11 @@ export type Catalog = {
   materials: Record<string, { id: string; code: string; openingQty: number }>;
   skus: Record<string, { id: string; code: string; name: string; grams: number; kg: number; coffee: string; label: string }>;
   customers: Record<string, { id: string; name: string }>;
+  /** Pipeline stages and commission plans, for the CRM suite. */
+  crm: {
+    stages: { id: string; code: string; nameEn: string; nameAr: string }[];
+    plans: Record<string, { planId: string; versionId: string; baseRatePercent: string }>;
+  };
 };
 
 let cookie = "";
@@ -55,8 +60,41 @@ async function teardown() {
   const SKUS = `SELECT id FROM "ProductSKU" WHERE "skuCode" LIKE '${TAG}%'`;
   const LOTS = `SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId" IN (${SKUS}) OR "packedFromBatchId" IN (${BATCHES}) OR "roastingBatchId" IN (${BATCHES})`;
 
+  // The CRM rows, identified by the tag on what the suite creates and by the employees
+  // that own it. Child-first: each of these is held down by a foreign key from the row
+  // below, and an employee cannot be deleted while a lead still points at them — which is
+  // exactly how a teardown on this codebase has failed before.
+  const CRM_EMPLOYEES = `SELECT id FROM "Employee" WHERE id LIKE '${TAG}_emp_%'`;
+  const CRM_OPPS = `SELECT id FROM "Opportunity" WHERE title LIKE '${TAG}%' OR "ownerId" IN (${CRM_EMPLOYEES})`;
+  const CRM_QUOTES = `SELECT id FROM "Quote" WHERE "opportunityId" IN (${CRM_OPPS})`;
+  const CRM_PLANS = `SELECT id FROM "CommissionPlan" WHERE code LIKE '${TAG}%'`;
+  const CRM_VERSIONS = `SELECT id FROM "CommissionPlanVersion" WHERE "planId" IN (${CRM_PLANS})`;
+
   await withDb(async (db) => {
     const q = (sql: string) => db.query(sql);
+
+    await q(`DELETE FROM "CommissionLedgerEntry" WHERE "employeeId" IN (${CRM_EMPLOYEES})`);
+    await q(`DELETE FROM "CommissionAccrual" WHERE "employeeId" IN (${CRM_EMPLOYEES})`);
+    await q(`DELETE FROM "CollectionEvent" WHERE "externalRef" LIKE '${TAG}%'`);
+    await q(`DELETE FROM "CommissionAssignment" WHERE "employeeId" IN (${CRM_EMPLOYEES}) OR "planVersionId" IN (${CRM_VERSIONS})`);
+    await q(`DELETE FROM "CommissionTier" WHERE "planVersionId" IN (${CRM_VERSIONS})`);
+    await q(`DELETE FROM "CommissionPlanVersion" WHERE id IN (${CRM_VERSIONS})`);
+    await q(`DELETE FROM "CommissionPlan" WHERE id IN (${CRM_PLANS})`);
+    await q(`DELETE FROM "SalesTarget" WHERE "employeeId" IN (${CRM_EMPLOYEES})`);
+    await q(`DELETE FROM "OpportunityOrder" WHERE "opportunityId" IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "QuoteLine" WHERE "quoteId" IN (${CRM_QUOTES})`);
+    // A revision points at the quotation it supersedes, so the link goes first.
+    await q(`UPDATE "Quote" SET "supersedesId" = NULL WHERE id IN (${CRM_QUOTES})`);
+    await q(`DELETE FROM "Quote" WHERE id IN (${CRM_QUOTES})`);
+    await q(`DELETE FROM "SampleShipment" WHERE "opportunityId" IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "Activity" WHERE "ownerId" IN (${CRM_EMPLOYEES}) OR "opportunityId" IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "OpportunityStageEvent" WHERE "opportunityId" IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "OpportunityOwner" WHERE "opportunityId" IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "LeadConversion" WHERE "opportunityId" IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "Opportunity" WHERE id IN (${CRM_OPPS})`);
+    await q(`DELETE FROM "Lead" WHERE "ownerId" IN (${CRM_EMPLOYEES}) OR "companyName" LIKE '${TAG}%'`);
+    await q(`DELETE FROM "PipelineStage" WHERE code LIKE '${TAG}%'`);
+
     await q(`DELETE FROM "StockAllocation" WHERE "orderItemId" IN (${ITEMS}) OR "finishedGoodsLotId" IN (${LOTS})`);
     await q(`DELETE FROM "Delivery" WHERE "orderItemId" IN (${ITEMS})`);
     await q(`DELETE FROM "OrderActivity" WHERE "orderId" IN (${ORDERS})`);
@@ -203,7 +241,69 @@ export default async function globalSetup() {
     if (bom.status !== 200) throw new Error(`UAT setup: bom ${code} failed ${bom.status} ${JSON.stringify(bom.json)}`);
   }
 
-  const catalog: Catalog = { beans, coffees, materials, skus, customers };
+  // ── CRM fixtures ─────────────────────────────────────────────────────────
+  // Pipeline stages, and two commission plans at genuinely different rates so the suite can
+  // show two people paid differently for the same collection because of their PLAN, rather
+  // than because of something the test arranged afterwards.
+  const stages = [
+    { id: `${TAG}_stage_new`, code: `${TAG}_NEW`, nameEn: "New", nameAr: "جديد", position: 10, probability: 10 },
+    { id: `${TAG}_stage_qual`, code: `${TAG}_QUALIFY`, nameEn: "Qualifying", nameAr: "تأهيل", position: 20, probability: 30 },
+    { id: `${TAG}_stage_prop`, code: `${TAG}_PROPOSAL`, nameEn: "Proposal", nameAr: "عرض سعر", position: 30, probability: 60 },
+  ];
+  const plans: Catalog["crm"]["plans"] = {};
+
+  await withDb(async (db) => {
+    for (const s of stages) {
+      await db.query(
+        `INSERT INTO "PipelineStage" (id,code,"nameEn","nameAr",position,probability,"isActive","createdAt","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6,true,now(),now())`,
+        [s.id, s.code, s.nameEn, s.nameAr, s.position, s.probability]
+      );
+    }
+
+    // Two rates: the rep on 1%, the manager on 2%.
+    const planSpec: [string, string, string, string][] = [
+      ["standard", `${TAG}_STD`, "Standard 1%", "1.000000"],
+      ["senior", `${TAG}_SNR`, "Senior 2%", "2.000000"],
+    ];
+    for (const [key, code, name, rate] of planSpec) {
+      const planId = `${TAG}_plan_${key}`;
+      const versionId = `${TAG}_ver_${key}`;
+      await db.query(
+        `INSERT INTO "CommissionPlan" (id,code,name,"isActive","createdAt","updatedAt")
+         VALUES ($1,$2,$3,true,now(),now())`, [planId, code, name]);
+      await db.query(
+        `INSERT INTO "CommissionPlanVersion"
+           (id,"planId",version,basis,"tierMode","baseRatePercent",currency,"effectiveFrom","createdAt")
+         VALUES ($1,$2,1,'NET_COLLECTION','INCREMENTAL',$3,'SAR','2020-01-01',now())`,
+        [versionId, planId, rate]);
+      plans[key] = { planId, versionId, baseRatePercent: rate };
+    }
+
+    // The rep and the manager are on different plans; finance is on none, which is what
+    // makes "finance cannot approve their own commission" a real situation rather than a
+    // contrived one.
+    await db.query(
+      `INSERT INTO "CommissionAssignment" (id,"employeeId","planId","planVersionId","effectiveFrom","createdAt")
+       VALUES ($1,$2,$3,$4,'2020-01-01',now())`,
+      [`${TAG}_asg_rep`, `${TAG}_emp_crmRep`, plans.standard.planId, plans.standard.versionId]);
+    await db.query(
+      `INSERT INTO "CommissionAssignment" (id,"employeeId","planId","planVersionId","effectiveFrom","createdAt")
+       VALUES ($1,$2,$3,$4,'2020-01-01',now())`,
+      [`${TAG}_asg_mgr`, `${TAG}_emp_crmManager`, plans.senior.planId, plans.senior.versionId]);
+  });
+
+  const catalog: Catalog = {
+    beans, coffees, materials, skus, customers,
+    crm: {
+      stages: stages.map((s) => ({ id: s.id, code: s.code, nameEn: s.nameEn, nameAr: s.nameAr })),
+      plans,
+    },
+  };
   writeFileSync(CATALOG_PATH, JSON.stringify(catalog, null, 2));
-  console.log(`\n  UAT fixtures ready — 6 employees, 3 origins, 4 SKUs, 4 materials, 3 customers\n`);
+  console.log(
+    `\n  UAT fixtures ready — ${Object.keys(ROLES).length} employees, 3 origins, 4 SKUs, ` +
+    `4 materials, 3 customers, ${stages.length} pipeline stages, ` +
+    `${Object.keys(plans).length} commission plans\n`
+  );
 }

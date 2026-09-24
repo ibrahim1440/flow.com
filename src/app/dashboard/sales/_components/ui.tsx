@@ -338,12 +338,34 @@ export function TextArea({
 }
 
 /**
+ * Present an exact decimal string as money, without ever going through a float.
+ *
+ * A Prisma Decimal serialises as the shortest string that represents it — 1350 for one
+ * thousand three hundred and fifty, 1552.5 for the total of a quotation. Rendering that
+ * verbatim puts "1552.5 SAR" on a document a customer is invoiced against, and a column of
+ * figures where some have two decimal places and some have none is unreadable.
+ *
+ * The padding and grouping are done as STRING operations. `Number(x).toFixed(2)` would be
+ * one line shorter and would route the amount through binary floating point, which is the
+ * one thing every layer below this has been careful not to do.
+ */
+export function formatMoney(raw: string, places = 2): string {
+  const trimmed = raw.trim();
+  // Anything that is not a plain decimal is handed back untouched rather than mangled.
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
+
+  const negative = trimmed.startsWith("-");
+  const [intPart, fracPart = ""] = trimmed.replace(/^-/, "").split(".");
+  const frac = (fracPart + "0".repeat(places)).slice(0, places);
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${negative ? "-" : ""}${grouped}${places > 0 ? "." + frac : ""}`;
+}
+
+/**
  * Money, in the one format the whole module uses.
  *
  * `tabular-nums` because these sit in columns and proportional digits make a column of
- * figures impossible to scan. Formatted from the string the server sent, never from a
- * float: the API returns Decimal-backed strings precisely so the browser never re-derives
- * an amount, and `Number(x).toFixed(2)` here would undo that in one line.
+ * figures impossible to scan.
  */
 export function Money({ value, currency = "SAR" }: { value: string | number | null | undefined; currency?: string }) {
   if (value === null || value === undefined || value === "") return <span className="text-brown/40">—</span>;
@@ -351,7 +373,7 @@ export function Money({ value, currency = "SAR" }: { value: string | number | nu
   const negative = raw.trim().startsWith("-");
   return (
     <span className={`tabular-nums font-bold ${negative ? "text-red-600" : ""}`}>
-      {raw} <span className="text-[10px] font-semibold text-brown/60">{currency}</span>
+      {formatMoney(raw)} <span className="text-[10px] font-semibold text-brown/60">{currency}</span>
     </span>
   );
 }

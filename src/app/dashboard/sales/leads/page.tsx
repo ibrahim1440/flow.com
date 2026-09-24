@@ -383,6 +383,7 @@ export default function LeadsPage() {
               <label className="block">
                 <span className="text-[11px] font-bold text-brown">{t("leadCompany")} *</span>
                 <input
+                  aria-label={t("leadCompany")}
                   value={form.companyName}
                   onChange={(e) => { setForm({ ...form, companyName: e.target.value }); setDuplicates([]); }}
                   className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
@@ -391,6 +392,7 @@ export default function LeadsPage() {
               <label className="block">
                 <span className="text-[11px] font-bold text-brown">{t("leadContact")} *</span>
                 <input
+                  aria-label={t("leadContact")}
                   value={form.contactName}
                   onChange={(e) => setForm({ ...form, contactName: e.target.value })}
                   className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
@@ -401,6 +403,7 @@ export default function LeadsPage() {
                   <span className="text-[11px] font-bold text-brown">{lang === "ar" ? "الهاتف" : "Phone"}</span>
                   <input
                     dir="ltr"
+                    aria-label={lang === "ar" ? "الهاتف" : "Phone"}
                     value={form.phone}
                     onChange={(e) => { setForm({ ...form, phone: e.target.value }); setDuplicates([]); }}
                     className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
@@ -409,6 +412,7 @@ export default function LeadsPage() {
                 <label className="block">
                   <span className="text-[11px] font-bold text-brown">{t("leadCity")}</span>
                   <input
+                    aria-label={t("leadCity")}
                     value={form.city}
                     onChange={(e) => setForm({ ...form, city: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
@@ -417,6 +421,11 @@ export default function LeadsPage() {
                 <label className="block">
                   <span className="text-[11px] font-bold text-brown">{t("leadSource")}</span>
                   <select
+                    // Named explicitly. Without this the wrapping label hands the control an
+                    // accessible name assembled from every option in the list, which is
+                    // unusable to a screen reader and ambiguous to anything else looking the
+                    // control up by name.
+                    aria-label={t("leadSource")}
                     value={form.source}
                     onChange={(e) => setForm({ ...form, source: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
@@ -430,6 +439,7 @@ export default function LeadsPage() {
                   <span className="text-[11px] font-bold text-brown">{t("leadNextFollowUp")}</span>
                   <input
                     type="date"
+                    aria-label={t("leadNextFollowUp")}
                     value={form.nextFollowUpAt}
                     onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"

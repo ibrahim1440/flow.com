@@ -59,6 +59,24 @@ const NAV_FOR: Record<RoleName, { visible: RegExp[]; hidden: RegExp[] }> = {
   packaging: { visible: [/^Packaging$/], hidden: [/^Orders$/, /^Dispatch$/, /Quality Control/, /Employees/] },
   dispatch: { visible: [/^Dispatch$/, /^Orders$/], hidden: [/^Production$/, /Quality Control/, /^Packaging$/, /Employees/] },
   admin: { visible: [/^Orders$/, /^Production$/, /Quality Control/, /^Packaging$/, /^Dispatch$/, /Employees/], hidden: [] },
+
+  // ── The CRM roles ─────────────────────────────────────────────────────────
+  // The hidden lists carry the point. A rep must not be offered commission
+  // administration or the team review; finance must not be offered the pipeline at all.
+  crmRep: {
+    visible: [/^Leads$/, /^Pipeline$/, /Follow-ups/, /Quotations/, /My commissions/],
+    hidden: [/Commission plans/, /Commission review/, /^Production$/, /Quality Control/, /Employees/],
+  },
+  crmManager: {
+    visible: [/^Leads$/, /^Pipeline$/, /Quotations/, /Sales targets/, /Sales reports/, /Commission plans/],
+    hidden: [/^Production$/, /Quality Control/, /^Dispatch$/, /Employees/],
+  },
+  crmFinance: {
+    visible: [/My commissions/, /Commission review/],
+    // Finance holds no sales module at all, so the entire CRM section is absent — not
+    // merely the parts they cannot act on.
+    hidden: [/^Leads$/, /^Pipeline$/, /Quotations/, /Sales targets/, /Commission plans/, /^Orders$/],
+  },
 };
 
 for (const role of Object.keys(NAV_FOR) as RoleName[]) {

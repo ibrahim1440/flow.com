@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Plus, Send, Check, X, Copy, ShoppingCart, Trash2 } from "lucide-react";
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
-  Button, Field, TextInput, Select, TextArea, Money, Pill, Modal, TableWrap, api,
+  Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api, formatMoney,
 } from "../../_components/ui";
 import { formatDate } from "@/lib/utils";
 
@@ -523,7 +523,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                         />
                       </td>
                       <td className="py-2 text-end tabular-nums font-bold" data-testid={`line-total-${i}`}>
-                        {lineTotal.toFixed(2)}
+                        {formatMoney(lineTotal.toFixed(2))}
                       </td>
                       <td className="py-2 text-center">
                         {editable && (
@@ -624,10 +624,12 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 }
 
 function Total({ label, value }: { label: string; value: string }) {
+  // Negative-signed values ("-125.00" for a discount) keep their sign through the
+  // formatter, which is why the sign is part of the string rather than part of the label.
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="text-xs font-bold text-brown/70">{label}</dt>
-      <dd className="tabular-nums font-bold">{value}</dd>
+      <dd className="tabular-nums font-bold">{formatMoney(value)}</dd>
     </div>
   );
 }
