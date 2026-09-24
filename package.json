@@ -14,6 +14,8 @@
     "db:studio": "prisma studio",
     "e2e": "node scripts/e2e/regression/run-all.mjs",
     "regression": "node scripts/e2e/regression/run-all.mjs",
+    "regression:sales": "node scripts/e2e/regression/run-sales.mjs",
+    "uat:sales": "playwright test --project=sales",
     "e2e:legacy": "node scripts/e2e/shelf-flow.mjs && node scripts/e2e/roast-to-stock.mjs && node scripts/e2e/race.mjs && node scripts/e2e/pages.mjs",
     "e2e:legacy:shelf": "node scripts/e2e/shelf-flow.mjs",
     "e2e:legacy:race": "node scripts/e2e/race.mjs",

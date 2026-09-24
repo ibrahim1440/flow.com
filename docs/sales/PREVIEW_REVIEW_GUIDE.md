@@ -10,20 +10,109 @@ are seeded into the preview database.
 
 ## 1. Why there is no hosted Preview URL
 
-Pushing this branch to the git remote would create a Vercel preview deployment, and **a preview
-deployment inherits project-level environment variables unless Preview-scoped ones exist.**
-This project's production `DATABASE_URL` is stored in Vercel as a write-only Secret; whether it
-is scoped to Preview as well as Production could not be read, because the Vercel connector in
-this session returns no accessible teams and the CLI path is unavailable.
+### A correction to what this document used to say
 
-So a hosted preview could not be proven to be isolated — and an unproven preview of a module
-that writes leads, customers and commission ledger entries is exactly the thing that must not
-be pointed at production by accident. A Preview URL does not demonstrate database isolation.
+It previously said a preview "inherits project-level environment variables". **That is not how
+Vercel works, and the earlier wording overstated the danger while missing the real one.**
+Variables carry an environment scope, and a Production-scoped variable does not reach a Preview
+deployment at all. Branch-specific Preview variables override branch-agnostic Preview ones.
+(https://vercel.com/docs/environment-variables)
 
-**The one step that unblocks it:** set Preview-scoped `DATABASE_URL` and `DIRECT_URL` on the
-Vercel project pointing at the `sales_crm_preview` database, plus `SALES_SANDBOX_COLLECTIONS=true`
-scoped to Preview only. Then this branch can be pushed and the preview will be safe by
-construction. Production variables must not be changed.
+### What this project's configuration actually is
+
+Read from the authenticated Vercel CLI — names and scopes only; no value is readable and none
+was read:
+
+| Variable | Scope | Reaches a preview of this branch? |
+|---|---|---|
+| `DATABASE_URL` | **Production** | **No** — Production-scoped, so it cannot |
+| `JWT_SECRET` | Production | No |
+| `PIN_LOOKUP_SECRET` | Production | No |
+| `DATABASE_URL`, `DIRECT_URL` | Preview, pinned to two named release branches | No |
+| `JWT_SECRET` | **Preview, branch-agnostic** | **Yes** |
+| **`DIRECT_URL`** | **Preview, branch-agnostic** | **Yes — and this is the real hazard** |
+
+So the production database credential was never going to reach a preview. The genuine risk is
+the **branch-agnostic Preview `DIRECT_URL`**, whose value cannot be read and which **Prisma uses
+for migrations**. Left unoverridden, a preview of this branch would carry a migration URL
+pointing somewhere nobody in this session can identify.
+
+There is also no branch-agnostic Preview `DATABASE_URL` and no Preview `PIN_LOOKUP_SECRET`, so a
+preview of this branch has neither.
+
+### Why the branch-scoped overrides could not be set yet
+
+`vercel env add DATABASE_URL preview feature/sales-crm-commissions` was attempted and refused:
+
+> `branch_not_found`: Branch "feature/sales-crm-commissions" not found in the connected Git
+> repository.
+
+Vercel will not create a branch-scoped variable for a branch that does not exist on the remote,
+and the branch has not been pushed. That is a genuine ordering problem, not a missing
+permission: **the branch must be pushed before its variables can be scoped to it, and pushing is
+what triggers the first deployment.**
+
+### What a premature push would actually do
+
+Verified locally rather than assumed. `npm run build` runs `scripts/validate-env.ts` **first**,
+before `prisma generate` and before `next build`. With no `DATABASE_URL` and no
+`PIN_LOOKUP_SECRET` — exactly what a first push would have — it prints:
+
+```
+Refusing to build: this environment is not configured to run (2 problems):
+  - DATABASE_URL is not set.
+  - PIN_LOOKUP_SECRET is not set.
+```
+
+and exits non-zero. The validator never contacts a database, `prisma generate` opens no
+connection, and no migration runs during a build. So the first deployment would **fail closed at
+the environment gate**, before compiling anything and before any server started.
+
+That makes a push safe in practice. It was still not done, because the instruction was explicit:
+do not push until the deployment trigger and the effective isolation have been verified, and
+"effective isolation" cannot be verified without a deployment.
+
+### The sequence that completes it
+
+1. Push `feature/sales-crm-commissions`. The first build fails at the environment gate; nothing
+   is deployed and nothing is reachable.
+2. Set the five **branch-scoped** Preview variables (values from the preview env file; the last
+   is literal):
+   ```
+   vercel env add DATABASE_URL            preview feature/sales-crm-commissions
+   vercel env add DIRECT_URL              preview feature/sales-crm-commissions
+   vercel env add JWT_SECRET              preview feature/sales-crm-commissions
+   vercel env add PIN_LOOKUP_SECRET       preview feature/sales-crm-commissions
+   vercel env add SALES_SANDBOX_COLLECTIONS preview feature/sales-crm-commissions   # true
+   ```
+   `DIRECT_URL` is the one that must not be skipped: it is what overrides the branch-agnostic
+   Preview value, and it is what Prisma would migrate with.
+
+   `JWT_SECRET` and `PIN_LOOKUP_SECRET` must be **the same values the preview database was
+   seeded with**. A different `PIN_LOOKUP_SECRET` leaves a preview nobody can sign in to: the
+   stored selector is a keyed derivation of the PIN, so a new key selects no row at all.
+3. Redeploy the branch and confirm from the build log which database it resolved.
+
+**Production variables must not be touched at any point.** Nothing above changes one.
+
+### The complete set the application reads
+
+So that "three variables" is not mistaken for the whole configuration:
+
+| Variable | Required? | Used by |
+|---|---|---|
+| `DATABASE_URL` | **yes** | runtime pool, and the build's environment gate |
+| `DIRECT_URL` | effectively yes | Prisma CLI for migrations — the non-pooler URL |
+| `JWT_SECRET` | **yes** | session signing at module load; also the rate-limit pepper, minimum 32 characters |
+| `PIN_LOOKUP_SECRET` | **yes** | the build's environment gate, and PIN sign-in |
+| `RATE_LIMIT_SECRET` | no | falls back to `JWT_SECRET` |
+| `SALES_SANDBOX_COLLECTIONS` | no | the sandbox collection gate; absent means off, which is the safe default |
+| `TRANSLATION_API_KEY` | no | the only outbound integration; absent means the endpoint does not call out |
+| `SHADOW_DATABASE_URL` | no | not used by this deployment; the guard checks it anyway |
+
+There are no workers, no queues, no object storage and no authentication callback URLs: sign-in
+is a first-party PIN flow against the application's own database, so there is no OAuth redirect
+to register for a preview domain.
 
 ---
 
@@ -34,6 +123,18 @@ against it with the guarded runner:
 
 ```bash
 SALES_ENV=<preview env file> node withsales.mjs next start -p 3020
+```
+
+Or, to drive the whole thing the way the tests do:
+
+```bash
+# The five API-level suites (refuse any database but sales_crm_preview)
+SALES_ENV=<preview env file> SALES_TEST_BASE_URL=http://127.0.0.1:3020 \
+  node withsales.mjs node scripts/e2e/regression/run-sales.mjs
+
+# The browser suite, in the Chrome already installed on the machine
+SALES_ENV=<preview env file> BASE_URL=http://127.0.0.1:3020 \
+  node withsales.mjs playwright test --project=sales
 ```
 
 The runner refuses to start unless every connection path names both the approved endpoint and
