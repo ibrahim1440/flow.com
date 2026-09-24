@@ -20,6 +20,7 @@ const SUITES = [
   "commission-engine",      // pure arithmetic — no database, no HTTP
   "quotes-domain",          // quotation pricing, lifecycle and CSV — no database, no HTTP
   "quote-discount-authz",   // the discount authorisation cannot be forged — source-level, no HTTP
+  "sales-rtl-audit",       // RTL and responsive statics — no database, no browser
   "sales-commissions-db",   // constraints, concurrency, rollback — real PostgreSQL
   "sales-security",         // what is refused — real HTTP API
   "sales-workflow",         // the ordinary path, end to end — real HTTP API
