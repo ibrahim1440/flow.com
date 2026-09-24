@@ -147,7 +147,22 @@ Then open `http://127.0.0.1:3020`.
 
 ## 3. Roles to review with
 
-Create three accounts in **Employees**, or seed them. The permissions that matter:
+**The quickest route: run the browser suite once.**
+
+```bash
+SALES_ENV=<preview env file> BASE_URL=http://127.0.0.1:3020 \
+  node withsales.mjs playwright test --project=sales
+```
+
+Its fixture setup creates exactly these three accounts in the preview database, along with
+pipeline stages, two commission plans at different rates, a product catalogue and customers
+— then the suite drives the whole module through them, so a green run is also a working
+dataset to review. The accounts and their PINs are defined in
+`tests/e2e/support/roles.ts` as `crmRep`, `crmManager` and `crmFinance`. They are test
+fixtures for a disposable database, which is why they live in the repository and why no PIN
+is repeated in this document.
+
+Or create three accounts by hand in **Employees**. The permissions that matter:
 
 | Role | `sales` | `commissions` |
 |---|---|---|
@@ -157,6 +172,12 @@ Create three accounts in **Employees**, or seed them. The permissions that matte
 
 `sandbox_collections` is deliberately **not** on the rep. A rep who could record a collection
 could manufacture the money they are paid on.
+
+`manage_plans` is deliberately **not** on finance either: somebody who approves a commission
+should not also be able to change the rate they are approving against. And regardless of any
+privilege, the service refuses to let anyone put themselves on a plan, set their own target,
+or approve their own commission — because `manage_plans` can legitimately belong to a sales
+manager who is on a plan themselves.
 
 ---
 
@@ -174,53 +195,130 @@ could manufacture the money they are paid on.
 5. **Press Convert again.** It reports the lead was already converted and creates nothing. This
    is the button people double-click; that is why it is idempotent.
 
+### As the rep, continued — the quotation
+
+6. Open the deal and press **New quotation**. Add a line, pick a product, set a quantity. The
+   totals beneath the lines are a **preview** and say so; press *Save* and the server's
+   figures replace them.
+7. Set a line discount of **25%** and press *Issue*. You are refused: above 10% a quotation
+   needs a manager with discount approval. The screen warns before you press it, not after.
+
 ### As the manager
 
-6. **Commission admin** is not built (see §6). Create a plan and assignment directly in the
-   database, or via the domain service, to give the rep a rate — for example 1%.
-7. Record a sandbox collection through `POST /api/commissions/sandbox-collections` with an
-   `externalRef`, `amountGross: 5750` and `amountTax: 750` against the deal. The qualifying
-   base is **5,000** and the rep accrues **50.00**.
-8. Send the **same `externalRef` again**. It answers as a replay and accrues nothing further.
-9. Record the remaining 5,750. The rep's total becomes **100.00** — the second payment adds 50,
-   it does not re-add 100.
+8. Open the same quotation and press **Issue**. It succeeds, the lines go read-only, and the
+   quotation records **who** approved the discount rather than leaving it implied.
+9. Press **Document**. The quotation renders as a customer document from the snapshot frozen
+   at issue. Rename the product in **Products**, come back and reload — the document has not
+   changed, because it is not reading the live catalogue.
+10. Press **Revise**. The original becomes *superseded*, a new draft carries revision 2 and the
+    lines come with it. Change the discount to 5%, issue, then press **Accepted**.
+11. Press **Create order**. An order appears in **Orders** with the quotation's lines, its
+    quotation number, and kilograms the ORDER service derived from the SKU.
+12. **Press Create order again.** It reports that the order already exists and creates no
+    second one.
+13. Now press **Won** on the deal. It is allowed only because an accepted quotation exists —
+    try it before step 10 and you are refused with that reason.
+14. **Commission plans** → *New plan*. Give it a base rate of 1% and a tier if you like; the
+    form states that a tier adds percentage POINTS to the slice inside its band, with the
+    worked example. Then *Assign someone* → the rep.
+15. Try to assign the plan to **yourself**. Refused, whatever your privileges: nobody sets
+    their own rate.
+16. Record a sandbox collection through `POST /api/commissions/sandbox-collections` with an
+    `externalRef`, `amountGross: 5750` and `amountTax: 750` against the deal. The qualifying
+    base is **5,000** and the rep accrues **50.00**. (There is deliberately no screen for
+    this — see §6.)
+17. Send the **same `externalRef` again**. It answers as a replay and accrues nothing further.
+18. Record another 5,750 under a new ref. The rep's total becomes **100.00** — the second
+    payment adds 50, it does not re-add 100.
+
+### As finance
+
+19. **Commission review** → pick the month. Each person shows what the LEDGER says and what
+    the accrual rows add up to, **and whether the two agree**. A row that does not reconcile
+    is marked, and it is the one thing on that screen worth stopping for.
+20. Expand the rep. Each accrual names its collection event, its own qualifying base, the
+    share applied and the effective rate — so the figure can be explained without re-running
+    anything.
+21. Press **Approve**. The rows become immutable.
+22. Ask the manager to **reverse** one of the collections
+    (`PATCH /api/commissions/sandbox-collections` with the same `externalRef`). Come back: the
+    ledger has dropped by 50 through a **negative entry**, and the approved accrual rows are
+    exactly as they were approved. That is the whole point of an append-only ledger.
+23. **Adjust** the rep by +10 with a reason. Then record a payout — it refuses anything above
+    what is outstanding, and refuses entirely while an accrual is still unapproved.
+24. Try to approve **your own** commission. Refused.
 
 ### As the rep again
 
-10. **My commissions** → pick the month. You should see the accruals with, for each one:
-    collected, of which tax, qualifying base, and the effective rate. Not just a total.
-11. Note the amber banner: these figures come from a sandbox source and **no real payment was
+25. **My commissions** → the same month. You should see the same figure finance saw, with the
+    accruals behind it: collected, of which tax, qualifying base, and the effective rate. Not
+    just a total.
+26. Note the banner: these figures come from a sandbox source and **no real payment was
     received**. That statement is the point of it.
-12. Reload the page. Everything persists — it is in the ledger, not in component state.
+27. Reload. Everything persists — it is in the ledger, not in component state.
 
 ### Checking the boundaries
 
-13. As the rep, call `POST /api/commissions/sandbox-collections`. **403.**
-14. As the rep, take another rep's lead id and call `…/convert`. **404** — not 403, because
-    confirming the row exists would tell you it is somebody else's.
-15. As the rep, post a lead with `ownerId` set to a colleague. It saves, but the owner is
+28. As the rep, call `POST /api/commissions/sandbox-collections`. **403.**
+29. As the rep, take another rep's lead id and open `/dashboard/sales/deals/<id>` or call
+    `…/convert`. **404** — not 403, because confirming the row exists would tell you it is
+    somebody else's.
+30. As the rep, post a lead with `ownerId` set to a colleague. It saves, but the owner is
     **you**. Ownership is never taken from the request body.
+31. As the rep, open **Commission review**. It is not in the sidebar, and the URL answers
+    **403**.
+32. Deactivate the rep in **Employees** while they have a tab open. Their very next request is
+    **401** — not when a token happens to expire.
 
 ---
 
 ## 5. Arabic and responsive
 
-Switch language in the profile. Both screens are authored in Arabic and English; the layout
-inherits the app's existing RTL handling. Phone numbers are forced left-to-right inside
-right-to-left text so they do not render reversed. Check at a phone width too — the lead cards
-and the commission summary reflow to a single column.
+Switch language in the profile, then **sign out and back in** — the language is baked into the
+session at sign-in, so changing it and reloading leaves the old session in place.
+
+Every screen is authored in Arabic and English and lays out from the same markup: `dir` is set
+once on `<html>` and the components use logical properties throughout, so there is no separate
+RTL stylesheet to drift out of step. Phone numbers are forced left-to-right inside
+right-to-left text so they do not render reversed.
+
+Check at a phone width (390px). Nothing should scroll sideways: wide tables scroll inside
+their own box, which is asserted in the browser suite rather than assumed.
+
+Worth trying with the keyboard alone — every field has a real label wired to it, which is what
+makes it announced by a screen reader, clickable, and findable by name.
 
 ---
 
 ## 6. What is not there
 
-Be clear-eyed about this while reviewing:
+Be clear-eyed about this while reviewing.
 
-- **Pipeline, deal detail, activities, quotes, sales targets and commission administration
-  screens are not built.** The Pipeline nav link exists but the page does not.
-- **Quote-to-order integration is modelled in the schema but has no route or screen.** The
-  `OpportunityOrder` bridge, its idempotency key and the first-order flag exist; nothing drives
-  them yet.
-- **Both screens are provisional** — no Figma design exists. See `FIGMA_UX_HANDOFF.md`.
-- **The financial cycle is not integrated.** Every figure traces to the sandbox source. Nothing
-  has been paid and no accounting system is connected.
+- **The financial cycle is not integrated, and this is the important one.** This ERP has no
+  invoice, payment or receivables model — checked against the schema, not assumed. So
+  collection is an **adapter**, and its only implementation is a sandbox behind three
+  server-side gates. **No figure in the commission screens corresponds to money anyone has
+  received.** Every screen that shows one says so.
+
+  That is also why there is no screen for recording a collection: building an operator-facing
+  way to type in payments would be building the thing this module explicitly does not claim to
+  have. The events in this walkthrough are posted to the adapter directly.
+
+- **Every screen is provisional** — no Figma design exists, and each one says so at the top.
+  See `FIGMA_UX_HANDOFF.md`. They are built from the existing ERP components and the
+  documented flow; they are functional, not final.
+
+- **A payout is a record, not a transfer.** There is no payment integration and the screen
+  says so.
+
+- **Recording a sample does not move stock.** The roastery has one inventory path with its own
+  guards; the CRM does not become a second way to decrement a shelf.
+
+- **Nothing sends email, SMS or WhatsApp.** Logging a call records that it happened. A CRM
+  that logs "sent" without sending is worse than one that logs nothing.
+
+- **The quotation document prints through the browser**, not through a PDF renderer. Use the
+  browser's *Print → Save as PDF*.
+
+Everything else in the brief is built. `REQUIREMENTS_MATRIX.md` maps each requirement to the
+screen and the named test that covers it, and marks explicitly what is refused and why.
