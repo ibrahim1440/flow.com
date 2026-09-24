@@ -32,6 +32,9 @@ export const translations = {
   leadConvertBtn:     { en: "Convert to customer",    ar: "تحويل إلى عميل" },
   leadNoFollowUp:     { en: "No follow-up set",       ar: "لا يوجد موعد متابعة" },
   leadOverdue:        { en: "Overdue",                ar: "متأخرة" },
+  leadShown:          { en: "shown",                  ar: "معروضة" },
+  leadNoCommitment:   { en: "with no next step",      ar: "بلا التزام قادم" },
+  leadCountScope:     { en: "Counts cover the rows shown after search and filtering, not every lead.", ar: "العدّادات تشمل الصفوف المعروضة بعد البحث والتصفية فقط، لا كل العملاء المحتملين." },
   leadScopeOwn:       { en: "Showing only your own leads.", ar: "تُعرض العملاء المحتملون المسؤول عنهم أنت فقط." },
   leadsEmpty:         { en: "No leads yet.",          ar: "لا يوجد عملاء محتملون بعد." },
   leadDuplicateTitle: { en: "A lead with this phone already exists", ar: "يوجد عميل محتمل بنفس رقم الهاتف" },
@@ -54,7 +57,10 @@ export const translations = {
   commissionEmpty:    { en: "Nothing accrued in this period.", ar: "لا يوجد استحقاق في هذه الفترة." },
   commissionTargetLbl:{ en: "Monthly target",         ar: "الهدف الشهري" },
   sandboxBanner:      { en: "Sandbox figures — no real payment received", ar: "أرقام تجريبية — لم يُستلم أي مبلغ فعلي" },
-  sandboxBannerBody:  { en: "This ERP has no invoicing or collection subsystem yet, so these commissions are calculated from synthetic collection events recorded for testing. Nothing here has been paid, and no financial system is connected.", ar: "لا يوجد في النظام نظام فواتير أو تحصيل بعد، لذلك تُحسب هذه العمولات من أحداث تحصيل تجريبية مُسجَّلة للاختبار. لم يُصرف أي مبلغ، ولا يوجد أي نظام مالي مرتبط." },
+  // Kept to one sentence on purpose. What the reader needs is that no money moved; how the
+  // sandbox adapter and its gates are built belongs in docs/sales/COMMISSION_RULES.md, not in
+  // a banner they read every time they open the screen.
+  sandboxBannerBody:  { en: "No money has been received or paid against these figures. They are a calculation only.", ar: "لم يُقبض أي مبلغ ولم يُصرف مقابل هذه الأرقام. هي حساب فقط." },
   provisionalUiBanner:{ en: "Provisional interface — pending design review", ar: "واجهة مبدئية — في انتظار مراجعة التصميم" },
   inventory:      { en: "Inventory",       ar: "المخزون" },
   orders:         { en: "Orders",          ar: "الطلبات" },

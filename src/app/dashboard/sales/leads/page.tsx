@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2 } from "lucide-react";
+import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { formatDate } from "@/lib/utils";
+import { LeadStatusBadge, LEAD_STATUS_SPECS } from "../_components/ui";
 import ImportDialog from "./ImportDialog";
 
 /**
@@ -47,13 +48,10 @@ const SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
   OTHER: { en: "Other", ar: "أخرى" },
 };
 
-const STATUS_LABELS: Record<string, { en: string; ar: string; tone: string }> = {
-  NEW: { en: "New", ar: "جديد", tone: "bg-info-bg text-slate" },
-  CONTACTED: { en: "Contacted", ar: "تم التواصل", tone: "bg-cream text-brown" },
-  QUALIFIED: { en: "Qualified", ar: "مؤهل", tone: "bg-emerald-100 text-emerald-800" },
-  UNQUALIFIED: { en: "Unqualified", ar: "غير مؤهل", tone: "bg-red-50 text-red-700" },
-  CONVERTED: { en: "Converted", ar: "تم التحويل", tone: "bg-orange/15 text-orange" },
-};
+// Status labels and colours now come from the shared map in `_components/ui`, so this screen
+// and every other one render a stored value identically. The local copy this replaced painted
+// UNQUALIFIED red, which reads as an error; disqualifying a lead is ordinary work, not a fault.
+const STATUS_LABELS = LEAD_STATUS_SPECS;
 
 export default function LeadsPage() {
   const user = useUser();
@@ -205,6 +203,19 @@ export default function LeadsPage() {
     [rows],
   );
 
+  // A lead nobody owns a next step for is the commonest way a pipeline goes quiet, and it is
+  // NOT counted as overdue: overdue means a commitment was made and missed, and these have no
+  // commitment to miss. Counted separately rather than folded in, so neither number lies.
+  //
+  // The exclusions differ from `overdue` on purpose. Converted and unqualified leads are
+  // terminal — no next step is expected of them — whereas `overdue` deliberately still counts
+  // an unqualified lead with a date that has passed, because that commitment was real. Leaving
+  // `overdue` alone keeps this change presentational.
+  const noCommitment = useMemo(
+    () => rows.filter((r) => !r.nextFollowUpAt && r.status !== "CONVERTED" && r.status !== "UNQUALIFIED").length,
+    [rows],
+  );
+
   const label = (m: Record<string, { en: string; ar: string }>, k: string) =>
     lang === "ar" ? (m[k]?.ar ?? k) : (m[k]?.en ?? k);
 
@@ -229,11 +240,17 @@ export default function LeadsPage() {
         <div>
           <h1 className="text-2xl font-extrabold text-charcoal">{t("leadsTitle")}</h1>
           <p className="text-brown text-sm font-medium">
-            {rows.length}
+            {rows.length} {t("leadShown")}
             {overdue > 0 && (
               <span className="text-red-700 font-bold"> · {overdue} {t("leadOverdue")}</span>
             )}
+            {noCommitment > 0 && (
+              <span className="text-amber-700 font-bold"> · {noCommitment} {t("leadNoCommitment")}</span>
+            )}
           </p>
+          {/* The counts are computed over the loaded rows, which the filter narrows. Saying so
+              stops the number being read as a total across every lead in the system. */}
+          <p className="text-brown/60 text-xs mt-0.5">{t("leadCountScope")}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {canExport && (
@@ -334,7 +351,8 @@ export default function LeadsPage() {
         <div className="space-y-3">
           {rows.map((lead) => {
             const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
-            const st = STATUS_LABELS[lead.status];
+            // A lead with no next step at all — distinct from overdue, and not counted as one.
+            const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
             return (
               <div
                 key={lead.id}
@@ -347,9 +365,15 @@ export default function LeadsPage() {
                       <p className="font-bold text-charcoal">
                         {lang === "ar" && lead.companyNameAr ? lead.companyNameAr : lead.companyName}
                       </p>
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${st?.tone ?? "bg-muted"}`}>
-                        {label(STATUS_LABELS, lead.status)}
-                      </span>
+                      <LeadStatusBadge status={lead.status} testId={`lead-status-${lead.id}`} />
+                      {hasNoCommitment && (
+                        <span
+                          data-testid={`lead-no-commitment-${lead.id}`}
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-100 text-amber-800"
+                        >
+                          <CircleDashed size={12} aria-hidden /> {t("leadNoCommitment")}
+                        </span>
+                      )}
                       {isOverdue && (
                         <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800">
                           {t("leadOverdue")}
