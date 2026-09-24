@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { AlertTriangle, KanbanSquare, Trophy, XCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
@@ -179,7 +180,13 @@ export default function PipelinePage() {
                         data-testid={`deal-${deal.id}`}
                         className="bg-white rounded-xl border border-border p-3 space-y-2"
                       >
-                        <p className="font-bold text-sm text-charcoal leading-snug">{deal.title}</p>
+<Link
+                          href={`/dashboard/sales/deals/${deal.id}`}
+                          data-testid={`open-deal-${deal.id}`}
+                          className="block font-bold text-sm text-charcoal leading-snug hover:text-orange focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50 rounded"
+                        >
+                          {deal.title}
+                        </Link>
                         {deal.customer && (
                           <p className="text-xs text-brown">
                             {rtl && deal.customer.nameAr ? deal.customer.nameAr : deal.customer.name}
@@ -265,7 +272,13 @@ export default function PipelinePage() {
                 <div className="space-y-2">
                   {list.slice(0, 30).map((deal) => (
                     <div key={deal.id} data-testid={`deal-${deal.id}`} className="bg-white rounded-xl border border-border p-3 space-y-1.5 opacity-90">
-                      <p className="font-bold text-sm text-charcoal leading-snug">{deal.title}</p>
+                      <Link
+                        href={`/dashboard/sales/deals/${deal.id}`}
+                        data-testid={`open-deal-${deal.id}`}
+                        className="block font-bold text-sm text-charcoal leading-snug hover:text-orange focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50 rounded"
+                      >
+                        {deal.title}
+                      </Link>
                       <p className="text-xs font-bold tabular-nums">{money(deal.amount, deal.currency)}</p>
                       {deal.lostReason && (
                         <p className="text-[11px] text-red-700">{rtl ? "السبب" : "Reason"}: {deal.lostReason}</p>

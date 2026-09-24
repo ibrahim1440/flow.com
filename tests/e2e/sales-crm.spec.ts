@@ -292,6 +292,28 @@ test.describe("2 — Leads: creation, duplicates, conversion", () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 test.describe("3 — The deal: stages, loss reasons, reopening", () => {
+  test("the board shows the deal in its stage, and opens it", async ({ page }) => {
+    await loginAs(page, "crmRep");
+    await page.goto("/dashboard/sales/pipeline");
+
+    const stage = await one<{ code: string }>(
+      `SELECT s.code FROM "Opportunity" o JOIN "PipelineStage" s ON s.id = o."stageId" WHERE o.id = $1`,
+      [state.dealId!],
+    );
+    const column = page.getByTestId(`stage-${stage.code}`);
+    await expect(column, "the deal's stage is a column on the board").toBeVisible({ timeout: 30_000 });
+    await expect(
+      column.getByTestId(`deal-${state.dealId}`),
+      "and the card sits in that column, not another",
+    ).toBeVisible();
+
+    // The board listed deals and offered no way to open one until this link existed: the
+    // deal page was built later and nothing connected the two.
+    await page.getByTestId(`open-deal-${state.dealId}`).click();
+    await page.waitForURL(new RegExp(`/dashboard/sales/deals/${state.dealId}$`), { timeout: 60_000 });
+    await expect(page.getByRole("heading", { name: new RegExp(COMPANY) })).toBeVisible({ timeout: 30_000 });
+  });
+
   test("the deal page opens and shows what the rep needs next", async ({ page }) => {
     await loginAs(page, "crmRep");
     await page.goto(`/dashboard/sales/deals/${state.dealId}`);
