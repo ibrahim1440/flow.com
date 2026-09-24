@@ -263,10 +263,23 @@ in §6) but because `next build` can open a connection while prerendering:
 | `commission-engine.mjs` | **48 passed, 0 failed** |
 | `quotes-domain.mjs` | **113 passed, 0 failed** |
 | `quote-discount-authz.mjs` | **17 passed, 0 failed** |
+| `follow-up-workflow.mjs` | **46 passed, 0 failed** |
 | `sales-rtl-audit.mjs` | **7 passed, 0 failed** |
-| lint delta across Sales | **one error fewer, none added** |
+| lint across Sales + commissions | **0 errors** (was 10) |
 
-**185 offline assertions.** None of it touches a database.
+**231 offline assertions.** None of it touches a database.
+
+### Mocked browser UI verification — 31 checks, 0 failed
+
+`npm run harness:ui`. Mounts the **real** Sales components in Chrome with a fixture-backed
+`fetch` and real compiled Tailwind, at 1440 / 1024 / 390. Covers the pipeline board-versus-
+accordion switch, accordion keyboard toggling, a 76-character Arabic company name wrapping
+rather than widening the page, no horizontal page overflow at any width, lead detail, the three
+follow-up failure paths, commission expansion by Enter, quotation discount above and below the
+threshold, and empty / error / not-found states.
+
+**This is layout and component-behaviour evidence only.** A stubbed `fetch` cannot refuse a
+request, so none of it says anything about authorisation, and nothing it does persists.
 
 **A local integration environment is not available.** Checked four ways: no `psql`, `pg_ctl`,
 `initdb` or `postgres` on PATH; no Docker; nothing listening on 5432–5439; no registered
@@ -274,17 +287,45 @@ Postgres service. Standing one up means installing new software, which is outsid
 permissions — so local integration evidence is genuinely blocked rather than deferred by
 preference.
 
-Checks that genuinely need a database or a refreshed Preview, all still outstanding:
+### What `npm run regression:sales` actually is — inspected, not assumed
 
-- `sales-commissions-db`, `sales-security`, `sales-workflow` — the three DB/HTTP suites
-- `next build` — it does **not** migrate, but it can open a connection while prerendering
-- the 66 hosted smoke assertions, against a new deployment id
-- that the lead detail screen's two-write scheduling really persists both the TASK activity and
-  `nextFollowUpAt`. The ordering and the failure handling are verifiable by reading; the
-  persistence is not
-- that the deployed transition route reaches `issueQuote` under a real session. The authz suite
-  proves the route's *shape* — that no body key can carry approval — not its runtime wiring
-- how any screen reads at 1024 and 390 with long names and dense rows
+It runs seven suites in order. **Five are offline** (`commission-engine`, `quotes-domain`,
+`quote-discount-authz`, `follow-up-workflow`, `sales-rtl-audit`) and are already green above.
+**Three are not:**
+
+| Suite | Needs | Writes? |
+|---|---|---|
+| `sales-commissions-db` | `DATABASE_URL` | **Yes — freely.** Raw `pg`, and its own guard says so |
+| `sales-security` | `DATABASE_URL`, `SALES_TEST_BASE_URL`, `PIN_LOOKUP_SECRET` | Yes — 34 mutating calls |
+| `sales-workflow` | same three | Yes — 131 mutating calls |
+
+All three **hard-refuse any database not named `sales_preview`** (`exit 3`), because that one
+is reached by `sales_preview_app`, a role that owns nothing and holds no DDL. That guard is
+protection against pointing them at the wrong place; it is not permission to run them while a
+review is in progress. **They mutate the shared preview database and will wake the shared
+compute.** That is why they are not run here and must be coordinated.
+
+**`regression:sales` is not hosted smoke.** Hosted smoke is a different script,
+`scripts/sales-preview/smoke-hosted.mjs`, driven by `SMOKE_URL` and `SMOKE_PIN_*`, and it pins
+the deployment id it tested. The regression suites point at whatever `SALES_TEST_BASE_URL`
+says, which may be localhost. Conflating the two is how a run gets cited against a deployment
+it never touched.
+
+### Database-backed tests still needed, specifically
+
+- **Follow-up persistence.** That scheduling really writes a `TASK` activity against the right
+  lead *and* `nextFollowUpAt`. The sequencing, the half-write handling and the no-duplicate
+  retry are proven offline with stand-in writers; that either write lands is not.
+- **Real-session discount authorisation.** That a user **without** `quote_approve_discount`
+  is refused at `POST /api/sales/quotes/[id]/transition {to:"ISSUED"}` on a quote above the
+  threshold, and that one **with** it succeeds and stamps `discountApprovedById`. The offline
+  suite proves no request body can carry the flag; it cannot prove the deployed route reaches
+  `issueQuote` under a real session.
+- **Editing an approved quotation.** That `PUT` on a non-DRAFT quote is refused and that
+  `revise` is refused for `ACCEPTED`, end to end rather than by reading `isRevisable`.
+- **Lead scoping.** That another rep's lead 404s at `/dashboard/sales/leads/[id]`.
+- `next build` — it does **not** migrate, but it can open a connection while prerendering.
+- The 66 hosted smoke assertions, against the new deployment id.
 
 **Figma prototype walks are prototype evidence.** The 22-step journey walk asserts that clicking
 a named layer lands on the expected frame. It is not application behaviour and is not security
