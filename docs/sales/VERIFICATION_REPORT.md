@@ -9,7 +9,7 @@ Branch `feature/sales-crm-commissions` · base `4640cbe`.
 | §1 operational regression, 2297 assertions | `d1a7b4b` |
 | §2 sales suites, 439 assertions | `dc5c27c` — the commit that made every order-number writer share one locking scheme |
 | §3 browser suite, 52 tests | `dc5c27c` |
-| §8 role isolation, 36 assertions | re-run against the live `sales_preview` after every change below |
+| §8 role isolation, 36 assertions (33 without an owner credential — see `DATABASE_ISOLATION.md` §5) | re-run against the live `sales_preview` after every change below |
 | §8 hosted smoke, 66 assertions | the deployment of `84fd9d6` |
 
 `84fd9d6` adds `vercel.json` and changes no application code, so §2 and §3 cover the
@@ -184,7 +184,7 @@ than deleting it — are covered by `flow I2` and `flow I3`.
 |---|---|---|
 | **Hosted Preview deployment and smoke test** | **DONE** | §8. The sequencing deadlock was removed with `vercel.json`'s `git.deploymentEnabled` rather than by pushing and letting a build fail. |
 | **Figma design and prototype** | **BLOCKED** | The MCP server is installed but unauthenticated; only `authenticate` and `complete_authentication` are exposed. OAuth consent is the account holder's to give and was not bypassed. Whether that server can write canvas content at all is **still untested** — the tools do not appear until authentication succeeds, so claiming it can would be a guess. `FIGMA_UX_HANDOFF.md` holds the handoff material. |
-| **Database privilege isolation for the preview** | **DONE** | `DATABASE_ISOLATION.md`. Two SQL-created roles with no memberships, on a new database; 36 assertions, 0 failed. One residual is recorded rather than fixed: `PUBLIC` keeps `CONNECT` on `neondb`, because revoking it would change infrastructure shared with the operational regression, which was explicitly out of scope. The runtime role can therefore open a connection there and read nothing — proven with a synthetic probe table. |
+| **Database privilege isolation for the preview** | **DONE** | `DATABASE_ISOLATION.md`. Two SQL-created roles with no memberships, on a new database; 36 assertions, 0 failed (33 when run without an owner credential, which skips the probe and says so). One residual is recorded rather than fixed: `PUBLIC` keeps `CONNECT` on `neondb`, because revoking it would change infrastructure shared with the operational regression, which was explicitly out of scope. The runtime role can therefore open a connection there and read nothing — proven with a synthetic probe table. |
 | **Load, performance and soak testing** | **NOT ATTEMPTED** | No claim is made about behaviour under concurrent load beyond the specific races §2 asserts. |
 | **Running two suite sets at once** | **AN EXECUTION CONSTRAINT, NOT A GAP** | `sales_preview` and the regression database `neondb` share one Neon compute. Suites must be run one set at a time; §1a is what happens otherwise. This applies to the hosted Preview too, which reaches the same compute from Vercel. |
 | **Accessibility audit beyond what is tested** | **PARTIAL** | Labels, keyboard operation, focus states, `aria-*` on dialogs and progress bars are implemented and partly tested. No screen-reader pass and no contrast audit was run. |

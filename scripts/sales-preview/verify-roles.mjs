@@ -37,7 +37,9 @@ const section = (t) => console.log(`\n${"=".repeat(76)}\n  ${t}\n${"=".repeat(76
 
 function readEnv(file) {
   const out = {};
-  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch { return out; }
+  for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
     if (!t || t.startsWith("#")) continue;
     const i = t.indexOf("=");
@@ -48,8 +50,20 @@ function readEnv(file) {
 }
 
 const appUrl = readEnv(`${S}/.env.preview-app`).DIRECT_URL;
-const migUrl = readEnv(`${S}/.env.preview-migrate`).DIRECT_URL;
-const ownerUrl = readEnv(`${S}/.env.sales-preview`).DIRECT_URL;
+
+// OPTIONAL, and deliberately so. Creating the synthetic probe table in neondb needs a
+// credential with rights there, which most people running this will not have and should not
+// be made to obtain. Without it the privilege sweep still runs in full — it is the positive
+// control that is skipped, and the run says so rather than quietly proving less.
+const ownerUrl = readEnv(`${S}/.env.sales-preview`).DIRECT_URL ?? null;
+
+// Sections A, B and D read the catalogue and drive the runtime role; none of that needs an
+// owner. The migration identity is enough, and is the one a reviewer will actually have.
+const adminUrl = ownerUrl ?? readEnv(`${S}/.env.preview-migrate`).DIRECT_URL;
+if (!adminUrl) {
+  console.error("REFUSE: need .env.preview-migrate (or .env.sales-preview) in $SCRATCH");
+  process.exit(3);
+}
 
 const withDb = (url, db) => { const u = new URL(url); u.pathname = "/" + db; return u.toString(); };
 
@@ -67,7 +81,7 @@ async function refused(c, sql) {
 async function main() {
   // ═══════════════════════════════════════════════════════════════════════
   section("A — ROLE ATTRIBUTES, READ BACK FROM THE CATALOGUE");
-  const owner = await connect(ownerUrl);
+  const owner = await connect(adminUrl);
   const roles = await q(owner, `
     SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls,
            rolcanlogin, rolinherit
@@ -149,12 +163,21 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════════
   section("C — WHAT IT MAY DO IN THE DATABASES THAT HOLD OTHER DATA");
 
-  // A synthetic probe, created by the owner, so the proof never involves a real row.
-  const otherOwner = await connect(withDb(ownerUrl, OTHER_DB));
-  await otherOwner.query('DROP TABLE IF EXISTS public."__isolation_probe"');
-  await otherOwner.query('CREATE TABLE public."__isolation_probe"(id int primary key, secret text)');
-  await otherOwner.query(`INSERT INTO public."__isolation_probe" VALUES (1, 'synthetic-canary')`);
-  console.log(`        (created a synthetic probe table in ${OTHER_DB}; no real row is touched)`);
+  // A synthetic probe, so the proof never involves a real row. Creating it needs rights in
+  // the other database, which only an owner credential has — and that credential is not
+  // required to run this script. Without it the sweep below still runs; what is lost is the
+  // positive control, and the run says so rather than quietly proving less.
+  let otherOwner = null;
+  if (ownerUrl) {
+    otherOwner = await connect(withDb(ownerUrl, OTHER_DB));
+    await otherOwner.query('DROP TABLE IF EXISTS public."__isolation_probe"');
+    await otherOwner.query('CREATE TABLE public."__isolation_probe"(id int primary key, secret text)');
+    await otherOwner.query(`INSERT INTO public."__isolation_probe" VALUES (1, 'synthetic-canary')`);
+    console.log(`        (created a synthetic probe table in ${OTHER_DB}; no real row is touched)`);
+  } else {
+    console.log(`        (SKIPPED the synthetic probe in ${OTHER_DB}: no owner credential configured.`);
+    console.log("         The privilege sweep below still runs; the positive control does not.)");
+  }
 
   let appOther = null;
   let connectCode = null;
@@ -169,12 +192,14 @@ async function main() {
     // is out of scope — it is shared and unrelated. Connecting is not reading, and what
     // follows is the part that matters.
     console.log(`        (the app CAN connect to ${OTHER_DB}: PUBLIC holds CONNECT there, deliberately left alone)`);
-    check("reading the synthetic probe row is refused",
-      (await refused(appOther, 'SELECT * FROM public."__isolation_probe"')) === "42501", "");
-    check("writing to the synthetic probe row is refused",
-      (await refused(appOther, `INSERT INTO public."__isolation_probe" VALUES (2,'x')`)) === "42501", "");
-    check("deleting from it is refused",
-      (await refused(appOther, 'DELETE FROM public."__isolation_probe"')) === "42501", "");
+    if (otherOwner) {
+      check("reading the synthetic probe row is refused",
+        (await refused(appOther, 'SELECT * FROM public."__isolation_probe"')) === "42501", "");
+      check("writing to the synthetic probe row is refused",
+        (await refused(appOther, `INSERT INTO public."__isolation_probe" VALUES (2,'x')`)) === "42501", "");
+      check("deleting from it is refused",
+        (await refused(appOther, 'DELETE FROM public."__isolation_probe"')) === "42501", "");
+    }
     check("creating a table there is refused",
       (await refused(appOther, 'CREATE TABLE public."__nope"(x int)')) === "42501", "");
 
@@ -195,9 +220,11 @@ async function main() {
     check(`connecting to ${OTHER_DB} is refused outright`, connectCode === "42501" || connectCode === "3D000", String(connectCode));
   }
 
-  await otherOwner.query('DROP TABLE IF EXISTS public."__isolation_probe"');
-  await otherOwner.end();
-  console.log("        (probe table dropped)");
+  if (otherOwner) {
+    await otherOwner.query('DROP TABLE IF EXISTS public."__isolation_probe"');
+    await otherOwner.end();
+    console.log("        (probe table dropped)");
+  }
 
   // The earlier preview database, same question.
   try {

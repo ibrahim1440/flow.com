@@ -172,6 +172,11 @@ of §5, and is proven rather than argued.
 Catalogue inspection says what *should* happen. These assertions make the database
 demonstrate it. Run with `verify-roles.mjs`.
 
+**36 with an owner credential configured, 33 without.** Creating the probe table in `neondb`
+needs rights there, which most people running this will not have and should not have to
+obtain. Absent one, the three probe assertions are skipped and the run says so on screen; the
+privilege sweep and everything else still runs. Both figures are 0 failed.
+
 **Can it reach the data on the other side of the branch?**
 
 - A **synthetic probe table** was created in `neondb` — `public."__isolation_probe"`, holding

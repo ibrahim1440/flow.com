@@ -18,7 +18,11 @@ const S = process.env.SCRATCH;
 const BASE = process.env.SMOKE_URL;
 if (!S || !BASE) { console.error("REFUSE: SCRATCH and SMOKE_URL are required"); process.exit(3); }
 
-const BYPASS = readFileSync(`${S}/.bypass-secret`, "utf8").trim();
+// Optional. A bypass secret is only needed when the deployment sits behind Vercel SSO AND
+// there is no browser session to carry. Absent — which is the correct resting state, since it
+// should be revoked as soon as a run finishes — the requests simply go without the header.
+let BYPASS = "";
+try { BYPASS = readFileSync(`${S}/.bypass-secret`, "utf8").trim(); } catch { /* none configured */ }
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const CATALOG = JSON.parse(readFileSync(`${ROOT}/tests/e2e/support/catalog.json`, "utf8"));
 const SKU = CATALOG.skus.ken1kg.id;
@@ -46,7 +50,7 @@ const PIN = {
 //      depend on remembering and this one does not.
 const redact = (s) =>
   String(s)
-    .replace(new RegExp(BYPASS, "g"), "<bypass-secret>")
+    .replace(BYPASS ? new RegExp(BYPASS, "g") : /(?!)/g, "<bypass-secret>")
     .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "<jwt>")
     .replace(/(_vercel_jwt|auth-token|session)=[^;\s"']+/gi, "$1=<redacted>")
     .replace(/("(?:secret|token|password|pin|bypass)"\s*:\s*")[^"]*"/gi, '$1<redacted>"');
@@ -68,7 +72,7 @@ async function api(path, opts = {}) {
     method: opts.method ?? "GET",
     headers: {
       "Content-Type": "application/json",
-      "x-vercel-protection-bypass": BYPASS,
+      ...(BYPASS ? { "x-vercel-protection-bypass": BYPASS } : {}),
       ...(jar ? { Cookie: jar } : {}),
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -121,11 +125,19 @@ async function main() {
   {
     const bare = await fetch(BASE + "/login", { redirect: "manual" });
     const loc = bare.headers.get("location") ?? "";
-    check("without the bypass header Vercel SSO intercepts the URL",
-      bare.status === 302 && loc.includes("sso-api"), `${bare.status} ${loc.slice(0, 50)}`);
+    const protectedBySso = bare.status === 302 && loc.includes("sso-api");
+    check("the URL is protected by Vercel SSO", protectedBySso, `status ${bare.status}`);
+
     const ok = await api("/login");
-    check("with it the application itself answers", ok.status === 200, String(ok.status));
-    check("and it is the sign-in screen", /PIN|login/i.test(ok.text), ok.text.slice(0, 120));
+    if (!BYPASS && protectedBySso) {
+      console.log("\n  No bypass secret configured and the URL is SSO-protected, so nothing");
+      console.log("  below can reach the application. Create a Protection Bypass for");
+      console.log("  Automation, put it in $SCRATCH/.bypass-secret, and revoke it afterwards.");
+      console.log("  scripts/sales-preview/README.md has the handling rules.");
+      process.exit(2);
+    }
+    check("the application itself answers", ok.status === 200, `status ${ok.status}`);
+    check("and it is the sign-in screen", /PIN|login/i.test(ok.text), `status ${ok.status}`);
   }
 
   section("2 - LOGIN AND SESSION");
