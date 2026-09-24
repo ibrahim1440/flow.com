@@ -1,6 +1,6 @@
 # Verification Report — Sales CRM & Commissions
 
-Branch `feature/sales-crm-commissions` · base `4640cbe` · this report covers up to `4fcca9e`.
+Branch `feature/sales-crm-commissions` · base `4640cbe` · this report covers up to `a7b8ff6`.
 
 Honest status per item. **PASS** means it ran and passed. **BLOCKED** means an external
 dependency prevented it. **NOT DONE** means it was not attempted. Nothing untested is
@@ -19,12 +19,13 @@ described as working.
 | Security negative tests — real HTTP API | **PASS — 34 / 0** | `sales-security.mjs`, against a running app |
 | Migration on an **empty** database | **PASS** — 20 baseline + migration 21, 0 pending, 0 unfinished | `sales_crm_preview`, created empty |
 | Migration on a **populated prior schema** | **PASS** — applied to the regression database carrying the existing 20-migration schema and synthetic fixtures | additive; existing suites then run against it |
-| Existing full regression (26 suites) | see §5 | run against this branch's build |
+| Existing full regression (26 suites) | **PASS — 2297 / 0** | run against this branch's build, §5 |
 | Hosted Preview deployment + smoke | **BLOCKED** | §6 |
 | Figma design + prototype | **BLOCKED** | `FIGMA_UX_HANDOFF.md` |
 | Browser E2E (Playwright, three roles) | **NOT DONE** | §7 |
 
 **105 assertions across the three new suites, 0 failed.**
+**2402 assertions in total across everything run for this branch, 0 failed.**
 
 ---
 
@@ -129,13 +130,24 @@ Migration 21 was applied to the regression database (non-production, additive) s
 26-suite regression could run against the new schema, then the full suite was run using this
 branch's build.
 
-**Result: recorded in the final session report.** The suite takes roughly half an hour; at the
-time this document was written it was still running with **0 failures across the suites that
-had reported**. Anyone resuming should re-run it and record the final line here:
+**Result: 26 suites, 2297 harness assertions, 0 failed. ALL SUITES GREEN.** No FATAL, no
+P2028, no connection termination, no untrustworthy or silently-skipped suite.
+
+The assertion count is **identical to the 2297 recorded for the Unified Packaging V2 release
+on this same base commit**. That equality is the useful part: the existing suites neither lost
+coverage nor gained a case that happened to paper over a change. Adding 19 tables, 11 enums and
+two permission modules disturbed nothing measurable in orders, production, packaging, QC,
+dispatch, blending, accounting or the reset paths.
+
+Reproduce with:
 
 ```
 ERP_E2E_BASE_URL=http://127.0.0.1:3010 node withpkg-sales.mjs node scripts/e2e/regression/run-all.mjs
 ```
+
+Note that this required applying migration 21 to the regression database first — additive, and
+non-production. That the existing suites then pass against the new schema is itself the
+strongest single piece of evidence that the migration is genuinely additive.
 
 ---
 
