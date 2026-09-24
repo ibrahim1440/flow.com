@@ -1,7 +1,10 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { AlertTriangle, FlaskConical } from "lucide-react";
+import {
+  AlertTriangle, FlaskConical, Ban, Check, Circle, CircleDashed, Clock, FileText,
+  MessageSquare, PackageCheck, RotateCcw, Save, XCircle, type LucideIcon,
+} from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 
@@ -403,6 +406,108 @@ export function Pill({
       {children}
     </span>
   );
+}
+
+const PILL_TONES: Record<string, string> = {
+  neutral: "bg-cream text-brown",
+  good: "bg-emerald-100 text-emerald-800",
+  warn: "bg-amber-100 text-amber-800",
+  bad: "bg-red-50 text-red-700",
+  info: "bg-info-bg text-slate",
+  accent: "bg-orange/15 text-orange",
+};
+
+type Tone = keyof typeof PILL_TONES;
+export type StatusSpec = { en: string; ar: string; tone: Tone; Icon: LucideIcon };
+type Spec = StatusSpec;
+
+/**
+ * Status badges, one map per stored enum.
+ *
+ * `Pill` takes a free-form tone, which means two screens can render the same stored value in
+ * two different colours and nobody notices until a reader compares them. These maps are the
+ * single place a status decides how it looks, keyed by the value the database actually holds.
+ *
+ * Every badge carries an icon AND a word. Colour alone fails for the colour-blind and washes
+ * out on a warehouse tablet in daylight, and two of these maps deliberately reuse a tone —
+ * Draft and Superseded are both neutral, Unqualified and Lost are both neutral — so the icon
+ * and the label are what actually distinguish them, not the fill.
+ *
+ * Unqualified and Lost are neutral rather than red on purpose: both are ordinary outcomes of
+ * doing the work, not errors, and colouring them like failures misreads the pipeline.
+ */
+function StatusBadge({ spec, testId }: { spec: Spec | undefined; fallback?: string; testId?: string }) {
+  const { lang } = useBadgeLang();
+  if (!spec) return null;
+  const { Icon } = spec;
+  return (
+    <span
+      data-testid={testId}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold whitespace-nowrap ${PILL_TONES[spec.tone]}`}
+    >
+      <Icon size={12} aria-hidden className="flex-shrink-0" />
+      {lang === "ar" ? spec.ar : spec.en}
+    </span>
+  );
+}
+
+function useBadgeLang() {
+  const user = useUser();
+  return { lang: (user?.preferredLanguage ?? "ar") as "ar" | "en" };
+}
+
+/** `LeadStatus` — the 5 stored values. */
+export const LEAD_STATUS_SPECS: Record<string, Spec> = {
+  NEW:         { en: "New",         ar: "جديد",       tone: "info",    Icon: Circle },
+  CONTACTED:   { en: "Contacted",   ar: "تم التواصل", tone: "warn",    Icon: MessageSquare },
+  QUALIFIED:   { en: "Qualified",   ar: "مؤهَّل",      tone: "accent",  Icon: Check },
+  UNQUALIFIED: { en: "Unqualified", ar: "غير مؤهَّل",  tone: "neutral", Icon: XCircle },
+  CONVERTED:   { en: "Converted",   ar: "محوَّل",      tone: "good",    Icon: PackageCheck },
+};
+
+/** `QuoteStatus` — the 6 stored values. Draft and Superseded share a tone; the icon separates them. */
+export const QUOTE_STATUS_SPECS: Record<string, Spec> = {
+  DRAFT:      { en: "Draft",      ar: "مسودة",          tone: "neutral", Icon: Save },
+  ISSUED:     { en: "Issued",     ar: "صادر",           tone: "info",    Icon: FileText },
+  ACCEPTED:   { en: "Accepted",   ar: "مقبول",          tone: "good",    Icon: Check },
+  REJECTED:   { en: "Rejected",   ar: "مرفوض",          tone: "bad",     Icon: Ban },
+  EXPIRED:    { en: "Expired",    ar: "منتهي الصلاحية", tone: "warn",    Icon: Clock },
+  SUPERSEDED: { en: "Superseded", ar: "مستبدَل",         tone: "neutral", Icon: RotateCcw },
+};
+
+/**
+ * `AccrualStatus` — the 5 declared values.
+ *
+ * PREVIEW is declared in the schema and **never written by this build**: accruals are created
+ * as ACCRUED and move to APPROVED then PAID. It is mapped here so a row is never unlabelled if
+ * that changes, not because the state occurs today.
+ */
+export const ACCRUAL_STATUS_SPECS: Record<string, Spec> = {
+  PREVIEW:  { en: "Preview",  ar: "معاينة", tone: "warn",    Icon: CircleDashed },
+  ACCRUED:  { en: "Accrued",  ar: "مستحَق",  tone: "info",    Icon: Clock },
+  APPROVED: { en: "Approved", ar: "معتمَد",  tone: "accent",  Icon: FileText },
+  PAID:     { en: "Paid",     ar: "مدفوع",  tone: "good",    Icon: Check },
+  REVERSED: { en: "Reversed", ar: "معكوس",  tone: "neutral", Icon: RotateCcw },
+};
+
+/** `OpportunityOutcome` — outcome is not a stage, and this badge sits beside one rather than replacing it. */
+export const DEAL_OUTCOME_SPECS: Record<string, Spec> = {
+  OPEN: { en: "Open", ar: "مفتوح", tone: "info",    Icon: Circle },
+  WON:  { en: "Won",  ar: "رابح",  tone: "good",    Icon: Check },
+  LOST: { en: "Lost", ar: "خاسر",  tone: "neutral", Icon: XCircle },
+};
+
+export function LeadStatusBadge({ status, testId }: { status: string; testId?: string }) {
+  return <StatusBadge spec={LEAD_STATUS_SPECS[status]} testId={testId} />;
+}
+export function QuoteStatusBadge({ status, testId }: { status: string; testId?: string }) {
+  return <StatusBadge spec={QUOTE_STATUS_SPECS[status]} testId={testId} />;
+}
+export function AccrualStatusBadge({ status, testId }: { status: string; testId?: string }) {
+  return <StatusBadge spec={ACCRUAL_STATUS_SPECS[status]} testId={testId} />;
+}
+export function DealOutcomeBadge({ outcome, testId }: { outcome: string; testId?: string }) {
+  return <StatusBadge spec={DEAL_OUTCOME_SPECS[outcome]} testId={testId} />;
 }
 
 /**

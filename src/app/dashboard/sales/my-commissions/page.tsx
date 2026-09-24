@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, Percent, FlaskConical } from "lucide-react";
+import { AlertTriangle, Percent, FlaskConical, ChevronDown, ChevronUp } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { formatDate } from "@/lib/utils";
+import { AccrualStatusBadge } from "../_components/ui";
 
 /**
  * My commissions.
@@ -56,14 +57,6 @@ type Payload = {
   notice: string | null;
 };
 
-const STATUS_LABELS: Record<string, { en: string; ar: string; tone: string }> = {
-  PREVIEW: { en: "Preview", ar: "معاينة", tone: "bg-muted text-brown" },
-  ACCRUED: { en: "Accrued", ar: "مستحق", tone: "bg-info-bg text-slate" },
-  APPROVED: { en: "Approved", ar: "معتمد", tone: "bg-emerald-100 text-emerald-800" },
-  PAID: { en: "Paid", ar: "مصروف", tone: "bg-orange/15 text-orange" },
-  REVERSED: { en: "Reversed", ar: "معكوس", tone: "bg-red-50 text-red-700" },
-};
-
 const LEDGER_LABELS: Record<string, { en: string; ar: string }> = {
   ACCRUAL: { en: "Accrual", ar: "استحقاق" },
   ADJUSTMENT: { en: "Adjustment", ar: "تسوية" },
@@ -86,6 +79,9 @@ export default function MyCommissionsPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Which accruals have their arithmetic open. Per-row rather than one global switch: a reader
+  // checking one disputed figure should not have to unfold every other row to reach it.
+  const [openCalc, setOpenCalc] = useState<Record<string, boolean>>({});
 
   useEffect(() => { load(month); }, [month]);
 
@@ -188,7 +184,6 @@ export default function MyCommissionsPage() {
           ) : (
             <div className="space-y-3">
               {data.accruals.map((a) => {
-                const st = STATUS_LABELS[a.status];
                 // Restated on the row so the reader can check the figure rather than trust it.
                 const net = Number(a.collectionEvent.amountGross)
                   - Number(a.collectionEvent.amountTax)
@@ -201,9 +196,7 @@ export default function MyCommissionsPage() {
                           <p className="font-bold text-charcoal">
                             {a.collectionEvent.customer?.name ?? (lang === "ar" ? "بدون عميل" : "No customer")}
                           </p>
-                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${st?.tone ?? "bg-muted"}`}>
-                            {label(STATUS_LABELS, a.status)}
-                          </span>
+                          <AccrualStatusBadge status={a.status} testId={`accrual-status-${a.id}`} />
                           {a.collectionEvent.sourceSystem === "SANDBOX" && (
                             <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
                               {lang === "ar" ? "تجريبي" : "Sandbox"}
@@ -220,8 +213,29 @@ export default function MyCommissionsPage() {
                       </span>
                     </div>
 
-                    {/* The arithmetic, in the reader's own terms. */}
-                    <div className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                    {/* The arithmetic, in the reader's own terms.
+                        Collapsed by default so the page leads with amounts, period and status
+                        rather than four rows of intermediate figures per accrual — but one
+                        click away, never behind a different screen, because a commission
+                        figure nobody can check is not an explanation. */}
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalc((s) => ({ ...s, [a.id]: !s[a.id] }))}
+                      aria-expanded={!!openCalc[a.id]}
+                      aria-controls={`calc-${a.id}`}
+                      data-testid={`toggle-calc-${a.id}`}
+                      className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-orange hover:underline"
+                    >
+                      {openCalc[a.id] ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+                      {openCalc[a.id]
+                        ? (lang === "ar" ? "إخفاء الحساب" : "Hide the calculation")
+                        : (lang === "ar" ? "اعرض الحساب وتحقّق منه" : "Show the calculation")}
+                    </button>
+                    <div
+                      id={`calc-${a.id}`}
+                      hidden={!openCalc[a.id]}
+                      className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2"
+                    >
                       <div>
                         <span className="block text-[11px] text-brown/60">{lang === "ar" ? "المُحصَّل" : "Collected"}</span>
                         <span className="block text-xs font-bold tabular-nums">{money(a.collectionEvent.amountGross)}</span>
@@ -242,7 +256,7 @@ export default function MyCommissionsPage() {
                       </div>
                     </div>
                     {Number(a.sharePercent) < 100 && (
-                      <p className="text-[11px] text-brown/60 mt-2">
+                      <p className="text-[11px] text-brown/60 mt-2" hidden={!openCalc[a.id]}>
                         {lang === "ar" ? "نسبة ملكيتك من هذه الصفقة" : "Your share of this deal"}:{" "}
                         <b className="tabular-nums">{Number(a.sharePercent).toFixed(2)}%</b>
                       </p>
