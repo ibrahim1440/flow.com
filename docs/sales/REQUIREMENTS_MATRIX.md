@@ -30,7 +30,7 @@ Test identifiers:
 | 1.3 | Normalise Arabic names and phone formats for comparison | `normalizeCompany` / `normalizePhone` | — | — | flow A1/A4 | **DONE** |
 | 1.4 | Assign / reassign an owner | — | `PATCH /api/sales/leads/[id]` | Leads | flow A4, sec C1 | **DONE** |
 | 1.5 | Edit a lead; refuse editing a converted one | — | `PATCH /api/sales/leads/[id]` | Leads | flow A4/A6 | **DONE** |
-| 1.6 | Delete a lead raised in error, but never one with history | — | `DELETE /api/sales/leads/[id]` | — *(API only)* | — | **PARTIAL** — the rule is enforced; no screen offers it |
+| 1.6 | Delete a lead raised in error, but never one with history | — | `DELETE /api/sales/leads/[id]` | Leads → delete | ui 8.5/8.6 | **DONE** |
 | 1.7 | Lead status lifecycle (new → contacted → qualified / unqualified) | — | `PATCH /api/sales/leads/[id]` | Leads filter + form | flow A4 | **DONE** |
 | 1.8 | Follow-up date, and a visible overdue state | — | list ordering | Leads, Follow-ups | ui 6.2 | **DONE** |
 | 1.9 | Convert to customer + deal, idempotently | `convertLead` | `POST /api/sales/leads/[id]/convert` | Leads → Convert | flow A5, db B1/B2, ui 2.5 | **DONE** |
@@ -43,8 +43,8 @@ Test identifiers:
 
 | # | Requirement | Service | API | Screen | Tests | Status |
 |---|---|---|---|---|---|---|
-| 2.1 | Configurable pipeline stages, ordered, bilingual | — | `GET/POST/PATCH /api/sales/stages` | — *(API only)* | flow I1 | **PARTIAL** — fully configurable through the API and tested; no settings screen drives it |
-| 2.2 | A stage holding deals cannot be retired | — | `PATCH /api/sales/stages` | — | flow I2 | **DONE** |
+| 2.1 | Configurable pipeline stages, ordered, bilingual | — | `GET/POST/PATCH /api/sales/stages` | Sales settings | flow I1, ui 8.3 | **DONE** |
+| 2.2 | A stage holding deals cannot be retired | — | `PATCH /api/sales/stages` | Sales settings | flow I2, ui 8.4 | **DONE** |
 | 2.3 | Kanban board of open deals | — | `GET /api/sales/opportunities` | Pipeline | ui 3.x | **DONE** |
 | 2.4 | Deal detail: value, probability, dates, customer, owner | — | `GET/PATCH /api/sales/opportunities/[id]` | Deal detail | ui 3.1, flow D5 | **DONE** |
 | 2.5 | Move between stages, with the move recorded | `transitionOpportunity` | `POST .../[id]/transition` | Deal detail stage row | ui 3.2 | **DONE** |
@@ -92,7 +92,7 @@ Test identifiers:
 | 4.11 | An accepted quotation cannot be revised or un-accepted | `isRevisable`, `assertTransition` | same | control hidden | quotes E3/E4, flow C8 | **DONE** |
 | 4.12 | Validity date required to issue; an expired quote cannot be accepted | `issueQuote`, `hasExpired` | same | date field + hint | quotes E5 | **DONE** |
 | 4.13 | Quotation numbering, unique and readable | `nextQuoteNumber` | — | shown everywhere | flow C2 | **DONE** |
-| 4.14 | Printable / PDF quotation document | — | — | — | — | **NOT BUILT** — `issuedSnapshot` holds exactly what a renderer needs; nothing renders it |
+| 4.14 | Printable quotation document, from the frozen snapshot | — | `GET /api/sales/quotes/[id]` | Quote → Document | ui 8.1/8.2 | **DONE** — renders `issuedSnapshot`, so renaming a SKU afterwards does not rewrite what the customer was sent; printed through the browser rather than a PDF library |
 | 4.15 | Quotations in a currency other than SAR | — | — | — | quotes (currency guard) | **REFUSED** — no exchange-rate policy exists to honour |
 
 ---
@@ -164,7 +164,7 @@ Test identifiers:
 | 8.8 | Sales-cycle length, median and mean, with a sample size | reports route | same | Reports | flow G3 | **DONE** |
 | 8.9 | Lead sources breakdown | reports route | same | Reports | flow G3 | **DONE** |
 | 8.10 | Reports scoped to a rep's own work | `seesAllSales` | same | banner | ui 7.4 | **DONE** |
-| 8.11 | Export a report to CSV / Excel | — | — | — | — | **NOT BUILT** — only leads export today |
+| 8.11 | Export a report to CSV | `sales/csv.ts` | `GET /api/sales/reports?format=csv` | Reports → Export CSV | ui 7.5 | **DONE** — one flat table, with the sandbox caveat as a row in the file |
 
 ---
 
@@ -204,19 +204,18 @@ Test identifiers:
 
 ## 11. What is not built, gathered in one place
 
-Nothing below is blocked by anything external. Each is work that was not done.
+**One item, and it is not code.**
 
-1. **A quotation document to print or send.** `issuedSnapshot` already holds exactly what a
-   renderer needs — the lines, names and prices as they were at issue. (4.14)
-2. **A pipeline-stage settings screen.** Stages are fully configurable through the API and
-   the board reads them; there is no screen to reorder or rename them. (2.1, 2.2)
-3. **Report export.** Leads export; the reports do not. (8.11)
-4. **A screen for deleting a lead** raised in error. The rule is enforced server-side. (1.6)
-5. **Figma design and prototype.** (10.8)
+1. **Figma design and prototype.** (10.8) Blocked on OAuth consent that only the account
+   holder can give. Everything else it would describe now exists as a tested reference
+   implementation — see `FIGMA_UX_HANDOFF.md` §1a.
 
-Everything else in this matrix that is implemented now has an assertion of its own. The two
-rules that previously did not — retiring a stage that still holds deals, and ending a
-commission assignment rather than deleting it — are covered by `flow I2` and `flow I3`.
+Everything in this matrix that is implemented has a named assertion of its own. The four
+items that were listed here as NOT BUILT — the printable quotation document, the pipeline
+settings screen, report export, and deleting a lead from the interface — are built and
+tested. The two rules that were enforced but unasserted — retiring a stage that still holds
+deals, and ending a commission assignment rather than deleting it — are covered by
+`flow I2` and `flow I3`.
 
 ## 12. What is refused, and why
 

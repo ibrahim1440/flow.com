@@ -71,7 +71,7 @@ assignment lifecycle. After each step it reads the database rather than believin
 
 Chrome, real screens, real keypad sign-in. `npm run uat:sales`.
 
-**44 tests, 0 failed** (`tests/e2e/sales-crm.spec.ts`), plus **15, 0 failed** in the existing
+**51 tests, 0 failed** (`tests/e2e/sales-crm.spec.ts`), plus **15, 0 failed** in the existing
 `permissions.spec.ts`, extended with the three CRM roles.
 
 | Group | Workflows driven |
@@ -83,7 +83,8 @@ Chrome, real screens, real keypad sign-in. `npm run uat:sales`.
 | Orders | the accepted quotation becomes exactly one order with kilograms derived by the order service; clicking again returns the first order; the order appears on the operational Orders screen; the deal can then be won |
 | Commission | a rep cannot record a collection; a partial collection accrues once and a re-delivery changes nothing; the rep sees their own figure marked as sandbox and cannot open the team review; the second instalment adds the difference and the rows sum to the period; two people on different plans are paid differently for the same money; finance reviews and the ledger reconciles with the rows; finance cannot approve their own; approval makes the rows immutable; a refund after approval corrects the ledger and leaves the approved rows untouched |
 | Arabic, mobile, keyboard | RTL renders with Arabic headings and no horizontal overflow at 390px; the follow-ups screen works at phone width; a form is completed with the keyboard alone, reached by label; Escape closes a dialog without saving; an invalid form cannot be submitted and the server agrees; the CSV importer previews before it writes |
-| Targets and reports | a manager sets a target and the bar reflects real collections; a manager cannot set their own; the reports screen states the denominator of its conversion rate; a rep's reports are scoped to their own work |
+| Targets and reports | a manager sets a target and the bar reflects real collections; a manager cannot set their own; the reports screen states the denominator of its conversion rate; a rep's reports are scoped to their own work; the report exports as a CSV carrying its own sandbox caveat |
+| Document, settings, deletion | an issued quotation renders as a document from its frozen snapshot, and **renaming the SKU afterwards does not change it**; a draft says it has no document rather than showing an empty one; the settings screen adds, renames and reorders a stage without two stages ever sharing a position; a stage holding deals cannot be retired from the screen either; a lead with logged activities cannot be deleted and a converted one offers no control; a lead raised in error is deleted |
 
 **Where the API is used instead of the UI, and why.** Two places, both marked in the file.
 Sandbox collection events, because there is deliberately no screen for them — the collection
@@ -104,11 +105,11 @@ The full matrix is `REQUIREMENTS_MATRIX.md`. What is NOT built, gathered here:
 
 | Gap | Where it stands |
 |---|---|
-| **A printable / PDF quotation document** | `issuedSnapshot` already stores exactly what a renderer needs — lines, names and prices as at issue. Nothing renders it. |
-| **A pipeline-stage settings screen** | Stages are fully configurable through `GET/POST/PATCH /api/sales/stages`, and the board reads them. There is no screen to reorder or rename them. |
-| **Report export** | Leads export to CSV. The reports do not. |
-| **A screen to delete a lead** | The rule (never once it has history) is enforced on `DELETE /api/sales/leads/[id]`; no screen offers it. |
-| **Figma design and prototype** | See §5. |
+| **Figma design and prototype** | The only remaining requirement, and it is not code. See §5. |
+
+The four gaps this section previously listed — a printable quotation document, a pipeline
+settings screen, report export, and deleting a lead from the interface — are built and
+covered by `ui 7.5` and `ui 8.1–8.6`.
 
 Every implemented rule in the matrix now has an assertion of its own. The two that did not —
 retiring a pipeline stage that still holds deals, and ending a commission assignment rather
