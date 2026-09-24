@@ -9,6 +9,9 @@ import { useUser } from "../../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { formatDate } from "@/lib/utils";
 import {
+  runScheduleFollowUp, scheduleMessage, EMPTY_SCHEDULE_STATE, type ScheduleState,
+} from "@/lib/services/sales/follow-up";
+import {
   ProvisionalBanner, PageHeader, Card, SectionTitle, Alert, Button, Field, TextInput,
   Select, TextArea, EmptyState, Spinner, LeadStatusBadge, LEAD_STATUS_SPECS,
 } from "../../_components/ui";
@@ -104,6 +107,8 @@ export default function LeadDetailPage() {
   const [logBody, setLogBody] = useState("");
   const [scheduleAt, setScheduleAt] = useState("");
   const [scheduleSubject, setScheduleSubject] = useState("");
+  /** Survives a failed attempt so a retry does not write the activity twice. */
+  const [scheduleState, setScheduleState] = useState<ScheduleState>(EMPTY_SCHEDULE_STATE);
 
   const label = (m: Record<string, { en: string; ar: string }>, k: string) =>
     ar ? (m[k]?.ar ?? k) : (m[k]?.en ?? k);
@@ -189,44 +194,60 @@ export default function LeadDetailPage() {
   /**
    * Schedules the next follow-up.
    *
-   * Two writes, deliberately in this order: the TASK activity first, because it is the record
-   * of the promise, then the lead column the list counts on. If the activity fails, the column
-   * is left alone — a date with no activity behind it is exactly the state this screen exists
-   * to prevent. If the column fails after the activity succeeded, the history is still right
-   * and the message says the list may lag.
+   * The sequencing, the half-written case and the no-duplicate-on-retry rule all live in
+   * `runScheduleFollowUp`, so they can be exercised without a browser. This function is the
+   * wiring: it supplies the two writes, holds the partial-success marker across attempts, and
+   * turns the outcome into a message. Only a fully written schedule reads as success.
    */
   async function scheduleFollowUp() {
-    if (busy) return;
     if (!scheduleAt) { setError(ar ? "اختر تاريخ المتابعة." : "Pick a follow-up date."); return; }
+    const dueAtIso = new Date(scheduleAt).toISOString();
     const subject = scheduleSubject.trim() || (ar ? "متابعة مجدولة" : "Scheduled follow-up");
+
+    // The in-flight check happens before the busy flag is raised, so a second tap that arrives
+    // before React has re-rendered the disabled button is still refused by the orchestration.
+    if (busy === "schedule") return;
     setBusy("schedule"); setError(""); setSuccess("");
     try {
-      const act = await fetch("/api/sales/activities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "TASK", subject, leadId: params.id, dueAt: new Date(scheduleAt).toISOString() }),
-      });
-      const actData = await act.json().catch(() => ({}));
-      if (!act.ok) {
-        setError(actData.error ?? (ar ? "تعذّر إنشاء مهمة المتابعة، فلم يُغيَّر الموعد." : "Could not create the follow-up task, so the date was not changed."));
-        return;
-      }
-      const patch = await fetch(`/api/sales/leads/${params.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nextFollowUpAt: new Date(scheduleAt).toISOString() }),
-      });
-      if (!patch.ok) {
-        const pd = await patch.json().catch(() => ({}));
-        setError(pd.error ?? (ar
-          ? "سُجِّلت المهمة، لكن تعذّر تحديث موعد المتابعة على السجل — قد لا تظهر في القائمة."
-          : "The task was recorded, but the lead's follow-up date could not be updated — it may not appear in the list."));
-        await load();
-        return;
-      }
-      setScheduleAt(""); setScheduleSubject("");
-      setSuccess(ar ? "جُدولت المتابعة وسُجِّلت في السجل." : "Follow-up scheduled and recorded in the history.");
-      await load();
+      const result = await runScheduleFollowUp(
+      {
+        createActivity: async ({ subject: s, dueAtIso: iso }) => {
+          const r = await fetch("/api/sales/activities", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "TASK", subject: s, leadId: params.id, dueAt: iso }),
+          });
+          if (r.ok) return { ok: true };
+          const d = await r.json().catch(() => ({}));
+          return { ok: false, error: d.error };
+        },
+        setFollowUpDate: async (iso) => {
+          const r = await fetch(`/api/sales/leads/${params.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nextFollowUpAt: iso }),
+          });
+          if (r.ok) return { ok: true };
+          const d = await r.json().catch(() => ({}));
+          return { ok: false, error: d.error };
+        },
+      },
+      scheduleState,
+      { subject, dueAtIso, inFlight: false },
+      );
+
+      if (result.outcome === "already-running") return;
+
+      setScheduleState(result.state);
+      const msg = scheduleMessage(result.outcome, ar, result.error);
+      setError(msg.kind === "success" || msg.kind === "none" ? "" : msg.text);
+      setSuccess(msg.kind === "success" ? msg.text : "");
+
+      if (result.outcome === "scheduled") { setScheduleAt(""); setScheduleSubject(""); }
+      // Refreshed on both a full and a half write: after a partial the activity really is in
+      // the history, and hiding that would make the retry look like the first attempt had
+      // done nothing at all.
+      if (result.outcome !== "activity-failed") await load();
     } finally { setBusy(""); }
   }
 
