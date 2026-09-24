@@ -36,6 +36,22 @@ export type AccrualOutcome = {
   /** The difference actually written. Zero for a replay; negative after a refund. */
   delta: PrismaNS.Decimal;
   effectiveRatePercent: PrismaNS.Decimal;
+
+  /**
+   * This ONE event's own qualifying base after the employee's share — its marginal
+   * contribution to the period, not the period's running total.
+   *
+   * The distinction is the whole point. The accrual row is per collection event, so
+   * storing the cumulative period figure on it made every row in a two-payment month
+   * report the same running total: a month with 50 then 100 collected showed rows of
+   * 50 and 150, which sum to 200 against a real 150. Anyone adding up their own payslip
+   * got a different answer from the ledger, and the ledger was right.
+   *
+   * Zero when the event has been reversed, because a reversed event contributes nothing.
+   */
+  eventBase: PrismaNS.Decimal;
+  /** The share applied to this event, recorded so the row explains itself. */
+  sharePercent: PrismaNS.Decimal;
 };
 
 export type CollectionInput = {
@@ -134,6 +150,12 @@ export async function recomputeEmployeePeriod(
   employeeId: string,
   at: Date,
   actorId: string | null,
+  /**
+   * The event whose own marginal base should be reported back. Optional because a
+   * period-wide recomputation (a report, a re-approval preview) has no single event in
+   * view; the accrual write path always supplies one.
+   */
+  forEventId?: string,
 ): Promise<AccrualOutcome | null> {
   const periodStart = riyadhMonthStart(at);
   const periodEnd = riyadhMonthEnd(at);
@@ -156,6 +178,8 @@ export async function recomputeEmployeePeriod(
   });
 
   let cumulativeBase = ZERO;
+  let eventBase = ZERO;
+  let eventShare = new Decimal(100);
   for (const e of events) {
     if (e.currency !== rules.currency) {
       // Refused rather than converted. There is no exchange-rate policy in this system to
@@ -175,7 +199,12 @@ export async function recomputeEmployeePeriod(
       amountTax: e.amountTax,
       amountNonQualifying: e.amountNonQualifying,
     });
-    cumulativeBase = cumulativeBase.plus(roundMoney(full.times(mine.sharePercent).dividedBy(100)));
+    const shareOfThis = roundMoney(full.times(mine.sharePercent).dividedBy(100));
+    cumulativeBase = cumulativeBase.plus(shareOfThis);
+    if (forEventId && e.id === forEventId) {
+      eventBase = shareOfThis;
+      eventShare = mine.sharePercent;
+    }
   }
   cumulativeBase = roundMoney(cumulativeBase);
 
@@ -196,6 +225,7 @@ export async function recomputeEmployeePeriod(
   return {
     employeeId, planVersionId, periodStart,
     cumulativeBase, targetAmount, alreadyRecorded, delta, effectiveRatePercent,
+    eventBase, sharePercent: eventShare,
   };
 }
 
@@ -205,19 +235,30 @@ export async function recomputeEmployeePeriod(
  * A zero delta writes nothing at all — a replay leaves no trace rather than a row saying
  * "zero". A positive delta is an ACCRUAL; a negative one is a REVERSAL, which is how a
  * refund is recorded without touching an approved entry.
+ *
+ * Two invariants this function is responsible for:
+ *
+ *  1. **The accrual row is marginal, the ledger is cumulative.** Each accrual carries what
+ *     ITS OWN collection event contributed, so the rows of a period sum to the period's
+ *     accrued total. Writing the running total onto every row instead made a month with two
+ *     payments read 50 and 150 — summing to 200 against a real 150 — and the person reading
+ *     their own payslip had no way to tell which figure was wrong.
+ *
+ *  2. **An approved accrual is never rewritten.** After approval the correction lives
+ *     entirely in the append-only ledger and the accrual keeps the figures that were
+ *     approved. Upserting over it would silently restate what somebody had already been
+ *     told they earned, which is the exact failure the append-only ledger exists to prevent.
  */
 export async function postDelta(
   tx: Tx,
   outcome: AccrualOutcome,
   opts: { collectionEventId: string; actorId: string | null; reason?: string },
-): Promise<{ posted: boolean; entryId: string | null }> {
-  if (outcome.delta.isZero()) return { posted: false, entryId: null };
+): Promise<{ posted: boolean; entryId: string | null; accrualFrozen: boolean }> {
+  if (outcome.delta.isZero()) return { posted: false, entryId: null, accrualFrozen: false };
 
   const periodEnd = riyadhMonthEnd(outcome.periodStart);
 
-  // The accrual row carries the explanation: the base, the share and the rate that produced
-  // the figure, so a payslip question is answerable without re-running the engine.
-  await tx.commissionAccrual.upsert({
+  const existing = await tx.commissionAccrual.findUnique({
     where: {
       collectionEventId_employeeId_planVersionId: {
         collectionEventId: opts.collectionEventId,
@@ -225,23 +266,44 @@ export async function postDelta(
         planVersionId: outcome.planVersionId,
       },
     },
-    create: {
-      collectionEventId: opts.collectionEventId,
-      employeeId: outcome.employeeId,
-      planVersionId: outcome.planVersionId,
-      periodStart: outcome.periodStart,
-      periodEnd,
-      qualifyingBase: outcome.cumulativeBase,
-      effectiveRatePercent: outcome.effectiveRatePercent,
-      amount: outcome.targetAmount,
-      status: "ACCRUED",
-    },
-    update: {
-      qualifyingBase: outcome.cumulativeBase,
-      effectiveRatePercent: outcome.effectiveRatePercent,
-      amount: outcome.targetAmount,
-    },
+    select: { id: true, status: true },
   });
+
+  const frozen = existing?.status === "APPROVED" || existing?.status === "PAID";
+
+  if (!existing) {
+    await tx.commissionAccrual.create({
+      data: {
+        collectionEventId: opts.collectionEventId,
+        employeeId: outcome.employeeId,
+        planVersionId: outcome.planVersionId,
+        periodStart: outcome.periodStart,
+        periodEnd,
+        // This event's own contribution, so the rows of a period add up.
+        qualifyingBase: outcome.eventBase,
+        sharePercent: outcome.sharePercent,
+        // The period's effective rate, which is what explains why the marginal amount is
+        // not simply base x base-rate once a tier has been crossed.
+        effectiveRatePercent: outcome.effectiveRatePercent,
+        amount: outcome.delta,
+        status: "ACCRUED",
+      },
+    });
+  } else if (!frozen) {
+    await tx.commissionAccrual.update({
+      where: { id: existing.id },
+      data: {
+        qualifyingBase: outcome.eventBase,
+        sharePercent: outcome.sharePercent,
+        effectiveRatePercent: outcome.effectiveRatePercent,
+        // Accumulates rather than replaces: a reversal of this event decrements its own
+        // contribution back towards zero instead of overwriting it with a period figure.
+        amount: { increment: outcome.delta },
+        // A contribution that has gone back to nothing is a reversal, and says so.
+        status: outcome.eventBase.isZero() ? "REVERSED" : "ACCRUED",
+      },
+    });
+  }
 
   const entry = await tx.commissionLedgerEntry.create({
     data: {
@@ -249,13 +311,17 @@ export async function postDelta(
       employeeId: outcome.employeeId,
       periodStart: outcome.periodStart,
       amount: outcome.delta,
-      reason: opts.reason ?? null,
+      reason:
+        opts.reason ??
+        (frozen
+          ? "Correction against an approved period; the approved accrual is unchanged."
+          : null),
       actorId: opts.actorId,
     },
     select: { id: true },
   });
 
-  return { posted: true, entryId: entry.id };
+  return { posted: true, entryId: entry.id, accrualFrozen: frozen };
 }
 
 /**
@@ -288,7 +354,9 @@ export async function accrueForCollection(
   const outcomes: AccrualOutcome[] = [];
 
   for (const share of shares) {
-    const outcome = await recomputeEmployeePeriod(tx, share.employeeId, event.collectedAt, actorId);
+    const outcome = await recomputeEmployeePeriod(
+      tx, share.employeeId, event.collectedAt, actorId, collectionEventId,
+    );
     if (!outcome) continue;
     await postDelta(tx, outcome, { collectionEventId, actorId });
     outcomes.push(outcome);

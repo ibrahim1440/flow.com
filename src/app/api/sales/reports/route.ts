@@ -1,0 +1,202 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { requireModule } from "@/lib/auth-server";
+import { handleDomainError } from "@/lib/api-error";
+import { seesAllSales } from "@/lib/services/sales/scope";
+import { Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd } from "@/lib/services/commissions/engine";
+
+/**
+ * GET /api/sales/reports — the four numbers a sales meeting actually asks for.
+ *
+ * ── Conversion rate is computed from LeadConversion rows, not from counts ──
+ * The obvious implementation — leads created this month, deals created this month, divide
+ * — measures nothing when the two sets are unrelated, which they always are: a lead from
+ * March converts in May. `LeadConversion` exists precisely so the question "of the leads
+ * that arrived in this window, how many became deals" has a real answer, and that is what
+ * is computed here.
+ *
+ * ── Pipeline duration comes from stage events ──
+ * Not from `updatedAt`, which moves whenever anybody edits a note.
+ *
+ * Every figure is scoped exactly as the lists are: a rep sees their own performance, and
+ * seeing the team's needs the privilege that governs seeing the team's work.
+ */
+export async function GET(request: Request) {
+  const { user, error } = await requireModule("sales");
+  if (error) return error;
+
+  const url = new URL(request.url);
+  const monthParam = url.searchParams.get("month");
+  const at = monthParam ? new Date(`${monthParam}-15T00:00:00Z`) : new Date();
+  if (Number.isNaN(at.getTime())) {
+    return NextResponse.json({ error: "month must look like 2026-09." }, { status: 400 });
+  }
+  const periodStart = riyadhMonthStart(at);
+  const periodEnd = riyadhMonthEnd(at);
+
+  const scopeAll = seesAllSales(user.permissions);
+  const mine = scopeAll ? {} : { ownerId: user.id };
+
+  try {
+    const [
+      leadsCreated,
+      leadsInWindow,
+      stageRows,
+      wonDeals,
+      lostDeals,
+      openDeals,
+      lostReasons,
+      sourceRows,
+      recentEvents,
+    ] = await Promise.all([
+      prisma.lead.count({ where: { ...mine, createdAt: { gte: periodStart, lt: periodEnd } } }),
+
+      // The cohort: leads that ARRIVED in this window, with their conversion if it has
+      // happened — whenever it happened.
+      prisma.lead.findMany({
+        where: { ...mine, createdAt: { gte: periodStart, lt: periodEnd } },
+        select: { id: true, source: true, conversion: { select: { convertedAt: true, customerCreated: true } } },
+      }),
+
+      prisma.opportunity.groupBy({
+        by: ["stageId"],
+        where: { ...mine, outcome: "OPEN" },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+
+      prisma.opportunity.findMany({
+        where: { ...mine, outcome: "WON", closedAt: { gte: periodStart, lt: periodEnd } },
+        select: { id: true, amount: true, createdAt: true, closedAt: true },
+      }),
+      prisma.opportunity.findMany({
+        where: { ...mine, outcome: "LOST", closedAt: { gte: periodStart, lt: periodEnd } },
+        select: { id: true, amount: true, createdAt: true, closedAt: true, lostReason: true },
+      }),
+      prisma.opportunity.aggregate({
+        where: { ...mine, outcome: "OPEN" },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+
+      prisma.opportunity.groupBy({
+        by: ["lostReason"],
+        where: { ...mine, outcome: "LOST", closedAt: { gte: periodStart, lt: periodEnd } },
+        _count: { _all: true },
+      }),
+
+      prisma.lead.groupBy({
+        by: ["source"],
+        where: { ...mine, createdAt: { gte: periodStart, lt: periodEnd } },
+        _count: { _all: true },
+      }),
+
+      prisma.collectionEvent.findMany({
+        where: { status: "RECORDED", collectedAt: { gte: periodStart, lt: periodEnd } },
+        select: { sourceSystem: true },
+        take: 500,
+      }),
+    ]);
+
+    const stages = await prisma.pipelineStage.findMany({
+      orderBy: { position: "asc" },
+      select: { id: true, code: true, nameEn: true, nameAr: true, position: true, isActive: true },
+    });
+    const stageById = new Map(stages.map((s) => [s.id, s]));
+
+    const converted = leadsInWindow.filter((l) => l.conversion !== null);
+    const conversionRate =
+      leadsInWindow.length === 0
+        ? ZERO
+        : new Decimal(converted.length).times(100).dividedBy(leadsInWindow.length).toDecimalPlaces(1);
+
+    // Days from creation to close, for the deals that closed in this window. The median as
+    // well as the mean, because one nine-month deal drags an average nobody recognises.
+    const durations = [...wonDeals, ...lostDeals]
+      .filter((d) => d.closedAt)
+      .map((d) => Math.round((d.closedAt!.getTime() - d.createdAt.getTime()) / 86400_000))
+      .sort((a, b) => a - b);
+    const median =
+      durations.length === 0
+        ? null
+        : durations.length % 2 === 1
+          ? durations[(durations.length - 1) / 2]
+          : Math.round((durations[durations.length / 2 - 1] + durations[durations.length / 2]) / 2);
+    const mean =
+      durations.length === 0
+        ? null
+        : Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+
+    const sumAmount = (rows: { amount: Decimal }[]) =>
+      roundMoney(rows.reduce((acc, r) => acc.plus(r.amount), ZERO));
+
+    const wonValue = sumAmount(wonDeals);
+    const lostValue = sumAmount(lostDeals);
+    const closedCount = wonDeals.length + lostDeals.length;
+    const winRate =
+      closedCount === 0
+        ? ZERO
+        : new Decimal(wonDeals.length).times(100).dividedBy(closedCount).toDecimalPlaces(1);
+
+    const sources = [...new Set(recentEvents.map((e) => e.sourceSystem))];
+
+    return NextResponse.json({
+      periodStart,
+      periodEnd,
+      scope: scopeAll ? "all" : "own",
+
+      leads: {
+        created: leadsCreated,
+        converted: converted.length,
+        // Of the leads that ARRIVED in this window — a cohort rate, not a ratio of
+        // unrelated counts.
+        conversionRatePercent: conversionRate.toString(),
+        newCustomersCreated: converted.filter((l) => l.conversion?.customerCreated).length,
+        bySource: sourceRows
+          .map((r) => ({ source: r.source, count: r._count._all }))
+          .sort((a, b) => b.count - a.count),
+      },
+
+      pipeline: {
+        openCount: openDeals._count._all,
+        openValue: roundMoney(openDeals._sum.amount ?? ZERO).toFixed(2),
+        byStage: stageRows
+          .map((r) => ({
+            stageId: r.stageId,
+            code: stageById.get(r.stageId)?.code ?? "?",
+            nameEn: stageById.get(r.stageId)?.nameEn ?? "Unknown",
+            nameAr: stageById.get(r.stageId)?.nameAr ?? "غير معروف",
+            position: stageById.get(r.stageId)?.position ?? 999,
+            count: r._count._all,
+            value: roundMoney(r._sum.amount ?? ZERO).toFixed(2),
+          }))
+          .sort((a, b) => a.position - b.position),
+      },
+
+      closed: {
+        won: wonDeals.length,
+        wonValue: wonValue.toFixed(2),
+        lost: lostDeals.length,
+        lostValue: lostValue.toFixed(2),
+        winRatePercent: winRate.toString(),
+        lostReasons: lostReasons
+          .map((r) => ({ reason: r.lostReason ?? "(none recorded)", count: r._count._all }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 10),
+      },
+
+      duration: {
+        // Named for what it is. "Average sales cycle" with no sample size beside it is a
+        // number people quote for years.
+        sampleSize: durations.length,
+        medianDays: median,
+        meanDays: mean,
+      },
+
+      collectionSources: sources,
+      sandbox: sources.length > 0 && sources.every((s) => s === "SANDBOX"),
+    });
+  } catch (err) {
+    return handleDomainError(err);
+  }
+}
