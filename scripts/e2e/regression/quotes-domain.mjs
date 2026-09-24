@@ -261,8 +261,13 @@ sub("E4. illegal transitions are refused with an explanation");
 
   const e2 = refusal(() => assertTransition("ACCEPTED", "REJECTED"));
   check("an accepted quotation cannot be un-accepted", e2?._appCode === 409, JSON.stringify(e2));
+  // This used to assert the message mentioned a "revision". It did — and that was the bug:
+  // `isRevisable("ACCEPTED")` is false, so the advice named an action the rules refuse. The
+  // assertion now requires advice the reader can actually follow, and forbids the old wording.
   check("and the message says what to do instead",
-    /revision/i.test(e2?.message ?? ""), e2?.message ?? "");
+    /new quotation/i.test(e2?.message ?? ""), e2?.message ?? "");
+  check("and does not send them to revise an accepted quotation, which is refused",
+    !/revision/i.test(e2?.message ?? ""), e2?.message ?? "");
 
   const e3 = refusal(() => assertTransition("ISSUED", "ISSUED"));
   check("issuing twice is refused as already-done, not as illegal",

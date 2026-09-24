@@ -282,7 +282,16 @@ export function assertTransition(from: QuoteStatus, to: QuoteStatus): void {
       _appCode: 409,
       message:
         `A ${from.toLowerCase()} quotation cannot become ${to.toLowerCase()}.` +
-        (from === "ACCEPTED" || from === "SUPERSEDED" ? " Raise a new revision instead." : ""),
+        // The hint has to name an action the rules actually permit. It previously said
+        // "Raise a new revision instead" for ACCEPTED and SUPERSEDED — and `isRevisable`
+        // allows neither, so both messages sent the reader at a door that is locked.
+        // Whether an accepted quotation *ought* to be revisable is a business question and
+        // is left alone here; only the advice is corrected.
+        (from === "ACCEPTED"
+          ? " An accepted quotation is what the customer agreed to; raise a new quotation on the deal to offer a different price."
+          : from === "SUPERSEDED"
+            ? " This quotation was already replaced by a later revision; work on that one."
+            : ""),
     };
   }
 }
