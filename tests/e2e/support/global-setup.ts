@@ -64,6 +64,20 @@ async function teardown() {
   // that own it. Child-first: each of these is held down by a foreign key from the row
   // below, and an employee cannot be deleted while a lead still points at them — which is
   // exactly how a teardown on this codebase has failed before.
+  // The human reviewer's accounts live under this prefix and are NOT ours to delete. Every
+  // teardown below is scoped to TAG or to a named suite prefix, so none of them matches it —
+  // but "none of them matches it" is a property of a dozen separate LIKE patterns, and a
+  // thirteenth added later would break a reviewer's access silently and at a distance. So it
+  // is counted before and after, and a mismatch fails the run.
+  const REVIEWER_PREFIX = "RVW";
+  const reviewerCount = async () =>
+    Number(
+      (await withDb(async (db) =>
+        db.query(`SELECT COUNT(*)::int AS n FROM "Employee" WHERE id LIKE '${REVIEWER_PREFIX}\\_%'`),
+      )).rows[0].n,
+    );
+  const reviewersBefore = await reviewerCount();
+
   const CRM_EMPLOYEES = `SELECT id FROM "Employee" WHERE id LIKE '${TAG}_emp_%'`;
   const CRM_OPPS = `SELECT id FROM "Opportunity" WHERE title LIKE '${TAG}%' OR "ownerId" IN (${CRM_EMPLOYEES})`;
   const CRM_QUOTES = `SELECT id FROM "Quote" WHERE "opportunityId" IN (${CRM_OPPS})`;
@@ -125,6 +139,20 @@ async function teardown() {
     await q(`DELETE FROM "GreenBean" WHERE id LIKE '${TAG}_bean_%'`);
     await q(`DELETE FROM "Customer" WHERE id LIKE '${TAG}_cust_%'`);
     await q(`DELETE FROM "Employee" WHERE id LIKE '${TAG}_emp_%'`);
+
+    // See REVIEWER_PREFIX above. If a teardown pattern ever widens to catch these, the
+    // symptom without this check is a reviewer who can no longer sign in, with nothing in the
+    // test output to connect the two.
+    const reviewersAfter = Number(
+      (await db.query(`SELECT COUNT(*)::int AS n FROM "Employee" WHERE id LIKE '${REVIEWER_PREFIX}\\_%'`)).rows[0].n,
+    );
+    if (reviewersAfter !== reviewersBefore) {
+      throw new Error(
+        `Fixture teardown removed ${reviewersBefore - reviewersAfter} reviewer account(s) ` +
+        `under ${REVIEWER_PREFIX}_. Those belong to a person reviewing the Preview, not to ` +
+        `this suite. Narrow the teardown pattern that matched them.`,
+      );
+    }
   });
 }
 

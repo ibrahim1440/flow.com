@@ -69,29 +69,36 @@ outside `sales_preview`.
 
 ## Handing the review accounts to a person
 
-The three reviewer accounts are seeded by the browser suite, and its fixture PINs are
-committed in `tests/e2e/support/roles.ts` — fine for a disposable test database, wrong as the
-way a person receives credentials for a review environment. Issue fresh ones instead:
-
 ```sh
 PREVIEW_ENV="$S/.env.preview-app" npx tsx scripts/sales-preview/reviewer-accounts.ts
 ```
 
-It prints three new six-digit PINs **once, to your terminal**, writes nothing to disk, and
-replaces whatever the accounts had — so the committed fixture PINs no longer open the
-database. Run it again to get new ones; the old ones are not recoverable.
+Creates or repairs three `RVW_`-prefixed accounts — rep, manager, finance — with permissions
+taken from the application's own privilege list via `ROLES`, plus the commission plans and
+assignments the commission screens need. Then it issues a fresh six-digit PIN for each and
+prints them **once, to your terminal**. Nothing is written to disk and the values are not
+recoverable; run it again for new ones.
 
-It runs as the restricted runtime role and refuses any other identity: it is an `UPDATE` on
-three rows, not an administrative act.
+It runs as the restricted runtime role and refuses any other identity: this is ordinary DML,
+not an administrative act.
 
-**Ordering, because these two tools disagree by design:** run the browser suite (seeds the
-fixtures) → run the smoke test (uses the fixture PINs) → rotate for the human reviewer. If you
-need to smoke-test after rotating, pass the live values instead:
+### Why these are not the `UAT_` fixtures
 
-```sh
-SMOKE_PIN_REP=… SMOKE_PIN_MANAGER=… SMOKE_PIN_FINANCE=… \
-  SCRATCH="$S" SMOKE_URL="…" node scripts/sales-preview/smoke-hosted.mjs
-```
+An earlier version rotated the browser suite's own accounts. That was wrong twice:
+`globalSetup` **deletes every `UAT_emp_%` row** and reseeds it with the committed fixture PIN,
+so a test run silently revokes the reviewer's access; and `sales-crm.spec.ts` deactivates
+`UAT_emp_crmRep` mid-test and switches its language, so a reviewer signing in during a run
+meets a deactivated account in the wrong language.
+
+Every teardown in this repository is scoped to `UAT_`, to a named suite prefix, or to an
+explicit id list — none matches `RVW_`. That is a property of a dozen separate `LIKE`
+patterns, so `globalSetup` **counts the `RVW_` rows before and after teardown and fails the
+run if any disappeared**. A thirteenth pattern added later cannot quietly take a reviewer's
+access away.
+
+The two tools therefore no longer conflict: the suites own `UAT_`, the reviewer owns `RVW_`,
+and `smoke-hosted.mjs` keeps using the fixture PINs (overridable via `SMOKE_PIN_REP`,
+`SMOKE_PIN_MANAGER`, `SMOKE_PIN_FINANCE`).
 
 ## Smoke-testing a deployed Preview
 
@@ -126,6 +133,11 @@ at, and not only preview deployments. Handle it accordingly:
 - **Revoke it when the run finishes, and verify the revocation two ways:** the raw secret
   should go back to `302`, *and* any cookie already issued from it should also be refused.
   Revoking the secret is not by itself proof the cookie path died with it.
+- **Poll that check; do not take a single response as the answer.** The edge caches the
+  bypass for a few seconds, so an immediate request after a successful revoke can still
+  return `200`. Observed here: `200` immediately, `302` about two seconds later. A one-shot
+  check produces a false "still live" — or, worse, a false "still live" that makes you delete
+  your only copy of the secret while trying to react to it.
 
 `smoke-hosted.mjs` enforces the printing rules itself: every logged detail passes through a
 pattern-based redactor, auth responses are reported by status code only, and the cookie jar is

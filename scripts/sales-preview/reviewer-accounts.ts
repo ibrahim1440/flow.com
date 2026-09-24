@@ -1,20 +1,27 @@
 /**
- * Issue fresh PINs for the three synthetic reviewer accounts, and print them ONCE, locally.
+ * Provision the human reviewer's accounts on the Preview database, and print their PINs ONCE.
  *
- * Why this exists. The browser suite's fixture PINs live in `tests/e2e/support/roles.ts`,
- * which is committed — acceptable for a disposable test database, and not acceptable as the
- * way a person is handed credentials for a review environment. Telling a reviewer "read the
- * PINs out of the repository" hands them a credential that anybody with the repository
- * already has.
+ * ── Why these are their own accounts ────────────────────────────────────────
+ * The first version of this script rotated the PINs of the browser suite's `UAT_emp_*`
+ * fixtures. That was wrong twice over. The suite's `globalSetup` DELETES every `UAT_emp_%` row
+ * and reseeds it with the committed fixture PIN, so a test run silently takes the reviewer's
+ * access away; and `sales-crm.spec.ts` deactivates `UAT_emp_crmRep` mid-test and flips its
+ * language to Arabic, so a reviewer signing in during a run would meet a deactivated account.
  *
- * So this rotates them. It generates three random six-digit PINs, writes the keyed selector
- * and the bcrypt verifier for each — using the SAME `pinLookup` / `pinVerifierInput` the login
- * route uses, under the preview `PIN_LOOKUP_SECRET` — and prints the PINs to this terminal and
- * nowhere else. Nothing is written to a file, and the values are not recoverable afterwards:
- * run it again to get new ones.
+ * So the reviewer gets `RVW_`-prefixed accounts of their own. Every teardown in this
+ * repository is prefix-scoped — `UAT_emp_%`, `<suite>_%`, or an explicit id list — and none of
+ * them matches `RVW_`. `globalSetup` also asserts that, so the guarantee is enforced rather
+ * than remembered.
  *
- * Runs as the RESTRICTED runtime role. It is an UPDATE on three rows of `Employee`, which is
- * inside what that role may do; it needs no elevated credential and is refused if handed one.
+ * ── What it does ───────────────────────────────────────────────────────────
+ * Creates or updates three employees, a 1% and a 2% commission plan, and the assignments that
+ * make the commission screens show something — all idempotent, all `RVW_`-prefixed — then
+ * issues a fresh random six-digit PIN for each and prints it to this terminal and nowhere
+ * else. Nothing is written to a file. The PINs are not recoverable afterwards: run it again to
+ * get new ones.
+ *
+ * Runs as the RESTRICTED runtime role, and refuses any other identity. Everything here is
+ * ordinary DML on rows this role may write.
  *
  * Usage:
  *   PREVIEW_ENV=<the app env file> npx tsx scripts/sales-preview/reviewer-accounts.ts
@@ -24,6 +31,10 @@ import { readFileSync } from "node:fs";
 import { hashSync } from "bcryptjs";
 import { Client } from "pg";
 import { pinLookup, pinVerifierInput } from "../../src/lib/pin-lookup";
+import { ROLES } from "../../tests/e2e/support/roles";
+
+/** The reviewer's own prefix. Deliberately not `UAT_`. */
+const P = "RVW";
 
 const ENVFILE = process.env.PREVIEW_ENV;
 if (!ENVFILE) {
@@ -57,25 +68,39 @@ if (u.username !== ALLOWED_ROLE) {
 const secret = env.PIN_LOOKUP_SECRET;
 if (!secret || secret.length < 32) { console.error("REFUSE: PIN_LOOKUP_SECRET is missing or too short"); process.exit(3); }
 
-/** The three accounts a reviewer needs, and what each one is for. */
+/**
+ * The three accounts, with permissions taken from the application's own privilege list via
+ * `ROLES` — so a reviewer can never be granted a privilege key that does not exist, and can
+ * never silently drift from what the tests assert about these roles.
+ */
 const REVIEWERS = [
-  { id: "UAT_emp_crmRep", role: "Sales rep", can: "own leads and deals, raise quotations, place the order an accepted quotation entitles" },
-  { id: "UAT_emp_crmManager", role: "Sales manager", can: "the whole pipeline, approve discounts, close and reopen deals, record sandbox collections" },
-  { id: "UAT_emp_crmFinance", role: "Finance", can: "approve, adjust and record payouts on commission — and no access to the pipeline at all" },
+  {
+    id: `${P}_emp_rep`, label: "Sales rep", role: ROLES.crmRep,
+    name: "Reviewer — Sales Rep",
+    can: "owns leads and deals, raises quotations, places the order an accepted quotation entitles",
+  },
+  {
+    id: `${P}_emp_manager`, label: "Sales manager", role: ROLES.crmManager,
+    name: "Reviewer — Sales Manager",
+    can: "whole pipeline, approves discounts, closes and reopens deals, records sandbox collections",
+  },
+  {
+    id: `${P}_emp_finance`, label: "Finance", role: ROLES.crmFinance,
+    name: "Reviewer — Finance",
+    can: "approves, adjusts and records payouts on commission — and no access to the pipeline at all",
+  },
 ];
 
-/** Six digits, uniformly drawn, never starting 0 so it reads as a PIN on screen. */
 const newPin = () => String(randomInt(100_000, 1_000_000));
 
 async function main() {
   const client = new Client({ connectionString: url });
   await client.connect();
+  const issued: { label: string; id: string; can: string; pin: string }[] = [];
 
-  const issued: { id: string; role: string; can: string; pin: string }[] = [];
   try {
+    // ── the accounts ────────────────────────────────────────────────────────
     for (const r of REVIEWERS) {
-      // Collision would make two accounts share a selector, and the login route takes the first
-      // row it finds — so draw again rather than risk it.
       let pin = newPin();
       for (let attempt = 0; attempt < 20; attempt++) {
         const clash = await client.query(
@@ -86,41 +111,88 @@ async function main() {
         pin = newPin();
       }
 
-      const res = await client.query(
-        `UPDATE "Employee"
-            SET "pinLookup" = $1, pin = $2, "updatedAt" = now()
-          WHERE id = $3 AND active = true`,
-        [pinLookup(pin, secret), hashSync(pinVerifierInput(pin, secret), 10), r.id],
+      // Upsert: create on a fresh database, repair on an existing one. Reactivates the row
+      // and rewrites the permissions, so a reviewer locked out by an earlier state recovers
+      // by running this again.
+      await client.query(
+        `INSERT INTO "Employee"
+           (id, name, pin, "pinLookup", role, permissions, "defaultRoute", active,
+            "preferredLanguage", "createdAt", "updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6,'/dashboard',true,'en',now(),now())
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name,
+           pin = EXCLUDED.pin,
+           "pinLookup" = EXCLUDED."pinLookup",
+           role = EXCLUDED.role,
+           permissions = EXCLUDED.permissions,
+           active = true,
+           "updatedAt" = now()`,
+        [
+          r.id, r.name,
+          hashSync(pinVerifierInput(pin, secret), 10),
+          pinLookup(pin, secret),
+          r.role.role, JSON.stringify(r.role.permissions),
+        ],
       );
-      if (res.rowCount !== 1) {
-        console.error(`\nREFUSE: ${r.id} is not present and active in this database.`);
-        console.error("Seed the fixtures first — run the browser suite once — then try again.");
-        process.exit(4);
-      }
-      issued.push({ ...r, pin });
+      issued.push({ label: r.label, id: r.id, can: r.can, pin });
+    }
+
+    // ── commission plans, so the commission screens have something to show ──
+    // Codes must not begin `UAT`: globalSetup deletes plans by `code LIKE 'UAT%'`.
+    const plans: [string, string, string, string][] = [
+      [`${P}_plan_standard`, `${P}_STD`, "Reviewer Standard 1%", "1.000000"],
+      [`${P}_plan_senior`, `${P}_SNR`, "Reviewer Senior 2%", "2.000000"],
+    ];
+    for (const [planId, code, name, rate] of plans) {
+      await client.query(
+        `INSERT INTO "CommissionPlan" (id, code, name, "isActive", "createdAt", "updatedAt")
+         VALUES ($1,$2,$3,true,now(),now())
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, "isActive" = true, "updatedAt" = now()`,
+        [planId, code, name],
+      );
+      await client.query(
+        `INSERT INTO "CommissionPlanVersion"
+           (id, "planId", version, basis, "tierMode", "baseRatePercent", currency, "effectiveFrom", "createdAt")
+         VALUES ($1,$2,1,'NET_COLLECTION','INCREMENTAL',$3,'SAR','2020-01-01',now())
+         ON CONFLICT (id) DO UPDATE SET "baseRatePercent" = EXCLUDED."baseRatePercent"`,
+        [`${planId.replace("_plan_", "_ver_")}`, planId, rate],
+      );
+    }
+
+    const assignments: [string, string, string][] = [
+      [`${P}_asg_rep`, `${P}_emp_rep`, `${P}_plan_standard`],
+      [`${P}_asg_mgr`, `${P}_emp_manager`, `${P}_plan_senior`],
+    ];
+    for (const [asgId, employeeId, planId] of assignments) {
+      await client.query(
+        `INSERT INTO "CommissionAssignment"
+           (id, "employeeId", "planId", "planVersionId", "effectiveFrom", "createdAt")
+         VALUES ($1,$2,$3,$4,'2020-01-01',now())
+         ON CONFLICT (id) DO NOTHING`,
+        [asgId, employeeId, planId, planId.replace("_plan_", "_ver_")],
+      );
     }
   } finally {
     await client.end();
   }
 
-  const line = "─".repeat(74);
+  const line = "-".repeat(76);
   console.log(`\n${line}`);
-  console.log("  REVIEWER ACCOUNTS — printed once, to this terminal only");
+  console.log("  PREVIEW REVIEWER ACCOUNTS — printed once, to this terminal only");
   console.log(line);
-  console.log("  Synthetic accounts in a disposable database. They are not staff accounts and");
-  console.log("  they hold no real data. Do not paste them into chat, a ticket, or a commit.\n");
+  console.log("  Synthetic accounts in a disposable database. Not staff accounts, no real");
+  console.log("  data. Do not paste them into chat, a ticket, or a commit.\n");
   for (const r of issued) {
-    console.log(`  ${r.role.padEnd(15)} PIN ${r.pin}`);
+    console.log(`  ${r.label.padEnd(15)} PIN ${r.pin}`);
     console.log(`  ${" ".repeat(15)} ${r.id}`);
     console.log(`  ${" ".repeat(15)} ${r.can}\n`);
   }
   console.log(line);
-  console.log("  These replace whatever PINs the accounts had, including the fixture values in");
-  console.log("  tests/e2e/support/roles.ts — so the committed PINs no longer open this");
-  console.log("  database. Re-running the browser suite re-seeds the fixture PINs and undoes");
-  console.log("  that; run this again afterwards.");
+  console.log("  These accounts are RVW_-prefixed and no test fixture touches them: every");
+  console.log("  teardown in this repository is scoped to UAT_ or to a named suite prefix,");
+  console.log("  and globalSetup asserts that none of the RVW_ rows disappeared. Running the");
+  console.log("  test suites will NOT reset these PINs.");
   console.log(`${line}\n`);
-
 }
 
 main().catch((e) => {

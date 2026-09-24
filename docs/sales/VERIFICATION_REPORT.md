@@ -401,6 +401,20 @@ everywhere else. Reported by digest; no value was printed.
 | Session transcript | both exposed secrets and the cookie remain in it. Not sanitised: it is Claude Code's own append-only session store and editing it risks corrupting session state. All three values are revoked, so the retained copies are inert. Flagged for the account holder to delete the file if they prefer. |
 | Env file permissions | `mode: 0o600` **does not restrict a file on Windows** — Node only toggles the read-only attribute, and Git Bash's `ls -l` reports an emulated `0644` that means nothing. Both files now carry a real ACL: inheritance removed, granted to the single user account. The README no longer claims 0600 on Windows. |
 
+#### A fourth bypass, created deliberately and revoked
+
+Reviewer sign-in on the hosted Preview could not be verified without reaching an SSO-protected
+URL, so one further bypass was created for that verification and revoked immediately. It was
+generated locally, never displayed, and used for a single scripted run.
+
+That revocation surfaced a behaviour worth recording: **the edge caches the bypass for a few
+seconds.** The check immediately after a successful revoke returned `200`, and `302` about two
+seconds later. A single-shot verification would have reported the secret still live. Worse, in
+reacting to that false reading the local copy of the secret was deleted, leaving no way to
+revoke it had it genuinely still existed — the state had to be re-established by probing
+whether a `generate` call would return `409`. It did not, proving no entry remained. Verify
+revocation by polling, and do not destroy your copy of a secret until the check has settled.
+
 #### Making it safe by construction
 
 Rules, not reminders, in `scripts/sales-preview/smoke-hosted.mjs` and its README:
