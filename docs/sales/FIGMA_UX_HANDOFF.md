@@ -157,15 +157,43 @@ Design decisions a reviewer should settle, and gaps between the frames and `main
 
 | # | Design | Code today | Kind |
 |---|---|---|---|
-| 1 | Header shows `N shown · N overdue · N with no next step` + scope line | **Implemented in this branch** (see §7) | closed |
-| 2 | Lead row opens the lead; company is a link | Rows are not navigable; no lead detail route exists | gap |
-| 3 | Per-row next action (convert / log follow-up / schedule) | Convert exists; log-follow-up and schedule do not | gap |
-| 4 | Commission calculation collapsed by default, expandable | Always expanded | gap |
-| 5 | Pipeline board with configurable stage columns | **Already built and working.** See the correction below. | closed |
-| 6 | Discount over role limit switches the primary action to "request approval" | Discount approval exists server-side; the button does not change | gap |
-| 7 | Status badges from the four new sets | App uses a generic 6-tone `Pill` | gap |
-| 8 | Sandbox notice is one line; DB models and gates live in docs | App banner carries implementation detail | gap |
-| 9 | Arabic desktop is the governing reference | App is bilingual and RTL-correct | aligned |
+| 1 | Header shows `N shown · N overdue · N with no next step` + scope line | Implemented | **closed** |
+| 2 | Lead row opens the lead; company is a link | `/dashboard/sales/leads/[id]` built, list links to it | **closed** |
+| 3 | Per-row next action (convert / log follow-up / schedule) | All three on the detail screen; activity + date written together | **closed** |
+| 4 | Commission calculation collapsed by default, expandable | Per-row toggle with `aria-expanded` | **closed** |
+| 5 | Pipeline board with configurable stage columns | Was never a gap — already built. See the correction below. | **closed** |
+| 6 | Discount over role limit switches the primary action | Was largely never a gap either — see below | **closed** |
+| 7 | Status badges from the four new sets | Adopted for the 5 genuine domain statuses | **closed** |
+| 8 | Sandbox notice is one line; detail lives in docs | One sentence | **closed** |
+| 9 | Arabic desktop is the governing reference | Aligned, and now asserted by `sales-rtl-audit` | **closed** |
+
+### A third correction: gap 6 was mostly not a gap
+
+A previous revision said "the quote editor has no discount handling at all." That was produced
+by grepping `quotes/new/page.tsx` — a **67-line redirect stub** that creates a draft and
+navigates away. The real editor is `quotes/[id]/page.tsx`, 734 lines, and it already had
+per-line `discountPercent`, live recalculated totals, the server-supplied threshold, a
+`needsApproval` banner naming who must issue, an approved-discount marker and a revise path.
+
+The server side was already stronger than the design asked for: `issueQuote` re-checks the gate
+**at issue time** rather than trusting what was true when the lines were saved, and the route
+derives `quote_approve_discount` from the session. Nothing needed building.
+
+What inspection *did* find was a refusal that named an impossible action: `assertTransition`
+appended "Raise a new revision instead" for ACCEPTED and SUPERSEDED, and `isRevisable` permits
+neither. Only the wording was changed — whether an accepted quotation *should* be revisable is
+a business decision and the rule is untouched.
+
+### Remaining gaps, stated plainly
+
+- **Pipeline on a phone** scrolls horizontally; the designed stage accordion (pattern P5) is not
+  implemented. Recorded as a `KNOWN GAP` in `sales-rtl-audit` so it prints on every run.
+- **Nine lint errors** remain across nine Sales screens, all one pattern
+  (`react-hooks/set-state-in-effect` on a `useCallback` loader). `my-commissions` was fixed and
+  is clean; the others reuse their loader after mutations, so inlining would break working
+  flows. They need one repo-wide refactor, not nine spot fixes.
+- **Eleven routes** still inherit a responsive pattern rather than having their own frame at
+  each width.
 
 Nothing above changes commission policy. The four load-bearing commission decisions are
 untouched and are documented in `COMMISSION_RULES.md`.
@@ -230,12 +258,37 @@ in §6) but because `next build` can open a connection while prerendering:
 | Check | Result |
 |---|---|
 | `prisma generate` | client generated (offline codegen, inert localhost URL) |
-| `npx tsc --noEmit` | **exit 0** |
-| `npx eslint` on both changed files | **0 errors**, 2 pre-existing `exhaustive-deps` warnings (lines 108, 129 — untouched) |
-| `scripts/e2e/regression/commission-engine.mjs` | **48 passed, 0 failed** (needs no database) |
+| `npm run build:test-domain` | exit 0 |
+| `npx tsc --noEmit` (whole repo) | **exit 0** |
+| `commission-engine.mjs` | **48 passed, 0 failed** |
+| `quotes-domain.mjs` | **113 passed, 0 failed** |
+| `quote-discount-authz.mjs` | **17 passed, 0 failed** |
+| `sales-rtl-audit.mjs` | **7 passed, 0 failed** |
+| lint delta across Sales | **one error fewer, none added** |
 
-Still outstanding before this can be called Preview-verified: commit, push, redeploy, and re-run
-the hosted smoke suite against the new deployment id.
+**185 offline assertions.** None of it touches a database.
+
+**A local integration environment is not available.** Checked four ways: no `psql`, `pg_ctl`,
+`initdb` or `postgres` on PATH; no Docker; nothing listening on 5432–5439; no registered
+Postgres service. Standing one up means installing new software, which is outside existing
+permissions — so local integration evidence is genuinely blocked rather than deferred by
+preference.
+
+Checks that genuinely need a database or a refreshed Preview, all still outstanding:
+
+- `sales-commissions-db`, `sales-security`, `sales-workflow` — the three DB/HTTP suites
+- `next build` — it does **not** migrate, but it can open a connection while prerendering
+- the 66 hosted smoke assertions, against a new deployment id
+- that the lead detail screen's two-write scheduling really persists both the TASK activity and
+  `nextFollowUpAt`. The ordering and the failure handling are verifiable by reading; the
+  persistence is not
+- that the deployed transition route reaches `issueQuote` under a real session. The authz suite
+  proves the route's *shape* — that no body key can carry approval — not its runtime wiring
+- how any screen reads at 1024 and 390 with long names and dense rows
+
+**Figma prototype walks are prototype evidence.** The 22-step journey walk asserts that clicking
+a named layer lands on the expected frame. It is not application behaviour and is not security
+evidence: a prototype cannot refuse anything.
 
 ### 7c. User acceptance — **has not happened**
 
