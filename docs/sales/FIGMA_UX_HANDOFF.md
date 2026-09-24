@@ -19,7 +19,7 @@ capabilities rather than rely on recollection. That inspection was done:
 | Is a Figma MCP server installed? | **Yes** — `plugin:figma:figma`, HTTP at `https://mcp.figma.com`. |
 | Is it authenticated? | **No.** Only two tools are exposed: `authenticate` and `complete_authentication`. |
 | Are any design tools available (create frame, component, variable, prototype)? | **No.** None are exposed while the server is unauthenticated, so its write capability could not be tested either way. |
-| Was an OAuth flow started? | **Yes**, and again in the later session that built the screens. `authenticate` returns a fresh authorisation URL each time; the current one is in the session report. |
+| Was an OAuth flow started? | **Yes** — three times now, most recently in the session that deployed the hosted Preview. `authenticate` returns a fresh authorisation URL each time, with a fresh PKCE challenge and a fresh callback port; the current one is in that session's report and is not reproduced here, because it expires. |
 | Was it completed? | **No.** It requires the account holder to authorise in a browser, on the machine the callback returns to (`localhost:44774`). |
 | Is there an alternative design surface? | A Claude design-system connector exists, but it manages code-based component libraries — it is not Figma and would not satisfy an "editable Figma file" requirement. |
 
@@ -28,6 +28,24 @@ replace the interactive OAuth step, and I must not bypass it, impersonate approv
 them to paste callback URLs or tokens into chat. So the flow is **left pending**, which is the
 correct end state rather than a failure to try.
 
+### Why this cannot be finished from here, stated precisely
+
+The authorisation URL redirects to `http://localhost:<port>/callback`, and that listener is
+opened by the MCP client **on the machine running this session**. `localhost` resolves on
+whichever machine the browser is running on, so the flow completes only if the browser and the
+session are on the same machine. Authorising from a phone, or from a different desktop, sends
+the callback to a port on *that* device where nothing is listening — the browser shows a
+connection error and the session never receives the code.
+
+There is a documented fallback in which the callback URL is copied out of the address bar and
+handed back. **It is deliberately not used here**, because that URL carries the authorisation
+code, and pasting it into chat is exactly the thing the account holder ruled out. If the flow
+has to be completed from a different machine, the right answer is to run a session on the
+machine that will hold the browser, not to move the code by hand.
+
+The consent screen itself is the account holder's to accept or decline. Nothing about this
+step can or should be automated.
+
 ---
 
 ## 1a. What has changed since this was first written
@@ -35,7 +53,7 @@ correct end state rather than a failure to try.
 Nothing about the blocker. What HAS changed is that there is now far more to hand to a
 designer than there was: the interface exists in full as a working reference implementation.
 
-Nine screens are built and driven by a 44-test browser suite — Leads, Pipeline, Deal detail,
+Nine screens are built and driven by a 52-test browser suite — Leads, Pipeline, Deal detail,
 Follow-ups, Quotations list, Quotation editor, Sales targets, Reports, My commissions, plus
 Commission plans and Commission review. Every one carries the provisional banner, every one is
 RTL-correct and works at 390px, and `src/app/dashboard/sales/_components/ui.tsx` is effectively
