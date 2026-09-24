@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
@@ -362,9 +363,15 @@ export default function LeadsPage() {
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-bold text-charcoal">
+                      {/* The row is now a way in. A list you can only look at forces every
+                          question about a lead into a spreadsheet somewhere else. */}
+                      <Link
+                        href={`/dashboard/sales/leads/${lead.id}`}
+                        className="font-bold text-charcoal hover:text-orange hover:underline"
+                        data-testid={`open-lead-${lead.id}`}
+                      >
                         {lang === "ar" && lead.companyNameAr ? lead.companyNameAr : lead.companyName}
-                      </p>
+                      </Link>
                       <LeadStatusBadge status={lead.status} testId={`lead-status-${lead.id}`} />
                       {hasNoCommitment && (
                         <span
