@@ -119,8 +119,11 @@ export type NewOrderHeader = {
  * alongside the numbering locks this codebase already uses — 7761 for production orders by
  * year, 7763 for roasting batches by date.
  *
- * Taken on the plain client the lock releases immediately (each statement is its own
- * transaction), which is harmless: that path still has its retry.
+ * EVERY caller must therefore run this inside a transaction, and both now do. Taken on a
+ * plain client the lock is acquired and released before the next statement runs, which
+ * serialises nothing — so a caller outside a transaction would silently fall back to
+ * colliding on the unique index and retrying, which is the behaviour this lock exists to
+ * replace. The retry below is kept only as a second line of defence.
  *
  * ── Lock order ──
  * This codebase states its canonical lock order wherever two locks can be held at once, so:

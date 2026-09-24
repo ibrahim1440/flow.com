@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 // One implementation of "make an order", shared with the quotation-to-order path. A
@@ -88,15 +88,28 @@ export async function POST(request: Request) {
     // POST /api/orders/fulfillment-preview for the pre-submit view and the preparation
     // review for the binding reservation.
     const resolvedItems = await resolveOrderLines(prisma, items);
-    const order = await createOrderWithNumber(
-      prisma,
-      {
-        customerId: body.customerId as string,
-        quotationNumber: typeof body.quotationNumber === "string" ? body.quotationNumber.trim() || null : null,
-        quotationSentDate: body.quotationSentDate ? new Date(body.quotationSentDate) : null,
-        notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
-      },
-      resolvedItems,
+
+    // In a transaction, so the advisory lock inside createOrderWithNumber actually holds.
+    //
+    // pg_advisory_xact_lock lives for the length of the transaction that took it. Called on
+    // the plain client every statement is its own implicit transaction, so the lock was
+    // released before the next statement read the maximum order number — it serialised
+    // nothing, and this path was relying entirely on the unique index and the retry while
+    // the quotation-to-order path held the lock properly. Two writers, two different
+    // schemes, and a lock that only looked like it covered both.
+    const order = await prisma.$transaction(
+      (tx) =>
+        createOrderWithNumber(
+          tx,
+          {
+            customerId: body.customerId as string,
+            quotationNumber: typeof body.quotationNumber === "string" ? body.quotationNumber.trim() || null : null,
+            quotationSentDate: body.quotationSentDate ? new Date(body.quotationSentDate) : null,
+            notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
+          },
+          resolvedItems,
+        ),
+      TX_OPTS,
     );
 
     return NextResponse.json(order, { status: 201 });

@@ -665,6 +665,151 @@ async function main() {
     check("no two orders share a number", dupes.n === 0, S(dupes));
   }
 
+  sub("D4c. the SAME quotation converting twice at the same instant makes one order");
+  {
+    // D2 proved the replay when the second call arrives after the first has committed. This
+    // is the harder case: both in flight together, both past the existence check before
+    // either commits. What stops a second order here is the FOR UPDATE on the quote row plus
+    // the unique requestKey — the loser waits, then reads what the winner wrote.
+    const q = await api("/api/sales/quotes", {
+      method: "POST",
+      body: {
+        opportunityId: ids.opportunityId,
+        validUntil: new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10),
+        lines: [{ productSkuId: ids.skuId, quantity: "3", unit: "UNIT", unitPrice: "110" }],
+      },
+    });
+    await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ISSUED" } });
+    await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ACCEPTED" } });
+
+    const before = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    const [a, b] = await Promise.all([
+      api(`/api/sales/quotes/${q.json.quote.id}/create-order`, { method: "POST", body: {} }),
+      api(`/api/sales/quotes/${q.json.quote.id}/create-order`, { method: "POST", body: {} }),
+    ]);
+
+    check("both callers got an answer, neither errored",
+      [200, 201].includes(a.status) && [200, 201].includes(b.status),
+      `${a.status} / ${b.status} ${S(a.json).slice(0, 120)} ${S(b.json).slice(0, 120)}`);
+    check("and both were told about the SAME order",
+      a.json?.orderNumber === b.json?.orderNumber, `${a.json?.orderNumber} vs ${b.json?.orderNumber}`);
+    check("exactly one of them reports having created it",
+      [a.json?.replayed, b.json?.replayed].filter((r) => r === false).length === 1,
+      `${a.json?.replayed} / ${b.json?.replayed}`);
+
+    const after = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    check("exactly one order was added", after.n === before.n + 1, `${before.n} → ${after.n}`);
+
+    const links = await one(
+      `SELECT COUNT(*)::int n FROM "OpportunityOrder" WHERE "quoteId"=$1`, [q.json.quote.id]);
+    check("and exactly one quote-to-order relationship exists", links.n === 1, S(links));
+  }
+
+  sub("D4d. a quotation conversion racing the ordinary order-creation path");
+  {
+    // The case the advisory lock is really about. pg_advisory_xact_lock is transaction
+    // scoped, so a caller outside a transaction acquires and releases it before it reads the
+    // maximum — it serialises nothing. Both writers now run inside a transaction, which is
+    // what makes this one scheme rather than two that happen not to collide often.
+    const q = await api("/api/sales/quotes", {
+      method: "POST",
+      body: {
+        opportunityId: ids.opportunityId,
+        validUntil: new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10),
+        lines: [{ productSkuId: ids.skuId, quantity: "4", unit: "UNIT", unitPrice: "110" }],
+      },
+    });
+    await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ISSUED" } });
+    await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ACCEPTED" } });
+
+    const before = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    const [viaQuote, viaOrders] = await Promise.all([
+      api(`/api/sales/quotes/${q.json.quote.id}/create-order`, { method: "POST", body: {} }),
+      api("/api/orders", {
+        method: "POST",
+        body: { customerId: ids.customerId, items: [{ productSkuId: ids.skuId, quantityUnits: 2 }] },
+      }),
+    ]);
+
+    check("the quotation conversion succeeded", viaQuote.status === 201, S(viaQuote.json).slice(0, 160));
+    check("the ordinary order creation succeeded", viaOrders.status === 201, S(viaOrders.json).slice(0, 160));
+    check("they are two different order numbers",
+      viaQuote.json?.orderNumber !== viaOrders.json?.orderNumber,
+      `${viaQuote.json?.orderNumber} vs ${viaOrders.json?.orderNumber}`);
+
+    const after = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    check("exactly two orders were added", after.n === before.n + 2, `${before.n} → ${after.n}`);
+
+    const dupes = await one(
+      `SELECT COUNT(*)::int n FROM (
+         SELECT "orderNumber" FROM "Order" GROUP BY "orderNumber" HAVING COUNT(*) > 1
+       ) d`);
+    check("and no two orders anywhere share a number", dupes.n === 0, S(dupes));
+  }
+
+  sub("D4e. a conversion that is refused mid-transaction leaves nothing behind, and can be retried");
+  {
+    // A quotation whose second line has no catalogue product. The refusal happens after the
+    // quote row has been locked and the first line resolved, so if the transaction did not
+    // roll back cleanly there would be a stranded order or a stranded link.
+    const q = await api("/api/sales/quotes", {
+      method: "POST",
+      body: {
+        opportunityId: ids.opportunityId,
+        validUntil: new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10),
+        lines: [
+          { productSkuId: ids.skuId, quantity: "1", unit: "UNIT", unitPrice: "110" },
+          { description: `${P} bespoke, not in the catalogue`, quantity: "2", unit: "KG", unitPrice: "70" },
+        ],
+      },
+    });
+    await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ISSUED" } });
+    await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ACCEPTED" } });
+
+    const before = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    const refused = await api(`/api/sales/quotes/${q.json.quote.id}/create-order`, { method: "POST", body: {} });
+    check("refused with 409", refused.status === 409, S(refused.json).slice(0, 200));
+
+    const mid = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    check("no order was left behind by the rolled-back transaction",
+      mid.n === before.n, `${before.n} → ${mid.n}`);
+    const strandedLink = await one(
+      `SELECT COUNT(*)::int n FROM "OpportunityOrder" WHERE "quoteId"=$1`, [q.json.quote.id]);
+    check("and no link row either", strandedLink.n === 0, S(strandedLink));
+
+    // The idempotency key must be free again, or a later correction could never be
+    // converted at all. It is derived from the quotation id, so the absence of any row
+    // carrying it is the thing to assert.
+    const keyRow = await one(
+      `SELECT COUNT(*)::int n FROM "OpportunityOrder" WHERE "requestKey" = $1`,
+      [`quote:${q.json.quote.id}`]);
+    check("and the idempotency key was released by the rollback", keyRow.n === 0, S(keyRow));
+
+    // An accepted quotation is deliberately NOT revisable — it is what the customer agreed
+    // to — so the correction is a new quotation on the same deal. That the deal still
+    // converts is the point: one refused attempt must not poison it.
+    const cannotRevise = await api(`/api/sales/quotes/${q.json.quote.id}/revise`, { method: "POST" });
+    check("the accepted quotation refuses to be revised, as designed",
+      cannotRevise.status === 409, S(cannotRevise.json).slice(0, 160));
+
+    const good = await api("/api/sales/quotes", {
+      method: "POST",
+      body: {
+        opportunityId: ids.opportunityId,
+        validUntil: new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10),
+        lines: [{ productSkuId: ids.skuId, quantity: "1", unit: "UNIT", unitPrice: "110" }],
+      },
+    });
+    await api(`/api/sales/quotes/${good.json.quote.id}/transition`, { method: "POST", body: { to: "ISSUED" } });
+    await api(`/api/sales/quotes/${good.json.quote.id}/transition`, { method: "POST", body: { to: "ACCEPTED" } });
+    const retried = await api(`/api/sales/quotes/${good.json.quote.id}/create-order`, { method: "POST", body: {} });
+    check("a corrected quotation on the same deal converts normally", retried.status === 201,
+      S(retried.json).slice(0, 200));
+
+    const end = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    check("adding exactly one order", end.n === before.n + 1, `${before.n} → ${end.n}`);
+  }
+
   sub("D5. the deal can now be won, and the pipeline records it");
   {
     await loginAs(MANAGER);
