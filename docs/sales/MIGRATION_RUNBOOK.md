@@ -33,8 +33,9 @@ Applied so far:
 
 | Target | Identity | Purpose |
 |---|---|---|
-| Preview | endpoint `ep-wandering-leaf-…` / database **`sales_crm_preview`** | The isolated preview target. Created **empty**; nothing was copied into it. |
-| Regression | same endpoint / database `neondb` | So the existing 26-suite regression could run against the new schema. |
+| Preview | endpoint `ep-wandering-leaf-…` / database **`sales_preview`**, as **`sales_preview_migrator`** | The isolated preview target. Created **empty**; nothing was copied into it. |
+| Regression | same endpoint / database `neondb`, as `neondb_owner` | So the existing 26-suite regression could run against the new schema. |
+| Preview (superseded) | same endpoint / database `sales_crm_preview`, as `neondb_owner` | The first preview database. Still present and untouched; replaced because a restricted role cannot be retrofitted onto tables another role already owns. |
 
 ### Why the preview database is a fresh one rather than a branch
 
@@ -45,26 +46,45 @@ not be verified as synthetic-only, so it was **not branched**. A new empty datab
 non-production branch was created instead: no data copied, no branch slot consumed, and the
 parent untouched.
 
-### The guard
+### The guard, and the second identity
 
-`withsales.mjs` is an **allowlist**, not a denylist. The URL must name **both** the approved
-endpoint **and** the database `sales_crm_preview`, or nothing runs. It checks every connection
-path — `DATABASE_URL`, `DIRECT_URL`, `SHADOW_DATABASE_URL`, `ERP_TEST_DATABASE_URL`,
-`POSTGRES_URL` — and denies three production identifiers as a second line of defence.
+Migrations run under their **own** credential, `sales_preview_migrator`, through their own
+runner: `scripts/sales-preview/withmigrate.mjs`. The application's credential cannot run them
+and its runner refuses `prisma` outright. The separation is the point — an application that
+can rewrite its own schema is an application whose schema anything reaching it can rewrite.
 
-A denylist alone is not sufficient, and this project has the scar to prove it: an earlier
-guard named an endpoint that exists in no environment at all and was therefore protecting
-nothing.
+`withmigrate.mjs` is an **allowlist**, not a denylist. Three things must hold on every
+connection path — `DATABASE_URL`, `DIRECT_URL`, `SHADOW_DATABASE_URL`,
+`ERP_TEST_DATABASE_URL`, `POSTGRES_URL`:
 
-Proven both ways: pointed at a production endpoint it refuses; pointed at the preview target
-it proceeds.
+1. the endpoint is the approved non-production one,
+2. the database is `sales_preview`,
+3. the **role** is `sales_preview_migrator`.
+
+(3) is the condition the previous revision of this runbook did not have. The old guard checked
+where a connection pointed but not who it connected as, so it would have run a migration as
+`neondb_owner` — a role that is a member of `neon_superuser`, and therefore of
+`pg_read_all_data` and `pg_write_all_data`, across every database on the branch.
+
+Three production identifiers are denied as well, as a second line and never as the only one. A
+denylist alone is not sufficient and this project has the scar to prove it: an earlier guard
+named an endpoint that exists in no environment at all and was therefore protecting nothing.
+
+Proven in both directions, and the proof is runnable — `sh scripts/sales-preview/guard-proof.sh`
+drives every refusal and the one acceptance, for both runners, without opening a connection.
+
+What the migration role can and cannot do: it owns every table in `sales_preview` and may
+change them, and it holds `CREATE` on that database and its `public` schema. It is **not**
+superuser, has **no** `CREATEDB`, `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, is a member of
+**no** role, cannot drop or rename the database, and cannot read anything in any other
+database on the branch. `DATABASE_ISOLATION.md` has the 36 assertions.
 
 ---
 
 ## 3. Preparation
 
 1. Confirm the target: `prisma migrate status` through the guarded runner. It prints the host
-   and database it resolved. If it is not `sales_crm_preview`, **stop**.
+   and database it resolved. If it is not `sales_preview`, **stop**.
 2. Confirm the migration is unchanged from what was certified:
    `git diff <certified-sha> -- prisma/migrations/20260924090000_add_sales_crm_and_commissions/`
    must be empty.
@@ -77,8 +97,12 @@ it proceeds.
 ## 4. Execution
 
 ```bash
-SALES_ENV=<preview env file> node withsales.mjs prisma migrate deploy
+MIGRATE_ENV=<the migration env file> \
+  node scripts/sales-preview/withmigrate.mjs prisma migrate deploy
 ```
+
+The env file here is **not** the one the application uses. `scripts/sales-preview/README.md`
+describes both.
 
 Never `prisma db push`, never `migrate reset`, never `migrate resolve` to skirt a failure, and
 never from a build step. The build script in this project runs `validate-env`,
@@ -90,7 +114,7 @@ never from a build step. The build script in this project runs `validate-env`,
 
 After applying:
 
-- `migrate status` → **21 applied, 0 pending, 0 unfinished**.
+- `migrate status` → **"Database schema is up to date!"**, 21 migrations found.
 - Row counts on every pre-existing table unchanged.
 - The 19 new tables exist and are empty.
 - Every foreign key validates: `SELECT … FROM pg_constraint WHERE contype='f' AND NOT convalidated` returns nothing.
@@ -98,6 +122,22 @@ After applying:
   that nothing was disturbed.
 
 Evidence for each is recorded in `VERIFICATION_REPORT.md`.
+
+### A note on reading `_prisma_migrations` directly
+
+The table holds **22** rows for 21 migrations. The extra one is `20260522000000_baseline`,
+marked rolled back with `applied_steps_count = 0`: the first attempt against `sales_preview`
+failed on a missing `CREATE` privilege on the database *before executing any statement*, and
+was cleared with `prisma migrate resolve --rolled-back` before the grant was added and the
+deploy re-run. `--rolled-back` leaves `finished_at` NULL, so a naive
+`COUNT(*) FILTER (WHERE finished_at IS NULL)` reports one unfinished migration on a database
+that is entirely up to date. Count `rolled_back_at IS NULL` as well, or just ask
+`prisma migrate status`.
+
+The grant that was missing, for anyone reproducing this: Prisma issues
+`CREATE SCHEMA IF NOT EXISTS "public"`, and PostgreSQL checks `CREATE` on the *database* even
+when the schema already exists. `GRANT CREATE ON DATABASE sales_preview TO sales_preview_migrator`
+is what it needs — on that database only.
 
 ---
 
