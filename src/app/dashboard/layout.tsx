@@ -2,12 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import {
-  LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
-  Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
-  Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
-  ClipboardList, ShieldAlert,
-} from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box, Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight, Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck, ClipboardList, ShieldAlert, UserPlus, KanbanSquare, Percent } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
@@ -18,6 +13,9 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
   { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
   { key: "productsNav", icon: Package,        href: "/dashboard/products", module: "inventory" },
+  { key: "leadsNav",   icon: UserPlus,        href: "/dashboard/sales/leads", module: "sales" },
+  { key: "pipelineNav", icon: KanbanSquare,   href: "/dashboard/sales/pipeline", module: "sales" },
+  { key: "myCommissionsNav", icon: Percent,   href: "/dashboard/sales/my-commissions", module: "commissions" },
   { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
   { key: "workstationPreparation", icon: PackageCheck, href: "/dashboard/workstation/preparation", module: "orders" },
   { key: "production", icon: Factory,         href: "/dashboard/production" },

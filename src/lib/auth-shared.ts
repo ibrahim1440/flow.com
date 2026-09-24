@@ -35,12 +35,16 @@ export const ALL_MODULES = [
   "settings",
   "customers",
   "accounting",
+  "sales",
+  "commissions",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
 
 export const MODULE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
+  sales: "Sales / CRM",
+  commissions: "Commissions",
   inventory: "Inventory",
   orders: "Orders",
   production: "Production",
@@ -58,6 +62,29 @@ export const MODULE_LABELS: Record<string, string> = {
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
+  sales: [
+    { key: "lead_write", label: "Create / edit leads" },
+    { key: "lead_assign", label: "Assign or reassign a lead's owner" },
+    { key: "lead_convert", label: "Convert a lead into a customer and a deal" },
+    { key: "lead_import", label: "Import leads from a file" },
+    { key: "lead_export", label: "Export leads" },
+    { key: "deal_close", label: "Mark a deal Won or Lost" },
+    { key: "deal_reopen", label: "Reopen a closed deal" },
+    { key: "quote_write", label: "Create / edit quotations" },
+    { key: "quote_approve_discount", label: "Approve a discount above the threshold" },
+    { key: "stage_manage", label: "Configure pipeline stages" },
+  ],
+  // Fine-grained on purpose: every key below decides either what somebody is paid or who
+  // gets to see it, and "manage_plans" in particular must never fall to the person the
+  // plan pays.
+  commissions: [
+    { key: "view_own", label: "See my own commission" },
+    { key: "view_team", label: "See the team's commission" },
+    { key: "manage_plans", label: "Create / edit commission plans and assignments" },
+    { key: "approve", label: "Approve accrued commission" },
+    { key: "record_payout", label: "Record a commission payout" },
+    { key: "sandbox_collections", label: "Record sandbox collection events (non-production only)" },
+  ],
   inventory: [
     { key: "receive", label: "Receive new beans" },
     { key: "adjust", label: "Edit / adjust stock" },
