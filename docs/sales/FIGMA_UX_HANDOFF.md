@@ -1,149 +1,255 @@
-# Figma / UX Handoff — **FIGMA_BLOCKED**
+# Figma / UX Handoff — **FIGMA_IN_PROGRESS**
 
-## Status: not delivered. This is an outstanding mandatory deliverable.
+## Status: connectivity works, initial designs exist, the deliverable is **not** complete.
 
-There is no Figma file, no prototype and no frame links, because the Figma integration in this
-session is **not authorised**. This document records the exact blocker and what was built
-instead, rather than substituting a screenshot or an in-code mockup and calling the
-requirement met.
+The previous version of this document said `FIGMA_BLOCKED` and stated there was no Figma file,
+no prototype and no frame links. All three of those statements are now false and have been
+replaced. What has **not** changed is that this is still an open deliverable: the design covers
+every route at desktop, but not every route at every breakpoint, and none of it has been
+through design review or user acceptance.
+
+Read the status line precisely. **In progress is not done.**
 
 ---
 
-## 1. What was actually checked
-
-The task said not to assume the official Figma MCP server is read-only, and to inspect real
-capabilities rather than rely on recollection. That inspection was done:
+## 1. Connection — what is actually true now
 
 | Check | Result |
 |---|---|
-| Is a Figma MCP server installed? | **Yes** — `plugin:figma:figma`, HTTP at `https://mcp.figma.com`. |
-| Is it authenticated? | **No.** Only two tools are exposed: `authenticate` and `complete_authentication`. |
-| Are any design tools available (create frame, component, variable, prototype)? | **No.** None are exposed while the server is unauthenticated, so its write capability could not be tested either way. |
-| Was an OAuth flow started? | **Yes** — three times now, most recently in the session that deployed the hosted Preview. `authenticate` returns a fresh authorisation URL each time, with a fresh PKCE challenge and a fresh callback port; the current one is in that session's report and is not reproduced here, because it expires. |
-| Was it completed? | **No.** It requires the account holder to authorise in a browser, on the machine the callback returns to (`localhost:44774`). |
-| Is there an alternative design surface? | A Claude design-system connector exists, but it manages code-based component libraries — it is not Figma and would not satisfy an "editable Figma file" requirement. |
+| Is the Figma connector reachable? | **Yes.** The claude.ai Figma web connector (`Figma`, 40 tools) is `connected`. |
+| Did a real Figma call succeed? | **Yes.** `whoami` returned the account, and every design below was written through `use_figma`. |
+| Can it write native canvas content? | **Yes — demonstrated, not assumed.** Pages, component sets, variants, variable bindings, text styles and prototype reactions were all created through the API. |
+| Which seat? | The file sits on the **Hiqbah ERP** plan (`team::1650589810646679944`), where the account holds a **Full** seat. Two other plans on the account hold **View** seats only and cannot be written to. |
+| What about `plugin:marketing:figma`? | Still `needs_auth`. It is a **separate, unauthenticated plugin server** and is not what serves these tools. The earlier "unauthenticated, only `authenticate` exposed" finding described *that* server. |
 
-The account holder's instruction was explicit: their authorisation message does **not**
-replace the interactive OAuth step, and I must not bypass it, impersonate approval, or ask
-them to paste callback URLs or tokens into chat. So the flow is **left pending**, which is the
-correct end state rather than a failure to try.
-
-### Why this cannot be finished from here, stated precisely
-
-The authorisation URL redirects to `http://localhost:<port>/callback`, and that listener is
-opened by the MCP client **on the machine running this session**. `localhost` resolves on
-whichever machine the browser is running on, so the flow completes only if the browser and the
-session are on the same machine. Authorising from a phone, or from a different desktop, sends
-the callback to a port on *that* device where nothing is listening — the browser shows a
-connection error and the session never receives the code.
-
-There is a documented fallback in which the callback URL is copied out of the address bar and
-handed back. **It is deliberately not used here**, because that URL carries the authorisation
-code, and pasting it into chat is exactly the thing the account holder ruled out. If the flow
-has to be completed from a different machine, the right answer is to run a session on the
-machine that will hold the browser, not to move the code by hand.
-
-The consent screen itself is the account holder's to accept or decline. Nothing about this
-step can or should be automated.
+The old §1/§2 OAuth narrative is obsolete and has been deleted rather than left to mislead.
 
 ---
 
-## 1a. What has changed since this was first written
+## 2. The file
 
-Nothing about the blocker. What HAS changed is that there is now far more to hand to a
-designer than there was: the interface exists in full as a working reference implementation.
+**ERP Design System & Order Operations** — `CYWypOA4538FYoTDUdGyP5`
 
-Nine screens are built and driven by a 52-test browser suite — Leads, Pipeline, Deal detail,
-Follow-ups, Quotations list, Quotation editor, Sales targets, Reports, My commissions, plus
-Commission plans and Commission review. Every one carries the provisional banner, every one is
-RTL-correct and works at 390px, and `src/app/dashboard/sales/_components/ui.tsx` is effectively
-the component inventory a Figma library would need to mirror: banner, page header, alert, card,
-section title, empty state, spinner, four button variants, labelled field, text input, select,
-textarea, money, six pill tones, modal, scrolling table wrapper.
+https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/ERP-Design-System--amp--Order-Operations
 
-So the design work is no longer "design this from a specification". It is **reconcile an
-editable Figma file with an implementation that already exists and is tested** — which is a
-better position to be in, and which is what §3 should be read as describing.
+Three pages were added. Nothing existing was renumbered, moved or edited.
 
----
+| Page | Node | Contents |
+|---|---|---|
+| `10 — Sales CRM Components` | `229:2` | 4 component sets, 38 variants |
+| `11 — Sales CRM Screens` | `229:3` | 14 route frames, 6 modals, states board, 6 responsive frames, rationale panel |
+| `12 — Sales CRM Prototype` | `229:4` | 19 frames, 48 wired reactions, 3 flow starting points |
 
-## 2. What to do to unblock it
-
-1. Open the authorisation URL produced by the Figma MCP `authenticate` call (re-runnable at
-   any time; it prints a fresh URL).
-2. Authorise the connection in the browser, as the Figma account holder.
-3. Once the server's real tools appear in a session, the design work can begin — and the first
-   thing to establish is whether the server can **write** native canvas content, since a
-   read-only Dev-Mode connection would still leave the "create an editable file" requirement
-   unmet and would need a different route (the Figma REST API with a personal access token, or
-   a person doing it in the app).
-
-**Do not treat step 3 as a formality.** Whether this server can create frames, components and
-prototypes has not been demonstrated, and claiming it can would be a guess.
+> **Reading the file:** `get_metadata` with no `nodeId` returns only the Cover page. That is a
+> partial result, not the file structure. Enumerate pages with a read-only `use_figma` over
+> `figma.root.children`, then address pages by id.
 
 ---
 
-## 3. What was built instead, and how it is marked
+## 3. Route → frame coverage (all 14 routes)
 
-Per the explicit exception granted — provisional UI using existing ERP components so backend
-work was not held hostage to a design tool — two screens were implemented:
+Shared frames are listed where one frame genuinely covers the route. Every link is
+`…/ERP-Design-System--amp--Order-Operations?node-id=<id>` with colons written as dashes.
 
-| Screen | Route |
+| # | Route | Desktop AR | Tablet 1024 | Mobile 390 | Interactions |
+|---|---|---|---|---|---|
+| 1 | `/dashboard/sales/leads` | **SC-02** `239:21` | **T-01** `262:294` | **MB-01** `263:341` | M-01 `261:291`, M-02 `261:335`, M-03 `261:355` |
+| 2 | `/dashboard/sales/pipeline` | **SC-03** `250:113` | — | — | outcome badge over stage |
+| 3 | `/dashboard/sales/deals/[id]` | **SC-04** `251:141` | — | — | M-04 `261:374`, M-05 `261:400` |
+| 4 | `/dashboard/sales/quotes` | **SC-05** `255:194` | — | — | row actions per status |
+| 5 | `/dashboard/sales/quotes/new` | **SC-06** `254:188` | **T-03** `262:449` | **MB-03** `263:458` | discount-approval gate |
+| 6 | `/dashboard/sales/quotes/[id]` | **SC-07** `255:368` | — | — | revision history |
+| 7 | `/dashboard/sales/quotes/[id]/print` | **SC-08** `257:260` (A4, no chrome) | n/a | n/a | print layout only |
+| 8 | `/dashboard/sales/activities` | **SC-09** `257:333` | — | — | complete / overdue |
+| 9 | `/dashboard/sales/targets` | **SC-10** `257:438` | — | — | attainment bars |
+| 10 | `/dashboard/sales/reports` | **SC-11** `258:269` | — | — | KPI tiles + funnel |
+| 11 | `/dashboard/sales/settings` | **SC-12** `258:324` | — | — | stages, sources, discount limits |
+| 12 | `/dashboard/sales/my-commissions` | **SC-01** `236:2` | **T-02** `262:379` | **MB-02** `263:412` | expandable calculation |
+| 13 | `/dashboard/commissions/plans` | **SC-13** `256:255` | — | — | versions + assignment |
+| 14 | `/dashboard/commissions/review` | **SC-14** `253:181` | — | — | M-06 `261:414` |
+
+**Desktop coverage: 14 / 14.** Responsive coverage is by **pattern**, mapped route by route on
+board **RM** `273:420`. Five patterns are drawn at both 1024 and 390, and every non-print route
+is assigned to one, with its state behaviour and recovery action named per route:
+
+| Pattern | Tablet 1024 | Mobile 390 | Routes covered |
+|---|---|---|---|
+| P1 · filterable list | `262:294` | `263:341` | leads, quotes, activities, targets, plans, review, settings |
+| P2 · record detail | `272:370` | `272:434` | deals/[id], quotes/[id] |
+| P3 · line-item editor | `262:449` | `263:458` | quotes/new |
+| P4 · statement & figures | `262:379` | `263:412` | my-commissions, reports |
+| P5 · stage board → accordion | `272:498` | `272:569` | pipeline |
+
+`quotes/[id]/print` is an A4 document and correctly has no phone or tablet canvas.
+
+This is a mapping, not a promise: each pattern exists as a drawn frame at both widths, and the
+mapping states what reflows (horizontal table → stacked cards, stepper → vertical list, columns
+→ collapsible sections). What it does **not** yet include is a per-route drawn frame for the
+eleven routes that inherit a pattern rather than having their own — a reviewer checking, say,
+`targets` at 390px is reading P1 plus the mapping row, not a `targets`-specific canvas.
+
+Screen states are defined **once** on a shared board — **ST** `260:275` — covering loading,
+empty, error, permission-denied and input validation, and are intended to apply to all
+fourteen with the same behaviour rather than being redrawn per screen.
+
+### Components added (page 10)
+
+| Set | Node | Variants | Stored enum |
+|---|---|---|---|
+| Sales / Lead Status Badge | `232:54` | 10 | `LeadStatus` (5) × Dir |
+| Sales / Quote Status Badge | `234:90` | 12 | `QuoteStatus` (6) × Dir |
+| Sales / Commission Accrual Badge | `235:106` | 10 | `AccrualStatus` (5) × Dir |
+| Sales / Deal Outcome Badge | `235:135` | 6 | `OpportunityOutcome` (3) × Dir |
+
+These are **separate from** the Order `Status Badge` (`34:51`), whose description pins it to the
+eight order statuses. Widening its axis to 24 unrelated values across four domains would break
+its contract and pollute every existing instance. Zero existing components were modified, and
+no variables or text styles were added — the file still reads 4 collections / 76 variables /
+18 text styles / 3 effect styles.
+
+---
+
+## 4. Prototype — three journeys
+
+https://www.figma.com/proto/CYWypOA4538FYoTDUdGyP5/ERP-Design-System--amp--Order-Operations?node-id=264-62
+
+48 reactions, **0 unresolved destinations**, 3 flow starting points. Navigation and primary
+actions are wired to the real buttons, not screen-to-screen shells; each full screen carries a
+working nav bar.
+
+| Flow | Start | Path |
+|---|---|---|
+| أ · lead → order | `264:62` | leads → create → duplicate → list → convert → deal → quote → approved quote → order created |
+| ب · lost → reopen | `264:675` | deal → mark lost (reason required) → lost state → reopen → reopened |
+| ج · plan → accrual → review | `264:955` | plans/assignment → accrual explanation → review → adjustment → after |
+
+Journey أ ends at an explicit handoff frame: the order enters the **frozen** Order Preparation
+path on page `08`, which Sales does not own past that point.
+
+---
+
+## 5. Findings the design corrected
+
+These were real defects in the first design pass, found by reading the implementation:
+
+1. **`AccrualStatus.PREVIEW` is never written.** Accruals are created directly as `ACCRUED`
+   (`accrual.ts:299`), then `APPROVED` (`:391`), then `PAID`. An earlier frame showed a
+   PREVIEW accrual as an ordinary state. The variant still exists because the enum value does,
+   but SC-01's legend now states plainly that this build never produces it.
+2. **The statement comes from the ledger, not the accrual rows.**
+   `accrued = Σ ACCRUAL + Σ REVERSAL`, `adjustments = Σ ADJUSTMENT`, `paid = Σ PAYOUT`,
+   `outstanding = accrued + adjustments − paid`. An earlier frame showed cards summing to 1,530
+   under a headline of 6,120. SC-01 now reconciles exactly: 1,150 + 180 + 200 = 1,530 accrued,
+   200 paid, 1,330 outstanding, with the ledger shown beneath it.
+3. **A paid amount is part of accrued, not additional to it.** Stated explicitly on the screen,
+   because adding the two is the obvious way to read a four-figure strip wrongly.
+4. **Overdue scope.** `overdue` counts loaded rows — i.e. after search and filtering — with a
+   `nextFollowUpAt` in the past, excluding `CONVERTED`. A lead with *no* follow-up date is not
+   overdue. An earlier frame claimed 4 overdue against example rows containing 1.
+5. **Leads missing search, filters and row actions.** The implementation has all three; the
+   first frame omitted them.
+
+---
+
+## 6. Implementation differences — design vs code today
+
+Design decisions a reviewer should settle, and gaps between the frames and `main`:
+
+| # | Design | Code today | Kind |
+|---|---|---|---|
+| 1 | Header shows `N shown · N overdue · N with no next step` + scope line | **Implemented in this branch** (see §7) | closed |
+| 2 | Lead row opens the lead; company is a link | Rows are not navigable; no lead detail route exists | gap |
+| 3 | Per-row next action (convert / log follow-up / schedule) | Convert exists; log-follow-up and schedule do not | gap |
+| 4 | Commission calculation collapsed by default, expandable | Always expanded | gap |
+| 5 | Pipeline board with configurable stage columns | **Already built and working.** See the correction below. | closed |
+| 6 | Discount over role limit switches the primary action to "request approval" | Discount approval exists server-side; the button does not change | gap |
+| 7 | Status badges from the four new sets | App uses a generic 6-tone `Pill` | gap |
+| 8 | Sandbox notice is one line; DB models and gates live in docs | App banner carries implementation detail | gap |
+| 9 | Arabic desktop is the governing reference | App is bilingual and RTL-correct | aligned |
+
+Nothing above changes commission policy. The four load-bearing commission decisions are
+untouched and are documented in `COMMISSION_RULES.md`.
+
+### Two claims in the previous revision were wrong — corrected here
+
+**1. "`npm run build` runs `prisma migrate deploy`." False for this repository.**
+
+```
+build = tsx scripts/validate-env.ts && prisma generate && next build
+```
+
+`vercel.json` sets no `buildCommand`, so Preview builds run exactly that. There are no
+`postinstall`, `prepare` or `prebuild` hooks. Migrations are quarantined behind
+`db:migrate:deploy` → `scripts/migrate-deploy.mjs`, which refuses to start without an explicit
+`DIRECT_URL`, and `scripts/e2e/regression/harness-selftest.mjs:573` asserts *"the build does NOT
+run `migrate deploy`"*. The claim came from a memory describing a **different worktree**.
+
+The practical consequence is narrower than it sounds: a build will not migrate, but `next build`
+can still open a database connection while prerendering, so it is **not** a safe check to run
+while the compute is meant to stay idle. `tsc --noEmit` and `eslint` are.
+
+**2. "Pipeline board not built." False.** `/dashboard/sales/pipeline` is a working 353-line
+screen: it loads `/api/sales/opportunities`, renders configurable stages from the server,
+filters open deals per stage, moves a deal with `POST …/transition`, requires a reason to mark
+lost, gates close/reopen on `can.close` / `can.reopen`, flips its chevrons for RTL, and has a
+real empty state when no stages are configured. The gap was only that the **design** did not
+exist; the feature did. The page's own header comment ("no Figma design exists yet") is now
+stale.
+
+A related correction runs the other way: the design used **«خط الأنابيب»** for this screen while
+the application already used the better term **«مسار الصفقات»** (`pipelineNav`). The Figma frame
+was renamed to match the code, not the reverse.
+
+---
+
+## 7. Verification evidence, and what each piece actually covers
+
+Keep these three separate. They are not interchangeable.
+
+### 7a. Design completion — **partial**
+
+Verified by screenshot of every frame at creation, plus a structural integrity read confirming
+all 8 pre-existing Order component sets unchanged (names, variant counts, descriptions) and
+token totals still 4 / 76 / 18 / 3. Prototype audit: 48 reactions, 0 unresolved.
+
+**Complete:** 14/14 desktop routes, 4 component sets, 6 modals, states board, 3 wired journeys.
+**Incomplete:** tablet/mobile for 11 of 14 routes; no design review has happened.
+
+### 7b. Preview verification — **NOT performed for this change**
+
+- Repository: `feature/sales-crm-commissions`, HEAD **`371ee1b`**, 7 commits ahead of origin.
+- The §7 UI change is **uncommitted working-tree modification** on top of `371ee1b`.
+- The hosted Preview runs deployment `dpl_HynUSRbdwvVVzBYC99yoQW4iM8TY`, built from **`84fd9d6`**.
+  **It does not contain this change.** The 66 hosted smoke assertions cite that deployment and
+  say nothing about the code added here.
+
+Offline checks run against the working tree, with the shared database compute deliberately left
+idle. `npm run build` is skipped — **not** because it migrates (it does not; see the correction
+in §6) but because `next build` can open a connection while prerendering:
+
+| Check | Result |
 |---|---|
-| Leads | `/dashboard/sales/leads` |
-| My commissions | `/dashboard/sales/my-commissions` |
+| `prisma generate` | client generated (offline codegen, inert localhost URL) |
+| `npx tsc --noEmit` | **exit 0** |
+| `npx eslint` on both changed files | **0 errors**, 2 pre-existing `exhaustive-deps` warnings (lines 108, 129 — untouched) |
+| `scripts/e2e/regression/commission-engine.mjs` | **48 passed, 0 failed** (needs no database) |
 
-Both carry a **visible amber banner in the interface itself** reading *"Provisional interface —
-pending design review"* / *«واجهة مبدئية — في انتظار مراجعة التصميم»*. A provisional screen
-that looks finished is worse than one that admits it, because nothing that appears already
-signed off gets reviewed.
+Still outstanding before this can be called Preview-verified: commit, push, redeploy, and re-run
+the hosted smoke suite against the new deployment id.
 
-### UX decisions made in the absence of a design, and why
+### 7c. User acceptance — **has not happened**
 
-These are decisions a designer should review, not settle facts:
-
-- **The next commitment is a column, not a detail.** `nextFollowUpAt` sits on the lead row and
-  a lead with none says so in amber. The commonest failure in a sales pipeline is a lead
-  nobody owns a next step for, and that has to be visible without opening anything.
-- **Overdue is counted in the header.** A number beside the title, not a filter the user has
-  to think to apply.
-- **Duplicates are surfaced, never merged, and never silently blocked.** A phone match is
-  treated as strong (one handset, probably one person); a company match is weak, because
-  several buyers at one café is the normal case. On a strong match the save is refused once,
-  the candidates are listed, and a *Create anyway* button lets the operator proceed
-  deliberately.
-- **Required fields first, optional after.** Company, contact, then phone/city/source/
-  follow-up. A long form gets abandoned halfway and leaves a half-built record.
-- **The commission screen shows the arithmetic, not a total.** Each accrual carries collected,
-  of which tax, qualifying base and effective rate. A final number nobody can check is not an
-  explanation, and a commission figure is exactly the number people argue about.
-- **Status is never colour alone.** Every badge carries a word as well as a tone.
-- **Arabic is the default and is first-class.** Labels are authored in both languages, the
-  layout inherits the app's existing RTL handling, and phone numbers are forced `dir="ltr"`
-  inside RTL text so they do not render reversed.
-
-### Not built, and honestly so
-
-Pipeline Kanban, deal detail, activities/tasks, quotes, sales targets and commission
-administration screens are **not implemented**. The nav links to Pipeline exist but the page
-does not, which is itself a gap to close — either build it or remove the link. Designing nine
-screens against no design system, then rebuilding them once a design exists, would be waste;
-the two screens that were built are the ones the end-to-end flow needed.
+Passing automated checks are not acceptance, and neither is a design existing. Reviewer
+walkthrough is `REVIEW_GUIDE_AR.md`; reviewer accounts are the `RVW_`-prefixed set provisioned by
+`scripts/sales-preview/reviewer-accounts.ts`. **Reviewer credentials were not rotated.**
 
 ---
 
-## 4. Reconciliation plan, for when Figma is available
+## 8. What this module still must not be called
 
-1. Establish whether the connection can write to a canvas. If not, stop and report that
-   instead of improvising.
-2. Find the authorised ERP design file or design system and confirm it belongs to this system
-   before using its tokens. Do not assume colours, type or logo from memory.
-3. Build the flows for all three roles — rep, manager, finance — as wireframes first, then
-   high-fidelity, then an interactive prototype.
-4. Reconcile the two provisional screens against the design, then remove the provisional
-   banner **only when the screen actually matches**.
-5. Record a frame-URL → route/component mapping in this file, and a visual comparison at the
-   agreed breakpoints with any intended differences explained.
+The financial cycle is **not integrated**. There is no invoice or receivables model in this ERP,
+so commission input is a sandbox adapter behind three gates and no figure corresponds to money
+anyone received. The sandbox notice is part of the design, not decoration.
 
-Until steps 1–5 are done, **this feature must not be described as scope-complete**, whatever
-the state of the backend.
+Do not describe the Sales CRM module as production-ready, and do not describe this design
+deliverable as complete.
