@@ -299,27 +299,123 @@ three sandbox payments shared one timestamp, which made it impossible to test th
 effect *from* its own date; a BOM assertion read the decoded string, which is exactly where
 `fetch` strips a BOM; and a URL poll was already satisfied on the page the click started from.
 
-### 7a. Two secret-handling mistakes of mine, and what was done about them
+### 7a. Incident — a Protection Bypass secret was exposed twice
 
-Both concern the temporary Vercel Protection Bypass secret that let an automated smoke test
-through the project's SSO protection. Recorded because a secret that has been displayed is
-compromised whether or not anyone read it.
+Recorded in full because an earlier revision of this section understated it. That revision said
+the exposed secrets "granted access to nothing beyond the protected Preview URL". **That was
+wrong**, and the error was a category one: it described where the secret was *used* as though
+that were the limit of what it *authorised*.
 
-1. **A probe call printed a generated secret into the session transcript.** Asking Vercel to
-   *generate* a bypass secret returns the value in the response body, and the response was
-   printed. The secret was **revoked immediately** and replaced with one generated locally and
-   sent with `--silent`, written to a `0600` file and never displayed.
-2. **`x-vercel-set-bypass-cookie: true` returns the secret to the caller.** It answers `307`
-   with a `Set-Cookie: _vercel_jwt=…` whose payload contains the bypass secret in clear text
-   inside the JWT body, so inspecting the response headers displayed it a second time — and a
-   redaction filter looking for the literal string does not catch it, because it is
-   base64-encoded. That secret was **revoked and rotated** as well, the header was removed from
-   the smoke test (the plain `x-vercel-protection-bypass` header alone returns `200`), and the
-   warning is now written down in `scripts/sales-preview/README.md`.
+#### What the credential actually authorised
 
-Neither secret granted access to anything beyond the protected Preview URL, and no production
-credential was involved. The bypass entry was revoked when the smoke testing finished; the
-project's `ssoProtection` setting was never changed.
+A Vercel **Protection Bypass for Automation** secret bypasses deployment protection for **every
+deployment in the project** until it is revoked — presented as a request header or as the
+`_vercel_jwt` cookie derived from it. It is not scoped to a URL, a deployment, a branch, or an
+environment.
+
+For this project that means the secret would have admitted a holder to any protected deployment
+of `flow`, including the deployment URLs of **production** builds. (Production's public custom
+domain is not protected in the first place, so the secret added nothing there; the protected
+`*.vercel.app` deployment URLs are the ones it would have opened.) It confers no ability to
+deploy, to read environment variables, or to act on the Vercel account — it defeats the access
+gate in front of already-built deployments, and nothing else.
+
+#### Timeline, from the session's own timestamps (UTC)
+
+| Time | Event |
+|---|---|
+| 12:36–12:39 | A probe call asked Vercel to **generate** a bypass secret. The API returns the value in the response body, and the response was printed. **Exposure 1: transcript.** |
+| 12:39:08 | Probe secret **revoked**; replacement #1 created from a locally generated value, sent with `--silent`, never printed. |
+| 12:52:37 | A `curl -D -` probe sent `x-vercel-set-bypass-cookie: true`. The `307` response carried `Set-Cookie: _vercel_jwt=…`, whose JWT payload contains the bypass secret in clear text. The header block was printed. **Exposure 2: transcript, and a redaction filter matching the literal string did not catch it because it is base64-encoded.** |
+| 12:53:12 | Replacement #1 **revoked**; replacement #2 created silently. Never displayed. |
+| 12:54:00 | A second create attempt returned **409 `automation bypass already exists`** — evidence that this project holds at most one automation-bypass entry at a time. |
+| 15:01:06 | Replacement #2 **revoked** at the end of the smoke testing. |
+| 15:01:18 | Revocation verified: the raw secret returns `302` again. |
+
+So a *displayed* secret was live for roughly three minutes in total across two windows
+(≈12:36–12:39 and ≈12:52:37–12:53:12). Replacement #2 was live for about two hours but was
+never displayed anywhere.
+
+#### Where it was exposed, and where it was used
+
+| | |
+|---|---|
+| **Exposed in** | this session's transcript, at `~/.claude/projects/…/<session>.jsonl`, twice. Nowhere else — see the scan below. |
+| **Used by me against** | the Preview deployment `dpl_HynUSRbdwvVVzBYC99yoQW4iM8TY` only, on its immutable URL and its branch alias. |
+| **Used by anyone else** | **unknown.** See the access-history limits below. |
+
+#### What access history exists, and what does not
+
+| Source | Available? |
+|---|---|
+| Vercel team audit log | **No** — `/v1/teams/…/audit-logs` returns 404 on this plan. |
+| Per-bypass-secret usage record | **Does not exist.** Vercel's runtime logs do not record whether a request was admitted by a protection bypass, by SSO, or by a public route, so no request can be attributed to the secret even where logs survive. |
+| Deployment runtime logs | **Partially** — and not for the window that matters. The retained window at the time of investigation was **15:00:32 → 15:39:48 UTC**, about 39 minutes, capped at 100 rows. Both exposure windows (≈12:36–12:39 and ≈12:52–12:53) had already aged out. |
+
+**Therefore: no evidence of unauthorised use exists, and no evidence of its absence exists
+either.** Both claims are unsupported and neither is made here. What can be said is that the
+exposure was to a local session transcript on the developer's own machine rather than to a
+shared or public surface, and that the displayed secrets were revoked within about three
+minutes of being displayed.
+
+One thing the surviving logs *did* show, and it is recorded because it is unattributed rather
+than because it is suspicious: at **15:38:46–15:39:48 UTC — 37 minutes after the last
+revocation** — a browser-shaped request sequence reached the deployment's functions on the
+immutable URL (`GET /`, `GET /login`, `GET /api/settings/logo`, then three
+`POST /api/auth/login` each answered **401**). Because it postdates revocation and the cookie
+path was already dead, it cannot have been admitted by the bypass; the only remaining admission
+path is Vercel SSO, which requires project membership. The log rows carry no IP, user-agent or
+identity, so it cannot be attributed further. The pattern — reaching the sign-in screen and
+then failing authentication three times — is what a reviewer following the handoff would
+produce if they had not been told the fixture PINs, which they had not been.
+
+#### Revocation and verification
+
+| Check | Result |
+|---|---|
+| Probe secret (exposure 1) | revoked 12:39:08 |
+| Replacement #1 (exposure 2) | revoked 12:53:12 |
+| Replacement #2 (never exposed) | revoked 15:01:06 |
+| Entries remaining | **zero.** The 409 above establishes that the project holds at most one automation-bypass entry, and the last operation on it was a successful revoke. The REST API exposes no `GET` for this resource (404), so the dashboard — Project → Settings → Deployment Protection → Protection Bypass for Automation — is the authoritative visual confirmation. |
+| Raw secret replayed | `302` to Vercel SSO, i.e. refused |
+| **Issued cookie replayed** | the one `_vercel_jwt` recoverable from the transcript was replayed against **both** the branch alias and the immutable URL: **`302` to SSO on both** — refused. Its audience claim was the immutable deployment host. |
+| Control | an unauthenticated request to the same URL also returns `302`, so "refused" above is not simply an open URL |
+| `ssoProtection` | unchanged, `all_except_custom_domains` |
+
+Replaying the cookie matters separately from replaying the secret: the cookie is a signed JWT
+the edge validates, and a JWT can outlive the credential that minted it. Revoking the secret is
+not by itself proof that the cookie path was invalidated.
+
+#### Scan for retained copies
+
+Needles recovered from the transcript and from the live environment files, then searched for
+everywhere else. Reported by digest; no value was printed.
+
+| Location | Result |
+|---|---|
+| Every commit this branch adds | **clean** — none of the nine credential values appears in any commit |
+| Added lines, generic credential sweep | 17 `postgres://` strings, **all** with the literal placeholder password `p` in `scripts/sales-preview/guard-proof.sh`; no token, key or JWT pattern |
+| Repository working tree | **clean** |
+| Scratch directory | the two live env files only, which are their own source |
+| `.env.sales-preview` | held the **superseded `neondb_owner` password** from the previous preview setup and was no longer needed — **deleted** |
+| Session transcript | both exposed secrets and the cookie remain in it. Not sanitised: it is Claude Code's own append-only session store and editing it risks corrupting session state. All three values are revoked, so the retained copies are inert. Flagged for the account holder to delete the file if they prefer. |
+| Env file permissions | `mode: 0o600` **does not restrict a file on Windows** — Node only toggles the read-only attribute, and Git Bash's `ls -l` reports an emulated `0644` that means nothing. Both files now carry a real ACL: inheritance removed, granted to the single user account. The README no longer claims 0600 on Windows. |
+
+#### Making it safe by construction
+
+Rules, not reminders, in `scripts/sales-preview/smoke-hosted.mjs` and its README:
+
+- `x-vercel-set-bypass-cookie` is gone. The plain `x-vercel-protection-bypass` header alone
+  returns `200`, so the cookie round-trip bought nothing and cost an exposure.
+- No response header block is ever printed around a bypass-protected request.
+- Auth endpoints are reported by **status code only** — never a response body, never the cookie
+  jar.
+- Every logged detail passes through a **pattern-based** redactor: the bypass value, anything
+  JWT-shaped, any `_vercel_jwt`/`auth-token`/`session` cookie, and any
+  `"secret"`/`"token"`/`"password"`/`"pin"` JSON field. Pattern-based because the second
+  exposure proved a literal-string filter is defeated by base64.
+- The secret is generated locally and the API call that registers it uses `--silent`, so the
+  value never appears in a response that might be printed.
 
 ---
 
@@ -381,9 +477,23 @@ is set to the **runtime** role rather than left unset, and why no deployment run
 
 ### 8c. Hosted smoke test — 66 assertions, 0 failed
 
-`scripts/sales-preview/smoke-hosted.mjs`, run over HTTPS against the deployed URL. No local
-server, no direct database connection: every assertion is what the deployed application
-answered.
+**Exactly what was tested.** The branch alias moves to whatever this branch last deployed, so
+it is the wrong thing to cite as evidence. The immutable identity is:
+
+| | |
+|---|---|
+| Deployment ID | `dpl_HynUSRbdwvVVzBYC99yoQW4iM8TY` |
+| Immutable URL | `https://flow-jjaqyku15-ibrahimmutambak-4927s-projects.vercel.app` |
+| Branch alias (moves) | `https://flow-com-git-feature-sale-adea3e-ibrahimmutambak-4927s-projects.vercel.app` |
+| Commit | `84fd9d60bbfcc446e3153721c45b673db1ecef36` |
+| State / created | READY · 2026-09-24T12:35:48Z |
+
+Run twice, once per URL, 66 assertions and 0 failures each time, from two different commission
+baselines. **If a later commit redeploys this branch, this evidence does not carry forward to
+it** — the alias will point somewhere else, and the new deployment needs its own run.
+
+`scripts/sales-preview/smoke-hosted.mjs`, run over HTTPS. No local server, no direct database
+connection: every assertion is what the deployed application answered.
 
 | Group | What was driven on the hosted deployment |
 |---|---|
@@ -439,7 +549,7 @@ either list.
 |---|---|
 | `vercel.json` committed | `git.deploymentEnabled` for `feature/sales-crm-commissions` only |
 | Five Preview variables created | `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `PIN_LOOKUP_SECRET`, `SALES_SANDBOX_COLLECTIONS` — **all branch-scoped to `feature/sales-crm-commissions`** |
-| Protection Bypass for Automation | created for the smoke test, **revoked afterwards**; see §7a |
+| Protection Bypass for Automation | created for the smoke test, exposed twice, and **revoked** — including the cookie path, verified by replay. It is a **project-wide** credential, not a URL-scoped one. Full record in §7a. |
 | Deployments | preview deployments of this branch |
 
 **Secrets** — `JWT_SECRET` and `PIN_LOOKUP_SECRET` for this branch were generated fresh and

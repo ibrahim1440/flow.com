@@ -25,12 +25,36 @@ const SKU = CATALOG.skus.ken1kg.id;
 const STAGE = CATALOG.crm.stages[0].id;
 
 const REP = "UAT_emp_crmRep", MGR = "UAT_emp_crmManager", FIN = "UAT_emp_crmFinance";
-const PIN = { rep: "720011", manager: "720022", finance: "720033" };
+// The browser suite's fixture PINs are the default, because that suite is what seeds these
+// accounts. They stop working the moment `reviewer-accounts.ts` issues fresh ones for a human
+// reviewer — so the values are overridable, and the smoke test does not force you to choose
+// between running it and having rotated credentials.
+const PIN = {
+  rep: process.env.SMOKE_PIN_REP ?? "720011",
+  manager: process.env.SMOKE_PIN_MANAGER ?? "720022",
+  finance: process.env.SMOKE_PIN_FINANCE ?? "720033",
+};
+
+// Everything printed goes through this. Three rules, each earned:
+//
+//   1. Never print a response HEADER. Vercel returns the protection-bypass secret inside a
+//      Set-Cookie JWT, so dumping headers leaks it — and base64 defeats a literal-string
+//      filter, which is why the filter below is shaped by PATTERN.
+//   2. Never print the cookie jar, and never print a response body from an auth endpoint
+//      beyond its status code.
+//   3. Redact anything JWT-shaped or bypass-secret-shaped even so, because rules 1 and 2
+//      depend on remembering and this one does not.
+const redact = (s) =>
+  String(s)
+    .replace(new RegExp(BYPASS, "g"), "<bypass-secret>")
+    .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "<jwt>")
+    .replace(/(_vercel_jwt|auth-token|session)=[^;\s"']+/gi, "$1=<redacted>")
+    .replace(/("(?:secret|token|password|pin|bypass)"\s*:\s*")[^"]*"/gi, '$1<redacted>"');
 
 const results = { pass: 0, fail: 0, failures: [] };
 const check = (name, ok, detail = "") => {
   if (ok) { results.pass++; console.log(`  [PASS] ${name}`); }
-  else { results.fail++; results.failures.push(name); console.log(`  [FAIL] ${name}  << ${detail}`); }
+  else { results.fail++; results.failures.push(name); console.log(`  [FAIL] ${name}  << ${redact(detail)}`); }
 };
 const section = (t) => console.log(`\n${"=".repeat(78)}\n  ${t}\n${"=".repeat(78)}`);
 const sub = (t) => console.log(`\n-- ${t}`);
@@ -64,7 +88,8 @@ const logout = () => { cookies = {}; };
 async function loginAs(role) {
   logout();
   const r = await api("/api/auth/login", { method: "POST", body: { method: "pin", pin: PIN[role] } });
-  if (r.status !== 200) throw new Error(`login as ${role} failed: ${r.status} ${r.text.slice(0, 200)}`);
+  // Status only. An auth response body is never printed, and neither is the jar it filled.
+  if (r.status !== 200) throw new Error(`login as ${role} failed with status ${r.status}`);
   return r;
 }
 
@@ -107,7 +132,7 @@ async function main() {
   sub("2.1 the rep signs in with a PIN");
   {
     const r = await loginAs("rep");
-    check("login succeeds", r.status === 200, r.text.slice(0, 160));
+    check("login succeeds", r.status === 200, `status ${r.status}`);
     // Succeeding proves two things about the resolved environment at once: the branch-scoped
     // DATABASE_URL points at the database holding this fixture, and the branch-scoped
     // PIN_LOOKUP_SECRET is the key its stored selector was derived under. A wrong value for
@@ -115,13 +140,13 @@ async function main() {
     check("which proves the branch-scoped DATABASE_URL and PIN_LOOKUP_SECRET both resolved", r.status === 200);
 
     const me = await api("/api/auth/me");
-    check("the session identifies the rep", me.status === 200 && me.text.includes(REP), me.text.slice(0, 160));
+    check("the session identifies the rep", me.status === 200 && me.text.includes(REP), `status ${me.status}`);
   }
   sub("2.2 a wrong PIN is refused");
   {
     logout();
     const bad = await api("/api/auth/login", { method: "POST", body: { method: "pin", pin: "000000" } });
-    check("refused with 401", bad.status === 401, `${bad.status} ${bad.text.slice(0, 120)}`);
+    check("refused with 401", bad.status === 401, `status ${bad.status}`);
     const me = await api("/api/auth/me");
     check("and no session was issued", me.status === 401, String(me.status));
   }
