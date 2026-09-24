@@ -615,6 +615,51 @@ async function main() {
     check("no partial order was created", after.n === before.n, `${before.n} → ${after.n}`);
   }
 
+  sub("D4b. two quotations converting at the same instant get two different order numbers");
+  {
+    // The order number is derived from the current maximum, so two callers reading it
+    // together would pick the same one. Outside a transaction the unique index plus a
+    // retry handles that. INSIDE one it cannot: PostgreSQL aborts the whole transaction on
+    // the duplicate key and every later statement fails with "current transaction is
+    // aborted" — so the retry has nothing to retry with. The quote-to-order path runs in a
+    // transaction, because the order and the link row that makes it idempotent must commit
+    // together. An advisory lock is what actually prevents the collision; this proves it.
+    const ids2 = [];
+    for (const n of [1, 2]) {
+      const q = await api("/api/sales/quotes", {
+        method: "POST",
+        body: {
+          opportunityId: ids.opportunityId,
+          validUntil: new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10),
+          lines: [{ productSkuId: ids.skuId, quantity: String(n), unit: "UNIT", unitPrice: "110" }],
+        },
+      });
+      await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ISSUED" } });
+      await api(`/api/sales/quotes/${q.json.quote.id}/transition`, { method: "POST", body: { to: "ACCEPTED" } });
+      ids2.push(q.json.quote.id);
+    }
+
+    const before = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+
+    // Fired together, not one after the other.
+    const [a, b] = await Promise.all(
+      ids2.map((id) => api(`/api/sales/quotes/${id}/create-order`, { method: "POST", body: {} })),
+    );
+    check("both conversions succeeded", a.status === 201 && b.status === 201,
+      `${a.status} / ${b.status} ${S(a.json).slice(0, 120)} ${S(b.json).slice(0, 120)}`);
+    check("and they are two DIFFERENT orders",
+      a.json?.orderNumber !== b.json?.orderNumber, `${a.json?.orderNumber} vs ${b.json?.orderNumber}`);
+
+    const after = await one(`SELECT COUNT(*)::int n FROM "Order"`);
+    check("exactly two orders were added", after.n === before.n + 2, `${before.n} → ${after.n}`);
+
+    const dupes = await one(
+      `SELECT COUNT(*)::int n FROM (
+         SELECT "orderNumber" FROM "Order" GROUP BY "orderNumber" HAVING COUNT(*) > 1
+       ) d`);
+    check("no two orders share a number", dupes.n === 0, S(dupes));
+  }
+
   sub("D5. the deal can now be won, and the pipeline records it");
   {
     await loginAs(MANAGER);

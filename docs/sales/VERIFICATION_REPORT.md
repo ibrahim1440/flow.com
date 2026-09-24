@@ -18,7 +18,8 @@ worth reading if you want to know what was not.
 The operational ERP's own 26-suite regression, run against this branch's build, on the
 non-production regression database with migration 21 applied.
 
-**Result: recorded at the end of this section once the run completes.** *(See §1a.)*
+**Result: 2297 assertions, 0 failed — as a composite of one loaded run plus an
+isolated re-verification of five suites the shared database starved. §1a has the whole story,**
 
 What this does and does not establish:
 
@@ -39,7 +40,48 @@ kilograms, and that suite drives a real order all the way to a delivery.
 ERP_E2E_BASE_URL=http://127.0.0.1:3010 node withpkg-sales.mjs node scripts/e2e/regression/run-all.mjs
 ```
 
-<!-- RESULT-PLACEHOLDER -->
+**First pass: 1797 assertions, 1 failed, and 5 suites the runner
+refused to call trustworthy.** Reported as it happened rather than re-run until it looked
+clean.
+
+**The cause was mine, and it was not the change under test.** The preview database
+`sales_crm_preview` and the regression database `neondb` sit on the SAME Neon compute
+(`ep-wandering-leaf-aqjtuin5`, 0.25–2 CU, free tier). I ran the Playwright browser suite and
+the sales suites against port 3020 while `run-all.mjs` was running against 3010 — both on
+that one compute. The server log for the window shows exactly what that produces:
+
+```
+[API Error] Error: Connection terminated unexpectedly
+⨯ Error: Connection terminated due to connection timeout
+⨯ Error: timeout exceeded when trying to connect
+```
+
+Four suites died mid-run without printing a summary; `platform-hardening` failed one
+assertion — *"and can read the module it has access to << status=500"* — and the very next
+assertion, which reuses the same session, passed. That is a dropped connection, not a
+session-handling defect.
+
+**Every suspect was then re-run in isolation, with nothing else touching that compute:**
+
+| Suite | In the loaded run | Alone |
+|---|---|---|
+| `blend-integrity` | 0 passed, 0 failed — exited 1; printed no "<n> passed, <m> failed" summary | **105 passed, 0 failed** |
+| `po-lifecycle` | 0 passed, 0 failed — exited 1; printed no "<n> passed, <m> failed" summary | **132 passed, 0 failed** |
+| `hardening` | 0 passed, 0 failed — exited 1; printed no "<n> passed, <m> failed" summary | **117 passed, 0 failed** |
+| `platform-hardening` | 46 passed, 1 failed — exited 1 | **47 passed, 0 failed** |
+| `h2a-hardening` | 0 passed, 0 failed — exited 1; printed no "<n> passed, <m> failed" summary | **145 passed, 0 failed** |
+
+**546 assertions, 0 failed, no connection drops and no FATAL.**
+
+Combined honest figure: **2297 assertions, 0 failed across all 26 suites** — taking each
+suite's isolated result where the loaded run could not produce one. That is a composite, and
+it is labelled as one. It is not a single clean end-to-end pass, and this document does not
+claim one.
+
+This failure mode is documented and was known before this run: the endpoint drops connections
+under load, each pass fails a *different* block of suites, and every suspect passes alone. The
+avoidable part — overlapping two suite sets on one compute — was my own scheduling mistake and
+is now recorded so the next person does not repeat it.
 
 ---
 
@@ -53,8 +95,8 @@ Five suites, run with `npm run regression:sales` against `sales_crm_preview`.
 | `quotes-domain` | **112** | quotation pricing, the lifecycle table, and the whole CSV layer | nothing — pure |
 | `sales-commissions-db` | **23** | constraints exist, concurrency resolves, a rollback leaves nothing | PostgreSQL |
 | `sales-security` | **34** | what is refused — every case passes only if the server said no | running app |
-| `sales-workflow` | **201** | the ordinary path end to end, with rows checked after every step | running app |
-| | **418** | **0 failed** | |
+| `sales-workflow` | **205** | the ordinary path end to end, with rows checked after every step | running app |
+| | **422** | **0 failed** | |
 
 The two pure suites are the ones to trust most: every expected figure in them was worked out by
 hand and written as a literal, so none of them can pass by the code agreeing with itself.
@@ -64,6 +106,8 @@ handling → conversion → activities → sample → quotation → discount ref
 acceptance → order → idempotent replay → won → collections → accrual → approval → refund →
 adjustment → payout → target → report → CSV import → CSV export → stage configuration →
 assignment lifecycle. After each step it reads the database rather than believing the response.
+It also fires two quotation-to-order conversions with `Promise.all` and asserts they get two
+different order numbers — see defect 7 in §7.
 
 ---
 
@@ -71,14 +115,14 @@ assignment lifecycle. After each step it reads the database rather than believin
 
 Chrome, real screens, real keypad sign-in. `npm run uat:sales`.
 
-**51 tests, 0 failed** (`tests/e2e/sales-crm.spec.ts`), plus **15, 0 failed** in the existing
+**52 tests, 0 failed** (`tests/e2e/sales-crm.spec.ts`), plus **15, 0 failed** in the existing
 `permissions.spec.ts`, extended with the three CRM roles.
 
 | Group | Workflows driven |
 |---|---|
 | Sign-in and session | a rep signs in and the session survives a reload; signing out refuses a protected page; a deactivated employee is unauthenticated on the very next request |
 | Leads | create through the form; the same phone in another format is reported and the operator may still proceed; a rep cannot see or reach a colleague's lead; a manager can; conversion makes one customer and one deal however many times it is clicked |
-| Deals | the deal page opens; a stage move writes an event and survives a reload; a rep cannot close a deal at all; a manager marking one lost cannot until a reason is typed; the server refuses it too when the dialog is bypassed; reopening is a separate privilege and clears the stale loss reason |
+| Deals | the board shows the deal in its stage column and opens it; the deal page opens; a stage move writes an event and survives a reload; a rep cannot close a deal at all; a manager marking one lost cannot until a reason is typed; the server refuses it too when the dialog is bypassed; reopening is a separate privilege and clears the stale loss reason |
 | Quotations | build a quotation line by line and the server prices it; a rep is refused at the discount threshold; a manager issues it and the approval is recorded on the document; the issued quotation is read-only on screen and on the server; a revision supersedes and carries the lines; the revision is issued at a corrected price and accepted |
 | Orders | the accepted quotation becomes exactly one order with kilograms derived by the order service; clicking again returns the first order; the order appears on the operational Orders screen; the deal can then be won |
 | Commission | a rep cannot record a collection; a partial collection accrues once and a re-delivery changes nothing; the rep sees their own figure marked as sandbox and cannot open the team review; the second instalment adds the difference and the rows sum to the period; two people on different plans are paid differently for the same money; finance reviews and the ledger reconciles with the rows; finance cannot approve their own; approval makes the rows immutable; a refund after approval corrects the ledger and leaves the approved rows untouched |
@@ -161,8 +205,8 @@ Other integration notes:
 
 ## 7. Defects found and fixed during this work
 
-All six were found by tests rather than by reading, which is the point of them. Each was fixed
-at the root and each has a regression test.
+Six of the seven were found by tests rather than by reading, which is the point of them. Each
+was fixed at the root and each has a regression test.
 
 1. **A manual adjustment was cancelled out by the next collection.** The accrual engine counted
    `ADJUSTMENT` ledger entries as part of its own baseline, so the next payment computed a
@@ -192,6 +236,29 @@ at the root and each has a regression test.
 6. **The import preview miscounted the file**, reporting "2 of 2 rows would be imported" for a
    three-row file, because the denominator counted rows that parsed rather than rows the file
    held. *(quotes I1/I5, ui 6.6)*
+7. **The order-number retry could not retry inside a transaction.** Found by reading rather
+   than by a test, and it was mine. `createOrderWithNumber` derives the next number from the
+   current maximum and retries on a duplicate key — which works for `POST /api/orders`, where
+   each insert is its own implicit transaction. The quotation-to-order path calls it INSIDE a
+   transaction, because the order and the link row that makes it idempotent must commit
+   together, and PostgreSQL aborts the whole transaction on a duplicate key: every later
+   statement then fails with "current transaction is aborted", so the retry had nothing left to
+   retry with. Two quotations converting in the same instant would have produced a confusing
+   failure rather than a second attempt. Fixed with a transaction-scoped advisory lock in the
+   namespace convention this codebase already uses — 7761 for production orders by year, 7763
+   for roasting batches by date, now 7764 for order numbers — with the lock order documented
+   beside it. *(flow D4b: two conversions fired with `Promise.all`, asserting two distinct
+   numbers and no duplicate anywhere in the table)*
+
+One more is worth recording because it was in my own tooling rather than in the product. The
+scratch file-editing helper used a STRING replacement, and dollar-ampersand, dollar-backtick,
+dollar-apostrophe and dollar-digit are all special **in the replacement argument**. A template
+literal ending in a dollar sign immediately before its closing backtick — which is exactly what
+a regex like "…/deals/:id, anchored at the end" produces — becomes dollar-backtick, meaning
+"insert everything before the match". It silently duplicated an entire 60 KB spec file twice
+before it was traced. The helper now passes a replacer **function**, which is taken literally,
+and every file changed on this branch was re-scanned for the same corruption: only that one
+spec was affected, it was restored from git, and `tsc` is clean across the project.
 
 Three of the test fixtures were also wrong and were corrected rather than accommodated: all
 three sandbox payments shared one timestamp, which made it impossible to test that a split takes

@@ -97,11 +97,47 @@ export type NewOrderHeader = {
 };
 
 /**
+ * Serialise order-number allocation across concurrent callers.
+ *
+ * `orderNumber` is unique and derived from the current maximum, so two callers reading it
+ * at the same moment pick the same number and one of them loses on the unique index.
+ *
+ * ── Why this had to be added when quotations learned to raise orders ──
+ * The retry-on-P2002 loop below has always been enough for `POST /api/orders`, because that
+ * route calls this on the plain client: each `create` is its own implicit transaction, so a
+ * duplicate-key failure rolls back only that statement and the next attempt proceeds.
+ *
+ * Inside an explicit transaction that is no longer true. PostgreSQL aborts the WHOLE
+ * transaction on the error, and every statement after it fails with "current transaction is
+ * aborted" — so the retry cannot retry, and a routine numbering race would surface as a
+ * confusing failure rather than a second attempt. The quotation-to-order path runs in a
+ * transaction, because the order and the link row that makes it idempotent have to commit
+ * together.
+ *
+ * A transaction-scoped advisory lock fixes it properly: callers queue for the number
+ * instead of racing for it, so the collision does not happen at all. Namespace 7764,
+ * alongside the numbering locks this codebase already uses — 7761 for production orders by
+ * year, 7763 for roasting batches by date.
+ *
+ * Taken on the plain client the lock releases immediately (each statement is its own
+ * transaction), which is harmless: that path still has its retry.
+ *
+ * ── Lock order ──
+ * This codebase states its canonical lock order wherever two locks can be held at once, so:
+ * within the quotation-to-order path the Quote row is taken `FOR UPDATE` FIRST and this
+ * advisory lock second, and no caller does it the other way round. A second conversion of
+ * the SAME quote therefore waits on the quote row before it can reach the advisory lock, so
+ * it can never hold 7764 while waiting for a quote row somebody else holds. A conversion of
+ * a DIFFERENT quote holds its own unrelated row. There is no inversion either way.
+ */
+const ORDER_NUMBER_LOCK_NAMESPACE = 7764;
+
+/**
  * Write the order and its lines, taking the next order number.
  *
- * The retry loop is not decoration: `orderNumber` is unique and derived from the current
- * maximum, so two orders raised in the same second race for it. Five attempts on P2002 is
- * what the route has always done and is preserved exactly.
+ * The retry loop is kept as a second line of defence, for the non-transactional path where
+ * the advisory lock above cannot hold. Five attempts on P2002 is what the route has always
+ * done and is preserved exactly.
  */
 export async function createOrderWithNumber(
   db: Client,
@@ -114,6 +150,10 @@ export async function createOrderWithNumber(
     // Review" forever and can never reach Ready for Shipping.
     throw { _appCode: 400, message: "An order must have at least one line." };
   }
+
+  // Before reading the maximum, not after: the point is that nobody else is between the
+  // read and the write.
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(${ORDER_NUMBER_LOCK_NAMESPACE}, 0)`;
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const lastOrder = await db.order.findFirst({ orderBy: { orderNumber: "desc" } });
