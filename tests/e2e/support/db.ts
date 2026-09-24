@@ -12,13 +12,15 @@ import { Client } from "pg";
  * No wildcard and no prefix match — "erp_mvp_preprod" must not pass merely because it
  * begins with "erp_mvp" — and an unrecognised name is refused rather than allowed.
  *
- * `sales_crm_preview` was added when the CRM suites arrived. It is a database created
- * EMPTY for that work, on a non-production branch, holding nothing that was copied from
- * anywhere. It is named here in full for the same reason the other two are: so widening
- * this boundary is a visible edit to a literal rather than a pattern quietly matching
- * something new.
+ * `sales_preview` is the CRM suites' target: a database created EMPTY on a non-production
+ * branch, holding nothing copied from anywhere, and reached with a role that owns nothing and
+ * cannot run DDL. It replaced `sales_crm_preview` — same branch, but that one is reached with
+ * `neondb_owner`, a member of neon_superuser and therefore of pg_read_all_data and
+ * pg_write_all_data, which can read every table in every database here. Named in full for the
+ * same reason the other two are: widening this boundary must be a visible edit to a literal,
+ * never a pattern quietly matching something new.
  */
-const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e", "sales_crm_preview"];
+const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e", "sales_preview"];
 
 function refuseTestDatabase(why: string): Error {
   return new Error(

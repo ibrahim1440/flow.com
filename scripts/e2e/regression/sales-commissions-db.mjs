@@ -20,7 +20,12 @@ const { Decimal } = require_("@prisma/client/runtime/client");
 
 const URL_ = process.env.DATABASE_URL ?? "";
 const dbName = (URL_.match(/\/([a-z0-9_]+)(\?|$)/) || [])[1];
-if (dbName !== "sales_crm_preview") {
+// The isolated Preview database. Not `sales_crm_preview`, which this suite used to name:
+// that database is reached with `neondb_owner`, a role that is a member of neon_superuser and
+// therefore of pg_read_all_data and pg_write_all_data — able to read and write every table in
+// every database on the branch. `sales_preview` is reached with `sales_preview_app`, which
+// owns nothing, holds SELECT/INSERT/UPDATE/DELETE and no DDL, and is a member of no role.
+if (dbName !== "sales_preview") {
   console.log(`FATAL: refusing to run against database "${dbName ?? "(none)"}" — this suite writes freely and`);
   console.log("only the dedicated preview database is an acceptable target.");
   process.exit(3);
