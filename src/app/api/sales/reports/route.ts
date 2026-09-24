@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales } from "@/lib/services/sales/scope";
+import { toCsv } from "@/lib/services/sales/csv";
 import { Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd } from "@/lib/services/commissions/engine";
 
 /**
@@ -36,6 +37,10 @@ export async function GET(request: Request) {
 
   const scopeAll = seesAllSales(user.permissions);
   const mine = scopeAll ? {} : { ownerId: user.id };
+
+  // A spreadsheet of the same figures, for the meeting nobody runs from a browser tab.
+  // Scoped exactly as the screen is — a rep exports their own performance, not the team's.
+  const asCsv = url.searchParams.get("format") === "csv";
 
   try {
     const [
@@ -140,7 +145,7 @@ export async function GET(request: Request) {
 
     const sources = [...new Set(recentEvents.map((e) => e.sourceSystem))];
 
-    return NextResponse.json({
+    const payload = {
       periodStart,
       periodEnd,
       scope: scopeAll ? "all" : "own",
@@ -198,6 +203,45 @@ export async function GET(request: Request) {
 
       collectionSources: sources,
       sandbox: sources.length > 0 && sources.every((s) => s === "SANDBOX"),
+    };
+
+    if (!asCsv) return NextResponse.json(payload);
+
+    // One flat table rather than several: a reader opening this in Excel wants to read
+    // down a column, and a file with four differently-shaped blocks in it cannot be
+    // sorted, filtered or pasted into anything.
+    const month = periodStart.toISOString().slice(0, 7);
+    const rows: unknown[][] = [
+      ["Leads", "Created", payload.leads.created, ""],
+      ["Leads", "Converted", payload.leads.converted, ""],
+      ["Leads", "Conversion rate %", payload.leads.conversionRatePercent,
+        "of the leads that arrived in this month"],
+      ["Leads", "New customers created", payload.leads.newCustomersCreated, ""],
+      ...payload.leads.bySource.map((s) => ["Lead source", s.source, s.count, ""]),
+      ["Pipeline", "Open deals", payload.pipeline.openCount, ""],
+      ["Pipeline", "Open value", payload.pipeline.openValue, "SAR"],
+      ...payload.pipeline.byStage.map((s) => ["Pipeline stage", s.nameEn, s.count, s.value + " SAR"]),
+      ["Closed", "Won", payload.closed.won, payload.closed.wonValue + " SAR"],
+      ["Closed", "Lost", payload.closed.lost, payload.closed.lostValue + " SAR"],
+      ["Closed", "Win rate %", payload.closed.winRatePercent, ""],
+      ...payload.closed.lostReasons.map((r) => ["Lost reason", r.reason, r.count, ""]),
+      ["Sales cycle", "Median days", payload.duration.medianDays ?? "", `from ${payload.duration.sampleSize} closed deals`],
+      ["Sales cycle", "Mean days", payload.duration.meanDays ?? "", `from ${payload.duration.sampleSize} closed deals`],
+    ];
+
+    if (payload.sandbox) {
+      // The caveat travels with the file. A spreadsheet outlives the screen that explained it.
+      rows.push(["Note", "Collection source", "SANDBOX",
+        "No real payment has been received; these figures are synthetic."]);
+    }
+
+    return new NextResponse(toCsv(["Section", "Measure", "Value", "Note"], rows), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="sales-report-${scopeAll ? "all" : "mine"}-${month}.csv"`,
+        "Cache-Control": "no-store",
+      },
     });
   } catch (err) {
     return handleDomainError(err);

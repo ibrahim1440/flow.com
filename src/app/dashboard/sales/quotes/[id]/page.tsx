@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Send, Check, X, Copy, ShoppingCart, Trash2 } from "lucide-react";
+import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer } from "lucide-react";
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
   Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api, formatMoney,
@@ -53,6 +53,9 @@ type Quote = {
   taxTotal: string;
   grandTotal: string;
   issuedAt: string | null;
+  // Present only once the quotation has been issued. Its presence is what decides whether
+  // there is a document to print at all — a draft has no frozen copy to show a customer.
+  issuedSnapshot: unknown | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
   rejectionNote: string | null;
@@ -306,6 +309,15 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         }
         actions={
           <>
+            {quote.issuedSnapshot != null && (
+              <Link
+                href={`/dashboard/sales/quotes/${quote.id}/print`}
+                data-testid="open-print"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold bg-white border-2 border-border text-charcoal hover:border-orange active:scale-[0.98] transition-all"
+              >
+                <Printer size={15} aria-hidden /> {ar ? "المستند" : "Document"}
+              </Link>
+            )}
             {editable && (
               <Button onClick={save} disabled={busy || lines.length === 0} testId="save-quote">
                 {ar ? "حفظ" : "Save"}

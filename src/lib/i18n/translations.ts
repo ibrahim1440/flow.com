@@ -17,6 +17,7 @@ export const translations = {
   salesReportsNav:    { en: "Sales reports",          ar: "تقارير المبيعات" },
   commissionPlansNav: { en: "Commission plans",       ar: "خطط العمولات" },
   commissionReviewNav:{ en: "Commission review",      ar: "مراجعة العمولات" },
+  salesSettingsNav:   { en: "Sales settings",         ar: "إعدادات المبيعات" },
   commissionsAdminNav:{ en: "Commission admin",       ar: "إدارة العمولات" },
 
   leadsTitle:         { en: "Leads",                  ar: "العملاء المحتملون" },

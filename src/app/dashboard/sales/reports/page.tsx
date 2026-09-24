@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, Download } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
   Field, TextInput, Money, Pill, TableWrap, api,
@@ -105,11 +105,23 @@ export default function ReportsPage() {
           ) : null
         }
         actions={
-          <div className="w-40">
-            <Field id="rp-month" label={ar ? "الشهر" : "Month"}>
-              <TextInput id="rp-month" type="month" value={month} onChange={setMonth} />
-            </Field>
-          </div>
+          <>
+            <div className="w-40">
+              <Field id="rp-month" label={ar ? "الشهر" : "Month"}>
+                <TextInput id="rp-month" type="month" value={month} onChange={setMonth} />
+              </Field>
+            </div>
+            <a
+              // A real link rather than a scripted download: the browser handles the file,
+              // the Content-Disposition header names it, and it survives JavaScript failing.
+              href={`/api/sales/reports?month=${month}&format=csv`}
+              download
+              data-testid="export-report"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-white border-2 border-border text-charcoal rounded-xl text-sm font-bold hover:border-orange active:scale-[0.98] transition-all"
+            >
+              <Download size={16} aria-hidden /> {ar ? "تصدير CSV" : "Export CSV"}
+            </a>
+          </>
         }
       />
 

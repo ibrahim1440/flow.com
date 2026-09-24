@@ -19,6 +19,7 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "quotesNav",  icon: FileText,        href: "/dashboard/sales/quotes", module: "sales" },
   { key: "salesTargetsNav", icon: Target,     href: "/dashboard/sales/targets", module: "sales" },
   { key: "salesReportsNav", icon: BarChart3,  href: "/dashboard/sales/reports", module: "sales" },
+  { key: "salesSettingsNav", icon: KanbanSquare, href: "/dashboard/sales/settings", module: "sales", sub: "stage_manage" },
   { key: "myCommissionsNav", icon: Percent,   href: "/dashboard/sales/my-commissions", module: "commissions" },
   // Administration, not self-service. Both are gated further inside — the plan screen needs
   // `manage_plans` and the review screen needs `view_team` — but keeping them out of the

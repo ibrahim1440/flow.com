@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download } from "lucide-react";
+import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -83,6 +83,27 @@ export default function LeadsPage() {
   });
 
   const [converting, setConverting] = useState<string | null>(null);
+  /**
+   * The lead being considered for deletion.
+   *
+   * A two-step confirmation rather than a window.confirm(): the reason a delete is refused
+   * — "this lead has nine logged conversations" — is the useful part, and a native dialog
+   * has nowhere to put it.
+   */
+  const [deleting, setDeleting] = useState<Lead | null>(null);
+
+  async function remove(lead: Lead) {
+    setError("");
+    const res = await fetch(`/api/sales/leads/${lead.id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    setDeleting(null);
+    if (!res.ok) {
+      setError(data.error ?? (lang === "ar" ? "تعذّر الحذف." : "Could not delete."));
+      return;
+    }
+    setSuccess(lang === "ar" ? "حُذف العميل المحتمل." : "Lead deleted.");
+    load();
+  }
 
   useEffect(() => { load(); }, []);
 
@@ -265,12 +286,20 @@ export default function LeadsPage() {
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-bold" role="alert">
+        <div
+          className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-bold"
+          role="alert"
+          data-testid="alert-error"
+        >
           {error}
         </div>
       )}
       {success && (
-        <div className="bg-success-bg border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm font-bold">
+        <div
+          className="bg-success-bg border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm font-bold"
+          role="status"
+          data-testid="alert-success"
+        >
           {success}
         </div>
       )}
@@ -359,11 +388,77 @@ export default function LeadsPage() {
                         {converting === lead.id ? "…" : t("leadConvertBtn")}
                       </button>
                     ) : null}
+
+                    {/* Offered only where it could succeed. A converted lead is not
+                        deletable at all — its details became a customer and a deal — and
+                        the server refuses it regardless of what the screen shows. */}
+                    {canWrite && !lead.conversion && (
+                      <button
+                        onClick={() => setDeleting(lead)}
+                        data-testid={`delete-lead-${lead.id}`}
+                        aria-label={
+                          lang === "ar"
+                            ? `حذف ${lead.companyName}`
+                            : `Delete ${lead.companyName}`
+                        }
+                        className="p-2.5 rounded-xl text-brown/50 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 size={15} aria-hidden />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {deleting && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+          onClick={() => setDeleting(null)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={lang === "ar" ? "حذف عميل محتمل" : "Delete a lead"}
+            data-testid="delete-lead-dialog"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl w-full max-w-md my-8 shadow-xl"
+          >
+            <div className="p-4 border-b border-border">
+              <h2 className="font-extrabold text-charcoal">
+                {lang === "ar" ? "حذف عميل محتمل" : "Delete this lead"}
+              </h2>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-sm font-bold text-charcoal">{deleting.companyName}</p>
+              <p className="text-xs text-brown leading-relaxed">
+                {lang === "ar"
+                  ? "الحذف مخصّص لسجل أُنشئ بالخطأ. أما العميل المحتمل الذي جرت معه محادثات مسجّلة فلا يُحذف — علّمه «غير مؤهل» بدلاً من محو سجل تلك المحادثات."
+                  : "Deleting is for a record raised in error. A lead with logged conversations is not deleted — mark it unqualified rather than erasing the record of those conversations."}
+              </p>
+            </div>
+            <div className="flex gap-3 p-4 border-t border-border">
+              <button
+                type="button"
+                onClick={() => remove(deleting)}
+                data-testid="confirm-delete-lead"
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700"
+              >
+                {lang === "ar" ? "حذف" : "Delete"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleting(null)}
+                className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-sm text-brown hover:bg-cream transition-colors"
+              >
+                {lang === "ar" ? "إلغاء" : "Cancel"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

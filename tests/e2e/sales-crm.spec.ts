@@ -1027,4 +1027,232 @@ test.describe("7 — Reports and targets", () => {
     await page.goto(`/dashboard/sales/reports?month=${riyadhMonth()}`);
     await expect(page.getByText(/your own performance only|أداؤك أنت فقط/i)).toBeVisible({ timeout: 30_000 });
   });
+
+  test("the report exports as a CSV carrying its own sandbox caveat", async ({ page }) => {
+    await loginAs(page, "crmManager");
+    await page.goto(`/dashboard/sales/reports?month=${riyadhMonth()}`);
+    await expect(page.getByTestId("export-report")).toBeVisible({ timeout: 30_000 });
+
+    // Fetched from inside the page, like every other API call in this suite: that is the
+    // real session cookie, and `page.request` runs in its own context which arrived here
+    // unauthenticated.
+    const res = await page.evaluate(async (url) => {
+      const r = await fetch(url);
+      return {
+        status: r.status,
+        contentType: r.headers.get("content-type") ?? "",
+        disposition: r.headers.get("content-disposition") ?? "",
+        body: await r.text(),
+      };
+    }, `/api/sales/reports?month=${riyadhMonth()}&format=csv`);
+
+    expect(res.status).toBe(200);
+    expect(res.contentType).toContain("text/csv");
+    expect(res.disposition).toContain("attachment");
+
+    const body = res.body;
+    expect(body, "the figures are in the file, not only on the screen").toContain("Conversion rate %");
+    expect(body).toContain("Win rate %");
+    // A spreadsheet outlives the screen that explained it, so the caveat travels with it.
+    expect(body, "the sandbox caveat is in the file").toContain("SANDBOX");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+test.describe("8 — The document, the settings screen, and deleting a lead", () => {
+  test("an issued quotation renders as a document from its frozen snapshot", async ({ page }) => {
+    await loginAs(page, "crmManager");
+    await page.goto(`/dashboard/sales/quotes/${state.revisionId}`);
+
+    await page.getByTestId("open-print").click();
+    await page.waitForURL(/\/print$/, { timeout: 60_000 });
+
+    const doc = page.getByTestId("quote-document");
+    await expect(doc).toBeVisible({ timeout: 30_000 });
+    await expect(doc, "the quotation number is on the document").toContainText(/Q-\d{6}-\d{4}/);
+    await expect(doc, "and the total, padded and grouped").toContainText("1,474.88");
+    await expect(doc, "with the customer it was for").toContainText(COMPANY);
+
+    // The document renders the SNAPSHOT. Renaming the SKU in the catalogue must not
+    // rewrite what the customer was sent.
+    const { exec } = await import("./support/db");
+    const original = catalog.skus.ken1kg.name;
+    await exec(`UPDATE "ProductSKU" SET name = $1 WHERE id = $2`, ["RENAMED AFTER ISSUE", catalog.skus.ken1kg.id]);
+    try {
+      await page.reload();
+      await expect(doc).toBeVisible({ timeout: 30_000 });
+      await expect(doc, "the document still says what it said when it was issued")
+        .toContainText(original);
+      await expect(doc).not.toContainText("RENAMED AFTER ISSUE");
+    } finally {
+      await exec(`UPDATE "ProductSKU" SET name = $1 WHERE id = $2`, [original, catalog.skus.ken1kg.id]);
+    }
+  });
+
+  test("a draft has no document, and says why rather than showing an empty one", async ({ page }) => {
+    await loginAs(page, "crmManager");
+    // A fresh draft on the won deal: quoting a won deal is allowed, only a lost one is not.
+    const made = await apiFromBrowser(page, "/api/sales/quotes", {
+      method: "POST",
+      body: {
+        opportunityId: state.dealId,
+        validUntil: new Date(Date.now() + 10 * 86400_000).toISOString().slice(0, 10),
+        lines: [{ productSkuId: catalog.skus.ken1kg.id, quantity: "1", unit: "UNIT", unitPrice: "135" }],
+      },
+    });
+    const draftId = (made.json as { quote?: { id: string } })?.quote?.id;
+    expect(draftId).toBeTruthy();
+
+    await page.goto(`/dashboard/sales/quotes/${draftId}`);
+    await expect(page.getByTestId("open-print"), "no document link on a draft").toHaveCount(0);
+
+    await page.goto(`/dashboard/sales/quotes/${draftId}/print`);
+    await expect(page.getByTestId("quote-document")).toHaveCount(0);
+    await expect(page.getByText(/still a draft|ما زال مسودة/i)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("the settings screen adds, renames and reorders a stage", async ({ page }) => {
+    await loginAs(page, "crmManager");
+    await page.goto("/dashboard/sales/settings");
+
+    await page.getByTestId("new-stage").click();
+    const dialog = page.getByTestId("stage-dialog");
+    await expect(dialog).toBeVisible();
+
+    const save = dialog.getByTestId("save-stage");
+    await dialog.getByLabel(/^Code/).fill("UATCFG");
+    await dialog.getByLabel(/English name/).fill("Contracting");
+    await expect(save, "an English name alone is not enough").toBeDisabled();
+    await dialog.getByLabel(/Arabic name/).fill("تعاقد");
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+
+    const row = page.getByTestId("stage-row-UATCFG");
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    const created = await one<{ id: string; nameAr: string; position: number }>(
+      `SELECT id, "nameAr", position FROM "PipelineStage" WHERE code = 'UATCFG'`);
+    expect(created.nameAr).toBe("تعاقد");
+
+    // Rename: the label changes, the code does not.
+    await row.getByTestId("edit-stage-UATCFG").click();
+    const edit2 = page.getByTestId("stage-dialog");
+    await edit2.getByLabel(/English name/).fill("Contract review");
+    await edit2.getByTestId("save-stage").click();
+    await expect(edit2).toBeHidden({ timeout: 30_000 });
+
+    const renamed = await one<{ nameEn: string; code: string }>(
+      `SELECT "nameEn", code FROM "PipelineStage" WHERE id = $1`, [created.id]);
+    expect(renamed.nameEn).toBe("Contract review");
+    expect(renamed.code, "the stable identity is untouched").toBe("UATCFG");
+
+    // Reorder: moving it up must swap positions, not duplicate one.
+    await page.getByTestId("stage-row-UATCFG").getByRole("button", { name: /Move .* up/i }).click();
+    await expect
+      .poll(async () =>
+        num((await one<{ position: number }>(
+          `SELECT position FROM "PipelineStage" WHERE id = $1`, [created.id])).position),
+        { timeout: 30_000 })
+      .toBeLessThan(num(created.position));
+
+    const duplicates = await all<{ n: number }>(
+      `SELECT COUNT(*)::int n FROM (
+         SELECT position FROM "PipelineStage" GROUP BY position HAVING COUNT(*) > 1
+       ) d`);
+    expect(num(duplicates[0].n), "no two stages share a position").toBe(0);
+  });
+
+  test("a stage holding deals cannot be retired from the screen either", async ({ page }) => {
+    const { exec } = await import("./support/db");
+    const stage = await one<{ id: string }>(`SELECT id FROM "PipelineStage" WHERE code='UATCFG'`);
+    await exec(`UPDATE "Opportunity" SET "stageId" = $1 WHERE id = $2`, [stage.id, state.dealId]);
+
+    await loginAs(page, "crmManager");
+    await page.goto("/dashboard/sales/settings");
+    await page.getByTestId("retire-stage-UATCFG").click();
+
+    await expect(page.getByTestId("alert-error")).toContainText(/still holds/i, { timeout: 30_000 });
+    const still = await one<{ isActive: boolean }>(
+      `SELECT "isActive" FROM "PipelineStage" WHERE id = $1`, [stage.id]);
+    expect(still.isActive, "the board did not lose a column with cards in it").toBe(true);
+
+    // Move the deal out and it retires cleanly.
+    const proposal = catalog.crm.stages.find((s) => s.code.endsWith("_PROPOSAL"))!;
+    await exec(`UPDATE "Opportunity" SET "stageId" = $1 WHERE id = $2`, [proposal.id, state.dealId]);
+    await page.reload();
+    await page.getByTestId("retire-stage-UATCFG").click();
+
+    await expect
+      .poll(async () =>
+        (await one<{ isActive: boolean }>(
+          `SELECT "isActive" FROM "PipelineStage" WHERE id = $1`, [stage.id])).isActive,
+        { timeout: 30_000 })
+      .toBe(false);
+    await expect(page.getByTestId("stage-row-UATCFG"), "retired, not deleted").toBeVisible();
+  });
+
+  test("a lead with history cannot be deleted, and a converted one offers no control", async ({ page }) => {
+    await loginAs(page, "crmRep");
+    await page.goto("/dashboard/sales/leads");
+
+    // The converted lead from section 2: its details became a customer and a deal.
+    await expect(
+      page.getByTestId(`delete-lead-${state.leadId}`),
+      "no delete control on a converted lead",
+    ).toHaveCount(0);
+
+    // One with a logged conversation on it.
+    const { exec } = await import("./support/db");
+    const withHistory = `${TAG}_lead_history`;
+    await exec(
+      `INSERT INTO "Lead" (id,"companyName","contactName","ownerId",status,source,"createdAt","updatedAt")
+       VALUES ($1,$2,'Rana',$3,'NEW','OTHER',now(),now()) ON CONFLICT (id) DO NOTHING`,
+      [withHistory, `${SUITE} Has History`, `${TAG}_emp_crmRep`]);
+    await exec(
+      `INSERT INTO "Activity" (id,type,subject,"leadId","ownerId","createdAt","updatedAt")
+       VALUES ($1,'CALL',$2,$3,$4,now(),now()) ON CONFLICT (id) DO NOTHING`,
+      [`${TAG}_act_history`, `${SUITE} a conversation worth keeping`, withHistory, `${TAG}_emp_crmRep`]);
+
+    await page.reload();
+    await page.getByTestId(`delete-lead-${withHistory}`).click();
+    const dialog = page.getByTestId("delete-lead-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("confirm-delete-lead").click();
+
+    await expect(
+      page.getByTestId("alert-error"),
+      "the refusal says how much history is in the way",
+    ).toContainText(/logged activities/i, { timeout: 30_000 });
+
+    const survived = await one<{ n: number }>(
+      `SELECT COUNT(*)::int n FROM "Lead" WHERE id = $1`, [withHistory]);
+    expect(num(survived.n), "the lead is still there").toBe(1);
+  });
+
+  test("a lead raised in error is deleted", async ({ page }) => {
+    await loginAs(page, "crmRep");
+    await page.goto("/dashboard/sales/leads");
+    await page.getByRole("button", { name: /New lead|عميل محتمل جديد/i }).click();
+
+    const form = page.getByTestId("lead-form");
+    await form.getByLabel(/Company/).fill(`${SUITE} Typed By Mistake`);
+    await form.getByLabel(/Contact/).fill("Nobody");
+    await form.getByRole("button", { name: /^Save$/ }).click();
+    await expect(form).toBeHidden({ timeout: 30_000 });
+
+    const made = await one<{ id: string }>(
+      `SELECT id FROM "Lead" WHERE "companyName" = $1`, [`${SUITE} Typed By Mistake`]);
+    expect(made?.id).toBeTruthy();
+
+    await page.getByTestId(`delete-lead-${made.id}`).click();
+    await page.getByTestId("delete-lead-dialog").getByTestId("confirm-delete-lead").click();
+
+    await expect
+      .poll(async () =>
+        num((await one<{ n: number }>(
+          `SELECT COUNT(*)::int n FROM "Lead" WHERE id = $1`, [made.id])).n),
+        { timeout: 30_000 })
+      .toBe(0);
+  });
 });
