@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertTriangle, UserPlus, Users2, X, ArrowRight } from "lucide-react";
+import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { formatDate } from "@/lib/utils";
+import ImportDialog from "./ImportDialog";
 
 /**
  * Leads.
@@ -60,6 +61,9 @@ export default function LeadsPage() {
   const lang = user?.preferredLanguage ?? "ar";
   const canWrite = hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_write");
   const canConvert = hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_convert");
+  const canImport = hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_import");
+  const canExport = hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_export");
+  const [showImport, setShowImport] = useState(false);
 
   const [rows, setRows] = useState<Lead[]>([]);
   const [scope, setScope] = useState<"own" | "all">("own");
@@ -210,15 +214,51 @@ export default function LeadsPage() {
             )}
           </p>
         </div>
-        {canWrite && (
-          <button
-            onClick={openForm}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
-          >
-            <UserPlus size={16} /> {t("newLeadBtn")}
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {canExport && (
+            <a
+              // A real link, not a scripted download: the browser handles the file, the
+              // Content-Disposition header names it, and it still works with JavaScript
+              // having failed to load.
+              href={`/api/sales/leads/export${statusFilter ? `?status=${statusFilter}` : ""}`}
+              download
+              data-testid="export-leads"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-white border-2 border-border text-charcoal rounded-xl text-sm font-bold hover:border-orange active:scale-[0.98] transition-all"
+            >
+              <Download size={16} aria-hidden /> {lang === "ar" ? "تصدير CSV" : "Export CSV"}
+            </a>
+          )}
+          {canImport && (
+            <button
+              onClick={() => setShowImport(true)}
+              data-testid="import-leads"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-white border-2 border-border text-charcoal rounded-xl text-sm font-bold hover:border-orange active:scale-[0.98] transition-all"
+            >
+              <Upload size={16} aria-hidden /> {lang === "ar" ? "استيراد CSV" : "Import CSV"}
+            </button>
+          )}
+          {canWrite && (
+            <button
+              onClick={openForm}
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
+            >
+              <UserPlus size={16} /> {t("newLeadBtn")}
+            </button>
+          )}
+        </div>
       </div>
+
+      {showImport && (
+        <ImportDialog
+          lang={lang}
+          onClose={() => setShowImport(false)}
+          onDone={(message) => {
+            setShowImport(false);
+            setSuccess(message);
+            load();
+          }}
+        />
+      )}
 
       {scope === "own" && (
         <p className="text-xs text-brown/60 font-semibold">{t("leadScopeOwn")}</p>

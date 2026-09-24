@@ -11,6 +11,12 @@ export const translations = {
   leadsNav:           { en: "Leads",                  ar: "العملاء المحتملون" },
   pipelineNav:        { en: "Pipeline",               ar: "مسار الصفقات" },
   myCommissionsNav:   { en: "My commissions",         ar: "عمولاتي" },
+  activitiesNav:      { en: "Follow-ups",             ar: "المتابعات" },
+  quotesNav:          { en: "Quotations",             ar: "عروض الأسعار" },
+  salesTargetsNav:    { en: "Sales targets",          ar: "أهداف المبيعات" },
+  salesReportsNav:    { en: "Sales reports",          ar: "تقارير المبيعات" },
+  commissionPlansNav: { en: "Commission plans",       ar: "خطط العمولات" },
+  commissionReviewNav:{ en: "Commission review",      ar: "مراجعة العمولات" },
   commissionsAdminNav:{ en: "Commission admin",       ar: "إدارة العمولات" },
 
   leadsTitle:         { en: "Leads",                  ar: "العملاء المحتملون" },

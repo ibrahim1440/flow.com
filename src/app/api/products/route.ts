@@ -31,8 +31,10 @@ const isUom = (v: unknown): v is UnitOfMeasure =>
 
 export async function GET(request: Request) {
   // Read access is deliberately wider than write: the sales order screen needs to list
-  // sellable products, and sales staff hold `orders`, not `inventory`.
-  const { error } = await requireAnyModule("inventory", "orders");
+  // sellable products, and sales staff hold `orders`, not `inventory`. The CRM needs it for
+  // the same reason — a quotation line and a sample both name a finished product — and a rep
+  // may hold `sales` without holding `orders` at all.
+  const { error } = await requireAnyModule("inventory", "orders", "sales");
   if (error) return error;
 
   const { searchParams } = new URL(request.url);

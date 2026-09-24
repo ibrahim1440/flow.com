@@ -2,20 +2,29 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box, Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight, Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck, ClipboardList, ShieldAlert, UserPlus, KanbanSquare, Percent } from "lucide-react";
-import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
+import { LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box, Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight, Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck, ClipboardList, ShieldAlert, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3, ScrollText } from "lucide-react";
+import { ROLE_LABELS, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { UserContext, useLogo, type User } from "./user-context";
 
-const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; module?: string }[] = [
+const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; module?: string; sub?: string }[] = [
   { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },
   { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
   { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
   { key: "productsNav", icon: Package,        href: "/dashboard/products", module: "inventory" },
   { key: "leadsNav",   icon: UserPlus,        href: "/dashboard/sales/leads", module: "sales" },
   { key: "pipelineNav", icon: KanbanSquare,   href: "/dashboard/sales/pipeline", module: "sales" },
+  { key: "activitiesNav", icon: CalendarCheck, href: "/dashboard/sales/activities", module: "sales" },
+  { key: "quotesNav",  icon: FileText,        href: "/dashboard/sales/quotes", module: "sales" },
+  { key: "salesTargetsNav", icon: Target,     href: "/dashboard/sales/targets", module: "sales" },
+  { key: "salesReportsNav", icon: BarChart3,  href: "/dashboard/sales/reports", module: "sales" },
   { key: "myCommissionsNav", icon: Percent,   href: "/dashboard/sales/my-commissions", module: "commissions" },
+  // Administration, not self-service. Both are gated further inside — the plan screen needs
+  // `manage_plans` and the review screen needs `view_team` — but keeping them out of the
+  // sidebar for everyone else means a rep is never shown a door that will not open.
+  { key: "commissionReviewNav", icon: ScrollText, href: "/dashboard/commissions/review", module: "commissions", sub: "view_team" },
+  { key: "commissionPlansNav", icon: Percent,  href: "/dashboard/commissions/plans", module: "commissions", sub: "manage_plans" },
   { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
   { key: "workstationPreparation", icon: PackageCheck, href: "/dashboard/workstation/preparation", module: "orders" },
   { key: "production", icon: Factory,         href: "/dashboard/production" },
@@ -53,7 +62,12 @@ function SidebarNav({
     // Settings is strictly admin-only — double-guard beyond permissions
     if (item.key === "settings" && user.role !== "admin") return false;
     // `module` lets a nav item piggyback on a different permission key (e.g. purchases → inventory)
-    return hasModuleAccess(user.permissions, item.module ?? (item.key as string));
+    const mod = item.module ?? (item.key as string);
+    if (!hasModuleAccess(user.permissions, mod)) return false;
+    // `sub` hides an administrative screen from everybody who could not use it. The screen
+    // and its API check the same privilege; this only avoids showing a door that will not open.
+    if (item.sub && !hasSubPrivilege(user.permissions, mod, item.sub)) return false;
+    return true;
   });
 
   return (
