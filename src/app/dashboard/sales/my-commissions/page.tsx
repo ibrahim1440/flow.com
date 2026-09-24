@@ -83,19 +83,36 @@ export default function MyCommissionsPage() {
   // checking one disputed figure should not have to unfold every other row to reach it.
   const [openCalc, setOpenCalc] = useState<Record<string, boolean>>({});
 
-  useEffect(() => { load(month); }, [month]);
-
-  async function load(m: string) {
-    setLoading(true);
-    setError("");
-    const res = await fetch(`/api/commissions/me?month=${encodeURIComponent(m)}`);
-    if (res.ok) setData(await res.json());
-    else {
-      setData(null);
-      setError(lang === "ar" ? "تعذّر تحميل العمولات." : "Could not load commissions.");
-    }
-    setLoading(false);
-  }
+  /**
+   * Loads the selected period.
+   *
+   * Inlined rather than a named `load` called from here, because the two lint rules that
+   * govern this shape cannot both be satisfied while it is separate: declared after the
+   * effect it is read before it exists, and declared before it the effect is seen to call
+   * setState synchronously. Inlining answers both — the first thing that happens is the
+   * fetch, and nothing outside needs to call it, since this was its only caller.
+   *
+   * The spinner is raised by the month picker rather than in here, so no state is written
+   * before the first `await`. `loading` starts true, which covers the first paint.
+   *
+   * `cancelled` is not ceremony. Switching months quickly leaves two requests in flight and
+   * the slower one can land last, putting September's figures under an October heading.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/commissions/me?month=${encodeURIComponent(month)}`);
+      if (cancelled) return;
+      if (res.ok) {
+        setData(await res.json());
+      } else {
+        setData(null);
+        setError(lang === "ar" ? "تعذّر تحميل العمولات." : "Could not load commissions.");
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [month, lang]);
 
   const label = (map: Record<string, { en: string; ar: string }>, k: string) =>
     lang === "ar" ? (map[k]?.ar ?? k) : (map[k]?.en ?? k);
@@ -122,7 +139,7 @@ export default function MyCommissionsPage() {
           <input
             type="month"
             value={month}
-            onChange={(e) => setMonth(e.target.value)}
+            onChange={(e) => { setLoading(true); setError(""); setMonth(e.target.value); }}
             className="px-3 py-2 rounded-xl border-2 border-border text-sm"
           />
         </label>

@@ -8,6 +8,7 @@ import {
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState,
   Spinner, Button, Field, TextInput, Select, TextArea, Money, Pill, Modal, TableWrap, api,
+  DealOutcomeBadge, QuoteStatusBadge,
 } from "../../_components/ui";
 import { formatDate } from "@/lib/utils";
 
@@ -72,19 +73,6 @@ type Can = {
   approveDiscount: boolean; assign: boolean; createOrder: boolean;
 };
 
-const QUOTE_TONES: Record<string, "neutral" | "good" | "warn" | "bad" | "info" | "accent"> = {
-  DRAFT: "neutral", ISSUED: "info", ACCEPTED: "good", REJECTED: "bad",
-  EXPIRED: "warn", SUPERSEDED: "neutral",
-};
-
-const QUOTE_LABELS: Record<string, { en: string; ar: string }> = {
-  DRAFT: { en: "Draft", ar: "مسودة" },
-  ISSUED: { en: "Issued", ar: "صادر" },
-  ACCEPTED: { en: "Accepted", ar: "مقبول" },
-  REJECTED: { en: "Rejected", ar: "مرفوض" },
-  EXPIRED: { en: "Expired", ar: "منتهي" },
-  SUPERSEDED: { en: "Superseded", ar: "مستبدل" },
-};
 
 const SAMPLE_LABELS: Record<string, { en: string; ar: string }> = {
   PREPARING: { en: "Preparing", ar: "قيد التحضير" },
@@ -183,12 +171,15 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         title={deal.title}
         subtitle={
           <span className="flex items-center gap-2 flex-wrap mt-1">
-            <Pill tone={open ? "info" : deal.outcome === "WON" ? "good" : "bad"} testId="deal-outcome">
-              {open
-                ? pick({ [deal.stage.code]: { en: deal.stage.nameEn, ar: deal.stage.nameAr } }, deal.stage.code, lang)
-                : deal.outcome === "WON"
-                  ? ar ? "مكسوبة" : "Won"
-                  : ar ? "خسارة" : "Lost"}
+            {/* Outcome and stage are two different facts and now read as two.
+                One pill used to carry both — the stage name while open, Won/Lost once
+                closed — which made a closed deal look as though it had left the pipeline
+                rather than finished somewhere in it. The stage is still shown after closing,
+                because "lost at negotiation" and "lost at qualification" are not the same
+                loss. */}
+            <DealOutcomeBadge outcome={deal.outcome} testId="deal-outcome" />
+            <Pill tone="neutral" testId="deal-stage">
+              {pick({ [deal.stage.code]: { en: deal.stage.nameEn, ar: deal.stage.nameAr } }, deal.stage.code, lang)}
             </Pill>
             {deal.customer && (
               <Link href={`/dashboard/customers`} className="font-bold text-charcoal hover:text-orange">
@@ -354,7 +345,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                           )}
                         </td>
                         <td className="py-2.5">
-                          <Pill tone={QUOTE_TONES[q.status]}>{pick(QUOTE_LABELS, q.status, lang)}</Pill>
+                          <QuoteStatusBadge status={q.status} />
                         </td>
                         <td className="py-2.5 text-end">
                           <Money value={q.grandTotal} currency={q.currency} />

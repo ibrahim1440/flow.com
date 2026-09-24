@@ -6,6 +6,7 @@ import { FileText } from "lucide-react";
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner,
   Field, TextInput, Select, Money, Pill, TableWrap, api,
+  QuoteStatusBadge,
 } from "../_components/ui";
 import { formatDate } from "@/lib/utils";
 
@@ -38,10 +39,6 @@ const STATUS_LABELS: Record<string, { en: string; ar: string }> = {
   SUPERSEDED: { en: "Superseded", ar: "مستبدل" },
 };
 
-const TONES: Record<string, "neutral" | "good" | "warn" | "bad" | "info" | "accent"> = {
-  DRAFT: "neutral", ISSUED: "info", ACCEPTED: "good", REJECTED: "bad",
-  EXPIRED: "warn", SUPERSEDED: "neutral",
-};
 
 export default function QuotesPage() {
   const lang = useLang();
@@ -193,7 +190,7 @@ export default function QuotesPage() {
                       </td>
                       <td className="py-2.5">
                         <span className="flex items-center gap-1.5 flex-wrap">
-                          <Pill tone={TONES[q.status]}>{pick(STATUS_LABELS, q.status, lang)}</Pill>
+                          <QuoteStatusBadge status={q.status} />
                           {expired && <Pill tone="warn">{ar ? "انتهى" : "lapsed"}</Pill>}
                           {q._count.orderLinks > 0 && (
                             <Pill tone="accent">{ar ? "طلب" : "ordered"}</Pill>

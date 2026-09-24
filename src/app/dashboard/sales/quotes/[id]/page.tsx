@@ -6,6 +6,7 @@ import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer } from "
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
   Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api, formatMoney,
+  QuoteStatusBadge,
 } from "../../_components/ui";
 import { formatDate } from "@/lib/utils";
 
@@ -85,19 +86,7 @@ type Quote = {
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
 type Can = { write: boolean; approveDiscount: boolean; createOrder: boolean };
 
-const STATUS_LABELS: Record<string, { en: string; ar: string }> = {
-  DRAFT: { en: "Draft", ar: "مسودة" },
-  ISSUED: { en: "Issued", ar: "صادر" },
-  ACCEPTED: { en: "Accepted", ar: "مقبول" },
-  REJECTED: { en: "Rejected", ar: "مرفوض" },
-  EXPIRED: { en: "Expired", ar: "منتهي" },
-  SUPERSEDED: { en: "Superseded", ar: "مستبدل" },
-};
 
-const TONES: Record<string, "neutral" | "good" | "warn" | "bad" | "info" | "accent"> = {
-  DRAFT: "neutral", ISSUED: "info", ACCEPTED: "good", REJECTED: "bad",
-  EXPIRED: "warn", SUPERSEDED: "neutral",
-};
 
 const emptyLine = (): Line => ({
   productSkuId: "",
@@ -291,9 +280,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         title={`${quote.quoteNumber}${quote.revision > 1 ? ` · r${quote.revision}` : ""}`}
         subtitle={
           <span className="flex items-center gap-2 flex-wrap mt-1">
-            <Pill tone={TONES[quote.status]} testId="quote-status">
-              {pick(STATUS_LABELS, quote.status, lang)}
-            </Pill>
+            <QuoteStatusBadge status={quote.status} testId="quote-status" />
             {state.expired && quote.status === "ISSUED" && (
               <Pill tone="warn">{ar ? "انتهت الصلاحية" : "lapsed"}</Pill>
             )}

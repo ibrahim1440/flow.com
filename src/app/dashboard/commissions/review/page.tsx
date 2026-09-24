@@ -5,6 +5,7 @@ import { CheckCircle2, AlertTriangle, Banknote, Scale } from "lucide-react";
 import {
   useLang, ProvisionalBanner, SandboxBanner, PageHeader, Alert, Card, SectionTitle,
   EmptyState, Spinner, Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
+  AccrualStatusBadge,
 } from "../../sales/_components/ui";
 import { formatDate } from "@/lib/utils";
 
@@ -73,17 +74,7 @@ type Review = {
   notice: string | null;
 };
 
-const STATUS_TONES: Record<string, "neutral" | "good" | "warn" | "bad" | "info" | "accent"> = {
-  PREVIEW: "neutral", ACCRUED: "info", APPROVED: "good", PAID: "accent", REVERSED: "bad",
-};
 
-const STATUS_LABELS: Record<string, { en: string; ar: string }> = {
-  PREVIEW: { en: "Preview", ar: "معاينة" },
-  ACCRUED: { en: "Accrued", ar: "مستحقة" },
-  APPROVED: { en: "Approved", ar: "معتمدة" },
-  PAID: { en: "Paid", ar: "مدفوعة" },
-  REVERSED: { en: "Reversed", ar: "معكوسة" },
-};
 
 function thisMonth(): string {
   const riyadh = new Date(Date.now() + 3 * 3600_000);
@@ -337,9 +328,7 @@ export default function CommissionReviewPage() {
                         <span className="font-mono">{a.planVersion.plan.code}</span> v{a.planVersion.version}
                       </td>
                       <td className="py-2.5">
-                        <Pill tone={STATUS_TONES[a.status] ?? "neutral"}>
-                          {ar ? (STATUS_LABELS[a.status]?.ar ?? a.status) : (STATUS_LABELS[a.status]?.en ?? a.status)}
-                        </Pill>
+                        <AccrualStatusBadge status={a.status} />
                       </td>
                     </tr>
                   ))}
