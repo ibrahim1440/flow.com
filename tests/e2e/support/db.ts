@@ -1,4 +1,7 @@
 import { Client } from "pg";
+// Plain ESM, shared with the regression harness so both layers enforce exactly the same
+// rule rather than two drifting copies of it.
+import { guardClient } from "../../../scripts/e2e/identity-guard.mjs";
 
 // ── Safety rail ──────────────────────────────────────────────────────────────
 // This suite creates orders, consumes stock and deliberately attempts invalid
@@ -55,7 +58,9 @@ export async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   const db = new Client({ connectionString: assertTestDatabase() });
   await db.connect();
   try {
-    return await fn(db);
+    // Every statement this suite issues goes through here, and the guard refuses — before
+    // execution — any mutation that could reach an identity the suite does not own.
+    return await fn(guardClient(db, "the Playwright suite") as Client);
   } finally {
     await db.end();
   }

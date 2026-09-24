@@ -328,7 +328,7 @@ gate in front of already-built deployments, and nothing else.
 | 12:39:08 | Probe secret **revoked**; replacement #1 created from a locally generated value, sent with `--silent`, never printed. |
 | 12:52:37 | A `curl -D -` probe sent `x-vercel-set-bypass-cookie: true`. The `307` response carried `Set-Cookie: _vercel_jwt=…`, whose JWT payload contains the bypass secret in clear text. The header block was printed. **Exposure 2: transcript, and a redaction filter matching the literal string did not catch it because it is base64-encoded.** |
 | 12:53:12 | Replacement #1 **revoked**; replacement #2 created silently. Never displayed. |
-| 12:54:00 | A second create attempt returned **409 `automation bypass already exists`** — evidence that this project holds at most one automation-bypass entry at a time. |
+| 12:54:00 | A second create attempt returned **409 `automation bypass already exists`**. This was previously read as "the project holds at most one entry". It does not establish that — see the retraction below. |
 | 15:01:06 | Replacement #2 **revoked** at the end of the smoke testing. |
 | 15:01:18 | Revocation verified: the raw secret returns `302` again. |
 
@@ -376,7 +376,7 @@ produce if they had not been told the fixture PINs, which they had not been.
 | Probe secret (exposure 1) | revoked 12:39:08 |
 | Replacement #1 (exposure 2) | revoked 12:53:12 |
 | Replacement #2 (never exposed) | revoked 15:01:06 |
-| Entries remaining | **zero.** The 409 above establishes that the project holds at most one automation-bypass entry, and the last operation on it was a successful revoke. The REST API exposes no `GET` for this resource (404), so the dashboard — Project → Settings → Deployment Protection → Protection Bypass for Automation — is the authoritative visual confirmation. |
+| Entries remaining | **UNVERIFIED — see the retraction below.** Every secret this work created is individually revoked and behaviourally refused, but no reliable read-only inventory of the project's bypass secrets was obtained, and Vercel supports more than one per project. Confirm in the dashboard: Project → Settings → Deployment Protection → Protection Bypass for Automation. |
 | Raw secret replayed | `302` to Vercel SSO, i.e. refused |
 | **Issued cookie replayed** | the one `_vercel_jwt` recoverable from the transcript was replayed against **both** the branch alias and the immutable URL: **`302` to SSO on both** — refused. Its audience claim was the immutable deployment host. |
 | Control | an unauthenticated request to the same URL also returns `302`, so "refused" above is not simply an open URL |
@@ -407,13 +407,40 @@ Reviewer sign-in on the hosted Preview could not be verified without reaching an
 URL, so one further bypass was created for that verification and revoked immediately. It was
 generated locally, never displayed, and used for a single scripted run.
 
-That revocation surfaced a behaviour worth recording: **the edge caches the bypass for a few
-seconds.** The check immediately after a successful revoke returned `200`, and `302` about two
-seconds later. A single-shot verification would have reported the secret still live. Worse, in
-reacting to that false reading the local copy of the secret was deleted, leaving no way to
-revoke it had it genuinely still existed — the state had to be re-established by probing
-whether a `generate` call would return `409`. It did not, proving no entry remained. Verify
-revocation by polling, and do not destroy your copy of a secret until the check has settled.
+**A retraction.** An earlier revision of this section reasoned that because a `generate` call
+succeeded instead of returning `409`, no bypass entry remained. **That inference is invalid.**
+Vercel supports more than one bypass secret per project, so a successful generate says nothing
+about what else exists; and the earlier `409` does not establish a one-entry limit either.
+Probing existence by creating a secret is itself the wrong method, and none was created for
+that purpose again.
+
+**The inventory is therefore UNVERIFIED.** The narrower claim, which is the only one made
+here: each of the four secrets this work created was individually revoked, and each was then
+behaviourally refused.
+
+Read-only interfaces attempted:
+
+| Interface | Result |
+|---|---|
+| `GET /v1/projects/{id}/protection-bypass` | 404 — no read endpoint exists |
+| `GET /v1/teams/{id}/audit-logs` | 404 — not available on this plan |
+| `GET /v9/projects/{id}` → `protectionBypass` | returns a map, currently `{}` — **but not trustworthy** |
+
+The third needs explaining rather than citing. That same field returned `{}` earlier in this
+work at a moment when a bypass demonstrably existed — the very next call was refused
+`409 automation bypass already exists`. A field that reads empty while an entry is present
+cannot be evidence that no entry is present. **The authoritative check is the dashboard**:
+Project → Settings → Deployment Protection → Protection Bypass for Automation.
+
+**A second demotion.** The post-revocation timing was previously described as edge caching.
+What was *observed* is only that the check is not immediately consistent: the request
+immediately after a successful revoke returned `200`, and `302` roughly two seconds later, on
+both occasions it was tried. Edge caching is a plausible explanation and remains a
+**hypothesis** — nothing here establishes the mechanism and no vendor documentation was
+consulted that states it. The operational rule rests on the observation alone and does not
+need the mechanism: **verify a revocation by polling until it settles, and do not destroy your
+local copy of a secret while reacting to a single reading.** Without that copy there is no way
+to revoke at all, which is precisely the corner this work walked into.
 
 #### Making it safe by construction
 

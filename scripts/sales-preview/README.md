@@ -90,11 +90,24 @@ so a test run silently revokes the reviewer's access; and `sales-crm.spec.ts` de
 `UAT_emp_crmRep` mid-test and switches its language, so a reviewer signing in during a run
 meets a deactivated account in the wrong language.
 
-Every teardown in this repository is scoped to `UAT_`, to a named suite prefix, or to an
-explicit id list — none matches `RVW_`. That is a property of a dozen separate `LIKE`
-patterns, so `globalSetup` **counts the `RVW_` rows before and after teardown and fails the
-run if any disappeared**. A thirteenth pattern added later cannot quietly take a reviewer's
-access away.
+Two protections, and they are not equal:
+
+- **Preventive — `scripts/e2e/identity-guard.mjs`.** Both test layers funnel through a single
+  database client, and the guard runs on every statement *before* it executes. It refuses any
+  INSERT/UPDATE/DELETE against an identity table that names a reserved id, is unscoped, or
+  carries a `LIKE` pattern wide enough to match one — so a teardown widened from
+  `UAT\_emp\_%` to `%\_emp\_%` is stopped, not merely noticed. 24 offline assertions in
+  `scripts/e2e/identity-guard.test.mjs`; no database is needed to run them.
+- **Detective, and narrow — the row count in `globalSetup`.** It notices *deletion*, after the
+  fact. It cannot see a changed PIN, a deactivation, or rewritten permissions: each of those
+  leaves the count unchanged. Kept only as a tripwire for code that opens its own connection
+  and so never reaches the guard.
+
+The guard reads SQL text; **it is not a database permission**. A mutation whose row set comes
+from a subquery it cannot evaluate is checked only for the rules above. Stronger options exist
+and were deliberately not taken: a trigger on `Employee` would be undeclared schema drift in
+the database used to validate migrations, and a separate low-privilege role for the suites is
+a larger change than this task. Ask if you want either.
 
 The two tools therefore no longer conflict: the suites own `UAT_`, the reviewer owns `RVW_`,
 and `smoke-hosted.mjs` keeps using the fixture PINs (overridable via `SMOKE_PIN_REP`,
