@@ -16,7 +16,8 @@ Test identifiers:
 - `db:` `scripts/e2e/regression/sales-commissions-db.mjs` — real PostgreSQL
 - `sec:` `scripts/e2e/regression/sales-security.mjs` — real HTTP, negative cases
 - `flow:` `scripts/e2e/regression/sales-workflow.mjs` — real HTTP, the ordinary path
-- `ui:` `tests/e2e/sales-crm.spec.ts` — Chrome, real screens
+- `ui:` `tests/e2e/sales-crm.spec.ts` — Chrome, real screens. `ui N.M` is the Mth test of
+  the Nth `describe` block in that file.
 - `perm:` `tests/e2e/permissions.spec.ts` — Chrome, the role matrix
 
 ---
@@ -45,12 +46,12 @@ Test identifiers:
 |---|---|---|---|---|---|---|
 | 2.1 | Configurable pipeline stages, ordered, bilingual | — | `GET/POST/PATCH /api/sales/stages` | Sales settings | flow I1, ui 8.3 | **DONE** |
 | 2.2 | A stage holding deals cannot be retired | — | `PATCH /api/sales/stages` | Sales settings | flow I2, ui 8.4 | **DONE** |
-| 2.3 | Kanban board of open deals | — | `GET /api/sales/opportunities` | Pipeline | ui 3.x | **DONE** |
-| 2.4 | Deal detail: value, probability, dates, customer, owner | — | `GET/PATCH /api/sales/opportunities/[id]` | Deal detail | ui 3.1, flow D5 | **DONE** |
-| 2.5 | Move between stages, with the move recorded | `transitionOpportunity` | `POST .../[id]/transition` | Deal detail stage row | ui 3.2 | **DONE** |
+| 2.3 | Kanban board of open deals, and a way to open one | — | `GET /api/sales/opportunities` | Pipeline | ui 3.1 | **DONE** |
+| 2.4 | Deal detail: value, probability, dates, customer, owner | — | `GET/PATCH /api/sales/opportunities/[id]` | Deal detail | ui 3.2, flow D5 | **DONE** |
+| 2.5 | Move between stages, with the move recorded | `transitionOpportunity` | `POST .../[id]/transition` | Deal detail stage row | ui 3.3 | **DONE** |
 | 2.6 | Won requires a customer AND an accepted quotation | `transitionOpportunity` | same | Deal detail | flow C1/D5, ui 4.9 | **DONE** |
-| 2.7 | Lost requires a reason | `transitionOpportunity` | same | Lost dialog | flow D5, ui 3.4/3.5 | **DONE** |
-| 2.8 | Reopening a closed deal is a separate privilege | `transitionOpportunity` | same | Deal detail | ui 3.6, sec B1 | **DONE** |
+| 2.7 | Lost requires a reason | `transitionOpportunity` | same | Lost dialog | flow D5, ui 3.5/3.6 | **DONE** |
+| 2.8 | Reopening a closed deal is a separate privilege | `transitionOpportunity` | same | Deal detail | ui 3.7, sec B1 | **DONE** |
 | 2.9 | A rep sees only their own deals | `sales/scope.ts` | every sales endpoint | every sales screen | sec C2/D1, ui 2.3/2.4 | **DONE** |
 | 2.10 | Split attribution between several people | `validateSplits` | `PUT .../[id]/owners` | Deal detail → Split | engine D1/D2, flow F1 | **DONE** |
 | 2.11 | A split takes effect from its own date; history is not re-pointed | `sharesForCollection` | same | Split dialog notice | flow F1 | **DONE** |
@@ -174,7 +175,7 @@ Test identifiers:
 |---|---|---|---|---|
 | 9.1 | Two new permission modules with fine-grained sub-privileges | `auth-shared.ts` | perm, sec B1 | **DONE** |
 | 9.2 | Unauthenticated access refused on every endpoint | `requireModule` / `requireSub` | sec A1 | **DONE** |
-| 9.3 | A module without a sub-privilege is refused | `requireSub` | sec B1, ui 3.3/5.1 | **DONE** |
+| 9.3 | A module without a sub-privilege is refused | `requireSub` | sec B1, ui 3.4/5.1 | **DONE** |
 | 9.4 | Ownership cannot be set by the request body | lead / activity routes | sec C1, flow A1, ui 6.3 | **DONE** |
 | 9.5 | Read scoping happens in the WHERE clause | `sales/scope.ts` | sec C2, ui 2.3 | **DONE** |
 | 9.6 | Another owner's id in the URL reads as 404, not 403 | every `[id]` route | sec D1, ui 2.3 | **DONE** |
