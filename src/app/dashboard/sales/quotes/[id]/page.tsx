@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, use } from "react";
+import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer } from "lucide-react";
 import {
@@ -145,10 +145,21 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [success, setSuccess] = useState("");
   const [dialog, setDialog] = useState<"reject" | "order" | null>(null);
 
-  const load = useCallback(async () => {
+  /**
+   * Reload counter. The fetch lives in the effect rather than a `useCallback` it calls, so the
+   * first `await` precedes any state write. Saving, issuing and revising bump this to refresh;
+   * none of them consumed the loader's completion, so nothing is lost by not awaiting it.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
     const res = await api<{
       quote: Quote; state: State; can: Can; discountThresholdPercent: string;
     }>(`/api/sales/quotes/${id}`);
+    if (cancelled) return;
     if (res.ok) {
       setQuote(res.data.quote);
       setState(res.data.state);
@@ -173,11 +184,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       setError(res.data.error ?? (ar ? "تعذّر تحميل العرض." : "Could not load the quotation."));
     }
     setLoading(false);
-  }, [id, ar]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    })();
+    return () => { cancelled = true; };
+  }, [id, ar, reloadToken]);
 
   useEffect(() => {
     api<Sku[]>("/api/products").then((r) => {
@@ -222,7 +231,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       return false;
     }
     setSuccess(ar ? "حُفظ العرض." : "Saved.");
-    await load();
+    reload();
     return true;
   }
 
@@ -247,7 +256,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           ? ar ? "سُجّل قبول العميل." : "Acceptance recorded."
           : ar ? "تم التحديث." : "Updated.",
     );
-    load();
+    reload();
   }
 
   if (loading) return <Spinner />;
@@ -614,7 +623,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           onDone={(msg) => {
             setDialog(null);
             setSuccess(msg);
-            load();
+            reload();
           }}
         />
       )}

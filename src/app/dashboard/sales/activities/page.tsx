@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { CheckCircle2, Clock, AlertCircle, Phone } from "lucide-react";
 import {
@@ -64,7 +64,17 @@ export default function ActivitiesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
+  /**
+   * Reload counter. The fetch lives in the effect rather than a `useCallback` it calls, so the
+   * first `await` precedes any state write. Completing an activity bumps this to refresh.
+   * `cancelled` stops a slow response for an old filter landing after a newer one.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
     const params = new URLSearchParams({ filter });
     if (type) params.set("type", type);
     if (!teamView) params.set("scope", "mine");
@@ -74,6 +84,7 @@ export default function ActivitiesPage() {
       scope: "own" | "all";
       canSeeTeam: boolean;
     }>(`/api/sales/activities?${params}`);
+    if (cancelled) return;
     if (res.ok) {
       setRows(res.data.rows);
       setCounts(res.data.counts);
@@ -84,18 +95,16 @@ export default function ActivitiesPage() {
       setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
     }
     setLoading(false);
-  }, [filter, type, teamView, ar]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    })();
+    return () => { cancelled = true; };
+  }, [filter, type, teamView, ar, reloadToken]);
 
   async function complete(id: string) {
     if (busy) return;
     setBusy(true);
     const res = await api(`/api/sales/activities/${id}`, { method: "PATCH", body: { completed: true } });
     setBusy(false);
-    if (res.ok) load();
+    if (res.ok) reload();
     else setError(res.data.error ?? "");
   }
 

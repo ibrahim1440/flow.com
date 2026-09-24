@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { AlertTriangle, KanbanSquare, Trophy, XCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, KanbanSquare, Trophy, XCircle, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { formatDate } from "@/lib/utils";
@@ -57,14 +57,31 @@ export default function PipelinePage() {
   const [lostFor, setLostFor] = useState<Deal | null>(null);
   const [lostReason, setLostReason] = useState("");
 
-  useEffect(() => { load(); }, []);
+  /**
+   * Which stage sections are open on narrow screens. Empty means "not chosen yet", and the
+   * first stage opens by default — an accordion where everything is shut shows the operator
+   * a list of headings and no work.
+   */
+  const [openStages, setOpenStages] = useState<Record<string, boolean>>({});
 
-  async function load() {
-    const res = await fetch("/api/sales/opportunities");
-    if (res.ok) setData(await res.json());
-    else setError(lang === "ar" ? "تعذّر تحميل مسار الصفقات." : "Could not load the pipeline.");
-    setLoading(false);
-  }
+  /**
+   * Reload counter. The fetch lives in the effect rather than a `load()` the effect calls, so
+   * the first `await` precedes any state write. Moving a deal bumps this to refresh.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/sales/opportunities");
+      if (cancelled) return;
+      if (res.ok) setData(await res.json());
+      else setError(lang === "ar" ? "تعذّر تحميل مسار الصفقات." : "Could not load the pipeline.");
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [lang, reloadToken]);
 
   async function move(deal: Deal, body: Record<string, unknown>) {
     if (busy) return;
@@ -85,7 +102,7 @@ export default function PipelinePage() {
         return;
       }
       setSuccess(lang === "ar" ? "تم التحديث." : "Updated.");
-      await load();
+      reload();
     } finally {
       setBusy(null);
     }
@@ -151,8 +168,11 @@ export default function PipelinePage() {
           </p>
         </div>
       ) : (
-        /* Columns scroll horizontally in their own container so the page body never does. */
-        <div className="overflow-x-auto pb-2">
+        <>
+        {/* Columns scroll horizontally in their own container so the page body never does.
+            Desktop only: below lg the same data is an accordion, because sideways scrolling
+            to find a column is the worst way to use a phone. */}
+        <div className="hidden lg:block overflow-x-auto pb-2">
           <div className="flex gap-3 min-w-max">
             {stages.map((stage, stageIdx) => {
               const inStage = openDeals.filter((d) => d.stageId === stage.id);
@@ -308,6 +328,197 @@ export default function PipelinePage() {
             ))}
           </div>
         </div>
+
+        {/* ── Narrow screens: the same board as stacked, collapsible sections ──────────
+            Same stages, same outcomes, same `move` handler, same permission flags. Nothing
+            here is a second source of truth; it is one layout swapped for another, so a
+            stage renamed in settings renames in both without anyone remembering to look.
+            Vertical order needs no RTL reversal — top-to-bottom reads the same in Arabic —
+            but the move buttons keep the direction-aware icons the board uses. */}
+        <div className="lg:hidden space-y-3" data-testid="pipeline-accordion">
+          {stages.map((stage, stageIdx) => {
+            const inStage = openDeals.filter((d) => d.stageId === stage.id);
+            const stageValue = inStage.reduce((s, d) => s + Number(d.amount), 0);
+            const prev = stages[stageIdx - 1];
+            const next = stages[stageIdx + 1];
+            // Nothing chosen yet: the first stage is open, so the screen opens on work.
+            const isOpen = openStages[stage.id] ?? stageIdx === 0;
+            return (
+              <div
+                key={stage.id}
+                className="bg-white rounded-2xl border border-border overflow-hidden"
+                data-testid={`m-stage-${stage.code}`}
+              >
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  aria-controls={`m-stage-body-${stage.code}`}
+                  onClick={() => setOpenStages((s) => ({ ...s, [stage.id]: !isOpen }))}
+                  className="w-full flex items-center justify-between gap-2 px-4 py-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50"
+                >
+                  <span className="min-w-0">
+                    <span className="block font-bold text-sm text-charcoal truncate">
+                      {stageName(stage)}
+                    </span>
+                    <span className="block text-[11px] text-brown/60 tabular-nums">
+                      {inStage.length} · {money(String(stageValue), "SAR")}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    size={18}
+                    aria-hidden
+                    className={`flex-shrink-0 text-brown/50 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+
+                <div id={`m-stage-body-${stage.code}`} hidden={!isOpen} className="px-3 pb-3 space-y-2">
+                  {inStage.length === 0 && (
+                    <p className="text-xs text-brown/40 py-4 text-center border-2 border-dashed border-border rounded-xl">
+                      {rtl ? "لا صفقات" : "No deals"}
+                    </p>
+                  )}
+                  {inStage.map((deal) => (
+                    <div
+                      key={deal.id}
+                      data-testid={`m-deal-${deal.id}`}
+                      className="rounded-xl border border-border p-3 space-y-2"
+                    >
+                      <Link
+                        href={`/dashboard/sales/deals/${deal.id}`}
+                        data-testid={`m-open-deal-${deal.id}`}
+                        className="block font-bold text-sm text-charcoal leading-snug break-words hover:text-orange focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50 rounded"
+                      >
+                        {deal.title}
+                      </Link>
+                      {deal.customer && (
+                        <p className="text-xs text-brown break-words">
+                          {rtl && deal.customer.nameAr ? deal.customer.nameAr : deal.customer.name}
+                        </p>
+                      )}
+                      <p className="text-xs font-bold text-charcoal tabular-nums">
+                        {money(deal.amount, deal.currency)}
+                      </p>
+                      {deal.owner?.name && (
+                        <p className="text-[11px] text-brown/60 break-words">{deal.owner.name}</p>
+                      )}
+
+                      {/* Full-width targets: these are pressed with a thumb. */}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={!prev || busy === deal.id}
+                          onClick={() => prev && move(deal, { toStageId: prev.id })}
+                          aria-label={prev ? `${rtl ? "إرجاع إلى" : "Move back to"} ${stageName(prev)}` : rtl ? "لا مرحلة قبلها" : "No earlier stage"}
+                          className="flex items-center justify-center gap-1 py-2 rounded-lg border border-border text-xs font-bold text-brown disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          {rtl ? <ChevronRight size={14} aria-hidden /> : <ChevronLeft size={14} aria-hidden />}
+                          {rtl ? "السابقة" : "Back"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!next || busy === deal.id}
+                          onClick={() => next && move(deal, { toStageId: next.id })}
+                          aria-label={next ? `${rtl ? "تقديم إلى" : "Move forward to"} ${stageName(next)}` : rtl ? "لا مرحلة بعدها" : "No later stage"}
+                          className="flex items-center justify-center gap-1 py-2 rounded-lg border border-border text-xs font-bold text-brown disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          {rtl ? "التالية" : "Next"}
+                          {rtl ? <ChevronLeft size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+                        </button>
+                      </div>
+                      {canClose && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={busy === deal.id}
+                            onClick={() => move(deal, { toOutcome: "WON" })}
+                            className="py-2 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-50 disabled:opacity-50"
+                          >
+                            {rtl ? "ربح" : "Won"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy === deal.id}
+                            onClick={() => { setLostFor(deal); setLostReason(""); }}
+                            className="py-2 rounded-lg text-xs font-bold text-red-700 bg-red-50 disabled:opacity-50"
+                          >
+                            {rtl ? "خسارة" : "Lost"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Outcomes stay outside the stage list here too — they are results, not stages. */}
+          {[
+            { key: "won", list: won, label: rtl ? "رابحة" : "Won", Icon: Trophy, tone: "text-emerald-800" },
+            { key: "lost", list: lost, label: rtl ? "خاسرة" : "Lost", Icon: XCircle, tone: "text-red-700" },
+          ].map(({ key, list, label, Icon, tone }) => {
+            const isOpen = openStages[`outcome-${key}`] ?? false;
+            return (
+              <div
+                key={key}
+                className="bg-white rounded-2xl border border-border border-dashed overflow-hidden"
+                data-testid={`m-outcome-${key}`}
+              >
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  aria-controls={`m-outcome-body-${key}`}
+                  onClick={() => setOpenStages((s) => ({ ...s, [`outcome-${key}`]: !isOpen }))}
+                  className="w-full flex items-center justify-between gap-2 px-4 py-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50"
+                >
+                  <span className={`font-bold text-sm flex items-center gap-1.5 ${tone}`}>
+                    <Icon size={14} aria-hidden /> {label}
+                    <span className="text-[11px] text-brown/60 tabular-nums">({list.length})</span>
+                  </span>
+                  <ChevronDown
+                    size={18}
+                    aria-hidden
+                    className={`flex-shrink-0 text-brown/50 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                <div id={`m-outcome-body-${key}`} hidden={!isOpen} className="px-3 pb-3 space-y-2">
+                  {list.length === 0 && (
+                    <p className="text-xs text-brown/40 py-4 text-center border-2 border-dashed border-border rounded-xl">
+                      {rtl ? "لا صفقات" : "None"}
+                    </p>
+                  )}
+                  {list.slice(0, 30).map((deal) => (
+                    <div key={deal.id} data-testid={`m-deal-${deal.id}`} className="rounded-xl border border-border p-3 space-y-1.5">
+                      <Link
+                        href={`/dashboard/sales/deals/${deal.id}`}
+                        className="block font-bold text-sm text-charcoal leading-snug break-words hover:text-orange focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50 rounded"
+                      >
+                        {deal.title}
+                      </Link>
+                      <p className="text-xs font-bold tabular-nums">{money(deal.amount, deal.currency)}</p>
+                      {deal.lostReason && (
+                        <p className="text-[11px] text-red-700 break-words">
+                          {rtl ? "السبب" : "Reason"}: {deal.lostReason}
+                        </p>
+                      )}
+                      {canReopen && (
+                        <button
+                          type="button"
+                          disabled={busy === deal.id}
+                          onClick={() => move(deal, { toOutcome: "OPEN" })}
+                          className="w-full py-2 rounded-lg text-xs font-bold border border-border text-brown disabled:opacity-50"
+                        >
+                          {rtl ? "إعادة فتح" : "Reopen"}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        </>
       )}
 
       {/* Lost needs a reason. Asked for here rather than accepted as optional, because a

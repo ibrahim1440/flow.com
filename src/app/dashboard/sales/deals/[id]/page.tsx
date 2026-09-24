@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, Phone, FileText, Package, CheckCircle2, Clock, Plus, Users2, Trophy, XCircle,
@@ -105,22 +105,35 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
 
   const [dialog, setDialog] = useState<"activity" | "sample" | "close" | "edit" | "splits" | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await api<{ deal: Deal; stages: Stage[]; can: Can }>(`/api/sales/opportunities/${id}`);
-    if (res.ok) {
-      setDeal(res.data.deal);
-      setStages(res.data.stages);
-      setCan(res.data.can);
-      setError("");
-    } else {
-      setError(res.data.error ?? (ar ? "تعذّر تحميل الصفقة." : "Could not load the deal."));
-    }
-    setLoading(false);
-  }, [id, ar]);
+  /**
+   * Reload counter.
+   *
+   * The fetch lives in the effect rather than in a `useCallback` the effect calls: the
+   * lint rule resolves a called callback and sees setState reachable from the effect
+   * body. Mutations still refresh by bumping this, so the behaviour is unchanged and the
+   * fetch has one owner. `cancelled` stops a slow response landing after a newer one.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      const res = await api<{ deal: Deal; stages: Stage[]; can: Can }>(`/api/sales/opportunities/${id}`);
+      if (cancelled) return;
+      if (res.ok) {
+        setDeal(res.data.deal);
+        setStages(res.data.stages);
+        setCan(res.data.can);
+        setError("");
+      } else {
+        setError(res.data.error ?? (ar ? "تعذّر تحميل الصفقة." : "Could not load the deal."));
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [id, ar, reloadToken]);
+
 
   async function transition(body: Record<string, unknown>, okMessage: string) {
     if (busy) return;
@@ -134,7 +147,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     }
     setSuccess(okMessage);
     setDialog(null);
-    await load();
+    reload();
     return true;
   }
 
@@ -436,7 +449,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                               body: { completed: true },
                             });
                             setBusy(false);
-                            if (res.ok) load();
+                            if (res.ok) reload();
                             else setError(res.data.error ?? "");
                           }}
                         >
@@ -504,7 +517,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                             body: { status: "SENT" },
                           });
                           setBusy(false);
-                          if (res.ok) load();
+                          if (res.ok) reload();
                           else setError(res.data.error ?? "");
                         }}
                       >
@@ -626,7 +639,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           onDone={() => {
             setDialog(null);
             setSuccess(ar ? "سُجّل النشاط." : "Activity logged.");
-            load();
+            reload();
           }}
         />
       )}
@@ -638,7 +651,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           onDone={() => {
             setDialog(null);
             setSuccess(ar ? "سُجّلت العيّنة." : "Sample recorded.");
-            load();
+            reload();
           }}
         />
       )}
@@ -650,7 +663,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           onDone={() => {
             setDialog(null);
             setSuccess(ar ? "حُفظت التعديلات." : "Saved.");
-            load();
+            reload();
           }}
         />
       )}
@@ -662,7 +675,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           onDone={() => {
             setDialog(null);
             setSuccess(ar ? "حُفظ التوزيع." : "Split saved.");
-            load();
+            reload();
           }}
         />
       )}

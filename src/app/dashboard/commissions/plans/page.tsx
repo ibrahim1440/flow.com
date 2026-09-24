@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Percent, Plus, Lock, UserPlus } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
@@ -76,25 +76,37 @@ export default function CommissionPlansPage() {
     { kind: "plan" } | { kind: "version"; plan: Plan } | { kind: "assign" } | null
   >(null);
 
-  const load = useCallback(async () => {
-    const [p, a] = await Promise.all([
-      api<{ plans: Plan[] }>("/api/commissions/plans"),
-      api<{ assignments: Assignment[]; employees: { id: string; name: string; role: string }[] }>(
-        "/api/commissions/assignments",
-      ),
-    ]);
-    if (p.ok) setPlans(p.data.plans);
-    else setError(p.data.error ?? (ar ? "تعذّر تحميل الخطط." : "Could not load the plans."));
-    if (a.ok) {
-      setAssignments(a.data.assignments);
-      setEmployees(a.data.employees);
-    }
-    setLoading(false);
-  }, [ar]);
+  /**
+   * Reload counter.
+   *
+   * The fetch lives in the effect rather than in a `useCallback` the effect calls: the lint
+   * rule resolves a called callback and sees setState reachable from the effect body, and
+   * inlining puts the first `await` before any state write. Mutations refresh by bumping this
+   * instead of holding a callable loader, so the refresh behaviour is unchanged.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      const [p, a] = await Promise.all([
+        api<{ plans: Plan[] }>("/api/commissions/plans"),
+        api<{ assignments: Assignment[]; employees: { id: string; name: string; role: string }[] }>(
+          "/api/commissions/assignments",
+        ),
+      ]);
+      if (cancelled) return;
+      if (p.ok) setPlans(p.data.plans);
+      else setError(p.data.error ?? (ar ? "تعذّر تحميل الخطط." : "Could not load the plans."));
+      if (a.ok) {
+        setAssignments(a.data.assignments);
+        setEmployees(a.data.employees);
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [ar, reloadToken]);
 
   if (loading) return <Spinner />;
 
@@ -261,7 +273,7 @@ export default function CommissionPlansPage() {
                           assignmentId={a.id}
                           onDone={(msg) => {
                             setSuccess(msg);
-                            load();
+                            reload();
                           }}
                           onError={setError}
                         />
@@ -289,7 +301,7 @@ export default function CommissionPlansPage() {
           onDone={(m) => {
             setDialog(null);
             setSuccess(m);
-            load();
+            reload();
           }}
         />
       )}
@@ -301,7 +313,7 @@ export default function CommissionPlansPage() {
           onDone={(m) => {
             setDialog(null);
             setSuccess(m);
-            load();
+            reload();
           }}
         />
       )}
@@ -314,7 +326,7 @@ export default function CommissionPlansPage() {
           onDone={(m) => {
             setDialog(null);
             setSuccess(m);
-            load();
+            reload();
           }}
         />
       )}

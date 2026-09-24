@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { CheckCircle2, AlertTriangle, Banknote, Scale } from "lucide-react";
 import {
   useLang, ProvisionalBanner, SandboxBanner, PageHeader, Alert, Card, SectionTitle,
@@ -94,20 +94,33 @@ export default function CommissionReviewPage() {
   const [success, setSuccess] = useState("");
   const [dialog, setDialog] = useState<{ kind: "adjust" | "payout"; row: EmployeeRow } | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await api<Review>(`/api/commissions/review?month=${month}`);
-    if (res.ok) {
-      setData(res.data);
-      setError("");
-    } else {
-      setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
-    }
-    setLoading(false);
-  }, [month, ar]);
+  /**
+   * Reload counter.
+   *
+   * The fetch lives in the effect rather than in a `useCallback` the effect calls: the
+   * lint rule resolves a called callback and sees setState reachable from the effect
+   * body. Mutations still refresh by bumping this, so the behaviour is unchanged and the
+   * fetch has one owner. `cancelled` stops a slow response landing after a newer one.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      const res = await api<Review>(`/api/commissions/review?month=${month}`);
+      if (cancelled) return;
+      if (res.ok) {
+        setData(res.data);
+        setError("");
+      } else {
+        setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [month, ar, reloadToken]);
+
 
   async function approve(row: EmployeeRow) {
     if (busy) return;
@@ -127,7 +140,7 @@ export default function CommissionReviewPage() {
         ? ar ? `اعتُمدت ${res.data.approved} استحقاقات لـ ${row.name}.` : `Approved ${res.data.approved} accruals for ${row.name}.`
         : (res.data.message ?? ""),
     );
-    load();
+    reload();
   }
 
   if (loading) return <Spinner />;
@@ -353,7 +366,7 @@ export default function CommissionReviewPage() {
           onDone={(m) => {
             setDialog(null);
             setSuccess(m);
-            load();
+            reload();
           }}
         />
       )}

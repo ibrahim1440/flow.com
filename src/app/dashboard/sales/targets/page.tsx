@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Target } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner, SandboxBanner,
@@ -55,10 +55,22 @@ export default function TargetsPage() {
   const [success, setSuccess] = useState("");
   const [editing, setEditing] = useState<Row | "new" | null>(null);
 
-  const load = useCallback(async () => {
+  /**
+   * Reload counter. The fetch lives in the effect rather than in a `useCallback` the effect
+   * calls, because the rule resolves a called callback and sees setState reachable from the
+   * effect body. Mutations refresh by bumping this, so behaviour is unchanged and the fetch
+   * has one owner. `cancelled` stops a slow response for an old month landing after a newer.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
     const res = await api<{ rows: Row[]; scope: "own" | "all"; notice: string | null }>(
       `/api/sales/targets?month=${month}`,
     );
+    if (cancelled) return;
     if (res.ok) {
       setRows(res.data.rows);
       setScope(res.data.scope);
@@ -68,11 +80,9 @@ export default function TargetsPage() {
       setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
     }
     setLoading(false);
-  }, [month, ar]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    })();
+    return () => { cancelled = true; };
+  }, [month, ar, reloadToken]);
 
   if (loading) return <Spinner />;
 
@@ -216,7 +226,7 @@ export default function TargetsPage() {
           onDone={(msg) => {
             setEditing(null);
             setSuccess(msg);
-            load();
+            reload();
           }}
         />
       )}

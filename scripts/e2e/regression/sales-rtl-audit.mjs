@@ -102,11 +102,9 @@ const RESPONSIVE_EXEMPT = {
     "a redirect stub — creates the draft and navigates; it renders only a spinner",
   "src/app/dashboard/sales/leads/ImportDialog.tsx":
     "a dialog body inside Modal, which owns the responsive frame",
-  // NOT an exemption on merit. The board scrolls horizontally instead of collapsing, which
-  // is the documented gap: the designed mobile behaviour (pattern P5) is a stage accordion,
-  // and it is not built. Listed so the suite stays green while the gap stays visible.
-  "src/app/dashboard/sales/pipeline/page.tsx":
-    "KNOWN GAP — horizontal scroll on narrow widths; designed accordion (P5) not implemented",
+  // The pipeline board was listed here as a KNOWN GAP and has been removed: the designed
+  // stage accordion (pattern P5) is now implemented, the board is `hidden lg:block`, and the
+  // staleness assertion below is what forced this entry to be deleted rather than linger.
 };
 const TABLE_WRAP_EXEMPT = {
   "src/app/dashboard/sales/quotes/[id]/print/page.tsx":

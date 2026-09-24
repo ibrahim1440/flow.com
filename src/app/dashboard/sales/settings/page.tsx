@@ -51,21 +51,33 @@ export default function SalesSettingsPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Stage | null>(null);
 
-  const load = useCallback(async () => {
-    // `all=true`: retired stages must stay visible here, or there is no way to bring one back.
-    const res = await api<{ stages: Stage[] }>("/api/sales/stages?all=true");
-    if (res.ok) {
-      setStages(res.data.stages);
-      setError("");
-    } else {
-      setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
-    }
-    setLoading(false);
-  }, [ar]);
+  /**
+   * Reload counter.
+   *
+   * The fetch lives in the effect instead of a `useCallback` the effect calls, because the
+   * lint rule resolves a called callback and sees setState reachable from the effect body.
+   * Mutations still need to refresh, so instead of holding a callable loader they bump this
+   * and the effect re-runs. Same refresh, one owner of the fetch.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
+  const reload = () => setReloadToken((t) => t + 1);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      // `all=true`: retired stages must stay visible here, or there is no way to bring one back.
+      const res = await api<{ stages: Stage[] }>("/api/sales/stages?all=true");
+      if (cancelled) return;
+      if (res.ok) {
+        setStages(res.data.stages);
+        setError("");
+      } else {
+        setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [ar, reloadToken]);
 
   async function patch(changes: Partial<Stage> & { id: string }, okMessage: string) {
     if (busy) return;
@@ -78,7 +90,7 @@ export default function SalesSettingsPage() {
       return;
     }
     setSuccess(okMessage);
-    load();
+    reload();
   }
 
   /**
@@ -105,7 +117,7 @@ export default function SalesSettingsPage() {
       },
     });
     setBusy(false);
-    if (res.ok) load();
+    if (res.ok) reload();
     else setError(res.data.error ?? "");
   }
 
@@ -270,7 +282,7 @@ export default function SalesSettingsPage() {
             setAdding(false);
             setEditing(null);
             setSuccess(m);
-            load();
+            reload();
           }}
         />
       )}

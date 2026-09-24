@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { TrendingUp, Download } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
@@ -71,20 +71,31 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    const res = await api<Report>(`/api/sales/reports?month=${month}`);
-    if (res.ok) {
-      setData(res.data);
-      setError("");
-    } else {
-      setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
-    }
-    setLoading(false);
-  }, [month, ar]);
-
+  /**
+   * Loads the period.
+   *
+   * The fetch lives in the effect rather than in a `useCallback` the effect then calls. The
+   * lint rule resolves a called callback and sees setState reachable from the effect body;
+   * inlining puts the first `await` before any state write, which is the property the rule
+   * is actually asking for. Nothing else calls this, so there is nothing to keep callable.
+   *
+   * `cancelled` guards against a slow response for an old month landing after a newer one.
+   */
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      const res = await api<Report>(`/api/sales/reports?month=${month}`);
+      if (cancelled) return;
+      if (res.ok) {
+        setData(res.data);
+        setError("");
+      } else {
+        setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [month, ar]);
 
   if (loading) return <Spinner />;
   if (!data) return <Alert kind="error">{error}</Alert>;

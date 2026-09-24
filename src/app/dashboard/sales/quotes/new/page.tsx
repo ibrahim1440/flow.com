@@ -21,17 +21,25 @@ export default function NewQuotePage() {
   const ar = lang === "ar";
   const opportunityId = search.get("opportunityId");
 
-  const [error, setError] = useState("");
+  const [createError, setCreateError] = useState("");
+
+  /**
+   * "You arrived without a deal" is derived from the URL, not stored.
+   *
+   * It used to be written with setError inside the effect, which is a synchronous state write
+   * during an effect and causes a cascading render — and it was never really state anyway: it
+   * is a fact about the current URL, knowable at render time. Only the failure of the create
+   * call is genuine state, because only that is discovered asynchronously.
+   */
+  const missingDeal = !opportunityId;
+  const error = missingDeal
+    ? (ar
+        ? "عرض السعر يُنشأ من صفقة. افتح الصفقة واضغط «عرض سعر جديد»."
+        : "A quotation is raised from a deal. Open the deal and use “New quotation”.")
+    : createError;
 
   useEffect(() => {
-    if (!opportunityId) {
-      setError(
-        ar
-          ? "عرض السعر يُنشأ من صفقة. افتح الصفقة واضغط «عرض سعر جديد»."
-          : "A quotation is raised from a deal. Open the deal and use “New quotation”.",
-      );
-      return;
-    }
+    if (!opportunityId) return;
 
     let cancelled = false;
     (async () => {
@@ -47,7 +55,7 @@ export default function NewQuotePage() {
       if (res.ok && res.data.quote) {
         router.replace(`/dashboard/sales/quotes/${res.data.quote.id}`);
       } else {
-        setError(res.data.error ?? (ar ? "تعذّر إنشاء العرض." : "Could not create the quotation."));
+        setCreateError(res.data.error ?? (ar ? "تعذّر إنشاء العرض." : "Could not create the quotation."));
       }
     })();
 
