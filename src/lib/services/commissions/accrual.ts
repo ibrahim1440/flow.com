@@ -210,12 +210,22 @@ export async function recomputeEmployeePeriod(
 
   const { amount: targetAmount, effectiveRatePercent } = commissionOnCumulativeBase(cumulativeBase, rules);
 
-  // What is already on the books for this employee, period and plan version.
+  // What THIS ENGINE has already written for the employee and period.
+  //
+  // ACCRUAL and REVERSAL only — deliberately NOT ADJUSTMENT. An adjustment is a human
+  // decision recorded ON TOP of what the rules compute: a goodwill payment, a negotiated
+  // correction. Counting it here made it part of the engine's own baseline, so the next
+  // collection computed a target that already contained it and wrote a smaller delta to
+  // compensate. The adjustment silently evaporated the moment the customer paid again, and
+  // the only visible symptom was somebody being paid less than they were promised.
+  //
+  // `periodStatement` has always reported the two separately for exactly this reason; this
+  // is the write path finally agreeing with the read path.
   const recorded = await tx.commissionLedgerEntry.aggregate({
     where: {
       employeeId,
       periodStart,
-      type: { in: ["ACCRUAL", "ADJUSTMENT", "REVERSAL"] },
+      type: { in: ["ACCRUAL", "REVERSAL"] },
     },
     _sum: { amount: true },
   });

@@ -150,7 +150,10 @@ export async function GET(request: Request) {
         converted: converted.length,
         // Of the leads that ARRIVED in this window — a cohort rate, not a ratio of
         // unrelated counts.
-        conversionRatePercent: conversionRate.toString(),
+        // toFixed, not toString: a Decimal rounded to one place renders "50" when the
+        // tenth is zero, so a client writing `${rate}%` gets "50%" one month and "49.5%"
+        // the next. One decimal place, always.
+        conversionRatePercent: conversionRate.toFixed(1),
         newCustomersCreated: converted.filter((l) => l.conversion?.customerCreated).length,
         bySource: sourceRows
           .map((r) => ({ source: r.source, count: r._count._all }))
@@ -178,7 +181,7 @@ export async function GET(request: Request) {
         wonValue: wonValue.toFixed(2),
         lost: lostDeals.length,
         lostValue: lostValue.toFixed(2),
-        winRatePercent: winRate.toString(),
+        winRatePercent: winRate.toFixed(1),
         lostReasons: lostReasons
           .map((r) => ({ reason: r.lostReason ?? "(none recorded)", count: r._count._all }))
           .sort((a, b) => b.count - a.count)

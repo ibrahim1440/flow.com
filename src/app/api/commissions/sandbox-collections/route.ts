@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
+import { handlePrismaError, handleDomainError } from "@/lib/api-error";
 import { Decimal } from "@prisma/client/runtime/client";
 import { accrueForCollection } from "@/lib/services/commissions/accrual";
 
@@ -203,5 +203,69 @@ export async function GET() {
     return NextResponse.json({ rows, sourceSystem: "SANDBOX", sandbox: true });
   } catch (err) {
     return handlePrismaError(err);
+  }
+}
+
+/**
+ * PATCH /api/commissions/sandbox-collections — reverse a sandbox collection.
+ *
+ * A refund is the case the accrual engine is most easily got wrong on, so there has to be a
+ * way to exercise it. Reversing does NOT edit or delete anything: the event is marked
+ * REVERSED, the recomputation then excludes it, the period's target drops, and the
+ * difference is written as a negative ledger entry. An accrual that was already APPROVED is
+ * left exactly as approved — the correction lives in the ledger, which is the whole point of
+ * it being append-only.
+ *
+ * Behind the same three gates as POST, for the same reasons.
+ */
+export async function PATCH(request: Request) {
+  const { user, error } = await requireSub("commissions", "sandbox_collections");
+  if (error) return error;
+
+  const gate = sandboxGate();
+  if (!gate.ok) return NextResponse.json({ error: gate.message, sandbox: true }, { status: gate.status });
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+  const b = (body ?? {}) as Record<string, unknown>;
+
+  const externalRef = typeof b.externalRef === "string" ? b.externalRef.trim() : "";
+  if (!externalRef) {
+    return NextResponse.json({ error: "externalRef is required." }, { status: 400 });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const event = await tx.collectionEvent.findUnique({
+        where: { sourceSystem_externalRef: { sourceSystem: "SANDBOX", externalRef } },
+        select: { id: true, status: true },
+      });
+      if (!event) throw { _appCode: 404, message: "No sandbox collection with that reference." };
+
+      // Idempotent: reversing twice recomputes to the same target and writes nothing.
+      if (event.status !== "REVERSED") {
+        await tx.collectionEvent.update({
+          where: { id: event.id },
+          data: { status: "REVERSED", reversedAt: new Date() },
+        });
+      }
+
+      const outcomes = await accrueForCollection(tx, event.id, user.id);
+      return { collectionEventId: event.id, alreadyReversed: event.status === "REVERSED", accruals: outcomes };
+    }, TX_OPTS);
+
+    return NextResponse.json({
+      ...result,
+      sourceSystem: "SANDBOX",
+      notice:
+        "Synthetic collection reversed. Approved accruals are unchanged; the correction is a " +
+        "negative entry in the ledger.",
+    });
+  } catch (err) {
+    return handleDomainError(err);
   }
 }

@@ -30,7 +30,17 @@ export async function GET(request: Request) {
     const periodStart = riyadhMonthStart(at);
     const periodEnd = riyadhMonthEnd(at);
 
-    const statement = await periodStatement(prisma, user.id, periodStart);
+    const raw = await periodStatement(prisma, user.id, periodStart);
+    // Fixed to two places, exactly as the team review endpoint formats it. Serialising the
+    // Decimal straight through gives "50" here and "50.00" there for the same money, and
+    // the person comparing their own screen with their manager's is the one who notices.
+    const statement = {
+      periodStart: raw.periodStart,
+      accrued: raw.accrued.toFixed(2),
+      adjustments: raw.adjustments.toFixed(2),
+      paid: raw.paid.toFixed(2),
+      outstanding: raw.outstanding.toFixed(2),
+    };
 
     // The accruals behind the total, each carrying the figures that explain it: the base it
     // was computed from, the share applied, and the effective rate. A commission screen that
