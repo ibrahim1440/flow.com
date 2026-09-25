@@ -150,6 +150,29 @@ const QUOTE_DETAIL = {
  * rendered "٥ عروض" into the same cell as the company name would still be caught, because
  * only the company name is subtracted.
  */
+/** One recorded receipt, in whichever state the screen needs to show. */
+const collection = (id, status, gross, tax, net, o = {}) => ({
+  id, status,
+  amountGross: gross, amountTax: tax, amountNet: net, currency: "SAR",
+  paymentMethod: o.method ?? "BANK_TRANSFER",
+  collectedAt: at(-3), referenceNumber: o.ref ?? null, note: null,
+  submittedAt: at(-3), submittedBy: OWNER,
+  decidedAt: o.decidedBy ? at(-2) : null,
+  decidedBy: o.decidedBy ?? null,
+  decisionReason: o.reason ?? null,
+  reversedAt: o.reversalReason ? at(-1) : null,
+  reversedBy: o.reversalReason ? (o.decidedBy ?? OWNER2) : null,
+  reversalReason: o.reversalReason ?? null,
+  collectionEventId: o.accrual ? `ce-${id}` : null,
+  customer: { id: "c1", name: "محمصة النخبة", nameAr: "محمصة النخبة" },
+  opportunity: { id: "d1", title: "خلطة خاصة", ownerId: "u1" },
+  quote: { id: "q1", quoteNumber: "OF-1042" },
+  _count: { evidence: o.evidence ?? 0 },
+  collectionEvent: o.accrual
+    ? { accruals: [{ amount: o.accrual, status: "ACCRUED", employee: OWNER }] }
+    : null,
+});
+
 export const CUSTOMER_TEXT = ["كافيه ٢١"];
 
 export const ROUTES = {
@@ -288,6 +311,33 @@ export const ROUTES = {
             ],
           },
           can: { write: true, convert: true },
+        },
+      },
+    },
+  },
+  "sales-collections": {
+    screen: "collections",
+    api: {
+      "/api/sales/collections": {
+        body: {
+          rows: [
+            collection("sc1", "PENDING_VERIFICATION", "5750.00", "750.00", "5000.00", {
+              ref: "TRF-88214", evidence: 1,
+            }),
+            collection("sc2", "APPROVED", "11500.00", "1500.00", "10000.00", {
+              ref: "TRF-88190", evidence: 2, accrual: "100.00", decidedBy: OWNER2,
+            }),
+            collection("sc3", "REJECTED", "2300.00", "300.00", "2000.00", {
+              ref: "CHQ-4471", decidedBy: OWNER2,
+              reason: "صورة الإيصال لا تطابق المبلغ المذكور.",
+            }),
+            collection("sc4", "REVERSED", "4600.00", "600.00", "4000.00", {
+              ref: "TRF-88011", accrual: "-40.00", decidedBy: OWNER2,
+              reversalReason: "أُعيد المبلغ للعميل بعد إلغاء جزء من الطلب.",
+            }),
+          ],
+          scope: "all",
+          can: { submit: true, verify: true, reject: true, reverse: true },
         },
       },
     },
