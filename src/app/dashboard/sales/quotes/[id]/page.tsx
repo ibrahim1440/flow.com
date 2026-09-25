@@ -264,7 +264,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     return (
       <div className="space-y-4">
         <Alert kind="error">{error || (ar ? "العرض غير موجود." : "Quotation not found.")}</Alert>
-        <Link href="/dashboard/sales/quotes" className="text-orange font-bold text-sm">
+        <Link href="/dashboard/sales/quotes" className="text-oo-action-primary font-bold text-sm">
           {ar ? "كل عروض الأسعار" : "All quotations"}
         </Link>
       </div>
@@ -279,7 +279,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
       <Link
         href={`/dashboard/sales/deals/${quote.opportunity.id}`}
-        className="inline-flex items-center gap-1.5 text-sm font-bold text-brown hover:text-orange"
+        className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
       >
         <ArrowLeft size={15} className="rtl:rotate-180" aria-hidden />
         {quote.opportunity.title}
@@ -297,7 +297,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               <Pill tone="accent">{ar ? "خصم معتمد" : "discount approved"}</Pill>
             )}
             {quote.customer && (
-              <span className="font-bold text-charcoal">
+              <span className="font-bold text-oo-text-primary">
                 {ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name}
               </span>
             )}
@@ -309,7 +309,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               <Link
                 href={`/dashboard/sales/quotes/${quote.id}/print`}
                 data-testid="open-print"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold bg-white border-2 border-border text-charcoal hover:border-orange active:scale-[0.98] transition-all"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold bg-oo-bg-default border border-oo-border-strong text-oo-text-primary hover:border-oo-action-primary active:scale-[0.98] transition-all"
               >
                 <Printer size={15} aria-hidden /> {ar ? "المستند" : "Document"}
               </Link>
@@ -380,7 +380,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         </Alert>
       )}
       {quote.supersedes && (
-        <p className="text-xs text-brown/70 font-semibold">
+        <p className="text-xs text-oo-text-secondary font-semibold">
           {ar ? "يراجع " : "Revises "}
           <Link href={`/dashboard/sales/quotes/${quote.supersedes.id}`} className="underline">
             {quote.supersedes.quoteNumber}
@@ -414,7 +414,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   setLines([...lines, emptyLine()]);
                   setDirty(true);
                 }}
-                className="text-xs font-bold text-orange hover:underline"
+                className="text-xs font-bold text-oo-action-primary hover:underline"
                 data-testid="add-line"
               >
                 + {ar ? "بند" : "Line"}
@@ -426,22 +426,22 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         </SectionTitle>
 
         {lines.length === 0 ? (
-          <p className="text-sm text-brown/50 font-semibold py-6 text-center">
+          <p className="text-sm text-oo-text-muted font-semibold py-6 text-center">
             {ar ? "لا توجد بنود. أضف بنداً لتسعير العرض." : "No lines yet. Add one to price the quotation."}
           </p>
         ) : (
           <TableWrap>
             <table className="w-full text-sm min-w-[860px]">
               <thead>
-                <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                  <th className="text-start py-2 w-[26%]">{ar ? "المنتج / الوصف" : "Product / description"}</th>
-                  <th className="text-end py-2 w-[10%]">{ar ? "الكمية" : "Qty"}</th>
-                  <th className="text-start py-2 w-[9%]">{ar ? "الوحدة" : "Unit"}</th>
-                  <th className="text-end py-2 w-[13%]">{ar ? "سعر الوحدة" : "Unit price"}</th>
-                  <th className="text-end py-2 w-[9%]">{ar ? "خصم %" : "Disc %"}</th>
-                  <th className="text-end py-2 w-[9%]">{ar ? "ضريبة %" : "Tax %"}</th>
-                  <th className="text-end py-2 w-[14%]">{ar ? "الإجمالي" : "Total"}</th>
-                  <th className="w-[4%]" />
+                <tr className="bg-oo-bg-subtle text-[12px] font-medium leading-[18px] text-oo-text-muted">
+                  <th className="pe-4 text-start py-2 w-[26%]">{ar ? "المنتج / الوصف" : "Product / description"}</th>
+                  <th className="pe-4 text-end py-2 w-[10%]">{ar ? "الكمية" : "Qty"}</th>
+                  <th className="pe-4 text-start py-2 w-[9%]">{ar ? "الوحدة" : "Unit"}</th>
+                  <th className="pe-4 text-end py-2 w-[13%]">{ar ? "سعر الوحدة" : "Unit price"}</th>
+                  <th className="pe-4 text-end py-2 w-[9%]">{ar ? "خصم %" : "Disc %"}</th>
+                  <th className="pe-4 text-end py-2 w-[9%]">{ar ? "ضريبة %" : "Tax %"}</th>
+                  <th className="pe-4 text-end py-2 w-[14%]">{ar ? "الإجمالي" : "Total"}</th>
+                  <th className="pe-4 w-[4%]" />
                 </tr>
               </thead>
               <tbody>
@@ -450,14 +450,14 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
                   const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
                   return (
-                    <tr key={i} className="border-t border-border align-top" data-testid={`line-${i}`}>
+                    <tr key={i} className="border-t border-oo-border-default align-top" data-testid={`line-${i}`}>
                       <td className="py-2 pe-2">
                         <select
                           aria-label={ar ? `المنتج للبند ${i + 1}` : `Product for line ${i + 1}`}
                           value={l.productSkuId}
                           disabled={!editable}
                           onChange={(e) => chooseSku(i, e.target.value)}
-                          className="w-full px-2 py-2 border-2 border-border rounded-lg text-xs bg-white disabled:bg-cream/40"
+                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs bg-oo-bg-default disabled:bg-oo-bg-subtle"
                         >
                           <option value="">{ar ? "— وصف حر —" : "— free text —"}</option>
                           {skus.map((s) => (
@@ -473,7 +473,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                             disabled={!editable}
                             placeholder={ar ? "وصف البند" : "What is being quoted"}
                             onChange={(e) => setLine(i, { description: e.target.value })}
-                            className="w-full mt-1 px-2 py-2 border-2 border-border rounded-lg text-xs disabled:bg-cream/40"
+                            className="w-full mt-1 px-2 py-2 border border-oo-border-strong rounded-lg text-xs disabled:bg-oo-bg-subtle"
                           />
                         )}
                       </td>
@@ -484,7 +484,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                           inputMode="decimal"
                           disabled={!editable}
                           onChange={(e) => setLine(i, { quantity: e.target.value })}
-                          className="w-full px-2 py-2 border-2 border-border rounded-lg text-xs text-end tabular-nums disabled:bg-cream/40"
+                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
                         />
                       </td>
                       <td className="py-2 pe-2">
@@ -493,7 +493,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                           value={l.unit}
                           disabled={!editable}
                           onChange={(e) => setLine(i, { unit: e.target.value })}
-                          className="w-full px-2 py-2 border-2 border-border rounded-lg text-xs disabled:bg-cream/40"
+                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs disabled:bg-oo-bg-subtle"
                         >
                           <option value="KG">KG</option>
                           <option value="UNIT">{ar ? "عبوة" : "UNIT"}</option>
@@ -507,7 +507,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                           inputMode="decimal"
                           disabled={!editable}
                           onChange={(e) => setLine(i, { unitPrice: e.target.value })}
-                          className="w-full px-2 py-2 border-2 border-border rounded-lg text-xs text-end tabular-nums disabled:bg-cream/40"
+                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
                         />
                       </td>
                       <td className="py-2 pe-2">
@@ -517,7 +517,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                           inputMode="decimal"
                           disabled={!editable}
                           onChange={(e) => setLine(i, { discountPercent: e.target.value })}
-                          className="w-full px-2 py-2 border-2 border-border rounded-lg text-xs text-end tabular-nums disabled:bg-cream/40"
+                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
                         />
                       </td>
                       <td className="py-2 pe-2">
@@ -527,13 +527,13 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                           inputMode="decimal"
                           disabled={!editable}
                           onChange={(e) => setLine(i, { taxRatePercent: e.target.value })}
-                          className="w-full px-2 py-2 border-2 border-border rounded-lg text-xs text-end tabular-nums disabled:bg-cream/40"
+                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
                         />
                       </td>
-                      <td className="py-2 text-end tabular-nums font-bold" data-testid={`line-total-${i}`}>
+                      <td className="pe-4 py-2 text-end tabular-nums font-bold" data-testid={`line-total-${i}`}>
                         {formatMoney(lineTotal.toFixed(2))}
                       </td>
-                      <td className="py-2 text-center">
+                      <td className="pe-4 py-2 text-center">
                         {editable && (
                           <button
                             aria-label={ar ? `حذف البند ${i + 1}` : `Remove line ${i + 1}`}
@@ -542,7 +542,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                               setLines(lines.filter((_, j) => j !== i));
                               setDirty(true);
                             }}
-                            className="text-brown/50 hover:text-red-600"
+                            className="text-oo-text-muted hover:text-oo-status-rejected"
                           >
                             <Trash2 size={14} aria-hidden />
                           </button>
@@ -575,24 +575,24 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               />
             </Field>
             {dirty && editable && (
-              <p className="text-[11px] text-amber-700 font-bold" role="status">
+              <p className="text-[11px] text-oo-status-hold font-bold" role="status">
                 {ar ? "تغييرات غير محفوظة." : "Unsaved changes."}
               </p>
             )}
           </div>
 
-          <dl className="bg-cream/50 rounded-xl p-4 space-y-2 text-sm" data-testid="quote-totals">
+          <dl className="bg-oo-bg-subtle rounded-xl p-4 space-y-2 text-sm" data-testid="quote-totals">
             <Total label={ar ? "المجموع قبل الخصم" : "Subtotal"} value={(dirty ? preview.subtotal.toFixed(2) : quote.subtotal)} />
             <Total label={ar ? "الخصم" : "Discount"} value={"-" + (dirty ? preview.discountTotal.toFixed(2) : quote.discountTotal)} />
             <Total label={ar ? "الضريبة" : "Tax"} value={dirty ? preview.taxTotal.toFixed(2) : quote.taxTotal} />
-            <div className="border-t border-border pt-2 flex items-baseline justify-between gap-3">
-              <dt className="font-extrabold text-charcoal">{ar ? "الإجمالي" : "Grand total"}</dt>
+            <div className="border-t border-oo-border-default pt-2 flex items-baseline justify-between gap-3">
+              <dt className="font-extrabold text-oo-text-primary">{ar ? "الإجمالي" : "Grand total"}</dt>
               <dd className="text-lg">
                 <Money value={dirty ? preview.grandTotal.toFixed(2) : quote.grandTotal} currency={quote.currency} />
               </dd>
             </div>
             {dirty && (
-              <p className="text-[10px] text-brown/60 font-semibold">
+              <p className="text-[10px] text-oo-text-muted font-semibold">
                 {ar
                   ? "معاينة محلية. الأرقام المعتمدة هي التي يحسبها الخادم عند الحفظ."
                   : "Local preview. The figures that count are the server's, computed on save."}
@@ -603,7 +603,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       </Card>
 
       {quote.issuedAt && (
-        <p className="text-[11px] text-brown/60 font-medium">
+        <p className="text-[11px] text-oo-text-muted font-medium">
           {ar ? "صدر في " : "Issued "}
           {formatDate(quote.issuedAt)}
           {ar
@@ -636,7 +636,7 @@ function Total({ label, value }: { label: string; value: string }) {
   // formatter, which is why the sign is part of the string rather than part of the label.
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs font-bold text-brown/70">{label}</dt>
+      <dt className="text-xs font-bold text-oo-text-secondary">{label}</dt>
       <dd className="tabular-nums font-bold">{formatMoney(value)}</dd>
     </div>
   );
@@ -712,7 +712,7 @@ function OrderDialog({
       }
     >
       {err && <Alert kind="error">{err}</Alert>}
-      <p className="text-sm text-brown font-medium">
+      <p className="text-sm text-oo-text-secondary font-medium">
         {ar
           ? "يُنشأ الطلب في نظام الطلبات عبر خدمة الطلبات نفسها، ببنود العرض وكمياته. الضغط مرتين لا يُنشئ طلبين."
           : "The order is created in the operational system through the order service itself, with this quotation's lines and quantities. Clicking twice does not make two orders."}
@@ -720,7 +720,7 @@ function OrderDialog({
       <Field id="ord-notes" label={ar ? "ملاحظات الطلب" : "Order notes"}>
         <TextArea id="ord-notes" value={notes} onChange={setNotes} rows={2} />
       </Field>
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[11px] text-oo-text-muted font-medium">
         {ar
           ? "البنود ذات الوصف الحر أو الكميات الكسرية للعبوات تُرفض، ويُذكر البند بالاسم."
           : "A free-text line, or a fractional pack count, is refused with the line named — not silently dropped."}

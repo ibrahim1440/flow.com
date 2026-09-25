@@ -3,20 +3,21 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft, Phone, FileText, Package, CheckCircle2, Clock, Plus, Users2, Trophy, XCircle,
+  ArrowLeft, Phone, FileText, Package, CheckCircle2, Check, Circle, CircleDashed, Clock, Plus,
+  Users2, Trophy, XCircle,
 } from "lucide-react";
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState,
   Spinner, Button, Field, TextInput, Select, TextArea, Money, Pill, Modal, TableWrap, api,
-  DealOutcomeBadge, QuoteStatusBadge,
+  DealOutcomeBadge, QuoteStatusBadge, ROW_ACTION, num, formatDay, formatWhen,
 } from "../../_components/ui";
-import { formatDate } from "@/lib/utils";
 
 /**
  * Deal detail — the whole opportunity in one place.
  *
- * PROVISIONAL INTERFACE, as the banner says. Built from the existing ERP components and
- * the documented flow because the Figma design could not be produced in this session.
+ * SC-04 in the Sales Screens design: the deal’s state and its one next action in the
+ * header, the ordered stages as a stepper rather than a row of equal pills, and the
+ * quotations and the activity log side by side beneath.
  *
  * The screen is organised around the question a salesperson opens it to answer: what is
  * the state of this deal and what happens next. So the lifecycle controls and the next
@@ -156,7 +157,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     return (
       <div className="space-y-4">
         <Alert kind="error">{error || (ar ? "الصفقة غير موجودة." : "Deal not found.")}</Alert>
-        <Link href="/dashboard/sales/pipeline" className="text-orange font-bold text-sm">
+        <Link href="/dashboard/sales/pipeline" className="text-oo-action-primary font-bold text-sm">
           {ar ? "العودة إلى مسار الصفقات" : "Back to the pipeline"}
         </Link>
       </div>
@@ -174,7 +175,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
 
       <Link
         href="/dashboard/sales/pipeline"
-        className="inline-flex items-center gap-1.5 text-sm font-bold text-brown hover:text-orange"
+        className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
       >
         <ArrowLeft size={15} className="rtl:rotate-180" aria-hidden />
         {ar ? "مسار الصفقات" : "Pipeline"}
@@ -191,22 +192,35 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                 because "lost at negotiation" and "lost at qualification" are not the same
                 loss. */}
             <DealOutcomeBadge outcome={deal.outcome} testId="deal-outcome" />
-            <Pill tone="neutral" testId="deal-stage">
-              {pick({ [deal.stage.code]: { en: deal.stage.nameEn, ar: deal.stage.nameAr } }, deal.stage.code, lang)}
-            </Pill>
-            {deal.customer && (
-              <Link href={`/dashboard/customers`} className="font-bold text-charcoal hover:text-orange">
-                {ar ? (deal.customer.nameAr ?? deal.customer.name) : deal.customer.name}
-              </Link>
-            )}
-            <span className="text-brown/60">·</span>
-            <Money value={deal.amount} currency={deal.currency} />
-            {deal.owner && (
-              <>
-                <span className="text-brown/60">·</span>
-                <span className="text-xs font-semibold">{deal.owner.name}</span>
-              </>
-            )}
+            {[
+              deal.customer ? (
+                <Link key="c" href="/dashboard/customers" className="hover:text-oo-action-primary">
+                  {ar ? (deal.customer.nameAr ?? deal.customer.name) : deal.customer.name}
+                </Link>
+              ) : null,
+              <Money key="m" value={deal.amount} currency={deal.currency} />,
+              deal.owner ? (
+                <span key="o">
+                  {ar ? "المالك " : "owner "}
+                  {deal.owner.name}
+                </span>
+              ) : null,
+              <span key="cr">
+                {ar ? "أُنشئت " : "created "}
+                {formatDay(deal.createdAt, lang)}
+              </span>,
+              <span key="p">
+                {ar ? "احتمال " : "probability "}
+                {num(deal.probability, lang)}٪
+              </span>,
+            ]
+              .filter(Boolean)
+              .map((part, i) => (
+                <span key={i} className="flex items-center gap-2">
+                  {i > 0 && <span aria-hidden className="text-oo-border-strong">·</span>}
+                  {part}
+                </span>
+              ))}
           </span>
         }
         actions={
@@ -224,6 +238,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
             {can.close && open && (
               <>
                 <Button
+                  variant="secondary"
                   onClick={() =>
                     transition({ toOutcome: "WON" }, ar ? "تم تسجيل الصفقة مكسوبة." : "Deal marked won.")
                   }
@@ -237,11 +252,19 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                         : "Needs an accepted quotation first"
                   }
                 >
-                  <Trophy size={15} aria-hidden /> {ar ? "مكسوبة" : "Won"}
+                  <Trophy size={15} aria-hidden /> {ar ? "تعليم رابح" : "Mark won"}
                 </Button>
-                <Button variant="danger" onClick={() => setDialog("close")} disabled={busy} testId="lose-deal">
-                  <XCircle size={15} aria-hidden /> {ar ? "خسارة" : "Lost"}
-                </Button>
+                {/* Outlined, not filled: losing a deal is ordinary work and a solid red
+                    button next to a solid indigo one reads as the pair of choices being
+                    equally weighted, which they are not. */}
+                <button
+                  onClick={() => setDialog("close")}
+                  disabled={busy}
+                  data-testid="lose-deal"
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
+                >
+                  <XCircle size={15} aria-hidden /> {ar ? "تعليم خاسر" : "Mark lost"}
+                </button>
               </>
             )}
             {can.reopen && !open && (
@@ -253,8 +276,20 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                   transition({ toOutcome: "OPEN" }, ar ? "أُعيد فتح الصفقة." : "Deal reopened.")
                 }
               >
-                {ar ? "إعادة فتح" : "Reopen"}
+                {ar ? "إعادة فتح الصفقة" : "Reopen the deal"}
               </Button>
+            )}
+            {/* The design's one primary action on this screen. Raising the quotation is what
+                moves the deal forward; marking it won is what happens after the customer
+                accepts one, which is why the server refuses the latter without the former. */}
+            {can.quote && open && (
+              <Link
+                href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`}
+                data-testid="new-quote-header"
+                className="inline-flex items-center gap-2 rounded-[10px] bg-oo-action-primary px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-white transition-colors hover:bg-oo-action-primary-hover"
+              >
+                <FileText size={15} aria-hidden /> {ar ? "إنشاء عرض سعر" : "Raise a quotation"}
+              </Link>
             )}
           </>
         }
@@ -278,35 +313,79 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         </Alert>
       )}
 
-      {/* ── Stage board ──────────────────────────────────────────────── */}
+      {/* ── Stage ────────────────────────────────────────────────────────────────────
+          A stepper rather than a row of equal pills, because the stages are ordered and the
+          row was not saying so: a passed stage, the current one and one still ahead all
+          looked like three buttons. Each step is still the control that moves the deal
+          there — the design's shape, the screen's existing behaviour. */}
       {open && can.write && (
         <Card>
-          <SectionTitle>{ar ? "المرحلة" : "Stage"}</SectionTitle>
-          <div className="flex gap-2 flex-wrap" role="group" aria-label={ar ? "المرحلة" : "Stage"}>
-            {stages
-              .filter((s) => s.isActive || s.id === deal.stage.id)
-              .map((s) => (
-                <button
-                  key={s.id}
-                  data-testid={`stage-${s.code}`}
-                  disabled={busy || s.id === deal.stage.id}
-                  aria-pressed={s.id === deal.stage.id}
-                  onClick={() =>
-                    transition(
-                      { toStageId: s.id },
-                      ar ? `نُقلت إلى ${s.nameAr}.` : `Moved to ${s.nameEn}.`,
-                    )
-                  }
-                  className={`px-3 py-2 rounded-xl text-xs font-bold border-2 transition-colors ${
-                    s.id === deal.stage.id
-                      ? "bg-orange text-white border-orange"
-                      : "bg-white border-border text-brown hover:border-orange"
-                  }`}
-                >
-                  {ar ? s.nameAr : s.nameEn}
-                </button>
-              ))}
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-[12px] leading-[18px] text-oo-text-muted">
+              {ar
+                ? "المراحل تُهيَّأ من إعدادات المبيعات — ليست قائمة ثابتة"
+                : "Stages come from Sales settings — this is not a fixed list"}
+            </span>
+            <SectionTitle>
+              {ar ? "المرحلة الحالية: " : "Current stage: "}
+              {ar ? deal.stage.nameAr : deal.stage.nameEn}
+            </SectionTitle>
           </div>
+          <ol className="flex flex-wrap items-center gap-1" role="group" aria-label={ar ? "المرحلة" : "Stage"}>
+            {(() => {
+              const shown = stages.filter((s) => s.isActive || s.id === deal.stage.id);
+              const atIdx = shown.findIndex((s) => s.id === deal.stage.id);
+              return shown.map((s, i) => {
+                const passed = i < atIdx;
+                const current = i === atIdx;
+                return (
+                  <li key={s.id} className="flex items-center gap-1">
+                    {i > 0 && (
+                      <span aria-hidden className="px-1 text-oo-text-muted">
+                        {ar ? "←" : "→"}
+                      </span>
+                    )}
+                    <button
+                      data-testid={`stage-${s.code}`}
+                      disabled={busy || current}
+                      aria-current={current ? "step" : undefined}
+                      onClick={() =>
+                        transition(
+                          { toStageId: s.id },
+                          ar ? `نُقلت إلى ${s.nameAr}.` : `Moved to ${s.nameEn}.`,
+                        )
+                      }
+                      className={`flex min-w-[130px] flex-col items-center gap-1 rounded-[10px] border px-4 py-2.5 transition-colors ${
+                        current
+                          ? "border-oo-action-primary bg-oo-bg-default"
+                          : "border-transparent hover:border-oo-border-strong"
+                      }`}
+                    >
+                      {/* Passed, current, still ahead — a tick, a filled ring, a dotted one. */}
+                      {passed ? (
+                        <Check size={16} aria-hidden className="text-oo-action-primary" />
+                      ) : current ? (
+                        <Circle size={16} aria-hidden className="text-oo-action-primary" />
+                      ) : (
+                        <CircleDashed size={16} aria-hidden className="text-oo-text-muted" />
+                      )}
+                      <span
+                        className={`text-[14px] leading-[22px] ${
+                          current
+                            ? "font-medium text-oo-text-primary"
+                            : passed
+                              ? "text-oo-text-secondary"
+                              : "text-oo-text-muted"
+                        }`}
+                      >
+                        {ar ? s.nameAr : s.nameEn}
+                      </span>
+                    </button>
+                  </li>
+                );
+              });
+            })()}
+          </ol>
         </Card>
       )}
 
@@ -319,7 +398,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                 can.quote && open ? (
                   <Link
                     href={`/dashboard/sales/quotes/new?opportunityId=${deal.id}`}
-                    className="text-xs font-bold text-orange hover:underline"
+                    className="text-xs font-bold text-oo-action-primary hover:underline"
                     data-testid="new-quote"
                   >
                     + {ar ? "عرض سعر جديد" : "New quotation"}
@@ -338,35 +417,35 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               <TableWrap>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                      <th className="text-start py-2">{ar ? "الرقم" : "Number"}</th>
-                      <th className="text-start py-2">{ar ? "الحالة" : "Status"}</th>
-                      <th className="text-end py-2">{ar ? "الإجمالي" : "Total"}</th>
-                      <th className="text-start py-2">{ar ? "صالح حتى" : "Valid until"}</th>
-                      <th className="text-start py-2" />
+                    <tr className="bg-oo-bg-subtle text-[12px] font-medium leading-[18px] text-oo-text-muted">
+                      <th className="pe-4 text-start py-2">{ar ? "الرقم" : "Number"}</th>
+                      <th className="pe-4 text-start py-2">{ar ? "الحالة" : "Status"}</th>
+                      <th className="pe-4 text-end py-2">{ar ? "الإجمالي" : "Total"}</th>
+                      <th className="pe-4 text-start py-2">{ar ? "صالح حتى" : "Valid until"}</th>
+                      <th className="pe-4 text-start py-2" />
                     </tr>
                   </thead>
                   <tbody>
                     {deal.quotes.map((q) => (
-                      <tr key={q.id} className="border-t border-border" data-testid={`quote-row-${q.quoteNumber}`}>
-                        <td className="py-2.5 font-bold">
-                          <Link href={`/dashboard/sales/quotes/${q.id}`} className="hover:text-orange">
+                      <tr key={q.id} className="border-t border-oo-border-default" data-testid={`quote-row-${q.quoteNumber}`}>
+                        <td className="pe-4 py-2.5 font-bold">
+                          <Link href={`/dashboard/sales/quotes/${q.id}`} className="hover:text-oo-action-primary">
                             {q.quoteNumber}
                           </Link>
                           {q.revision > 1 && (
-                            <span className="text-[10px] text-brown/60 ps-1">r{q.revision}</span>
+                            <span className="text-[10px] text-oo-text-muted ps-1">r{q.revision}</span>
                           )}
                         </td>
-                        <td className="py-2.5">
+                        <td className="pe-4 py-2.5">
                           <QuoteStatusBadge status={q.status} />
                         </td>
-                        <td className="py-2.5 text-end">
+                        <td className="pe-4 py-2.5 text-end">
                           <Money value={q.grandTotal} currency={q.currency} />
                         </td>
-                        <td className="py-2.5 text-xs text-brown">
-                          {q.validUntil ? formatDate(q.validUntil) : "—"}
+                        <td className="pe-4 py-2.5 text-xs text-oo-text-secondary">
+                          {q.validUntil ? formatDay(q.validUntil, lang) : "—"}
                         </td>
-                        <td className="py-2.5 text-xs">
+                        <td className="pe-4 py-2.5 text-xs">
                           {q._count.orderLinks > 0 && (
                             <Pill tone="accent">{ar ? "طلب مُنشأ" : "Ordered"}</Pill>
                           )}
@@ -386,7 +465,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                 can.write ? (
                   <button
                     onClick={() => setDialog("activity")}
-                    className="text-xs font-bold text-orange hover:underline"
+                    className="text-xs font-bold text-oo-action-primary hover:underline"
                     data-testid="log-activity"
                   >
                     + {ar ? "تسجيل نشاط" : "Log activity"}
@@ -415,26 +494,26 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                       key={a.id}
                       data-testid={`activity-${a.id}`}
                       className={`flex items-start gap-3 p-3 rounded-xl border ${
-                        late ? "border-red-200 bg-red-50/40" : "border-border"
+                        late ? "border-oo-status-rejected bg-red-50/40" : "border-oo-border-default"
                       }`}
                     >
                       <span className="mt-0.5">
                         {a.completedAt ? (
-                          <CheckCircle2 size={15} className="text-emerald-600" aria-hidden />
+                          <CheckCircle2 size={15} className="text-oo-status-success" aria-hidden />
                         ) : (
-                          <Clock size={15} className={late ? "text-red-600" : "text-brown/50"} aria-hidden />
+                          <Clock size={15} className={late ? "text-oo-status-rejected" : "text-oo-text-muted"} aria-hidden />
                         )}
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Pill>{pick(ACTIVITY_LABELS, a.type, lang)}</Pill>
-                          <span className="font-bold text-sm text-charcoal">{a.subject}</span>
+                          <span className="font-bold text-sm text-oo-text-primary">{a.subject}</span>
                         </div>
-                        {a.body && <p className="text-xs text-brown mt-1 break-words">{a.body}</p>}
-                        <p className="text-[11px] text-brown/60 mt-1">
+                        {a.body && <p className="text-xs text-oo-text-secondary mt-1 break-words">{a.body}</p>}
+                        <p className="text-[11px] text-oo-text-muted mt-1">
                           {a.owner?.name}
-                          {a.dueAt && ` · ${ar ? "الاستحقاق" : "due"} ${formatDate(a.dueAt)}`}
-                          {a.completedAt && ` · ${ar ? "اكتمل" : "done"} ${formatDate(a.completedAt)}`}
+                          {a.dueAt && ` · ${ar ? "الاستحقاق" : "due"} ${formatWhen(a.dueAt, lang)}`}
+                          {a.completedAt && ` · ${ar ? "اكتمل" : "done"} ${formatWhen(a.completedAt, lang)}`}
                         </p>
                       </div>
                       {!a.completedAt && (
@@ -470,7 +549,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                 can.write && open ? (
                   <button
                     onClick={() => setDialog("sample")}
-                    className="text-xs font-bold text-orange hover:underline"
+                    className="text-xs font-bold text-oo-action-primary hover:underline"
                     data-testid="add-sample"
                   >
                     + {ar ? "عيّنة" : "Sample"}
@@ -491,7 +570,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                   <li
                     key={s.id}
                     data-testid={`sample-${s.id}`}
-                    className="flex items-center gap-3 p-3 rounded-xl border border-border flex-wrap"
+                    className="flex items-center gap-3 p-3 rounded-xl border border-oo-border-default flex-wrap"
                   >
                     <Pill tone={s.status === "FEEDBACK_RECEIVED" ? "good" : s.status === "CANCELLED" ? "bad" : "info"}>
                       {pick(SAMPLE_LABELS, s.status, lang)}
@@ -499,7 +578,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                     <span className="font-bold text-sm flex-1 min-w-0 break-words">
                       {s.productSku?.name ?? s.productSku?.skuCode ?? s.description}
                     </span>
-                    <span className="text-xs text-brown tabular-nums">
+                    <span className="text-xs text-oo-text-secondary tabular-nums">
                       {s.quantity} {s.unit}
                     </span>
                     {s.feedbackScore !== null && (
@@ -528,7 +607,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                 ))}
               </ul>
             )}
-            <p className="text-[11px] text-brown/60 mt-3 font-medium">
+            <p className="text-[11px] text-oo-text-muted mt-3 font-medium">
               {ar
                 ? "تسجيل العيّنة لا يُحرّك المخزون. أصرف البن من مسار المخزون والشحن المعتاد."
                 : "Recording a sample does not move stock. Issue the coffee through the normal inventory and dispatch path."}
@@ -541,17 +620,17 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <Card>
             <SectionTitle>{ar ? "التفاصيل" : "Details"}</SectionTitle>
             <dl className="space-y-2.5 text-sm">
-              <Row label={ar ? "الاحتمال" : "Probability"}>{deal.probability}%</Row>
+              <Row label={ar ? "الاحتمال" : "Probability"}>{ar ? `${num(deal.probability, "ar")}٪` : `${deal.probability}%`}</Row>
               <Row label={ar ? "الإغلاق المتوقع" : "Expected close"}>
-                {deal.expectedCloseAt ? formatDate(deal.expectedCloseAt) : "—"}
+                {deal.expectedCloseAt ? formatDay(deal.expectedCloseAt, lang) : "—"}
               </Row>
               <Row label={ar ? "المتابعة القادمة" : "Next follow-up"}>
-                {deal.nextFollowUpAt ? formatDate(deal.nextFollowUpAt) : "—"}
+                {deal.nextFollowUpAt ? formatWhen(deal.nextFollowUpAt, lang) : "—"}
               </Row>
-              <Row label={ar ? "أُنشئت" : "Created"}>{formatDate(deal.createdAt)}</Row>
+              <Row label={ar ? "أُنشئت" : "Created"}>{formatDay(deal.createdAt, lang)}</Row>
               {deal.conversion && (
                 <Row label={ar ? "من عميل محتمل" : "From lead"}>
-                  <Link href={`/dashboard/sales/leads`} className="text-orange hover:underline">
+                  <Link href={`/dashboard/sales/leads`} className="text-oo-action-primary hover:underline">
                     {deal.conversion.lead.companyName}
                   </Link>
                 </Row>
@@ -570,7 +649,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
                   </li>
                 ))}
               </ul>
-              <p className="text-[11px] text-brown/60 mt-3 font-medium">
+              <p className="text-[11px] text-oo-text-muted mt-3 font-medium">
                 {ar
                   ? "التوزيع يقسّم الأساس، لا العمولة المحسوبة — وما استُحق سابقاً لا يتغيّر."
                   : "Splits divide the base, not the finished commission. What was already earned stays earned."}
@@ -584,7 +663,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               <ul className="space-y-2 text-sm">
                 {deal.orderLinks.map((l) => (
                   <li key={l.id} className="flex items-center justify-between gap-2">
-                    <Link href="/dashboard/orders" className="font-bold hover:text-orange">
+                    <Link href="/dashboard/orders" className="font-bold hover:text-oo-action-primary">
                       #{l.order.orderNumber}
                     </Link>
                     <span className="flex items-center gap-1.5">
@@ -604,12 +683,12 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
             ) : (
               <ol className="space-y-2.5 text-xs">
                 {deal.stageEvents.slice(0, 15).map((e) => (
-                  <li key={e.id} className="border-s-2 border-border ps-3">
-                    <p className="font-bold text-charcoal">
+                  <li key={e.id} className="border-s-2 border-oo-border-default ps-3">
+                    <p className="font-bold text-oo-text-primary">
                       {e.toStage ? (ar ? e.toStage.nameAr : e.toStage.nameEn) : e.toOutcome ?? "—"}
                     </p>
-                    {e.reason && <p className="text-brown break-words">{e.reason}</p>}
-                    <p className="text-brown/50">{formatDate(e.createdAt)}</p>
+                    {e.reason && <p className="text-oo-text-secondary break-words">{e.reason}</p>}
+                    <p className="text-oo-text-muted">{formatWhen(e.createdAt, lang)}</p>
                   </li>
                 ))}
               </ol>
@@ -686,8 +765,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs font-bold text-brown/70">{label}</dt>
-      <dd className="font-semibold text-charcoal text-end">{children}</dd>
+      <dt className="text-xs font-bold text-oo-text-secondary">{label}</dt>
+      <dd className="font-semibold text-oo-text-primary text-end">{children}</dd>
     </div>
   );
 }
@@ -808,7 +887,7 @@ function ActivityDialog({
           {ar ? "حدث بالفعل" : "This already happened"}
         </label>
       )}
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[11px] text-oo-text-muted font-medium">
         {ar
           ? "هذا تسجيل لما حدث. لا يُرسل بريداً ولا رسالة."
           : "This records that contact happened. It does not send an email or a message."}
@@ -1071,14 +1150,14 @@ function SplitDialog({
         ))}
       </div>
       <div
-        className={`text-sm font-bold ${balanced ? "text-emerald-700" : "text-red-600"}`}
+        className={`text-sm font-bold ${balanced ? "text-emerald-700" : "text-oo-status-rejected"}`}
         data-testid="split-total"
         role="status"
       >
         {ar ? "الإجمالي" : "Total"}: {total.toFixed(2)}%
         {!balanced && ` — ${ar ? "يجب أن يساوي 100" : "must equal 100"}`}
       </div>
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[11px] text-oo-text-muted font-medium">
         {ar
           ? "التوزيع يقسّم الأساس قبل الشرائح، لا العمولة النهائية. والاستحقاقات السابقة لا تتغيّر."
           : "Splits divide the base before tiers, not the finished commission. Accruals already written do not change."}

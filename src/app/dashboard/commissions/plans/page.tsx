@@ -322,7 +322,7 @@ export default function CommissionPlansPage() {
                 }
               >
                 <span className="inline-flex items-center gap-2">
-                  <span className="font-mono text-xs bg-cream px-1.5 py-0.5 rounded">{plan.code}</span>
+                  <span className="font-mono text-xs bg-oo-bg-subtle px-1.5 py-0.5 rounded">{plan.code}</span>
                   {ar ? (plan.nameAr ?? plan.name) : plan.name}
                   {!plan.isActive && <Pill tone="neutral">{ar ? "غير نشطة" : "inactive"}</Pill>}
                 </span>
@@ -633,9 +633,9 @@ function PlanDialog({
       </div>
 
       <div>
-        <p className="text-xs font-bold text-brown mb-2">{ar ? "الشرائح" : "Tiers"}</p>
+        <p className="text-xs font-bold text-oo-text-secondary mb-2">{ar ? "الشرائح" : "Tiers"}</p>
         {tiers.length === 0 ? (
-          <p className="text-xs text-brown/50 font-semibold">
+          <p className="text-xs text-oo-text-muted font-semibold">
             {ar ? "بلا شرائح: النسبة الأساسية على كل شيء." : "No tiers: the base rate on everything."}
           </p>
         ) : (
@@ -671,7 +671,7 @@ function PlanDialog({
             ))}
           </div>
         )}
-        <p className="text-[11px] text-brown/60 mt-2 font-medium">
+        <p className="text-[11px] text-oo-text-muted mt-2 font-medium">
           {ar
             ? "الشريحة تضيف نقاطاً مئوية على الجزء الواقع داخل نطاقها فقط. مثال: 1% + 0.5 نقطة على 100,000–120,000 تدفع 1,150 على أساس 110,000 — أي 1.045455% فعلياً، لا 1.5%."
             : "A tier adds percentage POINTS to the slice of base inside its band only. 1% plus 0.5 points on 100,000–120,000 pays 1,150 on a base of 110,000 — an effective 1.045455%, not 1.5%."}
@@ -679,7 +679,7 @@ function PlanDialog({
       </div>
 
       {isNewVersion && (
-        <p className="text-[11px] text-brown/60 font-medium">
+        <p className="text-[11px] text-oo-text-muted font-medium">
           {ar
             ? "الإصدار السابق يُغلق عند تاريخ بداية هذا الإصدار، فلا توجد لحظة بإصدارين ساريين. وما استُحق تحت القديم يبقى محسوباً به."
             : "The previous version is closed at this one's start date, so there is never a moment with two live versions. What was earned under the old one stays computed by it."}
@@ -765,7 +765,7 @@ function AssignDialog({
           <TextInput id="as-to" type="date" value={effectiveTo} onChange={setEffectiveTo} />
         </Field>
       </div>
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[11px] text-oo-text-muted font-medium">
         {ar
           ? "التعيينات لا تتداخل: خطتان ساريتان لشخص واحد ليس لهما جواب محدّد."
           : "Assignments may not overlap: two live plans for one person have no defined answer."}

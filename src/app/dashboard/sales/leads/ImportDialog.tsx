@@ -90,16 +90,16 @@ export default function ImportDialog({
         aria-label={ar ? "استيراد عملاء محتملين" : "Import leads"}
         data-testid="import-dialog"
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4"
+        className="bg-oo-bg-default rounded-2xl shadow-2xl w-full max-w-2xl my-4"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="text-lg font-extrabold text-charcoal">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-oo-border-default">
+          <h2 className="text-lg font-extrabold text-oo-text-primary">
             {ar ? "استيراد عملاء محتملين" : "Import leads"}
           </h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="text-brown/60 hover:text-charcoal text-xl font-black px-2"
+            className="text-oo-text-muted hover:text-oo-text-primary text-xl font-black px-2"
           >
             ×
           </button>
@@ -108,7 +108,7 @@ export default function ImportDialog({
         <div className="px-5 py-4 space-y-4">
           {err && (
             <div
-              className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-bold"
+              className="bg-oo-status-rejected-bg border border-oo-status-rejected text-oo-status-rejected px-4 py-3 rounded-xl text-sm font-bold"
               role="alert"
             >
               {err}
@@ -116,7 +116,7 @@ export default function ImportDialog({
           )}
 
           <div className="space-y-1">
-            <label htmlFor="import-file" className="block text-xs font-bold text-brown">
+            <label htmlFor="import-file" className="block text-xs font-bold text-oo-text-secondary">
               {ar ? "ملف CSV" : "CSV file"}
             </label>
             <input
@@ -131,9 +131,9 @@ export default function ImportDialog({
                 setPreview(null);
                 setErr("");
               }}
-              className="w-full text-sm file:me-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-cream file:text-brown file:font-bold"
+              className="w-full text-sm file:me-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-oo-bg-subtle file:text-oo-text-secondary file:font-bold"
             />
-            <p className="text-[11px] text-brown/60 font-medium">
+            <p className="text-[11px] text-oo-text-muted font-medium">
               {ar
                 ? "العمودان المطلوبان: companyName و contactName. وتُقبل أيضاً phone و email و city و address و source و sourceNote و notes و nextFollowUpAt."
                 : "Required columns: companyName and contactName. phone, email, city, address, source, sourceNote, notes and nextFollowUpAt are accepted too."}
@@ -144,7 +144,7 @@ export default function ImportDialog({
               how a lot of real lead lists arrive, and it is also what makes this screen
               testable without a file-upload fixture. */}
           <div className="space-y-1">
-            <label htmlFor="import-paste" className="block text-xs font-bold text-brown">
+            <label htmlFor="import-paste" className="block text-xs font-bold text-oo-text-secondary">
               {ar ? "أو الصق المحتوى" : "Or paste the content"}
             </label>
             <textarea
@@ -157,7 +157,7 @@ export default function ImportDialog({
                 setPreview(null);
               }}
               placeholder="companyName,contactName,phone"
-              className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-xs font-mono"
+              className="w-full px-3 py-2.5 border border-oo-border-strong rounded-xl text-xs font-mono"
             />
           </div>
 
@@ -166,7 +166,7 @@ export default function ImportDialog({
               onClick={() => post(true)}
               disabled={busy}
               data-testid="import-check"
-              className="px-4 py-2.5 bg-white border-2 border-border rounded-xl text-sm font-bold hover:border-orange disabled:opacity-50"
+              className="px-4 py-2.5 bg-oo-bg-default border border-oo-border-strong rounded-xl text-sm font-bold hover:border-oo-action-primary disabled:opacity-50"
             >
               {ar ? "فحص الملف" : "Check the file"}
             </button>
@@ -181,7 +181,7 @@ export default function ImportDialog({
               </div>
 
               {preview.unknownColumns?.length > 0 && (
-                <p className="text-xs text-amber-800 font-bold">
+                <p className="text-xs text-oo-status-hold font-bold">
                   {ar ? "أعمدة غير معروفة (تُتجاهل): " : "Unrecognised columns (ignored): "}
                   {preview.unknownColumns.join(", ")}
                 </p>
@@ -189,12 +189,12 @@ export default function ImportDialog({
 
               {preview.problems?.length > 0 && (
                 <div>
-                  <p className="text-xs font-bold text-red-700 mb-1">
+                  <p className="text-xs font-bold text-oo-status-rejected mb-1">
                     {ar ? "صفوف مرفوضة" : "Rejected rows"}
                   </p>
                   <ul className="text-xs space-y-0.5 max-h-40 overflow-y-auto" data-testid="import-problems">
                     {preview.problems.slice(0, 50).map((p, i) => (
-                      <li key={i} className="text-red-700">
+                      <li key={i} className="text-oo-status-rejected">
                         {ar ? "صف " : "Row "}
                         {p.row}
                         {p.column ? ` · ${p.column}` : ""} — {p.message}
@@ -206,12 +206,12 @@ export default function ImportDialog({
 
               {preview.duplicatesInFile?.length > 0 && (
                 <div>
-                  <p className="text-xs font-bold text-amber-800 mb-1">
+                  <p className="text-xs font-bold text-oo-status-hold mb-1">
                     {ar ? "تكرار داخل الملف" : "Duplicates within the file"}
                   </p>
                   <ul className="text-xs space-y-0.5 max-h-28 overflow-y-auto">
                     {preview.duplicatesInFile.slice(0, 30).map((d, i) => (
-                      <li key={i} className="text-amber-800">
+                      <li key={i} className="text-oo-status-hold">
                         {ar ? "صف " : "Row "}
                         {d.row} — {d.message}
                       </li>
@@ -222,12 +222,12 @@ export default function ImportDialog({
 
               {preview.duplicatesInSystem?.length > 0 && (
                 <div data-testid="import-duplicates">
-                  <p className="text-xs font-bold text-amber-800 mb-1">
+                  <p className="text-xs font-bold text-oo-status-hold mb-1">
                     {ar ? "أرقام هواتف موجودة مسبقاً" : "Phone numbers already in the system"}
                   </p>
                   <ul className="text-xs space-y-0.5 max-h-28 overflow-y-auto">
                     {preview.duplicatesInSystem.slice(0, 30).map((d, i) => (
-                      <li key={i} className="text-amber-800">
+                      <li key={i} className="text-oo-status-hold">
                         {ar ? "صف " : "Row "}
                         {d.row}: {d.companyName} — {ar ? "يطابق " : "matches "}
                         {d.matchesCompany}
@@ -258,10 +258,10 @@ export default function ImportDialog({
           )}
         </div>
 
-        <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2">
+        <div className="px-5 py-4 border-t border-oo-border-default flex items-center justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2.5 bg-white border-2 border-border rounded-xl text-sm font-bold hover:border-orange"
+            className="px-4 py-2.5 bg-oo-bg-default border border-oo-border-strong rounded-xl text-sm font-bold hover:border-oo-action-primary"
           >
             {ar ? "إلغاء" : "Cancel"}
           </button>
@@ -269,7 +269,7 @@ export default function ImportDialog({
             onClick={() => post(false)}
             disabled={busy || !preview || preview.wouldImport === 0}
             data-testid="import-commit"
-            className="px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark disabled:opacity-50"
+            className="px-4 py-2.5 bg-oo-action-primary text-white rounded-xl text-sm font-bold hover:bg-oo-action-primary-hover disabled:opacity-50"
           >
             {ar ? `استيراد ${preview?.wouldImport ?? 0} صفاً` : `Import ${preview?.wouldImport ?? 0} rows`}
           </button>

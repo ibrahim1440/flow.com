@@ -344,7 +344,7 @@ function TargetDialog({
       <Field id="tg-note" label={ar ? "ملاحظة" : "Note"}>
         <TextArea id="tg-note" value={note} onChange={setNote} rows={2} />
       </Field>
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[11px] text-oo-text-muted font-medium">
         {ar
           ? "لا يستطيع أحد تعيين هدفه بنفسه — لأن الهدف المصحوب بمكافأة هو أجر."
           : "Nobody sets their own target: a target with a bonus attached is pay."}

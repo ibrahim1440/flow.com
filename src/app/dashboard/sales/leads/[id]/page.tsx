@@ -291,7 +291,7 @@ export default function LeadDetailPage() {
 
       <Link
         href="/dashboard/sales/leads"
-        className="inline-flex items-center gap-1.5 text-sm font-bold text-brown hover:text-orange"
+        className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
       >
         <ArrowRight size={15} className="rtl:rotate-0 rotate-180" aria-hidden />
         {ar ? "العملاء المحتملون" : "Leads"}
@@ -422,7 +422,7 @@ export default function LeadDetailPage() {
                 <Row label={ar ? "آخر تعديل" : "Updated"} value={formatDate(lead.updatedAt)} />
                 {lead.notes && (
                   <div className="sm:col-span-2">
-                    <dt className="text-[11px] text-brown/60 font-bold">{ar ? "ملاحظات" : "Notes"}</dt>
+                    <dt className="text-[11px] text-oo-text-muted font-bold">{ar ? "ملاحظات" : "Notes"}</dt>
                     <dd className="whitespace-pre-wrap">{lead.notes}</dd>
                   </div>
                 )}
@@ -443,17 +443,17 @@ export default function LeadDetailPage() {
             ) : (
               <ul className="mt-3 space-y-2" data-testid="activity-list">
                 {lead.activities.map((a) => (
-                  <li key={a.id} className="border border-border rounded-xl px-3 py-2.5" data-testid={`activity-${a.id}`}>
+                  <li key={a.id} className="border border-oo-border-default rounded-xl px-3 py-2.5" data-testid={`activity-${a.id}`}>
                     <div className="flex items-start justify-between gap-2 flex-wrap">
                       <span className="font-bold text-sm">{a.subject}</span>
-                      <span className="text-[11px] text-brown/60">
+                      <span className="text-[11px] text-oo-text-muted">
                         {label(TYPE_LABELS, a.type)} · {formatDate(a.createdAt)}
                         {a.owner ? ` · ${a.owner.name}` : ""}
                       </span>
                     </div>
-                    {a.body && <p className="text-xs text-brown mt-1 whitespace-pre-wrap">{a.body}</p>}
+                    {a.body && <p className="text-xs text-oo-text-secondary mt-1 whitespace-pre-wrap">{a.body}</p>}
                     {a.dueAt && (
-                      <p className="text-[11px] text-brown/60 mt-1 flex items-center gap-1">
+                      <p className="text-[11px] text-oo-text-muted mt-1 flex items-center gap-1">
                         <CalendarClock size={12} aria-hidden />
                         {ar ? "مستحق" : "Due"} {formatDate(a.dueAt)}
                         {a.completedAt ? ` · ${ar ? "اكتمل" : "completed"}` : ""}
@@ -469,7 +469,7 @@ export default function LeadDetailPage() {
         <div className="space-y-4">
           <Card>
             <SectionTitle>{ar ? "الالتزام القادم" : "Next commitment"}</SectionTitle>
-            <p className={`mt-2 text-sm font-bold ${overdue ? "text-red-700" : lead.nextFollowUpAt ? "text-charcoal" : "text-amber-700"}`} data-testid="next-followup">
+            <p className={`mt-2 text-sm font-bold ${overdue ? "text-oo-status-rejected" : lead.nextFollowUpAt ? "text-oo-text-primary" : "text-oo-status-hold"}`} data-testid="next-followup">
               {lead.nextFollowUpAt
                 ? `${formatDate(lead.nextFollowUpAt)}${overdue ? ` · ${t("leadOverdue")}` : ""}`
                 : (ar ? "لا التزام قادم" : "No next step")}
@@ -486,7 +486,7 @@ export default function LeadDetailPage() {
                 <Button onClick={scheduleFollowUp} disabled={busy === "schedule" || !scheduleAt} testId="schedule-followup">
                   {busy === "schedule" ? "…" : (ar ? "جدولة المتابعة" : "Schedule follow-up")}
                 </Button>
-                <p className="text-[11px] text-brown/60">
+                <p className="text-[11px] text-oo-text-muted">
                   {ar
                     ? "تُنشئ مهمة في السجل وتحدّث الموعد معاً — لا يُغيَّر التاريخ وحده."
                     : "Creates a task in the history and updates the date together — the date is never moved on its own."}
@@ -526,7 +526,7 @@ function Row({ label, value, ltr, icon }: { label: string; value: string | null;
   if (!value) return null;
   return (
     <div>
-      <dt className="text-[11px] text-brown/60 font-bold flex items-center gap-1">{icon}{label}</dt>
+      <dt className="text-[11px] text-oo-text-muted font-bold flex items-center gap-1">{icon}{label}</dt>
       {/* Latin digits inside Arabic text render reversed unless the run is marked LTR. */}
       <dd className="font-semibold" dir={ltr ? "ltr" : undefined} style={ltr ? { textAlign: "start" } : undefined}>
         {value}

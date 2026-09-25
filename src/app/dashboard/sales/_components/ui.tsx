@@ -329,14 +329,14 @@ export function Field({
 }) {
   return (
     <div className="space-y-1">
-      <label htmlFor={id} className="block text-xs font-bold text-brown">
+      <label htmlFor={id} className="block text-xs font-bold text-oo-text-secondary">
         {label}
-        {required && <span className="text-red-600 ps-0.5" aria-hidden>*</span>}
+        {required && <span className="text-oo-status-rejected ps-0.5" aria-hidden>*</span>}
       </label>
       {children}
-      {hint && !error && <p className="text-[11px] text-brown/60 font-medium">{hint}</p>}
+      {hint && !error && <p className="text-[11px] text-oo-text-muted font-medium">{hint}</p>}
       {error && (
-        <p id={`${id}-error`} className="text-[11px] text-red-600 font-bold" role="alert">
+        <p id={`${id}-error`} className="text-[11px] text-oo-status-rejected font-bold" role="alert">
           {error}
         </p>
       )}
@@ -464,6 +464,24 @@ export function formatMoney(raw: string, places = 2): string {
  * figures impossible to scan.
  */
 const CURRENCY_AR: Record<string, string> = { SAR: "ر.س", USD: "$", EUR: "€", AED: "د.إ" };
+
+/**
+ * The same money, as a plain string.
+ *
+ * For the places an amount is part of a sentence or an aria-label and a `<Money>` element
+ * cannot go. Same formatter, same numerals, same currency word — so a figure never reads
+ * one way in a table cell and another way in the sentence describing it.
+ */
+export function moneyText(
+  value: string | number,
+  currency: string,
+  lang: "ar" | "en",
+  places = 2,
+): string {
+  const formatted = formatMoney(String(value), places);
+  const unit = lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
+  return `${lang === "ar" ? toArabicDigits(formatted) : formatted} ${unit}`;
+}
 
 export function Money({
   value,
@@ -699,21 +717,21 @@ export function Modal({
         aria-label={title}
         data-testid={testId}
         onClick={(e) => e.stopPropagation()}
-        className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? "max-w-3xl" : "max-w-lg"} my-4`}
+        className={`bg-oo-bg-default rounded-2xl shadow-2xl w-full ${wide ? "max-w-3xl" : "max-w-lg"} my-4`}
       >
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
-          <h2 className="text-lg font-extrabold text-charcoal">{title}</h2>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-oo-border-default">
+          <h2 className="text-lg font-extrabold text-oo-text-primary">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="text-brown/60 hover:text-charcoal font-black text-xl leading-none px-2"
+            className="text-oo-text-muted hover:text-oo-text-primary font-black text-xl leading-none px-2"
           >
             ×
           </button>
         </div>
         <div className="px-5 py-4 space-y-4">{children}</div>
         {footer && (
-          <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2 flex-wrap">
+          <div className="px-5 py-4 border-t border-oo-border-default flex items-center justify-end gap-2 flex-wrap">
             {footer}
           </div>
         )}

@@ -502,9 +502,9 @@ function ActionDialog({
     >
       {err && <Alert kind="error">{err}</Alert>}
 
-      <dl className="bg-cream/50 rounded-xl p-3 text-sm space-y-1">
+      <dl className="bg-oo-bg-subtle rounded-xl p-3 text-sm space-y-1">
         <div className="flex justify-between gap-3">
-          <dt className="text-xs font-bold text-brown/70">{ar ? "المتبقي" : "Outstanding"}</dt>
+          <dt className="text-xs font-bold text-oo-text-secondary">{ar ? "المتبقي" : "Outstanding"}</dt>
           <dd><Money value={row.outstanding} /></dd>
         </div>
       </dl>
@@ -538,7 +538,7 @@ function ActionDialog({
       </Field>
 
       {!isAdjust && (
-        <p className="text-[11px] text-brown/60 font-medium">
+        <p className="text-[11px] text-oo-text-muted font-medium">
           {ar
             ? "هذا تسجيل بأن الصرف تم. لا يحرّك مالاً — لا يوجد تكامل مدفوعات في هذا النظام."
             : "This records that a payout was made. It does not move money — there is no payment integration in this system."}

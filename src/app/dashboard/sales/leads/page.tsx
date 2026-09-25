@@ -303,7 +303,7 @@ export default function LeadsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-4 border-oo-action-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -312,15 +312,15 @@ export default function LeadsPage() {
     <div className="space-y-6">
       {/* Says what it is. A provisional screen that looks finished is worse than one that
           admits it, because nobody reviews what appears already signed off. */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex items-start gap-2">
-        <AlertTriangle size={15} className="text-amber-700 flex-shrink-0 mt-0.5" />
-        <p className="text-xs font-bold text-amber-900">{t("provisionalUiBanner")}</p>
+      <div className="bg-oo-status-waiting-bg border border-oo-status-waiting rounded-xl px-4 py-2.5 flex items-start gap-2">
+        <AlertTriangle size={15} className="text-oo-status-hold flex-shrink-0 mt-0.5" />
+        <p className="text-xs font-bold text-oo-status-hold">{t("provisionalUiBanner")}</p>
       </div>
 
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("leadsTitle")}</h1>
-          <p className="text-brown text-sm font-medium">
+          <h1 className="text-2xl font-extrabold text-oo-text-primary">{t("leadsTitle")}</h1>
+          <p className="text-oo-text-secondary text-sm font-medium">
             {/* The design draws the urgent count as an outlined chip rather than coloured
                 text in a sentence, so it survives being scanned rather than read. */}
             <span className="flex flex-wrap items-center gap-2">
@@ -349,7 +349,7 @@ export default function LeadsPage() {
           </p>
           {/* The counts are computed over the loaded rows, which the filter narrows. Saying so
               stops the number being read as a total across every lead in the system. */}
-          <p className="text-brown/60 text-xs mt-0.5">{t("leadCountScope")}</p>
+          <p className="text-oo-text-muted text-xs mt-0.5">{t("leadCountScope")}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {canExport && (
@@ -360,7 +360,7 @@ export default function LeadsPage() {
               href={`/api/sales/leads/export${statusFilter ? `?status=${statusFilter}` : ""}`}
               download
               data-testid="export-leads"
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-white border-2 border-border text-charcoal rounded-xl text-sm font-bold hover:border-orange active:scale-[0.98] transition-all"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-bg-default border border-oo-border-strong text-oo-text-primary rounded-xl text-sm font-bold hover:border-oo-action-primary active:scale-[0.98] transition-all"
             >
               <Download size={16} aria-hidden /> {lang === "ar" ? "تصدير CSV" : "Export CSV"}
             </a>
@@ -369,7 +369,7 @@ export default function LeadsPage() {
             <button
               onClick={() => setShowImport(true)}
               data-testid="import-leads"
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-white border-2 border-border text-charcoal rounded-xl text-sm font-bold hover:border-orange active:scale-[0.98] transition-all"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-bg-default border border-oo-border-strong text-oo-text-primary rounded-xl text-sm font-bold hover:border-oo-action-primary active:scale-[0.98] transition-all"
             >
               <Upload size={16} aria-hidden /> {lang === "ar" ? "استيراد CSV" : "Import CSV"}
             </button>
@@ -377,7 +377,7 @@ export default function LeadsPage() {
           {canWrite && (
             <button
               onClick={openForm}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-action-primary text-white rounded-xl text-sm font-bold hover:bg-oo-action-primary-hover shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
             >
               <UserPlus size={16} /> {t("newLeadBtn")}
             </button>
@@ -398,12 +398,12 @@ export default function LeadsPage() {
       )}
 
       {scope === "own" && (
-        <p className="text-xs text-brown/60 font-semibold">{t("leadScopeOwn")}</p>
+        <p className="text-xs text-oo-text-muted font-semibold">{t("leadScopeOwn")}</p>
       )}
 
       {error && (
         <div
-          className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm font-bold"
+          className="bg-oo-status-rejected-bg border border-oo-status-rejected text-oo-status-rejected px-4 py-3 rounded-xl text-sm font-bold"
           role="alert"
           data-testid="alert-error"
         >
@@ -412,7 +412,7 @@ export default function LeadsPage() {
       )}
       {success && (
         <div
-          className="bg-success-bg border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm font-bold"
+          className="bg-oo-status-success-bg border border-oo-status-success text-oo-status-success px-4 py-3 rounded-xl text-sm font-bold"
           role="status"
           data-testid="alert-success"
         >
@@ -443,7 +443,7 @@ export default function LeadsPage() {
       </Toolbar>
 
       {rows.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-border text-brown/40">
+        <div className="text-center py-16 bg-oo-bg-default rounded-2xl border border-oo-border-default text-oo-text-muted">
           <Users2 size={40} className="mx-auto mb-3 opacity-50" />
           <p className="font-semibold text-lg">{t("leadsEmpty")}</p>
         </div>
@@ -538,7 +538,7 @@ export default function LeadsPage() {
                                 onClick={() => setDeleting(lead)}
                                 data-testid={`delete-lead-${lead.id}`}
                                 aria-label={lang === "ar" ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`}
-                                className="rounded-lg p-1.5 text-brown/40 transition-colors hover:bg-red-50 hover:text-red-600"
+                                className="rounded-lg p-1.5 text-oo-text-muted transition-colors hover:bg-oo-status-rejected-bg hover:text-oo-status-rejected"
                               >
                                 <Trash2 size={14} aria-hidden />
                               </button>
@@ -577,7 +577,7 @@ export default function LeadsPage() {
                     <KV k={lang === "ar" ? "الجوال" : "Phone"} v={lead.phone ?? "—"} ltr />
                     <KV k={t("leadOwner")} v={lead.owner?.name ?? (lang === "ar" ? "غير مُسنَد" : "Unassigned")} />
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] leading-[18px] text-brown-light">{t("leadNextFollowUp")}</span>
+                      <span className="text-[12px] leading-[18px] text-oo-text-muted">{t("leadNextFollowUp")}</span>
                       {isOverdue ? (
                         <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked">
                           <AlertTriangle size={13} aria-hidden /> {t("leadOverdue")}
@@ -610,7 +610,7 @@ export default function LeadsPage() {
                       <button
                         onClick={() => setDeleting(lead)}
                         aria-label={lang === "ar" ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`}
-                        className="rounded-lg p-2 text-brown/40 transition-colors hover:bg-red-50 hover:text-red-600"
+                        className="rounded-lg p-2 text-oo-text-muted transition-colors hover:bg-oo-status-rejected-bg hover:text-oo-status-rejected"
                       >
                         <Trash2 size={15} aria-hidden />
                       </button>
@@ -635,22 +635,22 @@ export default function LeadsPage() {
             aria-label={lang === "ar" ? "حذف عميل محتمل" : "Delete a lead"}
             data-testid="delete-lead-dialog"
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-2xl w-full max-w-md my-8 shadow-xl"
+            className="bg-oo-bg-default rounded-2xl w-full max-w-md my-8 shadow-xl"
           >
-            <div className="p-4 border-b border-border">
-              <h2 className="font-extrabold text-charcoal">
+            <div className="p-4 border-b border-oo-border-default">
+              <h2 className="font-extrabold text-oo-text-primary">
                 {lang === "ar" ? "حذف عميل محتمل" : "Delete this lead"}
               </h2>
             </div>
             <div className="p-4 space-y-3">
-              <p className="text-sm font-bold text-charcoal">{deleting.companyName}</p>
-              <p className="text-xs text-brown leading-relaxed">
+              <p className="text-sm font-bold text-oo-text-primary">{deleting.companyName}</p>
+              <p className="text-xs text-oo-text-secondary leading-relaxed">
                 {lang === "ar"
                   ? "الحذف مخصّص لسجل أُنشئ بالخطأ. أما العميل المحتمل الذي جرت معه محادثات مسجّلة فلا يُحذف — علّمه «غير مؤهل» بدلاً من محو سجل تلك المحادثات."
                   : "Deleting is for a record raised in error. A lead with logged conversations is not deleted — mark it unqualified rather than erasing the record of those conversations."}
               </p>
             </div>
-            <div className="flex gap-3 p-4 border-t border-border">
+            <div className="flex gap-3 p-4 border-t border-oo-border-default">
               <button
                 type="button"
                 onClick={() => remove(deleting)}
@@ -662,7 +662,7 @@ export default function LeadsPage() {
               <button
                 type="button"
                 onClick={() => setDeleting(null)}
-                className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-sm text-brown hover:bg-cream transition-colors"
+                className="flex-1 py-2.5 border border-oo-border-strong rounded-xl font-bold text-sm text-oo-text-secondary hover:bg-oo-bg-subtle transition-colors"
               >
                 {lang === "ar" ? "إلغاء" : "Cancel"}
               </button>
@@ -673,11 +673,11 @@ export default function LeadsPage() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-lg my-8 shadow-xl" data-testid="lead-form">
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h2 className="font-extrabold text-charcoal">{t("newLeadBtn")}</h2>
+          <div className="bg-oo-bg-default rounded-2xl w-full max-w-lg my-8 shadow-xl" data-testid="lead-form">
+            <div className="flex items-center justify-between p-4 border-b border-oo-border-default">
+              <h2 className="font-extrabold text-oo-text-primary">{t("newLeadBtn")}</h2>
               <button type="button" onClick={() => setShowForm(false)} aria-label="Close" disabled={saving}>
-                <X size={20} className="text-brown/60" />
+                <X size={20} className="text-oo-text-muted" />
               </button>
             </div>
 
@@ -685,45 +685,45 @@ export default function LeadsPage() {
               {/* Required first, optional after: a short form gets filled, a long one gets
                   abandoned halfway and leaves a half-built record. */}
               <label className="block">
-                <span className="text-[11px] font-bold text-brown">{t("leadCompany")} *</span>
+                <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadCompany")} *</span>
                 <input
                   aria-label={t("leadCompany")}
                   value={form.companyName}
                   onChange={(e) => { setForm({ ...form, companyName: e.target.value }); setDuplicates([]); }}
-                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
+                  className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
                 />
               </label>
               <label className="block">
-                <span className="text-[11px] font-bold text-brown">{t("leadContact")} *</span>
+                <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadContact")} *</span>
                 <input
                   aria-label={t("leadContact")}
                   value={form.contactName}
                   onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
+                  className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
                 />
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-[11px] font-bold text-brown">{lang === "ar" ? "الهاتف" : "Phone"}</span>
+                  <span className="text-[11px] font-bold text-oo-text-secondary">{lang === "ar" ? "الهاتف" : "Phone"}</span>
                   <input
                     dir="ltr"
                     aria-label={lang === "ar" ? "الهاتف" : "Phone"}
                     value={form.phone}
                     onChange={(e) => { setForm({ ...form, phone: e.target.value }); setDuplicates([]); }}
-                    className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-[11px] font-bold text-brown">{t("leadCity")}</span>
+                  <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadCity")}</span>
                   <input
                     aria-label={t("leadCity")}
                     value={form.city}
                     onChange={(e) => setForm({ ...form, city: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-[11px] font-bold text-brown">{t("leadSource")}</span>
+                  <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadSource")}</span>
                   <select
                     // Named explicitly. Without this the wrapping label hands the control an
                     // accessible name assembled from every option in the list, which is
@@ -732,7 +732,7 @@ export default function LeadsPage() {
                     aria-label={t("leadSource")}
                     value={form.source}
                     onChange={(e) => setForm({ ...form, source: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
                   >
                     {SOURCES.map((s) => (
                       <option key={s} value={s}>{label(SOURCE_LABELS, s)}</option>
@@ -740,26 +740,26 @@ export default function LeadsPage() {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="text-[11px] font-bold text-brown">{t("leadNextFollowUp")}</span>
+                  <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadNextFollowUp")}</span>
                   <input
                     type="date"
                     aria-label={t("leadNextFollowUp")}
                     value={form.nextFollowUpAt}
                     onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
                   />
                 </label>
               </div>
 
               {duplicates.length > 0 && (
-                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3" role="alert">
-                  <p className="text-[11px] font-bold text-amber-900 uppercase mb-1 flex items-center gap-1.5">
+                <div className="rounded-xl border border-amber-300 bg-oo-status-waiting-bg p-3" role="alert">
+                  <p className="text-[11px] font-bold text-oo-status-hold uppercase mb-1 flex items-center gap-1.5">
                     <AlertTriangle size={13} /> {t("leadDuplicateTitle")}
                   </p>
-                  <p className="text-xs text-amber-900 leading-relaxed mb-2">{t("leadDuplicateBody")}</p>
+                  <p className="text-xs text-oo-status-hold leading-relaxed mb-2">{t("leadDuplicateBody")}</p>
                   <ul className="space-y-1 mb-2">
                     {duplicates.map((d) => (
-                      <li key={d.leadId} className="text-xs text-amber-900 font-semibold">
+                      <li key={d.leadId} className="text-xs text-oo-status-hold font-semibold">
                         {d.companyName} — {d.contactName}
                       </li>
                     ))}
@@ -776,18 +776,18 @@ export default function LeadsPage() {
               )}
 
               {formError && (
-                <p className="text-xs font-semibold text-red-700 flex items-start gap-1.5" role="alert">
+                <p className="text-xs font-semibold text-oo-status-rejected flex items-start gap-1.5" role="alert">
                   <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> {formError}
                 </p>
               )}
             </div>
 
-            <div className="flex gap-3 p-4 border-t border-border">
+            <div className="flex gap-3 p-4 border-t border-oo-border-default">
               <button
                 type="button"
                 onClick={() => submit(false)}
                 disabled={!formValid || saving}
-                className="flex-1 py-2.5 rounded-xl bg-orange text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? "…" : lang === "ar" ? "حفظ" : "Save"}
               </button>
@@ -795,7 +795,7 @@ export default function LeadsPage() {
                 type="button"
                 onClick={() => setShowForm(false)}
                 disabled={saving}
-                className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-sm text-brown hover:bg-cream transition-colors"
+                className="flex-1 py-2.5 border border-oo-border-strong rounded-xl font-bold text-sm text-oo-text-secondary hover:bg-oo-bg-subtle transition-colors"
               >
                 {lang === "ar" ? "إلغاء" : "Cancel"}
               </button>

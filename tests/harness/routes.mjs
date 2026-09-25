@@ -112,8 +112,38 @@ export const ROUTES = {
     screen: "deal-detail",
     api: {
       "/api/sales/opportunities/": {
-        body: { deal: deal("d1", "s2", "محمصة النخبة — خلطة خاصة"), stages: STAGES,
-          can: { write: true, close: true, reopen: true, quote: true, approveDiscount: false, assign: true, createOrder: true } },
+        body: {
+          // SC-04's deal, with the quotations and the log the frame shows against it.
+          deal: {
+            ...deal("d1", "s2", "محمصة النخبة — خلطة خاصة", "OPEN", "90000"),
+            probability: 60,
+            createdAt: at(-17, 8, 15),
+            quotes: [
+              { id: "q1", quoteNumber: "OF-1042", revision: 2, status: "ISSUED", currency: "SAR",
+                validUntil: at(5), grandTotal: "90000.00", issuedAt: at(-11), acceptedAt: null,
+                _count: { lines: 3, orderLinks: 0 } },
+              { id: "q5", quoteNumber: "OF-1038", revision: 1, status: "SUPERSEDED", currency: "SAR",
+                validUntil: null, grandTotal: "94000.00", issuedAt: at(-14), acceptedAt: null,
+                _count: { lines: 3, orderLinks: 0 } },
+            ],
+            activities: [
+              { id: "a1", type: "CALL", subject: "مكالمة — مناقشة الكميات", body: null,
+                dueAt: at(-13, 9, 30), completedAt: at(-13, 10, 0), createdAt: at(-13),
+                owner: OWNER },
+              { id: "a2", type: "VISIT", subject: "زيارة — تذوّق العيّنة", body: null,
+                dueAt: at(-15, 13, 0), completedAt: at(-15, 14, 0), createdAt: at(-15),
+                owner: OWNER },
+            ],
+            stageEvents: [
+              { id: "se1", reason: null, createdAt: at(-11, 11, 2), toOutcome: null,
+                toStage: { nameEn: "QUOTE", nameAr: "عرض سعر" } },
+              { id: "se2", reason: null, createdAt: at(-17, 8, 15), toOutcome: null,
+                toStage: { nameEn: "QUALIFY", nameAr: "تأهيل" } },
+            ],
+          },
+          stages: STAGES,
+          can: { write: true, close: true, reopen: true, quote: true, approveDiscount: false, assign: true, createOrder: true },
+        },
       },
     },
   },

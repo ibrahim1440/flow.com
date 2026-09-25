@@ -115,7 +115,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
       <div className="print:hidden flex items-center justify-between gap-3 flex-wrap">
         <Link
           href={`/dashboard/sales/quotes/${quote.id}`}
-          className="inline-flex items-center gap-1.5 text-sm font-bold text-brown hover:text-orange"
+          className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
         >
           <ArrowLeft size={15} className="rtl:rotate-180" aria-hidden />
           {quote.quoteNumber}
@@ -138,7 +138,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
       ) : (
         <article
           data-testid="quote-document"
-          className="bg-white text-charcoal rounded-2xl border border-border p-8 print:border-0 print:rounded-none print:p-0"
+          className="bg-oo-bg-default text-oo-text-primary rounded-2xl border border-oo-border-default p-8 print:border-0 print:rounded-none print:p-0"
         >
           <header className="flex items-start justify-between gap-6 flex-wrap border-b-2 border-charcoal pb-4 mb-6">
             <div>
@@ -146,7 +146,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
               <p className="text-sm font-bold mt-1 tabular-nums">
                 {snap.quoteNumber}
                 {snap.revision > 1 && (
-                  <span className="text-brown/70">
+                  <span className="text-oo-text-secondary">
                     {" "}
                     · {ar ? "مراجعة" : "revision"} {snap.revision}
                   </span>
@@ -155,15 +155,15 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
             </div>
             <dl className="text-xs space-y-0.5 text-end">
               <div>
-                <dt className="inline font-bold text-brown/70">{ar ? "التاريخ: " : "Issued: "}</dt>
+                <dt className="inline font-bold text-oo-text-secondary">{ar ? "التاريخ: " : "Issued: "}</dt>
                 <dd className="inline">{formatDate(quote.issuedAt ?? snap.frozenAt)}</dd>
               </div>
               <div>
-                <dt className="inline font-bold text-brown/70">{ar ? "صالح حتى: " : "Valid until: "}</dt>
+                <dt className="inline font-bold text-oo-text-secondary">{ar ? "صالح حتى: " : "Valid until: "}</dt>
                 <dd className="inline">{formatDate(snap.validUntil)}</dd>
               </div>
               <div>
-                <dt className="inline font-bold text-brown/70">{ar ? "العملة: " : "Currency: "}</dt>
+                <dt className="inline font-bold text-oo-text-secondary">{ar ? "العملة: " : "Currency: "}</dt>
                 <dd className="inline">{snap.currency}</dd>
               </div>
             </dl>
@@ -171,22 +171,22 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
 
           <section className="grid sm:grid-cols-2 gap-6 mb-6 text-sm">
             <div>
-              <h2 className="text-[11px] uppercase font-bold text-brown/60 tracking-wide mb-1">
+              <h2 className="text-[11px] uppercase font-bold text-oo-text-muted tracking-wide mb-1">
                 {ar ? "إلى" : "For"}
               </h2>
               {quote.customer ? (
                 <address className="not-italic">
                   <p className="font-bold">{ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name}</p>
-                  {quote.customer.address && <p className="text-brown">{quote.customer.address}</p>}
-                  {quote.customer.phone && <p className="text-brown tabular-nums" dir="ltr">{quote.customer.phone}</p>}
-                  {quote.customer.email && <p className="text-brown" dir="ltr">{quote.customer.email}</p>}
+                  {quote.customer.address && <p className="text-oo-text-secondary">{quote.customer.address}</p>}
+                  {quote.customer.phone && <p className="text-oo-text-secondary tabular-nums" dir="ltr">{quote.customer.phone}</p>}
+                  {quote.customer.email && <p className="text-oo-text-secondary" dir="ltr">{quote.customer.email}</p>}
                 </address>
               ) : (
-                <p className="text-brown/50">—</p>
+                <p className="text-oo-text-muted">—</p>
               )}
             </div>
             <div className="sm:text-end">
-              <h2 className="text-[11px] uppercase font-bold text-brown/60 tracking-wide mb-1">
+              <h2 className="text-[11px] uppercase font-bold text-oo-text-muted tracking-wide mb-1">
                 {ar ? "جهة الاتصال" : "Prepared by"}
               </h2>
               <p className="font-bold">{quote.opportunity.owner?.name ?? "—"}</p>
@@ -195,38 +195,38 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
 
           <table className="w-full text-sm mb-6">
             <thead>
-              <tr className="border-b-2 border-charcoal text-[11px] uppercase font-bold text-brown/70">
-                <th className="text-start py-2">{ar ? "البند" : "Item"}</th>
-                <th className="text-end py-2">{ar ? "الكمية" : "Qty"}</th>
-                <th className="text-end py-2">{ar ? "السعر" : "Unit price"}</th>
-                <th className="text-end py-2">{ar ? "خصم" : "Disc"}</th>
-                <th className="text-end py-2">{ar ? "ضريبة" : "Tax"}</th>
-                <th className="text-end py-2">{ar ? "الإجمالي" : "Total"}</th>
+              <tr className="border-b-2 border-charcoal text-[11px] uppercase font-bold text-oo-text-secondary">
+                <th className="pe-4 text-start py-2">{ar ? "البند" : "Item"}</th>
+                <th className="pe-4 text-end py-2">{ar ? "الكمية" : "Qty"}</th>
+                <th className="pe-4 text-end py-2">{ar ? "السعر" : "Unit price"}</th>
+                <th className="pe-4 text-end py-2">{ar ? "خصم" : "Disc"}</th>
+                <th className="pe-4 text-end py-2">{ar ? "ضريبة" : "Tax"}</th>
+                <th className="pe-4 text-end py-2">{ar ? "الإجمالي" : "Total"}</th>
               </tr>
             </thead>
             <tbody>
               {snap.lines.map((l) => (
-                <tr key={l.position} className="border-b border-border align-top">
-                  <td className="py-2.5">
+                <tr key={l.position} className="border-b border-oo-border-default align-top">
+                  <td className="pe-4 py-2.5">
                     {/* The name as it stood when the offer was made. */}
                     <span className="font-semibold">
                       {(ar ? l.nameAr : null) ?? l.name ?? l.description ?? "—"}
                     </span>
                     {l.skuCode && (
-                      <span className="block text-[11px] text-brown/60 font-mono">{l.skuCode}</span>
+                      <span className="block text-[11px] text-oo-text-muted font-mono">{l.skuCode}</span>
                     )}
                   </td>
-                  <td className="py-2.5 text-end tabular-nums">
-                    {l.quantity} <span className="text-[10px] text-brown/60">{l.unit}</span>
+                  <td className="pe-4 py-2.5 text-end tabular-nums">
+                    {l.quantity} <span className="text-[10px] text-oo-text-muted">{l.unit}</span>
                   </td>
-                  <td className="py-2.5 text-end tabular-nums">{formatMoney(l.unitPrice)}</td>
-                  <td className="py-2.5 text-end tabular-nums">
+                  <td className="pe-4 py-2.5 text-end tabular-nums">{formatMoney(l.unitPrice)}</td>
+                  <td className="pe-4 py-2.5 text-end tabular-nums">
                     {Number(l.discountAmount) > 0 ? formatMoney(l.discountAmount) : "—"}
                   </td>
-                  <td className="py-2.5 text-end tabular-nums">
+                  <td className="pe-4 py-2.5 text-end tabular-nums">
                     {Number(l.lineTax) > 0 ? formatMoney(l.lineTax) : "—"}
                   </td>
-                  <td className="py-2.5 text-end tabular-nums font-bold">{formatMoney(l.lineTotal)}</td>
+                  <td className="pe-4 py-2.5 text-end tabular-nums font-bold">{formatMoney(l.lineTotal)}</td>
                 </tr>
               ))}
             </tbody>
@@ -249,14 +249,14 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
             </dl>
           </div>
 
-          <footer className="mt-8 pt-4 border-t border-border text-[11px] text-brown/70 leading-relaxed">
+          <footer className="mt-8 pt-4 border-t border-oo-border-default text-[11px] text-oo-text-secondary leading-relaxed">
             <p>
               {ar
                 ? `هذه الأسعار مثبّتة كما صدرت في ${formatDate(quote.issuedAt ?? snap.frozenAt)} وتبقى سارية حتى ${formatDate(snap.validUntil)}.`
                 : `These prices are as issued on ${formatDate(quote.issuedAt ?? snap.frozenAt)} and hold until ${formatDate(snap.validUntil)}.`}
             </p>
             {quote.status === "SUPERSEDED" && (
-              <p className="font-bold text-red-700 mt-1">
+              <p className="font-bold text-oo-status-rejected mt-1">
                 {ar
                   ? "استُبدل هذا العرض بمراجعة أحدث. لا تُرسله إلى العميل."
                   : "This quotation has been superseded by a later revision. Do not send it to the customer."}
@@ -278,7 +278,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-brown/70">{label}</dt>
+      <dt className="text-oo-text-secondary">{label}</dt>
       <dd className="tabular-nums font-semibold">{value}</dd>
     </div>
   );

@@ -473,7 +473,7 @@ function StageDialog({
         <TextInput id="st-prob" value={probability} onChange={setProbability} inputMode="numeric" />
       </Field>
 
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[11px] text-oo-text-muted font-medium">
         {ar
           ? "كلا الاسمين مطلوبان. مرحلة بالإنجليزية فقط تظهر كفراغ على اللوحة التي يعمل عليها معظم المستخدمين."
           : "Both names are required. A stage with only an English label renders as a gap on the board most of these users actually work in."}
