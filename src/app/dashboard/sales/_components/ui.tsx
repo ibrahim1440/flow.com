@@ -25,33 +25,54 @@ import { useUser } from "../../user-context";
  */
 
 /**
- * A date for an Arabic-first screen.
+ * NUMBERS AND DATES FOR AN ARABIC INTERFACE THAT USES LATIN DIGITS.
  *
- * `formatDate` in lib/utils is pinned to en-US, so every Arabic screen in this module was
- * rendering "Jan 1, 2099" beside right-to-left text. That function is used across the whole
- * ERP and is left alone; this is the Sales-local replacement.
+ * The interface is Arabic and right-to-left; the digits in it are 0–9. Those are separate
+ * decisions and this module is where the second one is made, once, for every Sales and
+ * Commissions screen.
  *
- * Near dates read as "today"/"tomorrow" plus a time, because a follow-up list is about what
- * happens next and a reader should not have to subtract dates to find out. Anything further
- * out gets a short numeric date.
+ * ── Why the locale is pinned, not inherited ──
+ * `toLocaleString("ar")` renders ١٢٬٤٥٠ on one machine and 12,450 on another, because the
+ * default numbering system for an Arabic locale differs by platform and by browser version.
+ * A figure that changes shape depending on who opens the page is not a figure anybody can
+ * quote in an email. So every call below names `ar-SA-u-nu-latn` — Arabic locale, Latin
+ * numbering system — and nothing here ever falls back to the browser's idea of either.
+ *
+ * ── Why dates are numeric ──
+ * `25/09/2026` is unambiguous, sorts visually, and is the same eleven characters in both
+ * languages. Month names are not: they are long, they wrap in a table cell, and in Arabic
+ * there are two competing sets of them.
+ *
+ * ── What is NOT transformed ──
+ * Anything a customer typed. A company name, a note, an address, a rejection reason —
+ * whatever numerals a person wrote are theirs and are stored and shown exactly as written.
+ * The audit in `scripts/e2e/regression/sales-digits-audit.mjs` excludes those fields by
+ * name, and the exclusions are listed there.
  */
-/** A count in the reader's own numerals. Arabic screens showing Latin digits read as a
- * half-translated interface, and the design uses Arabic-Indic throughout. */
-export function num(n: number, lang: "ar" | "en"): string {
-  return n.toLocaleString(lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB");
-}
 
-const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+/** Arabic labels, Latin digits. Named explicitly so no platform gets a vote. */
+const AR_LATN = "ar-SA-u-nu-latn-ca-gregory";
+const EN = "en-GB";
+const locale = (lang: "ar" | "en") => (lang === "ar" ? AR_LATN : EN);
 
 /**
- * Arabic-Indic presentation of an already-formatted Latin-digit number.
+ * A count: `42`, `12,450`.
  *
- * A character substitution rather than a re-format, so the exact decimal string produced
- * upstream survives intact — the money path is deliberately string-only and must not be
- * routed back through `Number` to change its numerals.
+ * Grouping is Latin (comma) in both languages, because the group separator has to match the
+ * digits it separates — ١٢٬٤٥٠ with Latin digits reads as a typo.
  */
-export function toArabicDigits(s: string): string {
-  return s.replace(/[0-9,.]/g, (c) => (c === "," ? "٬" : c === "." ? "٫" : AR_DIGITS[Number(c)]));
+export function num(n: number, _lang: "ar" | "en" = "ar"): string {
+  return n.toLocaleString("en-US");
+}
+
+/** A percentage the way the design writes one: `2.5%`, `38%`. Never `%`. */
+export function percent(value: number | string, places?: number): string {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(n)) return "—";
+  const text = places === undefined
+    ? String(Number(n.toFixed(6)))
+    : n.toFixed(places);
+  return `${text}%`;
 }
 
 /**
@@ -64,10 +85,7 @@ export function toArabicDigits(s: string): string {
  */
 export function monthOptions(current: string, lang: "ar" | "en"): { value: string; label: string }[] {
   const name = (d: Date) =>
-    d.toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-arab-ca-gregory" : "en-GB", {
-      month: "long",
-      year: "numeric",
-    });
+    d.toLocaleDateString(locale(lang), { month: "long", year: "numeric" });
   const out = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
     d.setDate(1);
@@ -81,37 +99,41 @@ export function monthOptions(current: string, lang: "ar" | "en"): { value: strin
   return out;
 }
 
-/** A calendar day the way the design writes one: "٣٠ سبتمبر" / "30 Sep". No year, because
- *  these columns are all within the current cycle and the year is noise in a table. */
-export function formatDay(value: string | Date | null | undefined, lang: "ar" | "en"): string {
+/** `25/09/2026`. Zero-padded so a column of dates lines up. */
+export function formatDay(value: string | Date | null | undefined, _lang?: "ar" | "en"): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB", {
-    day: "numeric",
-    month: lang === "ar" ? "long" : "short",
-  });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+/** `15:00`, twenty-four hour. The one time format that needs no am/pm in either language. */
+export function formatTime(value: string | Date): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * When something is due, in the words a work queue needs.
+ *
+ * Near dates read as "today"/"tomorrow" plus a time, because a follow-up list is about what
+ * happens next and a reader should not have to subtract dates to find out. Anything further
+ * out is the plain numeric date.
+ */
 export function formatWhen(value: string | Date | null | undefined, lang: "ar" | "en"): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  const locale = lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB";
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((startOf(d) - startOf(new Date())) / 86_400_000);
-  const time = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const time = formatTime(d);
   if (days === 0) return `${lang === "ar" ? "اليوم" : "Today"} ${time}`;
   if (days === 1) return `${lang === "ar" ? "غداً" : "Tomorrow"} ${time}`;
   if (days === -1) return `${lang === "ar" ? "أمس" : "Yesterday"} ${time}`;
-  // The year only earns its place when it is not this one. The design writes these as
-  // "٢٦ سبتمبر", and a column of dates that all repeat the same year is four wasted glyphs.
-  const thisYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString(locale, {
-    ...(thisYear ? {} : { year: "numeric" }),
-    month: lang === "ar" ? "long" : "short",
-    day: "numeric",
-  });
+  return formatDay(d);
 }
 
 export function useLang(): "ar" | "en" {
@@ -480,7 +502,7 @@ export function moneyText(
 ): string {
   const formatted = formatMoney(String(value), places);
   const unit = lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
-  return `${lang === "ar" ? toArabicDigits(formatted) : formatted} ${unit}`;
+  return `${formatted} ${unit}`;
 }
 
 export function Money({
@@ -502,16 +524,31 @@ export function Money({
   const negative = raw.trim().startsWith("-");
   const formatted = formatMoney(raw);
   const unit = lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
+  // The figure is wrapped in <bdi>. A Latin-digit amount sitting in Arabic text is a
+  // direction-neutral run, and the bidi algorithm will happily reorder it against whatever
+  // is beside it — "12,450.00" after a full stop can come out as "00.450,12", and a minus
+  // sign migrates to the wrong end. <bdi> isolates it so the number is laid out on its own
+  // terms and then placed as a unit.
   return (
     <span
-      className={`tabular-nums ${strong ? "font-semibold" : ""} ${
+      className={`${strong ? "font-semibold" : ""} ${
         negative ? "text-oo-status-rejected" : "text-oo-text-primary"
       }`}
-      dir={lang === "ar" ? "rtl" : undefined}
     >
-      {lang === "ar" ? toArabicDigits(formatted) : formatted} {unit}
+      <bdi className="tabular-nums">{formatted}</bdi> {unit}
     </span>
   );
+}
+
+/**
+ * An identifier or a bare number, isolated from the text around it.
+ *
+ * For quotation numbers, order numbers, collection references, phone numbers — anything
+ * that is read as one token and must not be reordered by the surrounding Arabic. This is
+ * the reason `OF-1042` does not render as `1042-OF`.
+ */
+export function Num({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <bdi className={`tabular-nums ${className}`}>{children}</bdi>;
 }
 
 export function Pill({

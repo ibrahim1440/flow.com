@@ -5,7 +5,7 @@ import { Percent, Plus, Lock, UserPlus } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
   Button, Field, TextInput, Select, TextArea, Pill, Modal, api,
-  Td, ROW_ACTION, num, formatDay, formatMoney, toArabicDigits,
+  Td, ROW_ACTION, num, formatDay, formatMoney,
 } from "../../sales/_components/ui";
 
 /**
@@ -43,11 +43,11 @@ function PlanVersion({
   const frozen = v._count.accruals > 0;
   const rate = (x: string | number) => {
     const s = Number(x).toFixed(6);
-    return ar ? `${toArabicDigits(s)}٪` : `${s}%`;
+    return ar ? `${s}%` : `${s}%`;
   };
   const amount = (x: string | number) => {
     const s = formatMoney(String(x), 0);
-    return ar ? toArabicDigits(s) : s;
+    return ar ? s : s;
   };
   const base = Number(v.baseRatePercent);
 
@@ -143,7 +143,7 @@ function PlanVersion({
                   <Td>
                     {Number(t.ratePercent) === 0
                       ? "—"
-                      : `+ ${ar ? toArabicDigits(Number(t.ratePercent).toFixed(2)) : Number(t.ratePercent).toFixed(2)}`}
+                      : `+ ${ar ? Number(t.ratePercent).toFixed(2) : Number(t.ratePercent).toFixed(2)}`}
                   </Td>
                   {/* The column that stops "1% + 0.5 points" being read as 1.5% on everything. */}
                   <Td>

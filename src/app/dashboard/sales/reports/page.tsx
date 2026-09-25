@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { TrendingUp, Download } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Money, api, FilterSelect, LEAD_SOURCE_LABELS, num, toArabicDigits, StatStrip, Stat, monthOptions,
+  Money, api, FilterSelect, LEAD_SOURCE_LABELS, num, StatStrip, Stat, monthOptions,
 } from "../_components/ui";
 
 /**
@@ -102,7 +102,7 @@ export default function ReportsPage() {
   const pct = (raw: string) => {
     // The server sends "36.84"; the trailing ".00" is noise in a headline figure.
     const trimmed = raw.replace(/\.0+$/, "");
-    return ar ? `${toArabicDigits(trimmed)}٪` : `${trimmed}%`;
+    return ar ? `${trimmed}%` : `${trimmed}%`;
   };
   const months = monthOptions(month, lang);
   const currentMonthLabel = months.find((o) => o.value === month)?.label ?? month;

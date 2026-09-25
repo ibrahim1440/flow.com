@@ -6,7 +6,7 @@ import { FileText } from "lucide-react";
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner,
   Money, Pill, api, QuoteStatusBadge, DataTable, Tr, Td, Toolbar, SearchField,
-  FilterSelect, ROW_ACTION, formatDay, formatMoney, num, toArabicDigits,
+  FilterSelect, ROW_ACTION, formatDay, formatMoney, num,
 } from "../_components/ui";
 
 /**
@@ -141,7 +141,7 @@ export default function QuotesPage() {
     .reduce((sum, q) => sum + Number(q.grandTotal), 0);
   const money = (n: number) => {
     const s = formatMoney(n.toFixed(2), 0);
-    return ar ? `${toArabicDigits(s)} ر.س` : `${s} SAR`;
+    return ar ? `${s} ر.س` : `${s} SAR`;
   };
   // Each fact is its own element. Joined into one string, the bidi algorithm is free to
   // move a "·" that sits between two Arabic-Indic numerals, and the caption reads as a

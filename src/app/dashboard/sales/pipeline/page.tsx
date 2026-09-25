@@ -6,7 +6,7 @@ import { KanbanSquare, Trophy, XCircle, ChevronLeft, ChevronRight, ChevronDown }
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import {
-  ProvisionalBanner, PageHeader, Alert, SectionTitle, ROW_ACTION, num, formatDay, moneyText,
+  ProvisionalBanner, PageHeader, Alert, SectionTitle, ROW_ACTION, Num, num, formatDay, moneyText,
 } from "../_components/ui";
 
 /**
@@ -218,10 +218,7 @@ export default function PipelinePage() {
                     </span>
                     <span className="text-end">
                       <span className="block text-[14px] font-medium leading-[22px] text-oo-text-primary">
-                        {String(stageIdx + 1).padStart(2, "0")
-                          .split("")
-                          .map((c) => (rtl ? "٠١٢٣٤٥٦٧٨٩"[Number(c)] : c))
-                          .join("")}{" "}
+                        <Num>{String(stageIdx + 1).padStart(2, "0")}</Num>{" "}
                         {stageName(stage)}
                       </span>
                       <span className="block text-[12px] leading-[18px] tabular-nums text-oo-text-muted">
@@ -257,7 +254,7 @@ export default function PipelinePage() {
                             deal.customer
                               ? (rtl && deal.customer.nameAr ? deal.customer.nameAr : deal.customer.name)
                               : null,
-                            `${rtl ? "احتمال" : "probability"} ${num(stage.probability, lang)}٪`,
+                            `${rtl ? "احتمال" : "probability"} ${num(stage.probability, lang)}%`,
                             deal._count.quotes > 0
                               ? `${rtl ? "عروض" : "quotes"} ${num(deal._count.quotes, lang)}`
                               : null,

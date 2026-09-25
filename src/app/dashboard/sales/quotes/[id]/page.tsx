@@ -6,7 +6,7 @@ import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock } 
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
   Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
-  QuoteStatusBadge, Td, num, formatDay, toArabicDigits,
+  QuoteStatusBadge, Td, num, formatDay,
 } from "../../_components/ui";
 
 /**
@@ -491,7 +491,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             </p>
             <p className="text-[12px] leading-[18px] text-oo-status-hold">
               {ar
-                ? `الخصم الفعّال ${toArabicDigits(preview.discountPercent.toFixed(2))}٪ وحدّ الاعتماد ${toArabicDigits(threshold)}٪. ` +
+                ? `الخصم الفعّال ${preview.discountPercent.toFixed(2)}% وحدّ الاعتماد ${threshold}%. ` +
                   (can.approveDiscount
                     ? "الإصدار يسجّل اعتمادك على العرض."
                     : "الإصدار يُرفض حتى يصدره مديرٌ لديه صلاحية اعتماد الخصم؛ العرض يبقى مسودة.")
@@ -605,12 +605,12 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                     <Td>
                       {Number(l.discountPercent) > 0
                         ? ar
-                          ? `${num(Number(l.discountPercent), "ar")}٪`
+                          ? `${num(Number(l.discountPercent), "ar")}%`
                           : `${l.discountPercent}%`
                         : "—"}
                     </Td>
                     <Td>
-                      {ar ? `${num(Number(l.taxRatePercent), "ar")}٪` : `${l.taxRatePercent}%`}
+                      {ar ? `${num(Number(l.taxRatePercent), "ar")}%` : `${l.taxRatePercent}%`}
                     </Td>
                     <Td><Money value={l.lineTotal} currency={quote.currency} /></Td>
                   </tr>
@@ -726,7 +726,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                         {Number(l.discountPercent) > Number(threshold) && (
                           <span className="block text-[12px] leading-[18px] text-oo-status-rejected">
                             {ar
-                              ? `خصم السطر فوق حدّ ${toArabicDigits(threshold)}٪`
+                              ? `خصم السطر فوق حدّ ${threshold}%`
                               : `line discount is over the ${threshold}% threshold`}
                           </span>
                         )}

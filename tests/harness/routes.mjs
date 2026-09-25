@@ -100,8 +100,8 @@ const line = (position, skuCode, name, qty, unitPrice, discountPercent = "0") =>
 };
 
 const QUOTE_LINES = [
-  line(1, "BRZ-1KG", "خلطة البرازيل ١ كجم", "300", "115.00", "0"),
-  line(2, "ETH-1KG", "إثيوبيا يرغاتشيف ١ كجم", "200", "160.00", "5"),
+  line(1, "BRZ-1KG", "خلطة البرازيل 1 كجم", "300", "115.00", "0"),
+  line(2, "ETH-1KG", "إثيوبيا يرغاتشيف 1 كجم", "200", "160.00", "5"),
   line(3, "SRV-CAL", "معايرة وصيانة", "1", "3500.00", "0"),
 ];
 
@@ -137,6 +137,20 @@ const QUOTE_DETAIL = {
     })),
   },
 };
+
+/**
+ * Fixture values that are CUSTOMER-ENTERED free text and legitimately contain Arabic-Indic
+ * digits.
+ *
+ * «كافيه ٢١» is a company's own name — "Cafe 21", written the way its owner writes it. The
+ * application does not get to renumber somebody's trading name, so the digit audit removes
+ * these exact strings from a text node before scanning it.
+ *
+ * Removing the string rather than skipping the element is deliberate: a formatter bug that
+ * rendered "٥ عروض" into the same cell as the company name would still be caught, because
+ * only the company name is subtracted.
+ */
+export const CUSTOMER_TEXT = ["كافيه ٢١"];
 
 export const ROUTES = {
   "sales-leads": {

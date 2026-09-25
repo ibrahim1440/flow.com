@@ -5,7 +5,7 @@ import { Target } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner, SandboxBanner,
   Button, Field, TextInput, Select, TextArea, Money, Modal, api,
-  DataTable, Tr, Td, ProgressBar, ROW_ACTION, num, FilterSelect, formatMoney, toArabicDigits, monthOptions,
+  DataTable, Tr, Td, ProgressBar, ROW_ACTION, num, FilterSelect, formatMoney, monthOptions,
 } from "../_components/ui";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -191,11 +191,11 @@ export default function TargetsPage() {
                     percent={pct}
                     testId={`progress-${r.employeeId}`}
                     label={
-                      (ar ? `تحقّق ${num(Math.round(pct), "ar")}٪` : `${Math.round(pct)}% achieved`) +
+                      (ar ? `تحقّق ${num(Math.round(pct), "ar")}%` : `${Math.round(pct)}% achieved`) +
                       (r.met
                         ? ""
                         : ` · ${ar ? "المتبقي" : "shortfall"} ${
-                            ar ? toArabicDigits(formatMoney(r.shortfall, 0)) : formatMoney(r.shortfall, 0)
+                            ar ? formatMoney(r.shortfall, 0) : formatMoney(r.shortfall, 0)
                           } ${ar ? "ر.س" : r.currency}`)
                     }
                   />

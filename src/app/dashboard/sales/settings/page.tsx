@@ -227,7 +227,7 @@ export default function SalesSettingsPage() {
                         {ar ? s.nameEn : s.nameAr}
                       </span>
                     </Td>
-                    <Td>{ar ? `${num(s.probability, "ar")}٪` : `${s.probability}%`}</Td>
+                    <Td>{ar ? `${num(s.probability, "ar")}%` : `${s.probability}%`}</Td>
                     <Td>{num(s._count?.opportunities ?? 0, lang)}</Td>
                     <Td>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -327,11 +327,11 @@ export default function SalesSettingsPage() {
             {[
               [
                 ar ? "بلا اعتماد" : "Without approval",
-                ar ? `حتى ${num(DISCOUNT_APPROVAL_THRESHOLD, "ar")}٪` : `up to ${DISCOUNT_APPROVAL_THRESHOLD}%`,
+                ar ? `حتى ${num(DISCOUNT_APPROVAL_THRESHOLD, "ar")}%` : `up to ${DISCOUNT_APPROVAL_THRESHOLD}%`,
               ],
               [
                 ar ? "باعتماد الخصم" : "With the discount-approval privilege",
-                ar ? `حتى ${num(DISCOUNT_MAX, "ar")}٪` : `up to ${DISCOUNT_MAX}%`,
+                ar ? `حتى ${num(DISCOUNT_MAX, "ar")}%` : `up to ${DISCOUNT_MAX}%`,
               ],
               [ar ? "فوق ذلك" : "Above that", ar ? "مرفوض" : "refused"],
             ].map(([who, limit]) => (

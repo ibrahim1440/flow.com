@@ -7,7 +7,7 @@ import { useUser } from "../../user-context";
 import {
   AccrualStatusBadge, ACCRUAL_STATUS_SPECS, ProvisionalBanner, PageHeader, SandboxBanner,
   Alert, Card, EmptyState, Spinner, SectionTitle, StatStrip, Stat, DataTable, Tr, Td,
-  FilterSelect, ROW_ACTION, formatMoney, formatDay, num, toArabicDigits, api, monthOptions,
+  FilterSelect, ROW_ACTION, formatMoney, formatDay, num, api, monthOptions,
 } from "../_components/ui";
 
 /**
@@ -150,12 +150,12 @@ export default function MyCommissionsPage() {
     ar ? (map[k]?.ar ?? k) : (map[k]?.en ?? k);
 
   /** A bare amount — no currency — for the places the design writes a running sum. */
-  const bare = (v: string) => (ar ? toArabicDigits(formatMoney(v)) : formatMoney(v));
+  const bare = (v: string) => (ar ? formatMoney(v) : formatMoney(v));
   const money = (v: string, ccy = "SAR") =>
     `${bare(v)} ${ar ? (ccy === "SAR" ? "ر.س" : ccy) : ccy}`;
   const pct = (v: string) => {
     const trimmed = Number(v).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
-    return ar ? `${toArabicDigits(trimmed)}٪` : `${trimmed}%`;
+    return ar ? `${trimmed}%` : `${trimmed}%`;
   };
   const months = monthOptions(month, lang);
 

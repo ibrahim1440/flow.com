@@ -348,9 +348,11 @@ test.describe("mocked browser UI — commissions", () => {
     await page.keyboard.press("Enter");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#calc-ac1")).toBeVisible();
-    // The effective rate, in the numerals the screen actually renders.
-    await expect(page.locator("#calc-ac1")).toContainText("١٫٠٤٥٤٥٥٪");
-    await expect(page.locator("#calc-ac1")).toContainText("١٬١٥٠٫٠٠");
+    // Latin digits, as every Sales screen now renders them — the interface is Arabic, the
+    // numerals are 0-9. The digit audit in digits.spec.ts is what enforces that generally;
+    // this asserts the two figures a reader of this panel is actually checking.
+    await expect(page.locator("#calc-ac1")).toContainText("1.045455%");
+    await expect(page.locator("#calc-ac1")).toContainText("1,150.00");
     await noHorizontalOverflow(page);
   });
 

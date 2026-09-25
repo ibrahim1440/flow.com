@@ -211,7 +211,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               </span>,
               <span key="p">
                 {ar ? "احتمال " : "probability "}
-                {num(deal.probability, lang)}٪
+                {num(deal.probability, lang)}%
               </span>,
             ]
               .filter(Boolean)
@@ -620,7 +620,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <Card>
             <SectionTitle>{ar ? "التفاصيل" : "Details"}</SectionTitle>
             <dl className="space-y-2.5 text-sm">
-              <Row label={ar ? "الاحتمال" : "Probability"}>{ar ? `${num(deal.probability, "ar")}٪` : `${deal.probability}%`}</Row>
+              <Row label={ar ? "الاحتمال" : "Probability"}>{ar ? `${num(deal.probability, "ar")}%` : `${deal.probability}%`}</Row>
               <Row label={ar ? "الإغلاق المتوقع" : "Expected close"}>
                 {deal.expectedCloseAt ? formatDay(deal.expectedCloseAt, lang) : "—"}
               </Row>

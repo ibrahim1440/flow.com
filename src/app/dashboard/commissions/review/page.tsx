@@ -406,8 +406,8 @@ export default function CommissionReviewPage() {
                       </Td>
                       <Td>{a.collectionEvent.customer?.name ?? "—"}</Td>
                       <Td><Money value={a.qualifyingBase} /></Td>
-                      <Td>{ar ? `${num(Number(a.sharePercent), "ar")}٪` : `${a.sharePercent}%`}</Td>
-                      <Td>{ar ? `${num(Number(a.effectiveRatePercent), "ar")}٪` : `${a.effectiveRatePercent}%`}</Td>
+                      <Td>{ar ? `${num(Number(a.sharePercent), "ar")}%` : `${a.sharePercent}%`}</Td>
+                      <Td>{ar ? `${num(Number(a.effectiveRatePercent), "ar")}%` : `${a.effectiveRatePercent}%`}</Td>
                       <Td><Money value={a.amount} currency={a.currency} /></Td>
                       <Td>
                         <span className="font-mono text-[12px] leading-[18px]">{a.planVersion.plan.code}</span>
