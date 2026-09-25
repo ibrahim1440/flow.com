@@ -459,15 +459,26 @@ export const ROUTES = {
         body: {
           periodStart: "2026-09-01", periodEnd: "2026-09-30",
           employees: [
-            { employeeId: "u1", name: "فهد العتيبي", accrued: "1530.00", adjustments: "0.00", paid: "200.00",
-              outstanding: "1330.00", accrualRowsTotal: "1530.00", reconciliationDifference: "0.00",
+            { employeeId: "u1", name: "فهد العتيبي", accrued: "1530.00", accrualEntries: "1530.00",
+              reversals: "0.00", adjustments: "0.00", paid: "200.00",
+              outstanding: "1330.00", accrualRowsTotal: "1530.00", frozenReversedTotal: "0.00",
+              expectedFromRows: "1530.00", reconciliationDifference: "0.00",
               reconciled: true, pendingCount: 3, approvedCount: 0 },
-            { employeeId: "u2", name: "نورة السبيعي", accrued: "840.00", adjustments: "0.00", paid: "0.00",
-              outstanding: "840.00", accrualRowsTotal: "840.00", reconciliationDifference: "0.00",
+            // A period that has seen a refund. The rows still add to 1,040.00 because an
+            // approved accrual is never rewritten; the 200.00 that came back is its own
+            // figure, and the period still reconciles. Before the reconciliation control
+            // was corrected this row read "off by -200.00" and nothing was wrong with it.
+            { employeeId: "u2", name: "نورة السبيعي", accrued: "840.00", accrualEntries: "1040.00",
+              reversals: "-200.00", adjustments: "0.00", paid: "0.00",
+              outstanding: "840.00", accrualRowsTotal: "1040.00", frozenReversedTotal: "200.00",
+              expectedFromRows: "840.00", reconciliationDifference: "0.00",
               reconciled: true, pendingCount: 0, approvedCount: 2 },
-            { employeeId: "u3", name: "خالد المطيري", accrued: "700.00", adjustments: "-90.00", paid: "610.00",
-              outstanding: "0.00", accrualRowsTotal: "700.00", reconciliationDifference: "0.00",
-              reconciled: true, pendingCount: 0, approvedCount: 1 },
+            // A genuine mismatch, so the control is visibly still able to fire.
+            { employeeId: "u3", name: "خالد المطيري", accrued: "700.00", accrualEntries: "700.00",
+              reversals: "0.00", adjustments: "-90.00", paid: "610.00",
+              outstanding: "0.00", accrualRowsTotal: "685.00", frozenReversedTotal: "0.00",
+              expectedFromRows: "685.00", reconciliationDifference: "15.00",
+              reconciled: false, pendingCount: 0, approvedCount: 1 },
           ],
           accruals: [
             accrual("ac1", "ACCRUED", "1150.00", { customer: "مقهى ذوّاقة" }),

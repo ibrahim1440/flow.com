@@ -740,7 +740,41 @@ async function main() {
     check("and produced no accrual", accruals.length === 0, `${accruals.length}`);
   }
 
-  sub("D5. every approved collection is stamped as a manual finance verification");
+  sub("D5. a reversal does not make the period look unreconciled");
+  {
+    // The regression this pins down: the review screen compared the ledger's NET accrued
+    // figure against the sum of the per-collection accrual rows. A reversal moves the first
+    // and deliberately never touches the second — an approved accrual is a fact about what
+    // was approved — so every period that had ever seen a refund reported a difference and
+    // told the reviewer not to approve. On the preview data that read "off by -200.00" with
+    // nothing wrong: 250.00 accrued, 200.00 reversed, 50.00 owed, and five untouched rows.
+    const review = await fin.api("/api/commissions/review");
+    check("Finance can read the review", review.status === 200, String(review.status));
+    const mine = (review.json?.employees ?? []).filter((e) => e.employeeId.startsWith(P));
+    check("this suite's people are in it", mine.length > 0, `${mine.length}`);
+
+    const withReversals = mine.filter((e) => Number(e.reversals) !== 0);
+    check("at least one of them has had a reversal", withReversals.length > 0,
+      S(mine.map((e) => [e.employeeId, e.reversals])));
+
+    for (const e of mine) {
+      check(`${e.employeeId} reconciles`, e.reconciled === true,
+        `difference ${e.reconciliationDifference} — accrued ${e.accrued} vs expected ${e.expectedFromRows}`);
+      check(`${e.employeeId}: the ledger equals the rows less anything frozen and reversed`,
+        Math.abs(Number(e.accrued) - (Number(e.accrualRowsTotal) - Number(e.frozenReversedTotal))) < 0.005,
+        `${e.accrued} vs ${e.accrualRowsTotal} - ${e.frozenReversedTotal}`);
+      check(`${e.employeeId}: and the net owed is the entries less the reversals`,
+        Math.abs(Number(e.accrued) - (Number(e.accrualEntries) + Number(e.reversals))) < 0.005,
+        `${e.accrued} vs ${e.accrualEntries} + ${e.reversals}`);
+    }
+    const reversed = withReversals[0];
+    if (reversed) {
+      check("the reversal is reported as its own negative figure, not folded into the total",
+        Number(reversed.reversals) < 0, S(reversed.reversals));
+    }
+  }
+
+  sub("D6. every approved collection is stamped as a manual finance verification");
   {
     const rows = await q(
       `SELECT DISTINCT "sourceSystem" FROM "CollectionEvent"

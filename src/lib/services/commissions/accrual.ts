@@ -439,7 +439,12 @@ export async function periodStatement(
   periodStart: Date,
 ): Promise<{
   periodStart: Date;
+  /** Net of reversals — what is actually owed for the period. */
   accrued: PrismaNS.Decimal;
+  /** The positive half of `accrued`, before any reversal. */
+  accrualEntries: PrismaNS.Decimal;
+  /** The negative half. Zero or below, never above. */
+  reversals: PrismaNS.Decimal;
   adjustments: PrismaNS.Decimal;
   paid: PrismaNS.Decimal;
   outstanding: PrismaNS.Decimal;
@@ -450,12 +455,20 @@ export async function periodStatement(
     _sum: { amount: true },
   });
   const by = (t: string) => roundMoney(rows.find((r) => r.type === t)?._sum.amount ?? ZERO);
-  const accrued = roundMoney(by("ACCRUAL").plus(by("REVERSAL")));
+  // The two halves are returned separately as well as netted. A reviewer reconciling the
+  // per-collection accrual rows has to compare them against the POSITIVE half: a reversal
+  // deliberately leaves the accrual row it corrects untouched, so the rows can only ever
+  // explain what was accrued, never what was later taken back.
+  const accrualEntries = by("ACCRUAL");
+  const reversals = by("REVERSAL");
+  const accrued = roundMoney(accrualEntries.plus(reversals));
   const adjustments = by("ADJUSTMENT");
   const paid = by("PAYOUT");
   return {
     periodStart,
     accrued,
+    accrualEntries,
+    reversals,
     adjustments,
     paid,
     outstanding: roundMoney(accrued.plus(adjustments).minus(paid)),

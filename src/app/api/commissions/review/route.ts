@@ -73,18 +73,54 @@ export async function GET(request: Request) {
             .reduce((acc, a) => acc.plus(a.amount), ZERO),
         );
         const ledgerAccrued = roundMoney(s.accrued);
+
+        // ── Why the comparison is not simply ledger-vs-rows ──
+        // An accrual row tracks its collection's CURRENT contribution while it is still
+        // unapproved: reversing that collection decrements the row back to zero, and the
+        // rows keep matching the ledger. Once the row is approved or paid it is frozen —
+        // restating a figure somebody has already been told they earned is the exact thing
+        // the append-only ledger exists to prevent — so a later reversal leaves the row at
+        // its approved amount and posts a compensating entry instead.
+        //
+        // Comparing the ledger against the raw row total therefore reported a difference on
+        // every period where an APPROVED accrual had since been reversed. On the preview
+        // data that read "off by -200.00" with nothing whatsoever wrong: 250.00 accrued in
+        // five entries, 200.00 given back in four, 50.00 owed, and five frozen rows still
+        // saying what they said when they were approved. A control that goes red whenever a
+        // refund has happened is a control reviewers learn to click past.
+        //
+        // The frozen-and-since-reversed rows are identifiable structurally — approved or
+        // paid, against an event now marked REVERSED — so they are subtracted, and the
+        // control keeps its teeth for every other kind of disagreement.
+        const mine = accruals.filter((a) => a.employeeId === employeeId);
+        const frozenAndReversed = roundMoney(
+          mine
+            .filter(
+              (a) =>
+                (a.status === "APPROVED" || a.status === "PAID") &&
+                a.collectionEvent?.status === "REVERSED",
+            )
+            .reduce((acc, a) => acc.plus(a.amount), ZERO),
+        );
+        const expectedFromRows = roundMoney(fromAccruals.minus(frozenAndReversed));
+
         return {
           employeeId,
           name: accruals.find((a) => a.employeeId === employeeId)?.employee.name ?? employeeId,
           accrued: ledgerAccrued.toFixed(2),
+          accrualEntries: roundMoney(s.accrualEntries).toFixed(2),
+          reversals: s.reversals.toFixed(2),
           adjustments: s.adjustments.toFixed(2),
           paid: s.paid.toFixed(2),
           outstanding: s.outstanding.toFixed(2),
           accrualRowsTotal: fromAccruals.toFixed(2),
+          /** Of the rows above, the part frozen at approval and since reversed. */
+          frozenReversedTotal: frozenAndReversed.toFixed(2),
+          expectedFromRows: expectedFromRows.toFixed(2),
           // Zero on a healthy period. Surfaced rather than asserted quietly, because the
           // one time it is not zero is the one time somebody needs to know.
-          reconciliationDifference: roundMoney(ledgerAccrued.minus(fromAccruals)).toFixed(2),
-          reconciled: ledgerAccrued.equals(fromAccruals),
+          reconciliationDifference: roundMoney(ledgerAccrued.minus(expectedFromRows)).toFixed(2),
+          reconciled: ledgerAccrued.equals(expectedFromRows),
           pendingCount: accruals.filter((a) => a.employeeId === employeeId && a.status === "ACCRUED").length,
           approvedCount: accruals.filter((a) => a.employeeId === employeeId && a.status === "APPROVED").length,
         };

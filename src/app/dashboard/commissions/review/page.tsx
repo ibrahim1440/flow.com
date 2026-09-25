@@ -30,10 +30,17 @@ type EmployeeRow = {
   employeeId: string;
   name: string;
   accrued: string;
+  /** The positive half of `accrued`. What the per-collection rows explain. */
+  accrualEntries: string;
+  /** Zero, or a negative figure: commission taken back after a refund or a reversal. */
+  reversals: string;
   adjustments: string;
   paid: string;
   outstanding: string;
   accrualRowsTotal: string;
+  /** The part of the rows above that was frozen at approval and has since been reversed. */
+  frozenReversedTotal: string;
+  expectedFromRows: string;
   reconciliationDifference: string;
   reconciled: boolean;
   pendingCount: number;
@@ -264,7 +271,21 @@ export default function CommissionReviewPage() {
                       }`
                     : "—"}
                 </Td>
-                <Td><Money value={e.accrued} /></Td>
+                <Td>
+                  <Money value={e.accrued} />
+                  {/* A reversal is shown here rather than buried inside the net figure.
+                      "50.00, of which 200.00 was taken back" is a different conversation
+                      from "50.00", and the reviewer is the person who needs to have it. */}
+                  {Number(e.reversals) !== 0 && (
+                    <span
+                      data-testid={`reversals-${e.employeeId}`}
+                      className="block text-[12px] leading-[18px] text-oo-status-rejected"
+                    >
+                      {ar ? "بعد عكس " : "after reversals of "}
+                      <Money value={e.reversals} />
+                    </span>
+                  )}
+                </Td>
                 <Td><Money value={e.adjustments} /></Td>
                 <Td><Money value={e.paid} /></Td>
                 <Td>
