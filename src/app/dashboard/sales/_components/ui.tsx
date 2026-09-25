@@ -873,7 +873,13 @@ export function DataTable({
                 <th
                   key={i}
                   scope="col"
-                  className={`${c.w ?? ""} px-4 py-[11px] text-[12px] font-medium leading-[18px] text-oo-text-muted ${
+                  /* `relative`, because an action column's heading is an `sr-only` span and
+                     `sr-only` is absolutely positioned. Without a positioned ancestor it
+                     lands against the initial containing block — off the left edge of an
+                     RTL page — and makes the whole document scroll sideways by however far
+                     the table has been shifted. One pixel of invisible text, ninety pixels
+                     of horizontal scroll. */
+                  className={`${c.w ?? ""} relative px-4 py-[11px] text-[12px] font-medium leading-[18px] text-oo-text-muted ${
                     c.align === "end" ? "text-end" : "text-start"
                   }`}
                 >

@@ -196,7 +196,10 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
             </div>
           </section>
 
-          <table className="w-full text-sm mb-6">
+          {/* On paper the table has the page's full width; on a phone it does not, so it
+              scrolls inside its own box rather than dragging the document sideways. */}
+          <div className="mb-6 overflow-x-auto print:overflow-visible">
+          <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="border-b-2 border-oo-text-primary text-[11px] uppercase font-bold text-oo-text-secondary">
                 <th className="pe-4 text-start py-2">{ar ? "البند" : "Item"}</th>
@@ -234,6 +237,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
               ))}
             </tbody>
           </table>
+          </div>
 
           <div className="flex justify-end">
             <dl className="w-full sm:w-72 space-y-1.5 text-sm">

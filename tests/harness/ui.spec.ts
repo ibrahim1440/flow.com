@@ -348,7 +348,9 @@ test.describe("mocked browser UI — commissions", () => {
     await page.keyboard.press("Enter");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#calc-ac1")).toBeVisible();
-    await expect(page.locator("#calc-ac1")).toContainText("1.0455%");
+    // The effective rate, in the numerals the screen actually renders.
+    await expect(page.locator("#calc-ac1")).toContainText("١٫٠٤٥٤٥٥٪");
+    await expect(page.locator("#calc-ac1")).toContainText("١٬١٥٠٫٠٠");
     await noHorizontalOverflow(page);
   });
 
@@ -363,8 +365,12 @@ test.describe("mocked browser UI — commissions", () => {
 
   test("a failed load shows an error", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await mount(page, "commissions", { "/api/commissions/me": { status: 500, body: { error: "x" } } });
-    await expect(page.getByRole("alert")).toContainText("تعذّر تحميل العمولات");
+    // The server's own message, not a generic one — the screen only falls back to
+    // "تعذّر تحميل العمولات" when the response carries nothing to show.
+    await mount(page, "commissions", {
+      "/api/commissions/me": { status: 500, body: { error: "الفترة غير متاحة" } },
+    });
+    await expect(page.getByRole("alert")).toContainText("الفترة غير متاحة");
   });
 });
 
@@ -409,19 +415,58 @@ test.describe("mocked browser UI — quotation discounts", () => {
   test("a discount under the threshold shows no approval warning", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mount(page, "quote-editor", quotePayload("5"), REP, { id: "q1" });
-    await expect(page.getByText(/أعلى من .* المسموح بها بدون اعتماد/)).toHaveCount(0);
+    await expect(page.getByTestId("discount-approval-notice")).toHaveCount(0);
   });
 
   test("a discount over the threshold warns that a manager must issue it", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mount(page, "quote-editor", quotePayload("25"), REP, { id: "q1" });
-    await expect(page.getByText(/المسموح بها بدون اعتماد/)).toBeVisible();
+    const notice = page.getByTestId("discount-approval-notice");
+    await expect(notice).toBeVisible();
+    // A reader without the privilege is told the issue will be refused, not merely that
+    // the discount is large.
+    await expect(notice).toContainText("يتجاوز صلاحيتك");
+    await expect(notice).toContainText("حدّ الاعتماد");
   });
 
   test("the warning survives the mobile layout", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mount(page, "quote-editor", quotePayload("25"), REP, { id: "q1" });
-    await expect(page.getByText(/المسموح بها بدون اعتماد/)).toBeVisible();
+    await expect(page.getByTestId("discount-approval-notice")).toBeVisible();
     await noHorizontalOverflow(page);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Every Sales and Commissions screen, at every width, against the one rule that a
+ * screenshot of the top of a page cannot show: the DOCUMENT must not scroll sideways.
+ *
+ * This exists because of a one-pixel bug. An action column's heading is an `sr-only`
+ * span, `sr-only` is absolutely positioned, and without a positioned ancestor it lands
+ * against the initial containing block — off the left edge of an RTL page — dragging the
+ * whole document ninety pixels wide on the quotations list at 1024. Invisible in a
+ * capture, obvious to anyone using the screen.
+ *
+ * Driven from the same route fixtures the screenshots use, so a screen added there is
+ * covered here without anyone remembering to add it twice.
+ */
+test.describe("mocked browser UI — no screen scrolls the document sideways", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ROUTES, REP: FIXTURE_REP } = require("./routes.mjs") as {
+    ROUTES: Record<string, { screen: string; api: Record<string, unknown> }>;
+    REP: unknown;
+  };
+  const paramId = (screen: string) =>
+    screen === "lead-detail" ? "l1" : screen.startsWith("quote") ? "q1" : "d1";
+
+  for (const vp of WIDTHS) {
+    for (const [name, spec] of Object.entries(ROUTES)) {
+      test(`${name} at ${vp.name}`, async ({ page }) => {
+        await page.setViewportSize({ width: vp.width, height: vp.height });
+        await mount(page, spec.screen, spec.api, FIXTURE_REP, { id: paramId(spec.screen) });
+        await noHorizontalOverflow(page);
+      });
+    }
+  }
 });
