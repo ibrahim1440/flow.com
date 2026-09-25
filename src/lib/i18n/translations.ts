@@ -13,6 +13,7 @@ export const translations = {
   myCommissionsNav:   { en: "My commissions",         ar: "عمولاتي" },
   activitiesNav:      { en: "Follow-ups",             ar: "المتابعات" },
   quotesNav:          { en: "Quotations",             ar: "عروض الأسعار" },
+  collectionsNav:     { en: "Collections",            ar: "التحصيلات" },
   salesTargetsNav:    { en: "Sales targets",          ar: "أهداف المبيعات" },
   salesReportsNav:    { en: "Sales reports",          ar: "تقارير المبيعات" },
   commissionPlansNav: { en: "Commission plans",       ar: "خطط العمولات" },

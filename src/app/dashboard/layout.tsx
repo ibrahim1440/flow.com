@@ -17,6 +17,10 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "pipelineNav", icon: KanbanSquare,   href: "/dashboard/sales/pipeline", module: "sales" },
   { key: "activitiesNav", icon: CalendarCheck, href: "/dashboard/sales/activities", module: "sales" },
   { key: "quotesNav",  icon: FileText,        href: "/dashboard/sales/quotes", module: "sales" },
+  // Sales sees its own collections; Finance sees the verification queue. Same route, and
+  // the page decides which of the two it is from the caller's privileges — a second URL
+  // for the same records is a second place for the scoping rule to be got wrong.
+  { key: "collectionsNav", icon: Wallet,      href: "/dashboard/sales/collections", module: "sales" },
   { key: "salesTargetsNav", icon: Target,     href: "/dashboard/sales/targets", module: "sales" },
   { key: "salesReportsNav", icon: BarChart3,  href: "/dashboard/sales/reports", module: "sales" },
   { key: "salesSettingsNav", icon: KanbanSquare, href: "/dashboard/sales/settings", module: "sales", sub: "stage_manage" },

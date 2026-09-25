@@ -15,6 +15,7 @@ import {
   Select, TextArea, EmptyState, Spinner, LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS,
   ROW_ACTION, formatWhen, formatDay, num,
 } from "../../_components/ui";
+import { ACTIVITY_OUTCOMES, QUALIFYING_OUTCOMES as QUALIFYING } from "@/lib/services/sales/qualification";
 
 /**
  * Lead detail.
@@ -63,6 +64,23 @@ const SOURCE_LABELS = LEAD_SOURCE_LABELS;
 
 /** The activity types a follow-up on a lead can be. TASK is reserved for scheduling. */
 const LOG_TYPES = ["CALL", "VISIT", "MEETING", "NOTE"];
+/**
+ * What happened, in Arabic, in the order a salesperson thinks about it: the attempts that
+ * went nowhere, the ones that landed, and then the two endings.
+ */
+const OUTCOME_LABELS: Record<string, { en: string; ar: string }> = {
+  NO_ANSWER: { en: "No answer", ar: "لا رد" },
+  LEFT_MESSAGE: { en: "Left a message", ar: "تُركت رسالة" },
+  INTERESTED: { en: "Spoke — interested", ar: "تواصل ناجح — مهتم" },
+  MEETING_SCHEDULED: { en: "Meeting scheduled", ar: "حُدِّد موعد اجتماع مع العميل" },
+  VISIT_SCHEDULED: { en: "Visit scheduled", ar: "حُدِّد موعد زيارة للعميل" },
+  MEETING_COMPLETED: { en: "Meeting held", ar: "تم الاجتماع" },
+  VISIT_COMPLETED: { en: "Visit made", ar: "تمت الزيارة" },
+  FOLLOW_UP_REQUIRED: { en: "Needs a follow-up", ar: "يحتاج متابعة" },
+  NOT_INTERESTED: { en: "Not interested", ar: "غير مهتم" },
+  NOTE_ONLY: { en: "Note / internal task", ar: "ملاحظة أو مهمة داخلية" },
+};
+
 const TYPE_LABELS: Record<string, { en: string; ar: string }> = {
   CALL: { en: "Call", ar: "مكالمة" },
   VISIT: { en: "Visit", ar: "زيارة" },
@@ -96,6 +114,8 @@ export default function LeadDetailPage() {
   });
 
   const [logType, setLogType] = useState("CALL");
+  const [logOutcome, setLogOutcome] = useState<string>("NOTE_ONLY");
+  const [qualifiedDealId, setQualifiedDealId] = useState<string | null>(null);
   const [logSubject, setLogSubject] = useState("");
   const [logBody, setLogBody] = useState("");
   const [scheduleAt, setScheduleAt] = useState("");
@@ -159,7 +179,14 @@ export default function LeadDetailPage() {
     } finally { setBusy(""); }
   }
 
-  /** Logs a completed follow-up. Written as an activity so the history survives. */
+  /**
+   * Logs a completed follow-up.
+   *
+   * The OUTCOME is the field that matters here. It is what the server reads to decide
+   * whether this prospect has become active selling work — see
+   * `lib/services/sales/qualification.ts` — and it is why the form asks "what happened"
+   * rather than leaving it to be inferred from a subject line somebody typed in Arabic.
+   */
   async function logActivity() {
     if (busy) return;
     if (logSubject.trim().length < 2) {
@@ -172,14 +199,26 @@ export default function LeadDetailPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: logType, subject: logSubject.trim(),
+          type: logType, subject: logSubject.trim(), outcome: logOutcome,
           body: logBody.trim() || null, leadId: params.id,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error ?? (ar ? "تعذّر تسجيل النشاط." : "Could not record the activity.")); return; }
       setLogSubject(""); setLogBody("");
-      setSuccess(ar ? "سُجِّل النشاط." : "Activity recorded.");
+      // The server says whether this put the lead into the pipeline, and names the deal it
+      // created. Saying so here is the difference between automation and a surprise.
+      const q = data.qualification;
+      setSuccess(
+        q
+          ? q.alreadyInPipeline
+            ? (ar ? "سُجِّل النشاط وأُضيف إلى الصفقة القائمة." : "Recorded, and added to the existing deal.")
+            : (ar
+                ? "سُجِّل النشاط، ودخل العميل المحتمل مسار الصفقات في مرحلة التأهيل."
+                : "Recorded — and the lead has entered the pipeline at Qualification.")
+          : (ar ? "سُجِّل النشاط." : "Activity recorded."),
+      );
+      setQualifiedDealId(q?.opportunityId ?? null);
       await load();
     } finally { setBusy(""); }
   }
@@ -316,7 +355,23 @@ export default function LeadDetailPage() {
       />
 
       {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
+      {success && (
+        <Alert kind="success" onDismiss={() => { setSuccess(""); setQualifiedDealId(null); }}>
+          <span className="flex flex-wrap items-center gap-2">
+            {success}
+            {/* The deal the server just created, offered rather than left to be hunted for. */}
+            {qualifiedDealId && (
+              <Link
+                href={`/dashboard/sales/deals/${qualifiedDealId}`}
+                data-testid="open-qualified-deal"
+                className="font-medium text-oo-action-primary underline"
+              >
+                {ar ? "فتح الصفقة" : "Open the deal"}
+              </Link>
+            )}
+          </span>
+        </Alert>
+      )}
 
       {converted && (
         <Alert kind="info">
@@ -495,6 +550,25 @@ export default function LeadDetailPage() {
                 <Field id="logType" label={ar ? "النوع" : "Type"}>
                   <Select id="logType" value={logType} onChange={setLogType}>
                     {LOG_TYPES.map((x) => <option key={x} value={x}>{label(TYPE_LABELS, x)}</option>)}
+                  </Select>
+                </Field>
+                <Field
+                  id="logOutcome"
+                  label={ar ? "ماذا حدث؟" : "What happened?"}
+                  hint={
+                    QUALIFYING.has(logOutcome)
+                      ? (ar
+                          ? "هذه النتيجة تُدخل العميل المحتمل مسار الصفقات تلقائياً."
+                          : "This outcome puts the lead into the pipeline automatically.")
+                      : (ar
+                          ? "لن تُنشأ صفقة. الصفقة تبدأ عند اهتمام مؤكَّد أو موعد مع العميل."
+                          : "No deal is created. A deal starts at confirmed interest or a customer appointment.")
+                  }
+                >
+                  <Select id="logOutcome" value={logOutcome} onChange={setLogOutcome}>
+                    {ACTIVITY_OUTCOMES.map((o) => (
+                      <option key={o} value={o}>{label(OUTCOME_LABELS, o)}</option>
+                    ))}
                   </Select>
                 </Field>
                 <Field id="logSubject" label={ar ? "الموضوع" : "Subject"} required>

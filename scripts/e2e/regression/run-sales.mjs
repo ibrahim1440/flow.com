@@ -22,6 +22,7 @@ const SUITES = [
   "quote-discount-authz",   // the discount authorisation cannot be forged — source-level, no HTTP
   "follow-up-workflow",     // two-write scheduling: failure, retry, double submit — no database
   "sales-rtl-audit",       // RTL and responsive statics — no database, no browser
+  "sales-lifecycle-collections", // qualification rules, tax allocation, commission deltas — no database
   "sales-commissions-db",   // constraints, concurrency, rollback — real PostgreSQL
   "sales-security",         // what is refused — real HTTP API
   "sales-workflow",         // the ordinary path, end to end — real HTTP API

@@ -11,6 +11,7 @@ import {
   Spinner, Button, Field, TextInput, Select, TextArea, Money, Pill, Modal, TableWrap, api,
   DealOutcomeBadge, QuoteStatusBadge, ROW_ACTION, num, formatDay, formatWhen,
 } from "../../_components/ui";
+import { CollectionsPanel, type CollectionRow, type Summary } from "./CollectionsPanel";
 
 /**
  * Deal detail — the whole opportunity in one place.
@@ -72,6 +73,8 @@ type Stage = { id: string; code: string; nameEn: string; nameAr: string; positio
 type Can = {
   write: boolean; close: boolean; reopen: boolean; quote: boolean;
   approveDiscount: boolean; assign: boolean; createOrder: boolean;
+  submitCollection?: boolean; verifyCollection?: boolean;
+  rejectCollection?: boolean; reverseCollection?: boolean;
 };
 
 
@@ -98,6 +101,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
 
   const [deal, setDeal] = useState<Deal | null>(null);
   const [stages, setStages] = useState<Stage[]>([]);
+  const [collections, setCollections] = useState<CollectionRow[]>([]);
+  const [collectionSummary, setCollectionSummary] = useState<Summary | null>(null);
   const [can, setCan] = useState<Can | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -120,12 +125,17 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await api<{ deal: Deal; stages: Stage[]; can: Can }>(`/api/sales/opportunities/${id}`);
+      const res = await api<{
+        deal: Deal; stages: Stage[]; can: Can;
+        collections: CollectionRow[]; collectionSummary: Summary;
+      }>(`/api/sales/opportunities/${id}`);
       if (cancelled) return;
       if (res.ok) {
         setDeal(res.data.deal);
         setStages(res.data.stages);
         setCan(res.data.can);
+        setCollections(res.data.collections ?? []);
+        setCollectionSummary(res.data.collectionSummary ?? null);
         setError("");
       } else {
         setError(res.data.error ?? (ar ? "تعذّر تحميل الصفقة." : "Could not load the deal."));
@@ -457,6 +467,22 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               </TableWrap>
             )}
           </Card>
+
+          {/* ── The money against this deal ──────────────────────────
+              Directly under the quotations, because that is the order the work happens in:
+              a quotation is accepted, and then it is paid for — possibly in pieces, possibly
+              not at all. */}
+          {collectionSummary && (
+            <CollectionsPanel
+              dealId={id}
+              ar={ar}
+              lang={lang}
+              summary={collectionSummary}
+              rows={collections}
+              canSubmit={!!can.submitCollection}
+              onChanged={reload}
+            />
+          )}
 
           {/* ── Activities ─────────────────────────────────────────── */}
           <Card>
