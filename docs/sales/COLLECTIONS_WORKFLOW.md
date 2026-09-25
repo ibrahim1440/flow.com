@@ -100,6 +100,38 @@ Sub-privileges, not role names. Every one is enforced at the API, not by hiding 
 | Reject | `commissions / collection_reject` |
 | Reverse an approved collection | `commissions / collection_reverse` |
 
+### Finance holds no sales module
+
+That is deliberate — Finance verifies collections, they do not read the pipeline. So the
+verification queue and the evidence download accept **either** `sales` or `commissions`
+(`requireAnyModule`), and what each caller sees is still decided by `collectionWhere`. Gating
+them on `sales` alone had locked the queue and the receipts away from the only people who can
+act on them.
+
+### Why the action is offered, or not
+
+One function — `collectionAction` — answers "may this person record a collection on this deal
+right now, and if not why". Every surface renders its verdict rather than re-deriving the rule:
+
+| Reason | What the screen says |
+| --- | --- |
+| `OK` | the primary «تسجيل تحصيل» button |
+| `NO_PRIVILEGE` | names the permission and where it is granted |
+| `NOT_YOUR_DEAL` | a collection is recorded by the deal's owner |
+| `NO_ACCEPTED_DOCUMENT` | record the customer's acceptance first |
+| `NOTHING_OUTSTANDING` | no banner — the figures already say fully collected |
+
+**This is not the authorisation boundary.** `POST /api/sales/collections` re-checks ownership
+and re-derives every amount behind a row lock, and refuses regardless of what a screen chose to
+render. The verdict exists so the screen can state the true reason instead of hiding the
+control, which is what it used to do.
+
+**A privilege added in code does not reach an existing employee.** `Employee.permissions` is a
+stored snapshot; a role provisioned before the key existed simply lacks it, and the feature
+then looks missing rather than withheld. Refresh the Preview roles with
+`scripts/sales-preview/reviewer-permissions.ts`, which updates permissions only —
+`reviewer-accounts.ts` rotates PINs and would sign out whoever is mid-review.
+
 **Separation of duties: whoever recorded a collection cannot decide it** — not approve, not
 reject — even holding every privilege. There is no emergency exception in this release, and
 none was invented. An exception nobody documented is how a rule stops being a rule.
