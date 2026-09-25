@@ -31,6 +31,7 @@ import ReportsPage from "../../src/app/dashboard/sales/reports/page";
 import SalesSettingsPage from "../../src/app/dashboard/sales/settings/page";
 import ReviewPage from "../../src/app/dashboard/commissions/review/page";
 import PlansPage from "../../src/app/dashboard/commissions/plans/page";
+import QuotePrintPage from "../../src/app/dashboard/sales/quotes/[id]/print/page";
 
 
 declare global {
@@ -94,6 +95,7 @@ const SCREENS: Record<string, () => React.ReactElement> = {
   settings: () => <SalesSettingsPage />,
   review: () => <ReviewPage />,
   plans: () => <PlansPage />,
+  "quote-print": () => <QuotePrintPage params={Promise.resolve({ id: "q1" })} />,
 };
 
 window.mountScreen = (name: string) => {

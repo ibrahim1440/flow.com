@@ -3,8 +3,9 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
-import { useLang, Alert, Spinner, Button, api, formatMoney } from "../../../_components/ui";
-import { formatDate } from "@/lib/utils";
+import {
+  useLang, Alert, Spinner, Button, api, moneyText, num, formatDay,
+} from "../../../_components/ui";
 
 /**
  * The quotation as a document.
@@ -108,6 +109,8 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
   if (!quote) return <Alert kind="error">{error}</Alert>;
 
   const snap = quote.issuedSnapshot;
+  /** Every figure on the document, in the reader's own numerals and currency word. */
+  const money = (v: string) => moneyText(v, quote.currency, lang);
 
   return (
     <div className="space-y-4">
@@ -140,7 +143,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
           data-testid="quote-document"
           className="bg-oo-bg-default text-oo-text-primary rounded-2xl border border-oo-border-default p-8 print:border-0 print:rounded-none print:p-0"
         >
-          <header className="flex items-start justify-between gap-6 flex-wrap border-b-2 border-charcoal pb-4 mb-6">
+          <header className="flex items-start justify-between gap-6 flex-wrap border-b-2 border-oo-text-primary pb-4 mb-6">
             <div>
               <h1 className="text-2xl font-extrabold">{ar ? "عرض سعر" : "Quotation"}</h1>
               <p className="text-sm font-bold mt-1 tabular-nums">
@@ -156,15 +159,15 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
             <dl className="text-xs space-y-0.5 text-end">
               <div>
                 <dt className="inline font-bold text-oo-text-secondary">{ar ? "التاريخ: " : "Issued: "}</dt>
-                <dd className="inline">{formatDate(quote.issuedAt ?? snap.frozenAt)}</dd>
+                <dd className="inline">{formatDay(quote.issuedAt ?? snap.frozenAt, lang)}</dd>
               </div>
               <div>
                 <dt className="inline font-bold text-oo-text-secondary">{ar ? "صالح حتى: " : "Valid until: "}</dt>
-                <dd className="inline">{formatDate(snap.validUntil)}</dd>
+                <dd className="inline">{formatDay(snap.validUntil, lang)}</dd>
               </div>
               <div>
                 <dt className="inline font-bold text-oo-text-secondary">{ar ? "العملة: " : "Currency: "}</dt>
-                <dd className="inline">{snap.currency}</dd>
+                <dd className="inline">{ar ? "ريال سعودي (SAR)" : snap.currency}</dd>
               </div>
             </dl>
           </header>
@@ -195,7 +198,7 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
 
           <table className="w-full text-sm mb-6">
             <thead>
-              <tr className="border-b-2 border-charcoal text-[11px] uppercase font-bold text-oo-text-secondary">
+              <tr className="border-b-2 border-oo-text-primary text-[11px] uppercase font-bold text-oo-text-secondary">
                 <th className="pe-4 text-start py-2">{ar ? "البند" : "Item"}</th>
                 <th className="pe-4 text-end py-2">{ar ? "الكمية" : "Qty"}</th>
                 <th className="pe-4 text-end py-2">{ar ? "السعر" : "Unit price"}</th>
@@ -217,16 +220,16 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
                     )}
                   </td>
                   <td className="pe-4 py-2.5 text-end tabular-nums">
-                    {l.quantity} <span className="text-[10px] text-oo-text-muted">{l.unit}</span>
+                    {num(Number(l.quantity), lang)} <span className="text-[10px] text-oo-text-muted">{l.unit}</span>
                   </td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums">{formatMoney(l.unitPrice)}</td>
+                  <td className="pe-4 py-2.5 text-end tabular-nums">{money(l.unitPrice)}</td>
                   <td className="pe-4 py-2.5 text-end tabular-nums">
-                    {Number(l.discountAmount) > 0 ? formatMoney(l.discountAmount) : "—"}
+                    {Number(l.discountAmount) > 0 ? money(l.discountAmount) : "—"}
                   </td>
                   <td className="pe-4 py-2.5 text-end tabular-nums">
-                    {Number(l.lineTax) > 0 ? formatMoney(l.lineTax) : "—"}
+                    {Number(l.lineTax) > 0 ? money(l.lineTax) : "—"}
                   </td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums font-bold">{formatMoney(l.lineTotal)}</td>
+                  <td className="pe-4 py-2.5 text-end tabular-nums font-bold">{money(l.lineTotal)}</td>
                 </tr>
               ))}
             </tbody>
@@ -234,16 +237,24 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
 
           <div className="flex justify-end">
             <dl className="w-full sm:w-72 space-y-1.5 text-sm">
-              <Row label={ar ? "المجموع" : "Subtotal"} value={formatMoney(snap.totals.subtotal)} />
+              <Row label={ar ? "الإجمالي قبل الخصم" : "Subtotal"} value={money(snap.totals.subtotal)} />
               {Number(snap.totals.discountTotal) > 0 && (
-                <Row label={ar ? "الخصم" : "Discount"} value={`-${formatMoney(snap.totals.discountTotal)}`} />
+                <Row label={ar ? "الخصم" : "Discount"} value={`-${money(snap.totals.discountTotal)}`} />
               )}
-              <Row label={ar ? "الضريبة" : "Tax"} value={formatMoney(snap.totals.taxTotal)} />
-              <div className="flex items-baseline justify-between gap-3 border-t-2 border-charcoal pt-2 mt-1">
+              {/* The base VAT is charged on. A tax document that jumps from a subtotal to a
+                  tax figure leaves the customer to work out which number it was 15% of. */}
+              <Row
+                label={ar ? "الوعاء الخاضع للضريبة" : "Taxable base"}
+                value={money((Number(snap.totals.subtotal) - Number(snap.totals.discountTotal)).toFixed(2))}
+              />
+              <Row
+                label={ar ? "ضريبة القيمة المضافة" : "VAT"}
+                value={money(snap.totals.taxTotal)}
+              />
+              <div className="flex items-baseline justify-between gap-3 border-t-2 border-oo-text-primary pt-2 mt-1">
                 <dt className="font-extrabold">{ar ? "الإجمالي المستحق" : "Total due"}</dt>
                 <dd className="font-extrabold tabular-nums text-lg">
-                  {formatMoney(snap.totals.grandTotal)}{" "}
-                  <span className="text-xs font-semibold">{snap.currency}</span>
+                  {money(snap.totals.grandTotal)}
                 </dd>
               </div>
             </dl>
@@ -252,8 +263,8 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
           <footer className="mt-8 pt-4 border-t border-oo-border-default text-[11px] text-oo-text-secondary leading-relaxed">
             <p>
               {ar
-                ? `هذه الأسعار مثبّتة كما صدرت في ${formatDate(quote.issuedAt ?? snap.frozenAt)} وتبقى سارية حتى ${formatDate(snap.validUntil)}.`
-                : `These prices are as issued on ${formatDate(quote.issuedAt ?? snap.frozenAt)} and hold until ${formatDate(snap.validUntil)}.`}
+                ? `هذه الأسعار مثبّتة كما صدرت في ${formatDay(quote.issuedAt ?? snap.frozenAt, lang)} وتبقى سارية حتى ${formatDay(snap.validUntil, lang)}.`
+                : `These prices are as issued on ${formatDay(quote.issuedAt ?? snap.frozenAt, lang)} and hold until ${formatDay(snap.validUntil, lang)}.`}
             </p>
             {quote.status === "SUPERSEDED" && (
               <p className="font-bold text-oo-status-rejected mt-1">
@@ -262,6 +273,21 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
                   : "This quotation has been superseded by a later revision. Do not send it to the customer."}
               </p>
             )}
+            <p className="mt-2">
+              {ar
+                ? "الشروط: الأسعار بالريال السعودي وتشمل التسليم داخل المدينة. العرض صالح حتى التاريخ المذكور. تُحتسب ضريبة القيمة المضافة وفق النظام السعودي."
+                : "Terms: prices are in Saudi riyals and include delivery within the city. The offer holds until the date above. VAT is charged under the Saudi regime."}
+            </p>
+
+            {/* The two signature blocks the design ends on: a quotation is signed back. */}
+            <div className="mt-8 grid grid-cols-2 gap-10">
+              {[ar ? "عن المؤسسة" : "For the company", ar ? "توقيع العميل" : "Customer signature"].map((l) => (
+                <div key={l}>
+                  <p className="text-oo-text-secondary">{l}</p>
+                  <div className="mt-8 border-t border-oo-border-strong" />
+                </div>
+              ))}
+            </div>
           </footer>
         </article>
       )}

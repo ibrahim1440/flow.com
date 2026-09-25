@@ -84,6 +84,60 @@ const accrual = (id, status, amount, o = {}) => ({
   },
 });
 
+/** One quotation, whole — the shape `GET /api/sales/quotes/[id]` returns. */
+const line = (position, skuCode, name, qty, unitPrice, discountPercent = "0") => {
+  const gross = Number(qty) * Number(unitPrice);
+  const discountAmount = (gross * Number(discountPercent)) / 100;
+  const lineSubtotal = gross - discountAmount;
+  const lineTax = lineSubtotal * 0.15;
+  return {
+    id: `l${position}`, productSkuId: `sku${position}`, description: null,
+    quantity: qty, unit: "KG", unitPrice, discountPercent, taxRatePercent: "15",
+    lineSubtotal: lineSubtotal.toFixed(2), lineTax: lineTax.toFixed(2),
+    lineTotal: (lineSubtotal + lineTax).toFixed(2), position,
+    productSku: { id: `sku${position}`, skuCode, name, nameAr: name, unitOfMeasure: "KG", price: unitPrice },
+  };
+};
+
+const QUOTE_LINES = [
+  line(1, "BRZ-1KG", "خلطة البرازيل ١ كجم", "300", "115.00", "0"),
+  line(2, "ETH-1KG", "إثيوبيا يرغاتشيف ١ كجم", "200", "160.00", "5"),
+  line(3, "SRV-CAL", "معايرة وصيانة", "1", "3500.00", "0"),
+];
+
+const QUOTE_DETAIL = {
+  id: "q1", quoteNumber: "OF-1042", revision: 2, status: "ISSUED", currency: "SAR",
+  validUntil: at(5), subtotal: "98000.00", discountTotal: "8000.00", taxTotal: "13500.00",
+  grandTotal: "103500.00", issuedAt: at(-11), acceptedAt: null, rejectedAt: null,
+  rejectionNote: null, discountApprovedById: null, discountApprovedAt: null,
+  supersedesId: "q5", createdAt: at(-16), updatedAt: at(-11),
+  supersededBy: null,
+  supersedes: { id: "q5", quoteNumber: "OF-1038", revision: 1 },
+  customer: {
+    id: "c1", name: "محمصة النخبة", nameAr: "محمصة النخبة",
+    phone: "+966 55 123 4567", email: "orders@nukhba.example", address: "الرياض · حي الملقا",
+  },
+  opportunity: { id: "d1", title: "خلطة خاصة", outcome: "OPEN", customerId: "c1", owner: OWNER },
+  lines: QUOTE_LINES,
+  orderLinks: [],
+  issuedSnapshot: {
+    frozenAt: at(-11),
+    quoteNumber: "OF-1042", revision: 2, currency: "SAR", validUntil: at(5),
+    totals: {
+      subtotal: "98000.00", discountTotal: "8000.00", taxTotal: "13500.00",
+      grandTotal: "103500.00", effectiveDiscountPercent: "7.55",
+    },
+    lines: QUOTE_LINES.map((l) => ({
+      position: l.position, skuCode: l.productSku.skuCode, name: l.productSku.name,
+      nameAr: l.productSku.nameAr, description: null, quantity: l.quantity, unit: l.unit,
+      unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxRatePercent: l.taxRatePercent,
+      gross: (Number(l.quantity) * Number(l.unitPrice)).toFixed(2),
+      discountAmount: ((Number(l.quantity) * Number(l.unitPrice) * Number(l.discountPercent)) / 100).toFixed(2),
+      lineSubtotal: l.lineSubtotal, lineTax: l.lineTax, lineTotal: l.lineTotal,
+    })),
+  },
+};
+
 export const ROUTES = {
   "sales-leads": {
     screen: "leads-list",
@@ -162,6 +216,64 @@ export const ROUTES = {
             quote("q6", "OF-1035", "EXPIRED", "29900.00", "مقهى الرصيف", "دفعة أولى", at(-10)),
           ],
           total: 6, scope: "all",
+        },
+      },
+    },
+  },
+  "sales-quote-detail": {
+    screen: "quote-editor",
+    api: {
+      "/api/sales/quotes/q1": {
+        body: {
+          quote: QUOTE_DETAIL,
+          state: { editable: false, revisable: true, expired: false, orderable: false },
+          can: { write: true, approveDiscount: false, createOrder: true },
+          discountThresholdPercent: "10",
+        },
+      },
+    },
+  },
+  "sales-quote-draft": {
+    screen: "quote-editor",
+    api: {
+      // The same quotation before it was issued — the editor, not the record.
+      "/api/sales/quotes/q1": {
+        body: {
+          quote: { ...QUOTE_DETAIL, status: "DRAFT", issuedAt: null, issuedSnapshot: null, revision: 1 },
+          state: { editable: true, revisable: false, expired: false, orderable: false },
+          can: { write: true, approveDiscount: false, createOrder: true },
+          discountThresholdPercent: "10",
+        },
+      },
+      "/api/products/skus": { body: { skus: [] } },
+    },
+  },
+  "sales-quote-print": {
+    screen: "quote-print",
+    api: { "/api/sales/quotes/q1": { body: { quote: QUOTE_DETAIL } } },
+  },
+  "sales-lead-detail": {
+    screen: "lead-detail",
+    api: {
+      "/api/sales/leads/l1": {
+        body: {
+          lead: {
+            id: "l1", companyName: "Nukhba Roastery", companyNameAr: "محمصة النخبة",
+            contactName: "سارة القحطاني", phone: "+966551234567", email: "sara@nukhba.example",
+            city: "الرياض", address: "حي الملقا", source: "REFERRAL", sourceNote: null,
+            status: "QUALIFIED", notes: "تريد خلطة خاصة للفرع الجديد.",
+            nextFollowUpAt: at(1, 10), createdAt: at(-20), updatedAt: at(-2),
+            owner: OWNER, conversion: null,
+            activities: [
+              { id: "a1", type: "CALL", subject: "مكالمة — مناقشة الكميات", body: null,
+                dueAt: at(-13, 9, 30), completedAt: at(-13, 10), createdAt: at(-13), owner: OWNER },
+              { id: "a2", type: "VISIT", subject: "زيارة — تذوّق العيّنة", body: null,
+                dueAt: at(-15, 13), completedAt: at(-15, 14), createdAt: at(-15), owner: OWNER },
+              { id: "a3", type: "TASK", subject: "متابعة — تأكيد العرض", body: null,
+                dueAt: at(1, 10), completedAt: null, createdAt: at(-2), owner: OWNER },
+            ],
+          },
+          can: { write: true, convert: true },
         },
       },
     },

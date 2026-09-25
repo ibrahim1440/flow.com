@@ -7,13 +7,13 @@ import { ArrowRight, Phone, Mail, MapPin, CalendarClock, Lock } from "lucide-rea
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { formatDate } from "@/lib/utils";
 import {
   runScheduleFollowUp, scheduleMessage, EMPTY_SCHEDULE_STATE, type ScheduleState,
 } from "@/lib/services/sales/follow-up";
 import {
   ProvisionalBanner, PageHeader, Card, SectionTitle, Alert, Button, Field, TextInput,
-  Select, TextArea, EmptyState, Spinner, LeadStatusBadge, LEAD_STATUS_SPECS,
+  Select, TextArea, EmptyState, Spinner, LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS,
+  ROW_ACTION, formatWhen, formatDay, num,
 } from "../../_components/ui";
 
 /**
@@ -58,15 +58,8 @@ type Lead = {
 };
 
 const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"];
-const SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
-  WALK_IN: { en: "Walk-in", ar: "زيارة مباشرة" },
-  REFERRAL: { en: "Referral", ar: "إحالة" },
-  PHONE: { en: "Phone", ar: "هاتف" },
-  SOCIAL: { en: "Social media", ar: "وسائل التواصل" },
-  EXHIBITION: { en: "Exhibition", ar: "معرض" },
-  WEBSITE: { en: "Website", ar: "الموقع" },
-  OTHER: { en: "Other", ar: "أخرى" },
-};
+// The shared map, so a source is not named one thing on the list and another here.
+const SOURCE_LABELS = LEAD_SOURCE_LABELS;
 
 /** The activity types a follow-up on a lead can be. TASK is reserved for scheduling. */
 const LOG_TYPES = ["CALL", "VISIT", "MEETING", "NOTE"];
@@ -418,8 +411,8 @@ export default function LeadDetailPage() {
                 <Row label={ar ? "المدينة" : "City"} value={lead.city} icon={<MapPin size={13} />} />
                 <Row label={ar ? "المصدر" : "Source"} value={label(SOURCE_LABELS, lead.source)} />
                 <Row label={ar ? "العنوان" : "Address"} value={lead.address} />
-                <Row label={ar ? "أُنشئ" : "Created"} value={formatDate(lead.createdAt)} />
-                <Row label={ar ? "آخر تعديل" : "Updated"} value={formatDate(lead.updatedAt)} />
+                <Row label={ar ? "أُنشئ" : "Created"} value={formatDay(lead.createdAt, lang)} />
+                <Row label={ar ? "آخر تعديل" : "Updated"} value={formatDay(lead.updatedAt, lang)} />
                 {lead.notes && (
                   <div className="sm:col-span-2">
                     <dt className="text-[11px] text-oo-text-muted font-bold">{ar ? "ملاحظات" : "Notes"}</dt>
@@ -447,7 +440,7 @@ export default function LeadDetailPage() {
                     <div className="flex items-start justify-between gap-2 flex-wrap">
                       <span className="font-bold text-sm">{a.subject}</span>
                       <span className="text-[11px] text-oo-text-muted">
-                        {label(TYPE_LABELS, a.type)} · {formatDate(a.createdAt)}
+                        {label(TYPE_LABELS, a.type)} · {formatDay(a.createdAt, lang)}
                         {a.owner ? ` · ${a.owner.name}` : ""}
                       </span>
                     </div>
@@ -455,7 +448,7 @@ export default function LeadDetailPage() {
                     {a.dueAt && (
                       <p className="text-[11px] text-oo-text-muted mt-1 flex items-center gap-1">
                         <CalendarClock size={12} aria-hidden />
-                        {ar ? "مستحق" : "Due"} {formatDate(a.dueAt)}
+                        {ar ? "مستحق" : "Due"} {formatWhen(a.dueAt, lang)}
                         {a.completedAt ? ` · ${ar ? "اكتمل" : "completed"}` : ""}
                       </p>
                     )}
@@ -471,7 +464,7 @@ export default function LeadDetailPage() {
             <SectionTitle>{ar ? "الالتزام القادم" : "Next commitment"}</SectionTitle>
             <p className={`mt-2 text-sm font-bold ${overdue ? "text-oo-status-rejected" : lead.nextFollowUpAt ? "text-oo-text-primary" : "text-oo-status-hold"}`} data-testid="next-followup">
               {lead.nextFollowUpAt
-                ? `${formatDate(lead.nextFollowUpAt)}${overdue ? ` · ${t("leadOverdue")}` : ""}`
+                ? `${formatWhen(lead.nextFollowUpAt, lang)}${overdue ? ` · ${t("leadOverdue")}` : ""}`
                 : (ar ? "لا التزام قادم" : "No next step")}
             </p>
             {!readOnly && (

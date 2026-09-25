@@ -2,13 +2,12 @@
 
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer } from "lucide-react";
+import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock } from "lucide-react";
 import {
-  useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
-  Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api, formatMoney,
-  QuoteStatusBadge,
+  useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
+  Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
+  QuoteStatusBadge, Td, num, formatDay, toArabicDigits,
 } from "../../_components/ui";
-import { formatDate } from "@/lib/utils";
 
 /**
  * The quotation editor.
@@ -61,6 +60,7 @@ type Quote = {
   rejectedAt: string | null;
   rejectionNote: string | null;
   discountApprovedAt: string | null;
+  createdAt: string;
   supersedes: { id: string; quoteNumber: string; revision: number } | null;
   supersededBy: { id: string; quoteNumber: string; revision: number; status: string } | null;
   customer: { id: string; name: string; nameAr: string | null } | null;
@@ -274,7 +274,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const editable = state.editable && can.write;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <Link
@@ -286,20 +286,33 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       </Link>
 
       <PageHeader
-        title={`${quote.quoteNumber}${quote.revision > 1 ? ` · r${quote.revision}` : ""}`}
+        title={`${ar ? "عرض السعر " : "Quotation "}${quote.quoteNumber}`}
         subtitle={
-          <span className="flex items-center gap-2 flex-wrap mt-1">
-            <QuoteStatusBadge status={quote.status} testId="quote-status" />
+          <span className="flex items-center gap-2 flex-wrap">
+            {[
+              quote.customer
+                ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name)
+                : null,
+              quote.issuedAt ? `${ar ? "صادر" : "issued"} ${formatDay(quote.issuedAt, lang)}` : null,
+              quote.revision > 1
+                ? `${ar ? "المراجعة" : "revision"} ${num(quote.revision, lang)}`
+                : null,
+              quote.validUntil
+                ? `${ar ? "صالح حتى" : "valid until"} ${formatDay(quote.validUntil, lang)}`
+                : null,
+            ]
+              .filter(Boolean)
+              .map((part, i) => (
+                <span key={i} className="flex items-center gap-2">
+                  {i > 0 && <span aria-hidden className="text-oo-border-strong">·</span>}
+                  <span>{part}</span>
+                </span>
+              ))}
             {state.expired && quote.status === "ISSUED" && (
               <Pill tone="warn">{ar ? "انتهت الصلاحية" : "lapsed"}</Pill>
             )}
             {quote.discountApprovedAt && (
               <Pill tone="accent">{ar ? "خصم معتمد" : "discount approved"}</Pill>
-            )}
-            {quote.customer && (
-              <span className="font-bold text-oo-text-primary">
-                {ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name}
-              </span>
             )}
           </span>
         }
@@ -309,9 +322,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               <Link
                 href={`/dashboard/sales/quotes/${quote.id}/print`}
                 data-testid="open-print"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold bg-oo-bg-default border border-oo-border-strong text-oo-text-primary hover:border-oo-action-primary active:scale-[0.98] transition-all"
+                className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary"
               >
-                <Printer size={15} aria-hidden /> {ar ? "المستند" : "Document"}
+                <Printer size={15} aria-hidden /> {ar ? "طباعة" : "Print"}
               </Link>
             )}
             {editable && (
@@ -332,12 +345,25 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             )}
             {quote.status === "ISSUED" && can.write && (
               <>
-                <Button disabled={busy} onClick={() => transition("ACCEPTED")} testId="accept-quote">
-                  <Check size={15} aria-hidden /> {ar ? "قَبِل العميل" : "Accepted"}
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => transition("ACCEPTED")}
+                  testId="accept-quote"
+                >
+                  <Check size={15} aria-hidden /> {ar ? "قَبِل العميل" : "Customer accepted"}
                 </Button>
-                <Button variant="danger" disabled={busy} onClick={() => setDialog("reject")} testId="reject-quote">
-                  <X size={15} aria-hidden /> {ar ? "رُفض" : "Rejected"}
-                </Button>
+                {/* Outlined, like the deal screen's "mark lost": recording a refusal is
+                    ordinary work, and a solid red button reads as a warning about the act
+                    rather than a record of what the customer said. */}
+                <button
+                  disabled={busy}
+                  onClick={() => setDialog("reject")}
+                  data-testid="reject-quote"
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
+                >
+                  <X size={15} aria-hidden /> {ar ? "رفَضه العميل" : "Customer rejected"}
+                </button>
               </>
             )}
             {state.revisable && can.write && (
@@ -355,12 +381,12 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   else setError(res.data.error ?? "");
                 }}
               >
-                <Copy size={15} aria-hidden /> {ar ? "مراجعة جديدة" : "Revise"}
+                <Copy size={15} aria-hidden /> {ar ? "إنشاء مراجعة" : "Raise a revision"}
               </Button>
             )}
             {state.orderable && can.createOrder && (
               <Button disabled={busy} onClick={() => setDialog("order")} testId="create-order">
-                <ShoppingCart size={15} aria-hidden /> {ar ? "إنشاء طلب" : "Create order"}
+                <ShoppingCart size={15} aria-hidden /> {ar ? "تحويل إلى طلب" : "Convert to an order"}
               </Button>
             )}
           </>
@@ -370,22 +396,74 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
       {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
 
-      {quote.supersededBy && (
-        <Alert kind="info">
-          {ar ? "استُبدل هذا العرض بـ " : "Superseded by "}
-          <Link href={`/dashboard/sales/quotes/${quote.supersededBy.id}`} className="underline font-bold">
-            {quote.supersededBy.quoteNumber}
-          </Link>
-          {` (r${quote.supersededBy.revision})`}
-        </Alert>
-      )}
-      {quote.supersedes && (
-        <p className="text-xs text-oo-text-secondary font-semibold">
-          {ar ? "يراجع " : "Revises "}
-          <Link href={`/dashboard/sales/quotes/${quote.supersedes.id}`} className="underline">
-            {quote.supersedes.quoteNumber}
-          </Link>
-        </p>
+      {/* Where the quotation stands, and what it comes to, on one line. */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[18px] font-semibold leading-[28px]">
+            <Money value={quote.grandTotal} currency={quote.currency} strong />
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-[14px] leading-[22px] text-oo-text-secondary">
+              {ar ? "الحالة الحالية" : "Current status"}
+            </span>
+            <QuoteStatusBadge status={quote.status} testId="quote-status" />
+          </span>
+        </div>
+      </Card>
+
+      {/* ── The revision chain ───────────────────────────────────────────────────────
+          A revision does not replace its predecessor, it supersedes it: the old quotation
+          stays, marked, because it is the document a customer was actually sent. Showing
+          the chain is how a reader knows which one that was. */}
+      {(quote.supersedes || quote.supersededBy) && (
+        <Card>
+          <SectionTitle>
+            {ar
+              ? "سجلّ المراجعات — النسخة السابقة تصبح «مستبدَل» ولا تُحذف"
+              : "Revisions — the earlier one becomes superseded, it is not deleted"}
+          </SectionTitle>
+          <ul className="space-y-2" data-testid="revision-chain">
+            {[
+              quote.supersededBy
+                ? { ...quote.supersededBy, self: false }
+                : null,
+              { id: quote.id, quoteNumber: quote.quoteNumber, revision: quote.revision, status: quote.status, self: true },
+              quote.supersedes
+                ? { ...quote.supersedes, status: "SUPERSEDED", self: false }
+                : null,
+            ]
+              .filter((r): r is NonNullable<typeof r> => r !== null)
+              .map((r) => (
+                <li
+                  key={r.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]"
+                >
+                  <QuoteStatusBadge status={r.status} />
+                  <span className="text-end">
+                    {r.self ? (
+                      <span className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
+                        {ar ? `المراجعة ${num(r.revision, lang)} — ` : `Revision ${r.revision} — `}
+                        {r.quoteNumber}
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/dashboard/sales/quotes/${r.id}`}
+                        className="text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline"
+                      >
+                        {ar ? `المراجعة ${num(r.revision, lang)} — ` : `Revision ${r.revision} — `}
+                        {r.quoteNumber}
+                      </Link>
+                    )}
+                    {r.self && (
+                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">
+                        {ar ? "المعروضة الآن" : "the one shown here"}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </Card>
       )}
       {quote.rejectionNote && (
         <Alert kind="info">{(ar ? "سبب الرفض: " : "Rejected because: ") + quote.rejectionNote}</Alert>
@@ -396,12 +474,64 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           {quote.orderLinks.map((l) => `#${l.order.orderNumber}`).join(", ")}
         </Alert>
       )}
+      {/* The design gives this its own amber card rather than a line of body text, because
+          it is the one thing on the screen that changes what the Issue button will do. */}
       {editable && needsApproval && (
-        <Alert kind="info">
-          {ar
-            ? `الخصم ${preview.discountPercent.toFixed(2)}% أعلى من ${threshold}% المسموح بها بدون اعتماد، فالإصدار يحتاج مديراً لديه صلاحية اعتماد الخصم.`
-            : `This discounts ${preview.discountPercent.toFixed(2)}%, above the ${threshold}% allowed without approval — a manager with discount approval must issue it.`}
-        </Alert>
+        <div
+          className="flex items-start gap-2.5 rounded-[10px] border border-oo-status-waiting bg-oo-status-waiting-bg px-4 py-[10px]"
+          role="note"
+          data-testid="discount-approval-notice"
+        >
+          <Lock size={16} aria-hidden className="mt-0.5 shrink-0 text-oo-status-hold" />
+          <div className="flex-1">
+            <p className="text-[14px] font-medium leading-[22px] text-oo-status-hold">
+              {can.approveDiscount
+                ? (ar ? "الخصم فوق الحدّ — اعتمادك مطلوب" : "The discount is above the threshold — your approval applies")
+                : (ar ? "الخصم يتجاوز صلاحيتك — يحتاج اعتماداً" : "The discount is beyond your authority — it needs approval")}
+            </p>
+            <p className="text-[12px] leading-[18px] text-oo-status-hold">
+              {ar
+                ? `الخصم الفعّال ${toArabicDigits(preview.discountPercent.toFixed(2))}٪ وحدّ الاعتماد ${toArabicDigits(threshold)}٪. ` +
+                  (can.approveDiscount
+                    ? "الإصدار يسجّل اعتمادك على العرض."
+                    : "الإصدار يُرفض حتى يصدره مديرٌ لديه صلاحية اعتماد الخصم؛ العرض يبقى مسودة.")
+                : `The effective discount is ${preview.discountPercent.toFixed(2)}% against a ${threshold}% threshold. ` +
+                  (can.approveDiscount
+                    ? "Issuing records your approval on the quotation."
+                    : "Issuing is refused until a manager with discount approval does it; the quotation stays a draft.")}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── The facts a quotation is written against ────────────────────────────────
+          Read-only on purpose. The customer comes from the deal, the date is when the
+          draft was raised, and the currency is fixed: `QUOTE_CURRENCY` is SAR and the
+          service refuses a collection in anything else because there is no exchange-rate
+          policy to convert it with. Rendering them as editable fields would offer three
+          choices the server does not accept. */}
+      {editable && (
+        <Card>
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              [
+                ar ? "العميل" : "Customer",
+                quote.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : "—",
+              ],
+              [ar ? "الصفقة" : "Deal", quote.opportunity.title],
+              [ar ? "تاريخ العرض" : "Quotation date", formatDay(quote.createdAt ?? null, lang)],
+              [
+                ar ? "العملة" : "Currency",
+                ar ? "ريال سعودي (SAR) — لا عملة أخرى" : "Saudi riyals (SAR) — no other currency",
+              ],
+            ].map(([label_, value]) => (
+              <div key={label_} className="rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]">
+                <dt className="text-[12px] leading-[18px] text-oo-text-muted">{label_}</dt>
+                <dd className="text-[14px] leading-[22px] text-oo-text-primary">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
       )}
 
       {/* ── Lines ─────────────────────────────────────────────────── */}
@@ -429,6 +559,65 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           <p className="text-sm text-oo-text-muted font-semibold py-6 text-center">
             {ar ? "لا توجد بنود. أضف بنداً لتسعير العرض." : "No lines yet. Add one to price the quotation."}
           </p>
+        ) : !editable ? (
+          /* A quotation that can no longer be edited is a record, not a form. It was
+             rendering the editor's inputs with `disabled` on them, which looks like a form
+             that is merely broken — and the server has refused every one of those fields
+             since the moment it was issued. The figures here are the SERVER's, not the
+             local recompute the editor previews with. */
+          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
+            <table className="w-full min-w-[820px] border-collapse text-start" data-testid="quote-lines-readonly">
+              <thead>
+                <tr className="bg-oo-bg-subtle">
+                  {[
+                    [ar ? "المنتج / الوصف" : "Product / description", "min-w-[240px]"],
+                    [ar ? "الكمية" : "Qty", "w-[110px]"],
+                    [ar ? "سعر الوحدة" : "Unit price", "w-[140px]"],
+                    [ar ? "خصم" : "Discount", "w-[100px]"],
+                    [ar ? "ضريبة" : "Tax", "w-[100px]"],
+                    [ar ? "الإجمالي" : "Total", "w-[150px]"],
+                  ].map(([l, w], i) => (
+                    <th
+                      key={i}
+                      scope="col"
+                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
+                    >
+                      {l}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {quote.lines.map((l) => (
+                  <tr key={l.id} className="border-t border-oo-border-default" data-testid={`ro-line-${l.position}`}>
+                    <Td>
+                      {l.productSku?.name ?? l.description ?? "—"}
+                      {l.productSku && (
+                        <span className="block font-mono text-[12px] leading-[18px] text-oo-text-muted">
+                          {l.productSku.skuCode}
+                        </span>
+                      )}
+                    </Td>
+                    <Td>
+                      {num(Number(l.quantity), lang)} {l.unit}
+                    </Td>
+                    <Td><Money value={l.unitPrice} currency={quote.currency} /></Td>
+                    <Td>
+                      {Number(l.discountPercent) > 0
+                        ? ar
+                          ? `${num(Number(l.discountPercent), "ar")}٪`
+                          : `${l.discountPercent}%`
+                        : "—"}
+                    </Td>
+                    <Td>
+                      {ar ? `${num(Number(l.taxRatePercent), "ar")}٪` : `${l.taxRatePercent}%`}
+                    </Td>
+                    <Td><Money value={l.lineTotal} currency={quote.currency} /></Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <TableWrap>
             <table className="w-full text-sm min-w-[860px]">
@@ -530,8 +719,17 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                           className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
                         />
                       </td>
-                      <td className="pe-4 py-2 text-end tabular-nums font-bold" data-testid={`line-total-${i}`}>
-                        {formatMoney(lineTotal.toFixed(2))}
+                      <td className="pe-4 py-2 text-end" data-testid={`line-total-${i}`}>
+                        <Money value={lineTotal.toFixed(2)} currency={quote.currency} />
+                        {/* A line whose own discount is past the threshold, marked where the
+                            number is rather than only in the notice above. */}
+                        {Number(l.discountPercent) > Number(threshold) && (
+                          <span className="block text-[12px] leading-[18px] text-oo-status-rejected">
+                            {ar
+                              ? `خصم السطر فوق حدّ ${toArabicDigits(threshold)}٪`
+                              : `line discount is over the ${threshold}% threshold`}
+                          </span>
+                        )}
                       </td>
                       <td className="pe-4 py-2 text-center">
                         {editable && (
@@ -558,22 +756,28 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
         <div className="mt-4 grid sm:grid-cols-2 gap-4 items-start">
           <div className="space-y-3">
-            <Field
-              id="q-valid"
-              label={ar ? "صالح حتى" : "Valid until"}
-              hint={ar ? "مطلوب قبل الإصدار." : "Required before the quotation can be issued."}
-            >
-              <TextInput
+            {editable ? (
+              <Field
                 id="q-valid"
-                type="date"
-                value={validUntil}
-                disabled={!editable}
-                onChange={(v) => {
-                  setValidUntil(v);
-                  setDirty(true);
-                }}
-              />
-            </Field>
+                label={ar ? "صالح حتى" : "Valid until"}
+                hint={ar ? "مطلوب قبل الإصدار." : "Required before the quotation can be issued."}
+              >
+                <TextInput
+                  id="q-valid"
+                  type="date"
+                  value={validUntil}
+                  onChange={(v) => {
+                    setValidUntil(v);
+                    setDirty(true);
+                  }}
+                />
+              </Field>
+            ) : (
+              <div className="rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary">
+                <span className="text-oo-text-muted">{ar ? "صالح حتى: " : "Valid until: "}</span>
+                {quote.validUntil ? formatDay(quote.validUntil, lang) : "—"}
+              </div>
+            )}
             {dirty && editable && (
               <p className="text-[11px] text-oo-status-hold font-bold" role="status">
                 {ar ? "تغييرات غير محفوظة." : "Unsaved changes."}
@@ -582,13 +786,37 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           </div>
 
           <dl className="bg-oo-bg-subtle rounded-xl p-4 space-y-2 text-sm" data-testid="quote-totals">
-            <Total label={ar ? "المجموع قبل الخصم" : "Subtotal"} value={(dirty ? preview.subtotal.toFixed(2) : quote.subtotal)} />
-            <Total label={ar ? "الخصم" : "Discount"} value={"-" + (dirty ? preview.discountTotal.toFixed(2) : quote.discountTotal)} />
-            <Total label={ar ? "الضريبة" : "Tax"} value={dirty ? preview.taxTotal.toFixed(2) : quote.taxTotal} />
+            <Total
+              label={ar ? "المجموع قبل الخصم" : "Subtotal"}
+              value={dirty ? preview.subtotal.toFixed(2) : quote.subtotal}
+              currency={quote.currency}
+            />
+            <Total
+              label={ar ? "الخصم" : "Discount"}
+              value={"-" + (dirty ? preview.discountTotal.toFixed(2) : quote.discountTotal)}
+              currency={quote.currency}
+            />
+            {/* The base VAT is charged on. The design names it, because "subtotal minus
+                discount" is the figure a customer queries and it was only implied. */}
+            <Total
+              label={ar ? "الوعاء الخاضع للضريبة" : "Taxable base"}
+              value={(
+                (dirty ? preview.subtotal : Number(quote.subtotal)) -
+                (dirty ? preview.discountTotal : Number(quote.discountTotal))
+              ).toFixed(2)}
+              currency={quote.currency}
+            />
+            <Total
+              label={ar ? "ضريبة القيمة المضافة" : "VAT"}
+              value={dirty ? preview.taxTotal.toFixed(2) : quote.taxTotal}
+              currency={quote.currency}
+            />
             <div className="border-t border-oo-border-default pt-2 flex items-baseline justify-between gap-3">
-              <dt className="font-extrabold text-oo-text-primary">{ar ? "الإجمالي" : "Grand total"}</dt>
-              <dd className="text-lg">
-                <Money value={dirty ? preview.grandTotal.toFixed(2) : quote.grandTotal} currency={quote.currency} />
+              <dt className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
+                {ar ? "الإجمالي" : "Grand total"}
+              </dt>
+              <dd className="text-[18px] leading-[28px]">
+                <Money value={dirty ? preview.grandTotal.toFixed(2) : quote.grandTotal} currency={quote.currency} strong />
               </dd>
             </div>
             {dirty && (
@@ -603,9 +831,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       </Card>
 
       {quote.issuedAt && (
-        <p className="text-[11px] text-oo-text-muted font-medium">
+        <p className="text-[12px] leading-[18px] text-oo-text-muted">
           {ar ? "صدر في " : "Issued "}
-          {formatDate(quote.issuedAt)}
+          {formatDay(quote.issuedAt, lang)}
           {ar
             ? " — البنود والأسعار المُثبّتة محفوظة كما أُرسلت للعميل."
             : " — the lines and prices sent to the customer are frozen as they were."}
@@ -631,13 +859,15 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   );
 }
 
-function Total({ label, value }: { label: string; value: string }) {
+function Total({ label, value, currency }: { label: string; value: string; currency: string }) {
   // Negative-signed values ("-125.00" for a discount) keep their sign through the
   // formatter, which is why the sign is part of the string rather than part of the label.
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs font-bold text-oo-text-secondary">{label}</dt>
-      <dd className="tabular-nums font-bold">{formatMoney(value)}</dd>
+      <dt className="text-[14px] leading-[22px] text-oo-text-secondary">{label}</dt>
+      <dd className="text-[14px] leading-[22px]">
+        <Money value={value} currency={currency} />
+      </dd>
     </div>
   );
 }

@@ -23,6 +23,10 @@ if (!spec) {
 const dir = path.join(HERE, "shots");
 fs.mkdirSync(dir, { recursive: true });
 
+/** The record id a detail screen is mounted with — the fixtures key on it. */
+const paramId = (screen) =>
+  screen === "lead-detail" ? "l1" : screen.startsWith("quote") ? "q1" : "d1";
+
 const browser = await chromium.launch({ channel: "chrome" });
 const page = await browser.newPage({
   viewport: { width: Number(widthArg ?? 1440), height: 1400 },
@@ -30,15 +34,15 @@ const page = await browser.newPage({
 });
 await page.goto(pathToFileURL(path.join(HERE, "index.html")).href);
 await page.evaluate(
-  ([api, user]) => {
+  ([api, user, routeId]) => {
     window.__ROUTES__ = api;
     window.__USER__ = user;
     window.__LANG__ = "ar";
-    window.__PARAMS__ = { id: "d1" };
+    window.__PARAMS__ = { id: routeId };
     document.documentElement.setAttribute("dir", "rtl");
     document.documentElement.setAttribute("lang", "ar");
   },
-  [spec.api, REP],
+  [spec.api, REP, paramId(spec.screen)],
 );
 await page.evaluate((s) => window.mountScreen(s), spec.screen);
 await page.waitForTimeout(600);
