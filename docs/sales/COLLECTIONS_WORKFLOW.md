@@ -108,6 +108,43 @@ verification queue and the evidence download accept **either** `sales` or `commi
 them on `sales` alone had locked the queue and the receipts away from the only people who can
 act on them.
 
+### Finding the queue at all
+
+Collections lives under Sales, so the nav item was gated on the sales module — which
+Finance does not hold. The queue was therefore invisible to the only people who can act on
+it, reachable by typing the URL and by nothing else. A nav item can now name a second way
+in as an **ability**: Collections admits anyone holding `collection_verify`,
+`collection_reject` or `collection_reverse`. An ability, deliberately, and not a role name.
+
+### Why a decision is offered, or not
+
+Per row, because the answer is per row: the same Finance user may decide one collection and
+be refused the next because they recorded it. `collectionDecisionAbility` returns a verdict
+for each of approve, reject and reverse, and the queue prints the reason where the button
+would have been.
+
+| Reason | Means |
+| --- | --- |
+| `OK` | the action is offered |
+| `NO_PRIVILEGE` | no financial decision privilege — a sales manager, by default |
+| `SELF_SUBMITTED` | you recorded this one; another member of Finance decides it |
+| `NOT_PENDING` | already approved or rejected |
+| `NOT_APPROVED` | only an approved collection can be reversed |
+
+Self-approval is decided in two places on purpose. `approveCollection` refuses it as the
+boundary; this exists so the screen can say *you recorded this one* rather than offering a
+button that will 403.
+
+### What opening a collection shows
+
+Gross received, the derived VAT, the net basis commission is computed on, and — while it is
+still pending — **what approving would be worth**. That last figure is projected by running
+the real engine over the live period twice and taking the difference, so it stays correct
+under tiering; a headline rate times the net would be wrong the moment a tier boundary fell
+between the two. It is labelled an estimate and is in no total until the approval happens.
+
+Evidence is listed with a download that goes to the one route returning the bytes.
+
 ### Why the action is offered, or not
 
 One function — `collectionAction` — answers "may this person record a collection on this deal
