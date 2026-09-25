@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { KanbanSquare, Plus, ArrowUp, ArrowDown, EyeOff, Eye } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
@@ -127,7 +127,7 @@ export default function SalesSettingsPage() {
   const ordered = [...stages].sort((a, b) => a.position - b.position);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <PageHeader

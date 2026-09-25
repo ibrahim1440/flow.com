@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed } from "lucide-react";
+import { AlertTriangle, UserPlus, Users2, X, Upload, Download, Trash2, CircleDashed } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 
 import {
-  LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, DataTable, Tr, Td, Toolbar,
+  LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, DataTable, Toolbar,
   SearchField, FilterSelect, formatWhen, num,
 } from "../_components/ui";
 import ImportDialog from "./ImportDialog";

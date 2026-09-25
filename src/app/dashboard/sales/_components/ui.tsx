@@ -54,6 +54,33 @@ export function toArabicDigits(s: string): string {
   return s.replace(/[0-9,.]/g, (c) => (c === "," ? "٬" : c === "." ? "٫" : AR_DIGITS[Number(c)]));
 }
 
+/**
+ * The months a period picker offers: the last twelve, this one, and the next.
+ *
+ * A `<select>` rather than `<input type="month">` everywhere this is used, because the
+ * native control renders its month name in the BROWSER's locale — an Arabic page was
+ * offering "September 2026". `current` is always present in the list, so a month reached
+ * from a link or a stale bookmark stays selectable.
+ */
+export function monthOptions(current: string, lang: "ar" | "en"): { value: string; label: string }[] {
+  const name = (d: Date) =>
+    d.toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-arab-ca-gregory" : "en-GB", {
+      month: "long",
+      year: "numeric",
+    });
+  const out = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + 1 - i);
+    return { value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: name(d) };
+  });
+  if (!out.some((o) => o.value === current)) {
+    const [y, m] = current.split("-").map(Number);
+    out.unshift({ value: current, label: name(new Date(y, (m ?? 1) - 1, 1)) });
+  }
+  return out;
+}
+
 /** A calendar day the way the design writes one: "٣٠ سبتمبر" / "30 Sep". No year, because
  *  these columns are all within the current cycle and the year is noise in a table. */
 export function formatDay(value: string | Date | null | undefined, lang: "ar" | "en"): string {
@@ -870,6 +897,54 @@ export function Td({
     >
       {children}
     </td>
+  );
+}
+
+/**
+ * The design's headline strip: one bordered box divided into equal cells.
+ *
+ * The dividers are a 1px grid gap showing the border colour through, rather than
+ * `divide-x`, so they land correctly in both directions without a direction-specific
+ * utility.
+ */
+export function StatStrip({ children, cols = 4 }: { children: ReactNode; cols?: 3 | 4 }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-border-default">
+      <div className={`grid gap-px sm:grid-cols-2 ${cols === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function Stat({
+  label,
+  value,
+  note,
+  money,
+  tone,
+  testId,
+}: {
+  label: string;
+  value: ReactNode;
+  note?: ReactNode;
+  money?: boolean;
+  /** The one figure the reader came for. Everything else stays in the text colour. */
+  tone?: "primary" | "action";
+  testId?: string;
+}) {
+  return (
+    <div className="bg-oo-bg-default px-5 py-4" data-testid={testId}>
+      <p
+        className={`text-[24px] font-bold leading-[34px] tabular-nums ${
+          tone === "action" ? "text-oo-action-primary" : "text-oo-text-primary"
+        }`}
+      >
+        {money ? <Money value={String(value)} strong /> : value}
+      </p>
+      <p className="text-[14px] leading-[22px] text-oo-text-primary">{label}</p>
+      {note && <p className="text-[12px] leading-[18px] text-oo-text-muted">{note}</p>}
+    </div>
   );
 }
 

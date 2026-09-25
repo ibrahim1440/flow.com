@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect } from "react";
 import { TrendingUp, Download } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Money, api, FilterSelect, LEAD_SOURCE_LABELS, num, toArabicDigits,
+  Money, api, FilterSelect, LEAD_SOURCE_LABELS, num, toArabicDigits, StatStrip, Stat, monthOptions,
 } from "../_components/ui";
 
 /**
@@ -104,25 +104,8 @@ export default function ReportsPage() {
     const trimmed = raw.replace(/\.0+$/, "");
     return ar ? `${toArabicDigits(trimmed)}٪` : `${trimmed}%`;
   };
-
-  // The last twelve months and the one ahead, named in the page's own language — the native
-  // <input type="month"> renders its month name in the browser's locale instead.
-  const monthName = (d: Date) =>
-    d.toLocaleDateString(ar ? "ar-SA-u-nu-arab-ca-gregory" : "en-GB", { month: "long", year: "numeric" });
-  const monthOptions = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() + 1 - i);
-    return {
-      value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
-      label: monthName(d),
-    };
-  });
-  if (!monthOptions.some((o) => o.value === month)) {
-    const [yy, mm] = month.split("-").map(Number);
-    monthOptions.unshift({ value: month, label: monthName(new Date(yy, (mm ?? 1) - 1, 1)) });
-  }
-  const currentMonthLabel = monthOptions.find((o) => o.value === month)?.label ?? month;
+  const months = monthOptions(month, lang);
+  const currentMonthLabel = months.find((o) => o.value === month)?.label ?? month;
 
   return (
     <div className="space-y-[18px]">
@@ -151,7 +134,7 @@ export default function ReportsPage() {
               width="w-[180px]"
               testId="rp-month"
             >
-              {monthOptions.map((o) => (
+              {months.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </FilterSelect>
@@ -342,33 +325,3 @@ export default function ReportsPage() {
   );
 }
 
-/**
- * The design's headline strip: one bordered box divided into equal cells.
- *
- * The dividers are a 1px grid gap showing the border colour through, rather than
- * `divide-x`, so they land on the right side of each cell in both directions without a
- * direction-specific utility.
- */
-function StatStrip({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-border-default">
-      <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4">{children}</div>
-    </div>
-  );
-}
-
-function Stat({
-  label, value, note, money, testId,
-}: {
-  label: string; value: ReactNode; note?: string; money?: boolean; testId?: string;
-}) {
-  return (
-    <div className="bg-oo-bg-default px-5 py-4" data-testid={testId}>
-      <p className="text-[24px] font-bold leading-[34px] text-oo-text-primary tabular-nums">
-        {money ? <Money value={String(value)} strong /> : value}
-      </p>
-      <p className="text-[14px] leading-[22px] text-oo-text-primary">{label}</p>
-      {note && <p className="text-[12px] leading-[18px] text-oo-text-muted">{note}</p>}
-    </div>
-  );
-}

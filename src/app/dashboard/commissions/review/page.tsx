@@ -4,10 +4,10 @@ import { useState, useEffect } from "react";
 import { CheckCircle2, AlertTriangle, Banknote, Scale } from "lucide-react";
 import {
   useLang, ProvisionalBanner, SandboxBanner, PageHeader, Alert, Card, SectionTitle,
-  EmptyState, Spinner, Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
-  AccrualStatusBadge,
+  EmptyState, Spinner, Button, Field, TextInput, TextArea, Money, Pill, Modal, api,
+  AccrualStatusBadge, DataTable, Tr, Td, StatStrip, Stat, FilterSelect, ROW_ACTION,
+  monthOptions, formatDay, num,
 } from "../../sales/_components/ui";
-import { formatDate } from "@/lib/utils";
 
 /**
  * Commission review and approval.
@@ -149,22 +149,34 @@ export default function CommissionReviewPage() {
   const unreconciled = data.employees.filter((e) => !e.reconciled);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <PageHeader
         title={ar ? "مراجعة العمولات" : "Commission review"}
         subtitle={
-          <span className="mt-1 block text-xs">
-            {formatDate(data.periodStart)} — {formatDate(data.periodEnd)} ({ar ? "شهر الرياض" : "Riyadh month"})
+          <span className="flex flex-wrap items-center gap-2">
+            <span>
+              {ar
+                ? "الاعتماد يشمل كل ما هو «مستحق» للموظّف في الفترة"
+                : "Approving covers everything accrued for that employee in the period"}
+            </span>
+            <span aria-hidden className="text-oo-border-strong">·</span>
+            <span>{ar ? "الصرف يشمل «معتمَد» فقط" : "a payout covers approved rows only"}</span>
           </span>
         }
         actions={
-          <div className="w-40">
-            <Field id="cr-month" label={ar ? "الشهر" : "Month"}>
-              <TextInput id="cr-month" type="month" value={month} onChange={setMonth} />
-            </Field>
-          </div>
+          <FilterSelect
+            value={month}
+            onChange={setMonth}
+            label={ar ? "الشهر" : "Month"}
+            width="w-[180px]"
+            testId="cr-month"
+          >
+            {monthOptions(month, lang).map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </FilterSelect>
         }
       />
 
@@ -183,121 +195,168 @@ export default function CommissionReviewPage() {
         </Alert>
       )}
 
-      <div className="grid sm:grid-cols-4 gap-4">
-        <Stat label={ar ? "المستحق" : "Accrued"} value={data.totals.accrued} />
-        <Stat label={ar ? "التسويات" : "Adjustments"} value={data.totals.adjustments} />
-        <Stat label={ar ? "المدفوع" : "Paid"} value={data.totals.paid} />
-        <Stat label={ar ? "المتبقي" : "Outstanding"} value={data.totals.outstanding} strong />
-      </div>
+      {/* The period's totals. Not in the design's frame, which goes straight to the table —
+          kept because a reviewer approving a period needs to see what the period comes to. */}
+      <StatStrip>
+        <Stat label={ar ? "المستحق" : "Accrued"} value={data.totals.accrued} money />
+        <Stat label={ar ? "التسويات" : "Adjustments"} value={data.totals.adjustments} money />
+        <Stat label={ar ? "المدفوع" : "Paid"} value={data.totals.paid} money />
+        <Stat
+          label={ar ? "المتبقّي" : "Outstanding"}
+          value={data.totals.outstanding}
+          money
+          tone="action"
+        />
+      </StatStrip>
 
       {data.employees.length === 0 ? (
         <Card>
           <EmptyState>{ar ? "لا توجد استحقاقات في هذا الشهر." : "No accruals in this period."}</EmptyState>
         </Card>
       ) : (
-        <Card>
-          <SectionTitle>{ar ? "حسب الموظف" : "By employee"}</SectionTitle>
-          <TableWrap>
-            <table className="w-full text-sm min-w-[820px]">
-              <thead>
-                <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                  <th className="text-start py-2">{ar ? "الموظف" : "Employee"}</th>
-                  <th className="text-end py-2">{ar ? "المستحق" : "Accrued"}</th>
-                  <th className="text-end py-2">{ar ? "التسويات" : "Adjust."}</th>
-                  <th className="text-end py-2">{ar ? "المدفوع" : "Paid"}</th>
-                  <th className="text-end py-2">{ar ? "المتبقي" : "Outstanding"}</th>
-                  <th className="text-start py-2">{ar ? "التطابق" : "Reconciled"}</th>
-                  <th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {data.employees.map((e) => (
-                  <tr
-                    key={e.employeeId}
-                    className="border-t border-border align-top"
-                    data-testid={`review-row-${e.employeeId}`}
+        <DataTable
+          testId="review-table"
+          minWidth={1180}
+          cols={[
+            { label: ar ? "الموظّف" : "Employee", w: "min-w-[190px]" },
+            { label: ar ? "الخطة" : "Plan", w: "w-[160px]" },
+            { label: ar ? "مستحق" : "Accrued", w: "w-[140px]" },
+            { label: ar ? "تسويات" : "Adjustments", w: "w-[130px]" },
+            { label: ar ? "مدفوع" : "Paid", w: "w-[130px]" },
+            { label: ar ? "المتبقّي" : "Outstanding", w: "w-[160px]" },
+            { label: ar ? "الإجراءات" : "Actions", w: "w-[270px]" },
+          ]}
+        >
+          {data.employees.map((e) => {
+            // The plan is not on the employee row; it is on that employee's accruals, which
+            // is where the reviewer would look for it anyway.
+            const pv = data.accruals.find((a) => a.employeeId === e.employeeId)?.planVersion;
+            const canPay =
+              data.can.recordPayout && Number(e.outstanding) > 0 && e.pendingCount === 0;
+            return (
+              <Tr key={e.employeeId} testId={`review-row-${e.employeeId}`}>
+                <Td>
+                  <button
+                    onClick={() => setExpanded(expanded === e.employeeId ? null : e.employeeId)}
+                    className="text-start font-medium hover:text-oo-action-primary"
+                    aria-expanded={expanded === e.employeeId}
+                    data-testid={`expand-${e.employeeId}`}
                   >
-                    <td className="py-3">
+                    {e.name}
+                  </button>
+                  <span className="block text-[12px] leading-[18px] text-oo-text-muted">
+                    {[
+                      e.pendingCount > 0
+                        ? `${num(e.pendingCount, lang)} ${ar ? "بانتظار الاعتماد" : "awaiting approval"}`
+                        : null,
+                      e.approvedCount > 0
+                        ? `${num(e.approvedCount, lang)} ${ar ? "معتمدة" : "approved"}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || (ar ? "لا حركات" : "no accruals")}
+                  </span>
+                </Td>
+                <Td className="text-oo-text-secondary">
+                  {pv
+                    ? `${ar && pv.plan.nameAr ? pv.plan.nameAr : pv.plan.name} · ${
+                        ar ? `ن${num(pv.version, "ar")}` : `v${pv.version}`
+                      }`
+                    : "—"}
+                </Td>
+                <Td><Money value={e.accrued} /></Td>
+                <Td><Money value={e.adjustments} /></Td>
+                <Td><Money value={e.paid} /></Td>
+                <Td>
+                  <Money value={e.outstanding} strong />
+                  {/* Only the exception is worth a chip. A green "matches" on every row is
+                      noise the reviewer learns to stop reading. */}
+                  {!e.reconciled && (
+                    <span
+                      data-testid={`reconciled-${e.employeeId}`}
+                      className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
+                    >
+                      <Scale size={12} aria-hidden /> {ar ? "فرق " : "off by "}
+                      {e.reconciliationDifference}
+                    </span>
+                  )}
+                </Td>
+                <Td>
+                  {/* The design puts the one action a reviewer should take first and shows
+                      the others in place, disabled — so the sequence approve → pay is
+                      visible without reading the rules card. */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {data.can.approve && e.pendingCount > 0 ? (
                       <button
-                        onClick={() => setExpanded(expanded === e.employeeId ? null : e.employeeId)}
-                        className="font-bold hover:text-orange text-start"
-                        aria-expanded={expanded === e.employeeId}
-                        data-testid={`expand-${e.employeeId}`}
+                        disabled={busy}
+                        onClick={() => approve(e)}
+                        data-testid={`approve-${e.employeeId}`}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50"
                       >
-                        {e.name}
+                        <CheckCircle2 size={14} aria-hidden /> {ar ? "اعتماد المستحق" : "Approve accrued"}
                       </button>
-                      <p className="text-[11px] text-brown/60">
-                        {e.pendingCount > 0 && (
-                          <span className="text-amber-700 font-bold">
-                            {e.pendingCount} {ar ? "بانتظار الاعتماد" : "awaiting approval"}
-                          </span>
-                        )}
-                        {e.pendingCount > 0 && e.approvedCount > 0 && " · "}
-                        {e.approvedCount > 0 && (
-                          <span>
-                            {e.approvedCount} {ar ? "معتمدة" : "approved"}
-                          </span>
-                        )}
-                      </p>
-                    </td>
-                    <td className="py-3 text-end"><Money value={e.accrued} /></td>
-                    <td className="py-3 text-end"><Money value={e.adjustments} /></td>
-                    <td className="py-3 text-end"><Money value={e.paid} /></td>
-                    <td className="py-3 text-end font-extrabold"><Money value={e.outstanding} /></td>
-                    <td className="py-3">
-                      {e.reconciled ? (
-                        <Pill tone="good" testId={`reconciled-${e.employeeId}`}>
-                          <span className="inline-flex items-center gap-1">
-                            <Scale size={10} aria-hidden /> {ar ? "متطابق" : "matches"}
-                          </span>
-                        </Pill>
-                      ) : (
-                        <Pill tone="bad" testId={`reconciled-${e.employeeId}`}>
-                          {ar ? "فرق " : "off by "}
-                          {e.reconciliationDifference}
-                        </Pill>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      <div className="flex gap-1.5 justify-end flex-wrap">
-                        {data.can.approve && e.pendingCount > 0 && (
-                          <Button
-                            disabled={busy}
-                            onClick={() => approve(e)}
-                            testId={`approve-${e.employeeId}`}
-                          >
-                            <CheckCircle2 size={14} aria-hidden /> {ar ? "اعتماد" : "Approve"}
-                          </Button>
-                        )}
-                        {data.can.approve && (
-                          <Button
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() => setDialog({ kind: "adjust", row: e })}
-                            testId={`adjust-${e.employeeId}`}
-                          >
-                            {ar ? "تسوية" : "Adjust"}
-                          </Button>
-                        )}
-                        {data.can.recordPayout && Number(e.outstanding) > 0 && e.pendingCount === 0 && (
-                          <Button
-                            variant="secondary"
-                            disabled={busy}
-                            onClick={() => setDialog({ kind: "payout", row: e })}
-                            testId={`payout-${e.employeeId}`}
-                          >
-                            <Banknote size={14} aria-hidden /> {ar ? "صرف" : "Payout"}
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableWrap>
-        </Card>
+                    ) : canPay ? (
+                      <button
+                        disabled={busy}
+                        onClick={() => setDialog({ kind: "payout", row: e })}
+                        data-testid={`payout-${e.employeeId}`}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50"
+                      >
+                        <Banknote size={14} aria-hidden /> {ar ? "صرف المعتمد" : "Pay approved"}
+                      </button>
+                    ) : null}
+                    {data.can.approve && (
+                      <button
+                        disabled={busy}
+                        onClick={() => setDialog({ kind: "adjust", row: e })}
+                        data-testid={`adjust-${e.employeeId}`}
+                        className={`${ROW_ACTION} text-oo-text-primary hover:border-oo-action-primary disabled:opacity-50`}
+                      >
+                        {ar ? "تسوية" : "Adjust"}
+                      </button>
+                    )}
+                    {e.pendingCount > 0 && (
+                      <span
+                        className={`${ROW_ACTION} cursor-not-allowed text-oo-text-muted`}
+                        title={ar ? "الصرف بعد الاعتماد" : "Payout comes after approval"}
+                      >
+                        {ar ? "صرف" : "Payout"}
+                      </span>
+                    )}
+                  </div>
+                </Td>
+              </Tr>
+            );
+          })}
+        </DataTable>
       )}
+
+      {/* ── The rules this screen enforces ──────────────────────────────────────── */}
+      <Card>
+        <SectionTitle>{ar ? "قواعد هذه الشاشة" : "The rules this screen enforces"}</SectionTitle>
+        <ul className="space-y-1.5 text-[12px] leading-[18px] text-oo-text-secondary">
+          {(ar
+            ? [
+                "«اعتماد المستحق» يعتمد كل حركة حالتها «مستحق» في هذه الفترة لهذا الموظّف — لا اعتماد جزئي لحركة واحدة.",
+                "«صرف المعتمد» متاح بعد الاعتماد فقط، ويكتب قيد صرف. الحركات تصبح «مدفوع» ويبقى «مستحق» كما هو.",
+                "«تسوية» تكتب قيد تسوية موجباً أو سالباً بسبب إلزامي — ولا تعدّل حركة استحقاق قائمة.",
+                "«المتبقّي» = مستحق + تسويات − مدفوع، محسوباً من قيود السجلّ. لا يُجمع المدفوع فوق المستحق.",
+              ]
+            : [
+                "“Approve accrued” approves every ACCRUED row for this employee in this period — there is no partial approval of one row.",
+                "“Pay approved” is available only after approval and writes a payout entry. The rows become PAID; what is accrued does not change.",
+                "“Adjust” writes a positive or negative adjustment entry with a mandatory reason — it never edits an existing accrual.",
+                "Outstanding = accrued + adjustments − paid, computed from the ledger. A payout is not added on top of what was accrued.",
+              ]
+          ).map((rule, i) => (
+            <li key={i} className="flex gap-2">
+              <span aria-hidden className="text-oo-border-strong">•</span>
+              <span>{rule}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
 
       {expanded && (
         <Card>
@@ -305,50 +364,65 @@ export default function CommissionReviewPage() {
             {ar ? "الاستحقاقات التفصيلية" : "The accruals behind the figure"} —{" "}
             {data.employees.find((e) => e.employeeId === expanded)?.name}
           </SectionTitle>
-          <TableWrap>
-            <table className="w-full text-sm min-w-[820px]" data-testid="accrual-detail">
+          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
+            <table className="w-full min-w-[900px] border-collapse text-start" data-testid="accrual-detail">
               <thead>
-                <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                  <th className="text-start py-2">{ar ? "التحصيل" : "Collection"}</th>
-                  <th className="text-start py-2">{ar ? "العميل" : "Customer"}</th>
-                  <th className="text-end py-2">{ar ? "الأساس" : "Base"}</th>
-                  <th className="text-end py-2">{ar ? "الحصة" : "Share"}</th>
-                  <th className="text-end py-2">{ar ? "النسبة الفعلية" : "Effective rate"}</th>
-                  <th className="text-end py-2">{ar ? "المبلغ" : "Amount"}</th>
-                  <th className="text-start py-2">{ar ? "الخطة" : "Plan"}</th>
-                  <th className="text-start py-2">{ar ? "الحالة" : "Status"}</th>
+                <tr className="bg-oo-bg-subtle">
+                  {[
+                    [ar ? "التحصيل" : "Collection", "min-w-[190px]"],
+                    [ar ? "العميل" : "Customer", "w-[160px]"],
+                    [ar ? "الأساس المؤهّل" : "Qualifying base", "w-[150px]"],
+                    [ar ? "الحصة" : "Share", "w-[90px]"],
+                    [ar ? "النسبة الفعّالة" : "Effective rate", "w-[130px]"],
+                    [ar ? "المبلغ" : "Amount", "w-[140px]"],
+                    [ar ? "الخطة" : "Plan", "w-[140px]"],
+                    [ar ? "الحالة" : "Status", "w-[150px]"],
+                  ].map(([l, w], i) => (
+                    <th
+                      key={i}
+                      scope="col"
+                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
+                    >
+                      {l}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {data.accruals
                   .filter((a) => a.employeeId === expanded)
                   .map((a) => (
-                    <tr key={a.id} className="border-t border-border" data-testid={`accrual-${a.id}`}>
-                      <td className="py-2.5 text-xs">
-                        <span className="font-mono">{a.collectionEvent.externalRef}</span>
-                        <br />
-                        <span className="text-brown/60">{formatDate(a.collectionEvent.collectedAt)}</span>
+                    <tr key={a.id} className="border-t border-oo-border-default" data-testid={`accrual-${a.id}`}>
+                      <Td>
+                        <span className="block font-mono text-[12px] leading-[18px]">
+                          {a.collectionEvent.externalRef}
+                        </span>
+                        <span className="text-[12px] leading-[18px] text-oo-text-muted">
+                          {formatDay(a.collectionEvent.collectedAt, lang)}
+                        </span>
                         {a.collectionEvent.sourceSystem === "SANDBOX" && (
                           <Pill tone="neutral">{ar ? "تجريبي" : "sandbox"}</Pill>
                         )}
-                      </td>
-                      <td className="py-2.5 text-xs">{a.collectionEvent.customer?.name ?? "—"}</td>
-                      <td className="py-2.5 text-end"><Money value={a.qualifyingBase} /></td>
-                      <td className="py-2.5 text-end tabular-nums">{a.sharePercent}%</td>
-                      <td className="py-2.5 text-end tabular-nums">{a.effectiveRatePercent}%</td>
-                      <td className="py-2.5 text-end"><Money value={a.amount} currency={a.currency} /></td>
-                      <td className="py-2.5 text-xs">
-                        <span className="font-mono">{a.planVersion.plan.code}</span> v{a.planVersion.version}
-                      </td>
-                      <td className="py-2.5">
+                      </Td>
+                      <Td>{a.collectionEvent.customer?.name ?? "—"}</Td>
+                      <Td><Money value={a.qualifyingBase} /></Td>
+                      <Td>{ar ? `${num(Number(a.sharePercent), "ar")}٪` : `${a.sharePercent}%`}</Td>
+                      <Td>{ar ? `${num(Number(a.effectiveRatePercent), "ar")}٪` : `${a.effectiveRatePercent}%`}</Td>
+                      <Td><Money value={a.amount} currency={a.currency} /></Td>
+                      <Td>
+                        <span className="font-mono text-[12px] leading-[18px]">{a.planVersion.plan.code}</span>
+                        {" "}
+                        {ar ? `ن${num(a.planVersion.version, "ar")}` : `v${a.planVersion.version}`}
+                      </Td>
+                      <Td>
                         <AccrualStatusBadge status={a.status} />
-                      </td>
+                      </Td>
                     </tr>
                   ))}
               </tbody>
             </table>
-          </TableWrap>
-          <p className="text-[11px] text-brown/60 mt-3 font-medium">
+          </div>
+          <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
             {ar
               ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة الفعلية هي ما يشرح سبب اختلاف المبلغ عن الأساس × النسبة الأساسية بعد تجاوز شريحة."
               : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The effective rate is what explains why the amount is not simply base × base rate once a tier has been crossed."}
@@ -370,17 +444,6 @@ export default function CommissionReviewPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className={`rounded-2xl border p-4 ${strong ? "bg-cream border-orange/30" : "bg-white border-border"}`}>
-      <p className="text-[11px] uppercase font-bold text-brown/60 tracking-wide">{label}</p>
-      <p className="text-xl mt-1">
-        <Money value={value} />
-      </p>
     </div>
   );
 }

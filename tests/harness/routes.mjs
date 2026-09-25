@@ -12,6 +12,7 @@ import { LEADS_ROWS, REP } from "./fixtures.mjs";
 
 const OWNER = { id: "u1", name: "فهد العتيبي" };
 const OWNER2 = { id: "u2", name: "نورة السبيعي" };
+const OWNER3 = { id: "u3", name: "خالد المطيري" };
 const CUST = { id: "c1", name: "Nukhba Roastery", nameAr: "محمصة النخبة" };
 
 /**
@@ -61,16 +62,21 @@ const quote = (id, no, status, total, customerAr, dealTitle, validUntil) => ({
   _count: { lines: 3, orderLinks: 0 },
 });
 
-const accrual = (id, status, amount) => ({
-  id, employeeId: "u1", qualifyingBase: "110000.00", sharePercent: "100",
-  effectiveRatePercent: "1.045455", amount, currency: "SAR", status,
-  approvedAt: null, createdAt: "2026-09-20T00:00:00.000Z",
-  employee: OWNER,
+const accrual = (id, status, amount, o = {}) => ({
+  id, employeeId: o.employee?.id ?? "u1",
+  qualifyingBase: o.base ?? "110000.00",
+  sharePercent: o.share ?? "100",
+  effectiveRatePercent: o.rate ?? "1.045455",
+  amount, currency: "SAR", status,
+  approvedAt: null, createdAt: o.at ?? at(-5),
+  employee: o.employee ?? OWNER,
   collectionEvent: {
-    id: "ce1", externalRef: "SBX-2026-09-0044", sourceSystem: "SANDBOX",
-    collectedAt: "2026-09-20T00:00:00.000Z", status: "RECORDED",
-    amountGross: "126500.00", amountTax: "16500.00", amountNonQualifying: "0.00",
-    customer: { id: "c1", name: "محمصة النخبة" },
+    id: `ce-${id}`, externalRef: o.ref ?? "SBX-2026-09-0044", sourceSystem: "SANDBOX",
+    collectedAt: o.at ?? at(-5), status: "RECORDED",
+    amountGross: o.gross ?? "126500.00",
+    amountTax: o.tax ?? "16500.00",
+    amountNonQualifying: "0.00",
+    customer: { id: "c1", name: o.customer ?? "محمصة النخبة" },
   },
   planVersion: {
     version: 3, baseRatePercent: "1.00", tierMode: "INCREMENTAL",
@@ -212,10 +218,27 @@ export const ROUTES = {
         body: {
           periodStart: "2026-09-01", periodEnd: "2026-09-30",
           statement: { accrued: "1530.00", adjustments: "0.00", paid: "200.00", outstanding: "1330.00" },
-          accruals: [accrual("ac1", "ACCRUED", "1150.00"), accrual("ac2", "PAID", "200.00")],
+          // The three accruals of SC-01, including the split one whose share divides the base.
+          accruals: [
+            accrual("ac1", "ACCRUED", "1150.00", { customer: "مقهى ذوّاقة", ref: "SBX-2026-09-0044", at: at(-5) }),
+            // The split one. `qualifyingBase` is what the engine stores: the share is already
+            // applied to it (34,500 − 4,500 = 30,000 net, × 60% = 18,000, × 1% = 180), so the
+            // fixture has to agree with the engine or the screen shows arithmetic that does
+            // not add up.
+            accrual("ac2", "ACCRUED", "180.00", {
+              customer: "محمصة النخبة", ref: "SBX-2026-09-0051", at: at(-3),
+              gross: "34500.00", tax: "4500.00", base: "18000.00", share: "60", rate: "1.000000",
+            }),
+            accrual("ac3", "PAID", "200.00", {
+              customer: "بن الشرق", ref: "SBX-2026-09-0186", at: at(-13),
+              gross: "23000.00", tax: "3000.00", base: "20000.00", rate: "1.000000",
+            }),
+          ],
           ledger: [
-            { id: "le1", type: "ACCRUAL", amount: "1150.00", reason: null, createdAt: "2026-09-20T00:00:00.000Z" },
-            { id: "le2", type: "PAYOUT", amount: "200.00", reason: "دفعة سبتمبر", createdAt: "2026-09-23T00:00:00.000Z" },
+            { id: "le1", type: "ACCRUAL", amount: "1150.00", reason: "استحقاق — مقهى ذوّاقة", createdAt: at(-5) },
+            { id: "le2", type: "ACCRUAL", amount: "180.00", reason: "استحقاق — محمصة النخبة", createdAt: at(-3) },
+            { id: "le3", type: "ACCRUAL", amount: "200.00", reason: "استحقاق — بن الشرق", createdAt: at(-13) },
+            { id: "le4", type: "PAYOUT", amount: "200.00", reason: "صرف دفعة سبتمبر — لا يغيّر «مستحق»", createdAt: at(-2) },
           ],
           target: { targetAmount: "200000.00", bonusAmount: "2000.00", currency: "SAR" },
           collectionSources: ["SANDBOX"], sandbox: true, notice: "لم يُقبض أي مبلغ ولم يُصرف. الأرقام حساب فقط.",
@@ -236,9 +259,16 @@ export const ROUTES = {
             { employeeId: "u2", name: "نورة السبيعي", accrued: "840.00", adjustments: "0.00", paid: "0.00",
               outstanding: "840.00", accrualRowsTotal: "840.00", reconciliationDifference: "0.00",
               reconciled: true, pendingCount: 0, approvedCount: 2 },
+            { employeeId: "u3", name: "خالد المطيري", accrued: "700.00", adjustments: "-90.00", paid: "610.00",
+              outstanding: "0.00", accrualRowsTotal: "700.00", reconciliationDifference: "0.00",
+              reconciled: true, pendingCount: 0, approvedCount: 1 },
           ],
-          accruals: [accrual("ac1", "ACCRUED", "1150.00"), accrual("ac2", "APPROVED", "840.00")],
-          totals: { accrued: "2370.00", adjustments: "0.00", paid: "200.00", outstanding: "2170.00" },
+          accruals: [
+            accrual("ac1", "ACCRUED", "1150.00", { customer: "مقهى ذوّاقة" }),
+            accrual("ac2", "APPROVED", "840.00", { employee: OWNER2, customer: "كافيه ٢١" }),
+            accrual("ac3", "PAID", "700.00", { employee: OWNER3, customer: "بن الشرق" }),
+          ],
+          totals: { accrued: "3070.00", adjustments: "-90.00", paid: "810.00", outstanding: "2170.00" },
           can: { approve: true, recordPayout: true, managePlans: true },
           sandbox: true, notice: "بيئة تجريبية — الاعتماد والصرف هنا لا يحرّكان مالاً.",
         },

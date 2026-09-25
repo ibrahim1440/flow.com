@@ -4,9 +4,9 @@ import { useState, useEffect } from "react";
 import { Percent, Plus, Lock, UserPlus } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Button, Field, TextInput, Select, TextArea, Pill, Modal, TableWrap, api,
+  Button, Field, TextInput, Select, TextArea, Pill, Modal, api,
+  Td, ROW_ACTION, num, formatDay, formatMoney, toArabicDigits,
 } from "../../sales/_components/ui";
-import { formatDate } from "@/lib/utils";
 
 /**
  * Commission plan administration.
@@ -26,6 +26,161 @@ import { formatDate } from "@/lib/utils";
  */
 
 type Tier = { id?: string; fromAmount: string; toAmount: string | null; ratePercent: string };
+
+/**
+ * One version of a plan, laid out the way the design explains a tier: the bands as a table
+ * whose last column states the rate that actually applies to that slice, a worked example,
+ * and the two constraints this release enforces.
+ */
+function PlanVersion({
+  ar, lang, plan, version: v,
+}: {
+  ar: boolean;
+  lang: "ar" | "en";
+  plan: Plan;
+  version: Version;
+}) {
+  const frozen = v._count.accruals > 0;
+  const rate = (x: string | number) => {
+    const s = Number(x).toFixed(6);
+    return ar ? `${toArabicDigits(s)}٪` : `${s}%`;
+  };
+  const amount = (x: string | number) => {
+    const s = formatMoney(String(x), 0);
+    return ar ? toArabicDigits(s) : s;
+  };
+  const base = Number(v.baseRatePercent);
+
+  /**
+   * An illustration, computed the way `commissionOnCumulativeBase` computes the real thing:
+   * the base rate on everything, then each band's POINTS on the slice of base inside it.
+   *
+   * It exists because "1% plus 0.5 points on 100k–120k" reads to most people as 1.5% on the
+   * whole base, which is a different number by thousands of riyals. The example is taken
+   * from the plan's own bands so it can never describe a tier the plan does not have.
+   */
+  const example = (() => {
+    const second = v.tiers[1];
+    if (!second) return null;
+    const from = Number(second.fromAmount);
+    const to = second.toAmount === null ? from * 2 : Number(second.toAmount);
+    const at = Math.round((from + (to - from) / 2) / 1000) * 1000;
+    if (!(at > from)) return null;
+    let total = (at * base) / 100;
+    const parts = [`${amount(at)} × ${rate(base)} = ${amount(((at * base) / 100).toFixed(2))}`];
+    for (const t of v.tiers) {
+      const bFrom = Number(t.fromAmount);
+      if (at <= bFrom) continue;
+      const bTo = t.toAmount === null ? at : Math.min(at, Number(t.toAmount));
+      const slice = bTo - bFrom;
+      if (slice <= 0 || Number(t.ratePercent) === 0) continue;
+      const add = (slice * Number(t.ratePercent)) / 100;
+      total += add;
+      parts.push(`${amount(slice)} × ${rate(t.ratePercent)} = ${amount(add.toFixed(2))}`);
+    }
+    const effective = ((total / at) * 100).toFixed(6);
+    return { at, parts, total, effective };
+  })();
+
+  return (
+    <div className="mt-3 first:mt-0" data-testid={`version-${plan.code}-${v.version}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {frozen ? (
+          <span className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-hold bg-oo-status-hold-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-hold">
+            <Lock size={12} aria-hidden />
+            {ar ? "مجمَّدة — لها استحقاقات" : "frozen — it has accruals"}
+          </span>
+        ) : (
+          <span className="text-[12px] leading-[18px] text-oo-text-muted">
+            {num(v._count.assignments, lang)} {ar ? "إسناد" : "assigned"}
+          </span>
+        )}
+        <p className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
+          {ar ? (plan.nameAr ?? plan.name) : plan.name}
+          {" · "}
+          {ar ? `النسخة ${num(v.version, "ar")}` : `version ${v.version}`}
+          {" — "}
+          {v.effectiveTo ? (ar ? "منتهية" : "ended") : (ar ? "سارية" : "in force")}
+        </p>
+      </div>
+      <p className="mt-1 text-[12px] leading-[18px] text-oo-text-secondary">
+        {ar ? "الأساس: صافي المحصّل بعد الضريبة وغير المؤهّل" : "Basis: net collected after tax and non-qualifying"}
+        {" · "}
+        {ar ? "النسبة الأساس" : "base rate"} {rate(base)}
+        {" · "}
+        {v.tierMode === "INCREMENTAL"
+          ? (ar ? "الشرائح تراكمية" : "tiers are incremental")
+          : (ar ? "بلا شرائح" : "no tiers")}
+        {" · "}
+        {ar ? "سريان من" : "from"} {formatDay(v.effectiveFrom, lang)}
+        {" · "}
+        {v.effectiveTo ? formatDay(v.effectiveTo, lang) : (ar ? "مفتوح" : "open")}
+      </p>
+
+      {v.tiers.length > 0 && (
+        <div className="mt-2 overflow-x-auto rounded-2xl border border-oo-border-default">
+          <table className="w-full min-w-[560px] border-collapse text-start">
+            <thead>
+              <tr className="bg-oo-bg-subtle">
+                {[ar ? "من" : "From", ar ? "إلى" : "To", ar ? "نقاط تُضاف" : "Points added", ar ? "الأثر" : "Effect"].map(
+                  (l) => (
+                    <th
+                      key={l}
+                      scope="col"
+                      className="px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted"
+                    >
+                      {l}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {v.tiers.map((t, i) => (
+                <tr key={i} className="border-t border-oo-border-default">
+                  <Td>{amount(t.fromAmount)}</Td>
+                  <Td>{t.toAmount === null ? (ar ? "ما فوق" : "and above") : amount(t.toAmount)}</Td>
+                  <Td>
+                    {Number(t.ratePercent) === 0
+                      ? "—"
+                      : `+ ${ar ? toArabicDigits(Number(t.ratePercent).toFixed(2)) : Number(t.ratePercent).toFixed(2)}`}
+                  </Td>
+                  {/* The column that stops "1% + 0.5 points" being read as 1.5% on everything. */}
+                  <Td>
+                    {rate(base + Number(t.ratePercent))}{" "}
+                    {i === 0
+                      ? (ar ? "على هذا الجزء" : "on this slice")
+                      : (ar ? "على هذا الجزء فقط" : "on this slice only")}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {example && (
+        <p
+          className="mt-2 rounded-[10px] border border-oo-status-ready bg-oo-status-ready-bg px-3 py-[9px] text-[12px] leading-[18px] text-oo-status-ready"
+          data-testid={`tier-example-${plan.code}-${v.version}`}
+        >
+          {ar ? "مثال: أساس" : "Example: a base of"} {amount(example.at)} → {example.parts.join(" · ")} ·{" "}
+          {ar ? "المجموع" : "total"} {amount(example.total.toFixed(2))} {ar ? "ر.س، بنسبة فعّالة" : "SAR, an effective"}{" "}
+          {rate(example.effective)} — {ar ? "لا" : "not"} {rate(base + Number(v.tiers[1].ratePercent))}.
+        </p>
+      )}
+
+      <p className="mt-2 flex items-start gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-status-rejected-bg px-3 py-[9px] text-[12px] leading-[18px] text-oo-status-rejected">
+        <Lock size={13} aria-hidden className="mt-0.5 shrink-0" />
+        <span>
+          {ar
+            ? "الشرائح بأثر رجعي مرفوضة في هذا الإصدار — تُعطي مبالغ مختلفة جذرياً على الأرقام نفسها، والخطأ يظهر في قسيمة راتب. العملة الريال السعودي حصراً: لا سياسة صرف عملات."
+            : "Retroactive tiers are refused in this release — they give radically different amounts on the same figures, and the mistake surfaces on a payslip. Saudi riyals only: there is no exchange-rate policy."}
+        </span>
+      </p>
+    </div>
+  );
+}
 
 type Version = {
   id: string;
@@ -111,21 +266,28 @@ export default function CommissionPlansPage() {
   if (loading) return <Spinner />;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <PageHeader
-        title={ar ? "خطط العمولات" : "Commission plans"}
+        title={ar ? "خطط العمولة والإسناد" : "Commission plans and assignments"}
         subtitle={
-          <span className="mt-1 block">
-            {plans.length} {ar ? "خطة" : "plans"} · {assignments.filter((a) => a.live).length}{" "}
-            {ar ? "تعيين نشط" : "live assignments"}
+          <span className="flex flex-wrap items-center gap-2">
+            <span>{ar ? "النسخة تُجمَّد عند أول استحقاق" : "A version freezes at its first accrual"}</span>
+            <span aria-hidden className="text-oo-border-strong">·</span>
+            <span>{ar ? "الإسناد يُنهى ولا يُحذف" : "an assignment is ended, never deleted"}</span>
+            <span aria-hidden className="text-oo-border-strong">·</span>
+            <span>
+              {num(plans.length, lang)} {ar ? "خطة" : "plans"} ·{" "}
+              {num(assignments.filter((a) => a.live).length, lang)}{" "}
+              {ar ? "إسناد ساري" : "live assignments"}
+            </span>
           </span>
         }
         actions={
           <>
             <Button variant="secondary" onClick={() => setDialog({ kind: "assign" })} testId="new-assignment">
-              <UserPlus size={15} aria-hidden /> {ar ? "تعيين موظف" : "Assign someone"}
+              <UserPlus size={15} aria-hidden /> {ar ? "إسناد موظّف إلى خطة" : "Assign someone to a plan"}
             </Button>
             <Button onClick={() => setDialog({ kind: "plan" })} testId="new-plan">
               <Plus size={15} aria-hidden /> {ar ? "خطة جديدة" : "New plan"}
@@ -166,65 +328,13 @@ export default function CommissionPlansPage() {
                 </span>
               </SectionTitle>
 
-              {plan.description && <p className="text-xs text-brown mb-3">{plan.description}</p>}
+              {plan.description && (
+                <p className="mb-3 text-[12px] leading-[18px] text-oo-text-secondary">{plan.description}</p>
+              )}
 
-              <TableWrap>
-                <table className="w-full text-sm min-w-[640px]">
-                  <thead>
-                    <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                      <th className="text-start py-2">{ar ? "الإصدار" : "Version"}</th>
-                      <th className="text-end py-2">{ar ? "النسبة الأساسية" : "Base rate"}</th>
-                      <th className="text-start py-2">{ar ? "الشرائح" : "Tiers"}</th>
-                      <th className="text-start py-2">{ar ? "من" : "From"}</th>
-                      <th className="text-start py-2">{ar ? "إلى" : "To"}</th>
-                      <th className="text-start py-2">{ar ? "الحالة" : "State"}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {plan.versions.map((v) => (
-                      <tr key={v.id} className="border-t border-border align-top" data-testid={`version-${plan.code}-${v.version}`}>
-                        <td className="py-2.5 font-bold">v{v.version}</td>
-                        <td className="py-2.5 text-end tabular-nums font-bold">{v.baseRatePercent}%</td>
-                        <td className="py-2.5">
-                          {v.tiers.length === 0 ? (
-                            <span className="text-brown/40">—</span>
-                          ) : (
-                            <ul className="space-y-0.5 text-xs">
-                              {v.tiers.map((t, i) => (
-                                <li key={i} className="tabular-nums">
-                                  {t.fromAmount} – {t.toAmount ?? (ar ? "فأكثر" : "and above")}
-                                  <span className="text-orange font-bold ps-1.5">+{t.ratePercent}</span>
-                                  <span className="text-brown/50 ps-0.5">
-                                    {ar ? "نقطة" : "pts"}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
-                        <td className="py-2.5 text-xs">{formatDate(v.effectiveFrom)}</td>
-                        <td className="py-2.5 text-xs">
-                          {v.effectiveTo ? formatDate(v.effectiveTo) : (ar ? "مفتوح" : "open")}
-                        </td>
-                        <td className="py-2.5">
-                          {v._count.accruals > 0 ? (
-                            <Pill tone="warn">
-                              <span className="inline-flex items-center gap-1">
-                                <Lock size={10} aria-hidden />
-                                {ar ? `مثبّت · ${v._count.accruals} استحقاق` : `frozen · ${v._count.accruals} accruals`}
-                              </span>
-                            </Pill>
-                          ) : (
-                            <Pill tone="info">
-                              {v._count.assignments} {ar ? "تعيين" : "assigned"}
-                            </Pill>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </TableWrap>
+              {plan.versions.map((v) => (
+                <PlanVersion key={v.id} ar={ar} lang={lang} plan={plan} version={v} />
+              ))}
             </Card>
           ))}
         </div>
@@ -232,41 +342,54 @@ export default function CommissionPlansPage() {
 
       {/* ── Assignments ───────────────────────────────────────────── */}
       <Card>
-        <SectionTitle>{ar ? "من على أي خطة" : "Who is on which plan"}</SectionTitle>
+        <SectionTitle>
+          {ar ? "إسناد الموظّفين — لكل موظّف نسخة وفترة سريان" : "Assignments — each person has a version and a period"}
+        </SectionTitle>
         {assignments.length === 0 ? (
           <EmptyState>{ar ? "لم يُعيَّن أحد بعد." : "Nobody is assigned yet."}</EmptyState>
         ) : (
-          <TableWrap>
-            <table className="w-full text-sm min-w-[640px]">
+          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
+            <table className="w-full min-w-[720px] border-collapse text-start" data-testid="assignments-table">
               <thead>
-                <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                  <th className="text-start py-2">{ar ? "الموظف" : "Employee"}</th>
-                  <th className="text-start py-2">{ar ? "الخطة" : "Plan"}</th>
-                  <th className="text-end py-2">{ar ? "النسبة" : "Rate"}</th>
-                  <th className="text-start py-2">{ar ? "من" : "From"}</th>
-                  <th className="text-start py-2">{ar ? "إلى" : "To"}</th>
-                  <th className="py-2" />
+                <tr className="bg-oo-bg-subtle">
+                  {[
+                    [ar ? "الموظّف" : "Employee", "min-w-[200px]"],
+                    [ar ? "النسخة" : "Version", "w-[200px]"],
+                    [ar ? "سريان من" : "From", "w-[150px]"],
+                    [ar ? "سريان حتى" : "Until", "w-[150px]"],
+                    ["", "w-[160px]"],
+                  ].map(([l, w], i) => (
+                    <th
+                      key={i}
+                      scope="col"
+                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
+                    >
+                      {l}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {assignments.map((a) => (
-                  <tr key={a.id} className="border-t border-border" data-testid={`assignment-${a.employeeId}`}>
-                    <td className="py-2.5 font-bold">
+                  <tr
+                    key={a.id}
+                    className="border-t border-oo-border-default"
+                    data-testid={`assignment-${a.employeeId}`}
+                  >
+                    <Td>
                       {a.employee.name}
                       {!a.employee.active && (
                         <Pill tone="neutral">{ar ? "غير نشط" : "inactive"}</Pill>
                       )}
-                    </td>
-                    <td className="py-2.5">
-                      <span className="font-mono text-xs">{a.plan.code}</span>
-                      <span className="text-brown/60 text-xs ps-1">v{a.planVersion.version}</span>
-                    </td>
-                    <td className="py-2.5 text-end tabular-nums">{a.planVersion.baseRatePercent}%</td>
-                    <td className="py-2.5 text-xs">{formatDate(a.effectiveFrom)}</td>
-                    <td className="py-2.5 text-xs">
-                      {a.effectiveTo ? formatDate(a.effectiveTo) : (ar ? "مفتوح" : "open")}
-                    </td>
-                    <td className="py-2.5 text-end">
+                    </Td>
+                    <Td>
+                      {a.plan.name}
+                      {" · "}
+                      {ar ? `ن${num(a.planVersion.version, "ar")}` : `v${a.planVersion.version}`}
+                    </Td>
+                    <Td>{formatDay(a.effectiveFrom, lang)}</Td>
+                    <Td>{a.effectiveTo ? formatDay(a.effectiveTo, lang) : (ar ? "مفتوح" : "open")}</Td>
+                    <Td>
                       {a.live ? (
                         <EndAssignmentButton
                           ar={ar}
@@ -278,16 +401,18 @@ export default function CommissionPlansPage() {
                           onError={setError}
                         />
                       ) : (
-                        <Pill tone="neutral">{ar ? "منتهٍ" : "ended"}</Pill>
+                        <span className={`${ROW_ACTION} cursor-not-allowed text-oo-text-muted`}>
+                          {ar ? "منتهٍ" : "ended"}
+                        </span>
                       )}
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </TableWrap>
+          </div>
         )}
-        <p className="text-[11px] text-brown/60 mt-3 font-medium">
+        <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
           {ar
             ? "لا يستطيع أحد تعيين نفسه على خطة، مهما كانت صلاحياته — لأن صلاحية إدارة الخطط قد تكون بيد مدير مبيعات هو نفسه على خطة."
             : "Nobody can put themselves on a plan, whatever their privileges: plan administration can legitimately belong to a sales manager who is on a plan themselves."}
@@ -345,9 +470,13 @@ function EndAssignmentButton({
 
   if (!open) {
     return (
-      <Button variant="ghost" onClick={() => setOpen(true)} testId={`end-${assignmentId}`}>
-        {ar ? "إنهاء" : "End"}
-      </Button>
+      <button
+        onClick={() => setOpen(true)}
+        data-testid={`end-${assignmentId}`}
+        className={`${ROW_ACTION} text-oo-text-primary hover:border-oo-action-primary`}
+      >
+        {ar ? "إنهاء الإسناد" : "End the assignment"}
+      </button>
     );
   }
   return (

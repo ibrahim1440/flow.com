@@ -5,7 +5,7 @@ import { Target } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner, SandboxBanner,
   Button, Field, TextInput, Select, TextArea, Money, Modal, api,
-  DataTable, Tr, Td, ProgressBar, ROW_ACTION, num, FilterSelect, formatMoney, toArabicDigits,
+  DataTable, Tr, Td, ProgressBar, ROW_ACTION, num, FilterSelect, formatMoney, toArabicDigits, monthOptions,
 } from "../_components/ui";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -88,26 +88,8 @@ export default function TargetsPage() {
   if (loading) return <Spinner />;
 
   // "سبتمبر ٢٠٢٦" — the period the table is showing, in the reader's own calendar names.
-  const monthName = (d: Date) =>
-    d.toLocaleDateString(ar ? "ar-SA-u-nu-arab-ca-gregory" : "en-GB", {
-      month: "long",
-      year: "numeric",
-    });
-  const [y, m] = month.split("-").map(Number);
-  const monthLabel = monthName(new Date(y, (m ?? 1) - 1, 1));
-
-  // The last twelve months and the one ahead — the range a target is ever set or reviewed in.
-  const monthOptions = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() + 1 - i);
-    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    return { value, label: monthName(d) };
-  });
-  // A month reached from elsewhere (a link, a stale bookmark) must still be selectable.
-  if (!monthOptions.some((o) => o.value === month)) {
-    monthOptions.unshift({ value: month, label: monthLabel });
-  }
+  const months = monthOptions(month, lang);
+  const monthLabel = months.find((o) => o.value === month)?.label ?? month;
 
   return (
     <div className="space-y-[18px]">
@@ -149,7 +131,7 @@ export default function TargetsPage() {
               width="w-[180px]"
               testId="tg-month"
             >
-              {monthOptions.map((o) => (
+              {months.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </FilterSelect>
