@@ -810,13 +810,17 @@ async function main() {
     check("adding exactly one order", end.n === before.n + 1, `${before.n} → ${end.n}`);
   }
 
-  sub("D5. the deal can now be won, and the pipeline records it");
+  sub("D5. the deal was won by the acceptance itself, and the pipeline records it");
   {
+    // Nobody pressed a "Won" button. The customer accepting the quotation in D4 is what
+    // won the deal, in the same transaction as the acceptance — so by the time anybody
+    // looks, the deal is already closed and the manual transition has nothing to do.
     await loginAs(MANAGER);
     const r = await api(`/api/sales/opportunities/${ids.opportunityId}/transition`, {
       method: "POST", body: { toOutcome: "WON" },
     });
-    check("won", r.status === 200, S(r.json).slice(0, 200));
+    check("winning it again by hand is refused as redundant, not applied twice",
+      r.status === 409 && /already won/i.test(S(r.json)), `${r.status} ${S(r.json).slice(0, 160)}`);
     const row = await one(`SELECT outcome,"closedAt" FROM "Opportunity" WHERE id=$1`, [ids.opportunityId]);
     check("stored as WON with a close date", row.outcome === "WON" && row.closedAt !== null, S(row));
 

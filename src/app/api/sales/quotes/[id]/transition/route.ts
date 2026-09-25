@@ -56,13 +56,17 @@ export async function POST(request: Request, { params }: Params) {
         const issued = await issueQuote(tx, { quoteId: id, actorId: user.id, canApproveDiscount });
         // Issuing a quotation IS the deal reaching the quotation stage. Leaving the board to
         // be updated by hand is how a pipeline stops describing the work.
-        const advanced = await advanceToQuotationStage(tx, visible.opportunityId, user.id);
+        const advance = await advanceToQuotationStage(tx, visible.opportunityId, user.id);
         return {
           status: "ISSUED",
           quoteNumber: issued.quoteNumber,
           grandTotal: issued.grandTotal.toFixed(2),
           discountApproved: issued.discountApproved,
-          stageAdvanced: advanced,
+          stageAdvanced: advance.moved,
+          // Reported rather than swallowed: "the quotation went out but the board did not
+          // move, because no Quotation stage is configured" is something the person needs
+          // to know, and is not a reason to have refused the quotation.
+          stageNotMovedBecause: advance.moved ? null : advance.reason,
         };
       }
 

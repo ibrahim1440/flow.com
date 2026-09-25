@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { KanbanSquare, Plus, ArrowUp, ArrowDown, EyeOff, Eye } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Button, Field, TextInput, Pill, Modal, api, Td, ROW_ACTION, num, LEAD_SOURCE_LABELS,
+  Button, Field, TextInput, Select, Pill, Modal, api, Td, ROW_ACTION, num, LEAD_SOURCE_LABELS,
 } from "../_components/ui";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 
@@ -29,6 +29,8 @@ import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/
  * PROVISIONAL INTERFACE — see the banner.
  */
 
+type StagePurpose = "QUALIFICATION" | "QUOTATION";
+
 type Stage = {
   id: string;
   code: string;
@@ -37,7 +39,31 @@ type Stage = {
   position: number;
   probability: number;
   isActive: boolean;
+  /** What the lifecycle automation means by this column. At most one stage per purpose. */
+  purpose: StagePurpose | null;
   _count?: { opportunities: number };
+};
+
+/**
+ * The two moments the server makes by itself, and where each one puts the deal.
+ *
+ * Deliberately not matched against the stage's code or its name: the names are translated
+ * and editable, and this deployment's codes are historical (`UAT_QUALIFY`, `UAT_PROPOSAL`).
+ * Somebody has to say which column is which, once, here.
+ */
+const PURPOSE_LABELS: Record<StagePurpose, { en: string; ar: string; whenEn: string; whenAr: string }> = {
+  QUALIFICATION: {
+    en: "Qualification",
+    ar: "التأهيل",
+    whenEn: "where a lead lands when an interaction qualifies it",
+    whenAr: "حيث يصل العميل المحتمل عندما يؤهّله تفاعل",
+  },
+  QUOTATION: {
+    en: "Quotation",
+    ar: "عرض السعر",
+    whenEn: "where a deal moves when a quotation is issued",
+    whenAr: "حيث تنتقل الصفقة عند إصدار عرض سعر",
+  },
 };
 
 export default function SalesSettingsPage() {
@@ -173,8 +199,9 @@ export default function SalesSettingsPage() {
                     [ar ? "الترتيب" : "Order", "w-[90px]"],
                     [ar ? "الرمز" : "Code", "w-[140px]"],
                     [ar ? "الاسم" : "Name", "min-w-[200px]"],
-                    [ar ? "الاحتمال الافتراضي" : "Default probability", "w-[170px]"],
-                    [ar ? "الصفقات" : "Deals", "w-[100px]"],
+                    [ar ? "الاحتمال الافتراضي" : "Default probability", "w-[150px]"],
+                    [ar ? "الأتمتة" : "Automation", "w-[190px]"],
+                    [ar ? "الصفقات" : "Deals", "w-[90px]"],
                     ["", "w-[200px]"],
                   ].map(([l, w], i) => (
                     <th
@@ -228,6 +255,35 @@ export default function SalesSettingsPage() {
                       </span>
                     </Td>
                     <Td>{ar ? `${num(s.probability, "ar")}%` : `${s.probability}%`}</Td>
+                    <Td>
+                      {/* Saved on change rather than behind an Edit dialog: this is a
+                          single choice with an immediate consequence, and the server
+                          takes the purpose off whichever column held it before. */}
+                      <Select
+                        id={`purpose-${s.id}`}
+                        value={s.purpose ?? ""}
+                        disabled={busy || !s.isActive}
+                        onChange={(v) =>
+                          patch(
+                            { id: s.id, purpose: (v || null) as StagePurpose | null },
+                            v
+                              ? ar
+                                ? `صارت هذه مرحلة ${PURPOSE_LABELS[v as StagePurpose].ar}.`
+                                : `This is now the ${PURPOSE_LABELS[v as StagePurpose].en} stage.`
+                              : ar
+                                ? "أُلغيت الأتمتة عن هذه المرحلة."
+                                : "Automation no longer points here.",
+                          )
+                        }
+                      >
+                        <option value="">{ar ? "— لا شيء —" : "— none —"}</option>
+                        {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => (
+                          <option key={p} value={p}>
+                            {ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}
+                          </option>
+                        ))}
+                      </Select>
+                    </Td>
                     <Td>{num(s._count?.opportunities ?? 0, lang)}</Td>
                     <Td>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -289,6 +345,45 @@ export default function SalesSettingsPage() {
             ? "المرحلة تُخفى ولا تُحذف: كل حركة سُجّلت في السجل تشير إليها، وحذفها يكسر التاريخ الذي وُجدت تلك الحركات لحفظه. ومرحلة بها صفقات لا يمكن إخفاؤها — انقل صفقاتها أولاً."
             : "A stage is retired, never deleted: every stage event that ever mentioned it points here, and deleting it would break the history those events exist to preserve. A stage holding deals cannot be retired — move them first."}
         </p>
+
+        {/* What the Automation column actually controls, and what happens when it is unset.
+            Stated here rather than only in an error message, because the person configuring
+            the board is the person who needs to know. */}
+        <div className="mt-3 rounded-xl bg-oo-bg-subtle px-4 py-3">
+          <p className="text-[12px] font-medium leading-[18px] text-oo-text-secondary">
+            {ar ? "ما تعنيه الأتمتة" : "What Automation means"}
+          </p>
+          <ul className="mt-1.5 space-y-1 text-[12px] leading-[18px] text-oo-text-muted">
+            {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => {
+              const held = stages.find((s) => s.purpose === p);
+              return (
+                <li key={p}>
+                  <span className="font-medium text-oo-text-secondary">
+                    {ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}
+                  </span>
+                  {" — "}
+                  {ar ? PURPOSE_LABELS[p].whenAr : PURPOSE_LABELS[p].whenEn}
+                  {". "}
+                  {held ? (
+                    <span className="text-oo-status-success">
+                      {ar ? `المرحلة الحالية: ${held.nameAr}` : `Currently: ${held.nameEn}`}
+                    </span>
+                  ) : (
+                    <span className="text-oo-status-hold">
+                      {p === "QUALIFICATION"
+                        ? ar
+                          ? "غير مُهيَّأة — لن يتحوّل أي عميل محتمل تلقائياً حتى تُحدَّد مرحلة."
+                          : "Not set — no lead will qualify automatically until a stage is chosen."
+                        : ar
+                          ? "غير مُهيَّأة — يُصدَر عرض السعر كالمعتاد، ولا تتحرّك بطاقة الصفقة."
+                          : "Not set — quotations are still issued, the card just does not move."}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </Card>
 
       {/* ── The two reference cards the design puts beside the stages ────────────────

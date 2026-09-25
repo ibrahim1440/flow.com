@@ -1,5 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
-import { requireStageFor, advancesForward } from "./stages";
+import { stageFor, advancesForward } from "./stages";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -21,17 +21,34 @@ type Tx = PrismaNS.TransactionClient;
  */
 
 /**
+ * Why a quotation did not move the deal. Every one of these is an ordinary outcome, not an
+ * error: the quotation is still issued and the reason is reported so a screen can say so.
+ */
+export type StageAdvance =
+  | { moved: true; stageId: string }
+  | { moved: false; reason: "NOT_CONFIGURED" | "NO_DEAL" | "DEAL_CLOSED" | "ALREADY_THERE" | "WOULD_GO_BACKWARDS" };
+
+/**
  * Move an open deal to the configured Quotation stage, if it is not already there or past it.
  *
- * Returns whether it actually moved, so the caller can say "and the deal moved to Quotation"
- * rather than implying it every time.
+ * ── Why an unconfigured stage does not refuse here ──
+ * Qualification cannot proceed without a target stage — there is nowhere to put the deal, so
+ * `requireStageFor` refuses and names the settings screen. Issuing a quotation is different:
+ * the quotation is the act, and moving the card is automation layered on top of it. A
+ * deployment that has not set a Quotation stage yet must still be able to send a customer a
+ * price; refusing would make an unconfigured setting block the primary job of the module.
+ *
+ * So this reports what it did and why, and the caller surfaces it. The deal can be moved by
+ * hand, and the screen can say the automation is not configured — which is a far better
+ * outcome than a 409 on a quotation that was otherwise perfectly valid.
  */
 export async function advanceToQuotationStage(
   tx: Tx,
   opportunityId: string,
   actorId: string,
-): Promise<boolean> {
-  const stage = await requireStageFor(tx, "QUOTATION");
+): Promise<StageAdvance> {
+  const stage = await stageFor(tx, "QUOTATION");
+  if (!stage) return { moved: false, reason: "NOT_CONFIGURED" };
 
   const locked = await tx.$queryRaw<
     { id: string; stageId: string; outcome: string; position: number }[]
@@ -43,13 +60,13 @@ export async function advanceToQuotationStage(
        FOR UPDATE OF o
   `;
   const deal = locked[0];
-  if (!deal) return false;
+  if (!deal) return { moved: false, reason: "NO_DEAL" };
 
   // A closed deal is not re-staged by a quotation. Re-issuing on a won deal is unusual but
   // legal; silently dragging it back into the pipeline is not.
-  if (deal.outcome !== "OPEN") return false;
-  if (deal.stageId === stage.id) return false;
-  if (!advancesForward(deal.position, stage.position)) return false;
+  if (deal.outcome !== "OPEN") return { moved: false, reason: "DEAL_CLOSED" };
+  if (deal.stageId === stage.id) return { moved: false, reason: "ALREADY_THERE" };
+  if (!advancesForward(deal.position, stage.position)) return { moved: false, reason: "WOULD_GO_BACKWARDS" };
 
   await tx.opportunity.update({
     where: { id: opportunityId },
@@ -66,7 +83,7 @@ export async function advanceToQuotationStage(
       actorId,
     },
   });
-  return true;
+  return { moved: true, stageId: stage.id };
 }
 
 /**
