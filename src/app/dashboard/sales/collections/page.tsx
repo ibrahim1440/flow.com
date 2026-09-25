@@ -50,8 +50,18 @@ type Collection = {
   collectionEvent: { accruals: Accrual[] } | null;
 };
 
+type EligibleDeal = {
+  id: string;
+  title: string;
+  quoteNumber: string;
+  currency: string;
+  remaining: string;
+};
+
 type Payload = {
   rows: Collection[];
+  /** Deals the caller could record against right now. Empty unless they may submit. */
+  eligibleDeals?: EligibleDeal[];
   scope: "all" | "own";
   can: { submit: boolean; verify: boolean; reject: boolean; reverse: boolean };
 };
@@ -171,6 +181,7 @@ export default function CollectionsPage() {
   if (!data) return <Alert kind="error">{error}</Alert>;
 
   const rows = data.rows;
+  const eligible = data.eligibleDeals ?? [];
   const pending = rows.filter((r) => r.status === "PENDING_VERIFICATION");
   const approved = rows.filter((r) => r.status === "APPROVED");
   const sum = (list: Collection[], key: "amountGross" | "amountNet") =>
@@ -247,6 +258,61 @@ export default function CollectionsPage() {
               ? "لا توجد تحصيلات. يُسجَّل التحصيل من صفحة الصفقة بعد قبول عرض السعر."
               : "No collections. One is recorded from a deal, once its quotation has been accepted."}
           </EmptyState>
+
+          {/* "Nothing here" is true but useless on its own when the reason is that the
+              person is looking in the wrong place. If they hold the privilege and own a
+              deal with money still outstanding, the empty state says so and takes them
+              there. If they hold it and own nothing eligible, it says that instead. */}
+          {data.can.submit && eligible.length > 0 && (
+            <div className="mx-auto mt-1 max-w-[560px]" data-testid="eligible-deals">
+              <p className="mb-2 text-center text-[12px] leading-[18px] text-oo-text-secondary">
+                {ar
+                  ? "صفقات يمكنك التسجيل عليها الآن:"
+                  : "Deals you can record against right now:"}
+              </p>
+              <ul className="space-y-1.5">
+                {eligible.map((d) => (
+                  <li key={d.id}>
+                    <Link
+                      href={`/dashboard/sales/deals/${d.id}#collections`}
+                      data-testid={`eligible-deal-${d.id}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-oo-border-default bg-oo-bg-subtle px-3.5 py-2.5 transition-colors hover:border-oo-action-primary"
+                    >
+                      <span className="text-[13px] font-medium leading-[20px] text-oo-action-primary">
+                        {d.title}
+                      </span>
+                      <span className="text-[12px] leading-[18px] text-oo-text-muted">
+                        <Num>{d.quoteNumber}</Num>
+                        {" · "}
+                        {ar ? "المتبقي " : "outstanding "}
+                        <Money value={d.remaining} currency={d.currency} />
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {data.can.submit && eligible.length === 0 && (
+            <p
+              data-testid="no-eligible-deals"
+              className="mt-1 text-center text-[12px] leading-[18px] text-oo-text-muted"
+            >
+              {ar
+                ? "لا توجد لديك صفقة بعرض سعر مقبول وعليها متبقٍّ. سجّل قبول العميل على عرض سعر أولاً."
+                : "You have no deal with an accepted quotation and an outstanding balance. Record a customer's acceptance first."}
+            </p>
+          )}
+          {!data.can.submit && (
+            <p
+              data-testid="cannot-submit"
+              className="mt-1 text-center text-[12px] leading-[18px] text-oo-text-muted"
+            >
+              {ar
+                ? "لا تملك صلاحية تسجيل التحصيل؛ هذه الشاشة للعرض فقط بالنسبة لك."
+                : "You do not have the collection-submit permission; this screen is read-only for you."}
+            </p>
+          )}
         </Card>
       ) : (
         <DataTable

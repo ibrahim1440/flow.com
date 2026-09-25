@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock } from "lucide-react";
+import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock, Wallet } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
   Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
@@ -388,6 +388,20 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               <Button disabled={busy} onClick={() => setDialog("order")} testId="create-order">
                 <ShoppingCart size={15} aria-hidden /> {ar ? "تحويل إلى طلب" : "Convert to an order"}
               </Button>
+            )}
+            {/* An accepted quotation is the document a collection is recorded against, but
+                the collection belongs to the DEAL — one deal can have revisions, and the
+                money is owed on the deal, not on a piece of paper. So this is a route back
+                rather than a second place to record one. Offered on the quotation because
+                that is where somebody is standing when the customer pays. */}
+            {quote.status === "ACCEPTED" && (
+              <Link
+                href={`/dashboard/sales/deals/${quote.opportunity.id}#collections`}
+                data-testid="go-to-collection"
+                className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary hover:text-oo-action-primary"
+              >
+                <Wallet size={15} aria-hidden /> {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
+              </Link>
             )}
           </>
         }

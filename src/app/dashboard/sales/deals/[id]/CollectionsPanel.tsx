@@ -77,15 +77,42 @@ const METHOD_LABEL: Record<string, { en: string; ar: string }> = {
   OTHER: { en: "Other", ar: "أخرى" },
 };
 
+/**
+ * Why the action is not offered, in the words the person needs.
+ *
+ * The panel used to render nothing at all when it could not offer the button, so a reviewer
+ * looking at an eligible deal saw a blank space and no way to tell whether the feature was
+ * missing, broken, or simply not theirs. Every branch here says which it is.
+ */
+const UNAVAILABLE: Record<string, { ar: string; en: string }> = {
+  NO_PRIVILEGE: {
+    ar: "لا تملك صلاحية تسجيل التحصيل. تُمنح من إعدادات المستخدمين: المبيعات ← تسجيل تحصيل.",
+    en: "You do not have the collection-submit permission. It is granted in user settings under Sales → Record a collection.",
+  },
+  NOT_YOUR_DEAL: {
+    ar: "هذه الصفقة ليست لك. التحصيل يسجّله مالك الصفقة.",
+    en: "This deal is not yours. A collection is recorded by the deal's owner.",
+  },
+  NO_ACCEPTED_DOCUMENT: {
+    ar: "لا يوجد عرض سعر مقبول على هذه الصفقة، فلا شيء يُحصَّل مقابله. سجّل قبول العميل أولاً.",
+    en: "There is no accepted quotation on this deal, so there is nothing to collect against. Record the customer's acceptance first.",
+  },
+  NOTHING_OUTSTANDING: {
+    ar: "لا يوجد متبقٍ على هذه الصفقة — حُصّل كامل المبلغ أو هو بانتظار التحقق.",
+    en: "Nothing is outstanding on this deal — it is fully collected, or the rest is awaiting verification.",
+  },
+};
+
 export function CollectionsPanel({
-  dealId, ar, lang, summary, rows, canSubmit, onChanged,
+  dealId, ar, lang, summary, rows, action, onChanged,
 }: {
   dealId: string;
   ar: boolean;
   lang: "ar" | "en";
   summary: Summary;
   rows: CollectionRow[];
-  canSubmit: boolean;
+  /** The server's verdict. Never recomputed here — see `collectionAction`. */
+  action: { available: boolean; reason: string };
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -175,17 +202,14 @@ export function CollectionsPanel({
   const doc = summary.document;
 
   return (
+    <div id="collections" className="scroll-mt-24">
     <Card>
       <SectionTitle
         right={
-          canSubmit && doc ? (
-            <button
-              onClick={start}
-              data-testid="record-collection"
-              className="text-[12px] font-medium text-oo-action-primary hover:underline"
-            >
+          action.available ? (
+            <Button onClick={start} testId="record-collection">
               + {ar ? "تسجيل تحصيل" : "Record a collection"}
-            </button>
+            </Button>
           ) : null
         }
       >
@@ -193,6 +217,22 @@ export function CollectionsPanel({
           <Wallet size={14} aria-hidden /> {ar ? "التحصيل" : "Collections"}
         </span>
       </SectionTitle>
+
+      {/* Why the button is not there. Shown whenever the action is unavailable for a
+          reason the person can act on — a missing privilege, somebody else's deal, no
+          accepted quotation — rather than leaving an unexplained gap where a control
+          should be. NOTHING_OUTSTANDING is deliberately excluded: the figures directly
+          below already say the deal is fully collected, and repeating it as a warning
+          would read as a fault. */}
+      {!action.available && action.reason !== "NOTHING_OUTSTANDING" && UNAVAILABLE[action.reason] && (
+        <div
+          data-testid="collection-unavailable"
+          data-reason={action.reason}
+          className="mb-3 rounded-xl border border-oo-status-waiting bg-oo-status-waiting-bg px-3.5 py-2.5 text-[12px] leading-[18px] text-oo-status-hold"
+        >
+          {ar ? UNAVAILABLE[action.reason].ar : UNAVAILABLE[action.reason].en}
+        </div>
+      )}
 
       {!doc ? (
         <EmptyState>
@@ -325,10 +365,31 @@ export function CollectionsPanel({
               {error}
             </p>
           )}
-          <p className="mb-3 text-[12px] leading-[18px] text-oo-text-secondary">
-            {ar ? "المتبقي على هذه الصفقة " : "Outstanding on this deal: "}
-            <Money value={summary.remainingGross} currency={doc.currency} />
-            {". "}
+          {/* Which document this is against, named rather than implied. There is exactly one
+              eligible quotation per deal — the latest accepted revision — so it is shown as a
+              fact, not offered as a choice: a picker here would be a way to pick the wrong
+              one, and the server would refuse it anyway. */}
+          <div
+            className="mb-3 rounded-xl bg-oo-bg-subtle px-3.5 py-2.5"
+            data-testid="collection-against"
+          >
+            <p className="text-[12px] leading-[18px] text-oo-text-secondary">
+              {ar ? "مقابل عرض السعر المقبول " : "Against the accepted quotation "}
+              <span className="font-medium text-oo-text-primary">
+                <Num>{doc.quoteNumber}</Num>
+              </span>
+              {" · "}
+              {ar ? "إجمالي " : "total "}
+              <Money value={doc.gross} currency={doc.currency} />
+            </p>
+            <p className="mt-0.5 text-[12px] leading-[18px] text-oo-text-secondary">
+              {ar ? "المتبقي " : "Outstanding "}
+              <span className="font-medium text-oo-text-primary">
+                <Money value={summary.remainingGross} currency={doc.currency} />
+              </span>
+            </p>
+          </div>
+          <p className="mb-3 text-[12px] leading-[18px] text-oo-text-muted">
             {ar
               ? "الضريبة والأساس الصافي يحسبهما النظام من عرض السعر المقبول — لا تُدخلهما."
               : "The tax and the net basis are derived by the server from the accepted quotation; you do not enter them."}
@@ -375,5 +436,6 @@ export function CollectionsPanel({
         </Modal>
       )}
     </Card>
+    </div>
   );
 }

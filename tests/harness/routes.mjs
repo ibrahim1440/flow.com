@@ -175,7 +175,79 @@ const collection = (id, status, gross, tax, net, o = {}) => ({
 
 export const CUSTOMER_TEXT = ["كافيه ٢١"];
 
+/**
+ * The deal screen's collection panel, in each verdict the server can return.
+ *
+ * These exist because the button was once hidden with no explanation whenever the action was
+ * unavailable, and no test could tell the difference between "correctly withheld" and
+ * "missing". Each fixture pins one verdict and the spec asserts what the person actually sees.
+ */
+const collectionDeal = (action, summary, rows = []) => ({
+  screen: "deal-detail",
+  api: {
+    "/api/sales/opportunities/": {
+      body: {
+        deal: {
+          ...deal("d1", "s2", "محمصة النخبة — خلطة خاصة", "WON", "1150"),
+          quotes: [
+            { id: "q1", quoteNumber: "Q-202609-0012", revision: 1, status: "ACCEPTED",
+              currency: "SAR", validUntil: at(20), grandTotal: "1150.00",
+              issuedAt: at(-6), acceptedAt: at(-2), _count: { lines: 2, orderLinks: 0 } },
+          ],
+        },
+        stages: STAGES,
+        can: {
+          write: true, close: true, reopen: true, quote: true, approveDiscount: false,
+          assign: false, createOrder: true,
+          submitCollection: action.reason !== "NO_PRIVILEGE",
+          verifyCollection: false, rejectCollection: false, reverseCollection: false,
+        },
+        collections: rows,
+        collectionSummary: summary,
+        collectionAction: action,
+      },
+    },
+  },
+});
+
+/** An accepted quotation of 1,150.00, with `approved` already agreed by Finance. */
+const collectionSummary = (approved, pending = "0.00") => {
+  const claimed = Number(approved) + Number(pending);
+  const remaining = (1150 - claimed).toFixed(2);
+  return {
+    document: {
+      quoteId: "q1", quoteNumber: "Q-202609-0012", currency: "SAR",
+      gross: "1150.00", tax: "150.00", net: "1000.00",
+    },
+    approvedGross: Number(approved).toFixed(2),
+    approvedTax: (Number(approved) * 150 / 1150).toFixed(2),
+    approvedNet: (Number(approved) * 1000 / 1150).toFixed(2),
+    pendingGross: Number(pending).toFixed(2),
+    reversedGross: "0.00",
+    remainingGross: remaining,
+    state: Number(approved) <= 0 ? "UNPAID" : Number(approved) >= 1150 ? "FULLY_COLLECTED" : "PARTIALLY_COLLECTED",
+  };
+};
+
 export const ROUTES = {
+  // The reported case: owned, Won, one accepted quotation, nothing collected yet.
+  "sales-deal-collection-available": collectionDeal(
+    { available: true, reason: "OK" }, collectionSummary("0.00"),
+  ),
+  // The same deal, seen by somebody whose role predates the privilege.
+  "sales-deal-collection-no-privilege": collectionDeal(
+    { available: false, reason: "NO_PRIVILEGE" }, collectionSummary("0.00"),
+  ),
+  // Owned and eligible in every way except that nothing has been accepted.
+  "sales-deal-collection-no-document": collectionDeal(
+    { available: false, reason: "NO_ACCEPTED_DOCUMENT" },
+    { ...collectionSummary("0.00"), document: null, remainingGross: "0.00" },
+  ),
+  // Fully collected: no button, and no warning either — the figures already say so.
+  "sales-deal-collection-settled": collectionDeal(
+    { available: false, reason: "NOTHING_OUTSTANDING" }, collectionSummary("1150.00"),
+  ),
+
   "sales-leads": {
     screen: "leads-list",
     api: { "/api/sales/leads": { body: { rows: LEADS_ROWS, scope: "all" } } },

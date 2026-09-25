@@ -80,7 +80,12 @@ export const ROLES: Record<RoleName, { pin: string; name: string; role: string; 
   crmRep: {
     pin: "720011", name: "UAT Sales Rep", role: "custom",
     permissions: withBase({
-      sales: edit("sales", ["lead_write", "lead_convert", "quote_write", "lead_import", "lead_export"]),
+      sales: edit("sales", [
+        "lead_write", "lead_convert", "quote_write", "lead_import", "lead_export",
+        // Records a receipt against a deal they own. It creates NO commission by itself —
+        // only a Finance approval does — so this is not a self-payment path.
+        "collection_submit",
+      ]),
       commissions: edit("commissions", ["view_own"]),
       orders: edit("orders", ["create"]),
       customers: view("customers"),
@@ -114,7 +119,14 @@ export const ROLES: Record<RoleName, { pin: string; name: string; role: string; 
   crmFinance: {
     pin: "720033", name: "UAT Finance", role: "custom",
     permissions: withBase({
-      commissions: edit("commissions", ["view_own", "view_team", "approve", "record_payout"]),
+      commissions: edit("commissions", [
+        "view_own", "view_team", "approve", "record_payout",
+        // The collection decision. Deliberately NOT paired with sales/collection_submit:
+        // whoever records a collection may not decide it, and this role cannot record one
+        // at all. Finance still holds no sales module — they reach the queue and the
+        // evidence through `commissions`, and cannot read the pipeline.
+        "collection_verify", "collection_reject", "collection_reverse",
+      ]),
     }),
   },
 };

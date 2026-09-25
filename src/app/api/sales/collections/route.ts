@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Decimal } from "@/lib/services/commissions/engine";
@@ -19,7 +19,12 @@ import { collectionScope, collectionWhere, seesAllSales } from "@/lib/services/s
 
 /** GET /api/sales/collections — what the caller is allowed to see, newest first. */
 export async function GET(request: Request) {
-  const { user, error } = await requireModule("sales");
+  // Either module: a salesperson reaches this screen as their own history, and Finance
+  // reaches it as the verification queue. Finance holds no sales module on purpose — they
+  // must not be able to read the pipeline — so requiring `sales` here locked the queue away
+  // from the only people who can act on it. What each caller SEES is still decided by
+  // `collectionWhere`, which is unchanged.
+  const { user, error } = await requireAnyModule("sales", "commissions");
   if (error) return error;
 
   const url = new URL(request.url);
@@ -65,11 +70,48 @@ export async function GET(request: Request) {
       },
     });
 
+    // Deals this caller could record against right now. Only needed to make the empty
+    // state actionable — "there is nothing here" is true but useless if the reason is that
+    // the person is looking in the wrong place. One query rather than a summary per deal:
+    // the ceiling is the accepted quotation's total, and what is already claimed is the sum
+    // of approved and pending collections, which is exactly what `collectionSummary` uses.
+    const canSubmit = hasSubPrivilege(user.permissions, "sales", "collection_submit");
+    const eligibleDeals = canSubmit
+      ? await prisma.$queryRaw<
+          { id: string; title: string; quoteNumber: string; currency: string; remaining: string }[]
+        >`
+          SELECT o."id",
+                 o."title",
+                 q."quoteNumber",
+                 q."currency",
+                 (q."grandTotal" - COALESCE(c.claimed, 0))::text AS remaining
+            FROM "Opportunity" o
+            JOIN LATERAL (
+              SELECT "id", "quoteNumber", "currency", "grandTotal"
+                FROM "Quote"
+               WHERE "opportunityId" = o."id" AND "status" = 'ACCEPTED'
+               ORDER BY "revision" DESC
+               LIMIT 1
+            ) q ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT SUM("amountGross") AS claimed
+                FROM "SalesCollection"
+               WHERE "opportunityId" = o."id"
+                 AND "status" IN ('APPROVED', 'PENDING_VERIFICATION')
+            ) c ON TRUE
+           WHERE (${seesAllSales(user.permissions)} OR o."ownerId" = ${user.id})
+             AND q."grandTotal" - COALESCE(c.claimed, 0) > 0
+           ORDER BY o."updatedAt" DESC
+           LIMIT 5
+        `
+      : [];
+
     return NextResponse.json({
       rows,
+      eligibleDeals,
       scope: scope.all ? "all" : "own",
       can: {
-        submit: hasSubPrivilege(user.permissions, "sales", "collection_submit"),
+        submit: canSubmit,
         verify: hasSubPrivilege(user.permissions, "commissions", "collection_verify"),
         reject: hasSubPrivilege(user.permissions, "commissions", "collection_reject"),
         reverse: hasSubPrivilege(user.permissions, "commissions", "collection_reverse"),

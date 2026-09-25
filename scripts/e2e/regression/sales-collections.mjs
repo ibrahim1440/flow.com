@@ -177,7 +177,7 @@ async function main() {
   await cleanup();
 
   // ── identities ────────────────────────────────────────────────────────────
-  const PIN = { repA: "920011", repB: "920022", fin: "920033", fin2: "920044", dual: "920055", none: "920066" };
+  const PIN = { repA: "920011", repB: "920022", fin: "920033", fin2: "920044", dual: "920055", none: "920066", stale: "920077" };
   const repPerms = {
     dashboard: { access: "edit" },
     sales: { access: "edit", sub: { lead_write: true, lead_convert: true, quote_write: true, collection_submit: true } },
@@ -185,7 +185,10 @@ async function main() {
   };
   const finPerms = {
     dashboard: { access: "edit" },
-    sales: { access: "view", sub: { collection_view_team: true } },
+    // No sales module, exactly like the deployed Finance role: they verify collections,
+    // they do not read the pipeline. The queue and the evidence are reached through
+    // `commissions` — if that ever regresses, C3 and D9 below stop passing.
+    sales: { access: "none" },
     commissions: {
       access: "edit",
       sub: { view_own: true, view_team: true, collection_verify: true, collection_reject: true, collection_reverse: true },
@@ -202,7 +205,14 @@ async function main() {
   };
   const ids = {
     repA: `${P}_rep_a`, repB: `${P}_rep_b`, fin: `${P}_fin`, fin2: `${P}_fin2`,
-    dual: `${P}_dual`, none: `${P}_none`,
+    dual: `${P}_dual`, none: `${P}_none`, stale: `${P}_stale`,
+  };
+  // A salesperson whose role predates the privilege — the exact shape of the reported
+  // defect. They can open the deal and see every figure; they just cannot record.
+  const stalePerms = {
+    dashboard: { access: "edit" },
+    sales: { access: "edit", sub: { lead_write: true, lead_convert: true, quote_write: true } },
+    commissions: { access: "view", sub: { view_own: true } },
   };
   await mkEmployee(ids.repA, `${P} Rep A`, PIN.repA, repPerms);
   await mkEmployee(ids.repB, `${P} Rep B`, PIN.repB, repPerms);
@@ -210,6 +220,7 @@ async function main() {
   await mkEmployee(ids.fin2, `${P} Finance Two`, PIN.fin2, finPerms);
   await mkEmployee(ids.dual, `${P} Both Hats`, PIN.dual, dualPerms);
   await mkEmployee(ids.none, `${P} No Access`, PIN.none, { dashboard: { access: "edit" } });
+  await mkEmployee(ids.stale, `${P} Stale Role`, PIN.stale, stalePerms);
 
   // ── stages, plan, deals ───────────────────────────────────────────────────
   const mkStage = (id, code, name, pos) =>
@@ -261,6 +272,7 @@ async function main() {
   const fin2 = await session().login(PIN.fin2);
   const dual = await session().login(PIN.dual);
   const none = await session().login(PIN.none);
+  const stale = await session().login(PIN.stale);
 
   const decide = (s, id, action, reason) =>
     s.api(`/api/sales/collections/${id}/actions`, {
@@ -774,7 +786,102 @@ async function main() {
     }
   }
 
-  sub("D6. every approved collection is stamped as a manual finance verification");
+  sub("D6. the server's own verdict on whether the action may be offered");
+  {
+    // The reported defect: a reviewer on their own Won deal, accepted quotation, 1,150.00
+    // outstanding, and no button — because their role predated `collection_submit`. The
+    // server was right; the screen just would not say so. These pin the verdict at each
+    // state, since every surface now renders whatever this returns.
+    const { oppId } = await mkDeal("t", ids.repA, 1150, 150);
+    const verdict = async (s, id = oppId) =>
+      (await s.api(`/api/sales/opportunities/${id}`)).json?.collectionAction;
+
+    const eligible = await verdict(repA);
+    check("the owner of an eligible deal is told the action is available",
+      eligible?.available === true && eligible?.reason === "OK", S(eligible));
+
+    const notMine = await verdict(repB);
+    check("another rep cannot even see the deal, so there is no verdict to give",
+      notMine === undefined, S(notMine));
+
+    // Finance holds no sales module at all, so the deal page is not theirs to open —
+    // there is no verdict because there is no screen. Deliberate: they verify collections,
+    // they do not read the pipeline.
+    const financeOnDeal = await fin.api(`/api/sales/opportunities/${oppId}`);
+    check("Finance cannot open a deal page at all, holding no sales module",
+      financeOnDeal.status === 403, String(financeOnDeal.status));
+
+    // The reported case, reproduced exactly: a salesperson looking at their OWN deal, with
+    // an accepted quotation and a balance outstanding, whose role predates the privilege.
+    const { oppId: staleDeal } = await mkDeal("v", ids.stale, 1150, 150);
+    const noPriv = await verdict(stale, staleDeal);
+    check("they can open their own deal and are given a verdict, not a blank",
+      noPriv !== undefined, S(noPriv));
+    check("the reason names the privilege, not the deal", noPriv?.reason === "NO_PRIVILEGE", S(noPriv));
+    const staleTry = await submit(stale, staleDeal, "100.00");
+    check("and the API refuses them too, so the screen was not the control",
+      staleTry.status === 403, `${staleTry.status} ${S(staleTry.json?.error).slice(0, 80)}`);
+
+    // 7. The button must go once there is nothing left to collect.
+    const whole = await submit(repA, oppId, "1150.00");
+    check("the owner can record the whole outstanding amount", whole.status === 201,
+      `${whole.status} ${S(whole.json?.error).slice(0, 90)}`);
+    const settled = await verdict(repA);
+    check("with the full amount pending, the action is withdrawn",
+      settled?.available === false && settled?.reason === "NOTHING_OUTSTANDING", S(settled));
+
+    await decide(fin, whole.json.collectionId, "approve");
+    const afterApproval = await verdict(repA);
+    check("and it stays withdrawn once approved",
+      afterApproval?.available === false && afterApproval?.reason === "NOTHING_OUTSTANDING",
+      S(afterApproval));
+
+    // 6. The API refuses regardless of what any screen decided to render.
+    const anyway = await submit(repA, oppId, "1.00");
+    check("and the API refuses a submission the screen would not have offered",
+      anyway.status === 409, `${anyway.status} ${S(anyway.json?.error).slice(0, 80)}`);
+
+    sub("D7. a deal with no accepted quotation reports that, not a privilege problem");
+    const bare = `${P}_opp_noquote`;
+    await c.query(
+      `INSERT INTO "Opportunity" (id,title,"customerId","stageId",outcome,amount,currency,probability,"ownerId","createdAt","updatedAt")
+       VALUES ($1,$2,$3,$4,'OPEN',900,'SAR',50,$5,now(),now())`,
+      [bare, `${P} Deal NoQuote`, custId, `${P}_stage_new`, ids.repA]);
+    const noDoc = await verdict(repA, bare);
+    check("the reason is the missing document", noDoc?.reason === "NO_ACCEPTED_DOCUMENT", S(noDoc));
+
+    sub("D8. partial then remainder, both offered and both accepted");
+    const { oppId: part } = await mkDeal("u", ids.repA, 1150, 150);
+    const first = await submit(repA, part, "400.00");
+    check("a partial amount is accepted", first.status === 201, String(first.status));
+    await decide(fin, first.json.collectionId, "approve");
+    const midway = await verdict(repA, part);
+    check("the action is still offered while a balance remains",
+      midway?.available === true, S(midway));
+    const rest = await submit(repA, part, "750.00");
+    check("and the remainder is accepted", rest.status === 201,
+      `${rest.status} ${S(rest.json?.error).slice(0, 80)}`);
+    const done = await verdict(repA, part);
+    check("after which it is withdrawn", done?.reason === "NOTHING_OUTSTANDING", S(done));
+
+    sub("D9. the empty state's eligible-deal list is scoped, and needs the privilege");
+    const mine = await repA.api("/api/sales/collections");
+    const theirs = await repB.api("/api/sales/collections");
+    const financeList = await fin.api("/api/sales/collections");
+    const ids_ = (r) => (r.json?.eligibleDeals ?? []).map((d) => d.id);
+    check("a rep is offered only their own eligible deals",
+      ids_(mine).every((id) => id.startsWith(P)) &&
+      !ids_(mine).some((id) => id === `${P}_opp_j`), S(ids_(mine)).slice(0, 120));
+    check("rep B is not offered rep A's deals",
+      !ids_(theirs).some((id) => ids_(mine).includes(id)), S(ids_(theirs)).slice(0, 120));
+    check("Finance holds no submit privilege, so it is offered none at all",
+      ids_(financeList).length === 0, S(ids_(financeList)).slice(0, 120));
+    check("and Finance can still read the queue despite holding no sales module",
+      financeList.status === 200 && financeList.json?.scope === "all",
+      `${financeList.status} ${S(financeList.json?.scope)}`);
+  }
+
+  sub("D10. every approved collection is stamped as a manual finance verification");
   {
     const rows = await q(
       `SELECT DISTINCT "sourceSystem" FROM "CollectionEvent"

@@ -103,6 +103,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [stages, setStages] = useState<Stage[]>([]);
   const [collections, setCollections] = useState<CollectionRow[]>([]);
   const [collectionSummary, setCollectionSummary] = useState<Summary | null>(null);
+  // The server's verdict on whether this person may record a collection here, and if not
+  // why. Not derived on the client: see `collectionAction` in services/sales/collections.
+  const [collectionAction, setCollectionAction] =
+    useState<{ available: boolean; reason: string }>({ available: false, reason: "NO_PRIVILEGE" });
   const [can, setCan] = useState<Can | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -128,6 +132,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       const res = await api<{
         deal: Deal; stages: Stage[]; can: Can;
         collections: CollectionRow[]; collectionSummary: Summary;
+        collectionAction: { available: boolean; reason: string };
       }>(`/api/sales/opportunities/${id}`);
       if (cancelled) return;
       if (res.ok) {
@@ -136,6 +141,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         setCan(res.data.can);
         setCollections(res.data.collections ?? []);
         setCollectionSummary(res.data.collectionSummary ?? null);
+        setCollectionAction(res.data.collectionAction ?? { available: false, reason: "NO_PRIVILEGE" });
         setError("");
       } else {
         setError(res.data.error ?? (ar ? "تعذّر تحميل الصفقة." : "Could not load the deal."));
@@ -479,7 +485,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               lang={lang}
               summary={collectionSummary}
               rows={collections}
-              canSubmit={!!can.submitCollection}
+              action={collectionAction}
               onChanged={reload}
             />
           )}

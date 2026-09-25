@@ -526,3 +526,45 @@ export async function reverseCollection(
     commission: outcomes.map((o) => ({ employeeId: o.employeeId, amount: o.delta.toFixed(2) })),
   };
 }
+
+/**
+ * ── Whether this person may record a collection on this deal, right now, and if not why ──
+ *
+ * One function, called by every surface that offers the action, because the alternative is
+ * each screen re-deriving the rule from a privilege flag and a couple of amounts. That is
+ * how the button came to be missing in the first place: the panel asked only "does the
+ * caller hold the privilege, and is there a document?", so a reviewer whose role predated
+ * the privilege got a blank space with nothing to read.
+ *
+ * This is NOT the authorisation boundary. `POST /api/sales/collections` re-checks ownership
+ * and re-derives every amount behind a row lock, and refuses regardless of what any screen
+ * decided to render. This exists so the screen can say the true reason instead of hiding.
+ */
+export type CollectionActionReason =
+  | "OK"
+  | "NO_PRIVILEGE"
+  | "NOT_YOUR_DEAL"
+  | "NO_ACCEPTED_DOCUMENT"
+  | "NOTHING_OUTSTANDING";
+
+export type CollectionAction = { available: boolean; reason: CollectionActionReason };
+
+export function collectionAction(input: {
+  hasSubmitPrivilege: boolean;
+  /** True when the caller owns the deal, or holds a scope that covers other people's. */
+  inScope: boolean;
+  summary: Pick<CollectionSummary, "document" | "remainingGross">;
+}): CollectionAction {
+  // Ordered most-fundamental first, so the reason a person is shown is the one they would
+  // have to fix first. Telling a rep "nothing outstanding" when they also lack the
+  // privilege sends them to the wrong conversation.
+  if (!input.hasSubmitPrivilege) return { available: false, reason: "NO_PRIVILEGE" };
+  if (!input.inScope) return { available: false, reason: "NOT_YOUR_DEAL" };
+  // A rejected, superseded or expired quotation is not an eligible document, and neither is
+  // no quotation at all. `eligibleDocument` already made that judgement.
+  if (!input.summary.document) return { available: false, reason: "NO_ACCEPTED_DOCUMENT" };
+  if (input.summary.remainingGross.lessThanOrEqualTo(0)) {
+    return { available: false, reason: "NOTHING_OUTSTANDING" };
+  }
+  return { available: true, reason: "OK" };
+}

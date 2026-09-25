@@ -4,7 +4,7 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
-import { collectionSummary } from "@/lib/services/sales/collections";
+import { collectionSummary, collectionAction } from "@/lib/services/sales/collections";
 import { serialiseSummary } from "@/app/api/sales/collections/route";
 import { Decimal } from "@/lib/services/commissions/engine";
 
@@ -123,11 +123,23 @@ export async function GET(_request: Request, { params }: Params) {
       },
     });
 
+    const summary = await collectionSummary(prisma, id);
+
     return NextResponse.json({
       deal,
       stages,
       collections,
-      collectionSummary: serialiseSummary(await collectionSummary(prisma, id)),
+      collectionSummary: serialiseSummary(summary),
+      // The verdict, not the ingredients. The panel used to be handed a privilege flag and
+      // left to work the rest out, which is how a reviewer whose role predated the privilege
+      // got a blank space instead of a reason.
+      collectionAction: collectionAction({
+        hasSubmitPrivilege: hasSubPrivilege(user.permissions, "sales", "collection_submit"),
+        // The deal was already fetched under the caller's scope — an out-of-scope deal 404s
+        // above and never reaches here — so anything visible at this point is in scope.
+        inScope: true,
+        summary,
+      }),
       can: {
         write: hasSubPrivilege(user.permissions, "sales", "lead_write"),
         close: hasSubPrivilege(user.permissions, "sales", "deal_close"),

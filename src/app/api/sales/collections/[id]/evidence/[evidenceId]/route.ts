@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule } from "@/lib/auth-server";
+import { requireAnyModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { collectionWhere } from "@/lib/services/sales/scope";
 import { evidenceHeaders } from "@/lib/services/sales/evidence";
@@ -25,7 +25,8 @@ type Params = { params: Promise<{ id: string; evidenceId: string }> };
  *   a cached copy in a shared proxy is a receipt with no access control in front of it.
  */
 export async function GET(_request: Request, { params }: Params) {
-  const { user, error } = await requireModule("sales");
+  // Finance holds no sales module, and cannot verify a receipt they cannot open.
+  const { user, error } = await requireAnyModule("sales", "commissions");
   if (error) return error;
 
   const { id, evidenceId } = await params;
