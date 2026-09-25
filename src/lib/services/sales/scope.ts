@@ -36,3 +36,40 @@ export function ownerScope(
  * salesperson enumerates the pipeline one id at a time.
  */
 export const NOT_FOUND_MESSAGE = "Not found.";
+
+/**
+ * Who may see which collections.
+ *
+ * Three widening rings, and the order matters:
+ *
+ *   Finance    — anyone who can verify, refuse or reverse must see the whole queue, because
+ *                a queue you cannot see is a queue you cannot work.
+ *   Team       — `collection_view_team`, or the existing all-sales privilege. A manager who
+ *                can already read every deal can read the money against them.
+ *   Own        — everybody else sees what they themselves submitted, and nothing more.
+ *
+ * Deliberately NOT "the deals I own": a rep who is reassigned a deal should not thereby
+ * gain the history of somebody else's receipts against it, and a rep whose deal is
+ * reassigned away should not lose sight of what they themselves recorded.
+ */
+export function collectionScope(
+  permissions: Permissions | Record<string, unknown>,
+  userId: string,
+): { all: true } | { all: false; submittedById: string } {
+  const p = permissions as Permissions;
+  const finance =
+    hasSubPrivilege(p, "commissions", "collection_verify") ||
+    hasSubPrivilege(p, "commissions", "collection_reject") ||
+    hasSubPrivilege(p, "commissions", "collection_reverse");
+  const team = hasSubPrivilege(p, "sales", "collection_view_team") || seesAllSales(p);
+  return finance || team ? { all: true } : { all: false, submittedById: userId };
+}
+
+/** The Prisma `where` fragment for the above. */
+export function collectionWhere(
+  permissions: Permissions | Record<string, unknown>,
+  userId: string,
+): { submittedById?: string } {
+  const scope = collectionScope(permissions, userId);
+  return scope.all ? {} : { submittedById: scope.submittedById };
+}

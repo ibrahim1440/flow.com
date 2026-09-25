@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
+import {
+  ACTIVITY_OUTCOMES, qualifies, qualifyLeadFromActivity, markLeadNotInterested,
+} from "@/lib/services/sales/qualification";
 import { seesAllSales } from "@/lib/services/sales/scope";
 
 const TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP"];
@@ -124,6 +127,20 @@ export async function POST(request: Request) {
   if (!type) {
     return NextResponse.json({ error: "type must be one of: " + TYPES.join(", ") }, { status: 400 });
   }
+  // The outcome is what the automation reads. Optional, because an activity logged before
+  // outcomes existed had none and a caller that does not care about qualification should
+  // not be forced to invent one.
+  const outcome =
+    typeof b.outcome === "string" && (ACTIVITY_OUTCOMES as string[]).includes(b.outcome)
+      ? (b.outcome as string)
+      : null;
+  if (b.outcome !== undefined && b.outcome !== null && !outcome) {
+    return NextResponse.json(
+      { error: "outcome must be one of: " + ACTIVITY_OUTCOMES.join(", ") },
+      { status: 400 },
+    );
+  }
+
   const subject = typeof b.subject === "string" ? b.subject.trim() : "";
   if (subject.length < 2) {
     return NextResponse.json({ error: "An activity needs a subject." }, { status: 400 });
@@ -172,26 +189,57 @@ export async function POST(request: Request) {
       customerId = customerId ?? deal.customerId;
     }
 
-    const activity = await prisma.activity.create({
-      data: {
-        type: type as never,
-        subject,
-        body: typeof b.body === "string" ? b.body.trim() || null : null,
-        leadId,
-        opportunityId,
-        customerId,
-        dueAt,
-        // Completing at creation is the ordinary case for a call that just happened.
-        completedAt: b.completed === true ? new Date() : null,
-        // Never taken from the request. The person logging the call owns the record of it.
-        ownerId: user.id,
-      },
-      select: {
-        id: true, type: true, subject: true, dueAt: true, completedAt: true, createdAt: true,
-      },
-    });
+    // The activity and whatever it triggers are ONE transaction. A qualification that
+    // half-committed — a deal with no activity explaining it, or an activity claiming a
+    // meeting with no deal — is worse than either failing.
+    const result = await prisma.$transaction(async (tx) => {
+      const activity = await tx.activity.create({
+        data: {
+          type: type as never,
+          subject,
+          outcome: outcome as never,
+          body: typeof b.body === "string" ? b.body.trim() || null : null,
+          leadId,
+          opportunityId,
+          customerId,
+          dueAt,
+          // Completing at creation is the ordinary case for a call that just happened.
+          completedAt: b.completed === true ? new Date() : null,
+          // Never taken from the request. The person logging the call owns the record of it.
+          ownerId: user.id,
+        },
+        select: {
+          id: true, type: true, subject: true, outcome: true,
+          dueAt: true, completedAt: true, createdAt: true,
+        },
+      });
 
-    return NextResponse.json({ activity }, { status: 201 });
+      // ── The lifecycle ────────────────────────────────────────────────────────────
+      // Only ever from a LEAD. An activity logged against a deal that already exists has
+      // nothing to qualify, and "not interested" on a live deal is not a reason to close
+      // it — losing a deal is an explicit act with a required reason and its own control.
+      let qualification = null;
+      if (leadId && qualifies(outcome)) {
+        qualification = await qualifyLeadFromActivity(tx, {
+          leadId,
+          activityId: activity.id,
+          outcome,
+          actorId: user.id,
+        });
+      } else if (leadId && outcome === "NOT_INTERESTED") {
+        await markLeadNotInterested(tx, {
+          leadId,
+          reason: typeof b.body === "string" ? b.body : null,
+          actorId: user.id,
+        });
+      }
+
+      return { activity, qualification };
+    }, TX_OPTS);
+
+    // The opportunity comes back so the screen can offer "Open deal" instead of making the
+    // person go and look for what just appeared.
+    return NextResponse.json(result, { status: 201 });
   } catch (err) {
     return handleDomainError(err);
   }

@@ -73,6 +73,11 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "quote_write", label: "Create / edit quotations" },
     { key: "quote_approve_discount", label: "Approve a discount above the threshold" },
     { key: "stage_manage", label: "Configure pipeline stages" },
+    // Collections. Submitting one is a selling act and lives here; DECIDING one is a
+    // finance duty and lives under commissions, which is what stops a rep who can record a
+    // receipt from also being able to bless it.
+    { key: "collection_submit", label: "Record a collection against an owned deal" },
+    { key: "collection_view_team", label: "See the team's collections, not only my own" },
   ],
   // Fine-grained on purpose: every key below decides either what somebody is paid or who
   // gets to see it, and "manage_plans" in particular must never fall to the person the
@@ -84,6 +89,16 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "approve", label: "Approve accrued commission" },
     { key: "record_payout", label: "Record a commission payout" },
     { key: "sandbox_collections", label: "Record sandbox collection events (non-production only)" },
+    // The finance duty. Approve and refuse are separate keys because they are separate
+    // abilities; a deployment will normally grant them together, and granting only one is
+    // an unusual but coherent configuration rather than a broken state.
+    //
+    // Reversal is its own key and a stronger one: it undoes a figure somebody has already
+    // been told they earned, and it is the only act in the module that makes a commission
+    // go backwards.
+    { key: "collection_verify", label: "Verify a recorded collection (this is what creates commission)" },
+    { key: "collection_reject", label: "Reject a recorded collection" },
+    { key: "collection_reverse", label: "Reverse an approved collection" },
   ],
   inventory: [
     { key: "receive", label: "Receive new beans" },

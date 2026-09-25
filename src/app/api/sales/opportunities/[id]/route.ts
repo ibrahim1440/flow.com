@@ -3,7 +3,9 @@ import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { collectionSummary } from "@/lib/services/sales/collections";
+import { serialiseSummary } from "@/app/api/sales/collections/route";
 import { Decimal } from "@/lib/services/commissions/engine";
 
 type Params = { params: Promise<{ id: string }> };
@@ -97,9 +99,35 @@ export async function GET(_request: Request, { params }: Params) {
       orderBy: { position: "asc" },
     });
 
+    // The money against this deal. Computed rather than stored: a "collected so far"
+    // column and a list of collections are two things that can disagree, and the one
+    // people would believe is the one that is wrong.
+    const collections = await prisma.salesCollection.findMany({
+      where: { opportunityId: id, ...collectionWhere(user.permissions, user.id) },
+      orderBy: { submittedAt: "desc" },
+      select: {
+        id: true, status: true, amountGross: true, amountTax: true, amountNet: true,
+        currency: true, paymentMethod: true, collectedAt: true, referenceNumber: true,
+        submittedAt: true, decidedAt: true, decisionReason: true,
+        reversedAt: true, reversalReason: true,
+        submittedBy: { select: { id: true, name: true } },
+        decidedBy: { select: { id: true, name: true } },
+        _count: { select: { evidence: true } },
+        collectionEvent: {
+          select: {
+            accruals: {
+              select: { amount: true, status: true, employee: { select: { id: true, name: true } } },
+            },
+          },
+        },
+      },
+    });
+
     return NextResponse.json({
       deal,
       stages,
+      collections,
+      collectionSummary: serialiseSummary(await collectionSummary(prisma, id)),
       can: {
         write: hasSubPrivilege(user.permissions, "sales", "lead_write"),
         close: hasSubPrivilege(user.permissions, "sales", "deal_close"),
@@ -108,6 +136,10 @@ export async function GET(_request: Request, { params }: Params) {
         approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"),
         assign: seesAllSales(user.permissions),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
+        submitCollection: hasSubPrivilege(user.permissions, "sales", "collection_submit"),
+        verifyCollection: hasSubPrivilege(user.permissions, "commissions", "collection_verify"),
+        rejectCollection: hasSubPrivilege(user.permissions, "commissions", "collection_reject"),
+        reverseCollection: hasSubPrivilege(user.permissions, "commissions", "collection_reverse"),
       },
     });
   } catch (err) {

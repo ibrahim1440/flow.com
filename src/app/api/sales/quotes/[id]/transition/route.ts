@@ -4,6 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sales/lifecycle";
 import { issueQuote, decideQuote } from "@/lib/services/sales/quotes";
 
 type Params = { params: Promise<{ id: string }> };
@@ -53,11 +54,15 @@ export async function POST(request: Request, { params }: Params) {
     const result = await prisma.$transaction(async (tx) => {
       if (to === "ISSUED") {
         const issued = await issueQuote(tx, { quoteId: id, actorId: user.id, canApproveDiscount });
+        // Issuing a quotation IS the deal reaching the quotation stage. Leaving the board to
+        // be updated by hand is how a pipeline stops describing the work.
+        const advanced = await advanceToQuotationStage(tx, visible.opportunityId, user.id);
         return {
           status: "ISSUED",
           quoteNumber: issued.quoteNumber,
           grandTotal: issued.grandTotal.toFixed(2),
           discountApproved: issued.discountApproved,
+          stageAdvanced: advanced,
         };
       }
 
@@ -71,6 +76,15 @@ export async function POST(request: Request, { params }: Params) {
       // Accepting a quotation is what unlocks winning the deal, so the moment is recorded on
       // the deal's own timeline. Without it the pipeline history shows a deal that jumped to
       // Won with nothing in between.
+      //
+      // And then the deal IS won — in the same transaction, because a quotation the customer
+      // accepted and a deal still sitting open is a state nobody can act on and everybody
+      // has to reconcile by hand. The stage it was won ON is preserved: "lost at
+      // negotiation" and "lost at qualification" are different facts, and so are the wins.
+      //
+      // A REJECTED quotation deliberately does NOT close the deal. A revision may still be
+      // issued, and closing Lost stays an explicit act with a required reason.
+      let wonNow = false;
       if (to === "ACCEPTED") {
         await tx.opportunityStageEvent.create({
           data: {
@@ -79,9 +93,10 @@ export async function POST(request: Request, { params }: Params) {
             actorId: user.id,
           },
         });
+        wonNow = await winOnAcceptedQuote(tx, visible.opportunityId, user.id);
       }
 
-      return { status: decided.status };
+      return { status: decided.status, dealWon: wonNow };
     }, TX_OPTS);
 
     return NextResponse.json(result);
