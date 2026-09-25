@@ -47,6 +47,7 @@ type Collection = {
   opportunity: { id: string; title: string; ownerId: string } | null;
   quote: { id: string; quoteNumber: string } | null;
   _count: { evidence: number };
+  evidence?: Evidence[];
   collectionEvent: { accruals: Accrual[] } | null;
 };
 
@@ -58,11 +59,42 @@ type EligibleDeal = {
   remaining: string;
 };
 
+type Evidence = {
+  id: string; filename: string; mimeType: string; byteSize: number; uploadedAt: string;
+};
+
+type Ability = { allowed: boolean; reason: string };
+type RowDecision = { approve: Ability; reject: Ability; reverse: Ability };
+
+/**
+ * Why an action is not offered on a row, said out loud.
+ *
+ * The queue used to render an empty cell for every unavailable action, so a manager
+ * correctly without approval rights, a Finance user whose privileges had not been granted,
+ * and a Finance user correctly refused their own submission all looked the same.
+ */
+const WHY_NOT: Record<string, { ar: string; en: string }> = {
+  NO_PRIVILEGE: {
+    ar: "لا تملك صلاحية القرار المالي على التحصيلات.",
+    en: "You do not hold the finance decision privilege for collections.",
+  },
+  SELF_SUBMITTED: {
+    ar: "أنت من سجّل هذا التحصيل، فلا يمكنك اعتماده أو رفضه. يقرّره شخص آخر في المالية.",
+    en: "You recorded this collection, so you cannot decide it. Another member of Finance does.",
+  },
+  NOT_PENDING: { ar: "صدر القرار على هذا التحصيل بالفعل.", en: "This collection has already been decided." },
+  NOT_APPROVED: { ar: "العكس لا ينطبق إلا على تحصيل معتمَد.", en: "Only an approved collection can be reversed." },
+};
+
 type Payload = {
   rows: Collection[];
   /** Deals the caller could record against right now. Empty unless they may submit. */
   eligibleDeals?: EligibleDeal[];
   scope: "all" | "own";
+  /** Per row: the same person may decide one collection and be refused the next. */
+  decisions?: Record<string, RowDecision>;
+  /** What approving each pending row would be worth. An estimate, never a total. */
+  projectedCommission?: Record<string, string>;
   can: { submit: boolean; verify: boolean; reject: boolean; reverse: boolean };
 };
 
@@ -116,6 +148,8 @@ export default function CollectionsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [dialog, setDialog] = useState<{ kind: "reject" | "reverse"; row: Collection } | null>(null);
+  /** The row a reviewer has opened to look at properly before deciding. */
+  const [detail, setDetail] = useState<Collection | null>(null);
   const [reason, setReason] = useState("");
 
   /**
@@ -182,6 +216,38 @@ export default function CollectionsPage() {
 
   const rows = data.rows;
   const eligible = data.eligibleDeals ?? [];
+
+  /**
+   * The server's verdict for this row. Never recomputed here — the client does not get to
+   * decide who may approve, and a client that tried would be wrong the moment the rules
+   * changed on one side only.
+   *
+   * The fallback keeps an older payload rendering: no verdict means offer nothing, which is
+   * the safe direction.
+   */
+  const decisionFor = (r: Collection): RowDecision =>
+    data.decisions?.[r.id] ?? {
+      approve: { allowed: false, reason: "NO_PRIVILEGE" },
+      reject: { allowed: false, reason: "NO_PRIVILEGE" },
+      reverse: { allowed: false, reason: "NO_PRIVILEGE" },
+    };
+
+  /**
+   * The one reason worth printing beside a row, or null.
+   *
+   * Only for rows still open to a decision — a settled row needs no explanation for why it
+   * has no buttons — and only for reasons somebody can act on. NOT_PENDING and NOT_APPROVED
+   * are states the status badge already communicates.
+   */
+  function blockedReason(r: Collection): string | null {
+    const d = decisionFor(r);
+    const relevant = r.status === "PENDING_VERIFICATION" ? [d.approve, d.reject]
+      : r.status === "APPROVED" ? [d.reverse]
+        : [];
+    if (relevant.length === 0 || relevant.some((a) => a.allowed)) return null;
+    const reason = relevant.find((a) => a.reason === "SELF_SUBMITTED")?.reason ?? relevant[0].reason;
+    return WHY_NOT[reason] ? reason : null;
+  }
   const pending = rows.filter((r) => r.status === "PENDING_VERIFICATION");
   const approved = rows.filter((r) => r.status === "APPROVED");
   const sum = (list: Collection[], key: "amountGross" | "amountNet") =>
@@ -394,44 +460,62 @@ export default function CollectionsPage() {
                 </Td>
                 <Td>
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      onClick={() => setDetail(r)}
+                      data-testid={`open-${r.id}`}
+                      className={`${ROW_ACTION} text-oo-action-primary hover:border-oo-action-primary`}
+                    >
+                      {ar ? "فتح" : "Open"}
+                    </button>
                     {r._count.evidence > 0 && (
-                      <Link
-                        href={`/api/sales/collections/${r.id}/evidence`}
-                        className={`${ROW_ACTION} gap-1.5 text-oo-text-secondary hover:border-oo-action-primary`}
-                        data-testid={`evidence-${r.id}`}
+                      <span
+                        className="inline-flex items-center gap-1 text-[12px] leading-[18px] text-oo-text-muted"
+                        data-testid={`evidence-count-${r.id}`}
                       >
                         <Paperclip size={13} aria-hidden /> <Num>{r._count.evidence}</Num>
-                      </Link>
+                      </span>
                     )}
-                    {r.status === "PENDING_VERIFICATION" && data.can.verify && (
+                    {decisionFor(r).approve.allowed && (
                       <button
                         disabled={busy}
                         onClick={() => decide(r, "approve", "")}
                         data-testid={`approve-${r.id}`}
                         className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50"
                       >
-                        <Check size={14} aria-hidden /> {ar ? "اعتماد" : "Approve"}
+                        <Check size={14} aria-hidden /> {ar ? "اعتماد التحصيل" : "Approve collection"}
                       </button>
                     )}
-                    {r.status === "PENDING_VERIFICATION" && data.can.reject && (
+                    {decisionFor(r).reject.allowed && (
                       <button
                         disabled={busy}
                         onClick={() => { setDialog({ kind: "reject", row: r }); setReason(""); }}
                         data-testid={`reject-${r.id}`}
                         className={`${ROW_ACTION} text-oo-status-rejected hover:bg-oo-status-rejected-bg`}
                       >
-                        {ar ? "رفض" : "Reject"}
+                        {ar ? "رفض التحصيل" : "Reject collection"}
                       </button>
                     )}
-                    {r.status === "APPROVED" && data.can.reverse && (
+                    {decisionFor(r).reverse.allowed && (
                       <button
                         disabled={busy}
                         onClick={() => { setDialog({ kind: "reverse", row: r }); setReason(""); }}
                         data-testid={`reverse-${r.id}`}
                         className={`${ROW_ACTION} text-oo-status-rejected hover:bg-oo-status-rejected-bg`}
                       >
-                        {ar ? "عكس" : "Reverse"}
+                        {ar ? "عكس التحصيل" : "Reverse collection"}
                       </button>
+                    )}
+                    {/* Why there is no button, when the row is still open to a decision.
+                        An empty cell cannot distinguish "not your job", "not your
+                        privilege" and "you recorded this one". */}
+                    {blockedReason(r) && (
+                      <span
+                        data-testid={`decision-blocked-${r.id}`}
+                        data-reason={blockedReason(r)}
+                        className="text-[12px] leading-[18px] text-oo-status-hold"
+                      >
+                        {ar ? WHY_NOT[blockedReason(r)!].ar : WHY_NOT[blockedReason(r)!].en}
+                      </span>
                     )}
                   </div>
                 </Td>
@@ -503,6 +587,160 @@ export default function CollectionsPage() {
           <Field id="decision-reason" label={ar ? "السبب" : "Reason"} hint={ar ? "مطلوب." : "Required."}>
             <TextArea id="decision-reason" value={reason} onChange={setReason} rows={3} />
           </Field>
+        </Modal>
+      )}
+
+      {/* ── One collection, opened to be decided ────────────────────
+          Everything a finance decision rests on, in one place: what arrived, how much of
+          it is tax, what the commission is actually computed on, what approving would be
+          worth, and the evidence itself. Approving from a table row alone is approving a
+          figure nobody opened. */}
+      {detail && (
+        <Modal
+          title={ar ? "تفاصيل التحصيل" : "Collection detail"}
+          onClose={() => setDetail(null)}
+          testId="collection-detail"
+          footer={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" onClick={() => setDetail(null)}>
+                {ar ? "إغلاق" : "Close"}
+              </Button>
+              {decisionFor(detail).approve.allowed && (
+                <Button
+                  disabled={busy}
+                  testId="detail-approve"
+                  onClick={() => { const r = detail; setDetail(null); decide(r, "approve", ""); }}
+                >
+                  <Check size={15} aria-hidden /> {ar ? "اعتماد التحصيل" : "Approve collection"}
+                </Button>
+              )}
+              {decisionFor(detail).reject.allowed && (
+                <button
+                  disabled={busy}
+                  data-testid="detail-reject"
+                  onClick={() => { setDialog({ kind: "reject", row: detail }); setReason(""); setDetail(null); }}
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
+                >
+                  {ar ? "رفض التحصيل" : "Reject collection"}
+                </button>
+              )}
+              {decisionFor(detail).reverse.allowed && (
+                <button
+                  disabled={busy}
+                  data-testid="detail-reverse"
+                  onClick={() => { setDialog({ kind: "reverse", row: detail }); setReason(""); setDetail(null); }}
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
+                >
+                  <RotateCcw size={15} aria-hidden /> {ar ? "عكس التحصيل" : "Reverse collection"}
+                </button>
+              )}
+            </div>
+          }
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <StatusBadge status={detail.status} ar={ar} />
+            <span className="text-[12px] leading-[18px] text-oo-text-muted">
+              {[detail.opportunity?.title, detail.quote?.quoteNumber, detail.submittedBy?.name]
+                .filter(Boolean).join(" · ")}
+            </span>
+          </div>
+
+          <dl className="rounded-xl border border-oo-border-default" data-testid="detail-figures">
+            {[
+              [ar ? "المبلغ المستلم (إجمالي)" : "Amount received (gross)", detail.amountGross, "text-oo-text-primary"],
+              [ar ? "منه ضريبة" : "of which tax", detail.amountTax, "text-oo-text-secondary"],
+              [ar ? "الأساس الصافي للعمولة" : "Net basis for commission", detail.amountNet, "text-oo-action-primary"],
+            ].map(([label, value, tone], k) => (
+              <div
+                key={k}
+                className={`flex items-center justify-between gap-3 px-4 py-2.5 ${k > 0 ? "border-t border-oo-border-default" : ""}`}
+              >
+                <dt className="text-[13px] leading-[20px] text-oo-text-secondary">{label as string}</dt>
+                <dd className={`text-[13px] font-medium leading-[20px] ${tone as string}`}>
+                  <Money value={value as string} currency={detail.currency} />
+                </dd>
+              </div>
+            ))}
+            <div className="flex items-center justify-between gap-3 border-t border-oo-border-default px-4 py-2.5">
+              <dt className="text-[13px] leading-[20px] text-oo-text-secondary">
+                {detail.status === "PENDING_VERIFICATION"
+                  ? (ar ? "أثر العمولة عند الاعتماد" : "Commission effect if approved")
+                  : (ar ? "أثر العمولة" : "Commission effect")}
+              </dt>
+              <dd className="text-[13px] font-medium leading-[20px]" data-testid="detail-commission">
+                {detail.status === "PENDING_VERIFICATION" ? (
+                  data.projectedCommission?.[detail.id] ? (
+                    <span className="text-oo-status-hold">
+                      <Money value={data.projectedCommission[detail.id]} currency={detail.currency} />
+                      <span className="text-oo-text-muted">
+                        {" "}{ar ? "· تقدير، لا يدخل أي مجموع قبل الاعتماد" : "· estimate, in no total until approved"}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-oo-text-muted">{ar ? "لا خطة عمولة سارية" : "no active commission plan"}</span>
+                  )
+                ) : (detail.collectionEvent?.accruals ?? []).length === 0 ? (
+                  <span className="text-oo-text-muted">—</span>
+                ) : (
+                  (detail.collectionEvent?.accruals ?? []).map((a, k) => (
+                    <span key={k} className="block">
+                      <Money value={a.amount} currency={detail.currency} />
+                      <span className="text-oo-text-muted"> · {a.employee.name}</span>
+                    </span>
+                  ))
+                )}
+              </dd>
+            </div>
+          </dl>
+
+          {(detail.decisionReason || detail.reversalReason) && (
+            <p className="mt-3 rounded-xl bg-oo-bg-subtle px-4 py-2.5 text-[12px] leading-[18px] text-oo-text-secondary">
+              {detail.reversalReason ?? detail.decisionReason}
+            </p>
+          )}
+
+          <p className="mt-4 mb-1.5 text-[12px] font-medium leading-[18px] text-oo-text-secondary">
+            {ar ? "الإثبات" : "Evidence"}
+          </p>
+          {(detail.evidence ?? []).length === 0 ? (
+            <p className="text-[12px] leading-[18px] text-oo-text-muted" data-testid="detail-no-evidence">
+              {ar ? "لم يُرفق أي إثبات بهذا التحصيل." : "No evidence was attached to this collection."}
+            </p>
+          ) : (
+            <ul className="space-y-1.5" data-testid="detail-evidence">
+              {(detail.evidence ?? []).map((e) => (
+                <li key={e.id}>
+                  {/* The one route that returns the bytes. It re-checks the session and the
+                      same visibility rule, and answers as an attachment with no-store. */}
+                  <a
+                    href={`/api/sales/collections/${detail.id}/evidence/${e.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid={`detail-evidence-${e.id}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-oo-border-default px-3.5 py-2.5 transition-colors hover:border-oo-action-primary"
+                  >
+                    <span className="inline-flex items-center gap-1.5 text-[13px] leading-[20px] text-oo-action-primary">
+                      <Paperclip size={13} aria-hidden /> {e.filename}
+                    </span>
+                    <span className="text-[12px] leading-[18px] text-oo-text-muted">
+                      {e.mimeType} · <Num>{Math.max(1, Math.round(e.byteSize / 1024))}</Num>{" "}
+                      {ar ? "كيلوبايت" : "KB"}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {blockedReason(detail) && (
+            <p
+              data-testid="detail-blocked"
+              data-reason={blockedReason(detail)}
+              className="mt-4 rounded-xl border border-oo-status-waiting bg-oo-status-waiting-bg px-3.5 py-2.5 text-[12px] leading-[18px] text-oo-status-hold"
+            >
+              {ar ? WHY_NOT[blockedReason(detail)!].ar : WHY_NOT[blockedReason(detail)!].en}
+            </p>
+          )}
         </Modal>
       )}
     </div>

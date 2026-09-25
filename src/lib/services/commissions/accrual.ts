@@ -156,6 +156,16 @@ export async function recomputeEmployeePeriod(
    * view; the accrual write path always supplies one.
    */
   forEventId?: string,
+  /**
+   * Extra qualifying base to fold in before computing the target, WITHOUT it existing in
+   * the database. Used to answer "what would approving this pending collection be worth?"
+   * — the finance queue has to show that, and the only honest way to say it is to run the
+   * same tiering against the same period rather than multiplying by a headline rate.
+   *
+   * Read-only either way: this function never writes, and with a projection the caller is
+   * expected to discard everything but the figure.
+   */
+  projectedExtraBase?: PrismaNS.Decimal,
 ): Promise<AccrualOutcome | null> {
   const periodStart = riyadhMonthStart(at);
   const periodEnd = riyadhMonthEnd(at);
@@ -207,6 +217,7 @@ export async function recomputeEmployeePeriod(
     }
   }
   cumulativeBase = roundMoney(cumulativeBase);
+  if (projectedExtraBase) cumulativeBase = roundMoney(cumulativeBase.plus(projectedExtraBase));
 
   const { amount: targetAmount, effectiveRatePercent } = commissionOnCumulativeBase(cumulativeBase, rules);
 
@@ -473,4 +484,30 @@ export async function periodStatement(
     paid,
     outstanding: roundMoney(accrued.plus(adjustments).minus(paid)),
   };
+}
+
+/**
+ * What approving a still-pending collection would be worth to one employee, right now.
+ *
+ * The finance queue has to show this: "approve" is the act that creates commission, and
+ * asking somebody to authorise a payment without telling them its size is asking them to
+ * sign a blank cheque. It is a PROJECTION — nothing is written, and the figure moves if
+ * another collection in the same period is approved first, which is exactly why it is
+ * computed against the live period rather than cached.
+ *
+ * Correct under tiering, because it runs the real engine over the real period twice and
+ * takes the difference. A headline rate times the net would be wrong the moment a tier
+ * boundary fell between the two.
+ */
+export async function projectedCommissionFor(
+  tx: Tx,
+  employeeId: string,
+  at: Date,
+  extraBase: PrismaNS.Decimal,
+): Promise<PrismaNS.Decimal | null> {
+  const before = await recomputeEmployeePeriod(tx, employeeId, at, null);
+  if (!before) return null;
+  const after = await recomputeEmployeePeriod(tx, employeeId, at, null, undefined, extraBase);
+  if (!after) return null;
+  return roundMoney(after.targetAmount.minus(before.targetAmount));
 }

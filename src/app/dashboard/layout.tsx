@@ -8,7 +8,23 @@ import { LanguageProvider, useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { UserContext, useLogo, type User } from "./user-context";
 
-const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; module?: string; sub?: string }[] = [
+/**
+ * `alsoIf` is a second way in, for a screen that legitimately belongs to two audiences.
+ *
+ * Collections is the only one so far and is the reason this exists: it lives under Sales
+ * because that is where a salesperson records one, but the people who APPROVE them are
+ * Finance, and the Finance role deliberately holds no sales module at all so it cannot
+ * read the pipeline. Gated on `sales` alone, the verification queue was invisible to the
+ * only people who can act on it — reachable by typing the URL and by nothing else.
+ *
+ * Deliberately a privilege and not a role name: it admits whoever holds the ability,
+ * which is the same rule the API applies.
+ */
+const NAV_ITEMS: {
+  key: TranslationKey; icon: React.ElementType; href: string;
+  module?: string; sub?: string;
+  alsoIf?: { module: string; sub: string }[];
+}[] = [
   { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },
   { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
   { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
@@ -20,7 +36,12 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   // Sales sees its own collections; Finance sees the verification queue. Same route, and
   // the page decides which of the two it is from the caller's privileges — a second URL
   // for the same records is a second place for the scoping rule to be got wrong.
-  { key: "collectionsNav", icon: Wallet,      href: "/dashboard/sales/collections", module: "sales" },
+  { key: "collectionsNav", icon: Wallet,      href: "/dashboard/sales/collections", module: "sales",
+    alsoIf: [
+      { module: "commissions", sub: "collection_verify" },
+      { module: "commissions", sub: "collection_reject" },
+      { module: "commissions", sub: "collection_reverse" },
+    ] },
   { key: "salesTargetsNav", icon: Target,     href: "/dashboard/sales/targets", module: "sales" },
   { key: "salesReportsNav", icon: BarChart3,  href: "/dashboard/sales/reports", module: "sales" },
   { key: "salesSettingsNav", icon: KanbanSquare, href: "/dashboard/sales/settings", module: "sales", sub: "stage_manage" },
@@ -68,7 +89,13 @@ function SidebarNav({
     if (item.key === "settings" && user.role !== "admin") return false;
     // `module` lets a nav item piggyback on a different permission key (e.g. purchases → inventory)
     const mod = item.module ?? (item.key as string);
-    if (!hasModuleAccess(user.permissions, mod)) return false;
+    const viaAlternate = (item.alsoIf ?? []).some(
+      (a) => hasModuleAccess(user.permissions, a.module) && hasSubPrivilege(user.permissions, a.module, a.sub),
+    );
+    if (!hasModuleAccess(user.permissions, mod) && !viaAlternate) return false;
+    // Admitted by an ability rather than by the module, so the `sub` below — which
+    // belongs to the primary module — must not also be demanded of them.
+    if (viaAlternate) return true;
     // `sub` hides an administrative screen from everybody who could not use it. The screen
     // and its API check the same privilege; this only avoids showing a door that will not open.
     if (item.sub && !hasSubPrivilege(user.permissions, mod, item.sub)) return false;

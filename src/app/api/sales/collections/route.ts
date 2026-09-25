@@ -6,7 +6,9 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Decimal } from "@/lib/services/commissions/engine";
 import {
   submitCollection, collectionSummary, PAYMENT_METHODS, type PaymentMethodValue,
+  collectionDecisionAbility,
 } from "@/lib/services/sales/collections";
+import { projectedCommissionFor } from "@/lib/services/commissions/accrual";
 import { collectionScope, collectionWhere, seesAllSales } from "@/lib/services/sales/scope";
 
 /**
@@ -54,6 +56,10 @@ export async function GET(request: Request) {
         opportunity: { select: { id: true, title: true, ownerId: true } },
         quote: { select: { id: true, quoteNumber: true } },
         _count: { select: { evidence: true } },
+        evidence: {
+          orderBy: { uploadedAt: "asc" },
+          select: { id: true, filename: true, mimeType: true, byteSize: true, uploadedAt: true },
+        },
         // The commission this collection actually produced. Read from the accruals against
         // its event rather than recomputed here, so the screen cannot disagree with the
         // ledger it is describing.
@@ -69,6 +75,46 @@ export async function GET(request: Request) {
         },
       },
     });
+
+    const canVerify = hasSubPrivilege(user.permissions, "commissions", "collection_verify");
+    const canReject = hasSubPrivilege(user.permissions, "commissions", "collection_reject");
+    const canReverse = hasSubPrivilege(user.permissions, "commissions", "collection_reverse");
+
+    // Per row, because the answer is per row: the same Finance user may approve one
+    // collection and be refused the next because they recorded it themselves.
+    const decisions: Record<string, ReturnType<typeof collectionDecisionAbility>> = {};
+    for (const r of rows) {
+      decisions[r.id] = collectionDecisionAbility({
+        status: r.status,
+        submittedById: r.submittedBy?.id ?? "",
+        actorId: user.id,
+        canVerify, canReject, canReverse,
+      });
+    }
+
+    // What approving each pending collection would actually be worth. Asking somebody to
+    // authorise a payment without telling them its size is asking them to sign a blank
+    // cheque, so the queue shows it — computed against the live period through the real
+    // engine, and labelled an estimate because another approval in the same period moves it.
+    //
+    // Only for the people who can act on it, and only for rows still awaiting a decision.
+    const projected: Record<string, string> = {};
+    if (canVerify || canReject) {
+      for (const r of rows) {
+        if (r.status !== "PENDING_VERIFICATION") continue;
+        const ownerId = r.opportunity?.ownerId;
+        if (!ownerId) continue;
+        try {
+          const amount = await projectedCommissionFor(
+            prisma, ownerId, r.collectedAt, new Decimal(r.amountNet.toString()),
+          );
+          if (amount) projected[r.id] = amount.toFixed(2);
+        } catch {
+          // A projection is a courtesy. If it cannot be computed — no plan assigned, say —
+          // the queue simply does not show one; it must never stop Finance deciding.
+        }
+      }
+    }
 
     // Deals this caller could record against right now. Only needed to make the empty
     // state actionable — "there is nothing here" is true but useless if the reason is that
@@ -108,14 +154,11 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       rows,
+      decisions,
+      projectedCommission: projected,
       eligibleDeals,
       scope: scope.all ? "all" : "own",
-      can: {
-        submit: canSubmit,
-        verify: hasSubPrivilege(user.permissions, "commissions", "collection_verify"),
-        reject: hasSubPrivilege(user.permissions, "commissions", "collection_reject"),
-        reverse: hasSubPrivilege(user.permissions, "commissions", "collection_reverse"),
-      },
+      can: { submit: canSubmit, verify: canVerify, reject: canReject, reverse: canReverse },
     });
   } catch (err) {
     return handleDomainError(err);

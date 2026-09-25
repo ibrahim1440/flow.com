@@ -387,6 +387,55 @@ export const ROUTES = {
       },
     },
   },
+  // ── The verification queue as three different people ────────────────────
+  // Finance could not approve, and the screen said nothing about why. These pin what each
+  // audience sees on the SAME pending collection: the decision verdict comes from the
+  // server per row, so a fixture is exactly the shape the real payload has.
+  ...(() => {
+    const pending = collection("scq", "PENDING_VERIFICATION", "575.00", "75.00", "500.00", {
+      ref: "TRF-90021", evidence: 1,
+    });
+    pending.evidence = [{
+      id: "ev1", filename: "receipt.pdf", mimeType: "application/pdf",
+      byteSize: 41231, uploadedAt: "2026-09-24T09:00:00.000Z",
+    }];
+    const queue = (can, decisions, extra = {}) => ({
+      screen: "collections",
+      api: {
+        "/api/sales/collections": {
+          body: {
+            rows: [pending],
+            scope: "all",
+            can,
+            decisions: { scq: decisions },
+            ...extra,
+          },
+        },
+      },
+    });
+    const no = (reason) => ({ allowed: false, reason });
+    const yes = { allowed: true, reason: "OK" };
+    return {
+      // Finance: both decisions offered, and the commission the approval would create.
+      "sales-collections-finance": queue(
+        { submit: false, verify: true, reject: true, reverse: true },
+        { approve: yes, reject: yes, reverse: no("NOT_APPROVED") },
+        { projectedCommission: { scq: "5.00" } },
+      ),
+      // A sales manager: sees the row, holds no financial decision, and is told so.
+      "sales-collections-manager": queue(
+        { submit: true, verify: false, reject: false, reverse: false },
+        { approve: no("NO_PRIVILEGE"), reject: no("NO_PRIVILEGE"), reverse: no("NO_PRIVILEGE") },
+      ),
+      // Finance looking at a collection they recorded themselves.
+      "sales-collections-self": queue(
+        { submit: true, verify: true, reject: true, reverse: true },
+        { approve: no("SELF_SUBMITTED"), reject: no("SELF_SUBMITTED"), reverse: no("SELF_SUBMITTED") },
+        { projectedCommission: { scq: "5.00" } },
+      ),
+    };
+  })(),
+
   "sales-collections": {
     screen: "collections",
     api: {

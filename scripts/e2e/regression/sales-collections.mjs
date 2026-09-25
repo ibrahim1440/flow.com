@@ -177,7 +177,7 @@ async function main() {
   await cleanup();
 
   // ── identities ────────────────────────────────────────────────────────────
-  const PIN = { repA: "920011", repB: "920022", fin: "920033", fin2: "920044", dual: "920055", none: "920066", stale: "920077" };
+  const PIN = { repA: "920011", repB: "920022", fin: "920033", fin2: "920044", dual: "920055", none: "920066", stale: "920077", mgr: "920088" };
   const repPerms = {
     dashboard: { access: "edit" },
     sales: { access: "edit", sub: { lead_write: true, lead_convert: true, quote_write: true, collection_submit: true } },
@@ -205,7 +205,7 @@ async function main() {
   };
   const ids = {
     repA: `${P}_rep_a`, repB: `${P}_rep_b`, fin: `${P}_fin`, fin2: `${P}_fin2`,
-    dual: `${P}_dual`, none: `${P}_none`, stale: `${P}_stale`,
+    dual: `${P}_dual`, none: `${P}_none`, stale: `${P}_stale`, mgr: `${P}_mgr`,
   };
   // A salesperson whose role predates the privilege — the exact shape of the reported
   // defect. They can open the deal and see every figure; they just cannot record.
@@ -221,6 +221,13 @@ async function main() {
   await mkEmployee(ids.dual, `${P} Both Hats`, PIN.dual, dualPerms);
   await mkEmployee(ids.none, `${P} No Access`, PIN.none, { dashboard: { access: "edit" } });
   await mkEmployee(ids.stale, `${P} Stale Role`, PIN.stale, stalePerms);
+  // A sales manager: sees the team's collections, and holds NO financial decision. The
+  // separation the whole design rests on — seeing is not deciding.
+  await mkEmployee(ids.mgr, `${P} Manager`, PIN.mgr, {
+    dashboard: { access: "edit" },
+    sales: { access: "edit", sub: { lead_write: true, quote_write: true, collection_submit: true, collection_view_team: true } },
+    commissions: { access: "edit", sub: { view_own: true, view_team: true, manage_plans: true } },
+  });
 
   // ── stages, plan, deals ───────────────────────────────────────────────────
   const mkStage = (id, code, name, pos) =>
@@ -273,6 +280,7 @@ async function main() {
   const dual = await session().login(PIN.dual);
   const none = await session().login(PIN.none);
   const stale = await session().login(PIN.stale);
+  const mgr = await session().login(PIN.mgr);
 
   const decide = (s, id, action, reason) =>
     s.api(`/api/sales/collections/${id}/actions`, {
@@ -879,6 +887,173 @@ async function main() {
     check("and Finance can still read the queue despite holding no sales module",
       financeList.status === 200 && financeList.json?.scope === "all",
       `${financeList.status} ${S(financeList.json?.scope)}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  section("E — THE APPROVAL WORKFLOW, THROUGH THREE SEPARATE IDENTITIES");
+  //
+  // Reported: Finance could not approve. Two causes, and only one of them was a privilege.
+  // The Finance role holds no sales module by design, so the queue — which lives under
+  // Sales — had no nav entry for them and no way in but typing the URL; and every
+  // unavailable action rendered as an empty cell, so "no privilege", "not your job" and
+  // "you recorded this one" were indistinguishable. This walks the whole story with a rep,
+  // a manager and a finance user who are three different people.
+
+  sub("E1. the rep submits");
+  let storyId = null;
+  {
+    const { oppId } = await mkDeal("w", ids.repA, 575, 75);
+    const r = await submit(repA, oppId, "575.00");
+    check("the rep records 575.00", r.status === 201, `${r.status} ${S(r.json?.error).slice(0, 90)}`);
+    storyId = r.json.collectionId;
+    check("the server derives the 75.00 tax", r.json?.amountTax === "75.00", S(r.json?.amountTax));
+    check("and the 500.00 net basis", r.json?.amountNet === "500.00", S(r.json?.amountNet));
+    const row = await one(`SELECT status::text AS status FROM "SalesCollection" WHERE id=$1`, [storyId]);
+    check("it is awaiting verification", row.status === "PENDING_VERIFICATION", row.status);
+  }
+
+  const decisionOf = async (s, id) =>
+    (await s.api("/api/sales/collections")).json?.decisions?.[id];
+
+  sub("E2. the manager sees it and cannot decide it");
+  {
+    const list = await mgr.api("/api/sales/collections");
+    const seen = (list.json?.rows ?? []).find((r) => r.id === storyId);
+    check("the manager can see the collection", Boolean(seen), "not in their list");
+    check("their scope is the whole team", list.json?.scope === "all", S(list.json?.scope));
+    check("and the server offers them no decision",
+      list.json?.can?.verify === false && list.json?.can?.reject === false, S(list.json?.can));
+    const d = list.json?.decisions?.[storyId];
+    check("the per-row verdict says why: no privilege",
+      d?.approve?.allowed === false && d.approve.reason === "NO_PRIVILEGE", S(d?.approve));
+    const tried = await decide(mgr, storyId, "approve");
+    check("and the API refuses them", tried.status === 403, `${tried.status} ${S(tried.json?.error).slice(0, 80)}`);
+  }
+
+  sub("E3. Finance sees it, with approve and reject offered");
+  {
+    const list = await fin.api("/api/sales/collections");
+    check("Finance can read the queue while holding NO sales module", list.status === 200, String(list.status));
+    check("and sees the whole queue", list.json?.scope === "all", S(list.json?.scope));
+    check("with the decision abilities the server grants",
+      list.json?.can?.verify === true && list.json?.can?.reject === true && list.json?.can?.reverse === true,
+      S(list.json?.can));
+    const d = list.json?.decisions?.[storyId];
+    check("approve is offered on this row", d?.approve?.allowed === true, S(d?.approve));
+    check("reject is offered on this row", d?.reject?.allowed === true, S(d?.reject));
+    check("reverse is not, because it is not approved yet",
+      d?.reverse?.allowed === false && d.reverse.reason === "NOT_APPROVED", S(d?.reverse));
+
+    const seen = (list.json?.rows ?? []).find((r) => r.id === storyId);
+    check("the row carries the gross", Number(seen?.amountGross) === 575, S(seen?.amountGross));
+    check("the derived tax", Number(seen?.amountTax) === 75, S(seen?.amountTax));
+    check("and the net basis the commission is computed on", Number(seen?.amountNet) === 500, S(seen?.amountNet));
+    check("the expected commission effect is quoted BEFORE deciding",
+      list.json?.projectedCommission?.[storyId] === "5.00",
+      S(list.json?.projectedCommission?.[storyId]));
+  }
+
+  sub("E5. the submitter cannot approve their own, before anyone else has decided it");
+  {
+    const d = await decisionOf(repA, storyId);
+    check("the submitter is not offered approve",
+      d === undefined || d.approve.allowed === false, S(d?.approve));
+    if (d) {
+      check("and the reason is the separation of duties, not a missing privilege",
+        d.approve.reason === "SELF_SUBMITTED" || d.approve.reason === "NO_PRIVILEGE", S(d.approve));
+    }
+    const tried = await decide(repA, storyId, "approve");
+    check("the API refuses them", tried.status === 403, `${tried.status} ${S(tried.json?.error).slice(0, 80)}`);
+    const still = await one(`SELECT status::text AS status FROM "SalesCollection" WHERE id=$1`, [storyId]);
+    check("the collection is untouched", still.status === "PENDING_VERIFICATION", still.status);
+  }
+
+  sub("E4. Finance approves: the status moves and the commission is created exactly once");
+  {
+    const before = await ledger(ids.repA);
+    const r = await decide(fin, storyId, "approve");
+    check("the approval is accepted", r.status === 200, `${r.status} ${S(r.json?.error).slice(0, 80)}`);
+    const row = await one(
+      `SELECT status::text AS status, "decidedById", "collectionEventId" FROM "SalesCollection" WHERE id=$1`,
+      [storyId]);
+    check("the status is APPROVED", row.status === "APPROVED", row.status);
+    check("attributed to the finance user", row.decidedById === ids.fin, S(row.decidedById));
+    check("and it now points at one commission event", Boolean(row.collectionEventId), S(row.collectionEventId));
+
+    const events = await q(`SELECT id FROM "CollectionEvent" WHERE "externalRef"=$1`, [storyId]);
+    check("exactly one event", events.length === 1, `${events.length}`);
+    const accruals = await q(
+      `SELECT amount FROM "CommissionAccrual" WHERE "collectionEventId" IN
+         (SELECT id FROM "CollectionEvent" WHERE "externalRef"=$1)`, [storyId]);
+    check("exactly one accrual", accruals.length === 1, `${accruals.length}`);
+    check("worth 1% of the 500.00 net — 5.00", accruals[0] && Number(accruals[0].amount) === 5,
+      S(accruals[0]?.amount));
+    const after = await ledger(ids.repA);
+    check("which is exactly what the estimate promised", Math.abs(after - before - 5) < 0.005, `${before} -> ${after}`);
+
+    const d = await decisionOf(fin, storyId);
+    check("approve is no longer offered",
+      d?.approve?.allowed === false && d.approve.reason === "NOT_PENDING", S(d?.approve));
+    check("and reverse now is", d?.reverse?.allowed === true, S(d?.reverse));
+  }
+
+  sub("E6. Finance rejects a different one, and the reason is mandatory");
+  {
+    const { oppId } = await mkDeal("x", ids.repA, 230, 30);
+    const id = (await submit(repA, oppId, "230.00")).json.collectionId;
+
+    const noReason = await decide(fin, id, "reject");
+    check("a rejection with no reason is refused", noReason.status === 400,
+      `${noReason.status} ${S(noReason.json?.error).slice(0, 80)}`);
+    const blank = await decide(fin, id, "reject", "  ");
+    check("whitespace is not a reason", blank.status === 400, String(blank.status));
+
+    const ok = await decide(fin, id, "reject", "صورة الإيصال لا تطابق المبلغ");
+    check("with a reason it is accepted", ok.status === 200, `${ok.status} ${S(ok.json?.error).slice(0, 80)}`);
+    const row = await one(
+      `SELECT status::text AS status, "decisionReason", "collectionEventId" FROM "SalesCollection" WHERE id=$1`,
+      [id]);
+    check("the status is REJECTED", row.status === "REJECTED", row.status);
+    check("the reason is stored", (row.decisionReason ?? "").length > 3, S(row.decisionReason));
+    check("and no commission event was created", row.collectionEventId === null, S(row.collectionEventId));
+    const accruals = await q(
+      `SELECT id FROM "CommissionAccrual" WHERE "collectionEventId" IN
+         (SELECT id FROM "CollectionEvent" WHERE "externalRef"=$1)`, [id]);
+    check("so no accrual either", accruals.length === 0, `${accruals.length}`);
+  }
+
+  sub("E7. an authorised reversal compensates without deleting");
+  {
+    const before = await ledger(ids.repA);
+    const noReason = await decide(fin, storyId, "reverse");
+    check("a reversal with no reason is refused", noReason.status === 400, String(noReason.status));
+
+    const r = await decide(fin, storyId, "reverse", "أُعيد المبلغ للعميل");
+    check("with a reason it is accepted", r.status === 200, `${r.status} ${S(r.json?.error).slice(0, 80)}`);
+
+    const row = await one(
+      `SELECT status::text AS status, "decidedById", "reversedById", "reversalReason", "collectionEventId"
+         FROM "SalesCollection" WHERE id=$1`, [storyId]);
+    check("the row still exists", Boolean(row));
+    check("still pointing at its original event", Boolean(row.collectionEventId), S(row.collectionEventId));
+    check("who approved it is still recorded", row.decidedById === ids.fin, S(row.decidedById));
+    check("the reversal is attributed separately", row.reversedById === ids.fin, S(row.reversedById));
+    check("and carries its reason", (row.reversalReason ?? "").length > 3, S(row.reversalReason));
+
+    const ev = await one(`SELECT status::text AS status FROM "CollectionEvent" WHERE "externalRef"=$1`, [storyId]);
+    check("the event is marked reversed, not deleted", ev?.status === "REVERSED", S(ev));
+
+    const after = await ledger(ids.repA);
+    check("the ledger came down by the 5.00 that was posted", Math.abs(before - after - 5) < 0.005, `${before} -> ${after}`);
+    const last = await one(
+      `SELECT amount, type::text AS type FROM "CommissionLedgerEntry"
+        WHERE "employeeId"=$1 ORDER BY "createdAt" DESC LIMIT 1`, [ids.repA]);
+    check("as a compensating REVERSAL entry", last?.type === "REVERSAL" && Number(last.amount) === -5, S(last));
+
+    const accruals = await q(
+      `SELECT id FROM "CommissionAccrual" WHERE "collectionEventId" IN
+         (SELECT id FROM "CollectionEvent" WHERE "externalRef"=$1)`, [storyId]);
+    check("and the original accrual row was not deleted", accruals.length === 1, `${accruals.length}`);
   }
 
   sub("D10. every approved collection is stamped as a manual finance verification");

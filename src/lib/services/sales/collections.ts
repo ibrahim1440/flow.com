@@ -568,3 +568,52 @@ export function collectionAction(input: {
   }
   return { available: true, reason: "OK" };
 }
+
+/**
+ * ── Whether this person may decide THIS collection, and if not why ──
+ *
+ * The queue used to render each action behind a bare privilege flag, so an unavailable
+ * action was an empty cell: a manager correctly without approval rights and a Finance user
+ * whose privileges had not been granted looked identical, and so did a Finance user being
+ * correctly refused their own submission. Three different situations, one blank space.
+ *
+ * Self-approval is decided here as well as in `approveCollection`, and the duplication is
+ * deliberate: the service is the boundary and refuses regardless, while this exists so the
+ * screen can say "you recorded this one" instead of offering a button that will 403.
+ */
+export type DecisionAbilityReason =
+  | "OK"
+  | "NO_PRIVILEGE"
+  | "SELF_SUBMITTED"
+  | "NOT_PENDING"
+  | "NOT_APPROVED";
+
+export type DecisionAbility = { allowed: boolean; reason: DecisionAbilityReason };
+
+export function collectionDecisionAbility(input: {
+  status: CollectionStatusValue;
+  submittedById: string;
+  actorId: string;
+  canVerify: boolean;
+  canReject: boolean;
+  canReverse: boolean;
+}): { approve: DecisionAbility; reject: DecisionAbility; reverse: DecisionAbility } {
+  const self = input.submittedById === input.actorId;
+  const pending = input.status === "PENDING_VERIFICATION";
+
+  // Privilege first, then separation of duties, then the row's own state. A person told
+  // "you recorded this one" when they also lack the privilege would fix the wrong thing.
+  const decide = (can: boolean, stateOk: boolean, notReady: DecisionAbilityReason): DecisionAbility => {
+    if (!can) return { allowed: false, reason: "NO_PRIVILEGE" };
+    if (self) return { allowed: false, reason: "SELF_SUBMITTED" };
+    if (!stateOk) return { allowed: false, reason: notReady };
+    return { allowed: true, reason: "OK" };
+  };
+
+  return {
+    approve: decide(input.canVerify, pending, "NOT_PENDING"),
+    reject: decide(input.canReject, pending, "NOT_PENDING"),
+    // A reversal undoes an approval, so it applies to an APPROVED row and to nothing else.
+    reverse: decide(input.canReverse, input.status === "APPROVED", "NOT_APPROVED"),
+  };
+}
