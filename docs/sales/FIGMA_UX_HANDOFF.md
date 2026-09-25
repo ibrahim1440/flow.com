@@ -333,9 +333,12 @@ the `sr-only` bug in §6 was found at all.
 
 ### 7c. Preview verification — **NOT performed; the push is blocked in this session**
 
-- Repository: `feature/sales-crm-commissions`, HEAD **`938c097`**, **6 commits ahead of origin**.
-- `git push` and the Vercel CLI are both refused by this session's permission classifier
-  ("Out-of-Place Publication"). Nothing was routed around it.
+- Repository: `feature/sales-crm-commissions`. At the time this section was written HEAD was
+  **`938c097`**, 6 commits ahead of origin. **It is now `6b86079`, 8 ahead** — the functional
+  automation of `COLLECTIONS_WORKFLOW.md` was added after this paragraph.
+- `git push` is refused by this session's permission classifier (first as "Out-of-Place
+  Publication", on the later attempt as "Data Exfiltration"). Nothing was routed around it,
+  in either attempt: no API, no CLI, no alternative transport.
 - The hosted Preview therefore still runs the **pre-change** build. **None of the work in §6 is
   on the hosted Preview**, and no hosted smoke result cited anywhere in this document describes
   it.
@@ -436,8 +439,84 @@ walkthrough is `REVIEW_GUIDE_AR.md`; reviewer accounts are the `RVW_`-prefixed s
 ## 8. What this module still must not be called
 
 The financial cycle is **not integrated**. There is no invoice or receivables model in this ERP,
-so commission input is a sandbox adapter behind three gates and no figure corresponds to money
-anyone received. The sandbox notice is part of the design, not decoration.
+and no bank feed. The sandbox notice is part of the design, not decoration.
+
+**Amended by section 9.** Commission input is no longer only a sandbox adapter. There is now a
+second, real source: a salesperson records a receipt with evidence, and somebody in Finance
+verifies it. That is an internal human control, stamped `MANUAL_FINANCE_VERIFICATION`, and it
+is the only thing besides the sandbox that creates commission.
+
+What it is **not**: a bank settlement, a reconciliation against a statement, or an accounting
+integration. An approved collection means a person in Finance looked at a receipt and agreed
+the money arrived. Calling it "verified" is accurate; calling it "verified by the bank" is not.
 
 Do not describe the Sales CRM module as production-ready, and do not describe this design
 deliverable as complete.
+
+---
+
+## 9. Sales Collections — page 13, added for the finance-verified collection workflow
+
+Everything in sections 1–8 describes the fourteen routes that existed before. This section
+covers what was added when the module gained a real collection workflow, and it is written
+to the same rule: **no existing frame was edited to make an implementation look compliant.**
+
+### 9a. What is on the page
+
+A new page, **`13 — Sales Collections`**, holding eleven frames and two prototype flows. The
+frames are built from the same colour variables and `Text/AR/*` styles as pages 10–12; no new
+token or style was introduced.
+
+| Frame | What it specifies |
+| --- | --- |
+| `SC-15 / التحصيلات — قائمة التحقق المالي / AR / Desktop` | The route at `/dashboard/sales/collections`, 1440 wide: totals strip, the seven-column queue with one row per status, and the rules card |
+| `SC-16 / لوحة التحصيل داخل الصفقة — محصَّل جزئياً / AR` | The money panel on the deal: accepted total, approved, pending, remaining, derived state, commission effect, history |
+| `SC-17 / نافذة تسجيل تحصيل / AR` | Recording a collection, including the server-derived tax and net shown read-only |
+| `SC-18 / إرفاق الإثبات — الحالات / AR` | Evidence: idle, uploading, attached, and a file whose bytes contradict its name |
+| `SC-19 / حالة التحصيل — بانتظار · معتمَد · مرفوض · معكوس / AR` | One collection in all four states, with what each is worth |
+| `SC-20 / ملخص الصفقة — غير محصَّل · جزئي · بالكامل / AR` | The three derived payment states |
+| `SC-21 / العمولة — تقدير بانتظار الاعتماد مقابل عمولة معتمَدة / AR` | The pending estimate beside the payable figure, and the period ledger |
+| `SC-22 / نافذة العكس أو الاسترداد / AR` | Reversal: the original entry, the required reason, the negative adjustment it creates |
+| `SC-23 / فارغة · تحميل · خطأ · لا صلاحية / AR` | The four states that show no data |
+| `SC-24 / التحصيلات — تابلت 1024 / AR` | 1024 behaviour |
+| `SC-25 / التحصيلات — جوال 390 / AR` | 390 behaviour |
+
+Prototype flows: **رحلة التحصيل — من الصفقة إلى العمولة** (SC-16 → SC-17 → SC-18 → SC-19)
+and **قائمة التحقق المالي** (SC-15 → approve/reject/reverse → SC-20 / SC-21 / SC-22).
+
+### 9b. Deviations, recorded rather than designed away
+
+1. **Figma auto-layout has no right-to-left direction.** The first child of a horizontal
+   auto-layout is always leftmost, so an RTL screen has to be authored in visual
+   left-to-right order. These frames were built in logical order and then mirrored to match
+   the convention pages 10–12 already use (primary column and title on the right, actions
+   and dialog footers on the left). Anyone editing them must keep that convention: a row
+   added in logical order will appear mirrored.
+
+2. **Bidi isolates are in the text.** `-40.00 ر.س` renders as `40.00-` and `OF-1042` as
+   `1042OF-` when a sign or a hyphen sits in an Arabic run, because those characters are
+   bidi-neutral. The application solves this with `<bdi>`; the frames use `U+2066 … U+2069`
+   isolate characters around signed amounts and document references. They are invisible and
+   will be lost if the text is retyped.
+
+3. **Prototype flows cannot cross pages in Figma.** The collection journey is therefore its
+   own starting point on page 13 rather than an extension of the page-12 prototype. The two
+   read as one journey; they are two flows because the tool requires it.
+
+4. **The mobile frame shows the table clipped.** That is the real behaviour, not a drawing
+   error: `DataTable` puts the horizontal overflow on the table's own card, so the table
+   scrolls sideways inside it and the page never does.
+
+5. **The fourteen older frames still show Arabic-Indic digits** (`كافيه ٢١`, `متأخر ٣ أيام`).
+   The implementation now renders Latin digits everywhere by explicit instruction, so those
+   frames are stale on that one point. They were **left untouched**: the instruction was to
+   preserve the completed Sales frames, and rewriting them is a separate, deliberate pass.
+   Page 13 uses Latin digits throughout, and the rendered-DOM audit
+   (`tests/harness/digits.spec.ts`, 51 assertions) is the authority on the application.
+
+### 9c. What the collections design does **not** claim
+
+Nothing on page 13 depicts a bank integration. The queue is headed
+«تحقّق مالي يدوي — ليست تسوية بنكية» and the approval is a person agreeing that money
+arrived, recorded as `MANUAL_FINANCE_VERIFICATION`. A frame showing an approved collection is
+a frame showing that a human in Finance accepted a receipt, and nothing more.
