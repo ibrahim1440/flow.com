@@ -24,6 +24,37 @@ import { useUser } from "../../user-context";
  * system most.
  */
 
+/**
+ * A date for an Arabic-first screen.
+ *
+ * `formatDate` in lib/utils is pinned to en-US, so every Arabic screen in this module was
+ * rendering "Jan 1, 2099" beside right-to-left text. That function is used across the whole
+ * ERP and is left alone; this is the Sales-local replacement.
+ *
+ * Near dates read as "today"/"tomorrow" plus a time, because a follow-up list is about what
+ * happens next and a reader should not have to subtract dates to find out. Anything further
+ * out gets a short numeric date.
+ */
+/** A count in the reader's own numerals. Arabic screens showing Latin digits read as a
+ * half-translated interface, and the design uses Arabic-Indic throughout. */
+export function num(n: number, lang: "ar" | "en"): string {
+  return n.toLocaleString(lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB");
+}
+
+export function formatWhen(value: string | Date | null | undefined, lang: "ar" | "en"): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const locale = lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB";
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(d) - startOf(new Date())) / 86_400_000);
+  const time = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (days === 0) return `${lang === "ar" ? "اليوم" : "Today"} ${time}`;
+  if (days === 1) return `${lang === "ar" ? "غداً" : "Tomorrow"} ${time}`;
+  if (days === -1) return `${lang === "ar" ? "أمس" : "Yesterday"} ${time}`;
+  return d.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+}
+
 export function useLang(): "ar" | "en" {
   const user = useUser();
   return (user?.preferredLanguage as "ar" | "en") ?? "ar";
@@ -408,13 +439,26 @@ export function Pill({
   );
 }
 
+/**
+ * Status badge tones, taken from the design system's status tokens.
+ *
+ * Each is a background plus a border-and-text colour, because the design draws these as
+ * outlined chips rather than soft pills: `bg` at 50-weight, `border`/`text` at 600–700. The
+ * names are the Figma token names (`status/preparing`, `status/ready`, …) rather than
+ * good/warn/bad, so a reader can put a badge next to the frame it came from.
+ *
+ * These values are Tailwind's default palette because the design tokens resolve to exactly
+ * those hexes — `status/preparing-bg` is #eff6ff, which is `blue-50`.
+ */
 const PILL_TONES: Record<string, string> = {
-  neutral: "bg-cream text-brown",
-  good: "bg-emerald-100 text-emerald-800",
-  warn: "bg-amber-100 text-amber-800",
-  bad: "bg-red-50 text-red-700",
-  info: "bg-info-bg text-slate",
-  accent: "bg-orange/15 text-orange",
+  preparing: "bg-oo-status-preparing-bg border-oo-status-preparing text-oo-status-preparing",
+  waiting: "bg-oo-status-waiting-bg border-oo-status-waiting text-oo-status-waiting",
+  ready: "bg-oo-status-ready-bg border-oo-status-ready text-oo-status-ready",
+  success: "bg-oo-status-success-bg border-oo-status-success text-oo-status-success",
+  cancelled: "bg-oo-status-cancelled-bg border-oo-status-cancelled text-oo-status-cancelled",
+  rejected: "bg-oo-status-rejected-bg border-oo-status-rejected text-oo-status-rejected",
+  hold: "bg-oo-status-hold-bg border-oo-status-hold text-oo-status-hold",
+  blocked: "bg-oo-status-blocked-bg border-oo-status-blocked text-oo-status-blocked",
 };
 
 type Tone = keyof typeof PILL_TONES;
@@ -436,6 +480,11 @@ type Spec = StatusSpec;
  * Unqualified and Lost are neutral rather than red on purpose: both are ordinary outcomes of
  * doing the work, not errors, and colouring them like failures misreads the pipeline.
  */
+/**
+ * Geometry is the design's: 28px tall, 10/4 padding, 6px radius, 8px gap, 12/18 medium text,
+ * 1px border. Not a soft pill — the outline is what lets these sit legibly on both the white
+ * table rows and the subtle page background without a fill heavy enough to shout.
+ */
 function StatusBadge({ spec, testId }: { spec: Spec | undefined; fallback?: string; testId?: string }) {
   const { lang } = useBadgeLang();
   if (!spec) return null;
@@ -443,9 +492,9 @@ function StatusBadge({ spec, testId }: { spec: Spec | undefined; fallback?: stri
   return (
     <span
       data-testid={testId}
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold whitespace-nowrap ${PILL_TONES[spec.tone]}`}
+      className={`inline-flex h-7 items-center gap-2 rounded-md border px-2.5 py-1 text-[12px] font-medium leading-[18px] whitespace-nowrap ${PILL_TONES[spec.tone]}`}
     >
-      <Icon size={12} aria-hidden className="flex-shrink-0" />
+      <Icon size={16} aria-hidden className="flex-shrink-0" />
       {lang === "ar" ? spec.ar : spec.en}
     </span>
   );
@@ -458,21 +507,21 @@ function useBadgeLang() {
 
 /** `LeadStatus` — the 5 stored values. */
 export const LEAD_STATUS_SPECS: Record<string, Spec> = {
-  NEW:         { en: "New",         ar: "جديد",       tone: "info",    Icon: Circle },
-  CONTACTED:   { en: "Contacted",   ar: "تم التواصل", tone: "warn",    Icon: MessageSquare },
-  QUALIFIED:   { en: "Qualified",   ar: "مؤهَّل",      tone: "accent",  Icon: Check },
-  UNQUALIFIED: { en: "Unqualified", ar: "غير مؤهَّل",  tone: "neutral", Icon: XCircle },
-  CONVERTED:   { en: "Converted",   ar: "محوَّل",      tone: "good",    Icon: PackageCheck },
+  NEW:         { en: "New",         ar: "جديد",       tone: "preparing", Icon: Circle },
+  CONTACTED:   { en: "Contacted",   ar: "تم التواصل", tone: "waiting",   Icon: MessageSquare },
+  QUALIFIED:   { en: "Qualified",   ar: "مؤهَّل",      tone: "ready",     Icon: Check },
+  UNQUALIFIED: { en: "Unqualified", ar: "غير مؤهَّل",  tone: "cancelled", Icon: XCircle },
+  CONVERTED:   { en: "Converted",   ar: "محوَّل",      tone: "success",   Icon: PackageCheck },
 };
 
 /** `QuoteStatus` — the 6 stored values. Draft and Superseded share a tone; the icon separates them. */
 export const QUOTE_STATUS_SPECS: Record<string, Spec> = {
-  DRAFT:      { en: "Draft",      ar: "مسودة",          tone: "neutral", Icon: Save },
-  ISSUED:     { en: "Issued",     ar: "صادر",           tone: "info",    Icon: FileText },
-  ACCEPTED:   { en: "Accepted",   ar: "مقبول",          tone: "good",    Icon: Check },
-  REJECTED:   { en: "Rejected",   ar: "مرفوض",          tone: "bad",     Icon: Ban },
-  EXPIRED:    { en: "Expired",    ar: "منتهي الصلاحية", tone: "warn",    Icon: Clock },
-  SUPERSEDED: { en: "Superseded", ar: "مستبدَل",         tone: "neutral", Icon: RotateCcw },
+  DRAFT:      { en: "Draft",      ar: "مسودة",          tone: "cancelled", Icon: Save },
+  ISSUED:     { en: "Issued",     ar: "صادر",           tone: "preparing", Icon: FileText },
+  ACCEPTED:   { en: "Accepted",   ar: "مقبول",          tone: "success",   Icon: Check },
+  REJECTED:   { en: "Rejected",   ar: "مرفوض",          tone: "rejected",  Icon: Ban },
+  EXPIRED:    { en: "Expired",    ar: "منتهي الصلاحية", tone: "hold",      Icon: Clock },
+  SUPERSEDED: { en: "Superseded", ar: "مستبدَل",         tone: "cancelled", Icon: RotateCcw },
 };
 
 /**
@@ -483,18 +532,18 @@ export const QUOTE_STATUS_SPECS: Record<string, Spec> = {
  * that changes, not because the state occurs today.
  */
 export const ACCRUAL_STATUS_SPECS: Record<string, Spec> = {
-  PREVIEW:  { en: "Preview",  ar: "معاينة", tone: "warn",    Icon: CircleDashed },
-  ACCRUED:  { en: "Accrued",  ar: "مستحَق",  tone: "info",    Icon: Clock },
-  APPROVED: { en: "Approved", ar: "معتمَد",  tone: "accent",  Icon: FileText },
-  PAID:     { en: "Paid",     ar: "مدفوع",  tone: "good",    Icon: Check },
-  REVERSED: { en: "Reversed", ar: "معكوس",  tone: "neutral", Icon: RotateCcw },
+  PREVIEW:  { en: "Preview",  ar: "معاينة", tone: "waiting",   Icon: CircleDashed },
+  ACCRUED:  { en: "Accrued",  ar: "مستحَق",  tone: "preparing", Icon: Clock },
+  APPROVED: { en: "Approved", ar: "معتمَد",  tone: "ready",     Icon: FileText },
+  PAID:     { en: "Paid",     ar: "مدفوع",  tone: "success",   Icon: Check },
+  REVERSED: { en: "Reversed", ar: "معكوس",  tone: "cancelled", Icon: RotateCcw },
 };
 
 /** `OpportunityOutcome` — outcome is not a stage, and this badge sits beside one rather than replacing it. */
 export const DEAL_OUTCOME_SPECS: Record<string, Spec> = {
-  OPEN: { en: "Open", ar: "مفتوح", tone: "info",    Icon: Circle },
-  WON:  { en: "Won",  ar: "رابح",  tone: "good",    Icon: Check },
-  LOST: { en: "Lost", ar: "خاسر",  tone: "neutral", Icon: XCircle },
+  OPEN: { en: "Open", ar: "مفتوح", tone: "preparing", Icon: Circle },
+  WON:  { en: "Won",  ar: "رابح",  tone: "success",   Icon: Check },
+  LOST: { en: "Lost", ar: "خاسر",  tone: "cancelled", Icon: XCircle },
 };
 
 export function LeadStatusBadge({ status, testId }: { status: string; testId?: string }) {

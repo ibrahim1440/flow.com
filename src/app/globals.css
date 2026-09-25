@@ -52,6 +52,7 @@
   --color-card-hover: var(--card-hover);
   --color-border: var(--border);
   --color-border-light: var(--border-light);
+  --color-border-strong: #D1D5DB;
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-slate: var(--slate);

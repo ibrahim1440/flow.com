@@ -22,6 +22,7 @@ import PipelinePage from "../../src/app/dashboard/sales/pipeline/page";
 import LeadDetailPage from "../../src/app/dashboard/sales/leads/[id]/page";
 import MyCommissionsPage from "../../src/app/dashboard/sales/my-commissions/page";
 import QuoteEditorPage from "../../src/app/dashboard/sales/quotes/[id]/page";
+import LeadsListPage from "../../src/app/dashboard/sales/leads/page";
 
 declare global {
   interface Window {
@@ -71,6 +72,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 const SCREENS: Record<string, () => React.ReactElement> = {
   pipeline: () => <PipelinePage />,
+  "leads-list": () => <LeadsListPage />,
   "lead-detail": () => <LeadDetailPage />,
   commissions: () => <MyCommissionsPage />,
   // The editor takes params as a promise, the way Next hands them over.

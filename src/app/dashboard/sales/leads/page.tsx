@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed } from "lucide-react";
+import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed, ChevronDown, Search } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { formatDate } from "@/lib/utils";
-import { LeadStatusBadge, LEAD_STATUS_SPECS } from "../_components/ui";
+
+import { LeadStatusBadge, LEAD_STATUS_SPECS, TableWrap, formatWhen, num } from "../_components/ui";
 import ImportDialog from "./ImportDialog";
 
 /**
@@ -40,8 +40,8 @@ type DuplicateCandidate = { leadId: string; companyName: string; contactName: st
 const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"] as const;
 
 const SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
-  WALK_IN: { en: "Walk-in", ar: "زيارة مباشرة" },
-  REFERRAL: { en: "Referral", ar: "توصية" },
+  WALK_IN: { en: "Walk-in", ar: "زيارة" },
+  REFERRAL: { en: "Referral", ar: "إحالة" },
   PHONE: { en: "Phone", ar: "هاتف" },
   SOCIAL: { en: "Social media", ar: "وسائل التواصل" },
   EXHIBITION: { en: "Exhibition", ar: "معرض" },
@@ -53,6 +53,90 @@ const SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
 // and every other one render a stored value identically. The local copy this replaced painted
 // UNQUALIFIED red, which reads as an error; disqualifying a lead is ordinary work, not a fault.
 const STATUS_LABELS = LEAD_STATUS_SPECS;
+
+/**
+ * The single next action for a row.
+ *
+ * The design gives each lead exactly one, chosen by what is most urgent rather than by what
+ * is possible: a converted or disqualified lead has none, an overdue one needs the call
+ * logging, one with no commitment needs a date, and anything else is ready to convert. The
+ * two follow-up actions navigate to the lead, which is where the forms that perform them
+ * live — the list does not grow its own copies of them.
+ */
+function RowAction({
+  lead, lang, canConvert, converting, onConvert, isOverdue, hasNoCommitment, full,
+}: {
+  lead: Lead; lang: "ar" | "en"; canConvert: boolean; converting: string | null;
+  onConvert: () => void; isOverdue: boolean; hasNoCommitment: boolean; full?: boolean;
+}) {
+  const ar = lang === "ar";
+  const base = `${full ? "w-full justify-center " : ""}inline-flex items-center whitespace-nowrap rounded-lg px-3 py-[7px] text-[12px] leading-[18px] transition-colors`;
+  const outline = `${base} border border-oo-border-strong bg-oo-bg-default`;
+
+  if (lead.conversion) {
+    // Still a link to the customer it became — the design shows this slot as non-actionable,
+    // but removing the only route to the converted customer would lose real functionality.
+    return (
+      <a href="/dashboard/customers" className={`${outline} text-oo-text-muted hover:text-oo-action-primary`}>
+        {ar ? "محوَّل — لا إجراء" : "Converted — no action"}
+      </a>
+    );
+  }
+  if (lead.status === "UNQUALIFIED") {
+    return (
+      <span className={`${outline} text-oo-text-muted`}>
+        {ar ? "غير مؤهَّل — لا تحويل" : "Unqualified — no convert"}
+      </span>
+    );
+  }
+  if (isOverdue) {
+    return (
+      <Link href={`/dashboard/sales/leads/${lead.id}`} className={`${outline} text-oo-action-primary hover:border-oo-action-primary`}>
+        {ar ? "تسجيل متابعة" : "Log a follow-up"}
+      </Link>
+    );
+  }
+  if (hasNoCommitment) {
+    return (
+      <Link href={`/dashboard/sales/leads/${lead.id}`} className={`${outline} text-oo-action-primary hover:border-oo-action-primary`}>
+        {ar ? "تحديد موعد متابعة" : "Schedule a follow-up"}
+      </Link>
+    );
+  }
+  if (!canConvert) {
+    return (
+      <Link href={`/dashboard/sales/leads/${lead.id}`} className={`${outline} text-oo-action-primary hover:border-oo-action-primary`}>
+        {ar ? "فتح السجل" : "Open the lead"}
+      </Link>
+    );
+  }
+  return (
+    <button
+      onClick={onConvert}
+      disabled={converting === lead.id}
+      data-testid={`convert-lead-${lead.id}`}
+      className={`${base} bg-oo-action-primary text-white hover:bg-oo-action-primary-hover disabled:opacity-50`}
+    >
+      {converting === lead.id ? "…" : ar ? "تحويل إلى عميل" : "Convert to customer"}
+    </button>
+  );
+}
+
+/** A key/value line for the narrow layout, mirroring one table column. */
+function KV({ k, v, ltr }: { k: string; v: string; ltr?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[12px] leading-[18px] text-oo-text-muted">{k}</span>
+      <span
+        className="text-[14px] leading-[22px] text-oo-text-primary"
+        dir={ltr ? "ltr" : undefined}
+        style={ltr ? { textAlign: "start" } : undefined}
+      >
+        {v}
+      </span>
+    </div>
+  );
+}
 
 export default function LeadsPage() {
   const user = useUser();
@@ -241,13 +325,31 @@ export default function LeadsPage() {
         <div>
           <h1 className="text-2xl font-extrabold text-charcoal">{t("leadsTitle")}</h1>
           <p className="text-brown text-sm font-medium">
-            {rows.length} {t("leadShown")}
-            {overdue > 0 && (
-              <span className="text-red-700 font-bold"> · {overdue} {t("leadOverdue")}</span>
-            )}
-            {noCommitment > 0 && (
-              <span className="text-amber-700 font-bold"> · {noCommitment} {t("leadNoCommitment")}</span>
-            )}
+            {/* The design draws the urgent count as an outlined chip rather than coloured
+                text in a sentence, so it survives being scanned rather than read. */}
+            <span className="flex flex-wrap items-center gap-2">
+              {overdue > 0 && (
+                <span
+                  data-testid="count-overdue"
+                  className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2.5 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
+                >
+                  <AlertTriangle size={13} aria-hidden />
+                  {num(overdue, lang)} {t("leadOverdue")}
+                </span>
+              )}
+              {noCommitment > 0 && (
+                <span
+                  data-testid="count-no-commitment"
+                  className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-hold bg-oo-status-hold-bg px-2.5 py-[3px] text-[12px] leading-[18px] text-oo-status-hold"
+                >
+                  <CircleDashed size={13} aria-hidden />
+                  {num(noCommitment, lang)} {t("leadNoCommitment")}
+                </span>
+              )}
+              <span className="text-[12px] leading-[18px] text-oo-text-muted">
+                {num(rows.length, lang)} {t("leadShown")}
+              </span>
+            </span>
           </p>
           {/* The counts are computed over the loaded rows, which the filter narrows. Saying so
               stops the number being read as a total across every lead in the system. */}
@@ -322,25 +424,46 @@ export default function LeadsPage() {
         </div>
       )}
 
-      <div className="flex gap-2 flex-wrap">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={lang === "ar" ? "ابحث بالمنشأة أو الهاتف أو المدينة…" : "Search company, phone or city…"}
-          className="flex-1 min-w-[200px] px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-          aria-label={lang === "ar" ? "بحث" : "Search"}
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2.5 border-2 border-border rounded-xl text-sm"
-          aria-label={t("leadStatus")}
-        >
-          <option value="">{lang === "ar" ? "كل الحالات" : "All statuses"}</option>
-          {Object.keys(STATUS_LABELS).map((s) => (
-            <option key={s} value={s}>{label(STATUS_LABELS, s)}</option>
-          ))}
-        </select>
+      {/* Toolbar: the status filter at a fixed 200, the search taking the rest, both with a
+          1px border and 10px radius. The old controls used a 2px border and a larger radius,
+          which read as two chunky form fields rather than a quiet filter bar above a table. */}
+      {/* In an RTL document the first child sits on the right. The design puts the search
+          there and the status filter on the left, with the magnifier against the search
+          box's right edge and the chevron against the filter's left edge — so both icons
+          use logical `start`/`end` rather than a hard side. */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <div className="relative min-w-[200px] flex-1">
+          <Search
+            size={15}
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 start-3.5 my-auto text-oo-text-muted"
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={lang === "ar" ? "ابحث بالشركة أو جهة الاتصال أو الجوال…" : "Search company, contact or phone…"}
+            className="w-full rounded-[10px] border border-oo-border-strong bg-oo-bg-default ps-10 pe-3.5 py-2.5 text-[14px] leading-[22px] text-oo-text-primary placeholder:text-oo-text-muted outline-none focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20"
+            aria-label={lang === "ar" ? "بحث" : "Search"}
+          />
+        </div>
+        <div className="relative w-[200px] shrink-0">
+          <ChevronDown
+            size={14}
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 end-3.5 my-auto text-oo-text-secondary"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-full appearance-none rounded-[10px] border border-oo-border-strong bg-oo-bg-default ps-3.5 pe-9 py-2.5 text-[14px] leading-[22px] text-oo-text-primary outline-none focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20"
+            aria-label={t("leadStatus")}
+          >
+            <option value="">{lang === "ar" ? "كل الحالات" : "All statuses"}</option>
+            {Object.keys(STATUS_LABELS).map((s) => (
+              <option key={s} value={s}>{label(STATUS_LABELS, s)}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -349,100 +472,192 @@ export default function LeadsPage() {
           <p className="font-semibold text-lg">{t("leadsEmpty")}</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {rows.map((lead) => {
-            const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
-            // A lead with no next step at all — distinct from overdue, and not counted as one.
-            const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
-            return (
-              <div
-                key={lead.id}
-                data-testid={`lead-${lead.id}`}
-                className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300"
-              >
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* The row is now a way in. A list you can only look at forces every
-                          question about a lead into a spreadsheet somewhere else. */}
+        <>
+          {/* ── Desktop: the compact table the design specifies ──────────────────────
+              Column order right-to-left is company, contact, phone, source, status, next
+              commitment, owner, next action. In an RTL document the first cell renders on
+              the right, so DOM order and reading order are the same thing here.
+
+              Row height is 13px of vertical padding against 22px line boxes, which is what
+              makes five leads readable in roughly the height the old cards gave to two. */}
+          <div className="hidden lg:block">
+            <TableWrap>
+              <table className="w-full min-w-[1180px] border-collapse text-start" data-testid="leads-table">
+                <thead>
+                  <tr className="bg-oo-bg-subtle">
+                    {[
+                      [t("leadCompany"), "min-w-[240px]"],
+                      [t("leadContact"), "w-[160px]"],
+                      [lang === "ar" ? "الجوال" : "Phone", "w-[145px]"],
+                      [t("leadSource"), "w-[95px]"],
+                      [t("leadStatus"), "w-[150px]"],
+                      [t("leadNextFollowUp"), "w-[210px]"],
+                      [t("leadOwner"), "w-[130px]"],
+                      [lang === "ar" ? "الإجراء التالي" : "Next action", "w-[190px]"],
+                    ].map(([label_, w]) => (
+                      <th
+                        key={String(label_)}
+                        scope="col"
+                        className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
+                      >
+                        {label_}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((lead) => {
+                    const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
+                    const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
+                    return (
+                      <tr key={lead.id} data-testid={`lead-${lead.id}`} className="border-t border-oo-border-default">
+                        <td className="px-4 py-[13px] align-middle">
+                          <Link
+                            href={`/dashboard/sales/leads/${lead.id}`}
+                            className="block text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline"
+                            data-testid={`open-lead-${lead.id}`}
+                          >
+                            {lang === "ar" && lead.companyNameAr ? lead.companyNameAr : lead.companyName}
+                          </Link>
+                          <span className="block text-[12px] leading-[18px] text-oo-text-muted">
+                            {[lead.city, label(SOURCE_LABELS, lead.source)].filter(Boolean).join(" · ")}
+                          </span>
+                        </td>
+                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary">
+                          {lead.contactName}
+                        </td>
+                        {/* A Latin run inside an RTL cell reverses unless it is marked. */}
+                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[20px] text-oo-text-primary" dir="ltr" style={{ textAlign: "start" }}>
+                          {lead.phone ?? "—"}
+                        </td>
+                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary">
+                          {label(SOURCE_LABELS, lead.source)}
+                        </td>
+                        <td className="px-4 py-[13px] align-middle">
+                          <LeadStatusBadge status={lead.status} testId={`lead-status-${lead.id}`} />
+                        </td>
+                        <td className="px-4 py-[13px] align-middle">
+                          {isOverdue ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked">
+                              <AlertTriangle size={13} aria-hidden /> {t("leadOverdue")}
+                            </span>
+                          ) : hasNoCommitment ? (
+                            <span
+                              data-testid={`lead-no-commitment-${lead.id}`}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-hold bg-oo-status-hold-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-hold"
+                            >
+                              <CircleDashed size={13} aria-hidden /> {t("leadNoCommitment")}
+                            </span>
+                          ) : (
+                            <span className="text-[14px] leading-[22px] text-oo-text-primary">
+                              {formatWhen(lead.nextFollowUpAt, lang)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary">
+                          {lead.owner?.name ?? (lang === "ar" ? "غير مُسنَد" : "Unassigned")}
+                        </td>
+                        <td className="px-4 py-[13px] align-middle">
+                          <div className="flex items-center gap-1.5">
+                            <RowAction
+                              lead={lead}
+                              lang={lang}
+                              canConvert={canConvert}
+                              converting={converting}
+                              onConvert={() => convert(lead)}
+                              isOverdue={!!isOverdue}
+                              hasNoCommitment={hasNoCommitment}
+                            />
+                            {canWrite && !lead.conversion && (
+                              <button
+                                onClick={() => setDeleting(lead)}
+                                data-testid={`delete-lead-${lead.id}`}
+                                aria-label={lang === "ar" ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`}
+                                className="rounded-lg p-1.5 text-brown/40 transition-colors hover:bg-red-50 hover:text-red-600"
+                              >
+                                <Trash2 size={14} aria-hidden />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+          </div>
+
+          {/* ── Narrow: the same columns as a stacked record, not a squeezed table ──── */}
+          <div className="space-y-2 lg:hidden">
+            {rows.map((lead) => {
+              const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
+              const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
+              return (
+                <div key={lead.id} data-testid={`m-lead-${lead.id}`} className="rounded-2xl border border-oo-border-default bg-oo-bg-default p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <LeadStatusBadge status={lead.status} />
+                    <div className="min-w-0 text-end">
                       <Link
                         href={`/dashboard/sales/leads/${lead.id}`}
-                        className="font-bold text-charcoal hover:text-orange hover:underline"
-                        data-testid={`open-lead-${lead.id}`}
+                        className="block break-words text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline"
                       >
                         {lang === "ar" && lead.companyNameAr ? lead.companyNameAr : lead.companyName}
                       </Link>
-                      <LeadStatusBadge status={lead.status} testId={`lead-status-${lead.id}`} />
-                      {hasNoCommitment && (
-                        <span
-                          data-testid={`lead-no-commitment-${lead.id}`}
-                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-100 text-amber-800"
-                        >
-                          <CircleDashed size={12} aria-hidden /> {t("leadNoCommitment")}
+                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">
+                        {[lead.city, label(SOURCE_LABELS, lead.source)].filter(Boolean).join(" · ")}
+                      </span>
+                    </div>
+                  </div>
+                  <dl className="mt-3 space-y-1.5">
+                    <KV k={t("leadContact")} v={lead.contactName} />
+                    <KV k={lang === "ar" ? "الجوال" : "Phone"} v={lead.phone ?? "—"} ltr />
+                    <KV k={t("leadOwner")} v={lead.owner?.name ?? (lang === "ar" ? "غير مُسنَد" : "Unassigned")} />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[12px] leading-[18px] text-brown-light">{t("leadNextFollowUp")}</span>
+                      {isOverdue ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked">
+                          <AlertTriangle size={13} aria-hidden /> {t("leadOverdue")}
                         </span>
-                      )}
-                      {isOverdue && (
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800">
-                          {t("leadOverdue")}
+                      ) : hasNoCommitment ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-hold bg-oo-status-hold-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-hold">
+                          <CircleDashed size={13} aria-hidden /> {t("leadNoCommitment")}
+                        </span>
+                      ) : (
+                        <span className="text-[14px] leading-[22px] text-oo-text-primary">
+                          {formatWhen(lead.nextFollowUpAt, lang)}
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-brown font-medium">
-                      {lead.contactName}
-                      {lead.phone && <> · <span dir="ltr">{lead.phone}</span></>}
-                      {lead.city && <> · {lead.city}</>}
-                    </p>
-                    <p className="text-xs text-brown/50 mt-0.5">
-                      {t("leadSource")}: {label(SOURCE_LABELS, lead.source)}
-                      {lead.owner && <> · {t("leadOwner")}: {lead.owner.name}</>}
-                      {" · "}
-                      {lead.nextFollowUpAt
-                        ? <>{t("leadNextFollowUp")}: {formatDate(lead.nextFollowUpAt)}</>
-                        : <span className="text-amber-700 font-semibold">{t("leadNoFollowUp")}</span>}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {lead.conversion ? (
-                      <a
-                        href={`/dashboard/customers`}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border-2 border-border text-brown hover:border-orange/60 hover:text-orange transition-colors"
-                      >
-                        {lang === "ar" ? "العميل المرتبط" : "Linked customer"} <ArrowRight size={13} />
-                      </a>
-                    ) : canConvert && lead.status !== "UNQUALIFIED" ? (
-                      <button
-                        onClick={() => convert(lead)}
-                        disabled={converting === lead.id}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {converting === lead.id ? "…" : t("leadConvertBtn")}
-                      </button>
-                    ) : null}
-
-                    {/* Offered only where it could succeed. A converted lead is not
-                        deletable at all — its details became a customer and a deal — and
-                        the server refuses it regardless of what the screen shows. */}
+                  </dl>
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="flex-1">
+                      <RowAction
+                        lead={lead}
+                        lang={lang}
+                        canConvert={canConvert}
+                        converting={converting}
+                        onConvert={() => convert(lead)}
+                        isOverdue={!!isOverdue}
+                        hasNoCommitment={hasNoCommitment}
+                        full
+                      />
+                    </div>
                     {canWrite && !lead.conversion && (
                       <button
                         onClick={() => setDeleting(lead)}
-                        data-testid={`delete-lead-${lead.id}`}
-                        aria-label={
-                          lang === "ar"
-                            ? `حذف ${lead.companyName}`
-                            : `Delete ${lead.companyName}`
-                        }
-                        className="p-2.5 rounded-xl text-brown/50 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        aria-label={lang === "ar" ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`}
+                        className="rounded-lg p-2 text-brown/40 transition-colors hover:bg-red-50 hover:text-red-600"
                       >
                         <Trash2 size={15} aria-hidden />
                       </button>
                     )}
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {deleting && (
