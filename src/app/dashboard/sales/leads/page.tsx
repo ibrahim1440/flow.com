@@ -2,21 +2,24 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed, ChevronDown, Search } from "lucide-react";
+import { AlertTriangle, UserPlus, Users2, X, ArrowRight, Upload, Download, Trash2, CircleDashed } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 
-import { LeadStatusBadge, LEAD_STATUS_SPECS, TableWrap, formatWhen, num } from "../_components/ui";
+import {
+  LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, DataTable, Tr, Td, Toolbar,
+  SearchField, FilterSelect, formatWhen, num,
+} from "../_components/ui";
 import ImportDialog from "./ImportDialog";
 
 /**
- * Leads.
+ * Leads — SC-02 in the Sales Screens design.
  *
- * PROVISIONAL INTERFACE. The Figma design for this feature could not be produced — the
- * design integration is not authorised in this session — so this is built from the existing
- * ERP components and the documented user flow, and says so at the top rather than passing
- * itself off as the designed article. It is functional, not final.
+ * A compact table, not the card list this screen shipped with: eight columns right to left,
+ * 13px of vertical padding against 22px line boxes, and one outlined action per row chosen
+ * by what is most urgent. Import and export stay in the header, because they are the two
+ * things this screen does that no other screen can.
  */
 
 type Lead = {
@@ -39,15 +42,8 @@ type DuplicateCandidate = { leadId: string; companyName: string; contactName: st
 
 const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSITE", "OTHER"] as const;
 
-const SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
-  WALK_IN: { en: "Walk-in", ar: "زيارة" },
-  REFERRAL: { en: "Referral", ar: "إحالة" },
-  PHONE: { en: "Phone", ar: "هاتف" },
-  SOCIAL: { en: "Social media", ar: "وسائل التواصل" },
-  EXHIBITION: { en: "Exhibition", ar: "معرض" },
-  WEBSITE: { en: "Website", ar: "الموقع" },
-  OTHER: { en: "Other", ar: "أخرى" },
-};
+// The shared map, so this screen and the settings screen name a source identically.
+const SOURCE_LABELS = LEAD_SOURCE_LABELS;
 
 // Status labels and colours now come from the shared map in `_components/ui`, so this screen
 // and every other one render a stored value identically. The local copy this replaced painted
@@ -431,40 +427,20 @@ export default function LeadsPage() {
           there and the status filter on the left, with the magnifier against the search
           box's right edge and the chevron against the filter's left edge — so both icons
           use logical `start`/`end` rather than a hard side. */}
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="relative min-w-[200px] flex-1">
-          <Search
-            size={15}
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 start-3.5 my-auto text-oo-text-muted"
-          />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={lang === "ar" ? "ابحث بالشركة أو جهة الاتصال أو الجوال…" : "Search company, contact or phone…"}
-            className="w-full rounded-[10px] border border-oo-border-strong bg-oo-bg-default ps-10 pe-3.5 py-2.5 text-[14px] leading-[22px] text-oo-text-primary placeholder:text-oo-text-muted outline-none focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20"
-            aria-label={lang === "ar" ? "بحث" : "Search"}
-          />
-        </div>
-        <div className="relative w-[200px] shrink-0">
-          <ChevronDown
-            size={14}
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 end-3.5 my-auto text-oo-text-secondary"
-          />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full appearance-none rounded-[10px] border border-oo-border-strong bg-oo-bg-default ps-3.5 pe-9 py-2.5 text-[14px] leading-[22px] text-oo-text-primary outline-none focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20"
-            aria-label={t("leadStatus")}
-          >
-            <option value="">{lang === "ar" ? "كل الحالات" : "All statuses"}</option>
-            {Object.keys(STATUS_LABELS).map((s) => (
-              <option key={s} value={s}>{label(STATUS_LABELS, s)}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      <Toolbar>
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          label={lang === "ar" ? "بحث" : "Search"}
+          placeholder={lang === "ar" ? "ابحث بالشركة أو جهة الاتصال أو الجوال…" : "Search company, contact or phone…"}
+        />
+        <FilterSelect value={statusFilter} onChange={setStatusFilter} label={t("leadStatus")}>
+          <option value="">{lang === "ar" ? "كل الحالات" : "All statuses"}</option>
+          {Object.keys(STATUS_LABELS).map((s) => (
+            <option key={s} value={s}>{label(STATUS_LABELS, s)}</option>
+          ))}
+        </FilterSelect>
+      </Toolbar>
 
       {rows.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-2xl border border-border text-brown/40">
@@ -481,32 +457,21 @@ export default function LeadsPage() {
               Row height is 13px of vertical padding against 22px line boxes, which is what
               makes five leads readable in roughly the height the old cards gave to two. */}
           <div className="hidden lg:block">
-            <TableWrap>
-              <table className="w-full min-w-[1180px] border-collapse text-start" data-testid="leads-table">
-                <thead>
-                  <tr className="bg-oo-bg-subtle">
-                    {[
-                      [t("leadCompany"), "min-w-[240px]"],
-                      [t("leadContact"), "w-[160px]"],
-                      [lang === "ar" ? "الجوال" : "Phone", "w-[145px]"],
-                      [t("leadSource"), "w-[95px]"],
-                      [t("leadStatus"), "w-[150px]"],
-                      [t("leadNextFollowUp"), "w-[210px]"],
-                      [t("leadOwner"), "w-[130px]"],
-                      [lang === "ar" ? "الإجراء التالي" : "Next action", "w-[190px]"],
-                    ].map(([label_, w]) => (
-                      <th
-                        key={String(label_)}
-                        scope="col"
-                        className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
-                      >
-                        {label_}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((lead) => {
+            <DataTable
+              testId="leads-table"
+              minWidth={1180}
+              cols={[
+                { label: t("leadCompany"), w: "min-w-[240px]" },
+                { label: t("leadContact"), w: "w-[160px]" },
+                { label: lang === "ar" ? "الجوال" : "Phone", w: "w-[145px]" },
+                { label: t("leadSource"), w: "w-[95px]" },
+                { label: t("leadStatus"), w: "w-[150px]" },
+                { label: t("leadNextFollowUp"), w: "w-[210px]" },
+                { label: t("leadOwner"), w: "w-[130px]" },
+                { label: lang === "ar" ? "الإجراء التالي" : "Next action", w: "w-[190px]" },
+              ]}
+            >
+              {rows.map((lead) => {
                     const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
                     const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
                     return (
@@ -583,9 +548,7 @@ export default function LeadsPage() {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </TableWrap>
+            </DataTable>
           </div>
 
           {/* ── Narrow: the same columns as a stacked record, not a squeezed table ──── */}

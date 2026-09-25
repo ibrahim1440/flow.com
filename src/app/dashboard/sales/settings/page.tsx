@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { KanbanSquare, Plus, ArrowUp, ArrowDown, EyeOff, Eye } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Button, Field, TextInput, Pill, Modal, TableWrap, api,
+  Button, Field, TextInput, Pill, Modal, api, Td, ROW_ACTION, num, LEAD_SOURCE_LABELS,
 } from "../_components/ui";
+import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 
 /**
  * Pipeline configuration.
@@ -132,8 +133,10 @@ export default function SalesSettingsPage() {
       <PageHeader
         title={ar ? "إعدادات المبيعات" : "Sales settings"}
         subtitle={
-          <span className="mt-1 block">
-            {ordered.filter((s) => s.isActive).length} {ar ? "مرحلة نشطة" : "active stages"}
+          <span>
+            {ar
+              ? "المراحل والمصادر وحدود الخصم — تغييرها يغيّر سلوك الشاشات فوراً"
+              : "Stages, sources and discount limits — changing these changes the screens at once"}
           </span>
         }
         actions={
@@ -160,32 +163,44 @@ export default function SalesSettingsPage() {
               : "No stages. Add at least one, or a lead cannot be converted into a deal."}
           </EmptyState>
         ) : (
-          <TableWrap>
-            <table className="w-full text-sm min-w-[720px]">
+          // Flush to the card's edges, so the tinted header band reads as part of the card
+          // rather than as a second box floating inside it.
+          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
+            <table className="w-full min-w-[760px] border-collapse text-start" data-testid="stages-table">
               <thead>
-                <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                  <th className="text-start py-2">{ar ? "الترتيب" : "Order"}</th>
-                  <th className="text-start py-2">{ar ? "الرمز" : "Code"}</th>
-                  <th className="text-start py-2">{ar ? "الاسم" : "Name"}</th>
-                  <th className="text-end py-2">{ar ? "الاحتمال" : "Probability"}</th>
-                  <th className="text-end py-2">{ar ? "الصفقات" : "Deals"}</th>
-                  <th className="py-2" />
+                <tr className="bg-oo-bg-subtle">
+                  {[
+                    [ar ? "الترتيب" : "Order", "w-[90px]"],
+                    [ar ? "الرمز" : "Code", "w-[140px]"],
+                    [ar ? "الاسم" : "Name", "min-w-[200px]"],
+                    [ar ? "الاحتمال الافتراضي" : "Default probability", "w-[170px]"],
+                    [ar ? "الصفقات" : "Deals", "w-[100px]"],
+                    ["", "w-[200px]"],
+                  ].map(([l, w], i) => (
+                    <th
+                      key={i}
+                      scope="col"
+                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
+                    >
+                      {l}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {ordered.map((s, i) => (
                   <tr
                     key={s.id}
-                    className={`border-t border-border ${s.isActive ? "" : "opacity-50"}`}
+                    className={`border-t border-oo-border-default ${s.isActive ? "" : "opacity-50"}`}
                     data-testid={`stage-row-${s.code}`}
                   >
-                    <td className="py-2.5">
+                    <Td>
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => move(i, -1)}
                           disabled={busy || i === 0}
                           aria-label={ar ? `نقل ${s.nameAr} لأعلى` : `Move ${s.nameEn} up`}
-                          className="p-1 rounded text-brown/60 hover:text-orange disabled:opacity-30"
+                          className="rounded p-1 text-oo-text-muted hover:text-oo-action-primary disabled:opacity-30"
                         >
                           <ArrowUp size={14} aria-hidden />
                         </button>
@@ -193,35 +208,40 @@ export default function SalesSettingsPage() {
                           onClick={() => move(i, 1)}
                           disabled={busy || i === ordered.length - 1}
                           aria-label={ar ? `نقل ${s.nameAr} لأسفل` : `Move ${s.nameEn} down`}
-                          className="p-1 rounded text-brown/60 hover:text-orange disabled:opacity-30"
+                          className="rounded p-1 text-oo-text-muted hover:text-oo-action-primary disabled:opacity-30"
                         >
                           <ArrowDown size={14} aria-hidden />
                         </button>
                       </div>
-                    </td>
-                    <td className="py-2.5">
+                    </Td>
+                    <Td>
                       {/* The stable identity. Shown, and never editable: the label may be
                           translated, this may not change. */}
-                      <span className="font-mono text-xs bg-cream px-1.5 py-0.5 rounded">{s.code}</span>
-                    </td>
-                    <td className="py-2.5">
-                      <span className="font-bold">{ar ? s.nameAr : s.nameEn}</span>
-                      <span className="block text-[11px] text-brown/60">{ar ? s.nameEn : s.nameAr}</span>
-                    </td>
-                    <td className="py-2.5 text-end tabular-nums">{s.probability}%</td>
-                    <td className="py-2.5 text-end tabular-nums">
-                      {s._count?.opportunities ?? 0}
-                    </td>
-                    <td className="py-2.5">
-                      <div className="flex gap-1.5 justify-end flex-wrap">
-                        <Button variant="ghost" onClick={() => setEditing(s)} testId={`edit-stage-${s.code}`}>
+                      <span className="rounded-md bg-oo-bg-subtle px-1.5 py-0.5 font-mono text-[12px] leading-[18px] text-oo-text-secondary">
+                        {s.code}
+                      </span>
+                    </Td>
+                    <Td>
+                      <span className="block font-medium">{ar ? s.nameAr : s.nameEn}</span>
+                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">
+                        {ar ? s.nameEn : s.nameAr}
+                      </span>
+                    </Td>
+                    <Td>{ar ? `${num(s.probability, "ar")}٪` : `${s.probability}%`}</Td>
+                    <Td>{num(s._count?.opportunities ?? 0, lang)}</Td>
+                    <Td>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          onClick={() => setEditing(s)}
+                          data-testid={`edit-stage-${s.code}`}
+                          className={`${ROW_ACTION} text-oo-action-primary hover:border-oo-action-primary`}
+                        >
                           {ar ? "تعديل" : "Edit"}
-                        </Button>
+                        </button>
                         {s.isActive ? (
-                          <Button
-                            variant="ghost"
+                          <button
                             disabled={busy}
-                            testId={`retire-stage-${s.code}`}
+                            data-testid={`retire-stage-${s.code}`}
                             title={
                               (s._count?.opportunities ?? 0) > 0
                                 ? ar
@@ -235,40 +255,97 @@ export default function SalesSettingsPage() {
                                 ar ? "أُخفيت المرحلة." : "Stage retired.",
                               )
                             }
+                            className={`${ROW_ACTION} gap-1.5 text-oo-text-secondary hover:border-oo-action-primary disabled:opacity-50`}
                           >
                             <EyeOff size={14} aria-hidden /> {ar ? "إخفاء" : "Retire"}
-                          </Button>
+                          </button>
                         ) : (
-                          <Button
-                            variant="ghost"
+                          <button
                             disabled={busy}
-                            testId={`restore-stage-${s.code}`}
+                            data-testid={`restore-stage-${s.code}`}
                             onClick={() =>
                               patch(
                                 { id: s.id, isActive: true },
                                 ar ? "أُعيدت المرحلة." : "Stage restored.",
                               )
                             }
+                            className={`${ROW_ACTION} gap-1.5 text-oo-text-secondary hover:border-oo-action-primary disabled:opacity-50`}
                           >
                             <Eye size={14} aria-hidden /> {ar ? "إظهار" : "Restore"}
-                          </Button>
+                          </button>
                         )}
                         {!s.isActive && <Pill tone="neutral">{ar ? "مخفية" : "retired"}</Pill>}
                       </div>
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </TableWrap>
+          </div>
         )}
 
-        <p className="text-[11px] text-brown/60 mt-3 font-medium">
+        <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
           {ar
             ? "المرحلة تُخفى ولا تُحذف: كل حركة سُجّلت في السجل تشير إليها، وحذفها يكسر التاريخ الذي وُجدت تلك الحركات لحفظه. ومرحلة بها صفقات لا يمكن إخفاؤها — انقل صفقاتها أولاً."
             : "A stage is retired, never deleted: every stage event that ever mentioned it points here, and deleting it would break the history those events exist to preserve. A stage holding deals cannot be retired — move them first."}
         </p>
       </Card>
+
+      {/* ── The two reference cards the design puts beside the stages ────────────────
+          Read-only on purpose. Both state values the rest of the module already enforces:
+          the seven stored lead sources, and the two discount limits the quotation service
+          applies. Neither is editable here, because neither is a settings row — changing
+          them is a code change, and a screen that implied otherwise would be lying. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <SectionTitle>{ar ? "مصادر العملاء المحتملين" : "Lead sources"}</SectionTitle>
+          <p className="-mt-1 mb-3 text-[12px] leading-[18px] text-oo-text-secondary">
+            {ar
+              ? "القيَم المخزَّنة السبع — تظهر في مرشّح القائمة ونموذج الإنشاء"
+              : "The seven stored values — they appear in the list filter and the create form"}
+          </p>
+          <div className="flex flex-wrap gap-2" data-testid="source-chips">
+            {Object.entries(LEAD_SOURCE_LABELS).map(([code, l]) => (
+              <span
+                key={code}
+                className="rounded-[10px] border border-oo-border-strong bg-oo-bg-subtle px-3 py-[5px] text-[12px] leading-[18px] text-oo-text-primary"
+              >
+                {ar ? l.ar : l.en}
+              </span>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <SectionTitle>{ar ? "حدود الخصم والصلاحيات" : "Discount limits"}</SectionTitle>
+          <p className="-mt-1 mb-3 text-[12px] leading-[18px] text-oo-text-secondary">
+            {ar
+              ? "تجاوز الحدّ يحوّل «إصدار العرض» إلى «طلب اعتماد الخصم»"
+              : "Past the threshold, “Issue” becomes “Ask for discount approval”"}
+          </p>
+          <div className="space-y-2" data-testid="discount-limits">
+            {[
+              [
+                ar ? "بلا اعتماد" : "Without approval",
+                ar ? `حتى ${num(DISCOUNT_APPROVAL_THRESHOLD, "ar")}٪` : `up to ${DISCOUNT_APPROVAL_THRESHOLD}%`,
+              ],
+              [
+                ar ? "باعتماد الخصم" : "With the discount-approval privilege",
+                ar ? `حتى ${num(DISCOUNT_MAX, "ar")}٪` : `up to ${DISCOUNT_MAX}%`,
+              ],
+              [ar ? "فوق ذلك" : "Above that", ar ? "مرفوض" : "refused"],
+            ].map(([who, limit]) => (
+              <div
+                key={who}
+                className="flex items-center justify-between rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
+              >
+                <span className="font-medium">{limit}</span>
+                <span>{who}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
 
       {(adding || editing) && (
         <StageDialog

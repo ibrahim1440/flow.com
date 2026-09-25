@@ -2,8 +2,8 @@
 
 import { type ReactNode } from "react";
 import {
-  AlertTriangle, FlaskConical, Ban, Check, Circle, CircleDashed, Clock, FileText,
-  MessageSquare, PackageCheck, RotateCcw, Save, XCircle, type LucideIcon,
+  AlertTriangle, FlaskConical, Ban, Check, ChevronDown, Circle, CircleDashed, Clock, FileText,
+  MessageSquare, PackageCheck, RotateCcw, Save, Search, XCircle, type LucideIcon,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
@@ -41,6 +41,31 @@ export function num(n: number, lang: "ar" | "en"): string {
   return n.toLocaleString(lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB");
 }
 
+const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+
+/**
+ * Arabic-Indic presentation of an already-formatted Latin-digit number.
+ *
+ * A character substitution rather than a re-format, so the exact decimal string produced
+ * upstream survives intact — the money path is deliberately string-only and must not be
+ * routed back through `Number` to change its numerals.
+ */
+export function toArabicDigits(s: string): string {
+  return s.replace(/[0-9,.]/g, (c) => (c === "," ? "٬" : c === "." ? "٫" : AR_DIGITS[Number(c)]));
+}
+
+/** A calendar day the way the design writes one: "٣٠ سبتمبر" / "30 Sep". No year, because
+ *  these columns are all within the current cycle and the year is noise in a table. */
+export function formatDay(value: string | Date | null | undefined, lang: "ar" | "en"): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-arab" : "en-GB", {
+    day: "numeric",
+    month: lang === "ar" ? "long" : "short",
+  });
+}
+
 export function formatWhen(value: string | Date | null | undefined, lang: "ar" | "en"): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -52,7 +77,14 @@ export function formatWhen(value: string | Date | null | undefined, lang: "ar" |
   if (days === 0) return `${lang === "ar" ? "اليوم" : "Today"} ${time}`;
   if (days === 1) return `${lang === "ar" ? "غداً" : "Tomorrow"} ${time}`;
   if (days === -1) return `${lang === "ar" ? "أمس" : "Yesterday"} ${time}`;
-  return d.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
+  // The year only earns its place when it is not this one. The design writes these as
+  // "٢٦ سبتمبر", and a column of dates that all repeat the same year is four wasted glyphs.
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(locale, {
+    ...(thisYear ? {} : { year: "numeric" }),
+    month: lang === "ar" ? "long" : "short",
+    day: "numeric",
+  });
 }
 
 export function useLang(): "ar" | "en" {
@@ -78,9 +110,9 @@ export function pick(
 export function ProvisionalBanner() {
   const { t } = useI18n();
   return (
-    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex items-start gap-2">
-      <AlertTriangle size={15} className="text-amber-700 flex-shrink-0 mt-0.5" aria-hidden />
-      <p className="text-xs font-bold text-amber-900">{t("provisionalUiBanner")}</p>
+    <div className="flex items-center gap-2.5 rounded-[10px] border border-oo-status-waiting bg-oo-status-waiting-bg px-4 py-[9px]">
+      <p className="flex-1 text-[12px] font-medium leading-[18px] text-oo-status-hold">{t("provisionalUiBanner")}</p>
+      <AlertTriangle size={16} className="shrink-0 text-oo-status-hold" aria-hidden />
     </div>
   );
 }
@@ -96,15 +128,15 @@ export function SandboxBanner({ notice }: { notice?: string | null }) {
   if (!notice) return null;
   return (
     <div
-      className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 flex items-start gap-2"
+      className="flex items-center gap-2.5 rounded-[10px] border-2 border-oo-status-hold bg-oo-status-hold-bg px-4 py-[10px]"
       role="note"
       data-testid="sandbox-banner"
     >
-      <FlaskConical size={15} className="text-violet-700 flex-shrink-0 mt-0.5" aria-hidden />
-      <p className="text-xs font-bold text-violet-900">
+      <p className="flex-1 text-[14px] font-medium leading-[22px] text-oo-status-hold">
         {lang === "ar" ? "مصدر تجريبي: " : "Sandbox source: "}
         {notice}
       </p>
+      <FlaskConical size={16} className="shrink-0 text-oo-status-hold" aria-hidden />
     </div>
   );
 }
@@ -121,8 +153,10 @@ export function PageHeader({
   return (
     <div className="flex items-start justify-between gap-3 flex-wrap">
       <div className="min-w-0">
-        <h1 className="text-2xl font-extrabold text-charcoal">{title}</h1>
-        {subtitle && <div className="text-brown text-sm font-medium">{subtitle}</div>}
+        <h1 className="text-[24px] font-bold leading-[34px] text-oo-text-primary">{title}</h1>
+        {subtitle && (
+          <div className="mt-[3px] text-[12px] leading-[18px] text-oo-text-secondary">{subtitle}</div>
+        )}
       </div>
       {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
     </div>
@@ -141,13 +175,13 @@ export function Alert({
   if (!children) return null;
   const tone =
     kind === "error"
-      ? "bg-red-50 border-red-200 text-red-700"
+      ? "bg-oo-status-blocked-bg border-oo-status-blocked text-oo-status-blocked"
       : kind === "success"
-        ? "bg-success-bg border-green-200 text-green-700"
-        : "bg-info-bg border-slate-200 text-slate";
+        ? "bg-oo-status-success-bg border-oo-status-success text-oo-status-success"
+        : "bg-oo-bg-subtle border-oo-border-strong text-oo-text-secondary";
   return (
     <div
-      className={`border px-4 py-3 rounded-xl text-sm font-bold flex items-start gap-3 ${tone}`}
+      className={`flex items-start gap-3 rounded-[10px] border px-4 py-3 text-[14px] leading-[22px] ${tone}`}
       // Errors are announced; a confirmation that steals focus mid-typing is worse than one
       // that waits to be read.
       role={kind === "error" ? "alert" : "status"}
@@ -165,14 +199,14 @@ export function Alert({
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`bg-white rounded-2xl border border-border p-5 ${className}`}>{children}</div>
+    <div className={`rounded-2xl border border-oo-border-default bg-oo-bg-default p-5 ${className}`}>{children}</div>
   );
 }
 
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-2 mb-3">
-      <h2 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">{children}</h2>
+      <h2 className="text-[18px] font-semibold leading-[28px] text-oo-text-primary">{children}</h2>
       {right}
     </div>
   );
@@ -180,23 +214,23 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="text-center py-10 text-brown/40 text-sm font-semibold">{children}</div>
+    <div className="py-10 text-center text-[14px] leading-[22px] text-oo-text-muted">{children}</div>
   );
 }
 
 export function Spinner() {
   return (
     <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
-      <div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin" />
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-oo-action-primary border-t-transparent" />
       <span className="sr-only">Loading</span>
     </div>
   );
 }
 
 const BTN_BASE =
-  "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all " +
-  "active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/50 focus-visible:ring-offset-1";
+  "inline-flex items-center gap-2 rounded-[10px] px-[18px] py-[10px] text-[14px] font-medium leading-[22px] transition-colors " +
+  "disabled:opacity-50 disabled:cursor-not-allowed " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40 focus-visible:ring-offset-1";
 
 export function Button({
   children,
@@ -217,12 +251,12 @@ export function Button({
 }) {
   const tone =
     variant === "primary"
-      ? "bg-orange text-white hover:bg-orange-dark shadow-md shadow-orange/20"
+      ? "bg-oo-action-primary text-white hover:bg-oo-action-primary-hover"
       : variant === "danger"
-        ? "bg-red-600 text-white hover:bg-red-700"
+        ? "bg-oo-status-blocked text-white hover:opacity-90"
         : variant === "ghost"
-          ? "text-brown hover:bg-cream"
-          : "bg-white border-2 border-border text-charcoal hover:border-orange";
+          ? "text-oo-text-secondary hover:bg-oo-bg-subtle"
+          : "border border-oo-border-strong bg-oo-bg-default text-oo-text-primary hover:border-oo-action-primary";
   return (
     <button
       type={type}
@@ -238,9 +272,10 @@ export function Button({
 }
 
 const FIELD_BASE =
-  "w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm bg-white " +
-  "focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors " +
-  "disabled:bg-cream/50 disabled:text-brown/60";
+  "w-full rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[14px] py-[10px] " +
+  "text-[14px] leading-[22px] text-oo-text-primary placeholder:text-oo-text-muted " +
+  "outline-none transition-colors focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 " +
+  "disabled:bg-oo-bg-subtle disabled:text-oo-text-muted";
 
 /**
  * A labelled control.
@@ -401,13 +436,35 @@ export function formatMoney(raw: string, places = 2): string {
  * `tabular-nums` because these sit in columns and proportional digits make a column of
  * figures impossible to scan.
  */
-export function Money({ value, currency = "SAR" }: { value: string | number | null | undefined; currency?: string }) {
-  if (value === null || value === undefined || value === "") return <span className="text-brown/40">—</span>;
+const CURRENCY_AR: Record<string, string> = { SAR: "ر.س", USD: "$", EUR: "€", AED: "د.إ" };
+
+export function Money({
+  value,
+  currency = "SAR",
+  strong,
+}: {
+  value: string | number | null | undefined;
+  currency?: string;
+  /** Headline figures — a statement total, a KPI — carry weight. A figure in a table column
+   *  does not: the design sets those in ordinary body text. */
+  strong?: boolean;
+}) {
+  const lang = useLang();
+  if (value === null || value === undefined || value === "") {
+    return <span className="text-oo-text-muted">—</span>;
+  }
   const raw = String(value);
   const negative = raw.trim().startsWith("-");
+  const formatted = formatMoney(raw);
+  const unit = lang === "ar" ? (CURRENCY_AR[currency] ?? currency) : currency;
   return (
-    <span className={`tabular-nums font-bold ${negative ? "text-red-600" : ""}`}>
-      {formatMoney(raw)} <span className="text-[10px] font-semibold text-brown/60">{currency}</span>
+    <span
+      className={`tabular-nums ${strong ? "font-semibold" : ""} ${
+        negative ? "text-oo-status-rejected" : "text-oo-text-primary"
+      }`}
+      dir={lang === "ar" ? "rtl" : undefined}
+    >
+      {lang === "ar" ? toArabicDigits(formatted) : formatted} {unit}
     </span>
   );
 }
@@ -421,18 +478,20 @@ export function Pill({
   tone?: "neutral" | "good" | "warn" | "bad" | "info" | "accent";
   testId?: string;
 }) {
+  // Soft fills for qualifiers that are not one of the stored status enums — "lapsed",
+  // "ordered", a share percentage. Status itself uses the outlined badges above.
   const tones: Record<string, string> = {
-    neutral: "bg-cream text-brown",
-    good: "bg-emerald-100 text-emerald-800",
-    warn: "bg-amber-100 text-amber-800",
-    bad: "bg-red-50 text-red-700",
-    info: "bg-info-bg text-slate",
-    accent: "bg-orange/15 text-orange",
+    neutral: "bg-oo-bg-subtle text-oo-text-secondary",
+    good: "bg-oo-status-success-bg text-oo-status-success",
+    warn: "bg-oo-status-waiting-bg text-oo-status-waiting",
+    bad: "bg-oo-status-blocked-bg text-oo-status-blocked",
+    info: "bg-oo-status-preparing-bg text-oo-status-preparing",
+    accent: "bg-oo-status-ready-bg text-oo-status-ready",
   };
   return (
     <span
       data-testid={testId}
-      className={`inline-block px-2 py-0.5 rounded-lg text-[11px] font-bold whitespace-nowrap ${tones[tone]}`}
+      className={`inline-block whitespace-nowrap rounded-lg px-2 py-[3px] text-[12px] font-medium leading-[18px] ${tones[tone]}`}
     >
       {children}
     </span>
@@ -506,6 +565,23 @@ function useBadgeLang() {
 }
 
 /** `LeadStatus` — the 5 stored values. */
+/**
+ * The seven stored `LeadSource` values.
+ *
+ * Shared, because the list screen's filter, the create form and the settings screen were
+ * each about to keep their own copy, and a source that reads "زيارة" in one place and
+ * "زيارة مباشرة" in another looks like two different sources to the person reading it.
+ */
+export const LEAD_SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
+  WALK_IN: { en: "Walk-in", ar: "زيارة" },
+  REFERRAL: { en: "Referral", ar: "إحالة" },
+  PHONE: { en: "Phone", ar: "هاتف" },
+  SOCIAL: { en: "Social media", ar: "وسائل التواصل" },
+  EXHIBITION: { en: "Exhibition", ar: "معرض" },
+  WEBSITE: { en: "Website", ar: "الموقع" },
+  OTHER: { en: "Other", ar: "أخرى" },
+};
+
 export const LEAD_STATUS_SPECS: Record<string, Spec> = {
   NEW:         { en: "New",         ar: "جديد",       tone: "preparing", Icon: Circle },
   CONTACTED:   { en: "Contacted",   ar: "تم التواصل", tone: "waiting",   Icon: MessageSquare },
@@ -628,6 +704,219 @@ export function Modal({
 export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto -mx-5 px-5">{children}</div>;
 }
+
+/**
+ * The filter bar above a list.
+ *
+ * In an RTL document the first child sits on the right. The design puts the search there
+ * and the filters on the left, with the magnifier against the search box's leading edge and
+ * each chevron against its select's trailing edge — so both icons use logical `start`/`end`
+ * rather than a hard side, and the same markup is correct in English.
+ */
+export function Toolbar({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-center gap-2.5">{children}</div>;
+}
+
+const CONTROL =
+  "w-full rounded-[10px] border border-oo-border-strong bg-oo-bg-default py-2.5 text-[14px] " +
+  "leading-[22px] text-oo-text-primary outline-none focus:border-oo-action-primary " +
+  "focus:ring-2 focus:ring-oo-action-primary/20";
+
+export function SearchField({
+  value,
+  onChange,
+  placeholder,
+  label,
+  testId,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  label: string;
+  testId?: string;
+}) {
+  return (
+    <div className="relative min-w-[200px] flex-1">
+      <Search
+        size={15}
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 start-3.5 my-auto text-oo-text-muted"
+      />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={label}
+        data-testid={testId}
+        className={`${CONTROL} ps-10 pe-3.5 placeholder:text-oo-text-muted`}
+      />
+    </div>
+  );
+}
+
+export function FilterSelect({
+  value,
+  onChange,
+  label,
+  width = "w-[200px]",
+  testId,
+  children,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  width?: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`relative ${width} shrink-0`}>
+      <ChevronDown
+        size={14}
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 end-3.5 my-auto text-oo-text-secondary"
+      />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        data-testid={testId}
+        className={`${CONTROL} appearance-none ps-3.5 pe-9`}
+      >
+        {children}
+      </select>
+    </div>
+  );
+}
+
+export type Col = {
+  label: ReactNode;
+  /** A width utility — `w-[150px]`, `min-w-[240px]`. The design fixes most columns and lets
+   *  exactly one take the slack, so widths belong with the column, not in the cells. */
+  w?: string;
+  align?: "start" | "end";
+};
+
+/**
+ * The module's one table shell: the bordered, rounded card IS the table in this design —
+ * there is no padded card around it, and the header is a tinted band flush with the edge.
+ *
+ * Every Sales list was previously a `<Card>` wrapping a bare `<table>` with no cell padding,
+ * which is why adjacent headers ran into each other. Putting the geometry here means a route
+ * cannot get the density wrong by forgetting a class.
+ */
+export function DataTable({
+  cols,
+  minWidth,
+  testId,
+  children,
+}: {
+  cols: Col[];
+  minWidth: number;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-bg-default">
+      {/* The page body must never scroll sideways; the overflow lives on the one element
+          that is genuinely too wide. */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-start" style={{ minWidth }} data-testid={testId}>
+          <thead>
+            <tr className="bg-oo-bg-subtle">
+              {cols.map((c, i) => (
+                <th
+                  key={i}
+                  scope="col"
+                  className={`${c.w ?? ""} px-4 py-[11px] text-[12px] font-medium leading-[18px] text-oo-text-muted ${
+                    c.align === "end" ? "text-end" : "text-start"
+                  }`}
+                >
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** A body row. The separator is a top border so the header band needs no bottom edge. */
+export function Tr({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <tr className="border-t border-oo-border-default" data-testid={testId}>
+      {children}
+    </tr>
+  );
+}
+
+export function Td({
+  children,
+  align,
+  className = "",
+}: {
+  children: ReactNode;
+  align?: "start" | "end";
+  className?: string;
+}) {
+  return (
+    <td
+      className={`px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary ${
+        align === "end" ? "text-end" : ""
+      } ${className}`}
+    >
+      {children}
+    </td>
+  );
+}
+
+/**
+ * A progress bar with its own caption, as the design draws it.
+ *
+ * The fill colour carries the same meaning as the status palette does everywhere else —
+ * green once the thing is met, amber while it is plausibly on track, red when it is not —
+ * and the caption repeats the figure in words, because colour alone is not a reading.
+ */
+export function ProgressBar({
+  percent,
+  label,
+  width = "w-[220px]",
+  testId,
+}: {
+  percent: number;
+  label: string;
+  width?: string;
+  testId?: string;
+}) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const tone =
+    percent >= 100 ? "bg-oo-status-success" : percent >= 50 ? "bg-oo-status-waiting" : "bg-oo-status-blocked";
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        className={`${width} h-[10px] overflow-hidden rounded-[10px] bg-oo-bg-subtle`}
+        role="progressbar"
+        aria-valuenow={Math.round(percent)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+        data-testid={testId}
+      >
+        <div className={`h-[10px] ${tone}`} style={{ width: `${clamped}%` }} />
+      </div>
+      <span className="text-[12px] leading-[18px] text-oo-text-secondary">{label}</span>
+    </div>
+  );
+}
+
+/** The outlined control that sits in a table's action column. Smaller than `Button`, which
+ *  is sized for page-level actions and would set the row height on its own. */
+export const ROW_ACTION =
+  "inline-flex items-center whitespace-nowrap rounded-[10px] border border-oo-border-strong " +
+  "bg-oo-bg-default px-3 py-[7px] text-[12px] leading-[18px] transition-colors";
 
 /** Fetch JSON and surface the server's own message, never a generic one. */
 export async function api<T = Record<string, unknown>>(

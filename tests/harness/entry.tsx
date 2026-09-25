@@ -23,6 +23,15 @@ import LeadDetailPage from "../../src/app/dashboard/sales/leads/[id]/page";
 import MyCommissionsPage from "../../src/app/dashboard/sales/my-commissions/page";
 import QuoteEditorPage from "../../src/app/dashboard/sales/quotes/[id]/page";
 import LeadsListPage from "../../src/app/dashboard/sales/leads/page";
+import QuotesListPage from "../../src/app/dashboard/sales/quotes/page";
+import DealDetailPage from "../../src/app/dashboard/sales/deals/[id]/page";
+import ActivitiesPage from "../../src/app/dashboard/sales/activities/page";
+import TargetsPage from "../../src/app/dashboard/sales/targets/page";
+import ReportsPage from "../../src/app/dashboard/sales/reports/page";
+import SalesSettingsPage from "../../src/app/dashboard/sales/settings/page";
+import ReviewPage from "../../src/app/dashboard/commissions/review/page";
+import PlansPage from "../../src/app/dashboard/commissions/plans/page";
+
 
 declare global {
   interface Window {
@@ -77,6 +86,14 @@ const SCREENS: Record<string, () => React.ReactElement> = {
   commissions: () => <MyCommissionsPage />,
   // The editor takes params as a promise, the way Next hands them over.
   "quote-editor": () => <QuoteEditorPage params={Promise.resolve({ id: "q1" })} />,
+  "quotes-list": () => <QuotesListPage />,
+  "deal-detail": () => <DealDetailPage params={Promise.resolve({ id: "d1" })} />,
+  activities: () => <ActivitiesPage />,
+  targets: () => <TargetsPage />,
+  reports: () => <ReportsPage />,
+  settings: () => <SalesSettingsPage />,
+  review: () => <ReviewPage />,
+  plans: () => <PlansPage />,
 };
 
 window.mountScreen = (name: string) => {

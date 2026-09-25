@@ -1,5 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney } from "../commissions/engine";
+import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -32,10 +33,10 @@ export const QUOTE_CURRENCY = "SAR";
  * a rep cannot issue an unlimited discount unilaterally, and that the authorisation is
  * recorded on the quote (`discountApprovedById`) rather than implied by who clicked issue.
  */
-export const DISCOUNT_APPROVAL_THRESHOLD_PERCENT = new Decimal(10);
+export const DISCOUNT_APPROVAL_THRESHOLD_PERCENT = new Decimal(DISCOUNT_APPROVAL_THRESHOLD);
 
 /** Hard ceiling. Not even an approver may give the coffee away by typing a wrong number. */
-export const MAX_DISCOUNT_PERCENT = new Decimal(60);
+export const MAX_DISCOUNT_PERCENT = new Decimal(DISCOUNT_MAX);
 
 const HUNDRED = new Decimal(100);
 

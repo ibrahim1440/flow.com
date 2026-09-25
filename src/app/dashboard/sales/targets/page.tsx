@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { Target } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner, SandboxBanner,
-  Button, Field, TextInput, Select, TextArea, Money, Pill, Modal, TableWrap, api,
+  Button, Field, TextInput, Select, TextArea, Money, Modal, api,
+  DataTable, Tr, Td, ProgressBar, ROW_ACTION, num, FilterSelect, formatMoney, toArabicDigits,
 } from "../_components/ui";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -86,34 +87,72 @@ export default function TargetsPage() {
 
   if (loading) return <Spinner />;
 
-  const totalTarget = rows.reduce((a, r) => a + Number(r.targetAmount), 0);
-  const totalAchieved = rows.reduce((a, r) => a + Number(r.achieved), 0);
+  // "سبتمبر ٢٠٢٦" — the period the table is showing, in the reader's own calendar names.
+  const monthName = (d: Date) =>
+    d.toLocaleDateString(ar ? "ar-SA-u-nu-arab-ca-gregory" : "en-GB", {
+      month: "long",
+      year: "numeric",
+    });
+  const [y, m] = month.split("-").map(Number);
+  const monthLabel = monthName(new Date(y, (m ?? 1) - 1, 1));
+
+  // The last twelve months and the one ahead — the range a target is ever set or reviewed in.
+  const monthOptions = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + 1 - i);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return { value, label: monthName(d) };
+  });
+  // A month reached from elsewhere (a link, a stale bookmark) must still be selectable.
+  if (!monthOptions.some((o) => o.value === month)) {
+    monthOptions.unshift({ value: month, label: monthLabel });
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <PageHeader
         title={ar ? "أهداف المبيعات" : "Sales targets"}
         subtitle={
-          <span className="flex items-center gap-2 flex-wrap mt-1">
-            <span className="tabular-nums">
-              {totalAchieved.toFixed(2)} / {totalTarget.toFixed(2)} SAR
+          <span className="flex items-center gap-2 flex-wrap">
+            <span>{monthLabel}</span>
+            <span aria-hidden className="text-oo-border-strong">·</span>
+            <span>
+              {ar
+                ? "الهدف يُقاس على صافي المحصّل، لا على قيمة الطلبات"
+                : "measured on net collections, not on order value"}
             </span>
             {scope === "own" && (
-              <span className="text-[11px] text-brown/60 font-semibold">
-                {ar ? "هدفك فقط" : "your own target only"}
-              </span>
+              <>
+                <span aria-hidden className="text-oo-border-strong">·</span>
+                <span>{ar ? "هدفك فقط" : "your own target only"}</span>
+              </>
             )}
           </span>
         }
         actions={
           <>
-            <div className="w-40">
-              <Field id="tg-month" label={ar ? "الشهر" : "Month"}>
-                <TextInput id="tg-month" type="month" value={month} onChange={setMonth} />
-              </Field>
-            </div>
+            {/* The design's actions slot is a period control and a create button. The period
+                control here lists months rather than stepping back one, because the screen
+                already supports jumping to any month and a one-step button would take that
+                away — and a select rather than <input type="month">: the native control
+                renders its
+                month name in the BROWSER's locale, so an Arabic page was showing
+                "September 2026". The choice on offer is the same — any of the last year, or
+                next month — and now it reads in the page's own language. */}
+            <FilterSelect
+              value={month}
+              onChange={setMonth}
+              label={ar ? "الشهر" : "Month"}
+              width="w-[180px]"
+              testId="tg-month"
+            >
+              {monthOptions.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </FilterSelect>
             {canManage && (
               <Button onClick={() => setEditing("new")} testId="new-target">
                 <Target size={15} aria-hidden /> {ar ? "تعيين هدف" : "Set a target"}
@@ -134,84 +173,76 @@ export default function TargetsPage() {
           </EmptyState>
         </Card>
       ) : (
-        <Card>
-          <TableWrap>
-            <table className="w-full text-sm min-w-[680px]">
-              <thead>
-                <tr className="text-[11px] uppercase text-brown/60 font-bold">
-                  <th className="text-start py-2">{ar ? "الموظف" : "Employee"}</th>
-                  <th className="text-end py-2">{ar ? "الهدف" : "Target"}</th>
-                  <th className="text-end py-2">{ar ? "المحقّق" : "Collected"}</th>
-                  <th className="py-2 w-[26%]">{ar ? "التقدّم" : "Progress"}</th>
-                  <th className="text-end py-2">{ar ? "المكافأة" : "Bonus"}</th>
-                  {canManage && <th className="py-2" />}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const pct = Math.min(100, Number(r.achievedPercent));
-                  return (
-                    <tr key={r.id} className="border-t border-border" data-testid={`target-${r.employeeId}`}>
-                      <td className="py-3 font-bold">{r.employee.name}</td>
-                      <td className="py-3 text-end">
-                        <Money value={r.targetAmount} currency={r.currency} />
-                      </td>
-                      <td className="py-3 text-end">
-                        <Money value={r.achieved} currency={r.currency} />
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="flex-1 h-2 bg-cream rounded-full overflow-hidden"
-                            role="progressbar"
-                            aria-valuenow={pct}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-label={`${r.employee.name} ${r.achievedPercent}%`}
-                          >
-                            <div
-                              className={`h-full rounded-full ${r.met ? "bg-emerald-500" : "bg-orange"}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-xs font-bold tabular-nums w-14 text-end">
-                            {r.achievedPercent}%
-                          </span>
-                        </div>
-                        {!r.met && (
-                          <p className="text-[10px] text-brown/60 mt-1 tabular-nums">
-                            {ar ? "المتبقي " : "shortfall "}
-                            {r.shortfall}
-                          </p>
-                        )}
-                      </td>
-                      <td className="py-3 text-end">
-                        {Number(r.bonusAmount) > 0 ? (
-                          <span className="flex items-center gap-1.5 justify-end">
-                            <Money value={r.bonusAmount} currency={r.currency} />
-                            {r.met && <Pill tone="good">{ar ? "مستحقة" : "earned"}</Pill>}
-                          </span>
-                        ) : (
-                          <span className="text-brown/40">—</span>
-                        )}
-                      </td>
-                      {canManage && (
-                        <td className="py-3 text-end">
-                          <Button variant="ghost" onClick={() => setEditing(r)} testId={`edit-target-${r.employeeId}`}>
-                            {ar ? "تعديل" : "Edit"}
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
-        </Card>
+        <DataTable
+          testId="targets-table"
+          minWidth={canManage ? 880 : 780}
+          cols={[
+            { label: ar ? "الموظّف" : "Employee", w: "min-w-[180px]" },
+            { label: ar ? "الهدف" : "Target", w: "w-[170px]" },
+            { label: ar ? "المحقّق" : "Collected", w: "w-[170px]" },
+            { label: ar ? "التقدّم" : "Progress", w: "w-[240px]" },
+            { label: ar ? "مكافأة التحقيق" : "Bonus", w: "w-[150px]" },
+            ...(canManage ? [{ label: <span className="sr-only">{ar ? "تعديل" : "Edit"}</span>, w: "w-[100px]" }] : []),
+          ]}
+        >
+          {rows.map((r) => {
+            const pct = Number(r.achievedPercent);
+            return (
+              <Tr key={r.id} testId={`target-${r.employeeId}`}>
+                <Td>
+                  <span className="block">{r.employee.name}</span>
+                  {r.note && (
+                    <span className="block text-[12px] leading-[18px] text-oo-text-muted">{r.note}</span>
+                  )}
+                </Td>
+                <Td>
+                  <Money value={r.targetAmount} currency={r.currency} />
+                </Td>
+                <Td>
+                  <Money value={r.achieved} currency={r.currency} />
+                </Td>
+                <Td>
+                  {/* The shortfall rides in the bar's own caption rather than on a second
+                      line, so every row is the same height the design gives it and the
+                      figure a rep actually wants is still on the screen. */}
+                  <ProgressBar
+                    percent={pct}
+                    testId={`progress-${r.employeeId}`}
+                    label={
+                      (ar ? `تحقّق ${num(Math.round(pct), "ar")}٪` : `${Math.round(pct)}% achieved`) +
+                      (r.met
+                        ? ""
+                        : ` · ${ar ? "المتبقي" : "shortfall"} ${
+                            ar ? toArabicDigits(formatMoney(r.shortfall, 0)) : formatMoney(r.shortfall, 0)
+                          } ${ar ? "ر.س" : r.currency}`)
+                    }
+                  />
+                </Td>
+                <Td>
+                  {Number(r.bonusAmount) > 0 ? (
+                    <Money value={r.bonusAmount} currency={r.currency} />
+                  ) : (
+                    <span className="text-oo-text-muted">—</span>
+                  )}
+                </Td>
+                {canManage && (
+                  <Td>
+                    <button
+                      onClick={() => setEditing(r)}
+                      data-testid={`edit-target-${r.employeeId}`}
+                      className={`${ROW_ACTION} text-oo-action-primary hover:border-oo-action-primary`}
+                    >
+                      {ar ? "تعديل" : "Edit"}
+                    </button>
+                  </Td>
+                )}
+              </Tr>
+            );
+          })}
+        </DataTable>
       )}
 
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[12px] leading-[18px] text-oo-text-muted">
         {ar
           ? "الهدف ليس نسبة عمولة. تحقيقه قد يستحق مكافأة، لكن المكافأة رقم يُقرّر ويُسجَّل، ولا يضيفه محرك العمولات إلى النسبة."
           : "A target is not a commission rate. Hitting it may pay a bonus, but the bonus is a figure someone decides and records — the accrual engine never adds it to a rate."}

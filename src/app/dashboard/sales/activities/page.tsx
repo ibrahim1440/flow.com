@@ -2,19 +2,23 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { CheckCircle2, Clock, AlertCircle, Phone } from "lucide-react";
+import { AlertTriangle, Phone } from "lucide-react";
 import {
   useLang, pick, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner,
-  Button, Field, Select, Pill, api,
+  Button, api, DataTable, Tr, Td, Toolbar, FilterSelect, ROW_ACTION, formatWhen, num,
 } from "../_components/ui";
-import { formatDate } from "@/lib/utils";
 
 /**
- * Follow-ups — the screen a salesperson opens first in the morning.
+ * Follow-ups — SC-09 in the Sales Screens design.
  *
  * Organised around what is late rather than around what exists. An activity list sorted by
  * creation date is a log; this is a work queue, so the counts and the default filter both
  * lead with overdue.
+ *
+ * The design collapses the filters behind a single "تصفية" button. They are left inline
+ * here: they are the primary control on this screen, they are already wired to the server,
+ * and a button that opens nothing would be worse than the extra row. Recorded in the
+ * handoff as a deliberate deviation.
  *
  * PROVISIONAL INTERFACE — see the banner.
  */
@@ -34,12 +38,12 @@ type Activity = {
 };
 
 const TYPE_LABELS: Record<string, { en: string; ar: string }> = {
-  CALL: { en: "Call", ar: "اتصال" },
+  CALL: { en: "Call", ar: "مكالمة" },
   VISIT: { en: "Visit", ar: "زيارة" },
   MEETING: { en: "Meeting", ar: "اجتماع" },
   NOTE: { en: "Note", ar: "ملاحظة" },
   TASK: { en: "Task", ar: "مهمة" },
-  SAMPLE_FOLLOW_UP: { en: "Sample follow-up", ar: "متابعة عينة" },
+  SAMPLE_FOLLOW_UP: { en: "Sample follow-up", ar: "متابعة عيّنة" },
 };
 
 const FILTERS = [
@@ -48,6 +52,22 @@ const FILTERS = [
   { key: "open", en: "All open", ar: "المفتوحة" },
   { key: "done", en: "Completed", ar: "المكتملة" },
 ] as const;
+
+/**
+ * "متأخّر يومان" — how late, not merely that it is late.
+ *
+ * Arabic counts one, two and a few differently, and a list that says "متأخّر ٢ يوم" reads as
+ * machine output. The English side is a plain day count, which is what it is.
+ */
+function lateBy(dueAt: string, lang: "ar" | "en"): string {
+  const days = Math.floor((Date.now() - new Date(dueAt).getTime()) / 86_400_000);
+  if (lang !== "ar") return days < 1 ? "Overdue today" : `${days}d overdue`;
+  if (days < 1) return "متأخّر اليوم";
+  if (days === 1) return "متأخّر يوم";
+  if (days === 2) return "متأخّر يومان";
+  if (days <= 10) return `متأخّر ${num(days, "ar")} أيام`;
+  return `متأخّر ${num(days, "ar")} يوماً`;
+}
 
 export default function ActivitiesPage() {
   const lang = useLang();
@@ -110,32 +130,93 @@ export default function ActivitiesPage() {
 
   if (loading) return <Spinner />;
 
+  /** What a row is attached to: the deal if there is one, otherwise the lead. */
+  function linkedTo(a: Activity) {
+    const customer = a.customer?.name ?? a.lead?.companyName ?? null;
+    if (a.opportunity) {
+      return (
+        <Link href={`/dashboard/sales/deals/${a.opportunity.id}`} className="hover:text-oo-action-primary">
+          {customer ? `${customer} — ${a.opportunity.title}` : a.opportunity.title}
+        </Link>
+      );
+    }
+    if (a.lead) {
+      return (
+        <Link href={`/dashboard/sales/leads/${a.lead.id}`} className="hover:text-oo-action-primary">
+          {a.lead.companyName}
+        </Link>
+      );
+    }
+    return <span className="text-oo-text-muted">—</span>;
+  }
+
+  /** The due cell: a red chip when it is late, otherwise the moment itself. */
+  function due(a: Activity) {
+    const late = !a.completedAt && a.dueAt && new Date(a.dueAt) < new Date();
+    if (late && a.dueAt) {
+      return (
+        <span
+          data-testid={`late-${a.id}`}
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
+        >
+          <AlertTriangle size={13} aria-hidden /> {lateBy(a.dueAt, lang)}
+        </span>
+      );
+    }
+    if (a.completedAt) {
+      return (
+        <span className="text-oo-text-muted">
+          {ar ? "اكتمل" : "done"} {formatWhen(a.completedAt, lang)}
+        </span>
+      );
+    }
+    return a.dueAt ? formatWhen(a.dueAt, lang) : <span className="text-oo-text-muted">—</span>;
+  }
+
+  function Complete({ a, full }: { a: Activity; full?: boolean }) {
+    if (a.completedAt) {
+      return (
+        <span className={`${ROW_ACTION} ${full ? "w-full justify-center " : ""}text-oo-text-muted`}>
+          {ar ? "مكتمل" : "Completed"}
+        </span>
+      );
+    }
+    return (
+      <button
+        disabled={busy}
+        onClick={() => complete(a.id)}
+        data-testid={`complete-${a.id}`}
+        className={`${full ? "w-full justify-center " : ""}inline-flex items-center whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50`}
+      >
+        {ar ? "إكمال" : "Complete"}
+      </button>
+    );
+  }
+
+  const caption = [
+    `${num(counts.open, lang)} ${ar ? "مفتوحة" : "open"}`,
+    `${num(counts.overdue, lang)} ${ar ? "متأخّرة" : "overdue"}`,
+    `${num(counts.dueToday, lang)} ${ar ? "اليوم" : "due today"}`,
+    `${ar ? "النطاق:" : "scope:"} ${
+      scope === "own" ? (ar ? "أنشطتي" : "mine") : (ar ? "الفريق" : "the team")
+    }`,
+  ];
+  const captionTestIds = ["count-open", "count-overdue", "count-today", "count-scope"];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <PageHeader
-        title={ar ? "المتابعات والمهام" : "Follow-ups & tasks"}
+        title={ar ? "الأنشطة والمتابعات" : "Activities & Follow-ups"}
         subtitle={
-          <span className="flex items-center gap-2 flex-wrap mt-1">
-            {counts.overdue > 0 && (
-              <Pill tone="bad" testId="count-overdue">
-                {counts.overdue} {ar ? "متأخرة" : "overdue"}
-              </Pill>
-            )}
-            {counts.dueToday > 0 && (
-              <Pill tone="warn" testId="count-today">
-                {counts.dueToday} {ar ? "اليوم" : "today"}
-              </Pill>
-            )}
-            <Pill tone="info" testId="count-open">
-              {counts.open} {ar ? "مفتوحة" : "open"}
-            </Pill>
-            {scope === "own" && (
-              <span className="text-[11px] text-brown/60 font-semibold">
-                {ar ? "متابعاتك فقط" : "your own follow-ups only"}
+          <span className="flex items-center gap-2 flex-wrap">
+            {caption.map((part, i) => (
+              <span key={i} className="flex items-center gap-2" data-testid={captionTestIds[i]}>
+                {i > 0 && <span aria-hidden className="text-oo-border-strong">·</span>}
+                <span>{part}</span>
               </span>
-            )}
+            ))}
           </span>
         }
         actions={
@@ -145,7 +226,7 @@ export default function ActivitiesPage() {
               onClick={() => setTeamView(!teamView)}
               testId="toggle-team"
             >
-              {teamView ? (ar ? "الفريق" : "Team") : (ar ? "أنا" : "Mine")}
+              {teamView ? (ar ? "الفريق" : "Team") : (ar ? "أنشطتي" : "Mine")}
             </Button>
           ) : null
         }
@@ -153,39 +234,31 @@ export default function ActivitiesPage() {
 
       {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
 
-      <div className="flex gap-2 flex-wrap items-end">
-        <div
-          className="flex gap-1.5 flex-wrap"
-          role="group"
-          aria-label={ar ? "تصفية" : "Filter"}
-        >
+      <Toolbar>
+        <div className="flex flex-1 flex-wrap gap-1.5" role="group" aria-label={ar ? "تصفية" : "Filter"}>
           {FILTERS.map((f) => (
             <button
               key={f.key}
               data-testid={`filter-${f.key}`}
               aria-pressed={filter === f.key}
               onClick={() => setFilter(f.key)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold border-2 transition-colors ${
+              className={`rounded-[10px] border px-[14px] py-2.5 text-[14px] leading-[22px] transition-colors ${
                 filter === f.key
-                  ? "bg-orange text-white border-orange"
-                  : "bg-white border-border text-brown hover:border-orange"
+                  ? "border-oo-action-primary bg-oo-action-primary font-medium text-white"
+                  : "border-oo-border-strong bg-oo-bg-default text-oo-text-primary hover:border-oo-action-primary"
               }`}
             >
               {ar ? f.ar : f.en}
             </button>
           ))}
         </div>
-        <div className="w-44">
-          <Field id="act-type-filter" label={ar ? "النوع" : "Type"}>
-            <Select id="act-type-filter" value={type} onChange={setType}>
-              <option value="">{ar ? "الكل" : "All"}</option>
-              {Object.keys(TYPE_LABELS).map((k) => (
-                <option key={k} value={k}>{pick(TYPE_LABELS, k, lang)}</option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-      </div>
+        <FilterSelect value={type} onChange={setType} label={ar ? "النوع" : "Type"} width="w-[170px]">
+          <option value="">{ar ? "كل الأنواع" : "All types"}</option>
+          {Object.keys(TYPE_LABELS).map((k) => (
+            <option key={k} value={k}>{pick(TYPE_LABELS, k, lang)}</option>
+          ))}
+        </FilterSelect>
+      </Toolbar>
 
       {rows.length === 0 ? (
         <Card>
@@ -197,86 +270,69 @@ export default function ActivitiesPage() {
           </EmptyState>
         </Card>
       ) : (
-        <ul className="space-y-2" data-testid="activity-list">
-          {rows.map((a) => {
-            const late = !a.completedAt && a.dueAt && new Date(a.dueAt) < new Date();
-            const subject = a.opportunity ?? a.lead;
-            return (
+        <>
+          {/* ── Desktop: the design's six columns, right to left ────────────────────── */}
+          <div className="hidden lg:block" data-testid="activity-list">
+            <DataTable
+              testId="activities-table"
+              minWidth={1120}
+              cols={[
+                { label: ar ? "النشاط" : "Activity", w: "min-w-[260px]" },
+                { label: ar ? "النوع" : "Type", w: "w-[150px]" },
+                { label: ar ? "مرتبط بـ" : "Linked to", w: "w-[230px]" },
+                { label: ar ? "الاستحقاق" : "Due", w: "w-[190px]" },
+                { label: ar ? "المالك" : "Owner", w: "w-[140px]" },
+                { label: <span className="sr-only">{ar ? "الإجراء" : "Action"}</span>, w: "w-[150px]" },
+              ]}
+            >
+              {rows.map((a) => (
+                <Tr key={a.id} testId={`activity-row-${a.id}`}>
+                  <Td>
+                    <span className="block">{a.subject}</span>
+                    {a.body && (
+                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">{a.body}</span>
+                    )}
+                  </Td>
+                  <Td>{pick(TYPE_LABELS, a.type, lang)}</Td>
+                  <Td>{linkedTo(a)}</Td>
+                  <Td>{due(a)}</Td>
+                  <Td>{a.owner?.name ?? (ar ? "غير مُسنَد" : "Unassigned")}</Td>
+                  <Td><Complete a={a} /></Td>
+                </Tr>
+              ))}
+            </DataTable>
+          </div>
+
+          {/* ── Narrow: the same six facts stacked ──────────────────────────────────── */}
+          <ul className="space-y-2 lg:hidden">
+            {rows.map((a) => (
               <li
                 key={a.id}
-                data-testid={`activity-row-${a.id}`}
-                className={`bg-white rounded-2xl border p-4 flex items-start gap-3 ${
-                  late ? "border-red-200" : "border-border"
-                }`}
+                data-testid={`m-activity-${a.id}`}
+                className="rounded-2xl border border-oo-border-default bg-oo-bg-default p-4"
               >
-                <span className="mt-0.5 flex-shrink-0">
-                  {a.completedAt ? (
-                    <CheckCircle2 size={17} className="text-emerald-600" aria-hidden />
-                  ) : late ? (
-                    <AlertCircle size={17} className="text-red-600" aria-hidden />
-                  ) : (
-                    <Clock size={17} className="text-brown/50" aria-hidden />
-                  )}
-                </span>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Pill>{pick(TYPE_LABELS, a.type, lang)}</Pill>
-                    <span className="font-bold text-sm text-charcoal break-words">{a.subject}</span>
-                    {late && <Pill tone="bad">{ar ? "متأخرة" : "Overdue"}</Pill>}
+                <div className="flex items-start justify-between gap-3">
+                  <span className="shrink-0 text-[12px] leading-[18px] text-oo-text-muted">
+                    {pick(TYPE_LABELS, a.type, lang)}
+                  </span>
+                  <div className="min-w-0 text-end">
+                    <span className="block text-[14px] leading-[22px] text-oo-text-primary">{a.subject}</span>
+                    <span className="block text-[12px] leading-[18px] text-oo-text-muted">
+                      {linkedTo(a)}
+                    </span>
                   </div>
-
-                  {a.body && <p className="text-xs text-brown mt-1 break-words">{a.body}</p>}
-
-                  <p className="text-[11px] text-brown/60 mt-1.5 flex items-center gap-1.5 flex-wrap">
-                    {a.opportunity ? (
-                      <Link
-                        href={`/dashboard/sales/deals/${a.opportunity.id}`}
-                        className="font-bold text-orange hover:underline"
-                      >
-                        {a.opportunity.title}
-                      </Link>
-                    ) : a.lead ? (
-                      <Link href="/dashboard/sales/leads" className="font-bold text-orange hover:underline">
-                        {a.lead.companyName}
-                      </Link>
-                    ) : null}
-                    {subject && <span>·</span>}
-                    <span>{a.owner?.name}</span>
-                    {a.dueAt && (
-                      <>
-                        <span>·</span>
-                        <span className={late ? "text-red-600 font-bold" : ""}>
-                          {ar ? "الاستحقاق" : "due"} {formatDate(a.dueAt)}
-                        </span>
-                      </>
-                    )}
-                    {a.completedAt && (
-                      <>
-                        <span>·</span>
-                        <span>{ar ? "اكتمل" : "done"} {formatDate(a.completedAt)}</span>
-                      </>
-                    )}
-                  </p>
                 </div>
-
-                {!a.completedAt && (
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => complete(a.id)}
-                    testId={`complete-${a.id}`}
-                  >
-                    {ar ? "تم" : "Done"}
-                  </Button>
-                )}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <Complete a={a} />
+                  <span className="text-[12px] leading-[18px]">{due(a)}</span>
+                </div>
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
+        </>
       )}
 
-      <p className="text-[11px] text-brown/60 font-medium">
+      <p className="text-[12px] leading-[18px] text-oo-text-muted">
         {ar
           ? "إكمال متابعة يسجّل أنها حدثت. لا يُرسل النظام بريداً ولا رسائل."
           : "Completing a follow-up records that it happened. Nothing here sends an email or a message."}

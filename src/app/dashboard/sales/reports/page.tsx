@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { TrendingUp, Download } from "lucide-react";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Field, TextInput, Money, Pill, TableWrap, api,
+  Money, api, FilterSelect, LEAD_SOURCE_LABELS, num, toArabicDigits,
 } from "../_components/ui";
 
 /**
@@ -47,15 +47,10 @@ type Report = {
   duration: { sampleSize: number; medianDays: number | null; meanDays: number | null };
 };
 
-const SOURCE_LABELS: Record<string, { en: string; ar: string }> = {
-  WALK_IN: { en: "Walk-in", ar: "زيارة مباشرة" },
-  REFERRAL: { en: "Referral", ar: "توصية" },
-  PHONE: { en: "Phone", ar: "هاتف" },
-  SOCIAL: { en: "Social media", ar: "وسائل التواصل" },
-  EXHIBITION: { en: "Exhibition", ar: "معرض" },
-  WEBSITE: { en: "Website", ar: "الموقع" },
-  OTHER: { en: "Other", ar: "أخرى" },
-};
+// The shared map. This screen used to keep its own, which named WALK_IN "زيارة مباشرة" and
+// REFERRAL "توصية" while the list screen called them "زيارة" and "إحالة" — the same source
+// under two names, one report apart.
+const SOURCE_LABELS = LEAD_SOURCE_LABELS;
 
 function thisMonth(): string {
   const riyadh = new Date(Date.now() + 3 * 3600_000);
@@ -102,33 +97,71 @@ export default function ReportsPage() {
 
   const maxStage = Math.max(1, ...data.pipeline.byStage.map((s) => s.count));
 
+  /** Counts and percentages in the reader's own numerals. */
+  const n = (v: number) => num(v, lang);
+  const pct = (raw: string) => {
+    // The server sends "36.84"; the trailing ".00" is noise in a headline figure.
+    const trimmed = raw.replace(/\.0+$/, "");
+    return ar ? `${toArabicDigits(trimmed)}٪` : `${trimmed}%`;
+  };
+
+  // The last twelve months and the one ahead, named in the page's own language — the native
+  // <input type="month"> renders its month name in the browser's locale instead.
+  const monthName = (d: Date) =>
+    d.toLocaleDateString(ar ? "ar-SA-u-nu-arab-ca-gregory" : "en-GB", { month: "long", year: "numeric" });
+  const monthOptions = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + 1 - i);
+    return {
+      value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      label: monthName(d),
+    };
+  });
+  if (!monthOptions.some((o) => o.value === month)) {
+    const [yy, mm] = month.split("-").map(Number);
+    monthOptions.unshift({ value: month, label: monthName(new Date(yy, (mm ?? 1) - 1, 1)) });
+  }
+  const currentMonthLabel = monthOptions.find((o) => o.value === month)?.label ?? month;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-[18px]">
       <ProvisionalBanner />
 
       <PageHeader
         title={ar ? "تقارير المبيعات" : "Sales reports"}
         subtitle={
-          data.scope === "own" ? (
-            <span className="text-[11px] text-brown/60 font-semibold">
-              {ar ? "أداؤك أنت فقط" : "your own performance only"}
+          <span className="flex flex-wrap items-center gap-2">
+            <span>{currentMonthLabel}</span>
+            <span aria-hidden className="text-oo-border-strong">·</span>
+            <span>
+              {ar ? "النطاق: " : "scope: "}
+              {data.scope === "own" ? (ar ? "أداؤك أنت" : "your own") : (ar ? "كل الفريق" : "the whole team")}
             </span>
-          ) : null
+            <span aria-hidden className="text-oo-border-strong">·</span>
+            <span>{ar ? "الأرقام من صافي المحصّل" : "figures are net collections"}</span>
+          </span>
         }
         actions={
           <>
-            <div className="w-40">
-              <Field id="rp-month" label={ar ? "الشهر" : "Month"}>
-                <TextInput id="rp-month" type="month" value={month} onChange={setMonth} />
-              </Field>
-            </div>
+            <FilterSelect
+              value={month}
+              onChange={setMonth}
+              label={ar ? "الشهر" : "Month"}
+              width="w-[180px]"
+              testId="rp-month"
+            >
+              {monthOptions.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </FilterSelect>
             <a
               // A real link rather than a scripted download: the browser handles the file,
               // the Content-Disposition header names it, and it survives JavaScript failing.
               href={`/api/sales/reports?month=${month}&format=csv`}
               download
               data-testid="export-report"
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-white border-2 border-border text-charcoal rounded-xl text-sm font-bold hover:border-orange active:scale-[0.98] transition-all"
+              className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary"
             >
               <Download size={16} aria-hidden /> {ar ? "تصدير CSV" : "Export CSV"}
             </a>
@@ -139,47 +172,47 @@ export default function ReportsPage() {
       {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
 
       {/* ── Headline figures ──────────────────────────────────────── */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <StatStrip>
         <Stat
-          label={ar ? "عملاء محتملون جدد" : "New leads"}
-          value={String(data.leads.created)}
-          note={
-            ar
-              ? `${data.leads.converted} تحوّلت`
-              : `${data.leads.converted} converted`
-          }
-          testId="stat-leads"
-        />
-        <Stat
-          label={ar ? "معدّل التحويل" : "Conversion rate"}
-          value={`${data.leads.conversionRatePercent}%`}
-          note={
-            ar
-              ? `من العملاء المحتملين الذين وصلوا هذا الشهر (${data.leads.created})`
-              : `of the leads that arrived this month (${data.leads.created})`
-          }
-          testId="stat-conversion"
+          label={ar ? "قيمة المسار المفتوح" : "Open pipeline"}
+          value={data.pipeline.openValue}
+          note={ar ? `${n(data.pipeline.openCount)} صفقة` : `${data.pipeline.openCount} deals`}
+          money
+          testId="stat-pipeline"
         />
         <Stat
           label={ar ? "معدّل الكسب" : "Win rate"}
-          value={`${data.closed.winRatePercent}%`}
+          value={pct(data.closed.winRatePercent)}
           note={
             ar
-              ? `${data.closed.won} مكسوبة · ${data.closed.lost} خاسرة`
+              ? `${n(data.closed.won)} مكسوبة · ${n(data.closed.lost)} خاسرة`
               : `${data.closed.won} won · ${data.closed.lost} lost`
           }
           testId="stat-winrate"
         />
         <Stat
-          label={ar ? "قيمة المسار المفتوح" : "Open pipeline"}
-          value={data.pipeline.openValue}
-          note={
-            ar ? `${data.pipeline.openCount} صفقة` : `${data.pipeline.openCount} deals`
+          label={ar ? "متوسط مدة الدورة" : "Median cycle"}
+          value={
+            data.duration.medianDays === null
+              ? "—"
+              : ar
+                ? `${n(data.duration.medianDays)} يوماً`
+                : `${data.duration.medianDays} days`
           }
-          money
-          testId="stat-pipeline"
+          note={ar ? "من الإنشاء إلى الإغلاق" : "from creation to close"}
+          testId="stat-cycle"
         />
-      </div>
+        <Stat
+          label={ar ? "نسبة التحويل" : "Conversion rate"}
+          value={pct(data.leads.conversionRatePercent)}
+          note={
+            ar
+              ? `من عميل محتمل إلى صفقة · ${n(data.leads.created)} وصلوا`
+              : `from lead to deal · ${data.leads.created} arrived`
+          }
+          testId="stat-conversion"
+        />
+      </StatStrip>
 
       <div className="grid lg:grid-cols-2 gap-5 items-start">
         {/* ── Pipeline by stage ──────────────────────────────────── */}
@@ -192,21 +225,24 @@ export default function ReportsPage() {
           {data.pipeline.byStage.length === 0 ? (
             <EmptyState>{ar ? "لا توجد صفقات مفتوحة." : "No open deals."}</EmptyState>
           ) : (
-            <ul className="space-y-3" data-testid="stage-breakdown">
+            // The design draws this as label, track, count on one line. The track's fill
+            // starts at the reading edge — the right in Arabic — so a longer bar grows the
+            // way the eye already travels.
+            <ul className="space-y-2.5" data-testid="stage-breakdown">
               {data.pipeline.byStage.map((s) => (
-                <li key={s.stageId}>
-                  <div className="flex items-baseline justify-between gap-2 mb-1">
-                    <span className="text-sm font-bold text-charcoal">{ar ? s.nameAr : s.nameEn}</span>
-                    <span className="text-xs tabular-nums text-brown">
-                      {s.count} · <Money value={s.value} />
-                    </span>
-                  </div>
-                  <div className="h-2 bg-cream rounded-full overflow-hidden">
+                <li key={s.stageId} className="flex items-center gap-3">
+                  <span className="w-[90px] shrink-0 text-[14px] leading-[22px] text-oo-text-primary">
+                    {ar ? s.nameAr : s.nameEn}
+                  </span>
+                  <div className="h-[10px] flex-1 overflow-hidden rounded-[10px] bg-oo-bg-subtle">
                     <div
-                      className="h-full bg-orange rounded-full"
+                      className="h-[10px] bg-oo-status-preparing"
                       style={{ width: `${(s.count / maxStage) * 100}%` }}
                     />
                   </div>
+                  <span className="w-[130px] shrink-0 text-end text-[12px] leading-[18px] text-oo-text-secondary">
+                    {n(s.count)} · <Money value={s.value} />
+                  </span>
                 </li>
               ))}
             </ul>
@@ -219,20 +255,19 @@ export default function ReportsPage() {
           {data.leads.bySource.length === 0 ? (
             <EmptyState>{ar ? "لا يوجد عملاء محتملون هذا الشهر." : "No leads this month."}</EmptyState>
           ) : (
-            <TableWrap>
-              <table className="w-full text-sm">
-                <tbody>
-                  {data.leads.bySource.map((s) => (
-                    <tr key={s.source} className="border-b border-border last:border-0">
-                      <td className="py-2 font-semibold">
-                        {ar ? (SOURCE_LABELS[s.source]?.ar ?? s.source) : (SOURCE_LABELS[s.source]?.en ?? s.source)}
-                      </td>
-                      <td className="py-2 text-end tabular-nums font-bold">{s.count}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+            <ul className="space-y-2" data-testid="source-breakdown">
+              {data.leads.bySource.map((s) => (
+                <li
+                  key={s.source}
+                  className="flex items-center justify-between rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
+                >
+                  <span className="tabular-nums font-medium">{n(s.count)}</span>
+                  <span>
+                    {ar ? (SOURCE_LABELS[s.source]?.ar ?? s.source) : (SOURCE_LABELS[s.source]?.en ?? s.source)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </Card>
 
@@ -244,9 +279,12 @@ export default function ReportsPage() {
           ) : (
             <ul className="space-y-2" data-testid="lost-reasons">
               {data.closed.lostReasons.map((r, i) => (
-                <li key={i} className="flex items-start justify-between gap-3 text-sm">
-                  <span className="break-words flex-1">{r.reason}</span>
-                  <Pill tone="bad">{r.count}</Pill>
+                <li
+                  key={i}
+                  className="flex items-start justify-between gap-3 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
+                >
+                  <span className="shrink-0 tabular-nums font-medium text-oo-status-rejected">{n(r.count)}</span>
+                  <span className="break-words text-end">{r.reason}</span>
                 </li>
               ))}
             </ul>
@@ -259,22 +297,24 @@ export default function ReportsPage() {
           {data.duration.sampleSize === 0 ? (
             <EmptyState>{ar ? "لم تُغلق صفقات هذا الشهر." : "No deals closed this month."}</EmptyState>
           ) : (
-            <dl className="space-y-3 text-sm" data-testid="cycle-stats">
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-xs font-bold text-brown/70">{ar ? "الوسيط" : "Median"}</dt>
-                <dd className="text-xl font-extrabold tabular-nums">
-                  {data.duration.medianDays} <span className="text-xs font-semibold">{ar ? "يوم" : "days"}</span>
-                </dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-xs font-bold text-brown/70">{ar ? "المتوسط" : "Mean"}</dt>
-                <dd className="font-bold tabular-nums">
-                  {data.duration.meanDays} <span className="text-xs">{ar ? "يوم" : "days"}</span>
-                </dd>
-              </div>
-              <p className="text-[11px] text-brown/60 font-medium pt-1 border-t border-border">
+            <dl className="space-y-2" data-testid="cycle-stats">
+              {[
+                [ar ? "الوسيط" : "Median", data.duration.medianDays],
+                [ar ? "المتوسط" : "Mean", data.duration.meanDays],
+              ].map(([label_, days]) => (
+                <div
+                  key={String(label_)}
+                  className="flex items-center justify-between rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
+                >
+                  <dd className="tabular-nums font-medium">
+                    {days === null ? "—" : ar ? `${n(Number(days))} يوماً` : `${days} days`}
+                  </dd>
+                  <dt>{label_}</dt>
+                </div>
+              ))}
+              <p className="pt-1 text-[12px] leading-[18px] text-oo-text-muted">
                 {ar
-                  ? `من ${data.duration.sampleSize} صفقة أُغلقت هذا الشهر. الوسيط مذكور أولاً لأن صفقة واحدة طويلة تجرّ المتوسط إلى رقم لا يعرفه أحد.`
+                  ? `من ${n(data.duration.sampleSize)} صفقة أُغلقت هذا الشهر. الوسيط مذكور أولاً لأن صفقة واحدة طويلة تجرّ المتوسط إلى رقم لا يعرفه أحد.`
                   : `From ${data.duration.sampleSize} deals closed this month. The median leads because one nine-month deal drags an average nobody recognises.`}
               </p>
             </dl>
@@ -282,16 +322,37 @@ export default function ReportsPage() {
         </Card>
       </div>
 
-      <div className="grid sm:grid-cols-3 gap-4">
+      <StatStrip>
         <Stat label={ar ? "قيمة المكسوب" : "Won value"} value={data.closed.wonValue} money testId="stat-won" />
         <Stat label={ar ? "قيمة الخاسر" : "Lost value"} value={data.closed.lostValue} money testId="stat-lost" />
         <Stat
+          label={ar ? "عملاء محتملون جدد" : "New leads"}
+          value={n(data.leads.created)}
+          note={ar ? `${n(data.leads.converted)} تحوّلت` : `${data.leads.converted} converted`}
+          testId="stat-leads"
+        />
+        <Stat
           label={ar ? "عملاء جدد أُنشئوا" : "New customers created"}
-          value={String(data.leads.newCustomersCreated)}
+          value={n(data.leads.newCustomersCreated)}
           note={ar ? "من تحويل العملاء المحتملين" : "from lead conversion"}
           testId="stat-customers"
         />
-      </div>
+      </StatStrip>
+    </div>
+  );
+}
+
+/**
+ * The design's headline strip: one bordered box divided into equal cells.
+ *
+ * The dividers are a 1px grid gap showing the border colour through, rather than
+ * `divide-x`, so they land on the right side of each cell in both directions without a
+ * direction-specific utility.
+ */
+function StatStrip({ children }: { children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-border-default">
+      <div className="grid gap-px sm:grid-cols-2 lg:grid-cols-4">{children}</div>
     </div>
   );
 }
@@ -299,15 +360,15 @@ export default function ReportsPage() {
 function Stat({
   label, value, note, money, testId,
 }: {
-  label: string; value: string; note?: string; money?: boolean; testId?: string;
+  label: string; value: ReactNode; note?: string; money?: boolean; testId?: string;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-border p-4" data-testid={testId}>
-      <p className="text-[11px] uppercase font-bold text-brown/60 tracking-wide">{label}</p>
-      <p className="text-2xl font-extrabold text-charcoal mt-1 tabular-nums">
-        {money ? <Money value={value} /> : value}
+    <div className="bg-oo-bg-default px-5 py-4" data-testid={testId}>
+      <p className="text-[24px] font-bold leading-[34px] text-oo-text-primary tabular-nums">
+        {money ? <Money value={String(value)} strong /> : value}
       </p>
-      {note && <p className="text-[11px] text-brown/60 font-medium mt-1">{note}</p>}
+      <p className="text-[14px] leading-[22px] text-oo-text-primary">{label}</p>
+      {note && <p className="text-[12px] leading-[18px] text-oo-text-muted">{note}</p>}
     </div>
   );
 }
