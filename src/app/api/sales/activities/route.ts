@@ -4,8 +4,9 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import {
   ACTIVITY_OUTCOMES, qualifies, qualifyLeadFromActivity, markLeadNotInterested,
+  lockLeadForAutomation,
 } from "@/lib/services/sales/qualification";
-import { seesAllSales } from "@/lib/services/sales/scope";
+import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 
 const TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP"];
 
@@ -193,6 +194,16 @@ export async function POST(request: Request) {
     // half-committed — a deal with no activity explaining it, or an activity claiming a
     // meeting with no deal — is worse than either failing.
     const result = await prisma.$transaction(async (tx) => {
+      // Before the activity, not after: the insert below takes a foreign-key share lock on
+      // the lead, and the automation then wants an exclusive one. Two concurrent callers
+      // each holding the share lock and each waiting for the other's is a deadlock, and
+      // PostgreSQL answers it by killing one of them. Locking first makes the second caller
+      // simply wait. See `lockLeadForAutomation`.
+      if (leadId && (qualifies(outcome) || outcome === "NOT_INTERESTED")) {
+        const present = await lockLeadForAutomation(tx, leadId);
+        if (!present) throw { _appCode: 404, message: NOT_FOUND_MESSAGE };
+      }
+
       const activity = await tx.activity.create({
         data: {
           type: type as never,

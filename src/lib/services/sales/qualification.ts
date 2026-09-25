@@ -93,12 +93,41 @@ export type QualificationResult = {
 };
 
 /**
+ * Take the lead's row lock BEFORE writing anything that references the lead.
+ *
+ * ── Why this exists, and why the caller has to remember it ──
+ * Inserting an `Activity` that carries a `leadId` makes PostgreSQL take a `FOR KEY SHARE`
+ * lock on the referenced `Lead` row, to stop the parent disappearing under the child.
+ * `convertLead` then wants `FOR UPDATE` on that same row. Within one transaction that is a
+ * harmless upgrade; between two it is a deadlock, and PostgreSQL resolves it by killing one
+ * of them with 40P01 — which reaches the salesperson as a 500 on a call they logged
+ * correctly. Two reps logging a meeting on the same lead at the same second is not an
+ * exotic case; it is what happens when a form is double-submitted.
+ *
+ * Taking the exclusive lock first removes the upgrade: the second caller blocks here,
+ * before it has taken any lock of its own, and proceeds once the first has committed — by
+ * which time it can see the conversion and correctly treats itself as a replay.
+ *
+ * Returns false when the lead does not exist, so the caller can answer 404 rather than
+ * carrying on and failing on a foreign key.
+ */
+export async function lockLeadForAutomation(tx: Tx, leadId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Lead" WHERE "id" = ${leadId} FOR UPDATE
+  `;
+  return rows.length > 0;
+}
+
+/**
  * Qualify a lead because of something that happened on it.
  *
  * Transactional and idempotent, and it has to be both: this runs inside the same
  * transaction as the activity that triggered it, and the activity write is a form people
  * double-submit. `convertLead` takes the lead row FOR UPDATE and `LeadConversion` is unique
  * on `leadId`, so a second concurrent call queues and then reads what the first wrote.
+ *
+ * The caller must already hold the lead's row lock — see `lockLeadForAutomation` for what
+ * goes wrong when the activity is written first.
  *
  * Returns `null` when the outcome does not qualify — the caller has written a perfectly
  * good activity and nothing further should happen.

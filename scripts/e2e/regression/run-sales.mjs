@@ -25,6 +25,7 @@ const SUITES = [
   "sales-lifecycle-collections", // qualification rules, tax allocation, commission deltas — no database
   "sales-commissions-db",   // constraints, concurrency, rollback — real PostgreSQL
   "sales-security",         // what is refused — real HTTP API
+  "sales-collections",      // constraints, races, separation of duties — PostgreSQL and HTTP
   "sales-workflow",         // the ordinary path, end to end — real HTTP API
 ];
 
