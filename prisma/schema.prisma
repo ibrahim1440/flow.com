@@ -44,6 +44,10 @@ model Employee {
   commissionAccruals   CommissionAccrual[]     @relation("CommissionEarner")
   commissionLedger     CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
   salesTargets         SalesTarget[]           @relation("SalesTargetOwner")
+  collectionsSubmitted SalesCollection[]       @relation("CollectionSubmitter")
+  collectionsDecided   SalesCollection[]       @relation("CollectionDecider")
+  collectionsReversed  SalesCollection[]       @relation("CollectionReverser")
+  evidenceUploaded     CollectionEvidence[]    @relation("EvidenceUploader")
 }
 
 model Customer {
@@ -64,6 +68,7 @@ model Customer {
   quotes           Quote[]
   activities       Activity[]
   collectionEvents CollectionEvent[]
+  salesCollections SalesCollection[]
 }
 
 model GreenBean {
@@ -133,6 +138,7 @@ model Order {
   @@index([customerId, createdAt])
   @@index([status])
   @@index([ownerId])
+  salesCollections SalesCollection[]
 }
 
 model OrderItem {
@@ -1482,6 +1488,22 @@ model LeadConversion {
 }
 
 /// A configurable pipeline column. Terminal outcomes are NOT stages — see Opportunity.
+/// What a stage MEANS to the automation, as distinct from what it is called.
+///
+/// The lifecycle has to know which column a newly-qualified lead lands in and which one an
+/// issued quotation moves a deal to. Matching on the label is the obvious way and the wrong
+/// one: the labels are translated, editable and, in this deployment, actually read
+/// "Qualifying" and "Proposal". Matching on position is no better — inserting a stage
+/// silently redirects the automation.
+///
+/// So the meaning is configured, once, by whoever configures the stages. A stage with no
+/// purpose is an ordinary stage; NEW deliberately has no entry here because nothing
+/// automatic puts a deal there.
+enum PipelineStagePurpose {
+  QUALIFICATION
+  QUOTATION
+}
+
 model PipelineStage {
   id          String        @id @default(cuid())
   /// Stable identity. The label may be translated; this may not change.
@@ -1491,6 +1513,9 @@ model PipelineStage {
   position    Int
   /// Default probability offered when a deal enters this stage. Advisory only.
   probability Int           @default(0)
+  /// At most one stage may hold each purpose — the unique index is what stops two columns
+  /// both claiming to be where quotations land.
+  purpose     PipelineStagePurpose? @unique
   isActive    Boolean       @default(true)
 
   opportunities Opportunity[]
@@ -1551,6 +1576,7 @@ model Opportunity {
   @@index([stageId, outcome])
   @@index([outcome, closedAt])
   @@index([nextFollowUpAt])
+  salesCollections SalesCollection[]
 }
 
 /// Split attribution. Percentages are stored, not inferred, and the service requires
@@ -1639,6 +1665,30 @@ enum ActivityType {
   SAMPLE_FOLLOW_UP
 }
 
+/// WHAT HAPPENED in a recorded interaction, as distinct from what KIND it was.
+///
+/// The type says a call was made; only this says whether anybody answered. That
+/// difference decides whether a prospect has become active selling work, so it is a
+/// stored value the server reads — not a phrase somebody typed into a note.
+///
+/// The five outcomes that qualify a lead are the ones that cannot happen without the
+/// customer having engaged: interest confirmed, an appointment agreed, or an appointment
+/// held. NOTE_ONLY and FOLLOW_UP_REQUIRED deliberately do not, and neither does a TASK —
+/// an internal reminder to call someone next Tuesday is not the customer agreeing to
+/// anything, and treating it as one fills the pipeline with deals nobody is working.
+enum ActivityOutcome {
+  NO_ANSWER
+  LEFT_MESSAGE
+  INTERESTED
+  MEETING_SCHEDULED
+  VISIT_SCHEDULED
+  MEETING_COMPLETED
+  VISIT_COMPLETED
+  FOLLOW_UP_REQUIRED
+  NOT_INTERESTED
+  NOTE_ONLY
+}
+
 /// A call, visit, note or task. Attaches to a lead or an opportunity, and survives
 /// conversion: the lead's history stays readable after it becomes a customer.
 ///
@@ -1656,6 +1706,10 @@ model Activity {
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   customerId    String?
   customer      Customer?    @relation(fields: [customerId], references: [id])
+
+  /// Nullable: every activity written before this existed has no recorded outcome, and
+  /// inventing one for them would be a claim about conversations nobody witnessed.
+  outcome       ActivityOutcome?
 
   dueAt         DateTime?
   completedAt   DateTime?
@@ -1726,6 +1780,7 @@ model Quote {
 
   @@index([opportunityId, status])
   @@index([customerId])
+  salesCollections SalesCollection[]
 }
 
 model QuoteLine {
@@ -1920,6 +1975,9 @@ model CollectionEvent {
   note          String?
 
   accruals      CommissionAccrual[]
+  /// The finance-verified receipt that produced this event, when one did. Sandbox events
+  /// have none, which is how the two sources stay tellable apart.
+  salesCollection SalesCollection?    @relation("CollectionCommissionEvent")
 
   createdById   String?
   createdAt     DateTime              @default(now())
@@ -2032,4 +2090,137 @@ model SalesTarget {
 
   @@unique([employeeId, periodStart])
   @@index([periodStart])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales collections — manual, finance-verified receipts (additive).
+//
+// This ERP still has no invoice or accounts-receivable subsystem; that was checked
+// against the schema, not assumed. What follows is NOT one. It is a durable internal
+// record of "a salesperson says money arrived, and Finance either agrees or does not",
+// and it is the only thing allowed to create commission entitlement.
+//
+// It deliberately does NOT replace `CollectionEvent`. That table is the commission
+// engine's input adapter and is unchanged: on approval this workflow writes one row into
+// it stamped `MANUAL_FINANCE_VERIFICATION`, so the engine's tiers, splits, period
+// boundaries and reversal arithmetic are reused rather than reimplemented beside them.
+//
+// Nothing here is a bank integration and no screen says it is.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How the money arrived. Recorded for reconciliation; used in no calculation.
+enum SalesCollectionMethod {
+  BANK_TRANSFER
+  CASH
+  CHEQUE
+  POS_CARD
+  OTHER
+}
+
+/// The lifecycle of a claimed receipt.
+///
+/// `APPROVED` is the only state that has ever created commission, and `REVERSED` is the
+/// only way out of it — there is no delete and no edit-in-place, because by then the
+/// figure has been used to tell somebody what they earned.
+enum SalesCollectionStatus {
+  PENDING_VERIFICATION
+  APPROVED
+  REJECTED
+  REVERSED
+}
+
+model SalesCollection {
+  id String @id @default(cuid())
+
+  /// What the money is against. The opportunity is required — commission is owed on a
+  /// deal — and the accepted quotation is what the amounts are checked against.
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
+  quoteId       String?
+  quote         Quote?      @relation(fields: [quoteId], references: [id])
+  orderId       String?
+  order         Order?      @relation(fields: [orderId], references: [id])
+  customerId    String?
+  customer      Customer?   @relation(fields: [customerId], references: [id])
+
+  /// Client-generated, unique per submitter: a double-clicked form, a retried request and
+  /// a replayed queue message all carry the same key and land once.
+  idempotencyKey  String
+  /// The payer's own reference — a transfer id, a cheque number. Deliberately NOT unique:
+  /// two genuine receipts can quote the same bank batch.
+  referenceNumber String?
+
+  /// Gross is what the salesperson claims arrived. Tax and net are DERIVED by the server
+  /// from the linked document and then stored, so the figures a decision was made against
+  /// survive a later revision of that document.
+  amountGross Decimal @db.Decimal(18, 2)
+  amountTax   Decimal @db.Decimal(18, 2)
+  amountNet   Decimal @db.Decimal(18, 2)
+  currency    String  @default("SAR")
+
+  paymentMethod SalesCollectionMethod @default(BANK_TRANSFER)
+  collectedAt   DateTime
+  note          String?
+
+  status SalesCollectionStatus @default(PENDING_VERIFICATION)
+
+  submittedById String
+  submittedBy   Employee @relation("CollectionSubmitter", fields: [submittedById], references: [id])
+  submittedAt   DateTime @default(now())
+
+  /// The verify-or-reject decision. Kept apart from the reversal fields below, because a
+  /// reversal happens AFTER an approval and must not overwrite who approved it.
+  decidedById    String?
+  decidedBy      Employee? @relation("CollectionDecider", fields: [decidedById], references: [id])
+  decidedAt      DateTime?
+  decisionReason String?
+
+  reversedById   String?
+  reversedBy     Employee? @relation("CollectionReverser", fields: [reversedById], references: [id])
+  reversedAt     DateTime?
+  reversalReason String?
+
+  /// The commission-adapter row this became when Finance approved it. One-to-one, and the
+  /// unique constraint is what makes a replayed approval a no-op rather than a second
+  /// accrual.
+  collectionEventId String?          @unique
+  collectionEvent   CollectionEvent? @relation("CollectionCommissionEvent", fields: [collectionEventId], references: [id])
+
+  evidence CollectionEvidence[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([submittedById, idempotencyKey])
+  @@index([opportunityId, status])
+  @@index([status, submittedAt])
+  @@index([submittedById, submittedAt])
+}
+
+/// Proof that the money arrived: a transfer screenshot, a deposit slip, a receipt.
+///
+/// The bytes live in `content` rather than on disk, because the deployment target has an
+/// ephemeral filesystem and a file written there is gone at the next cold start. A
+/// deliberate first implementation for a small, low-volume, private artefact:
+/// `lib/services/sales/evidence.ts` is the only reader and writer, so moving to object
+/// storage later changes that file and this column and nothing else.
+model CollectionEvidence {
+  id           String          @id @default(cuid())
+  collectionId String
+  collection   SalesCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  filename String
+  /// The type proven by the file's own signature, never the one the browser claimed.
+  mimeType String
+  byteSize Int
+  /// SHA-256 of the bytes, so a re-upload of the same proof is recognisable and a stored
+  /// file can be shown not to have changed.
+  checksum String
+  content  Bytes
+
+  uploadedById String
+  uploadedBy   Employee @relation("EvidenceUploader", fields: [uploadedById], references: [id])
+  uploadedAt   DateTime @default(now())
+
+  @@index([collectionId])
 }
