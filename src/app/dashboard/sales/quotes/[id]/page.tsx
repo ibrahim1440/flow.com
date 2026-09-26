@@ -8,6 +8,7 @@ import {
   Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
   QuoteStatusBadge, Td, num, formatDay,
 } from "../../_components/ui";
+import { useUnsavedGuard } from "../../../_components/useUnsavedGuard";
 
 /**
  * The quotation editor.
@@ -193,6 +194,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       if (r.ok && Array.isArray(r.data)) setSkus(r.data);
     });
   }, []);
+
+  // Edited lines that have not been saved are the only unsaved state in the module.
+  // Navigating away from them silently would lose a priced quotation somebody was building.
+  useUnsavedGuard(dirty && Boolean(state?.editable));
 
   const preview = useMemo(() => previewTotals(lines), [lines]);
   const needsApproval = preview.discountPercent > Number(threshold);
