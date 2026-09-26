@@ -14,6 +14,7 @@ type Row = {
   originalApproved: number | null; revisedApproved: number | null; baseline: number; plannedToDate: number; actualToDate: number;
   toDate: V; fullMonth: V; openCommitments: number; additionalForecast: number; remainingForecast: number; fac: number; forecastVariance: V;
   alert: boolean; ownerName: string | null; phasing: string | null; dueDate: string | null; unbudgeted: boolean;
+  completeness: { verified: boolean; unreviewed: number; pending: number; unreconciled: string[] };
   note: { id: string; explanation: string; correctiveAction: string | null; responsibleEmployeeId: string | null; followUpDate: string | null; status: string } | null;
 };
 type Report = {
@@ -175,7 +176,7 @@ export default function BudgetPage() {
                           <Td className="min-w-[180px]"><span className="font-medium">{name(x)}</span>{x.alert && <span className="ms-1.5"><Badge tone="bad">{L("تنبيه", "Alert")}</Badge></span>}{x.ownerName && <p className="text-[11px] text-brown-light">{x.ownerName}</p>}</Td>
                           <Td num><b>{x.unbudgeted ? "—" : money(x.baseline)}</b>{x.revisedApproved !== null && x.originalApproved !== null && x.revisedApproved !== x.originalApproved && <p className="text-[11px] text-brown-light">{L("الأصلية", "Original")} {money(x.originalApproved)}</p>}</Td>
                           <Td num className="text-brown">{money(x.plannedToDate)}</Td>
-                          <Td num className="font-bold">{money(x.actualToDate)}{x.actualToDate === 0 && <p className="text-[10px] font-normal text-brown-light">{r.completeness.complete ? L("صفر مؤكد", "verified zero") : L("قد تكون البيانات ناقصة", "data may be incomplete")}</p>}</Td>
+                          <Td num className="font-bold">{money(x.actualToDate)}{x.actualToDate === 0 && <ZeroState c={x.completeness} reportDate={r.reportDate} />}</Td>
                           <Td num><b className={vColor(x.toDate, k)}>{money(x.toDate.variance, { sign: true })}</b><p className={`text-[11px] ${vColor(x.toDate, k)}`}>{pct(x.toDate.percentBp)}</p></Td>
                           <Td><Badge tone={st[2]}>{L(st[0], st[1])}</Badge></Td>
                           <Td num><b>{money(x.remainingForecast)}</b>{x.openCommitments > 0 && <p className="text-[11px] text-brown-light">{L("التزامات", "Commitments")} {money(x.openCommitments)}</p>}{x.additionalForecast > 0 && <p className="text-[11px] text-brown-light">{L("توقعات", "Forecast")} {money(x.additionalForecast)}</p>}</Td>
@@ -424,5 +425,25 @@ function ReasonDialog({ open, onClose, title, sub, onSubmit }: { open: boolean; 
       <Field label={L("السبب", "Reason")}><input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
       <div className="flex gap-2"><Button kind="primary" busy={busy} disabled={!reason} onClick={async () => { setBusy(true); await onSubmit(reason); setBusy(false); setReason(""); onClose(); }}>{L("متابعة", "Continue")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
     </Dialog>
+  );
+}
+
+/**
+ * A zero actual is either a verified zero or not yet verified — and then the row says what
+ * could still change it (lines to review or pending in its direction and category, accounts
+ * not reconciled through the report date). Nothing else produces a warning.
+ */
+function ZeroState({ c, reportDate }: { c: Row["completeness"]; reportDate: string }) {
+  const { L } = useL();
+  if (c.verified) return <p data-testid="zero-verified" className="text-[10px] font-normal text-green-700">{L("صفر مؤكد", "verified zero")}</p>;
+  const parts: string[] = [];
+  if (c.unreviewed) parts.push(L(`${c.unreviewed} للمراجعة`, `${c.unreviewed} to review`));
+  if (c.pending) parts.push(L(`${c.pending} معلّق`, `${c.pending} pending`));
+  if (c.unreconciled.length) parts.push(L(`${c.unreconciled.length} حساب غير مُسوّى حتى ${reportDate}`, `${c.unreconciled.length} account(s) not reconciled to ${reportDate}`));
+  const detail = [c.unreconciled.length ? c.unreconciled.join(", ") : ""].filter(Boolean).join("");
+  return (
+    <p data-testid="zero-unverified" className="text-[10px] font-normal text-amber-700" title={detail || undefined}>
+      {L("لم يُتحقق بعد", "not yet verified")}: {parts.join(" · ")}
+    </p>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { riyadhDateString } from "@/lib/finance/dates";
 import { Save, Plus, Sparkles, UserPlus } from "lucide-react";
 import { useUser } from "../../user-context";
+import { canEdit } from "@/lib/auth-shared";
 import { Badge, Button, Card, CardTitle, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, api, useApi, useFinance, useHasSub, useL, withBranch } from "../_components/ui";
 
 type Setup = {
@@ -45,6 +46,10 @@ export default function ReportsPage() {
   const user = useUser();
   const { branch, refresh } = useFinance();
   const canSettings = useHasSub(user?.permissions, "settings_manage");
+  // Branch access is an administrator's change (same rule as the server): finance settings,
+  // company-wide access, and the ERP authority to edit employees.
+  const companyWide = useHasSub(user?.permissions, "all_branches");
+  const canAccess = canSettings && companyWide && !!user && canEdit(user.permissions, "employees");
   const setup = useApi<Setup>("/api/finance/setup");
   const audit = useApi<Audit[]>("/api/finance/audit");
   const ov = useApi<Accrual>("/api/finance/overview");
@@ -122,11 +127,11 @@ export default function ReportsPage() {
       {canSettings && <AccountsCard setup={d} onDone={() => { setup.reload(); refresh(); }} />}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
-        <BranchesCard setup={d} canSettings={canSettings} onCall={call} busy={busy} />
+        <BranchesCard setup={d} canSettings={canSettings} canAccess={canAccess} selfId={user?.id ?? ""} onCall={call} busy={busy} />
         <Card>
           <CardTitle title={L("بنود الميزانية النقدية", "Cash budget categories")} sub={L("بنود التمويل (قروض، مساهمات المالك) مستبعدة من الإجماليات التشغيلية", "Financing categories (loans, owner money) are excluded from operating totals")}
-            right={canSettings && <Button icon={Sparkles} busy={busy} onClick={() => call("/api/finance/setup/recommended", { branchKey: d.scope.all ? "COMPANY" : d.branches[0]?.id }, L("أُضيفت الفئات المقترحة (أسماء فقط، دون مبالغ).", "Suggested categories added (names only, no amounts)."))}>{L("إضافة المقترحة", "Add suggested")}</Button>} />
-          {d.finCategories.length === 0 ? <p className="text-[13px] text-brown">{L("لا توجد بنود بعد.", "No categories yet.")}</p> : (
+            right={canSettings && <Button icon={Sparkles} busy={busy} onClick={() => call("/api/finance/setup/recommended", { branchKey: d.scope.all ? "COMPANY" : d.branches[0]?.id }, L("أُضيفت الفئات المقترحة (أسماء فقط، دون مبالغ).", "Suggested categories added (names only, no amounts)."))}>{L("إضافة المقترحة (اختياري)", "Add suggested (optional)")}</Button>} />
+          {d.finCategories.length === 0 ? <p className="text-[13px] text-brown">{L("لا توجد بنود بعد. أنشئ بنودك أدناه، أو أضف المقترحة إن ناسبتك — ليست مطلوبة.", "No categories yet. Create your own below, or add the suggested ones if they fit — they are not required.")}</p> : (
             <Table>
               <thead><tr><Th>{L("الرمز", "Code")}</Th><Th>{L("البند", "Category")}</Th><Th>{L("النوع", "Kind")}</Th></tr></thead>
               <tbody>{(allCats ? d.finCategories : d.finCategories.slice(0, 6)).map((c) => (
@@ -200,7 +205,7 @@ function AccountsCard({ setup, onDone }: { setup: Setup; onDone: () => void }) {
   );
 }
 
-function BranchesCard({ setup, canSettings, onCall, busy }: { setup: Setup; canSettings: boolean; onCall: (p: string, j: unknown, ok: string) => Promise<void>; busy: boolean }) {
+function BranchesCard({ setup, canSettings, canAccess, selfId, onCall, busy }: { setup: Setup; canSettings: boolean; canAccess: boolean; selfId: string; onCall: (p: string, j: unknown, ok: string) => Promise<void>; busy: boolean }) {
   const { L, name } = useL();
   const [nb, setNb] = useState({ code: "", nameEn: "", nameAr: "" });
   const [acc, setAcc] = useState({ employeeId: "", branchId: "" });
@@ -223,12 +228,14 @@ function BranchesCard({ setup, canSettings, onCall, busy }: { setup: Setup; canS
             <Field label={L("الاسم بالإنجليزية", "English name")}><input className={INPUT} value={nb.nameEn} onChange={(e) => setNb({ ...nb, nameEn: e.target.value })} /></Field>
             <Button icon={Plus} busy={busy} disabled={!nb.code || !nb.nameEn} onClick={() => onCall("/api/finance/setup/branches", nb, L("أُضيف الفرع.", "Branch added."))}>{L("فرع جديد", "New branch")}</Button>
           </div>
-          <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-end">
-            <Field label={L("الموظف", "Employee")}><select className={INPUT} value={acc.employeeId} onChange={(e) => setAcc({ ...acc, employeeId: e.target.value })}><option value="">—</option>{setup.people.filter((p) => p.hasFinance).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-            <Field label={L("الفرع", "Branch")}><select className={INPUT} value={acc.branchId} onChange={(e) => setAcc({ ...acc, branchId: e.target.value })}><option value="">—</option>{setup.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
-            <Button icon={UserPlus} busy={busy} disabled={!acc.employeeId || !acc.branchId} onClick={() => onCall("/api/finance/setup/branch-access", { ...acc, grant: true }, L("مُنح الوصول.", "Access granted."))}>{L("منح", "Grant")}</Button>
-            <Button kind="danger" busy={busy} disabled={!acc.employeeId || !acc.branchId} onClick={() => onCall("/api/finance/setup/branch-access", { ...acc, grant: false }, L("سُحب الوصول.", "Access revoked."))}>{L("سحب", "Revoke")}</Button>
-          </div>
+          {canAccess ? (
+            <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-end">
+              <Field label={L("الموظف", "Employee")}><select className={INPUT} value={acc.employeeId} onChange={(e) => setAcc({ ...acc, employeeId: e.target.value })}><option value="">—</option>{setup.people.filter((p) => p.hasFinance && p.id !== selfId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+              <Field label={L("الفرع", "Branch")}><select className={INPUT} value={acc.branchId} onChange={(e) => setAcc({ ...acc, branchId: e.target.value })}><option value="">—</option>{setup.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+              <Button icon={UserPlus} busy={busy} disabled={!acc.employeeId || !acc.branchId} onClick={() => onCall("/api/finance/setup/branch-access", { ...acc, grant: true }, L("مُنح الوصول.", "Access granted."))}>{L("منح", "Grant")}</Button>
+              <Button kind="danger" busy={busy} disabled={!acc.employeeId || !acc.branchId} onClick={() => onCall("/api/finance/setup/branch-access", { ...acc, grant: false }, L("سُحب الوصول.", "Access revoked."))}>{L("سحب", "Revoke")}</Button>
+            </div>
+          ) : <p data-testid="access-admin-only" className="text-[11px] text-brown-light">{L("منح وسحب وصول الفروع يقوم به مسؤول النظام الذي يملك صلاحية تعديل الموظفين، ويُسجَّل في سجل التدقيق.", "Granting and revoking branch access is done by an administrator who may edit employees, and is recorded in the audit log.")}</p>}
         </>
       )}
     </Card>

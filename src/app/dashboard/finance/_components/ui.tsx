@@ -3,7 +3,7 @@
 // Finance UI kit. Measurements follow the Figma frames on page "15 — Finance · Cash & Budget"
 // (cards 16px radius / 20px padding, 13px table text, 11px table headers, 12px labels).
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Loader2, RefreshCw, ShieldAlert, X, Inbox } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, RefreshCw, ShieldAlert, X, Inbox } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { formatSAR } from "@/lib/finance/money";
 
@@ -233,6 +233,22 @@ export function Notice({ tone = "warn", children, icon: Icon = AlertTriangle }: 
       <Icon size={18} className="flex-shrink-0 mt-0.5" />
       <div className="min-w-0">{children}</div>
     </div>
+  );
+}
+
+// ─── Collapsible section ─────────────────────────────────────────────────────
+// Native <details>/<summary> (the ERP uses native controls): keyboard and screen-reader
+// support come with the element. Closed by default unless `open` is passed.
+
+export function Section({ title, summary, children, testId }: { title: string; summary?: ReactNode; children: ReactNode; testId?: string }) {
+  return (
+    <details className="group rounded-[10px] border border-border-light" data-testid={testId}>
+      <summary className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer select-none text-xs font-bold text-brown list-none [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-1.5"><ChevronDown size={14} className="transition-transform group-open:rotate-180" aria-hidden />{title}</span>
+        {summary !== undefined && <span className="font-medium text-brown-light tabular-nums">{summary}</span>}
+      </summary>
+      <div className="px-3 pb-3 pt-1 flex flex-col gap-2">{children}</div>
+    </details>
   );
 }
 

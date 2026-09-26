@@ -1,4 +1,5 @@
 // End-to-end user workflow through the real Finance UI (local fixture server only):
+//   link the Al Qasr receipt to its approved Sales collection and allocate it once →
 //   classify an unknown deposit → allocate it by approved rules → create, fill and submit a
 //   budget → approver approves it → payment request above the limit → approver approves the
 //   override → the payment is made in online banking (outside the app) and recorded as a
@@ -28,11 +29,65 @@ async function as(user) {
 }
 const steps = [];
 const step = (s) => { steps.push(s); console.log("✔", s); };
+// Company pool as the preparer sees it (halalas), recorded after every step.
+const money = (v) => (v / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
+const balances = [];
+async function pool(page, label) {
+  const pools = await page.evaluate(async () => (await fetch("/api/finance/pools")).json());
+  const c = pools.find((x) => x.branchKey === "COMPANY");
+  const row = { step: label, eligible: c.eligibleCash, allocated: c.allocated, unallocated: c.unallocated };
+  balances.push(row);
+  return row;
+}
 
 try {
-  // 1. Classify the unknown deposit and allocate it.
   const m = await as("fin.manager");
   let p = m.page;
+  await p.goto(`${BASE}/dashboard/finance`);
+  const start = await pool(p, "Fixture as seeded");
+
+  // 0. An approved Sales collection matched to the bank receipt that brought the money in.
+  await p.goto(`${BASE}/dashboard/finance/transactions`);
+  await p.getByText("TRANSFER AL QASR CAFE").click();
+  const cp = p.locator("div.bg-white.rounded-2xl", { hasText: "مراجعة سطر بنكي" }).first();
+  // D2: status and primary action visible; the extra sections are closed.
+  await cp.getByTestId("review-status").waitFor();
+  await cp.getByRole("button", { name: "حفظ ووضع علامة مُراجعة" }).waitFor();
+  for (const id of ["section-link", "section-note", "section-allocated", "section-history"]) {
+    const sec = cp.getByTestId(id);
+    if (await sec.count()) assert.equal(await sec.evaluate((e) => e.open), false, `${id} is collapsed by default`);
+  }
+  const sug = cp.getByTestId("collection-suggestion");
+  await sug.getByText("مقهى القصر").waitFor();
+  assert.ok((await sug.textContent()).includes("بالمرجع"), "matched by reference");
+  await snap(p, "0-collection-suggested");
+  await sug.getByRole("button", { name: "ربط التحصيل" }).click();
+  await cp.getByTestId("collection-linked").waitFor();
+  const afterLink = await pool(p, "Collection linked (receipt not yet reviewed)");
+  assert.deepEqual([afterLink.eligible, afterLink.allocated], [start.eligible, start.allocated], "linking moves no cash and allocates nothing");
+  await cp.locator("select").first().selectOption("CUSTOMER_RECEIPT");
+  const cs0 = cp.getByLabel("بند الميزانية");
+  const cso = await cs0.locator("option").allTextContents();
+  await cs0.selectOption({ index: cso.findIndex((o) => o.includes("تحصيلات عملاء الجملة")) });
+  await cp.getByRole("button", { name: "حفظ ووضع علامة مُراجعة" }).click();
+  await cp.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).waitFor();
+  const reviewed = await pool(p, "Receipt reviewed as a customer receipt");
+  assert.equal(reviewed.eligible - start.eligible, 575000, "the receipt is eligible cash once: 5,750.00");
+  await cp.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).click();
+  await cp.getByTestId("section-allocated").locator("summary").click();
+  await cp.getByText("ضريبة القيمة المضافة").first().waitFor();
+  const allocated = await pool(p, "Allocated by approved rules");
+  assert.equal(allocated.eligible, reviewed.eligible, "allocation moves no cash");
+  const vatEntry = await cp.getByTestId("section-allocated").locator("div", { hasText: "احتياطي ضريبة القيمة المضافة" }).last().textContent();
+  assert.ok(vatEntry.includes("750.00"), "VAT reserve takes the collection's VAT (750.00)");
+  assert.equal(await cp.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).count(), 0, "cannot allocate the same receipt twice");
+  const again = await p.evaluate(async (id) => (await fetch("/api/finance/allocations/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ txnId: id }) })).status, await p.evaluate(async () => (await (await fetch("/api/finance/transactions?q=IN-2301")).json()).rows[0].id));
+  const retried = await pool(p, "Allocation retried (refused or no-op)");
+  assert.deepEqual([retried.eligible, retried.allocated], [allocated.eligible, allocated.allocated], `a retried allocation changes nothing (HTTP ${again})`);
+  await snap(p, "0b-collection-allocated");
+  step(`Approved Sales collection (Al Qasr, 5,750.00 incl. 750.00 VAT) linked to its receipt; reviewed and allocated once — eligible +5,750.00, allocated +${money(allocated.allocated - reviewed.allocated)}`);
+
+  // 1. Classify the unknown deposit and allocate it.
   await p.goto(`${BASE}/dashboard/finance/transactions`);
   await p.getByText("INCOMING TRANSFER 88213").click();
   const panel = p.locator("div.bg-white.rounded-2xl", { hasText: "مراجعة سطر بنكي" }).first();
@@ -45,11 +100,13 @@ try {
   await panel.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).waitFor();
   step("Unknown deposit classified and reviewed; it was not allocated before review");
   await panel.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).click();
+  await panel.getByTestId("section-allocated").locator("summary").click();
   await panel.getByText("غير مخصص من الإيصال").waitFor();
   await p.waitForTimeout(800);
   const unalloc = await panel.getByText("غير مخصص من الإيصال").locator("b").textContent();
   assert.ok(unalloc, "unallocated shown");
   await snap(p, "1-allocated");
+  await pool(p, "Unknown deposit reviewed and allocated");
   step(`Allocated by approved rules; remaining unallocated from receipt: ${unalloc.replace(/[⁦⁩]/g, "")}`);
 
   // 2. Create an empty budget for next month, add a line, submit it.
@@ -103,6 +160,7 @@ try {
   await ad.getByLabel("ملاحظة القرار (إلزامية عند الرفض)").fill("شحنة مؤكدة");
   await ad.getByRole("button", { name: "اعتماد", exact: true }).click();
   await ad.getByText("دفع 31,200.00").waitFor({ state: "detached" });
+  await pool(p, "Payment request 31,200.00 approved (reserved)");
   step("Approver approved the spending override");
 
   // The transfer is made in online banking (the app never sends money); record it as pending.
@@ -129,6 +187,7 @@ try {
   await ps.selectOption({ index: po.findIndex((o) => o.includes("مشتريات البن الأخضر")) });
   await rp.getByRole("button", { name: "حفظ ووضع علامة مُراجعة" }).click();
   await rp.getByText("مُراجعة").first().waitFor();
+  await pool(p, "Pending payment line recorded and classified");
   step("Payment made outside the app recorded as a PENDING line (reference TRF-AC771) and classified");
   await p.goto(`${BASE}/dashboard/finance/allocation`);
   const row = p.locator("tr", { hasText: "أنديز لتصدير البن" });
@@ -141,6 +200,7 @@ try {
   await ed.getByRole("button", { name: "تسجيل", exact: true }).click();
   await ed.waitFor({ state: "detached" });
   await snap(p, "3-executed");
+  await pool(p, "Payment recorded against the pending line");
   step("Payment recorded against the pending line (category reduced and reservation released together; nothing sent)");
 
   // The bank statement arrives: it confirms the recorded line instead of adding a second outflow.
@@ -170,6 +230,7 @@ ${day},-31200.00,TRF-AC771,OUTWARD TRANSFER ANDES
   await p.getByText("Andes Coffee Export — invoice AC-771").click();
   await p.getByText(/أكّده كشف البنك في/).waitFor();
   await snap(p, "3c-statement-confirmed");
+  await pool(p, "Statement confirmed the payment line");
   step("Statement imported: its line confirmed the recorded payment (0 inserted, 1 confirmed, no second outflow)");
 
   // 5. Budget report reflects actuals and variance.
@@ -182,6 +243,8 @@ ${day},-31200.00,TRF-AC771,OUTWARD TRANSFER ANDES
   step("Current-month budget shows the new actual for green coffee (57,700.00) with its variance");
   await m.ctx.close(); await a.ctx.close();
   console.log(`\n${steps.length} workflow steps passed`);
+  console.log("\nCompany pool after each step (SAR):\n| Step | Eligible cash | Allocated | Unallocated |\n|---|---:|---:|---:|");
+  for (const b of balances) console.log(`| ${b.step} | ${money(b.eligible)} | ${money(b.allocated)} | ${money(b.unallocated)} |`);
 } finally {
   await browser.close();
 }

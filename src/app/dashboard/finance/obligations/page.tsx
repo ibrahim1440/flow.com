@@ -29,6 +29,7 @@ export default function ObligationsPage() {
   const [showAll, setShowAll] = useState(false);
   const [dlg, setDlg] = useState<null | "ob" | "item">(null);
   const [supersede, setSupersede] = useState<Ob | null>(null);
+  const [cancelling, setCancelling] = useState<Ob | null>(null);
   const reloadAll = () => { fc.reload(); ov.reload(); obs.reload(); items.reload(); refresh(); };
 
   if (fc.loading && !fc.data) return <LoadingState />;
@@ -92,7 +93,7 @@ export default function ObligationsPage() {
                       <Td><Badge tone={tone}>{label}</Badge>{o.reserved > 0 && <p className="text-[11px] text-brown-light mt-0.5">{L("محجوز", "Reserved")} {money(o.reserved)}</p>}</Td>
                       {canPrepare && <Td><div className="flex gap-1 justify-end">
                         {o.type === "PURCHASE_ORDER" && o.status === "OPEN" && <Button kind="ghost" icon={Replace} onClick={() => setSupersede(o)} title={L("استبدال بفاتورة المورد", "Replace with the supplier bill")}>{L("فاتورة", "Bill")}</Button>}
-                        {o.paid === 0 && <Button kind="ghost" icon={XCircle} title={L("إلغاء", "Cancel")} onClick={async () => { const reason = prompt(L("سبب الإلغاء", "Reason for cancelling")); if (!reason) return; try { await api(withBranch(`/api/finance/obligations/${o.id}/cancel`, branch), { method: "POST", json: { reason } }); reloadAll(); } catch (e) { alert((e as Error).message); } }}>{""}</Button>}
+                        <Button kind="ghost" icon={XCircle} title={L("إلغاء الالتزام", "Cancel obligation")} onClick={() => setCancelling(o)}>{L("إلغاء", "Cancel")}</Button>
                       </div></Td>}
                     </tr>
                   );
@@ -125,6 +126,7 @@ export default function ObligationsPage() {
       <ObligationDialog open={dlg === "ob"} onClose={() => setDlg(null)} setup={setup.data} cats={cats.data ?? []} onDone={reloadAll} />
       <ItemDialog open={dlg === "item"} onClose={() => setDlg(null)} setup={setup.data} onDone={reloadAll} />
       <SupersedeDialog ob={supersede} onClose={() => setSupersede(null)} onDone={reloadAll} />
+      <CancelDialog ob={cancelling} onClose={() => setCancelling(null)} onDone={reloadAll} />
     </div>
   );
 }
@@ -202,6 +204,42 @@ function SupersedeDialog({ ob, onClose, onDone }: { ob: Ob | null; onClose: () =
       </div>
       {err && <Notice tone="bad">{err}</Notice>}
       <div className="flex gap-2"><Button kind="primary" busy={busy} onClick={submit}>{L("استبدال", "Replace")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
+    </Dialog>
+  );
+}
+
+type Effects = { amount: number; paid: number; remaining: number; reservations: { id: string; amount: number; status: string }[]; cancellable: boolean };
+
+/** Cancelling shows what it touches first; a reason is required and recorded in the audit log. */
+function CancelDialog({ ob, onClose, onDone }: { ob: Ob | null; onClose: () => void; onDone: () => void }) {
+  const { L, money } = useL();
+  const { branch } = useFinance();
+  const user = useUser();
+  const canAllocate = useHasSub(user?.permissions, "allocate");
+  const fx = useApi<Effects>(ob ? withBranch(`/api/finance/obligations/${ob.id}/cancel`, branch) : null);
+  const [reason, setReason] = useState(""); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
+  if (!ob) return null;
+  const close = () => { setReason(""); setErr(null); onClose(); };
+  const e = fx.data;
+  const held = e ? e.reservations.reduce((t, r) => t + r.amount, 0) : 0;
+  const blocked = !!e && e.reservations.length > 0 && !canAllocate;
+  async function submit() {
+    setBusy(true); setErr(null);
+    try { await api(withBranch(`/api/finance/obligations/${ob!.id}/cancel`, branch), { method: "POST", json: { reason } }); onDone(); close(); } catch (x) { setErr((x as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <Dialog open={!!ob} onClose={close} title={L("إلغاء الالتزام", "Cancel obligation")} sub={`${ob.description}${ob.counterparty ? ` · ${ob.counterparty}` : ""}`}>
+      {!e ? <LoadingState /> : (
+        <div data-testid="cancel-effects" className="flex flex-col gap-1.5 text-[13px]">
+          <p>{L("يتوقف احتساب المتبقي في التوقع والتنبيهات", "The remaining amount stops counting in the forecast and alerts")}: <b className="tabular-nums">{money(e.remaining)}</b></p>
+          {e.paid > 0 && <p>{L("المدفوع يبقى مسجلاً ومطابقاً (نقد خرج فعلاً ولا يُعكس هنا)", "What was paid stays recorded and matched (cash that left is not reversed here)")}: <b className="tabular-nums">{money(e.paid)}</b></p>}
+          {e.reservations.length > 0 && <p>{L(`${e.reservations.length} طلب دفع مفتوح يُحرَّر ويعود مبلغه إلى الفئة بقيد تحرير مسجّل`, `${e.reservations.length} open payment request(s) are released and their money returns to the category with a recorded release`)}: <b className="tabular-nums">{money(held)}</b></p>}
+        </div>
+      )}
+      {blocked && <Notice tone="warn">{L("تحرير طلبات الدفع يتطلب صلاحية التخصيص؛ اطلب ذلك من صاحبها.", "Releasing payment requests needs the allocate duty; ask a holder of that duty.")}</Notice>}
+      <Field label={L("سبب الإلغاء (مطلوب)", "Reason for cancelling (required)")}><textarea className={INPUT} rows={2} value={reason} onChange={(x) => setReason(x.target.value)} /></Field>
+      {err && <Notice tone="bad">{err}</Notice>}
+      <div className="flex gap-2"><Button kind="danger" busy={busy} disabled={!e || blocked || reason.trim().length < 5} onClick={submit}>{L("تأكيد الإلغاء", "Confirm cancellation")}</Button><Button onClick={close}>{L("رجوع", "Back")}</Button></div>
     </Dialog>
   );
 }

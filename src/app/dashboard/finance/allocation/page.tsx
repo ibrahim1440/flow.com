@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { HandCoins, ArrowRightLeft, Receipt, Plus, Send, Eye, Pencil } from "lucide-react";
+import { HandCoins, ArrowRightLeft, Receipt, Plus, Send, Eye, Pencil, Info } from "lucide-react";
 import { useUser } from "../../user-context";
 import { parseMoney } from "@/lib/finance/money";
 import { riyadhDateString } from "@/lib/finance/dates";
 import { CLASS_LABELS, type TxnClass } from "@/lib/finance/classes";
 import { monthName } from "../_components/helpers";
+import { isProfitLike, PROFIT_HINT } from "@/lib/finance/profit-hint";
 import { Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, api, useApi, useFinance, useHasSub, useIdempotencyKey, useL, withBranch, type Tone } from "../_components/ui";
 
 type Cat = {
@@ -50,6 +51,7 @@ export default function AllocationPage() {
   const res = useApi<Reservation[]>("/api/finance/reservations");
   const [dlg, setDlg] = useState<null | "manual" | "transfer" | "request" | "category" | "rules">(null);
   const [editCat, setEditCat] = useState<Cat | null>(null);
+  const [newCatBranch, setNewCatBranch] = useState<string | null>(null);
   const [editVersion, setEditVersion] = useState<Version | null>(null);
   const [ledger, setLedger] = useState<Cat | null>(null);
   const reloadAll = () => { cats.reload(); pools.reload(); rules.reload(); res.reload(); refresh(); };
@@ -113,7 +115,7 @@ export default function AllocationPage() {
 
       {byBranch.length === 0 ? (
         <EmptyState title={L("لا توجد فئات تخصيص", "No allocation categories")} body={L("أنشئ فئات مثل الرواتب والإيجار والبن الأخضر، أو أضف الفئات المقترحة من الإعدادات.", "Create categories such as salaries, rent and green coffee, or add the suggested ones from Settings.")}>
-          {canPrepare && <Button kind="primary" icon={Plus} onClick={() => { setEditCat(null); setDlg("category"); }}>{L("فئة جديدة", "New category")}</Button>}
+          {canPrepare && <Button kind="primary" icon={Plus} onClick={() => { setEditCat(null); setNewCatBranch(null); setDlg("category"); }}>{L("فئة جديدة", "New category")}</Button>}
         </EmptyState>
       ) : byBranch.map((bk) => {
         const rows = list.filter((c) => c.branchKey === bk);
@@ -124,7 +126,7 @@ export default function AllocationPage() {
                 ? L(`فئات التخصيص — ${monthName(thisMonth, "ar")} ${thisMonth.slice(0, 4)}`, `Allocation categories — ${monthName(thisMonth, "en")} ${thisMonth.slice(0, 4)}`)
                 : L(`فئات التخصيص — ${branchName(bk)}`, `Allocation categories — ${branchName(bk)}`)}
               sub={L("الرصيد = الافتتاحي المرحّل + التخصيصات + الواردة − المدفوعات − الصادرة · المتاح = الرصيد − المحجوز", "Balance = opening carried + allocations + incoming − payments − outgoing · Available = balance − reserved")}
-              right={canPrepare && <Button icon={Plus} onClick={() => { setEditCat(null); setDlg("category"); }}>{L("فئة جديدة", "New category")}</Button>} />
+              right={canPrepare && <Button icon={Plus} onClick={() => { setEditCat(null); setNewCatBranch(bk); setDlg("category"); }}>{L("فئة جديدة", "New category")}</Button>} />
             <Table>
               <thead><tr>
                 <Th>{L("الفئة", "Category")}</Th><Th>{L("السياسة", "Policy")}</Th><Th num>{L("افتتاحي مرحّل", "Opening carried")}</Th><Th num>{L("تخصيصات", "Allocations")}</Th>
@@ -133,7 +135,7 @@ export default function AllocationPage() {
               <tbody>
                 {rows.map((c) => { const p = policy(c); return (
                   <tr key={c.id} className="hover:bg-cream cursor-pointer" onClick={() => setLedger(c)}>
-                    <Td className="font-medium">{name(c)}{!c.active && <span className="ms-2"><Badge>{L("غير نشطة", "Inactive")}</Badge></span>}</Td>
+                    <Td className="font-medium">{name(c)}{!c.active && <span className="ms-2"><Badge>{L("غير نشطة", "Inactive")}</Badge></span>}{isProfitLike(c) && <p data-testid="profit-hint" className="flex items-start gap-1 text-[11px] font-normal text-amber-700 max-w-[320px]"><Info size={12} className="mt-0.5 flex-shrink-0" aria-hidden />{L(PROFIT_HINT.ar, PROFIT_HINT.en)}</p>}</Td>
                     <Td>{p ? <Badge tone={p[1]}>{p[0]}</Badge> : <span className="text-brown-light">—</span>}</Td>
                     <Td num className="text-brown">{money(c.openingCarried)}</Td><Td num>{money(c.allocations)}</Td><Td num className="text-brown">{money(c.incoming)}</Td>
                     <Td num>{money(c.payments)}</Td><Td num className="text-brown">{money(c.outgoing)}</Td>
@@ -147,7 +149,6 @@ export default function AllocationPage() {
                 </tr>
               </tbody>
             </Table>
-            <p className="text-[11px] text-brown-light">{L("اسم الفئة لا يعني ربحاً قابلاً للتوزيع؛ توزيع الأرباح يتطلب اعتماداً منفصلاً.", "A category's name does not make it distributable profit; profit distributions need a separate approval.")}</p>
           </Card>
         );
       })}
@@ -178,7 +179,7 @@ export default function AllocationPage() {
       <ManualAllocationDialog open={dlg === "manual"} onClose={() => setDlg(null)} cats={list} onDone={reloadAll} />
       <TransferDialog open={dlg === "transfer"} onClose={() => setDlg(null)} cats={list} people={setup.data?.people ?? []} onDone={reloadAll} />
       <PaymentRequestDialog open={dlg === "request"} onClose={() => setDlg(null)} cats={list} people={setup.data?.people ?? []} onDone={reloadAll} />
-      <CategoryDialog open={dlg === "category"} onClose={() => setDlg(null)} cat={editCat} setup={setup.data} onDone={reloadAll} />
+      <CategoryDialog open={dlg === "category"} onClose={() => setDlg(null)} cat={editCat} defaultBranch={newCatBranch} setup={setup.data} onDone={reloadAll} />
       <RulesEditor open={dlg === "rules"} onClose={() => setDlg(null)} version={editVersion} cats={list} onDone={reloadAll} branch={branch} />
       <LedgerDialog cat={ledger} onClose={() => setLedger(null)} onEdit={canPrepare ? (c) => { setLedger(null); setEditCat(c); setDlg("category"); } : undefined} lang={lang} />
     </div>
@@ -419,15 +420,15 @@ function PaymentRequestDialog({ open, onClose, cats, people, onDone }: { open: b
   );
 }
 
-type CategoryDialogProps = { open: boolean; onClose: () => void; cat: Cat | null; setup: Setup | null; onDone: () => void };
+type CategoryDialogProps = { open: boolean; onClose: () => void; cat: Cat | null; defaultBranch?: string | null; setup: Setup | null; onDone: () => void };
 function CategoryDialog(props: CategoryDialogProps) {
-  return props.open ? <CategoryDialogBody key={props.cat?.id ?? "new"} {...props} /> : null;
+  return props.open ? <CategoryDialogBody key={props.cat?.id ?? `new:${props.defaultBranch ?? ""}`} {...props} /> : null;
 }
 
-function CategoryDialogBody({ open, onClose, cat, setup, onDone }: CategoryDialogProps) {
+function CategoryDialogBody({ open, onClose, cat, defaultBranch, setup, onDone }: CategoryDialogProps) {
   const { L, name } = useL();
   const { branch } = useFinance();
-  const blank = { code: "", nameEn: "", nameAr: "", branchKey: "COMPANY", priority: "100", fundingType: "OPEN", targetAmount: "", replenish: false, rollover: "CARRY_FORWARD", spendingLimit: "", approverEmployeeId: "", isTaxReserve: false, finCategoryId: "", active: true, reason: "" };
+  const blank = { code: "", nameEn: "", nameAr: "", branchKey: defaultBranch ?? (setup?.scope.all ? "COMPANY" : setup?.branches[0]?.id ?? "COMPANY"), priority: "100", fundingType: "OPEN", targetAmount: "", replenish: false, rollover: "CARRY_FORWARD", spendingLimit: "", approverEmployeeId: "", isTaxReserve: false, finCategoryId: "", active: true, reason: "" };
   const [f, setF] = useState(() => (cat ? { ...blank, code: cat.code, nameEn: cat.nameEn, nameAr: cat.nameAr ?? "", branchKey: cat.branchKey, priority: String(cat.priority), fundingType: cat.fundingType, targetAmount: cat.targetAmount === null ? "" : (cat.targetAmount / 100).toFixed(2), replenish: cat.replenish, rollover: cat.rollover, spendingLimit: cat.spendingLimit === null ? "" : (cat.spendingLimit / 100).toFixed(2), approverEmployeeId: cat.approverEmployeeId ?? "", isTaxReserve: cat.isTaxReserve, finCategoryId: cat.finCategoryId ?? "", active: cat.active } : blank));
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
   async function submit() {
@@ -460,6 +461,7 @@ function CategoryDialogBody({ open, onClose, cat, setup, onDone }: CategoryDialo
         <label className="flex items-center gap-2"><input type="checkbox" checked={f.isTaxReserve} onChange={(e) => setF({ ...f, isTaxReserve: e.target.checked })} />{L("احتياطي ضريبي (من ضريبة المستندات فقط)", "Tax reserve (document VAT only)")}</label>
         {cat && <label className="flex items-center gap-2"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />{L("نشطة", "Active")}</label>}
       </div>
+      {isProfitLike(f) && <Notice tone="info" icon={Info}>{L(PROFIT_HINT.ar, PROFIT_HINT.en)}</Notice>}
       {cat && <Field label={L("سبب التعديل", "Reason for the change")}><input className={INPUT} value={f.reason} onChange={set("reason")} /></Field>}
       {err && <Notice tone="bad">{err}</Notice>}
       <div className="flex gap-2"><Button kind="primary" busy={busy} onClick={submit}>{L("حفظ", "Save")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>

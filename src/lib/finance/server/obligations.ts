@@ -12,7 +12,7 @@ import { prisma } from "@/lib/db";
 import { fromMinor, parseMoney, toMinor, type Minor } from "../money";
 import { addMonths, dbDate, isDateString } from "../dates";
 import {
-  assertCan, assertScope, audit, COMPANY, FinanceError, reqStr, scopeWhere, str,
+  assertCan, assertScope, audit, can, COMPANY, FinanceError, reqStr, scopeWhere, str,
   type Db, type FinanceActor, type FinanceScope,
 } from "./context";
 
@@ -137,20 +137,53 @@ export async function supersedeObligation(actor: FinanceActor, scope: FinanceSco
   });
 }
 
+/**
+ * What cancelling an obligation would touch — shown in the cancel dialog before a reason is
+ * asked for. Paid amounts are real cash that already left: they stay recorded; only the
+ * unpaid remainder stops being owed. Open payment requests hold category money: they are
+ * released with their own audited release, which needs the allocate duty.
+ */
+export async function cancelEffects(db: Db, scope: FinanceScope, id: string) {
+  const o = await db.finObligation.findUnique({ where: { id } });
+  if (!o) throw new FinanceError("Not found", 404);
+  assertScope(scope, o.branchKey);
+  const paid = (await paidByObligation(db, [id])).get(id) ?? 0;
+  const reservations = await db.paymentReservation.findMany({ where: { obligationId: id, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } }, select: { id: true, amount: true, status: true } });
+  return {
+    id, status: o.status, amount: toMinor(o.amount), paid, remaining: toMinor(o.amount) - paid,
+    reservations: reservations.map((r) => ({ id: r.id, amount: toMinor(r.amount), status: r.status })),
+    cancellable: (LIVE_OBLIGATION as readonly string[]).includes(o.status),
+  };
+}
+
+export const CANCEL_REASON_MIN = 5;
+
 export async function cancelObligation(actor: FinanceActor, scope: FinanceScope, id: string, reason: string) {
   assertCan(actor, "budget_prepare");
+  const why = reason.trim();
+  if (why.length < CANCEL_REASON_MIN) throw new FinanceError(`Give a reason for cancelling (at least ${CANCEL_REASON_MIN} characters).`, 400);
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "FinObligation" WHERE id = ${id} FOR UPDATE`;
     const o = await tx.finObligation.findUnique({ where: { id } });
     if (!o) throw new FinanceError("Not found", 404);
     assertScope(scope, o.branchKey);
     if (!(LIVE_OBLIGATION as readonly string[]).includes(o.status)) throw new FinanceError("Only a live obligation can be cancelled.", 409);
     const paid = (await paidByObligation(tx, [id])).get(id) ?? 0;
-    if (paid > 0) throw new FinanceError("Payments are matched to this obligation; it cannot be cancelled.", 409);
-    const live = await tx.paymentReservation.count({ where: { obligationId: id, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } } });
-    if (live > 0) throw new FinanceError("Release its payment reservations first.", 409);
-    const upd = await tx.finObligation.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledBy: actor.id, cancelReason: reason } });
-    await audit(tx, { action: "obligation.cancelled", entityType: "FinObligation", entityId: id, branchKey: o.branchKey, before: o, after: upd, reason, userId: actor.id });
-    return upd;
+    const live = await tx.paymentReservation.findMany({ where: { obligationId: id, status: { in: ["ACTIVE", "PENDING_APPROVAL"] } } });
+    // Money held for this obligation goes back to its category through the same audited
+    // release a person would do by hand — never silently.
+    if (live.length > 0 && !can(actor, "allocate")) throw new FinanceError("Open payment requests hold money for this obligation; releasing them needs the allocate duty.", 403);
+    const released: { id: string; amount: Minor }[] = [];
+    for (const r of live) {
+      const upd = await tx.paymentReservation.update({ where: { id: r.id }, data: { status: "RELEASED", releasedAt: new Date(), releasedBy: actor.id, releaseReason: `Obligation cancelled: ${why}` } });
+      if (r.approvalId) await tx.finApprovalRequest.updateMany({ where: { id: r.approvalId, status: "PENDING" }, data: { status: "CANCELLED", decidedAt: new Date(), decidedBy: actor.id, decisionNote: "Obligation cancelled" } });
+      await audit(tx, { action: "reservation.released", entityType: "PaymentReservation", entityId: r.id, branchKey: r.branchKey, before: r, after: upd, reason: `Obligation cancelled: ${why}`, refs: { obligationId: id }, userId: actor.id });
+      released.push({ id: r.id, amount: toMinor(r.amount) });
+    }
+    const upd = await tx.finObligation.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledBy: actor.id, cancelReason: why } });
+    // Payments already matched stay matched: that cash left and is not reversed here.
+    await audit(tx, { action: "obligation.cancelled", entityType: "FinObligation", entityId: id, branchKey: o.branchKey, before: o, after: { ...upd, paidRetained: fromMinor(paid), remainingCancelled: fromMinor(toMinor(o.amount) - paid), reservationsReleased: released.map((r) => r.id) }, reason: why, userId: actor.id });
+    return { obligation: upd, paidRetained: paid, remainingCancelled: toMinor(o.amount) - paid, released };
   });
 }
 

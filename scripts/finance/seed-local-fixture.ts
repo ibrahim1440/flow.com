@@ -30,7 +30,9 @@ import { buildDefaultPermissions, MODULE_SUB_PRIVILEGES, type Permissions } from
 import { resolveScope, COMPANY, type FinanceActor } from "../../src/lib/finance/server/context";
 import { installRecommended, createBranch, setBranchAccess } from "../../src/lib/finance/server/setup";
 import { createAccount, createManualTransaction, reviewTransaction, addMatch, createTransfer, commitImport } from "../../src/lib/finance/server/transactions";
-import { updateCategory, saveRuleDraft, submitRuleVersion, runAllocation, manualAllocate, createReservation, executeReservation, requestCategoryTransfer } from "../../src/lib/finance/server/allocation";
+import { Prisma } from "../../src/generated/prisma/client";
+import { submitCollection, approveCollection } from "../../src/lib/services/sales/collections";
+import { createCategory, updateCategory, saveRuleDraft, submitRuleVersion, runAllocation, manualAllocate, createReservation, executeReservation, requestCategoryTransfer } from "../../src/lib/finance/server/allocation";
 import { decideApproval } from "../../src/lib/finance/server/approvals";
 import { createObligation, supersedeObligation, createForecastItem } from "../../src/lib/finance/server/obligations";
 import { createBudget, saveDraftLines, submitBudget, startRevision, addVarianceNote, saveForecastSnapshot } from "../../src/lib/finance/server/budgets";
@@ -62,7 +64,7 @@ async function main() {
   if (process.argv.includes("--reset")) {
     // Local disposable database only (guarded above). TRUNCATE bypasses the row triggers
     // that make the finance ledgers append-only everywhere else.
-    const tables = ["FinAuditLog","FinApprovalRequest","FinForecastSnapshot","FinVarianceNote","BudgetLine","BudgetRevision","FinBudget","FinForecastItem","FinObligation","PaymentReservation","AllocationEntry","AllocationRun","AllocationRuleStep","AllocationRuleVersion","AllocationCategory","FinAttachment","BankTransactionMatch","BankTransactionSplit","BankTransaction","BankReconciliation","BankImportBatch","CashAccount","FinCategory","FinCostCenter","FinBranchAccess","FinBranch","FinSettings","OrderActivity","OrderItem","Order","Customer","LoginAttempt","RateLimit"];
+    const tables = ["FinAuditLog","FinApprovalRequest","FinForecastSnapshot","FinVarianceNote","BudgetLine","BudgetRevision","FinBudget","FinForecastItem","FinObligation","PaymentReservation","AllocationEntry","AllocationRun","AllocationRuleStep","AllocationRuleVersion","AllocationCategory","FinAttachment","BankTransactionMatch","BankTransactionSplit","BankTransaction","BankReconciliation","BankImportBatch","CashAccount","FinCategory","FinCostCenter","FinBranchAccess","FinBranch","FinSettings","OrderActivity","OrderItem","Order","CollectionEvidence","SalesCollection","CommissionLedgerEntry","CommissionAccrual","CollectionEvent","QuoteLine","Quote","OpportunityStageEvent","OpportunityOwner","Opportunity","PipelineStage","Customer","LoginAttempt","RateLimit"];
     await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`);
   }
   if ((await prisma.bankTransaction.count()) > 0) {
@@ -71,6 +73,7 @@ async function main() {
   }
   const prep = await user("fin.manager", "سارة العتيبي — المالية", perms(["txn_enter", "reconcile", "budget_prepare", "allocate", "all_branches", "settings_manage"]));
   const appr = await user("fin.approver", "عبدالله الحربي — المدير العام", perms(["budget_approve", "transfer_approve", "spend_override_approve", "period_close", "all_branches"]));
+  const finAdmin = await user("fin.admin", "مسؤول النظام — المالية", perms(["settings_manage", "all_branches"], { employees: { access: "edit" } }));
   const cafeUser = await user("fin.cafe", "نورة — مديرة المقهى", perms(["txn_enter", "budget_prepare"]));
   await user("fin.viewer", "مراجع — عرض فقط", perms([]));
   await user("fin.manager.en", "Sara Alotaibi — Finance", perms(["txn_enter", "reconcile", "budget_prepare", "allocate", "all_branches", "settings_manage"]), "en");
@@ -90,7 +93,7 @@ async function main() {
   let ps = await resolveScope(prep);
   await installRecommended(prep, ps, COMPANY);
   const cafe = await createBranch(prep, { code: "CAFE", nameEn: "Café", nameAr: "المقهى" });
-  await setBranchAccess(prep, { employeeId: cafeUser.id, branchId: cafe.id });
+  await setBranchAccess(finAdmin, { employeeId: cafeUser.id, branchId: cafe.id });
   ps = await resolveScope(prep);
   const as = await resolveScope(appr);
   const fin = Object.fromEntries((await prisma.finCategory.findMany()).map((c) => [c.code, c.id]));
@@ -109,6 +112,8 @@ async function main() {
   await updateCategory(prep, ps, al["AL-RESERVE"].id, { fundingType: "RESERVE_TARGET", targetAmount: "25000", replenish: true });
   await updateCategory(prep, ps, al["AL-GREEN"].id, { spendingLimit: "30000", approverEmployeeId: appr.id });
   await updateCategory(prep, ps, al["AL-MKT"].id, { spendingLimit: "5000" });
+
+  await createCategory(prep, ps, { code: "AL-PROFIT", nameEn: "Owner profit share", nameAr: "حصة أرباح المالك", priority: "90" });
 
   // Opening balance earmarks.
   for (const [code, amt] of [["AL-SALARY", "20000"], ["AL-RENT", "12000"], ["AL-RESERVE", "15000"], ["AL-GREEN", "20000"]] as const) {
@@ -207,10 +212,23 @@ async function main() {
   const pre = await previewReconciliation(ps, snb.id, D(20), "0");
   await saveReconciliation(prep, ps, { cashAccountId: snb.id, statementDate: D(20), statementBalance: fromMinor(pre.ledgerBalance), notes: "Statement 01–20 Sep" });
 
-  // Statement import for the last days: one unknown deposit enters the review queue.
+  const rep = await user("sales.rep", "خالد — مبيعات الجملة", { ...buildDefaultPermissions("custom"), dashboard: { access: "edit" } });
+  const verifier = await user("sales.verifier", "ريم — تحقق التحصيلات", { ...buildDefaultPermissions("custom"), dashboard: { access: "edit" } });
+  const stage = await prisma.pipelineStage.create({ data: { code: "UAT_WON", nameEn: "Won", nameAr: "مكسوبة", position: 1, probability: 100, isActive: true } });
+  const qasr = await prisma.customer.create({ data: { name: "Al Qasr Café", nameAr: "مقهى القصر" } });
+  const opp = await prisma.opportunity.create({ data: { title: "Al Qasr Café — house blend", customerId: qasr.id, stageId: stage.id, amount: "5750", currency: "SAR", probability: 100, ownerId: rep.id } });
+  await prisma.quote.create({ data: { quoteNumber: "Q-2026-0417", revision: 1, opportunityId: opp.id, customerId: qasr.id, status: "ACCEPTED", currency: "SAR", subtotal: "5000", discountTotal: "0", taxTotal: "750", grandTotal: "5750", acceptedAt: new Date(`${D(24)}T09:00:00Z`) } });
+  const sc = await prisma.$transaction((tx) => submitCollection(tx, {
+    opportunityId: opp.id, amountGross: new Prisma.Decimal("5750.00"), currency: "SAR", collectedAt: new Date(`${D(25)}T08:00:00Z`),
+    paymentMethod: "BANK_TRANSFER", referenceNumber: "IN-2301", note: "Transfer confirmed by the customer", idempotencyKey: "uat-qasr-1", submittedById: rep.id,
+  }));
+  await prisma.$transaction((tx) => approveCollection(tx, { collectionId: sc.collectionId, actorId: verifier.id }));
+
+  // Statement import for the last days: one unknown deposit enters the review queue, and the
+  // Al Qasr transfer arrives (it matches the approved Sales collection by reference).
   await commitImport(prep, ps, {
     cashAccountId: snb.id, fileName: "snb-statement-26sep.csv",
-    csv: `Date,Amount,Reference,Description\n${D(26)},2300.00,TRF88213,INCOMING TRANSFER 88213\n${D(26)},-450.00,POS-REF-77,CARD PURCHASE PENDING\n`,
+    csv: `Date,Amount,Reference,Description\n${D(26)},2300.00,TRF88213,INCOMING TRANSFER 88213\n${D(26)},5750.00,IN-2301,TRANSFER AL QASR CAFE\n${D(26)},-450.00,POS-REF-77,CARD PURCHASE PENDING\n`,
     mapping: { date: "Date", amount: "Amount", reference: "Reference", description: "Description", dateFormat: "YYYY-MM-DD" },
   });
   const pendingLine = await prisma.bankTransaction.findFirstOrThrow({ where: { bankReference: "POS-REF-77" } });
@@ -268,7 +286,7 @@ async function main() {
   await submitBudget(prep, ps, oct.id, {});
   await requestCategoryTransfer(prep, ps, { fromCategoryId: al["AL-RESERVE"].id, toCategoryId: al["AL-GREEN"].id, amount: "5000", reason: "تعزيز البن الأخضر لشحنة كولومبيا" });
 
-  console.log("Local finance fixture created. Logins: fin.manager, fin.approver, fin.cafe, fin.viewer, fin.manager.en, no.finance, legacy.admin, new.preparer, new.approver, fin.dual (password from FIN_FIXTURE_PASSWORD).");
+  console.log("Local finance fixture created. Logins: fin.manager, fin.approver, fin.admin, fin.cafe, fin.viewer, fin.manager.en, no.finance, legacy.admin, new.preparer, new.approver, fin.dual (password from FIN_FIXTURE_PASSWORD).");
 }
 
 main().then(async () => { await prisma.$disconnect(); process.exit(0); }).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });

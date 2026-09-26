@@ -6,7 +6,7 @@ import { useUser } from "../../user-context";
 import { ALL_CLASSES, CLASS_LABELS, classDirection, isAllocatableClass, SETTLEMENT_CLASSES, type TxnClass } from "@/lib/finance/classes";
 import { parseMoney } from "@/lib/finance/money";
 import { riyadhDateString } from "@/lib/finance/dates";
-import { Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, api, useApi, useFinance, useHasSub, useIdempotencyKey, useL, withBranch, type Tone } from "../_components/ui";
+import { Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Section, Segmented, Table, Td, Th, api, useApi, useFinance, useHasSub, useIdempotencyKey, useL, withBranch, type Tone } from "../_components/ui";
 import { ImportDialog } from "./import-dialog";
 
 type Account = { id: string; code: string; nameEn: string; nameAr: string | null; branchKey: string; isRestricted: boolean; type?: string };
@@ -23,6 +23,9 @@ type Detail = {
   audits: { id: string; action: string; createdAt: string; userId: string | null; reason: string | null }[];
   people: { id: string; name: string }[];
 };
+
+type CollectionCand = { id: string; status: string; amountGross: number; amountTax: number; referenceNumber: string | null; collectedAt: string; customer: string | null; customerAr: string | null; deal: string };
+type CollectionView = { linked: CollectionCand | null; matchId: string | null; decision: { kind: "MATCH"; collectionId: string; basis: "REFERENCE" | "AMOUNT_AND_DATE" } | { kind: "AMBIGUOUS" | "AWAITING_VERIFICATION"; collectionIds: string[] } | { kind: "NONE"; reason: string } | null; candidates: CollectionCand[] };
 
 const toMinor = (s: string | number) => Math.round(Number(s) * 100);
 
@@ -168,6 +171,7 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
   const [matchQ, setMatchQ] = useState(""); const [cands, setCands] = useState<{ kind: string; note?: string; rows: { id: string; label: string; labelAr?: string; matched?: number; amount?: number; dueDate?: string }[] } | null>(null);
   const [matchPick, setMatchPick] = useState<{ id: string; label: string } | null>(null);
   const [matchAmt, setMatchAmt] = useState(""); const [matchTax, setMatchTax] = useState("");
+  const coll = useApi<CollectionView>(t.status === "CONFIRMED" && Number(t.amount) > 0 ? withBranch(`/api/finance/transactions/${id}/collection`, branch) : null);
 
   useEffect(() => {
     const h = setTimeout(() => api<typeof cands>(withBranch(`/api/finance/transactions/${id}/matches?q=${encodeURIComponent(matchQ)}`, branch)).then(setCands).catch(() => setCands(null)), 250);
@@ -201,7 +205,7 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
   }
   async function act(path: string, json: unknown = {}) {
     setBusy(true); setErr(null);
-    try { await api(withBranch(path, branch), { method: "POST", json }); d.reload(); onChanged(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    try { await api(withBranch(path, branch), { method: "POST", json }); d.reload(); coll.reload(); onChanged(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   async function upload(file: File) {
     setBusy(true); setErr(null);
@@ -210,12 +214,16 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
   }
 
   const [rar, ren, rtone] = reviewTone(t);
+  const activeMatches = t.matches.filter((m) => m.active);
+  const canAllocateNow = canAllocate && amount > 0 && t.status === "CONFIRMED" && t.reviewStatus === "REVIEWED" && isAllocatableClass(t.classification) && !d.data.run && d.data.unallocated > 0;
+  const custName = (c: CollectionCand) => L(c.customerAr ?? c.customer ?? "—", c.customer ?? c.customerAr ?? "—");
+  const cv = coll.data;
   return (
     <Card>
       <CardTitle title={L("مراجعة سطر بنكي", "Review bank line")} sub={`${d.data.transaction.cashAccount.code} · ${t.txnDate.slice(0, 10)}${t.bankReference ? ` · ${L("المرجع", "Ref")} ${t.bankReference}` : ""}`}
         right={<button type="button" onClick={onClose} aria-label={L("إغلاق", "Close")} className="text-brown-light hover:text-charcoal"><X size={16} /></button>} />
       <div className={`rounded-xl px-3.5 py-3 ${amount > 0 ? "bg-green-100" : "bg-cream-dark"}`}>
-        <div className="flex items-center gap-2"><p className={`text-xs font-bold ${amount > 0 ? "text-green-700" : "text-brown"}`}>{amount > 0 ? L("وارد", "Money in") : L("صادر", "Money out")} · {L(t.status === "CONFIRMED" ? "مؤكد" : t.status === "PENDING" ? "معلّق" : "ملغى", t.status === "CONFIRMED" ? "confirmed" : t.status === "PENDING" ? "pending" : "void")}</p><Badge tone={rtone}>{L(rar, ren)}</Badge></div>
+        <div className="flex items-center gap-2"><p className={`text-xs font-bold ${amount > 0 ? "text-green-700" : "text-brown"}`}>{amount > 0 ? L("وارد", "Money in") : L("صادر", "Money out")} · {L(t.status === "CONFIRMED" ? "مؤكد" : t.status === "PENDING" ? "معلّق" : "ملغى", t.status === "CONFIRMED" ? "confirmed" : t.status === "PENDING" ? "pending" : "void")}</p><span data-testid="review-status"><Badge tone={rtone}>{L(rar, ren)}</Badge></span></div>
         <p className={`text-2xl font-extrabold tabular-nums ${amount > 0 ? "text-green-700" : "text-charcoal"}`}>{sar(amount)}</p>
         {t.grossAmount && <p className="text-xs text-brown">{L("الإجمالي", "Gross")} {money(toMinor(t.grossAmount))} − {L("الرسوم", "fees")} {money(toMinor(t.feeAmount ?? 0))} = {L("صافي الإيداع", "net deposit")} {money(amount)}</p>}
         <p className="text-xs text-charcoal mt-1">{t.description}</p>
@@ -233,6 +241,28 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
         <Notice tone="warn">{L("مصدر الإيداع غير معروف: لا يُعامل كتحصيل مبيعات ولا يُخصص قبل تصنيفه ومراجعته.", "Unknown source: not treated as a sales receipt and not allocated until it is classified and reviewed.")}</Notice>
       )}
       {t.reconciliationId && <Notice tone="info">{L("السطر ضمن تسوية مكتملة؛ لا يمكن إلغاؤه.", "This line is in a completed reconciliation; it cannot be voided.")}</Notice>}
+
+      {cv?.linked && (
+        <div data-testid="collection-linked" className="rounded-lg bg-green-100 px-3 py-2 text-xs flex items-start gap-2">
+          <Link2 size={14} className="mt-0.5 text-green-700 flex-shrink-0" />
+          <div>
+            <p className="font-bold text-green-700">{L("مرتبط بتحصيل مبيعات معتمد", "Linked to an approved Sales collection")}</p>
+            <p>{custName(cv.linked)} · {money(cv.linked.amountGross)} ({L("منها ضريبة", "incl. VAT")} {money(cv.linked.amountTax)}){cv.linked.referenceNumber && <> · <bdi dir="ltr">{cv.linked.referenceNumber}</bdi></>}</p>
+            <p className="text-brown-light">{L("الربط لا يُنشئ نقداً ولا تخصيصاً إضافياً؛ هذا السطر هو النقد.", "The link adds no cash and no allocation; this bank line is the cash.")}</p>
+          </div>
+        </div>
+      )}
+      {!cv?.linked && cv?.decision && cv.decision.kind !== "NONE" && cv.candidates.length > 0 && !isVoid && (
+        <div data-testid="collection-suggestion" className="rounded-lg border-2 border-orange px-3 py-2 text-xs flex flex-col gap-1.5">
+          <p className="font-bold">{cv.decision.kind === "MATCH" ? L("تحصيل مبيعات مقترح لهذا الإيصال", "Suggested Sales collection for this receipt") : cv.decision.kind === "AMBIGUOUS" ? L("أكثر من تحصيل مطابق — اختر الصحيح", "More than one matching collection — choose the right one") : L("تحصيل مطابق بانتظار تحقق المبيعات", "A matching collection is awaiting verification in Sales")}</p>
+          {cv.candidates.map((c) => (
+            <div key={c.id} className="flex items-center justify-between gap-2">
+              <span>{custName(c)} · {money(c.amountGross)} ({L("ضريبة", "VAT")} {money(c.amountTax)}){c.referenceNumber && <> · <bdi dir="ltr">{c.referenceNumber}</bdi></>} · {c.collectedAt.slice(0, 10)}{cv.decision?.kind === "MATCH" ? ` · ${cv.decision.basis === "REFERENCE" ? L("بالمرجع", "by reference") : L("بالمبلغ والتاريخ", "by amount and date")}` : ""}</span>
+              {canEnter && c.status === "APPROVED" && <Button kind="primary" busy={busy} onClick={() => act(`/api/finance/transactions/${id}/collection`, { collectionId: c.id })}>{L("ربط التحصيل", "Link collection")}</Button>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <Field label={L("التصنيف", "Classification")}>
         <select className={INPUT} disabled={locked} value={cls} onChange={(e) => setCls(e.target.value as TxnClass)}>
@@ -268,11 +298,22 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs font-bold text-brown">{L("الربط بمستند", "Link to a document")}</span>
-        {t.matches.filter((m) => m.active).map((m) => (
+      <div className="flex flex-col gap-1.5">
+        {d.data.attachments.map((a) => (
+          <a key={a.id} href={withBranch(`/api/finance/attachments/${a.id}`, branch)} className="flex items-center gap-2 text-xs text-orange font-bold"><Paperclip size={12} />{a.fileName}</a>
+        ))}
+        {canEnter && !isVoid && (
+          <label className="flex items-center gap-2 px-3 py-2.5 rounded-[10px] border border-border text-xs text-brown cursor-pointer hover:bg-cream">
+            <Paperclip size={16} />{L("إرفاق مستند (PDF أو صورة، حتى 5 ميغابايت)", "Attach a document (PDF or image, up to 5 MB)")}
+            <input type="file" className="hidden" accept="application/pdf,image/png,image/jpeg,image/webp,text/csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
+          </label>
+        )}
+      </div>
+
+      <Section testId="section-link" title={L("الربط بمستند", "Link to a document")} summary={activeMatches.length ? L(`${activeMatches.length} مرتبط`, `${activeMatches.length} linked`) : L("لا يوجد", "none")}>
+        {activeMatches.map((m) => (
           <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-cream-dark px-3 py-2 text-xs">
-            <span><Link2 size={12} className="inline me-1" />{m.targetType} · {money(toMinor(m.amount))}{toMinor(m.taxAmount) > 0 ? ` · ${L("ضريبة", "VAT")} ${money(toMinor(m.taxAmount))}` : ""}</span>
+            <span><Link2 size={12} className="inline me-1" />{m.targetType === "SALES_COLLECTION" ? L("تحصيل مبيعات", "Sales collection") : m.targetType} · {money(toMinor(m.amount))}{toMinor(m.taxAmount) > 0 ? ` · ${L("ضريبة", "VAT")} ${money(toMinor(m.taxAmount))}` : ""}</span>
             {canEnter && <button type="button" className="text-red-600 font-bold" onClick={() => { const r = prompt(L("سبب إلغاء الربط", "Reason for unlinking")); if (r) act(`/api/finance/matches/${m.id}/remove`, { reason: r }); }}>{L("إلغاء الربط", "Unlink")}</button>}
           </div>
         ))}
@@ -305,35 +346,12 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
             <p className="text-[11px] text-brown">{L("الربط لا يُنشئ إيصالاً جديداً. أدخل ضريبة القيمة المضافة من الفاتورة ليُحتجز في احتياطي الضريبة.", "Linking never creates a new receipt. Enter the invoice VAT so it is held in the tax reserve.")}</p>
           </>
         )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        {d.data.attachments.map((a) => (
-          <a key={a.id} href={withBranch(`/api/finance/attachments/${a.id}`, branch)} className="flex items-center gap-2 text-xs text-orange font-bold"><Paperclip size={12} />{a.fileName}</a>
-        ))}
-        {canEnter && !isVoid && (
-          <label className="flex items-center gap-2 px-3 py-2.5 rounded-[10px] border border-border text-xs text-brown cursor-pointer hover:bg-cream">
-            <Paperclip size={16} />{L("إرفاق مستند (PDF أو صورة، حتى 5 ميغابايت)", "Attach a document (PDF or image, up to 5 MB)")}
-            <input type="file" className="hidden" accept="application/pdf,image/png,image/jpeg,image/webp,text/csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
-          </label>
-        )}
-      </div>
-
-      {amount > 0 && t.status === "CONFIRMED" && (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-bold text-brown">{L("التخصيص من هذا الإيصال", "Allocated from this receipt")}</span>
-          {d.data.entries.length === 0 ? <p className="text-xs text-brown-light">{L("لم يُخصص بعد.", "Not allocated yet.")}</p> : d.data.entries.map((e) => (
-            <div key={e.id} className="flex justify-between text-xs"><span>{name(e.category)} · {e.entryType === "ALLOCATION" ? L("تخصيص", "allocation") : L("عكس", "reversal")}</span><span className="tabular-nums font-bold">{money(toMinor(e.amount) * (e.entryType === "ALLOCATION" ? 1 : -1))}</span></div>
-          ))}
-          <p className="text-xs text-brown">{L("غير مخصص من الإيصال", "Unallocated from receipt")}: <b className="tabular-nums">{money(d.data.unallocated)}</b></p>
-          {canAllocate && t.reviewStatus === "REVIEWED" && isAllocatableClass(t.classification) && !d.data.run && d.data.unallocated > 0 && (
-            <Button kind="primary" busy={busy} onClick={() => act("/api/finance/allocations/run", { txnId: id })}>{L("تخصيص حسب القواعد المعتمدة", "Allocate by approved rules")}</Button>
-          )}
-        </div>
-      )}
+      </Section>
 
       {canEnter && !isVoid && (
-        <Field label={L("ملاحظة المراجعة", "Review note")}><input className={INPUT} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <Section testId="section-note" title={L("ملاحظة المراجعة", "Review note")} summary={note ? L("مكتوبة", "written") : L("اختيارية", "optional")}>
+          <input aria-label={L("ملاحظة المراجعة", "Review note")} className={INPUT} value={note} onChange={(e) => setNote(e.target.value)} />
+        </Section>
       )}
       {err && <Notice tone="bad">{err}</Notice>}
       {confirmReverse && (
@@ -342,24 +360,32 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
           <Button kind="danger" busy={busy} onClick={() => save(true, true)}>{L("تأكيد العكس وإعادة التصنيف", "Confirm reversal and reclassify")}</Button>
         </Notice>
       )}
-      {canEnter && !isVoid && (
-        <div className="flex gap-2 flex-wrap">
-          <Button kind="primary" icon={CheckCircle2} busy={busy} disabled={cls === "UNCLASSIFIED" || !splitsOk} onClick={() => save(true)}>{L("حفظ ووضع علامة مُراجعة", "Save and mark reviewed")}</Button>
-          <Button busy={busy} onClick={() => save(false)}>{L("حفظ دون مراجعة", "Save without review")}</Button>
-          {t.status === "PENDING" && <Button busy={busy} onClick={() => act(`/api/finance/transactions/${id}/confirm`)}>{L("تأكيد السطر", "Confirm line")}</Button>}
+      {((canEnter && !isVoid) || canAllocateNow) && (
+        <div className="flex gap-2 flex-wrap" data-testid="review-actions">
+          {canEnter && !isVoid && <Button kind="primary" icon={CheckCircle2} busy={busy} disabled={cls === "UNCLASSIFIED" || !splitsOk} onClick={() => save(true)}>{L("حفظ ووضع علامة مُراجعة", "Save and mark reviewed")}</Button>}
+          {canEnter && !isVoid && <Button busy={busy} onClick={() => save(false)}>{L("حفظ دون مراجعة", "Save without review")}</Button>}
+          {canEnter && t.status === "PENDING" && <Button busy={busy} onClick={() => act(`/api/finance/transactions/${id}/confirm`)}>{L("تأكيد السطر", "Confirm line")}</Button>}
+          {canAllocateNow && <Button kind="primary" busy={busy} onClick={() => act("/api/finance/allocations/run", { txnId: id })}>{L("تخصيص حسب القواعد المعتمدة", "Allocate by approved rules")}</Button>}
         </div>
       )}
       {canEnter && !isVoid && !t.reconciliationId && (
         <button type="button" className="text-xs font-bold text-red-600 self-start" onClick={() => { const r = prompt(L("سبب إلغاء السطر", "Reason for voiding")); if (r) act(`/api/finance/transactions/${id}/void`, { reason: r }); }}>{L("إلغاء السطر", "Void line")}</button>
       )}
-      <div className="border-t border-border-light pt-2 flex flex-col gap-1">
-        <span className="text-[11px] font-bold text-brown">{L("السجل", "History")}</span>
+
+      {amount > 0 && t.status === "CONFIRMED" && (
+        <Section testId="section-allocated" title={L("التخصيص من هذا الإيصال", "Allocated from this receipt")} summary={d.data.entries.length === 0 ? L("لم يُخصص بعد", "not allocated yet") : L(`غير مخصص ${money(d.data.unallocated)}`, `unallocated ${money(d.data.unallocated)}`)}>
+          {d.data.entries.length === 0 ? <p className="text-xs text-brown-light">{L("لم يُخصص بعد.", "Not allocated yet.")}</p> : d.data.entries.map((e) => (
+            <div key={e.id} className="flex justify-between text-xs"><span>{name(e.category)} · {e.entryType === "ALLOCATION" ? L("تخصيص", "allocation") : L("عكس", "reversal")}</span><span className="tabular-nums font-bold">{money(toMinor(e.amount) * (e.entryType === "ALLOCATION" ? 1 : -1))}</span></div>
+          ))}
+          <p className="text-xs text-brown">{L("غير مخصص من الإيصال", "Unallocated from receipt")}: <b className="tabular-nums">{money(d.data.unallocated)}</b></p>
+        </Section>
+      )}
+      <Section testId="section-history" title={L("السجل", "History")} summary={L(`${d.data.audits.length} حدث`, `${d.data.audits.length} events`)}>
         {d.data.audits.slice(0, 5).map((a) => <p key={a.id} className="text-[11px] text-brown-light">{a.createdAt.slice(0, 16).replace("T", " ")} · {a.action} · {person(a.userId)}{a.reason ? ` · ${a.reason}` : ""}</p>)}
-      </div>
+      </Section>
     </Card>
   );
 }
-
 // ─── Reconciliation ──────────────────────────────────────────────────────────
 
 function ReconciliationCard({ accounts, canRecon, onDone }: { accounts: Account[]; canRecon: boolean; onDone: () => void }) {

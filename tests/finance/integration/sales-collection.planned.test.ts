@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { Prisma } from "../../../src/generated/prisma/client";
 import { prisma, reset, makeUser, ALL_SCOPE_SUBS } from "./support";
 import { resolveScope, COMPANY } from "../../../src/lib/finance/server/context";
-import { createAccount, reviewTransaction, commitImport, linkSalesCollection, suggestSalesCollection } from "../../../src/lib/finance/server/transactions";
+import { createAccount, reviewTransaction, commitImport, linkSalesCollection, suggestSalesCollection, collectionSuggestion } from "../../../src/lib/finance/server/transactions";
 import { createCategory, saveRuleDraft, submitRuleVersion, runAllocation } from "../../../src/lib/finance/server/allocation";
 import { decideApproval } from "../../../src/lib/finance/server/approvals";
 import { installRecommended } from "../../../src/lib/finance/server/setup";
@@ -154,6 +154,23 @@ ${today},8050.00,IN-9999,OTHER
     assert.equal(again.importedCount + again.attachedCount, 0);
     assert.equal(await prisma.bankTransaction.count(), 1);
     assert.equal(await prisma.bankTransactionMatch.count({ where: { targetType: "SALES_COLLECTION", active: true, targetId: id } }), 1);
+  });
+
+  test("the review panel suggestion: an approved collection is offered with its details, linking shows it as linked", async () => {
+    const c = await setup();
+    const id = await approvedCollection(c);
+    await commitImport(c.prep, c.ps, { cashAccountId: c.bank.id, fileName: "s.csv", csv: statement, mapping });
+    const line = await firstLine();
+    const s1 = await collectionSuggestion(prisma, c.ps, line.id);
+    assert.equal(s1.linked, null);
+    assert.deepEqual(s1.decision, { kind: "MATCH", collectionId: id, basis: "REFERENCE" });
+    assert.equal(s1.candidates[0].customer, "Elite Roastery");
+    assert.deepEqual([s1.candidates[0].amountGross, s1.candidates[0].amountTax], [805000, 105000]);
+    assert.equal(await prisma.bankTransactionMatch.count(), 0, "a suggestion links nothing");
+    await linkSalesCollection(c.prep, c.ps, line.id, id);
+    const s2 = await collectionSuggestion(prisma, c.ps, line.id);
+    assert.equal(s2.linked?.id, id);
+    assert.equal(s2.decision, null);
   });
 });
 

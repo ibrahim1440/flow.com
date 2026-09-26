@@ -2,9 +2,9 @@
 // The "recommended categories" installer creates NAMES only — no amounts, no transactions,
 // nothing that could be mistaken for the company's figures.
 import { prisma } from "@/lib/db";
-import { buildDefaultPermissions, hasSubPrivilege, parsePermissions } from "@/lib/auth-shared";
+import { buildDefaultPermissions, canEdit, hasSubPrivilege, parsePermissions } from "@/lib/auth-shared";
 import { parseMoney, fromMinor } from "../money";
-import { assertCan, assertScope, audit, COMPANY, FinanceError, getSettings, reqStr, str, type Db, type FinanceActor, type FinanceScope } from "./context";
+import { assertCan, assertScope, audit, can, COMPANY, FinanceError, getSettings, reqStr, str, type Db, type FinanceActor, type FinanceScope } from "./context";
 
 export async function updateSettings(actor: FinanceActor, body: Record<string, unknown>) {
   assertCan(actor, "settings_manage");
@@ -52,19 +52,33 @@ export async function createBranch(actor: FinanceActor, body: Record<string, unk
   });
 }
 
+/**
+ * Who may change which employee sees which branch: an administrator — the finance settings
+ * duty with company-wide access AND the ERP's own authority to edit employees (the same
+ * authority that edits permissions elsewhere). Nobody changes their own access.
+ */
+export function canManageBranchAccess(actor: FinanceActor): boolean {
+  return can(actor, "settings_manage") && can(actor, "all_branches") && canEdit(actor.permissions, "employees");
+}
+
 export async function setBranchAccess(actor: FinanceActor, body: Record<string, unknown>) {
   assertCan(actor, "settings_manage");
   assertCan(actor, "all_branches");
+  if (!canEdit(actor.permissions, "employees")) throw new FinanceError("Branch access is changed by an administrator who may edit employees.", 403);
   const employeeId = reqStr(body.employeeId, "Employee", 40);
   const branchId = reqStr(body.branchId, "Branch", 40);
+  if (employeeId === actor.id) throw new FinanceError("You cannot change your own branch access.", 403);
   const grant = body.grant !== false;
   return prisma.$transaction(async (tx) => {
     const [e, b] = await Promise.all([tx.employee.findUnique({ where: { id: employeeId } }), tx.finBranch.findUnique({ where: { id: branchId } })]);
     if (!e || !b) throw new FinanceError("Not found", 404);
-    if (grant) await tx.finBranchAccess.upsert({ where: { employeeId_branchId: { employeeId, branchId } }, update: {}, create: { employeeId, branchId, createdBy: actor.id } });
+    const had = (await tx.finBranchAccess.count({ where: { employeeId, branchId } })) > 0;
+    if (had === grant) return { ok: true, changed: false }; // nothing to change, nothing to audit
+    if (grant) await tx.finBranchAccess.create({ data: { employeeId, branchId, createdBy: actor.id } });
     else await tx.finBranchAccess.deleteMany({ where: { employeeId, branchId } });
-    await audit(tx, { action: grant ? "branch_access.granted" : "branch_access.revoked", entityType: "FinBranchAccess", entityId: `${employeeId}:${branchId}`, branchKey: branchId, userId: actor.id });
-    return { ok: true };
+    const who = { employeeId, employeeName: e.name, branchId, branchCode: b.code };
+    await audit(tx, { action: grant ? "branch_access.granted" : "branch_access.revoked", entityType: "FinBranchAccess", entityId: `${employeeId}:${branchId}`, branchKey: branchId, before: { ...who, access: had }, after: { ...who, access: grant }, userId: actor.id });
+    return { ok: true, changed: true };
   });
 }
 

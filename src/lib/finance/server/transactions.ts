@@ -784,3 +784,30 @@ export async function getAttachment(scope: FinanceScope, id: string) {
   assertScope(scope, t.branchKey);
   return a;
 }
+
+/**
+ * What the review panel shows for Sales collections on one receipt: the collection already
+ * linked (if any), else the decision of the tested rule with the candidates' details. The
+ * suggestion links nothing by itself; a person confirms it (linkSalesCollection).
+ */
+export async function collectionSuggestion(db: Db, scope: FinanceScope, txnId: string) {
+  const describe = async (ids: string[]) => {
+    if (ids.length === 0) return [];
+    const cs = await db.salesCollection.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true, paymentMethod: true, amountGross: true, amountTax: true, referenceNumber: true, collectedAt: true, customer: { select: { name: true, nameAr: true } }, opportunity: { select: { title: true, customer: { select: { name: true, nameAr: true } } } } },
+    });
+    return cs.map((c) => {
+      const cust = c.customer ?? c.opportunity.customer;
+      return { id: c.id, status: c.status, paymentMethod: c.paymentMethod, amountGross: toMinor(c.amountGross), amountTax: toMinor(c.amountTax), referenceNumber: c.referenceNumber, collectedAt: c.collectedAt.toISOString(), customer: cust?.name ?? null, customerAr: cust?.nameAr ?? null, deal: c.opportunity.title };
+    });
+  };
+  const t = await db.bankTransaction.findUnique({ where: { id: txnId } });
+  if (!t) throw new FinanceError("Not found", 404);
+  assertScope(scope, t.branchKey);
+  const linked = await db.bankTransactionMatch.findFirst({ where: { transactionId: txnId, targetType: "SALES_COLLECTION", active: true } });
+  if (linked) return { linked: (await describe([linked.targetId]))[0] ?? null, matchId: linked.id, decision: null, candidates: [] };
+  const decision = await suggestSalesCollection(db, scope, txnId);
+  const ids = decision.kind === "MATCH" ? [decision.collectionId] : decision.kind === "NONE" ? [] : decision.collectionIds;
+  return { linked: null, matchId: null, decision, candidates: await describe(ids) };
+}

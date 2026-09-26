@@ -313,7 +313,8 @@ describe("finance — database integration", () => {
     const accB = await createAccount(c.prep, scope, { code: "WEB", nameEn: "Web", branchKey: b.id, openingBalanceDate: d1 });
     await createManualTransaction(c.prep, scope, { cashAccountId: accB.id, amount: "999", txnDate: today });
     const cafe = await makeUser("Café manager", ["txn_enter", "budget_prepare"]);
-    await setBranchAccess(c.prep, { employeeId: cafe.id, branchId: a.id });
+    // Branch access is an administrator's change (D6): finance settings + may edit employees.
+    await setBranchAccess({ ...c.prep, permissions: { ...c.prep.permissions, employees: { access: "edit" } } }, { employeeId: cafe.id, branchId: a.id });
     const cs = await resolveScope(cafe);
     assert.deepEqual(cs, { all: false, branchKeys: [a.id] });
     const { rows } = await listTransactions(prisma, cs, new URLSearchParams());

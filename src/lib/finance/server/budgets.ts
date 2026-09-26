@@ -14,6 +14,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { fromMinor, parseMoney, toMinor, type Minor } from "../money";
+import { rowCompleteness, unreconciledAccounts, type OpenLine, type RowCompleteness } from "../completeness";
 import { addMonths, dbDate, isDateString, isMonthString, monthEnd, monthStart, riyadhDateString } from "../dates";
 import { plannedThrough, validateWeights, type Phasing } from "../phasing";
 import { aggregateVariance, computeVariance, crossesThreshold, forecastAtCompletion, type Variance } from "../variance";
@@ -262,6 +263,8 @@ export type ReportRow = {
   ownerEmployeeId: string | null; ownerName: string | null; phasing: string | null; dueDate: string | null;
   note: { id: string; explanation: string; correctiveAction: string | null; responsibleEmployeeId: string | null; followUpDate: string | null; status: string } | null;
   unbudgeted: boolean;
+  /** Whether this row's actual could still change (D4a): see completeness.ts. */
+  completeness: RowCompleteness;
 };
 
 export async function budgetReport(db: Db, scope: FinanceScope, budgetId: string, reportDateIn?: string) {
@@ -363,6 +366,7 @@ export async function budgetReport(db: Db, scope: FinanceScope, budgetId: string
       phasing: baselineLine?.phasing ?? null, dueDate: baselineLine?.dueDate?.toISOString().slice(0, 10) ?? null,
       note: note ? { id: note.id, explanation: note.explanation, correctiveAction: note.correctiveAction, responsibleEmployeeId: note.responsibleEmployeeId, followUpDate: note.followUpDate?.toISOString().slice(0, 10) ?? null, status: note.status } : null,
       unbudgeted: !o && !l,
+      completeness: { verified: false, unreviewed: 0, pending: 0, unreconciled: [] },
     });
   }
   rows.sort((a, b2) => (a.kind === b2.kind ? a.code.localeCompare(b2.code) : a.kind === "RECEIPT" ? -1 : 1));
@@ -389,6 +393,14 @@ export async function budgetReport(db: Db, scope: FinanceScope, budgetId: string
   const reconciledThrough = accounts.length === 0 ? null : accounts.every((a) => recons.some((r) => r.cashAccountId === a.id))
     ? recons.map((r) => r.statementDate.toISOString().slice(0, 10)).sort()[0] : null;
   const complete = needsReview === 0 && pending === 0 && !!reconciledThrough && reconciledThrough >= reportDate;
+  // Per row: only indicators that could actually change THIS row (direction and category).
+  const open = await db.bankTransaction.findMany({
+    where: { ...txWhere, OR: [{ reviewStatus: "NEEDS_REVIEW" }, { status: "PENDING" }] },
+    select: { amount: true, status: true, reviewStatus: true, splits: { select: { finCategoryId: true } } },
+  });
+  const openLines: OpenLine[] = open.map((t) => ({ amount: toMinor(t.amount), status: t.status === "PENDING" ? "PENDING" : "CONFIRMED", reviewStatus: t.reviewStatus === "NEEDS_REVIEW" ? "NEEDS_REVIEW" : "REVIEWED", finCategoryIds: t.splits.map((x) => x.finCategoryId) }));
+  const unrec = unreconciledAccounts(accounts, new Map(recons.map((r) => [r.cashAccountId, r.statementDate.toISOString().slice(0, 10)])), reportDate);
+  for (const r of rows) r.completeness = rowCompleteness(r, openLines, unrec);
 
   const memo = (working?.lines ?? []).filter((l) => l.kind === "SALES_MEMO").map((l) => ({ lineKey: l.lineKey, finCategoryId: l.finCategoryId, planned: toMinor(l.plannedAmount), assumptions: l.assumptions }));
 
