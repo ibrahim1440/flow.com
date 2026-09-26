@@ -21,7 +21,7 @@
 // relaxes a rule that still holds — the stock, concurrency and idempotency invariants are
 // proved by the suites that already own them.
 import {
-  ADMIN_PIN, db, api, check, section, sub, one, all, num, invariants, loginAs,
+  ADMIN_PIN, pinLookupValue, db, api, check, section, sub, one, all, num, invariants, loginAs,
   results, finish, ensureUser, concurrently,
 } from "./harness.mjs";
 import { buildCatalog, teardown } from "./catalog.mjs";
@@ -119,8 +119,39 @@ async function main() {
   const whoami = await api("/api/auth/me");
   const operatorId = whoami.json?.user?.id;
   check("the caller's identity is known", Boolean(operatorId), `status=${whoami.status}`);
+
+  // The invariant is stated three ways, because the version this replaced could not tell
+  // a right answer from a wrong one: it compared the owner against a row that did not
+  // exist, so `undefined` was the only thing it could ever have matched.
+  //
+  // 1. The owner IS the authenticated caller. Both sides are required to be present, so
+  //    two absent values cannot satisfy the equality between them.
   check("and it is the operator who committed, not the approver",
-    owner4 === operatorId, `${owner4} vs ${operatorId}`);
+    Boolean(owner4) && Boolean(operatorId) && owner4 === operatorId,
+    `${owner4} vs ${operatorId}`);
+
+  // 2. That caller is the holder of the credential this suite signed in with. Without
+  //    this, the comparison is only between two things the server said, and a server
+  //    that echoed the order's owner back as the session user would satisfy it. Anchoring
+  //    to the PIN actually used makes the claim about a real actor.
+  const credentialHolder = await one(
+    `SELECT id FROM "Employee" WHERE "pinLookup"=$1 AND active=true`,
+    [pinLookupValue(ADMIN_PIN)]
+  );
+  check("the caller is the employee whose credential was used to sign in",
+    Boolean(credentialHolder?.id) && credentialHolder.id === operatorId,
+    `${credentialHolder?.id} vs ${operatorId}`);
+
+  // 3. Matching the caller is a real result rather than the only possible one. If exactly
+  //    one employee could ever be chosen, "the owner is the operator" is true by
+  //    construction and proves nothing about the rule.
+  const adminCount = num((await one(
+    `SELECT count(*)::int n FROM "Employee" WHERE active=true AND role='admin'`)).n);
+  check("more than one operator exists, so matching the caller is a real result",
+    adminCount > 1, `active admins=${adminCount}`);
+
+  // A5 below completes the picture from the other side: it re-commits as a DIFFERENT
+  // operator and requires the owner NOT to follow the later writer.
   check("profile route is reachable for identity context", me.status === 200 || me.status === 404, `status=${me.status}`);
 
   sub("A5. a second Commit Allocation does not change the owner");
