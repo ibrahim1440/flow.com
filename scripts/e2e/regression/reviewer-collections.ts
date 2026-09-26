@@ -93,6 +93,10 @@ async function cleanup() {
     `DELETE FROM "SalesCollection" WHERE "idempotencyKey" LIKE '${P}%'`,
     `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE reason LIKE '${P}%') OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE reason LIKE '${P}%')`,
     `DELETE FROM "CommissionLedgerEntry" WHERE reason LIKE '${P}%'`,
+    // engine movements: they carry no reason, so they belong to their own events but no reason
+    // prefix matches them. Delete them before the events, or ON DELETE SET NULL orphans them.
+    `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "collectionEventId" IN (SELECT id FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%'))) OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "collectionEventId" IN (SELECT id FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%')))`,
+    `DELETE FROM "CommissionLedgerEntry" WHERE "collectionEventId" IN (SELECT id FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%'))`,
     `DELETE FROM "CommissionAccrual" WHERE "collectionEventId" IN (SELECT id FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%'))`,
     `DELETE FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%')`,
     `DELETE FROM "Quote" WHERE "quoteNumber" LIKE '${P}%'`,
