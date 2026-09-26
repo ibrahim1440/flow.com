@@ -85,6 +85,9 @@ for (const role of Object.keys(NAV_FOR) as RoleName[]) {
     const nav = page.locator("nav");
     // Grouped navigation renders a group's links only while it is open, and groups the
     // current page is not in start closed. Open every group, then assert the same sets.
+    // Wait for hydration first: a group opened on the server-rendered markup is closed again
+    // when the client takes over.
+    await page.waitForLoadState("networkidle");
     const closed = nav.locator('button[aria-expanded="false"]');
     for (let i = 0; i < 20 && (await closed.count()) > 0; i++) await closed.first().click();
     for (const re of NAV_FOR[role].visible) {
