@@ -14,7 +14,7 @@
  * Nothing is printed except the problem; no URL, user or password is ever echoed.
  */
 export const MARKER = "hiqbah-finance-disposable";
-export const DISPOSABLE_DATABASES = ["erp_finance_dev", "erp_finance_test", "erp_finance_integration"];
+export const DISPOSABLE_DATABASES = ["erp_finance_dev", "erp_finance_test", "erp_finance_integration", "erp_finance_integration_dev"];
 /** Shared Neon endpoints named in project documents. ep-dawn-dust is treated as production. */
 export const SHARED_ENDPOINTS = ["ep-dawn-dust-aqn1u1uf", "ep-icy-field-aq4upc3z", "ep-wandering-leaf-aqjtuin5", "ep-jolly-feather-aqne6cp1"];
 

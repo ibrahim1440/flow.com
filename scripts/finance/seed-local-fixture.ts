@@ -58,7 +58,7 @@ async function user(username: string, name: string, p: Permissions, lang: "ar" |
 }
 
 async function main() {
-  await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_dev", query: (q) => prisma.$queryRawUnsafe(q) });
+  await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: process.env.FIN_DISPOSABLE_DB === "erp_finance_integration_dev" ? "erp_finance_integration_dev" : "erp_finance_dev", query: (q) => prisma.$queryRawUnsafe(q) });
   if (process.argv.includes("--reset")) {
     // Local disposable database only (guarded above). TRUNCATE bypasses the row triggers
     // that make the finance ledgers append-only everywhere else.
