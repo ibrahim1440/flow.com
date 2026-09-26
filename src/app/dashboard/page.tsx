@@ -55,9 +55,9 @@ type AnalyticsData = {
 // mid grey — so they are named for their role here instead.
 const C_PRIMARY = "#4f46e5"; // --oo-action-primary  · the measured series
 const C_MUTED   = "#d4d4d8"; // --oo-border-strong   · the comparison series
-const C_GOOD    = "#16a34a"; // --oo-status-success
-const C_WARN    = "#d97706"; // --oo-status-waiting
-const C_BAD     = "#dc2626"; // --oo-status-blocked
+const C_GOOD    = "#15803d"; // --oo-status-success
+const C_WARN    = "#b45309"; // --oo-status-waiting
+const C_BAD     = "#b91c1c"; // --oo-status-blocked
 const C_TRACK   = "#f4f4f5"; // --oo-bg-subtle       · meter track
 
 // ─── Custom bar tooltip ───────────────────────────────────────────────────────

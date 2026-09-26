@@ -16,7 +16,7 @@
 :root {
   /* Neutrals — zinc, matching the Figma Color collection */
   --slate: #52525b;
-  --slate-light: #a1a1aa;
+  --slate-light: #71717a;
   --slate-dark: #3f3f46;
 
   /* Primary action. Indigo 600, not the former #7C3AED violet. */
@@ -30,7 +30,7 @@
 
   --charcoal: #18181b;
   --brown: #52525b;
-  --brown-light: #a1a1aa;
+  --brown-light: #71717a;
   --white: #ffffff;
 
   /* Semantic */
@@ -44,11 +44,11 @@
   --muted-foreground: #52525b;
 
   /* Status — aliased to the Order Operations status tokens */
-  --success: #16a34a;
+  --success: #15803d;
   --success-bg: #f0fdf4;
-  --warning: #d97706;
+  --warning: #b45309;
   --warning-bg: #fffbeb;
-  --danger: #dc2626;
+  --danger: #b91c1c;
   --danger-bg: #fef2f2;
   --info: #2563eb;
   --info-bg: #eff6ff;
@@ -158,7 +158,7 @@ h1, h2, h3, h4, h5, h6 {
 :root {
   --oo-text-primary: #18181b;
   --oo-text-secondary: #52525b;
-  --oo-text-muted: #a1a1aa;
+  --oo-text-muted: #71717a;
 
   /* The ground the console sits on. Distinct from --oo-bg-subtle: the app
      ground is what surrounds cards, subtle is a quiet band inside one. */
@@ -181,7 +181,7 @@ h1, h2, h3, h4, h5, h6 {
   --oo-radius-large: 16px;
 
   /* Waiting Approval / Waiting Preparation Review */
-  --oo-status-waiting: #d97706;
+  --oo-status-waiting: #b45309;
   --oo-status-waiting-bg: #fffbeb;
 
   /* Preparing */
@@ -189,11 +189,11 @@ h1, h2, h3, h4, h5, h6 {
   --oo-status-preparing-bg: #eff6ff;
 
   /* Ready for Shipping (teal — kept distinct from Completed's green) */
-  --oo-status-ready: #0d9488;
+  --oo-status-ready: #0f766e;
   --oo-status-ready-bg: #f0fdfa;
 
   /* Completed */
-  --oo-status-success: #16a34a;
+  --oo-status-success: #15803d;
   --oo-status-success-bg: #f0fdf4;
 
   /* On Hold */
@@ -201,13 +201,19 @@ h1, h2, h3, h4, h5, h6 {
   --oo-status-hold-bg: #fef3c7;
 
   /* Blocked (preparation decision, not an order status) */
-  --oo-status-blocked: #dc2626;
+  --oo-status-blocked: #b91c1c;
   --oo-status-blocked-bg: #fef2f2;
 
   /* Rejected — destructive red, one step darker than Blocked so an order-level
      approval failure never reads as an item-level block. Shares the red-50 tint
-     with Blocked deliberately; the two are separated by foreground, icon and label. */
-  --oo-status-rejected: #b91c1c;
+     with Blocked deliberately; the two are separated by foreground, icon and label.
+
+     Both moved a step down the ramp when the palette was corrected for contrast:
+     Blocked at red-600 measured 4.41:1 on its own tint, short of WCAG AA for the
+     10.5px text it carries. Taking Blocked to red-700 would have landed it on the
+     exact value Rejected already used, collapsing a distinction this comment exists
+     to protect — so Rejected took red-800 and the gap survives. */
+  --oo-status-rejected: #991b1b;
   --oo-status-rejected-bg: #fef2f2;
 
   /* Cancelled — neutral dark gray, deliberately NOT red so it never reads

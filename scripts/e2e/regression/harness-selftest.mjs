@@ -1312,6 +1312,69 @@ check("no use-client module imports the server env or the PIN/database config",
   leaking.length === 0, leaking.map((f) => f.replace(REPO, "")).join(", "));
 
 // ─────────────────────────────────────────────────────────────────────────────
+sub("Design tokens — text contrast meets WCAG AA");
+
+// The palette shipped below AA for a long time without anyone noticing, because a
+// contrast failure looks like a design choice rather than a bug: text/muted measured
+// 2.39:1 on the application ground and carried every timestamp, caption and meta line in
+// the console. Status chip text sat between 3.07 and 4.41 at 10.5px, which is nowhere
+// near the size that earns the large-text allowance.
+//
+// Nothing here will catch that by eye, so it is arithmetic and it runs on every
+// regression. The values are read from the stylesheet that actually ships, not from a
+// copy, so a token edited back to an inaccessible value fails immediately.
+
+const cssTokens = (() => {
+  const css = readFileSync(join(REPO, "src", "app", "globals.css"), "utf8");
+  const out = {};
+  for (const m of css.matchAll(/^\s*(--oo-[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;/gm)) out[m[1]] = m[2].toLowerCase();
+  return out;
+})();
+
+const srgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const lum = (h) => { const [r, g, b] = srgb(h).map(lin); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrast = (a, b) => {
+  const [hi, lo] = lum(a) >= lum(b) ? [lum(a), lum(b)] : [lum(b), lum(a)];
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+check("the stylesheet's --oo-* colour tokens could be read",
+  Object.keys(cssTokens).length >= 20, `${Object.keys(cssTokens).length} found`);
+
+// Every pairing carries text at normal size somewhere in the console, so every one of
+// them owes 4.5:1. Chip text is 10.5px and metadata 10.5–12px: none of it is large text.
+const PAIRS = [
+  ["--oo-text-primary", "--oo-bg-default"],
+  ["--oo-text-secondary", "--oo-bg-default"],
+  ["--oo-text-muted", "--oo-bg-default"],
+  ["--oo-text-muted", "--oo-bg-app"],
+  ["--oo-text-muted", "--oo-bg-subtle"],
+  ["--oo-action-primary", "--oo-action-primary-subtle"],
+  ["--oo-status-waiting", "--oo-status-waiting-bg"],
+  ["--oo-status-preparing", "--oo-status-preparing-bg"],
+  ["--oo-status-ready", "--oo-status-ready-bg"],
+  ["--oo-status-success", "--oo-status-success-bg"],
+  ["--oo-status-hold", "--oo-status-hold-bg"],
+  ["--oo-status-blocked", "--oo-status-blocked-bg"],
+  ["--oo-status-rejected", "--oo-status-rejected-bg"],
+  ["--oo-status-cancelled", "--oo-status-cancelled-bg"],
+];
+for (const [fg, bg] of PAIRS) {
+  const f = cssTokens[fg], b = cssTokens[bg];
+  if (!f || !b) { check(`${fg} on ${bg} — both tokens exist`, false, `${f} / ${b}`); continue; }
+  const r = contrast(f, b);
+  check(`${fg} on ${bg} meets AA 4.5:1`, r >= 4.5, `${r.toFixed(2)}:1 (${f} on ${b})`);
+}
+
+// Blocked and Rejected deliberately share a tint and are told apart by foreground, icon
+// and label. If they ever resolve to the same colour that separation is gone, and the
+// contrast fix is exactly the kind of change that could collapse it by accident.
+check("Blocked and Rejected remain visually distinct foregrounds",
+  cssTokens["--oo-status-blocked"] !== cssTokens["--oo-status-rejected"],
+  `${cssTokens["--oo-status-blocked"]} vs ${cssTokens["--oo-status-rejected"]}`);
+
+// ─────────────────────────────────────────────────────────────────────────────
 sub("Regression target guard — host AND database, protected endpoints first");
 
 // These suites write. The guard deciding WHERE they write is the most dangerous decision
