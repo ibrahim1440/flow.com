@@ -1,0 +1,37 @@
+  [FAIL] concurrent work overlapped rather than serializing end to end  
+  [FAIL] and the refusal discloses nothing about reset configuration  
+  [FAIL] the authorized training reset is accepted  
+  [FAIL] packaging operations are gone  
+  [FAIL] roasting batches are gone  
+  [FAIL] finished stock is gone  
+  [FAIL] the whole operational dataset is gone  
+  [FAIL] the authorized factory reset is accepted  
+  [FAIL] a wrong confirmation phrase is still refused  
+  [FAIL] a wrong PIN is still refused  
+  harness-selftest          375 passed    0 failed  exit 0  ok
+  production-gate            71 passed    0 failed  exit 0  ok
+  workflow-alignment         45 passed    0 failed  exit 0  ok
+  production-concurrency     37 passed    0 failed  exit 0  ok
+  lifecycle-locks            37 passed    1 failed  exit 1  exited 1
+  completion-gate            69 passed    0 failed  exit 0  ok
+  reservation-cas            22 passed    0 failed  exit 0  ok
+  packaging-stock            49 passed    0 failed  exit 0  ok
+  packaging-concurrency      24 passed    0 failed  exit 0  ok
+  packaging-idempotency      64 passed    0 failed  exit 0  ok
+  packaging-identity         73 passed    0 failed  exit 0  ok
+  unified-packaging         183 passed    0 failed  exit 0  ok
+  legacy-packaging-routes    53 passed    0 failed  exit 0  ok
+  production-demand          81 passed    0 failed  exit 0  ok
+  blend-integrity           105 passed    0 failed  exit 0  ok
+  po-lifecycle              132 passed    0 failed  exit 0  ok
+  hardening                 117 passed    0 failed  exit 0  ok
+  platform-hardening         47 passed    0 failed  exit 0  ok
+  h2a-hardening             145 passed    0 failed  exit 0  ok
+  h2b-hardening             165 passed    0 failed  exit 0  ok
+  finished-products          61 passed    0 failed  exit 0  ok
+  delivery                   22 passed    0 failed  exit 0  ok
+  order-edit-integrity      137 passed    0 failed  exit 0  ok
+  order-to-delivery          88 passed    0 failed  exit 0  ok
+  release-simulation         66 passed    0 failed  exit 0  ok
+  reset-safety               21 passed    9 failed  exit 1  exited 1
+  26 suite(s), 2289 harness assertions, 10 failed

@@ -22,16 +22,71 @@ Production steps were not executed (RELEASE-20260927.md §6).
 | Clean-checkout backend regression (no `.env`, disposable DB) vs `origin/main` | the same 26 failing assertions as `main` — none new, none fixed (below) |
 | Clean-checkout Playwright (critical-path, permissions, responsive, ui-resilience) | 32 passed, 2 failed, 15 did not run (serial suites stop at the first failure) — the same two failures as the Sales baseline |
 
-**Pre-existing failures, not waived** (fail identically on `main`, i.e. in production today):
-- `production-concurrency` (13) and `lifecycle-locks`/`workflow-alignment` (4): when a hold or
-  cancel commits first, a production requirement, roast or delivery is still accepted (201
-  instead of 409; green stock 120 → 117); a lot-reservation conflict on delivery; the committing
-  operator is not recorded on Commit Allocation. These concern core operations and need their own
-  investigation and fix; this release neither causes nor changes them.
+**Correction.** An earlier version of this section called the failures below "identical on
+`main`, i.e. in production today". A matching failure on the baseline proves only that the
+release did not introduce it; it does not prove the deployed workflow is affected. Each one was
+therefore investigated on an isolated database through the real API (§00a).
+
+### 00a. The 17 core-operation assertions — root causes and disposition
+
+Reproduced on the disposable `erp_e2e` (127.0.0.1:54329) through the HTTP API with a real admin
+session. **No product defect was found**; all three causes are in the tests. Fixes are on
+`fix/core-ops-regression-ordering` (from `main` `4640cbe`: `57fdc67`, `d58098d`, `41c5e4e`),
+merged into the release as `9295a10`/`5c4577d`/`1521a05`; no assertion was removed or loosened.
+
+| # | Assertions | Root cause | Evidence | Disposition |
+|---|---|---|---|---|
+| 1 | `production-concurrency` A1×3, B1×2, C1×4, C3×4 (13) | The race was ordered by a 350 ms head start, which only holds with remote-database latency. Locally the requirement/roast committed *before* the hold/cancel — a legitimate serialization in which acceptance is correct | Forced ordering: a separate session holds the route's own advisory lock (7762, line key) so the request parks mid-transaction; the hold/cancel commits via `/api/orders/[id]/status`; the lock is released. Result: parked = 1, hold/cancel 200, requirement/roast **409**, green stock 120 → 120, 0 movements, no batch, no production order. Reverse order: accepted, as designed | Test fixed to force the ordering and to assert it happened ("parked mid-transaction when the hold/cancel was sent"). 37/37 |
+| 2 | `lifecycle-locks` D1/D2 (3) | Delivery used the SKU's oldest available lot, which the fixture had fully reserved for *another* order (20/20 reserved); the server's refusal "reserved for another order" is correct | `StockAllocation`: the order's own reservation was on a different lot | Test now delivers from the lot reserved for the line and asserts that reservation exists. 37/38 — the remaining failure is G1's wall-clock "work overlapped" check (timing; passes 2 of 3 runs; not one of the 17), left unchanged |
+| 3 | `workflow-alignment` A4 (1) | Looked up the committing employee by username `admin`, which the seed does not create | The recorded owner is the seeded administrator who committed | Test identifies the session's employee by its PIN selector. 45/45 |
+
+Each fixed suite failed on the unfixed tests (13, 3, 1 failures) and passes after.
+
+**Playwright — why 15 did not run.** Both files are `serial`; a failure stops the rest of its
+group. The two failures were test faults: "Dispatch ships the order in full" matched a hidden
+element with `.first()` although the form showed "Max: 24 units" (screenshot); "sees only the
+modules they hold" looked for labels in a sidebar whose groups are collapsed until opened and
+which the client re-closes at hydration, and — with Sales — admin and CRM roles reach some pages
+through a subunit's contextual bar. Fixed in `d58098d`/`41c5e4e` (main-valid) and `87b6e47`
+(release: compares against everything navigation offers). Final results: §00b.
+
 - `reset-safety` (9): the disposable test database is not configured as an authorized reset
-  target, so the guarded training/factory reset refuses — environment, not product.
-- Playwright: "Dispatch ships the order in full" and "UAT Sales sees only the modules they hold"
-  fail on the Sales baseline too.
+  target, so the guarded training/factory reset refuses — environment, not product. Production
+  never runs it.
+
+### 00b. Clean-checkout run of the release head `87b6e47`
+
+Fresh worktree (no `.env`), `npm ci`, fresh `erp_e2e`, migrate, seed, build, server on :3050.
+
+| Suite | Result |
+|---|---|
+| Backend regression (26 suites, 2,289 assertions) | 10 failed, was 26: `reset-safety` 9 (environment, above) and `lifecycle-locks` G1 1 (wall-clock overlap check, "together 101 ms vs single 45 ms"; timing, not one of the 17). All 17 core-operation assertions pass |
+| Playwright critical-path, permissions, responsive, ui-resilience | **49 passed, 0 failed, 0 did not run** (was 32/2/15). No exclusions |
+
+**Mutation check of the fixed concurrency test.** On a scratch copy of `4640cbe`, the late
+barrier `assertOrderStillAcceptsProduction` was removed from both routes, the app rebuilt and
+the fixed `production-concurrency` run on a fresh database: **5 failures** — A1/B1 return 201 and
+leave a production order for a held/cancelled order. The test therefore detects the defect it
+names. C1/C3 (roast) still refuse with 409 without the barrier, because the roasting ceiling is
+re-read inside the same advisory lock and a held/cancelled order has no remaining demand; that
+is a second, independent refusal, not a gap. Restored afterwards (no changes left).
+
+### 00c. The production application on the migrated database, as the restricted role
+
+`4640cbe` (fresh worktree, own `npm ci`, own build) served on a database built by its own
+migrations + seed and then migrated by the release (28 migrations = 20 + 8); the server
+connected as `finance_app` (DML only; `pg_stat_activity` showed `finance_app` sessions).
+
+| Check | Result |
+|---|---|
+| `main`'s own backend regression (26 suites, 2,270 assertions) | 26 failed — **the identical failure set** of `main` on its own unmigrated database (the 17 test faults above, fixed only on the release branch, + `reset-safety` 9) |
+| `main`'s own Playwright (same four files; `erp_e2e` copy of the migrated database, the suite accepts only that name) | 44 passed, 1 failed, 1 did not run — identical to `main` on its own database (the dispatch test fault, fixed in `d58098d`) |
+| Server log | 0 "permission denied" / "must be owner" |
+| Privileged writes as `finance_app` after the runs | 10/10 refused: TRUNCATE, DISABLE TRIGGER, DROP TRIGGER, `session_replication_role`, DDL, DROP TABLE, self-decision, forged pre-approved request, audit-row DELETE, audit-row UPDATE; an ordinary read works |
+
+So the currently deployed application keeps working, reads and writes, on the migrated schema
+under the restricted role — the precondition for migrating before the merge and for the
+instant rollback to `dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq`.
 
 Not tested: production data and volume, Neon branch copy, point-in-time restore, the
 `ui-ux-alignment` branch, the Sales shell suite on this commit (35/35 at `995b3bf`).
