@@ -23,6 +23,7 @@
 import {
   ADMIN_PIN, db, api, check, section, sub, one, all, num, invariants, loginAs,
   results, finish, ensureUser, concurrently,
+  pinLookupValue,
 } from "./harness.mjs";
 import { buildCatalog, teardown } from "./catalog.mjs";
 import { createRequire } from "node:module";
@@ -106,8 +107,12 @@ async function main() {
   check("commit accepted", c4.status === 200, `status=${c4.status}`);
   const owner4 = (await orderRow(o4.id)).ownerId;
   check("an owner is now set", owner4 !== null, S(owner4));
+  // The operator is whoever holds the session that committed: the employee behind ADMIN_PIN.
+  // (Looking the admin up by username='admin' only works on databases where that username
+  // exists; the seed creates a PIN-only administrator with no username.)
   const adminId = (await one(
-    `SELECT id FROM "Employee" WHERE active=true AND role='admin' AND username='admin' LIMIT 1`))?.id;
+    `SELECT id FROM "Employee" WHERE active=true AND "pinLookup"=$1 LIMIT 1`, [pinLookupValue(ADMIN_PIN)]))?.id;
+  check("the committing session's employee was identified", Boolean(adminId), String(adminId));
   check("and it is the operator who committed, not the approver",
     owner4 === adminId, `${owner4} vs ${adminId}`);
   check("profile route is reachable for identity context", me.status === 200 || me.status === 404, `status=${me.status}`);

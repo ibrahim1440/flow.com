@@ -186,9 +186,13 @@ async function main() {
   await stockShelf(20);
   const oE = await mkOrder(C.customers.retail.id, "dispatch vs cancel", 8);
   await review(oE);
+  // The lot the preparation review reserved for THIS line. The oldest lot with free units for
+  // the SKU may be fully reserved by earlier orders in this run, and shipping from it is
+  // (correctly) refused as stock promised to someone else — which is not what D tests.
   const lotE = (await one(
-    `SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND "unitsAvailable">0 ORDER BY "createdAt" LIMIT 1`,
-    [C.skus.bra250.id]))?.id;
+    `SELECT "finishedGoodsLotId" id FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED' ORDER BY "createdAt" LIMIT 1`,
+    [oE.items[0].id]))?.id;
+  check("the review reserved a lot for this line", Boolean(lotE), String(lotE));
   const availBefore = await lotAvail(lotE);
   const delRowsBefore = await deliveryRows(oE.items[0].id);
   const delE = deliver(oE.items[0], 3, lotE);
@@ -210,9 +214,13 @@ async function main() {
   await stockShelf(20);
   const oF = await mkOrder(C.customers.retail.id, "dispatch then cancel", 8);
   await review(oF);
+  // The lot the preparation review reserved for THIS line. The oldest lot with free units for
+  // the SKU may be fully reserved by earlier orders in this run, and shipping from it is
+  // (correctly) refused as stock promised to someone else — which is not what D tests.
   const lotF = (await one(
-    `SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND "unitsAvailable">0 ORDER BY "createdAt" LIMIT 1`,
-    [C.skus.bra250.id]))?.id;
+    `SELECT "finishedGoodsLotId" id FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED' ORDER BY "createdAt" LIMIT 1`,
+    [oF.items[0].id]))?.id;
+  check("the review reserved a lot for this line", Boolean(lotF), String(lotF));
   const dF = await deliver(oF.items[0], 3, lotF);
   const canF = await statusAct(oF, "cancel", P + " cancel after dispatch");
   noDeadlock("dispatch-then-cancel", dF, canF);
