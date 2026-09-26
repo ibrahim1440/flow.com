@@ -85,8 +85,9 @@ export default function BudgetPage() {
       <Card pad="p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <select aria-label={L("الشهر", "Month")} className={`${INPUT} !w-auto font-bold !text-sm`} value={id} onChange={(e) => { setId(e.target.value); setDate(""); }}>
+            <select aria-label={L("الشهر", "Month")} className={`${INPUT} !w-auto font-bold !text-sm`} value={id} onChange={(e) => { if (e.target.value === "__new") { setDlg("new"); return; } setId(e.target.value); setDate(""); }}>
               {list.data?.map((b) => <option key={b.id} value={b.id}>{monthName(b.month, lang)} {b.month.slice(0, 4)} · {branchName(b.branchKey)}</option>)}
+              {canPrepare && <option value="__new">{L("+ ميزانية جديدة…", "+ New budget…")}</option>}
             </select>
             {r && <Badge tone={BSTATUS[r.budget.status][2]}>{L(BSTATUS[r.budget.status][0], BSTATUS[r.budget.status][1])}</Badge>}
             {working && working.revisionNo > 1 && <Badge tone="brand">{L(`المراجعة ${working.revisionNo}`, `Revision ${working.revisionNo}`)}</Badge>}
@@ -99,7 +100,6 @@ export default function BudgetPage() {
                 <input type="date" className="text-[13px] font-bold outline-none bg-transparent" value={date || r.reportDate} min={`${r.budget.month}-01`} max={`${r.budget.month}-31`} onChange={(e) => setDate(e.target.value)} />
               </label>
             )}
-            {canPrepare && <Button icon={Plus} onClick={() => setDlg("new")}>{L("ميزانية جديدة", "New budget")}</Button>}
             {canPrepare && r?.budget.status === "APPROVED" && !draft && !submitted && <Button icon={GitBranch} onClick={() => setDlg("revise")}>{L("مراجعة جديدة", "New revision")}</Button>}
             {canPrepare && draft && <Button icon={Pencil} onClick={() => setDlg("lines")}>{L("تعديل البنود", "Edit lines")}</Button>}
             {canPrepare && draft && <Button kind="primary" icon={Send} busy={busy} onClick={() => act(`/api/finance/budgets/${id}/submit`, {}, L("أُرسلت للاعتماد.", "Sent for approval."))}>{L("إرسال للاعتماد", "Submit for approval")}</Button>}
@@ -207,7 +207,7 @@ export default function BudgetPage() {
           </Card>
 
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_460px] gap-4 items-start">
-            <NotesSummary rows={rows} person={person} onOpen={setNoteRow} />
+            <NotesSummary rows={rows} person={person} onOpen={setNoteRow} canPrepare={canPrepare} onResolved={() => rep.reload()} />
             <Card>
               <CardTitle title={L("سجل المراجعات", "Revision history")} sub={L("النسخة الأصلية المعتمدة هي خط الأساس ولا تُعدّل", "The original approved version is the baseline and is never edited")} />
               {[...r.revisions].reverse().map((v) => (
@@ -255,8 +255,10 @@ function SummaryCard({ title, v, kind, note }: { title: string; v: V; kind: stri
   );
 }
 
-function NotesSummary({ rows, person, onOpen }: { rows: Row[]; person: (id: string | null) => string; onOpen: (r: Row) => void }) {
+function NotesSummary({ rows, person, onOpen, canPrepare, onResolved }: { rows: Row[]; person: (id: string | null) => string; onOpen: (r: Row) => void; canPrepare: boolean; onResolved: () => void }) {
   const { L, money, pct, name } = useL();
+  const { branch } = useFinance();
+  const [busy, setBusy] = useState(false);
   const noted = rows.filter((r) => r.note || r.alert);
   const first = noted.find((r) => r.note) ?? noted[0];
   if (!first) return <Card><CardTitle title={L("تفسيرات الانحراف", "Variance explanations")} sub={L("لا توجد انحرافات تتجاوز حدود التنبيه.", "No variance crosses the alert thresholds.")} /></Card>;
@@ -273,9 +275,13 @@ function NotesSummary({ rows, person, onOpen }: { rows: Row[]; person: (id: stri
           <dt className="text-xs font-bold text-brown">{L("تاريخ المتابعة", "Follow-up date")}</dt><dd>{n.followUpDate ?? "—"}</dd>
         </dl>
       ) : <p className="text-[13px] text-brown">{L("سجّل السبب والإجراء التصحيحي والمسؤول وتاريخ المتابعة.", "Record the cause, corrective action, owner and follow-up date.")}</p>}
+      {/* As in the design: add an explanation, or close the open one. Other lines are reached
+          from the note icon in their table row. */}
       <div className="flex gap-2 flex-wrap">
-        <Button kind="primary" onClick={() => onOpen(first)}>{n ? L("عرض وإضافة تفسير", "View and add explanation") : L("إضافة تفسير", "Add explanation")}</Button>
-        {noted.filter((r) => r !== first).map((r) => <Button key={r.lineKey} kind="ghost" onClick={() => onOpen(r)}>{name(r)}</Button>)}
+        <Button kind="primary" onClick={() => onOpen(first)}>{L("إضافة تفسير", "Add explanation")}</Button>
+        {canPrepare && n?.status === "OPEN" && (
+          <Button busy={busy} onClick={async () => { setBusy(true); try { await api(withBranch(`/api/finance/notes/${n.id}/resolve`, branch), { method: "POST", json: {} }); onResolved(); } finally { setBusy(false); } }}>{L("تم الحل", "Mark resolved")}</Button>
+        )}
       </div>
     </Card>
   );

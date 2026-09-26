@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { HandCoins, ArrowRightLeft, Receipt, Plus, Send, Eye, Pencil } from "lucide-react";
 import { useUser } from "../../user-context";
 import { parseMoney } from "@/lib/finance/money";
+import { riyadhDateString } from "@/lib/finance/dates";
 import { CLASS_LABELS, type TxnClass } from "@/lib/finance/classes";
+import { monthName } from "../_components/helpers";
 import { Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, api, useApi, useFinance, useHasSub, useIdempotencyKey, useL, withBranch, type Tone } from "../_components/ui";
 
 type Cat = {
@@ -35,6 +37,7 @@ const METHOD: Record<string, [string, string]> = {
 const PHASE = ["RECEIPT_TAX_COMPONENT", "PERCENT_OF_BASE", "FUND_OBLIGATIONS", "FILL_TARGET", "WEIGHTED_REMAINDER", "LEAVE_UNALLOCATED"];
 
 export default function AllocationPage() {
+  const [thisMonth] = useState(() => riyadhDateString().slice(0, 7));
   const { L, name, money, lang } = useL();
   const user = useUser();
   const { refresh, branch } = useFinance();
@@ -64,7 +67,12 @@ export default function AllocationPage() {
     if (c.spendingLimit) return [L(`حد ${money(c.spendingLimit).replace(".00", "")}`, `Limit ${money(c.spendingLimit).replace(".00", "")}`), "warn"];
     return null;
   };
-  const byBranch = [...new Set(list.map((c) => c.branchKey))];
+  // As in the design: with several branches in view, a branch whose categories have never
+  // held money is not listed (choose that branch in the header to manage its categories).
+  const allBranches = [...new Set(list.map((c) => c.branchKey))];
+  const active = (bk: string) => list.some((c) => c.branchKey === bk && (c.balance !== 0 || c.reserved !== 0 || c.allocations !== 0 || c.openingCarried !== 0 || c.payments !== 0 || c.incoming !== 0 || c.outgoing !== 0));
+  const withActivity = allBranches.filter(active);
+  const byBranch = allBranches.length > 1 && withActivity.length > 0 ? withActivity : allBranches;
 
   return (
     <div className="flex flex-col gap-5">
@@ -112,7 +120,9 @@ export default function AllocationPage() {
         const tot = (k: keyof Cat) => rows.reduce((s, c) => s + (c[k] as number), 0);
         return (
           <Card key={bk} pad="p-4">
-            <CardTitle title={L(`فئات التخصيص — ${branchName(bk)}`, `Allocation categories — ${branchName(bk)}`)}
+            <CardTitle title={byBranch.length === 1
+                ? L(`فئات التخصيص — ${monthName(thisMonth, "ar")} ${thisMonth.slice(0, 4)}`, `Allocation categories — ${monthName(thisMonth, "en")} ${thisMonth.slice(0, 4)}`)
+                : L(`فئات التخصيص — ${branchName(bk)}`, `Allocation categories — ${branchName(bk)}`)}
               sub={L("الرصيد = الافتتاحي المرحّل + التخصيصات + الواردة − المدفوعات − الصادرة · المتاح = الرصيد − المحجوز", "Balance = opening carried + allocations + incoming − payments − outgoing · Available = balance − reserved")}
               right={canPrepare && <Button icon={Plus} onClick={() => { setEditCat(null); setDlg("category"); }}>{L("فئة جديدة", "New category")}</Button>} />
             <Table>

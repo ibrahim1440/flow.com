@@ -316,6 +316,7 @@ export async function commitImport(actor: FinanceActor, scope: FinanceScope, bod
 export async function listTransactions(db: Db, scope: FinanceScope, q: URLSearchParams) {
   const where: Prisma.BankTransactionWhereInput = { ...scopeWhere(scope) };
   if (q.get("accountId")) where.cashAccountId = q.get("accountId")!;
+  if (q.get("reference")) where.bankReference = { equals: q.get("reference")!.trim(), mode: "insensitive" };
   if (q.get("status")) where.status = q.get("status") as "PENDING";
   if (q.get("review")) where.reviewStatus = q.get("review") as "NEEDS_REVIEW";
   if (q.get("classification")) where.classification = q.get("classification") as "UNCLASSIFIED";

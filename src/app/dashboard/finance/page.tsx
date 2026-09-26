@@ -2,7 +2,8 @@
 
 import { Wallet, PiggyBank, Lock, AlertOctagon, ArrowDownCircle, ArrowUpCircle, TrendingUp, Landmark } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, Legend } from "recharts";
-import { Badge, Card, CardTitle, EmptyState, ErrorState, Kpi, LoadingState, Table, Td, Th, useApi, useL, type Tone } from "./_components/ui";
+import { Badge, Card, CardTitle, EmptyState, ErrorState, Kpi, LoadingState, Table, Td, Th, useApi, useHasSub, useL, type Tone } from "./_components/ui";
+import { useUser } from "../user-context";
 import { monthName, useAlertText, ddmm, type OverviewAlert } from "./_components/helpers";
 
 type Week = { index: number; start: string; closing: number };
@@ -21,13 +22,19 @@ export default function FinanceOverviewPage() {
   const { L, lang, sar, money, name } = useL();
   const alertText = useAlertText();
   const { data, error, loading, reload } = useApi<Overview>("/api/finance/overview");
+  const canSetUp = useHasSub(useUser()?.permissions, "settings_manage");
   if (loading && !data) return <LoadingState />;
   if (error) return <ErrorState error={error} onRetry={reload} />;
   if (!data) return null;
   if (data.accounts.length === 0) {
     return (
       <EmptyState icon={Landmark} title={L("لا توجد حسابات بنكية أو نقدية بعد", "No bank or cash accounts yet")} body={L("أضف حساباتك وأرصدتها الافتتاحية وبنود الميزانية. لا تُعرض أي أرقام تجريبية.", "Add your accounts, their opening balances and budget categories. No sample figures are shown.")}>
-        <a href="/dashboard/finance/reports" className="inline-flex items-center px-3.5 py-2 rounded-lg text-[13px] font-bold bg-orange text-white">{L("إعداد الحسابات", "Set up accounts")}</a>
+        {canSetUp ? (
+          <div className="flex gap-2 flex-wrap justify-center">
+            <a href="/dashboard/finance/reports" className="inline-flex items-center px-3.5 py-2 rounded-lg text-[13px] font-bold bg-orange text-white">{L("إعداد الحسابات", "Set up accounts")}</a>
+            <a href="/dashboard/finance/reports#categories" className="inline-flex items-center px-3.5 py-2 rounded-lg text-[13px] font-bold bg-white border border-border text-charcoal">{L("إضافة البنود المقترحة", "Add suggested categories")}</a>
+          </div>
+        ) : <p className="text-xs text-brown">{L("اطلب من مسؤول المالية إعداد الحسابات.", "Ask a finance administrator to set up the accounts.")}</p>}
       </EmptyState>
     );
   }

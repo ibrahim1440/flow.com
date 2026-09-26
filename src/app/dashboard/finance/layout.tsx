@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { LayoutDashboard, ArrowLeftRight, PieChart, CalendarRange, CalendarClock, FileBarChart, CheckCircle2, ChevronDown } from "lucide-react";
 import { FinanceContext, useL, api, withBranch } from "./_components/ui";
 import { ApprovalsDialog } from "./_components/approvals";
+import "./finance.css";
 
 const TABS = [
   { href: "/dashboard/finance", ar: "نظرة عامة", en: "Overview", icon: LayoutDashboard },
@@ -43,7 +44,7 @@ export default function FinanceLayout({ children }: { children: ReactNode }) {
 
   return (
     <FinanceContext value={{ branch, setBranch, version, refresh }}>
-      <div className="flex flex-col gap-5 max-w-[1400px]">
+      <div data-finance-root className="flex flex-col gap-5 max-w-[1400px]">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-extrabold text-charcoal">{L("المالية — النقد والميزانية", "Finance — Cash & Budget")}</h1>
