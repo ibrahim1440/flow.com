@@ -3,13 +3,28 @@
 Nothing in this branch's work connected to, migrated, seeded or tested against any Neon
 endpoint. Every database write went to a portable PostgreSQL on `127.0.0.1:54329`.
 
-## 1. Which database serves www.beanflow.net — resolved by evidence (2026-09-26)
+## 1. Which database serves www.beanflow.net — identified from indirect evidence (2026-09-26)
 
-**Answer: `ep-dawn-dust-aqn1u1uf` is the live production database**, even though its Neon
+**Conclusion: treat `ep-dawn-dust-aqn1u1uf` as the live production database** (it already was
+treated that way; every finance guard refuses it and every other shared endpoint). Its Neon
 branch is named `hiqbah-demo-training-20260529` and two repository sources call it "demo".
-Every finance guard keeps refusing it (and every other shared endpoint).
 
-Method — read-only, no database connection, no connection string read:
+**Limitation — the deployed connection configuration was not inspected directly.** The
+production `DATABASE_URL` in Vercel is a *sensitive* variable: the API never returns its value,
+so the host and database it names could not be read. The conclusion rests on the independent,
+indirect evidence below; the owner can confirm it directly in the Vercel dashboard (or by
+reading the variable's host with the project owner's access). No further production traffic
+will be generated and no production data was accessed.
+
+| Kind | Evidence | Weight |
+|---|---|---|
+| Independent | The production deployment (`flow-com`, `dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq`) has a single production `DATABASE_URL` (sensitive, last edited 2026-09-09 06:07 UTC) and no production `DIRECT_URL` | shows there is exactly one production database setting; does not show which host |
+| Independent | Neon activity metadata: `ep-jolly-feather-aqne6cp1` (branch literally named `production`) suspended since 2026-09-17 11:56 UTC with 86 KB transferred in its lifetime, while the site kept serving; `ep-dawn-dust-aqn1u1uf` active until 2026-09-25 23:42 UTC with ~400 MB transferred | the branch named "production" is not what the live site uses |
+| Independent | Every `pre-go-live` / `pre-cutover` / `pre-migration` backup branch since 2026-09-17 was cut from `ep-dawn-dust`'s branch (`br-weathered-bread-aqais7hp`) | the go-live migrations were applied to that branch |
+| Independent | `docs/sales/DATABASE_ISOLATION.md` on the sales branch states it serves www.beanflow.net | a written claim by another workstream |
+| **Corroborating (not direct)** | One `GET /api/health` (the public uptime check: bounded `SELECT 1`, no writes) at 10:45:00 UTC was followed by `ep-dawn-dust`'s compute starting at 10:45:03 UTC while `ep-jolly-feather` stayed suspended | a timing correlation, not an inspection of the configuration; another client could in principle have woken that compute in the same seconds. Not repeated |
+
+Details of each observation:
 
 | # | Evidence | Source | Result |
 |---|---|---|---|
@@ -18,7 +33,7 @@ Method — read-only, no database connection, no connection string read:
 | 3 | Current production deployment | `list_deployments target=production state=READY` | **`dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq`**, created 2026-09-19 05:56 UTC from `main` @ **`4640cbe`** (the base of this branch), repo `ibrahim1440/flow.com` |
 | 4 | Database variables of that environment (names and metadata only, never decrypted) | `filter_project_envs decrypt=false` | Production: `DATABASE_URL` (id `utHcUVSmtDnNhptT`, type **sensitive** — Vercel never returns the value, so the host cannot be read from Vercel; last edited 2026-09-09 06:07 UTC), `JWT_SECRET`, `PIN_LOOKUP_SECRET`; **no production `DIRECT_URL`**. Preview-only, branch-scoped copies exist for `feature/sales-crm-commissions`, `release/rc-order-operations-20260906`, `-20260908` and `release/pre-go-live-20260904` |
 | 5 | Neon project, branches and computes | Neon control-plane API (metadata only; `describe_branch`, which queries the database, was not used) | Project **`hiqbah`** (`dark-lab-61530722`, `aws-us-east-1`). Branch **`production`** (`br-fragrant-poetry-aqd0ndyx`, endpoint `ep-jolly-feather-aqne6cp1` "production-primary"): suspended since **2026-09-17 11:56 UTC**, 86 KB transferred in its lifetime. Branch `hiqbah-demo-training-20260529` (`br-weathered-bread-aqais7hp`, endpoint `ep-dawn-dust-aqn1u1uf`): last active 2026-09-25 23:42 UTC, ~400 MB transferred; every `pre-go-live` / `pre-cutover` / `pre-migration` backup branch since 2026-09-17 was cut **from this branch** |
-| 6 | Which compute the live site wakes | one `GET https://www.beanflow.net/api/health` at 10:45:00 UTC (the public, unauthenticated uptime endpoint on `main`: bounded `SELECT 1`, no writes, returns only up/down) → HTTP 200 in 2.74 s (cold start; the route documents ~167 ms warm) | **`ep-dawn-dust-aqn1u1uf` compute started at 10:45:03 UTC**; `ep-jolly-feather-aqne6cp1` stayed suspended |
+| 6 | Which compute the live site wakes | one `GET https://www.beanflow.net/api/health` at 10:45:00 UTC (the public, unauthenticated uptime endpoint on `main`: bounded `SELECT 1`, no writes, returns only up/down) → HTTP 200 in 2.74 s (cold start; the route documents ~167 ms warm) | `ep-dawn-dust-aqn1u1uf` compute started at 10:45:03 UTC; `ep-jolly-feather-aqne6cp1` stayed suspended — **corroborating only** (see above) |
 
 Non-secret identifiers of the live database: Neon project `dark-lab-61530722` (`hiqbah`),
 branch `br-weathered-bread-aqais7hp`, endpoint `ep-dawn-dust-aqn1u1uf`, hosts

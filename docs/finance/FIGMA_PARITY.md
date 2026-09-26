@@ -27,13 +27,13 @@ not marked Match while a material difference is open.
 | Overview | [FIN-01](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=326-2) | `/dashboard/finance` (`fin.manager`) | 1440 | 1403 / 1404 | Match, documented differences | Blocks within 1–4 px of the frame after the typography fix; shell header (existing code) 3 px taller and uses Arabic-Indic digits |
 | Transactions & reconciliation | [FIN-02](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=329-2) | `/dashboard/finance/transactions` | 1440 | 1231 / 1498 | **Differs — D2** | Review panel sections not drawn (suggestions, allocation from receipt, note, history) |
 | Cash allocation | [FIN-03](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=331-2) | `/dashboard/finance/allocation` | 1440 | 1786 / 1824 | **Differs — D3a/D3b** | "+ new category" button; profit footnote |
-| Monthly budget & variance | [FIN-04](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=332-2) | `/dashboard/finance/budget` | 1440 | 2082 / 2234 | **Differs — D4a/D4b** | Owner and "may be incomplete" under lines; "Close period" shown to the preparer in the frame only |
+| Monthly budget & variance | [FIN-04](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=332-2) | `/dashboard/finance/budget` | 1440 | 2082 / 2234 | **Differs — D4a** | Owner and "may be incomplete" under lines (D4b closed: frame corrected to the permission policy) |
 | Obligations & forecasts | [FIN-05](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=334-2) | `/dashboard/finance/obligations` | 1440 | 1384 / 1616 | **Differs — D5** | Cancel per obligation, counterparty, show-all, Export |
 | Reports & settings | [FIN-06](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=335-2) | `/dashboard/finance/reports` | 1440 | 1865 / 2369 | **Differs — D6** | Account, branch-access and category forms not drawn |
 | Approvals dialog | [FIN-07a](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-2) | header → Approvals (`fin.approver`) | 1440 | 434 / 486 | Match, documented differences | Queue order follows the data |
-| CSV import preview | [FIN-07b](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-36) | Transactions → Import CSV | 1440 | 541 / 544 | Differs — D7 only | Native select/file controls; counts reflect a 5-row sample |
-| Payment request | [FIN-07c](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-111) | Allocation → Payment request | 1440 | 574 / 576 | Differs — D7 only | Native select/date controls |
-| Record payment made | [FIN-07d](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=361-6616) | Allocation → open request | 1440 | 236 / 241 | Differs — D7 only | Native select |
+| CSV import preview | [FIN-07b](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-36) | Transactions → Import CSV | 1440 | 541 / 544 | Match, documented differences | Native select/file controls per ERP convention (D7); counts reflect a 5-row sample |
+| Payment request | [FIN-07c](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-111) | Allocation → Payment request | 1440 | 574 / 576 | Match, documented differences | Native select/date controls per ERP convention (D7) |
+| Record payment made | [FIN-07d](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=361-6616) | Allocation → open request | 1440 | 236 / 241 | Match, documented differences | Native select per ERP convention (D7) |
 | States | [FIN-08](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=337-2) | §2 | 1440 | — | Match, documented differences | All five panels match (both set-up actions for a user who can set up; inline duplicate-reference warning); a view-only user sees no set-up actions, per FIN-08's own rule |
 | Overview — tablet | [FIN-09](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=337-5712) | `/dashboard/finance` | 1024 | 2282 / 2255 | Match, documented differences | As FIN-01 |
 | Overview — English | [FIN-10](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=338-2) | `/dashboard/finance` (`fin.manager.en`) | 1440 | 1403 / 1404 | Match, documented differences | As FIN-01 |
@@ -71,13 +71,14 @@ classic scrollbar cannot move the breakpoint.
   Arabic-Indic digits on `origin/main`; the sales branch's shell fixes it.
 - **Signed numbers:** LTR isolates in the app; Figma ignores isolates (a few negatives render
   with a trailing minus in the frames) — Figma limitation.
-- **Native controls:** decision D7.
+- **Native controls:** the ERP convention (D7 — closed): native `<select>`, date and file inputs everywhere; the frames draw stylised controls and are not redrawn.
 - **Server error text** is English inside the localised error card (detail line only).
 
 ## 4. Decisions
 
-See **[DECISIONS.md](DECISIONS.md)** — D2, D3a, D3b, D4a, D4b, D5, D6, D7, each with Figma and app
-crops, the exact difference, the user impact and a recommendation. All unresolved.
+See **[DECISIONS.md](DECISIONS.md)** — each with Figma and app crops, the exact difference, the effect
+on the user, a recommendation and what it changes. Open: D2, D3a, D3b, D4a, D5, D6. Closed: D4b
+(design corrected to the permission policy), D7 (ERP convention).
 
 ## 5. Changes made after implementation
 
@@ -100,6 +101,7 @@ Figma (every change, with its classification):
 | 2026-09-26 | FIN-02 | class labels "تحويل بين حسابات الشركة", "تسوية نقاط البيع (صافي الرسوم)" | Design used outdated labels |
 | 2026-09-26 | FIN-07b | "confirms a recorded line" box and footnote | New behaviour after the design |
 | 2026-09-26 | FIN-01/03/09/10 | figures briefly set to the first D1 rule (−450.00), then **restored to the original values** when the final D1 rule was adopted | Business-rule change (D1); no net change to those figures |
+| 2026-09-26 | FIN-04 | "إغلاق الفترة" removed from the preparer toolbar (D4b) | Design error: the frame contradicted the permission policy |
 | 2026-09-26 | FIN-03 | pending sentence split: "pending out deducted: 0.00" and "pending out awaiting review (not deducted yet): 450.00" | Business-rule change (D1) |
 
 Application (aligned to the design — no Figma change):

@@ -75,6 +75,9 @@ async function main() {
   await user("fin.viewer", "مراجع — عرض فقط", perms([]));
   await user("fin.manager.en", "Sara Alotaibi — Finance", perms(["txn_enter", "reconcile", "budget_prepare", "allocate", "all_branches", "settings_manage"]), "en");
   await user("no.finance", "موظف بلا صلاحية مالية", { ...buildDefaultPermissions("custom"), dashboard: { access: "edit" } });
+  // Holds BOTH preparing and approving duties (a small team): only the four-eyes rule stops
+  // them approving their own request (tests/finance/http/approver-identity.test.mjs).
+  await user("fin.dual", "مدير مالي — إعداد واعتماد", perms(["budget_prepare", "budget_approve", "all_branches"]));
   // First-grant scenario (tests/finance/http/admin-grant.test.mjs): an administrator whose
   // stored permissions were written before the Finance module existed, and two staff members
   // who have no finance access yet.
@@ -265,7 +268,7 @@ async function main() {
   await submitBudget(prep, ps, oct.id, {});
   await requestCategoryTransfer(prep, ps, { fromCategoryId: al["AL-RESERVE"].id, toCategoryId: al["AL-GREEN"].id, amount: "5000", reason: "تعزيز البن الأخضر لشحنة كولومبيا" });
 
-  console.log("Local finance fixture created. Logins: fin.manager, fin.approver, fin.cafe, fin.viewer, fin.manager.en, no.finance, legacy.admin, new.preparer, new.approver (password from FIN_FIXTURE_PASSWORD).");
+  console.log("Local finance fixture created. Logins: fin.manager, fin.approver, fin.cafe, fin.viewer, fin.manager.en, no.finance, legacy.admin, new.preparer, new.approver, fin.dual (password from FIN_FIXTURE_PASSWORD).");
 }
 
 main().then(async () => { await prisma.$disconnect(); process.exit(0); }).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });
