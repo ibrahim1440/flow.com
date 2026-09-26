@@ -470,7 +470,7 @@ token or style was introduced.
 | Frame | What it specifies |
 | --- | --- |
 | `SC-15 / التحصيلات — قائمة التحقق المالي / AR / Desktop` | The route at `/dashboard/sales/collections`, 1440 wide: totals strip, the seven-column queue with one row per status, and the rules card |
-| `SC-16 / لوحة التحصيل داخل الصفقة — محصَّل جزئياً / AR` | The money panel on the deal: accepted total, approved, pending, remaining, derived state, commission effect, history |
+| `SC-16 / لوحة التحصيل داخل الصفقة — محصَّل جزئياً / AR` | The money panel on the deal: accepted total, approved, pending, **unpaid balance**, **available to submit**, derived state, commission effect, history |
 | `SC-17 / نافذة تسجيل تحصيل / AR` | Recording a collection, including the server-derived tax and net shown read-only |
 | `SC-18 / إرفاق الإثبات — الحالات / AR` | Evidence: idle, uploading, attached, and a file whose bytes contradict its name |
 | `SC-19 / حالة التحصيل — بانتظار · معتمَد · مرفوض · معكوس / AR` | One collection in all four states, with what each is worth |
@@ -480,6 +480,16 @@ token or style was introduced.
 | `SC-23 / فارغة · تحميل · خطأ · لا صلاحية / AR` | The four states that show no data |
 | `SC-24 / التحصيلات — تابلت 1024 / AR` | 1024 behaviour |
 | `SC-25 / التحصيلات — جوال 390 / AR` | 390 behaviour |
+
+### 9c. Revised 26/09/2026 — the two balances
+
+Hosted verification found the deal panel showing one figure labelled «المتبقي» /
+"Outstanding" that carried total − approved − **pending**, i.e. submission capacity, not the
+debt. SC-16, SC-17, SC-20 and the SC-15 rules card were revised to name both quantities:
+**«المتبقي غير المسدد»** (total − approved) and **«المتاح لتسجيل تحصيل إضافي»**
+(unpaid − pending). SC-20’s middle card is where they diverge — 11,500.00 against 5,750.00 —
+and is the state worth reviewing. No token or style was added; the rows reuse the existing
+cells and Text/AR styles.
 
 Prototype flows: **رحلة التحصيل — من الصفقة إلى العمولة** (SC-16 → SC-17 → SC-18 → SC-19)
 and **قائمة التحقق المالي** (SC-15 → approve/reject/reverse → SC-20 / SC-21 / SC-22).

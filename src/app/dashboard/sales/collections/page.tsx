@@ -56,6 +56,8 @@ type EligibleDeal = {
   title: string;
   quoteNumber: string;
   currency: string;
+  unpaid: string;
+  availableToSubmit: string;
   remaining: string;
 };
 
@@ -350,8 +352,13 @@ export default function CollectionsPage() {
                       <span className="text-[12px] leading-[18px] text-oo-text-muted">
                         <Num>{d.quoteNumber}</Num>
                         {" · "}
-                        {ar ? "المتبقي " : "outstanding "}
-                        <Money value={d.remaining} currency={d.currency} />
+                        {/* This list answers "what can I still submit against?", so it
+                            shows capacity, and says so rather than saying "outstanding". */}
+                        {ar ? "المتاح لتسجيل تحصيل إضافي " : "available to submit "}
+                        <Money value={d.availableToSubmit} currency={d.currency} />
+                        {" · "}
+                        {ar ? "غير المسدد " : "unpaid "}
+                        <Money value={d.unpaid} currency={d.currency} />
                       </span>
                     </Link>
                   </li>
@@ -534,14 +541,14 @@ export default function CollectionsPage() {
                 "الاعتماد المالي وحده يُنشئ استحقاق العمولة، وأساسه صافي المحصَّل بعد الضريبة.",
                 "من سجّل التحصيل لا يعتمده، مهما كانت صلاحياته. لا استثناء في هذا الإصدار.",
                 "العكس لا يحذف شيئاً: القيد الأصلي يبقى كما اعتُمد، وتُكتب فوقه تسوية سالبة مرتبطة به.",
-                "لا يمكن تسجيل تحصيل يتجاوز المتبقي على عرض السعر المقبول، محسوباً مع ما هو بانتظار التحقق.",
+                "المتبقي غير المسدد هو قيمة العرض ناقص المعتمَد. المتاح لتسجيل تحصيل إضافي هو غير المسدد ناقص ما هو بانتظار التحقق، ولا يمكن تجاوزه.",
               ]
             : [
                 "A collection awaiting verification creates no commission. The estimate shown is an estimate and is in no total.",
                 "Finance approval alone creates the entitlement, and its basis is the net collected after tax.",
                 "Whoever recorded a collection does not approve it, whatever privileges they hold. No exception in this release.",
                 "A reversal deletes nothing: the original stays exactly as approved, with a linked negative adjustment on top.",
-                "A collection cannot exceed what is outstanding on the accepted quotation, counting what is already awaiting verification.",
+                "The unpaid balance is the quotation less what is approved. What is available to submit is the unpaid balance less what is awaiting verification, and a collection cannot exceed it.",
               ]
           ).map((rule, i) => (
             <li key={i} className="flex gap-2">

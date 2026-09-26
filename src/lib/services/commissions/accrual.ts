@@ -269,13 +269,114 @@ export async function recomputeEmployeePeriod(
  *     entirely in the append-only ledger and the accrual keeps the figures that were
  *     approved. Upserting over it would silently restate what somebody had already been
  *     told they earned, which is the exact failure the append-only ledger exists to prevent.
+ *
+ *  3. **Every movement carries its own provenance.** The accrual is a projection; the
+ *     ledger entry records the event, the accrual, the plan version, the base, the split
+ *     and the effective rate as they were when the money moved, so a later recomputation
+ *     of the projection cannot restate what was awarded.
  */
+
+/** What a negative movement was applied against. */
+export type Compensation = {
+  /** How much of the movement was matched to earlier movements. */
+  allocated: PrismaNS.Decimal;
+  /**
+   * The part that could not be: there was no earlier movement left to compensate, or the
+   * only candidates predate provenance. Surfaced rather than hidden — an unallocated
+   * reversal is exactly the case a reviewer needs to see.
+   */
+  unallocated: PrismaNS.Decimal;
+  /** How many earlier movements it reached across. */
+  targets: number;
+};
+
+const NO_COMPENSATION: Compensation = { allocated: ZERO, unallocated: ZERO, targets: 0 };
+
+/**
+ * Record what a negative movement compensates, explicitly.
+ *
+ * Order is decided, not guessed: **the reversed event's own earlier movements first**,
+ * because that is where the money demonstrably came from, then the rest of the period's
+ * movements oldest-first, because a tier change reaches back over earlier events and the
+ * append-only log is the only defensible order to unwind in. Each target takes as much as
+ * it has left, so a partial reversal stops part-way through one target and a split or a
+ * tier change reaches across several.
+ *
+ * Nothing here consults an amount or a timestamp to *decide* what a movement corresponds
+ * to; the event id does that. Candidates with no provenance are skipped rather than
+ * matched on resemblance, and whatever is left over is reported as unallocated.
+ */
+async function allocateCompensation(
+  tx: Tx,
+  input: {
+    entryId: string;
+    employeeId: string;
+    periodStart: Date;
+    collectionEventId: string;
+    magnitude: PrismaNS.Decimal;
+  },
+): Promise<Compensation> {
+  const priors = await tx.commissionLedgerEntry.findMany({
+    where: {
+      employeeId: input.employeeId,
+      periodStart: input.periodStart,
+      type: "ACCRUAL",
+      id: { not: input.entryId },
+      // Only movements that know what they are. A pre-provenance row is not evidence of
+      // anything and is left alone rather than matched on resemblance.
+      collectionEventId: { not: null },
+    },
+    select: {
+      id: true, amount: true, collectionEventId: true, createdAt: true,
+      correctedBy: { select: { amount: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const remainingOn = (p: (typeof priors)[number]) =>
+    roundMoney(
+      new Decimal(p.amount.toString()).minus(
+        p.correctedBy.reduce((s, c) => s.plus(new Decimal(c.amount.toString())), ZERO),
+      ),
+    );
+
+  const ownEvent = priors.filter((p) => p.collectionEventId === input.collectionEventId);
+  const others = priors.filter((p) => p.collectionEventId !== input.collectionEventId);
+
+  let left = input.magnitude;
+  let targets = 0;
+  for (const prior of [...ownEvent, ...others]) {
+    if (left.lessThanOrEqualTo(0)) break;
+    const available = remainingOn(prior);
+    if (available.lessThanOrEqualTo(0)) continue;
+    const take = roundMoney(Decimal.min(available, left));
+    await tx.commissionLedgerCorrection.create({
+      data: { entryId: input.entryId, correctsEntryId: prior.id, amount: take },
+    });
+    left = roundMoney(left.minus(take));
+    targets++;
+  }
+
+  return {
+    allocated: roundMoney(input.magnitude.minus(left)),
+    unallocated: left,
+    targets,
+  };
+}
+
 export async function postDelta(
   tx: Tx,
   outcome: AccrualOutcome,
   opts: { collectionEventId: string; actorId: string | null; reason?: string },
-): Promise<{ posted: boolean; entryId: string | null; accrualFrozen: boolean }> {
-  if (outcome.delta.isZero()) return { posted: false, entryId: null, accrualFrozen: false };
+): Promise<{
+  posted: boolean;
+  entryId: string | null;
+  accrualFrozen: boolean;
+  compensation: Compensation;
+}> {
+  if (outcome.delta.isZero()) {
+    return { posted: false, entryId: null, accrualFrozen: false, compensation: NO_COMPENSATION };
+  }
 
   const periodEnd = riyadhMonthEnd(outcome.periodStart);
 
@@ -292,8 +393,11 @@ export async function postDelta(
 
   const frozen = existing?.status === "APPROVED" || existing?.status === "PAID";
 
+  let accrualId = existing?.id ?? null;
+
   if (!existing) {
-    await tx.commissionAccrual.create({
+    const created = await tx.commissionAccrual.create({
+      select: { id: true },
       data: {
         collectionEventId: opts.collectionEventId,
         employeeId: outcome.employeeId,
@@ -310,6 +414,7 @@ export async function postDelta(
         status: "ACCRUED",
       },
     });
+    accrualId = created.id;
   } else if (!frozen) {
     await tx.commissionAccrual.update({
       where: { id: existing.id },
@@ -338,11 +443,35 @@ export async function postDelta(
           ? "Correction against an approved period; the approved accrual is unchanged."
           : null),
       actorId: opts.actorId,
+      // Provenance, written once and never updated. The accrual above is a projection and
+      // may legitimately be recomputed; these are the figures this movement was actually
+      // made on, so what was awarded survives the recomputation.
+      collectionEventId: opts.collectionEventId,
+      accrualId,
+      planVersionId: outcome.planVersionId,
+      qualifyingBase: outcome.eventBase,
+      sharePercent: outcome.sharePercent,
+      effectiveRatePercent: outcome.effectiveRatePercent,
     },
     select: { id: true },
   });
 
-  return { posted: true, entryId: entry.id, accrualFrozen: frozen };
+  const allocation = outcome.delta.isNegative()
+    ? await allocateCompensation(tx, {
+        entryId: entry.id,
+        employeeId: outcome.employeeId,
+        periodStart: outcome.periodStart,
+        collectionEventId: opts.collectionEventId,
+        magnitude: outcome.delta.negated(),
+      })
+    : { allocated: ZERO, unallocated: ZERO, targets: 0 };
+
+  return {
+    posted: true,
+    entryId: entry.id,
+    accrualFrozen: frozen,
+    compensation: allocation,
+  };
 }
 
 /**

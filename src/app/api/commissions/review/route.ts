@@ -104,6 +104,29 @@ export async function GET(request: Request) {
         );
         const expectedFromRows = roundMoney(fromAccruals.minus(frozenAndReversed));
 
+        // ── Traceability, reported beside the arithmetic ──
+        // A correct total is not the same as a defensible one. These say whether each
+        // movement can be traced to what produced it, and whether every negative movement
+        // is accounted for against the positives it compensates. Historical rows written
+        // before provenance existed are counted here rather than quietly excluded.
+        const movements = await prisma.commissionLedgerEntry.findMany({
+          where: { employeeId, periodStart, type: { in: ["ACCRUAL", "REVERSAL"] } },
+          select: {
+            type: true, amount: true, accrualId: true, collectionEventId: true,
+            corrects: { select: { amount: true } },
+          },
+        });
+        const untraceable = movements.filter((m) => m.collectionEventId === null).length;
+        const unallocatedReversal = roundMoney(
+          movements
+            .filter((m) => m.type === "REVERSAL")
+            .reduce((acc, m) => {
+              const magnitude = new Decimal(m.amount.toString()).negated();
+              const applied = m.corrects.reduce((s, c) => s.plus(new Decimal(c.amount.toString())), ZERO);
+              return acc.plus(Decimal.max(ZERO, magnitude.minus(applied)));
+            }, ZERO),
+        );
+
         return {
           employeeId,
           name: accruals.find((a) => a.employeeId === employeeId)?.employee.name ?? employeeId,
@@ -121,6 +144,16 @@ export async function GET(request: Request) {
           // one time it is not zero is the one time somebody needs to know.
           reconciliationDifference: roundMoney(ledgerAccrued.minus(expectedFromRows)).toFixed(2),
           reconciled: ledgerAccrued.equals(expectedFromRows),
+          /** Movements in this period, and how many cannot be traced to their source. */
+          movementCount: movements.length,
+          movementsWithoutProvenance: untraceable,
+          /**
+           * Reversal money not matched to the movements it compensates. Zero on a period
+           * whose movements all carry provenance; above zero means a negative exists that
+           * nothing accounts for, which is worth a look even when the total is right.
+           */
+          unallocatedReversal: unallocatedReversal.toFixed(2),
+          traceable: untraceable === 0 && unallocatedReversal.isZero(),
           pendingCount: accruals.filter((a) => a.employeeId === employeeId && a.status === "ACCRUED").length,
           approvedCount: accruals.filter((a) => a.employeeId === employeeId && a.status === "APPROVED").length,
         };

@@ -91,6 +91,7 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM "CollectionEvidence" WHERE "collectionId" IN (SELECT id FROM "SalesCollection" WHERE "idempotencyKey" LIKE '${P}%')`,
     `DELETE FROM "SalesCollection" WHERE "idempotencyKey" LIKE '${P}%'`,
+    `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE reason LIKE '${P}%') OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE reason LIKE '${P}%')`,
     `DELETE FROM "CommissionLedgerEntry" WHERE reason LIKE '${P}%'`,
     `DELETE FROM "CommissionAccrual" WHERE "collectionEventId" IN (SELECT id FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%'))`,
     `DELETE FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%')`,

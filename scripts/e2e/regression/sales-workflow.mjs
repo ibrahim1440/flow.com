@@ -102,6 +102,7 @@ async function mkEmployee(id, name, pin, permissions) {
 async function cleanup() {
   const like = `${P}%`;
   for (const sql of [
+    `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%') OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%')`,
     `DELETE FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CommissionAccrual" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CollectionEvent" WHERE "externalRef" LIKE '${P}%'`,
@@ -196,22 +197,60 @@ async function fixtures() {
   ids.customerId = cust.id;
 }
 
-/** The current Riyadh month, as the API's `month` parameter wants it. */
-function riyadhMonth(d = new Date()) {
-  const r = new Date(d.getTime() + 3 * 3600_000);
+/**
+ * ── This suite owns a month of its own ──
+ *
+ * It used to work in the CURRENT Riyadh month, which it shares with every other suite and
+ * with anything a person does on the preview database. That is fine for most assertions
+ * and fatal for one: `sandbox` on the review screen is true only when EVERY accrual in the
+ * period came from the sandbox source, so a single genuine finance-verified collection
+ * anywhere in the month — a hosted verification, a reviewer trying the product — turned
+ * "the whole screen is marked sandbox" red while the application was behaving correctly.
+ *
+ * The assertion is worth keeping, so the suite moved instead. Six months back is far enough
+ * that nothing else writes there, recent enough to sit inside every plan version's validity
+ * (they run from 2020), and stable across runs.
+ */
+const SUITE_MONTHS_BACK = 6;
+
+/** The month that is actually happening — for records this run creates with today's date. */
+function currentRiyadhMonth() {
+  const r = new Date(Date.now() + 3 * 3600_000);
   return `${r.getUTCFullYear()}-${String(r.getUTCMonth() + 1).padStart(2, "0")}`;
 }
+
+function riyadhAnchor(monthsBack = SUITE_MONTHS_BACK) {
+  const r = new Date(Date.now() + 3 * 3600_000);
+  return { year: r.getUTCFullYear(), month: r.getUTCMonth() - monthsBack };
+}
+
+/** The Riyadh month start and end for a suite month, as UTC instants — the same two
+ *  values `riyadhMonthStart`/`riyadhMonthEnd` compute, so a hand-made accrual row lands in
+ *  the period the review screen queries rather than three hours outside it. */
+function monthBoundsISO(monthsBack = SUITE_MONTHS_BACK) {
+  const { year, month } = riyadhAnchor(monthsBack);
+  const at = (m) => new Date(Date.UTC(year, m, 1, 0, 0, 0) - 3 * 3600_000).toISOString();
+  return { start: at(month), end: at(month + 1) };
+}
+
+/** This suite's own month, as the API's `month` parameter wants it. */
+function riyadhMonth(monthsBack = SUITE_MONTHS_BACK) {
+  const { year, month } = riyadhAnchor(monthsBack);
+  const d = new Date(Date.UTC(year, month, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 /**
- * A collection date on a given day of the current Riyadh month.
+ * A collection date on a given day of this suite's month.
  *
  * Distinct days matter: a split takes effect from its own date, so testing that the history
  * is NOT re-pointed needs payments on either side of it. With every payment sharing one
  * timestamp the split applied to all of them and the test proved the opposite of what it
  * claimed to.
  */
-function dayOfMonthISO(day) {
-  const r = new Date(Date.now() + 3 * 3600_000);
-  return new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth(), day, 9, 0, 0)).toISOString();
+function dayOfMonthISO(day, monthsBack = SUITE_MONTHS_BACK) {
+  const { year, month } = riyadhAnchor(monthsBack);
+  return new Date(Date.UTC(year, month, day, 9, 0, 0)).toISOString();
 }
 
 async function main() {
@@ -902,7 +941,10 @@ async function main() {
     // 5,750 less 750 VAT = 5,000 qualifying; 1% = 50.00.
     const led = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total, COUNT(*)::int n
-         FROM "CommissionLedgerEntry" WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_rep`]);
+         FROM "CommissionLedgerEntry"
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     check("the ledger holds 50.00", Number(led.total) === 50, S(led));
     check("from exactly one entry", led.n === 1, S(led));
   }
@@ -919,7 +961,10 @@ async function main() {
     check("reported as a replay", r.json?.replayed === true, S(r.json).slice(0, 200));
     const led = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total, COUNT(*)::int n
-         FROM "CommissionLedgerEntry" WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_rep`]);
+         FROM "CommissionLedgerEntry"
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     check("still 50.00, not 100.00", Number(led.total) === 50, S(led));
     check("and no second ledger entry was written", led.n === 1, S(led));
   }
@@ -940,7 +985,9 @@ async function main() {
 
     const led = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total FROM "CommissionLedgerEntry"
-        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_rep`]);
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     check("the ledger now holds 100.00 — the second payment added 50, not another 100",
       Number(led.total) === 100, S(led));
 
@@ -970,6 +1017,78 @@ async function main() {
     check("the whole screen is marked sandbox", r.json.sandbox === true, S(r.json.notice));
   }
 
+
+  sub("E6b. a period holding real money is NOT marked sandbox");
+  {
+    // The counterpart to E6, and the reason E6 can be trusted. E6 asserts the banner
+    // appears when every figure is synthetic; without this, a banner that had simply been
+    // hardcoded to true would pass. So: put one genuine finance-verified event into a
+    // month of this suite's own, and require the flag to go the other way.
+    //
+    // A separate month, because E6's month must stay sandbox-only for E6 to mean anything.
+    const MIXED = 7;
+    const mixedMonth = riyadhMonth(MIXED);
+
+    await loginAs(MANAGER);
+    const sb = await api("/api/commissions/sandbox-collections", {
+      method: "POST",
+      body: {
+        externalRef: `${P}-MIX-SANDBOX`, opportunityId: ids.opportunityId, customerId: ids.customerId,
+        amountGross: "2300", amountTax: "300", collectedAt: dayOfMonthISO(4, MIXED),
+      },
+    });
+    check("a sandbox collection lands in the mixed month", sb.status === 201, S(sb.json).slice(0, 200));
+
+    await loginAs(FINANCE);
+    let only = await api(`/api/commissions/review?month=${mixedMonth}`);
+    check("with only synthetic money the flag is true",
+      only.json?.sandbox === true, S(only.json?.collectionSources));
+
+    // The genuine one. Inserted directly because this suite has no quotation-acceptance
+    // fixture — the point here is the SOURCE the review screen reads, not the route the
+    // money took, which sales-collections covers end to end.
+    await c.query(
+      `INSERT INTO "CollectionEvent"
+         (id,"sourceSystem","externalRef",status,"customerId","opportunityId",
+          "amountGross","amountTax","amountNonQualifying",currency,"collectedAt","createdAt")
+       VALUES ($1,'MANUAL_FINANCE_VERIFICATION',$2,'RECORDED',$3,$4,'1150.00','150.00','0','SAR',$5,now())`,
+      [`${P}_ev_mixed`, `${P}-MIX-MANUAL`, ids.customerId, ids.opportunityId, dayOfMonthISO(6, MIXED)],
+    );
+    // and give it an accrual, because the flag is derived from the accruals on the screen
+    const pv = await one(`SELECT "planVersionId" FROM "CommissionAccrual" WHERE "employeeId" = $1 LIMIT 1`, [`${P}_rep`]);
+    await c.query(
+      `INSERT INTO "CommissionAccrual"
+         (id,"collectionEventId","employeeId","planVersionId","periodStart","periodEnd",
+          "qualifyingBase","sharePercent","effectiveRatePercent",amount,currency,status,"createdAt","updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,'1000.00',100,1,'10.00','SAR','ACCRUED',now(),now())`,
+      [
+        `${P}_acc_mixed`, `${P}_ev_mixed`, `${P}_rep`, pv.planVersionId,
+        monthBoundsISO(MIXED).start, monthBoundsISO(MIXED).end,
+      ],
+    );
+
+    const mixed = await api(`/api/commissions/review?month=${mixedMonth}`);
+    check("once real money is in the period the flag is false",
+      mixed.json?.sandbox === false, S(mixed.json?.collectionSources));
+    check("and both sources are named rather than one hidden",
+      (mixed.json?.collectionSources ?? []).includes("SANDBOX") &&
+      (mixed.json?.collectionSources ?? []).includes("MANUAL_FINANCE_VERIFICATION"),
+      S(mixed.json?.collectionSources));
+    check("with no misleading notice attached", mixed.json?.notice === null, S(mixed.json?.notice));
+  }
+
+  sub("E6c. every movement this suite wrote can be traced to what produced it");
+  {
+    const r = await api(`/api/commissions/review?month=${riyadhMonth()}`);
+    const row = r.json.employees.find((e) => e.employeeId === `${P}_rep`);
+    check("the period reports its movement count", typeof row?.movementCount === "number", S(row?.movementCount));
+    check("none of them is missing provenance",
+      row?.movementsWithoutProvenance === 0, S(row?.movementsWithoutProvenance));
+    check("no reversal money is left unaccounted for",
+      row?.unallocatedReversal === "0.00", S(row?.unallocatedReversal));
+    check("so the period is reported as traceable", row?.traceable === true, S(row));
+  }
+
   sub("E7. nobody approves their own commission");
   {
     await loginAs(FINANCE);
@@ -985,7 +1104,9 @@ async function main() {
     check("two accruals approved", rep.json?.approved === 2, S(rep.json));
 
     const rows = await q(
-      `SELECT status,"approvedById" FROM "CommissionAccrual" WHERE "employeeId"=$1`, [`${P}_rep`]);
+      `SELECT status,"approvedById" FROM "CommissionAccrual"
+        WHERE "employeeId"=$1 AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     check("both rows read APPROVED", rows.every((x) => x.status === "APPROVED"), S(rows));
     check("and carry the approver", rows.every((x) => x.approvedById === `${P}_fin`), S(rows));
   }
@@ -1004,7 +1125,9 @@ async function main() {
 
     const led = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total FROM "CommissionLedgerEntry"
-        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_rep`]);
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     check("the ledger drops to 50.00", Number(led.total) === 50, S(led));
 
     const rev = await one(
@@ -1028,7 +1151,9 @@ async function main() {
     check("reversing twice is harmless", again.status === 200, S(again.json).slice(0, 200));
     const led2 = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total FROM "CommissionLedgerEntry"
-        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_rep`]);
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     check("and the ledger is still 50.00", Number(led2.total) === 50, S(led2));
   }
 
@@ -1132,12 +1257,16 @@ async function main() {
     // Base 10,000 split 60/40 → 6,000 and 4,000 → at 1% → 60.00 and 40.00.
     const finLed = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total FROM "CommissionLedgerEntry"
-        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_fin`]);
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_fin`, riyadhMonth()]);
     check("the 40% share earns 40.00", Number(finLed.total) === 40, S(finLed));
 
     const repLed = await one(
       `SELECT COALESCE(SUM(amount),0)::numeric total FROM "CommissionLedgerEntry"
-        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')`, [`${P}_rep`]);
+        WHERE "employeeId"=$1 AND type IN ('ACCRUAL','REVERSAL')
+          AND to_char("periodStart" + interval '3 hours', 'YYYY-MM') = $2`,
+      [`${P}_rep`, riyadhMonth()]);
     // 50 from the first payment, which predates the split and stays wholly the rep's, plus
     // 60 from the 60% share of this one. If the split were applied retroactively the rep
     // would be on 90 and the earlier month's approved figure would have moved under them.
@@ -1188,7 +1317,7 @@ async function main() {
 
   sub("G3. conversion rate is a cohort rate, computed from real links");
   {
-    const r = await api(`/api/sales/reports?month=${riyadhMonth()}`);
+    const r = await api(`/api/sales/reports?month=${currentRiyadhMonth()}`);
     check("readable", r.status === 200, S(r.json).slice(0, 200));
     check("the leads created this month are counted", r.json.leads.created >= 2, S(r.json.leads));
     check("and the conversions among THEM", r.json.leads.converted >= 1, S(r.json.leads));

@@ -51,6 +51,8 @@ export type Summary = {
   approvedNet: string;
   pendingGross: string;
   reversedGross: string;
+  unpaidGross: string;
+  availableToSubmitGross: string;
   remainingGross: string;
   state: "UNPAID" | "PARTIALLY_COLLECTED" | "FULLY_COLLECTED";
 };
@@ -260,7 +262,12 @@ export function CollectionsPanel({
               [ar ? "قيمة العرض المقبول" : "Accepted quotation", doc.gross, null],
               [ar ? "محصَّل ومعتمَد" : "Approved", summary.approvedGross, ar ? `الأساس الصافي ${moneyText(summary.approvedNet, doc.currency, lang)}` : `net basis ${moneyText(summary.approvedNet, doc.currency, lang)}`],
               [ar ? "بانتظار التحقق" : "Awaiting verification", summary.pendingGross, ar ? "لم يُنشئ عمولة" : "no commission yet"],
-              [ar ? "المتبقي" : "Remaining", summary.remainingGross, null],
+              // Two figures, not one. The debt ignores pending claims; the capacity does
+              // not. Showing only the second under the word "outstanding" read as a debt.
+              [ar ? "المتبقي غير المسدد" : "Unpaid balance", summary.unpaidGross,
+                ar ? "قيمة العرض ناقص المعتمَد" : "quotation less approved"],
+              [ar ? "المتاح لتسجيل تحصيل إضافي" : "Available to submit", summary.availableToSubmitGross,
+                ar ? "غير المسدد ناقص ما هو بانتظار التحقق" : "unpaid less what is pending"],
             ].map(([k, v, hint]) => (
               <div key={k as string} className="rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]">
                 <dt className="text-[12px] leading-[18px] text-oo-text-muted">{k as string}</dt>
@@ -382,11 +389,15 @@ export function CollectionsPanel({
               {ar ? "إجمالي " : "total "}
               <Money value={doc.gross} currency={doc.currency} />
             </p>
+            {/* Inside the submission form this is the ceiling, so it is named as one. */}
             <p className="mt-0.5 text-[12px] leading-[18px] text-oo-text-secondary">
-              {ar ? "المتبقي " : "Outstanding "}
+              {ar ? "المتاح لتسجيل تحصيل إضافي " : "Available to submit "}
               <span className="font-medium text-oo-text-primary">
-                <Money value={summary.remainingGross} currency={doc.currency} />
+                <Money value={summary.availableToSubmitGross} currency={doc.currency} />
               </span>
+              {" · "}
+              {ar ? "غير المسدد " : "unpaid "}
+              <Money value={summary.unpaidGross} currency={doc.currency} />
             </p>
           </div>
           <p className="mb-3 text-[12px] leading-[18px] text-oo-text-muted">

@@ -124,12 +124,19 @@ export async function GET(request: Request) {
     const canSubmit = hasSubPrivilege(user.permissions, "sales", "collection_submit");
     const eligibleDeals = canSubmit
       ? await prisma.$queryRaw<
-          { id: string; title: string; quoteNumber: string; currency: string; remaining: string }[]
+          {
+            id: string; title: string; quoteNumber: string; currency: string;
+            unpaid: string; availableToSubmit: string; remaining: string;
+          }[]
         >`
           SELECT o."id",
                  o."title",
                  q."quoteNumber",
                  q."currency",
+                 -- what the customer still owes: approved money only
+                 (q."grandTotal" - COALESCE(c.approved, 0))::text AS unpaid,
+                 -- and what may still be CLAIMED, which also nets off pending submissions
+                 (q."grandTotal" - COALESCE(c.claimed, 0))::text AS "availableToSubmit",
                  (q."grandTotal" - COALESCE(c.claimed, 0))::text AS remaining
             FROM "Opportunity" o
             JOIN LATERAL (
@@ -140,7 +147,8 @@ export async function GET(request: Request) {
                LIMIT 1
             ) q ON TRUE
             LEFT JOIN LATERAL (
-              SELECT SUM("amountGross") AS claimed
+              SELECT SUM("amountGross") FILTER (WHERE "status" = 'APPROVED') AS approved,
+                     SUM("amountGross") AS claimed
                 FROM "SalesCollection"
                WHERE "opportunityId" = o."id"
                  AND "status" IN ('APPROVED', 'PENDING_VERIFICATION')
@@ -281,6 +289,9 @@ export function serialiseSummary(s: Awaited<ReturnType<typeof collectionSummary>
     approvedNet: s.approvedNet.toFixed(2),
     pendingGross: s.pendingGross.toFixed(2),
     reversedGross: s.reversedGross.toFixed(2),
+    unpaidGross: s.unpaidGross.toFixed(2),
+    availableToSubmitGross: s.availableToSubmitGross.toFixed(2),
+    // Kept for callers written against the old name; same value as availableToSubmitGross.
     remainingGross: s.remainingGross.toFixed(2),
     state: s.state,
   };
