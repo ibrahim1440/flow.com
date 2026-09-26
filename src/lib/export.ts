@@ -9,7 +9,7 @@ const bidi = bidiFactory();
 
 const BRAND = {
   primary: "#6B7280",
-  accent: "#7C3AED",
+  accent: "#4f46e5",
   primaryRGB: [107, 114, 128] as [number, number, number],
   accentRGB: [124, 58, 237] as [number, number, number],
   white: [255, 255, 255] as [number, number, number],

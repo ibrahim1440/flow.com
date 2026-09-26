@@ -698,7 +698,7 @@ export default function ProductionPage() {
                 <FileText size={14} /> PDF
               </button>
               <button onClick={() => exportBatchesExcel(toExportRows(batches))}
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#7C3AED] text-white rounded-xl text-xs font-bold hover:bg-[#6D28D9] shadow-sm active:scale-[0.98] transition-all">
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#4f46e5] text-white rounded-xl text-xs font-bold hover:bg-[#4338ca] shadow-sm active:scale-[0.98] transition-all">
                 <FileSpreadsheet size={14} /> Excel
               </button>
             </div>

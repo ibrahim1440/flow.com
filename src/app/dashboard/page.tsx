@@ -49,7 +49,7 @@ type AnalyticsData = {
 
 // ─── Brand colors (for Recharts — must use hex) ───────────────────────────────
 
-const C_ORANGE   = "#7C3AED";
+const C_ORANGE   = "#4f46e5";
 const C_BROWN    = "#6B7280";
 const C_GREEN    = "#22c55e";
 const C_RED      = "#ef4444";
