@@ -9,6 +9,7 @@
 //   npm run regression          the 26 operational suites, against the regression database
 //   npm run regression:sales    the 5 suites below, against sales_crm_preview
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +23,7 @@ const SUITES = [
   "quote-discount-authz",   // the discount authorisation cannot be forged — source-level, no HTTP
   "follow-up-workflow",     // two-write scheduling: failure, retry, double submit — no database
   "sales-rtl-audit",       // RTL and responsive statics — no database, no browser
+  "navigation",            // the menu registry against the real roles — no database, no browser
   "sales-lifecycle-collections", // qualification rules, tax allocation, commission deltas — no database
   "sales-commissions-db",   // constraints, concurrency, rollback — real PostgreSQL
   "sales-security",         // what is refused — real HTTP API
@@ -40,10 +42,14 @@ if (only.length && list.length !== only.length) {
 const run = (name) =>
   new Promise((resolve) => {
     let out = "";
-    const child = spawn(process.execPath, [path.join(HERE, `${name}.mjs`)], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
-    });
+    const ts = fs.existsSync(path.join(HERE, `${name}.ts`));
+    const child = ts
+      ? spawn("npx", ["tsx", path.join(HERE, `${name}.ts`)], {
+          stdio: ["ignore", "pipe", "pipe"], env: process.env, shell: process.platform === "win32",
+        })
+      : spawn(process.execPath, [path.join(HERE, `${name}.mjs`)], {
+          stdio: ["ignore", "pipe", "pipe"], env: process.env,
+        });
     child.stdout.on("data", (d) => { out += d; process.stdout.write(d); });
     child.stderr.on("data", (d) => { out += d; process.stderr.write(d); });
     child.on("close", (code) => {

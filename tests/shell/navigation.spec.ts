@@ -1,0 +1,300 @@
+/**
+ * THE APPLICATION SHELL — the navigation, in a real browser, against the running app.
+ *
+ * The registry's own suite (`scripts/e2e/regression/navigation.ts`) proves the tree: who
+ * may see what, that nothing was lost, that a detail route resolves to its list. It cannot
+ * prove that any of it is rendered, that a link navigates without reloading the document,
+ * that the drawer closes behind you, or that a phone does not scroll sideways. That is
+ * what this is for.
+ *
+ * ── Identities ──
+ * Three disposable `NAV_` fixtures, created by `scripts/sales-preview/nav-fixtures.ts` from
+ * the same ROLES the other suites use. Never the `RVW_` reviewer accounts: their PINs are
+ * issued once and somebody may be holding a session. Nothing here writes business data.
+ */
+import { test, expect, type Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
+
+const SHOTS = path.join(process.cwd(), "docs/sales/nav-shots");
+fs.mkdirSync(SHOTS, { recursive: true });
+
+const PIN = { rep: "940011", manager: "940022", finance: "940033" };
+
+const WIDTHS = [
+  { name: "desktop-1440", width: 1440, height: 900 },
+  { name: "tablet-1024", width: 1024, height: 900 },
+  { name: "mobile-390", width: 390, height: 844 },
+] as const;
+
+/** Sign in through the real endpoint, then land on `to`. */
+async function signIn(page: Page, pin: string, to = "/dashboard") {
+  await page.goto("/login");
+  const res = await page.evaluate(async (p) => {
+    await fetch("/api/auth/me", { method: "DELETE" });
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "pin", pin: p }),
+    });
+    return r.status;
+  }, pin);
+  expect(res, "the fixture login must succeed").toBe(200);
+  await page.goto(to);
+  await page.waitForSelector("aside nav", { timeout: 60_000 });
+}
+
+/** Nothing on the page may make the DOCUMENT scroll sideways. */
+async function documentOverflow(page: Page) {
+  return page.evaluate(() =>
+    Math.max(
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      document.body.scrollWidth - document.body.clientWidth,
+    ),
+  );
+}
+
+test.describe("the sidebar groups what used to be a flat list", () => {
+  test("a rep sees modules, not every page at the top level", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+
+    // The module, disclosed and open because the current page is inside it.
+    const sales = page.getByTestId("navgroup-sales");
+    await expect(sales).toBeVisible();
+    await expect(sales, "the group holding the page opens itself").toHaveAttribute("aria-expanded", "true");
+
+    // Its subunits — and NOT its leaves, which is the whole point.
+    for (const id of ["sales.customers", "sales.pipeline", "sales.quotes", "sales.collections", "sales.performance"]) {
+      await expect(page.getByTestId(`nav-${id}`), `${id} in the sidebar`).toBeVisible();
+    }
+    await expect(
+      page.getByTestId("nav-sales.customers.leads"),
+      "a leaf must NOT also be a sidebar entry — that is the clutter this replaces",
+    ).toHaveCount(0);
+
+    // A rep holds no stage_manage, so the settings subunit is simply absent.
+    await expect(page.getByTestId("nav-sales.settings")).toHaveCount(0);
+  });
+
+  test("a collapsed group can be opened and closed from the keyboard", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+
+    const ops = page.getByTestId("navgroup-operations");
+    await expect(ops).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("nav-operations.preparation")).toHaveCount(0);
+
+    await ops.focus();
+    await page.keyboard.press("Enter");
+    await expect(ops).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("nav-operations.preparation")).toBeVisible();
+
+    await page.keyboard.press("Enter");
+    await expect(ops).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
+test.describe("contextual navigation", () => {
+  test("a subunit with several pages offers them, and marks the current one", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+
+    const ctx = page.getByTestId("contextual-nav");
+    await expect(ctx, "this is what the reference design had and the app did not").toBeVisible();
+    await expect(page.getByTestId("ctx-sales.customers.leads")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByTestId("ctx-sales.customers.accounts")).toBeVisible();
+    await expect(page.getByTestId("ctx-sales.customers.accounts")).not.toHaveAttribute("aria-current", "page");
+
+    // Real links, not tabs: separate URLs that survive a refresh and the Back button.
+    await expect(ctx.locator("[role=tablist]"), "tab semantics would promise arrow-keys").toHaveCount(0);
+    await expect(page.getByTestId("ctx-sales.customers.accounts")).toHaveAttribute("href", "/dashboard/customers");
+  });
+
+  test("a single-destination subunit shows no bar at all", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/collections");
+    await expect(
+      page.getByTestId("contextual-nav"),
+      "one tab is decoration pretending to be navigation",
+    ).toHaveCount(0);
+    await expect(page.getByTestId("nav-sales.collections")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("moving between pages does not reload the document", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+
+    // A marker that only survives if the document is never thrown away.
+    await page.evaluate(() => { (window as unknown as Record<string, unknown>).__shellAlive = true; });
+    await page.getByTestId("ctx-sales.customers.accounts").click();
+    await page.waitForURL("**/dashboard/customers");
+    const survived = await page.evaluate(() => (window as unknown as Record<string, unknown>).__shellAlive === true);
+    expect(survived, "a client-side navigation keeps the document").toBe(true);
+    await expect(page.getByTestId("ctx-sales.customers.accounts")).toHaveAttribute("aria-current", "page");
+  });
+});
+
+test.describe("deep links, refresh and history", () => {
+  test("a detail page resolves to the list it came from", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/pipeline");
+    // The board's own subunit is marked even though the deal page has no entry of its own.
+    await expect(page.getByTestId("nav-sales.pipeline")).toHaveAttribute("aria-current", "true");
+
+    await page.goto("/dashboard/sales/deals/does-not-exist");
+    await page.waitForSelector("aside nav");
+    await expect(page.getByTestId("nav-sales.pipeline"), "a deal belongs to the pipeline")
+      .toHaveAttribute("aria-current", "true");
+    await expect(page.getByTestId("ctx-sales.pipeline.board")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByTestId("breadcrumbs")).toContainText("مسار الصفقات");
+  });
+
+  test("Back and Forward move the active markers with them", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    await page.getByTestId("ctx-sales.customers.accounts").click();
+    await page.waitForURL("**/dashboard/customers");
+
+    await page.goBack();
+    await page.waitForURL("**/dashboard/sales/leads");
+    await expect(page.getByTestId("ctx-sales.customers.leads")).toHaveAttribute("aria-current", "page");
+
+    await page.goForward();
+    await page.waitForURL("**/dashboard/customers");
+    await expect(page.getByTestId("ctx-sales.customers.accounts")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("a refresh keeps you where you were", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/activities");
+    await page.reload();
+    await page.waitForSelector("aside nav");
+    await expect(page.getByTestId("navgroup-sales")).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("ctx-sales.pipeline.activities")).toHaveAttribute("aria-current", "page");
+  });
+});
+
+test.describe("who sees what", () => {
+  test("Finance reaches collections without ever seeing the pipeline", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.finance, "/dashboard");
+
+    const finance = page.getByTestId("navgroup-finance");
+    await expect(finance, "the Finance module").toBeVisible();
+    await expect(page.getByTestId("navgroup-sales"), "and no Sales module").toHaveCount(0);
+
+    // Closed on arrival, because the dashboard is not inside it. Opening it is the
+    // disclosure doing its job, not a workaround.
+    await expect(finance).toHaveAttribute("aria-expanded", "false");
+    await finance.click();
+    await expect(finance).toHaveAttribute("aria-expanded", "true");
+    await page.getByTestId("nav-finance.collections").click();
+    await page.waitForURL("**/dashboard/sales/collections");
+    await expect(page.getByTestId("breadcrumbs")).toContainText("المالية");
+    // Navigation did not grant the ability; the ability was already theirs.
+    await expect(page.getByTestId("collections-table")).toBeVisible();
+  });
+
+  test("a sales manager sees collections and no Finance module", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.manager, "/dashboard/sales/collections");
+    await expect(page.getByTestId("navgroup-sales")).toBeVisible();
+    await expect(page.getByTestId("navgroup-finance"), "seeing is not deciding").toHaveCount(0);
+    await expect(page.getByTestId("nav-sales.collections")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("a refused route still refuses, whatever the menu shows", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.finance, "/dashboard");
+    await page.goto("/dashboard/sales/pipeline");
+    await page.waitForSelector("aside nav");
+    // The shell refuses it rather than rendering a working-looking screen with no data.
+    await expect(page.locator("main")).toContainText(/صلاحي|permission|Access/i);
+    await expect(page.getByTestId("contextual-nav")).toHaveCount(0);
+  });
+});
+
+test.describe("the phone", () => {
+  test("the drawer opens, navigates, closes behind you and returns focus", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+
+    const opener = page.getByRole("button", { name: /فتح القائمة|Open menu/ });
+    await expect(opener).toBeVisible();
+    await expect(opener).toHaveAttribute("aria-expanded", "false");
+
+    await opener.click();
+    await expect(opener).toHaveAttribute("aria-expanded", "true");
+    // Focus moved into the drawer rather than being left behind the overlay.
+    const closeFocused = await page.evaluate(() =>
+      document.activeElement?.getAttribute("aria-label") ?? "");
+    expect(closeFocused, "focus enters the drawer").toMatch(/إغلاق القائمة|Close menu/);
+
+    await page.getByTestId("nav-sales.pipeline").click();
+    await page.waitForURL("**/dashboard/sales/pipeline");
+    await expect(opener, "a drawer covering the page you asked for is a bug")
+      .toHaveAttribute("aria-expanded", "false");
+
+    // And Escape closes it, putting focus back on the control that opened it.
+    await opener.click();
+    await page.keyboard.press("Escape");
+    await expect(opener).toHaveAttribute("aria-expanded", "false");
+    const backOnOpener = await page.evaluate(() =>
+      document.activeElement?.getAttribute("aria-label") ?? "");
+    expect(backOnOpener, "focus returns to the opener").toMatch(/فتح القائمة|Open menu/);
+  });
+});
+
+test.describe("no screen scrolls the document sideways", () => {
+  const PAGES = [
+    ["/dashboard/sales/leads", "leads"],
+    ["/dashboard/sales/pipeline", "pipeline"],
+    ["/dashboard/sales/collections", "collections"],
+    ["/dashboard/sales/quotes", "quotes"],
+  ] as const;
+
+  for (const vp of WIDTHS) {
+    for (const [url, name] of PAGES) {
+      test(`${name} at ${vp.name}`, async ({ page }) => {
+        await page.setViewportSize({ width: vp.width, height: vp.height });
+        await signIn(page, PIN.rep, url);
+        await page.waitForTimeout(600);
+        const overflow = await documentOverflow(page);
+        expect(overflow, `${name} overflows the document by ${overflow}px at ${vp.width}`).toBeLessThanOrEqual(0);
+      });
+    }
+  }
+
+  test("and the contextual bar scrolls inside itself rather than widening the page", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    const bar = page.getByTestId("contextual-nav");
+    await expect(bar).toBeVisible();
+    const barWidth = await bar.evaluate((el) => el.getBoundingClientRect().width);
+    expect(barWidth, "the bar stays within the viewport").toBeLessThanOrEqual(390);
+    expect(await documentOverflow(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+test.describe("the record, for the report", () => {
+  for (const vp of WIDTHS) {
+    test(`screenshot at ${vp.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await signIn(page, PIN.rep, "/dashboard/sales/leads");
+      if (vp.width < 1024) {
+        await page.getByRole("button", { name: /فتح القائمة|Open menu/ }).click();
+        await page.waitForTimeout(400);
+      }
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: path.join(SHOTS, `sales-leads-${vp.name}.png`), fullPage: false });
+    });
+  }
+
+  test("screenshot of the Finance view", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.finance, "/dashboard/sales/collections");
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: path.join(SHOTS, "finance-collections-desktop-1440.png"), fullPage: false });
+  });
+});
