@@ -7,7 +7,7 @@ or stash other than this branch was changed; nothing was merged or cherry-picked
 |---|---|---|
 | `origin/main` (base of this branch) | `4640cbe` | |
 | `feature/sales-crm-commissions` (local) | `aa9ef8c` | one commit ahead of its remote (`46f713c`): browser-suite setup/teardown only, no schema/source change; worktree `C:\Projects\ERP-sales-crm` is clean |
-| `feature/ui-ux-alignment` | `fdc5e4d` | navigation registry + design tokens; no migrations |
+| `feature/ui-ux-alignment` | `fdc5e4d` → `901a50a` | navigation registry + design tokens; no migrations. **Actively moving:** another session committed dashboard/orders/preparation rework during this review (reflog 12:44–13:08 +03:00) |
 | local `main` (main checkout) | `d52f83d` | **51 commits behind `origin/main`** — stale, not an integration target |
 
 ## 1. What the sales branch has
@@ -64,6 +64,7 @@ the merge aborted and the worktree removed. No branch moved.
 |---|---|---|
 | `feature/sales-crm-commissions` (`aa9ef8c`) and its remote (`46f713c`) | `.gitignore`, `package.json`, `prisma/schema.prisma`, `src/app/dashboard/layout.tsx`, `src/lib/auth-shared.ts` | `src/lib/i18n/translations.ts` |
 | `feature/ui-ux-alignment` (`fdc5e4d`) | `src/app/dashboard/layout.tsx` | — |
+| re-check with the committed branch head `597dd9c`: `feature/ui-ux-alignment` `901a50a` / sales `aa9ef8c` | unchanged: `layout.tsx` / the same five files | — |
 
 Semantic overlaps that a clean text merge would **not** catch:
 
