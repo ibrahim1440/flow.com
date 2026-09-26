@@ -2,176 +2,29 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import {
-  LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
-  Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
-  Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
-  ClipboardList, ShieldAlert,
-} from "lucide-react";
-import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
+import { Menu, ShieldAlert } from "lucide-react";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
-import type { TranslationKey } from "@/lib/i18n/translations";
-import { UserContext, useLogo, type User } from "./user-context";
+import { routeAllowed, type Viewer } from "@/lib/nav/registry";
+import { UserContext, type User } from "./user-context";
+import { Nav } from "./_components/Nav";
+import { Breadcrumbs } from "./_components/Breadcrumbs";
+import { ContextualNav } from "./_components/ContextualNav";
 
-const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; module?: string }[] = [
-  { key: "dashboard",  icon: LayoutDashboard, href: "/dashboard" },
-  { key: "inventory",  icon: Package,         href: "/dashboard/inventory" },
-  { key: "purchases",  icon: ShoppingBag,     href: "/dashboard/purchases", module: "inventory" },
-  { key: "productsNav", icon: Package,        href: "/dashboard/products", module: "inventory" },
-  { key: "orders",     icon: ShoppingCart,    href: "/dashboard/orders" },
-  { key: "workstationPreparation", icon: PackageCheck, href: "/dashboard/workstation/preparation", module: "orders" },
-  { key: "production", icon: Factory,         href: "/dashboard/production" },
-  { key: "productionOrdersNav", icon: ClipboardList, href: "/dashboard/production-orders", module: "production" },
-  { key: "qc",         icon: ClipboardCheck,  href: "/dashboard/qc" },
-  { key: "packaging",  icon: Box,             href: "/dashboard/packaging" },
-  { key: "dispatch",   icon: Truck,           href: "/dashboard/dispatch" },
-  { key: "history",    icon: History,         href: "/dashboard/history" },
-  { key: "analytics",  icon: TrendingUp,      href: "/dashboard/analytics" },
-  { key: "labels",     icon: Tag,             href: "/dashboard/labels" },
-  { key: "employees",  icon: Users,           href: "/dashboard/employees" },
-  { key: "cupping",    icon: FlaskConical,    href: "/dashboard/cupping" },
-  { key: "customers",  icon: Users2,          href: "/dashboard/customers" },
-  { key: "accounting", icon: Wallet,          href: "/dashboard/accounting" },
-  { key: "settings",   icon: Settings,        href: "/dashboard/settings" },
-];
-
-function SidebarNav({
+function DashboardShell({
   user,
-  sidebarOpen,
-  setSidebarOpen,
-  onLogout,
+  logoBase64,
+  children,
 }: {
   user: User;
-  sidebarOpen: boolean;
-  setSidebarOpen: (v: boolean) => void;
-  onLogout: () => void;
+  logoBase64: string | null;
+  children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const { t } = useI18n();
-  const router = useRouter();
-  const logoBase64 = useLogo();
-
-  const filteredNav = NAV_ITEMS.filter((item) => {
-    // Settings is strictly admin-only — double-guard beyond permissions
-    if (item.key === "settings" && user.role !== "admin") return false;
-    // `module` lets a nav item piggyback on a different permission key (e.g. purchases → inventory)
-    return hasModuleAccess(user.permissions, item.module ?? (item.key as string));
-  });
-
-  return (
-    <aside
-      className={`fixed lg:static top-0 h-[100dvh] z-[50] w-[260px] bg-sidebar text-white transform transition-transform duration-300 ease-in-out flex flex-col ltr:left-0 rtl:right-0 overflow-y-auto ${
-        sidebarOpen ? "translate-x-0" : "max-lg:ltr:-translate-x-full max-lg:rtl:translate-x-full"
-      }`}
-      style={{ WebkitOverflowScrolling: "touch" }}
-    >
-      {/* Logo */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-        <div className="flex items-center gap-3">
-          {/* Logo */}
-          <div className="w-11 h-11 bg-white/10 rounded-xl flex flex-col items-center justify-center shadow-lg flex-shrink-0 overflow-hidden">
-            {logoBase64 ? (
-              <img src={logoBase64} alt="Logo" className="w-full h-full object-contain p-1" />
-            ) : (
-              <>
-                <span className="text-[22px] text-white/90 leading-none" style={{ fontFamily: "'Scheherazade New', 'Amiri', serif" }}>ح</span>
-                <span className="block w-4 h-[3px] rounded-full mt-0.5" style={{ backgroundColor: "#7C3AED" }} />
-              </>
-            )}
-          </div>
-          <div>
-            <h2 className="font-extrabold text-sm tracking-widest text-white">HIQBAH</h2>
-            <p className="text-[10px] text-white/50 font-light mt-0.5">مقهى و محمصة حقبة</p>
-          </div>
-        </div>
-        <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/50 hover:text-white">
-          <X size={20} />
-        </button>
-      </div>
-
-      {/* User card — click to go to profile */}
-      <div className="px-5 py-4 border-b border-white/10">
-        <button
-          onClick={() => { router.push("/dashboard/profile"); setSidebarOpen(false); }}
-          className="flex items-center gap-3 w-full text-start hover:opacity-80 transition-opacity"
-        >
-          <div className="w-9 h-9 rounded-full bg-orange/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-orange text-sm font-bold">{user.name.charAt(0)}</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{user.name}</p>
-            <p className="text-[11px] text-orange">{ROLE_LABELS[user.role] || user.role}</p>
-          </div>
-          <UserCircle size={16} className="text-white/30 flex-shrink-0" />
-        </button>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-        {filteredNav.map((item) => {
-          // Compared on whole path segments, not raw prefixes: a bare startsWith makes
-          // "/dashboard/production" light up on "/dashboard/production-orders" too, so two
-          // entries would look selected at once.
-          const isActive =
-            pathname === item.href ||
-            (item.href !== "/dashboard" && pathname.startsWith(item.href + "/"));
-          return (
-            <a
-              key={item.key}
-              href={item.href}
-              onClick={() => setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-200 ${
-                isActive
-                  ? "bg-orange text-white shadow-md shadow-orange/25"
-                  : "text-sidebar-text hover:bg-sidebar-hover hover:text-white"
-              }`}
-            >
-              <item.icon size={18} strokeWidth={isActive ? 2.5 : 1.5} />
-              {t(item.key)}
-              {isActive && (
-                <ChevronRight
-                  size={14}
-                  className="ltr:ml-auto rtl:mr-auto opacity-70 rtl:rotate-180"
-                />
-              )}
-            </a>
-          );
-        })}
-      </nav>
-
-      {/* Sign out */}
-      <div className="px-3 py-3 border-t border-white/10">
-        <button
-          onClick={onLogout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg w-full text-[13px] font-medium text-sidebar-text hover:bg-red-500/15 hover:text-red-400 transition-all duration-200"
-        >
-          <LogOut size={18} strokeWidth={1.5} />
-          {t("signOut")}
-        </button>
-      </div>
-    </aside>
-  );
-}
-
-/**
- * The module a dashboard route belongs to, by longest matching navigation prefix.
- *
- * Longest-match so a nested route resolves to its own section rather than a shorter one
- * that happens to share a prefix, and so detail pages (a production order, say) inherit
- * the same requirement as their list.
- */
-function requiredModuleFor(pathname: string): string | null {
-  const match = NAV_ITEMS.filter(
-    (item) => item.href !== "/dashboard" && (pathname === item.href || pathname.startsWith(item.href + "/"))
-  ).sort((a, b) => b.href.length - a.href.length)[0];
-  return match ? match.module ?? (match.key as string) : null;
-}
-
-function DashboardShell({ user, children }: { user: User; children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { lang, t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
+
+  const viewer: Viewer = { permissions: user.permissions, role: user.role };
 
   // Hiding a navigation entry keeps a screen out of the way; it does not keep anybody out
   // of it. Typing the address, following an old bookmark or using browser history all
@@ -179,12 +32,11 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   // APIs behind it were refusing every request. The data was never exposed and no write
   // was ever accepted, but the operator was shown a working-looking screen for work they
   // cannot do. The route is refused here, once, for every dashboard page.
-  const requiredModule = requiredModuleFor(pathname);
-  const routeAllowed =
-    requiredModule === null ||
-    (hasModuleAccess(user.permissions, requiredModule) &&
-      // Settings carries the same admin-only double guard as its navigation entry.
-      (requiredModule !== "settings" || user.role === "admin"));
+  //
+  // The rule is unchanged by the navigation restructuring: same module-level check, same
+  // admin-only double guard on settings, now read from the registry instead of from a
+  // flat array of nav items. See `routeAllowed` for why it stays at module level.
+  const allowed = routeAllowed(viewer, pathname);
 
   async function handleLogout() {
     await fetch("/api/auth/me", { method: "DELETE" });
@@ -192,33 +44,42 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   }
 
   return (
-    <div className="h-screen overflow-hidden flex bg-cream">
-      {sidebarOpen && (
+    <div className="h-screen overflow-hidden flex bg-oo-bg-app">
+      {drawerOpen && (
         <div
-          className="fixed inset-x-0 top-0 h-[100dvh] bg-black/40 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-x-0 top-0 h-[100dvh] bg-oo-text-primary/30 z-40 lg:hidden"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden="true"
         />
       )}
 
-      <SidebarNav
-        user={user}
-        sidebarOpen={sidebarOpen}
-        setSidebarOpen={setSidebarOpen}
+      <Nav
+        viewer={viewer}
+        userName={user.name}
+        logoBase64={logoBase64}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
         onLogout={handleLogout}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white/80 backdrop-blur-md border-b border-border px-5 py-3.5 flex items-center gap-4 z-30 flex-shrink-0">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <header className="bg-oo-bg-default border-b border-oo-border-default px-5 lg:px-7 py-3 flex items-center gap-4 shrink-0 z-30">
           <button
             type="button"
-            onClick={() => setSidebarOpen(true)}
-            className="lg:hidden text-charcoal hover:text-orange transition-colors relative z-[60]"
-            style={{ cursor: "pointer" }}
+            onClick={() => setDrawerOpen(true)}
+            aria-label={lang === "ar" ? "فتح القائمة" : "Open menu"}
+            aria-expanded={drawerOpen}
+            aria-controls="primary-navigation"
+            className="lg:hidden text-oo-text-secondary hover:text-oo-text-primary transition-colors"
           >
-            <Menu size={22} />
+            <Menu size={20} />
           </button>
+
+          <Breadcrumbs viewer={viewer} />
+
           <div className="flex-1" />
-          <div className="text-sm text-brown font-medium">
+
+          <div className="text-[12px] text-oo-text-muted whitespace-nowrap hidden sm:block">
             {new Date().toLocaleDateString(lang === "ar" ? "ar-SA" : "en-US", {
               weekday: "long",
               year: "numeric",
@@ -228,19 +89,21 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
           </div>
         </header>
 
+        <ContextualNav viewer={viewer} />
+
         <main className="flex-1 overflow-y-auto p-5 lg:p-7">
-          {routeAllowed ? (
+          {allowed ? (
             children
           ) : (
-            <div className="max-w-md mx-auto mt-16 bg-white rounded-2xl border border-border p-8 text-center">
-              <div className="w-12 h-12 rounded-xl bg-oo-status-blocked-bg flex items-center justify-center mx-auto mb-4">
+            <div className="max-w-md mx-auto mt-16 bg-oo-bg-default rounded-oo-large border border-oo-border-default p-8 text-center">
+              <div className="w-12 h-12 rounded-oo-medium bg-oo-status-blocked-bg flex items-center justify-center mx-auto mb-4">
                 <ShieldAlert size={22} className="text-oo-status-blocked" />
               </div>
-              <h1 className="text-lg font-extrabold text-charcoal">{t("accessDeniedTitle")}</h1>
-              <p className="text-sm text-brown mt-1.5">{t("accessDeniedBody")}</p>
+              <h1 className="text-lg font-bold text-oo-text-primary">{t("accessDeniedTitle")}</h1>
+              <p className="text-sm text-oo-text-secondary mt-1.5">{t("accessDeniedBody")}</p>
               <a
                 href="/dashboard"
-                className="inline-block mt-5 px-4 py-2 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark transition-colors"
+                className="inline-block mt-5 px-4 py-2 bg-oo-action-primary text-white rounded-oo-small text-sm font-semibold hover:bg-oo-action-primary-hover transition-colors"
               >
                 {t("dashboard")}
               </a>
@@ -273,10 +136,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-cream">
+      <div className="min-h-screen flex items-center justify-center bg-oo-bg-app">
         <div className="text-center">
-          <div className="w-14 h-14 border-4 border-orange border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-charcoal font-semibold text-lg">Loading...</p>
+          <div className="w-10 h-10 border-[3px] border-oo-action-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-oo-text-secondary font-medium text-sm">Loading...</p>
         </div>
       </div>
     );
@@ -287,7 +150,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <UserContext value={{ user, logoBase64 }}>
       <LanguageProvider lang={user.preferredLanguage ?? "ar"}>
-        <DashboardShell user={user}>{children}</DashboardShell>
+        <DashboardShell user={user} logoBase64={logoBase64}>{children}</DashboardShell>
       </LanguageProvider>
     </UserContext>
   );

@@ -46,6 +46,33 @@ async function expectPageRefused(page: Page, url: string, label: string) {
     .toBe("refused");
 }
 
+/**
+ * Open every collapsed group in the sidebar.
+ *
+ * The navigation is a tree: modules in the sidebar, their subunits disclosed beneath. A
+ * collapsed group does not render its children at all, so asserting on links without
+ * expanding first would test the disclosure state rather than the permissions — and, far
+ * worse, every "must not see" below would pass for free on a group that simply happened
+ * to be shut. Expanding first is what keeps the negative half of this test meaningful.
+ */
+async function expandAllGroups(page: Page) {
+  const nav = page.locator("nav").first();
+  // The shell fetches the signed-in user before it can draw a permission-pruned menu, so
+  // until that resolves there is no sidebar at all. Without this wait the loop below finds
+  // zero collapsed groups, exits immediately and silently expands nothing — which then
+  // fails as a missing link rather than as the race it actually is.
+  await nav.getByRole("link", { name: /Dashboard/ }).waitFor({ state: "visible", timeout: 30_000 });
+
+  // Each click re-renders the list, so re-query rather than hold a stale handle, and stop
+  // once nothing is left collapsed.
+  for (let i = 0; i < 12; i++) {
+    const collapsed = nav.locator('button[aria-expanded="false"]');
+    if ((await collapsed.count()) === 0) break;
+    await collapsed.first().click();
+  }
+  await expect(nav.locator('button[aria-expanded="false"]')).toHaveCount(0);
+}
+
 const NAV_FOR: Record<RoleName, { visible: RegExp[]; hidden: RegExp[] }> = {
   sales: {
     visible: [/^Orders$/, /Order Preparation/, /Customers/],
@@ -64,7 +91,8 @@ const NAV_FOR: Record<RoleName, { visible: RegExp[]; hidden: RegExp[] }> = {
 for (const role of Object.keys(NAV_FOR) as RoleName[]) {
   test(`${ROLES[role].name} sees only the modules they hold`, async ({ page }) => {
     await loginAs(page, role);
-    const nav = page.locator("nav");
+    await expandAllGroups(page);
+    const nav = page.locator("nav").first();
     for (const re of NAV_FOR[role].visible) {
       await expect(nav.getByRole("link", { name: re }), `${role} should see ${re}`).toHaveCount(1);
     }
