@@ -19,7 +19,7 @@ fixture password from the gitignored `.env`, e.g.
 | 4 | `npm run test:finance:unit` | **36/36** (pure finance 19, DB guard 4, sales-collection rule 8, exactly-once rules 5) |
 | 5 | `npm run test:finance:db` (`erp_finance_test`) | **28 pass, 0 fail, 5 skipped** — the 5 are the sales-collection specifications (§7) |
 | 6 | `npx next start -p 3040`; `npm run finance:fixture -- --reset` | fixture server |
-| 7 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:http` | **6/6** |
+| 7 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:http` | **7/7** (incl. approver identity from the session) |
 | 8 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:ui` | **10/10** workflow steps |
 | 9 | `capture.mjs` / `states.mjs` / `decision-crops.mjs` | 13 screens, 13 states/breakpoints, 16 decision crops |
 | 10 | `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` (`.env.test`) | empty |
@@ -94,6 +94,14 @@ The same path runs in the real UI (`workflow-ui.mjs` steps 7–10) with screensh
 HTTP): which duty may prepare, approve, allocate, reconcile, close, manage settings; branch scope
 (404 outside); routing to the named approver; spending limits and available balances;
 validation; statement matching; idempotency keys; the pool advisory lock.
+
+**Who decides — the identity boundary in three tiers.**
+
+| Tier | Who | What stops self-approval | Evidence |
+|---|---|---|---|
+| 1. Ordinary application users | anyone using the web app or its API with their own login | The decider is the employee in the **signed `token` cookie**, verified on the server; permissions and active state are re-read from the database on every request. No request body field, query parameter or header is used as an identity. The service refuses a decision by the requester; so does the database. | `tests/finance/http/approver-identity.test.mjs`: a user holding both preparing and approving duties submits a budget, then tries to approve it while claiming another approver's id in body fields (`decidedBy`, `actorId`, `userId`, `approverId`, `employeeId`, …), query parameters and identity-style headers (`x-user-id`, `x-forwarded-user`, …) → **403** each time; tampered, malformed and unsigned cookies → **401**; the request stays PENDING with no decider. The real approver then approves while the body names the requester — the recorded `decidedBy` is the approver (from the session). |
+| 2. The backend and its database credential | the deployed application code and anyone holding the `finance_app` (application) credential | The database refuses a decision whose recorded decider equals the recorded requester, forged pre-approved requests, and approval-gated states without an approved request. It **does not authenticate the human**: it trusts the ids the backend writes. Code or a person with this credential could write another employee's id as the decider. Mitigations: the credential is a server secret; the finance audit log is append-only for this role, so such a write leaves a permanent record naming the impersonated person. | `lifecycle.test.ts` "no self-approval bypass" (as `finance_app`) |
+| 3. Privileged database administrators | the table owner / superuser (`finance_local` here; `neondb_owner` by default on Neon) | Nothing in these controls: they can disable or replace triggers and rewrite or truncate any table. Only organisational controls apply (separate non-owner runtime role, owner credential restricted to named administrators, provider audit trail, point-in-time restore). | not testable here; see ENVIRONMENT.md §6 |
 
 **Trust boundary — what the database does not and cannot protect against:**
 
@@ -209,8 +217,8 @@ Local only: `npm run db:local`, `npm run build`, `npx next start -p 3040`,
 | 1 | The application role could enable self-approval (`FinSettings.allowSelfApproval`) | Exception removed: column and helper dropped; guards consult no setting or session variable; requests born pending; approval-gated states (held payment, rule activation, revision approval, category transfer, period reopen) require an APPROVED request decided by someone else; named approver ≠ requester (`20260926140000_finance_strict_four_eyes`, `d954c78`) | `lifecycle.test.ts` "no self-approval bypass" as `finance_app`: every bypass refused; 9-table snapshot unchanged; legitimate approval still works | **Closed** at the database boundary for the application role. Residual trust (§3): the recorded actor id, privileged DB administrators, migrations |
 | 2 | D1 — commitments before settlement, exactly once | Implemented (`exactly-once.ts`, `ledger.ts`, import `SETTLES`, request↔line tracing, awaiting-review class) | `exactly-once.test.ts` (5 scenarios incl. races) with per-step balances in `evidence/d1-balances.md`; unit tests; mutation check | **Closed** |
 | 3a | Straightforward visual discrepancies | App aligned to Figma: typography (line height), FIN-03 branch tables and title, FIN-04 toolbar and variance card, FIN-08 empty state and duplicate-reference warning, dialog labels | FIGMA_PARITY.md §1, §3 (FIN-01 geometry within 1–4 px), parity side-by-sides | **Closed** |
-| 3b | Genuine design/usability choices | D2, D3a, D3b, D4a, D4b, D5, D6, D7 — one sheet with crops, impact and a recommendation each | DECISIONS.md | **Open — needs your decision**; FIN-02/03/04/05/06 stay "Differs" |
-| 4 | Which database serves www.beanflow.net | Read-only evidence: Vercel `flow-com` production deployment `dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq` (main `4640cbe`) → Neon `dark-lab-61530722` / branch `br-weathered-bread-aqais7hp` / endpoint **`ep-dawn-dust-aqn1u1uf`** (woken by one `/api/health` GET) | ENVIRONMENT.md §1 | **Resolved**. Owner action: `CLAUDE.md` (not modified) labels it "demo" and names a non-existent production endpoint; the main checkout's `.env` points at production. Guards unchanged |
+| 3b | Genuine design/usability choices | One sheet with crops, effect, recommendation and what each changes. D4b: Figma corrected to the permission policy (preparer not given `period_close`). D7: native controls, the ERP convention. | DECISIONS.md | D4b, D7 **closed**; D2, D3a, D3b, D4a, D5, D6 **open — needs your decision**; FIN-02/03/04/05/06 stay "Differs" |
+| 4 | Which database serves www.beanflow.net | Read-only evidence: Vercel `flow-com` production deployment `dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq` (main `4640cbe`) → Neon `dark-lab-61530722` / branch `br-weathered-bread-aqais7hp` / endpoint **`ep-dawn-dust-aqn1u1uf`** — from independent Neon/Vercel metadata, corroborated by one `/api/health` GET; the deployed connection string itself is a sensitive variable and was not read | ENVIRONMENT.md §1 | **Identified (indirect evidence); protected as production**. Direct confirmation needs the owner. Owner action: `CLAUDE.md` (not modified) labels it "demo" and names a non-existent production endpoint; the main checkout's `.env` points at production. Guards unchanged |
 | 5a | Approved sales/navigation integration commit | None exists (no PR, no remote integration branch; `ui-ux-alignment` unpushed and moving) | SALES_INTEGRATION.md §4 | **Blocked — dependency on an approval** |
 | 5b | Five sales-collection tests | Implemented and passing on the disposable local branch `trial/finance-sales-integration-20260926` (merge `71b3043` of sales `aa9ef8c` + finance `4bb76bb`; head `04419a7`); specs complete and skipped on this branch; patches in `docs/finance/integration/` | trial: finance DB 33/33, 0 skipped; SALES_INTEGRATION.md §5 | **Verified on the trial branch only** |
 | 5c | `aeb384a` | Ordinary commit on `feature/finance-cash-budget`, parent `597dd9c`; documents a trial merge; not a merge commit; no trial branch existed then | `git log`, SALES_INTEGRATION.md §6 | **Answered** |
@@ -234,7 +242,7 @@ Local only: `npm run db:local`, `npm run build`, `npx next start -p 3040`,
    the five skips, and run the suites (incl. `test:shell` in its own environment).
 3. **Production database roles** — confirm the application connects to `ep-dawn-dust` as a
    non-owner role and that the owner credential is restricted (§3); cannot be verified from here.
-4. **Migration rehearsal** on a Neon branch copy of `ep-dawn-dust`'s branch, with a backup, by
+4. **Migration rehearsal** (procedure: MIGRATION_REHEARSAL.md) on a Neon branch copy of `ep-dawn-dust`'s branch, with a backup, by
    someone authorised to touch it.
 5. Known functional gaps unchanged: CSV import only (no bank connector); receipts matched to
    orders without invoice values; no payroll module; accrual view off; English server error
