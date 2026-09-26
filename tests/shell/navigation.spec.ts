@@ -454,3 +454,109 @@ test.describe("the shell renders Latin digits", () => {
     });
   }
 });
+test.describe("the mobile drawer is modal, and keyboard-provably so", () => {
+  // Real key presses, not dispatched events. A synthetic KeyboardEvent does not move
+  // focus, so it can only ever confirm what the script already did by hand — which is why
+  // the earlier pass could not answer this question.
+  test("Tab cannot walk out of the open drawer, and the page behind it is inert", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    expect(await page.evaluate(() => window.innerWidth), "a real 390px viewport").toBe(390);
+
+    const opener = page.getByRole("button", { name: "فتح القائمة" });
+    await expect(opener, "the drawer is a drawer at this width").toBeVisible();
+
+    // Before: the content behind is reachable.
+    await expect(page.locator("main")).toBeVisible();
+    const inertBefore = await page.evaluate(() =>
+      (document.querySelector("main")?.closest("[inert]") ?? null) !== null);
+    expect(inertBefore, "nothing is inert while the drawer is shut").toBe(false);
+
+    await opener.click();
+    const aside = page.locator("aside");
+    await expect(aside).toBeVisible();
+
+    // Focus went in, on its own.
+    const landed = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+    expect(landed, "focus moves into the drawer when it opens").toBe("إغلاق القائمة");
+
+    // The page behind is inert — which is what takes it out of the tab order.
+    const inertNow = await page.evaluate(() =>
+      (document.querySelector("main")?.closest("[inert]") ?? null) !== null);
+    expect(inertNow, "the content column is inert while the drawer is open").toBe(true);
+
+    // Now walk the whole drawer with REAL Tab presses and a few more besides. Focus must
+    // never land outside the aside.
+    const inDrawer: boolean[] = [];
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press("Tab");
+      inDrawer.push(await page.evaluate(() => {
+        const a = document.activeElement;
+        return !!a && (a === document.body || !!a.closest("aside"));
+      }));
+    }
+    expect(inDrawer.every(Boolean), "20 real Tab presses never left the drawer").toBe(true);
+
+    // And backwards.
+    const back: boolean[] = [];
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Shift+Tab");
+      back.push(await page.evaluate(() => {
+        const a = document.activeElement;
+        return !!a && (a === document.body || !!a.closest("aside"));
+      }));
+    }
+    expect(back.every(Boolean), "and neither does Shift+Tab").toBe(true);
+
+    // Escape closes it and gives focus back.
+    await page.keyboard.press("Escape");
+    await expect(aside).not.toBeInViewport();
+    const restored = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+    expect(restored, "focus returns to the control that opened it").toBe("فتح القائمة");
+    const inertAfter = await page.evaluate(() =>
+      (document.querySelector("main")?.closest("[inert]") ?? null) !== null);
+    expect(inertAfter, "and the page is interactive again").toBe(false);
+  });
+
+  test("no focusable control is left stranded under the drawer", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    await page.getByRole("button", { name: "فتح القائمة" }).click();
+    await expect(page.locator("aside")).toBeVisible();
+
+    // Geometry: anything behind the drawer that is still focusable would be a control a
+    // keyboard user can reach and nobody can see.
+    const stranded = await page.evaluate(() => {
+      const aside = document.querySelector("aside")!;
+      const r = aside.getBoundingClientRect();
+      const focusable = [...document.querySelectorAll<HTMLElement>(
+        'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')];
+      return focusable
+        .filter((e) => !aside.contains(e) && e.offsetParent !== null)
+        .filter((e) => {
+          const b = e.getBoundingClientRect();
+          return b.width > 0 && b.height > 0 &&
+            b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top;
+        })
+        .filter((e) => e.closest("[inert]") === null)   // inert ones are out of the tab order
+        .map((e) => (e.getAttribute("aria-label") || e.textContent || e.tagName).trim().slice(0, 30));
+    });
+    expect(stranded, `covered but still reachable: ${JSON.stringify(stranded)}`).toEqual([]);
+  });
+
+  test("above lg the sidebar is permanent and nothing is inert", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    await page.getByRole("button", { name: "فتح القائمة" }).click();
+    expect(await page.evaluate(() =>
+      (document.querySelector("main")?.closest("[inert]") ?? null) !== null)).toBe(true);
+
+    // Widening while the drawer is open must not leave the whole application inert.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(() => page.evaluate(() =>
+      (document.querySelector("main")?.closest("[inert]") ?? null) !== null),
+      { message: "the drawer flag is cleared on the way up to a permanent sidebar" },
+    ).toBe(false);
+    await expect(page.locator("aside")).toBeVisible();
+  });
+});

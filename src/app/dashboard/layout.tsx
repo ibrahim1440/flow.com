@@ -31,6 +31,21 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useDrawerFocus(sidebarOpen, menuButtonRef);
 
+  // The drawer covers 260 of a 390px screen behind a backdrop, closes on Escape and moves
+  // focus into itself — every signal says modal. It was not: the content behind it stayed
+  // in the tab order, so Tab walked focus onto controls nobody could see. `inert` fixes
+  // both halves at once, because the browser's own tab order is the containment.
+  //
+  // Only while the drawer is a drawer. Above lg the sidebar is permanent, so the flag is
+  // cleared on the way up rather than inerting the whole application.
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const close = () => { if (desktop.matches) setSidebarOpen(false); };
+    close();
+    desktop.addEventListener("change", close);
+    return () => desktop.removeEventListener("change", close);
+  }, []);
+
   const viewer: Viewer = { permissions: user.permissions, role: user.role };
 
   // Hiding a navigation entry keeps a screen out of the way; it does not keep anybody out
@@ -131,7 +146,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0" inert={sidebarOpen}>
         <header className="bg-white/80 backdrop-blur-md border-b border-border px-5 py-3.5 flex items-center gap-4 z-30 flex-shrink-0">
           <button
             ref={menuButtonRef}

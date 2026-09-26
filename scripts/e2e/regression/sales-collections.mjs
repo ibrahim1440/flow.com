@@ -1057,6 +1057,182 @@ async function main() {
     }
   }
 
+
+  {
+    sub("D13. the effective rate is DERIVED, and is not the contractual rate");
+    //
+    // The plan says 1%. Movements record rates like 1.000018%. That is not drift and not a
+    // tier: `effectiveRatePercent` is computed AFTER the money is rounded —
+    //
+    //     amount = roundHalfUp2(cumulativeBase x contractualRate / 100)
+    //     rate   = round6(100 x amount / cumulativeBase)
+    //
+    // — so whenever the cumulative base is not a multiple of 100 the rounded riyal figure
+    // is not exactly 1% of it, and the back-computed rate says so. Derived from the ROUNDED
+    // amount on purpose, so the rate shown and the money paid agree.
+    //
+    // Computed here from the INPUTS — the events' own qualifying bases — never from the
+    // engine's answer, so this is a check and not a tautology.
+    const round2 = (x) => Math.round((x + Number.EPSILON) * 100) / 100;
+    const round6 = (x) => Math.round((x + Number.EPSILON) * 1e6) / 1e6;
+
+    const rows = await q(
+      `SELECT l.id, l.amount::text amt, l."qualifyingBase"::text base,
+              l."effectiveRatePercent"::text rate, l."periodStart"
+         FROM "CommissionLedgerEntry" l
+        WHERE l."employeeId" = $1 AND l."effectiveRatePercent" IS NOT NULL
+        ORDER BY l."createdAt" DESC LIMIT 1`, [ids.repA]);
+    check("a movement carries a recorded effective rate", rows.length === 1, S(rows.length));
+
+    if (rows.length === 1) {
+      const m = rows[0];
+      // The cumulative base the engine saw: every RECORDED event in that period this rep
+      // has a share of. Inputs only.
+      const cum = await one(
+        `SELECT COALESCE(SUM(
+                  ROUND((e."amountGross" - e."amountTax" - e."amountNonQualifying")
+                        * COALESCE(o."sharePercent", 100) / 100, 2)), 0)::text total
+           FROM "CollectionEvent" e
+           LEFT JOIN "OpportunityOwner" o
+                  ON o."opportunityId" = e."opportunityId" AND o."employeeId" = $1
+          WHERE e.status = 'RECORDED'
+            AND e."collectedAt" >= $2
+            AND e."collectedAt" <  $2::timestamp + interval '1 month'
+            AND (o."employeeId" IS NOT NULL OR EXISTS (
+                  SELECT 1 FROM "Opportunity" op WHERE op.id = e."opportunityId" AND op."ownerId" = $1))`,
+        [ids.repA, m.periodStart]);
+
+      const B = Number(cum.total);
+      const contractual = 1;                       // the plan's baseRatePercent, no tiers
+      const expectedAmount = round2(B * contractual / 100);
+      const expectedRate = B === 0 ? contractual : round6((100 * expectedAmount) / B);
+
+      check(`the cumulative base is a real figure (${B.toFixed(2)})`, B > 0, S(cum.total));
+      check(
+        `the recorded rate equals the rate derived by hand from the base ` +
+          `(round2(${B.toFixed(2)}/100)=${expectedAmount.toFixed(2)}; ` +
+          `100x${expectedAmount.toFixed(2)}/${B.toFixed(2)}=${expectedRate})`,
+        Math.abs(Number(m.rate) - expectedRate) < 5e-7,
+        `${m.rate} vs ${expectedRate}`);
+      check("and it is NOT simply the contractual rate unless the base happens to divide",
+        (B % 100 === 0) === (Number(m.rate) === contractual),
+        `base ${B} rate ${m.rate}`);
+    }
+  }
+
+  {
+    sub("D14. reversing one event in a TIERED period, per affected accrual");
+    //
+    // The case the allocation has to answer for. With a tier, reversing one collection does
+    // not only cancel its own contribution: it lowers the period's cumulative base, which
+    // changes what the OTHER collections were worth. So one negative delta reaches back
+    // over more than one earlier movement, and "which accrual does this adjust" has more
+    // than one answer.
+    //
+    // Plan: 1% base, plus 1 point on everything above 1,000 — so 2% on the slice above.
+    const T = `${P}_t`;
+    await c.query(`INSERT INTO "CommissionPlan" (id,code,name,"isActive","createdAt","updatedAt")
+                   VALUES ($1,$2,'Tiered',true,now(),now()) ON CONFLICT (id) DO NOTHING`, [`${T}_plan`, `${T}_PLAN`]);
+    await c.query(
+      `INSERT INTO "CommissionPlanVersion" (id,"planId",version,basis,"tierMode","baseRatePercent",currency,"effectiveFrom","createdAt")
+       VALUES ($1,$2,1,'NET_COLLECTION','INCREMENTAL',1,'SAR',$3,now()) ON CONFLICT (id) DO NOTHING`,
+      [`${T}_pv`, `${T}_plan`, new Date("2026-01-01T00:00:00Z")]);
+    await c.query(
+      `INSERT INTO "CommissionTier" (id,"planVersionId",position,"fromAmount","toAmount","ratePercent")
+       VALUES ($1,$2,1,1000,NULL,1) ON CONFLICT (id) DO NOTHING`, [`${T}_tier`, `${T}_pv`]);
+    await mkEmployee(`${T}_rep`, `${P} Tier Rep`, "920099", repPerms);
+    await c.query(
+      `INSERT INTO "CommissionAssignment" (id,"employeeId","planId","planVersionId","effectiveFrom","createdAt")
+       VALUES ($1,$2,$3,$4,$5,now()) ON CONFLICT (id) DO NOTHING`,
+      [`${T}_asg`, `${T}_rep`, `${T}_plan`, `${T}_pv`, new Date("2026-01-01T00:00:00Z")]);
+
+    const tierRep = await session().login("920099");
+    const { oppId: t1 } = await mkDeal("t1", `${T}_rep`, 920, 120);    // net 800
+    const { oppId: t2 } = await mkDeal("t2", `${T}_rep`, 920, 120);    // net 800
+
+    const s1 = await submit(tierRep, t1, 920);
+    const s2 = await submit(tierRep, t2, 920);
+    await decide(fin, s1.json.collectionId, "approve");
+    await decide(fin, s2.json.collectionId, "approve");
+
+    const accrualsOf = () => q(
+      `SELECT a.id, a."qualifyingBase"::text base, a.amount::text amt, a.status::text,
+              sc."referenceNumber" ref, e.id ev
+         FROM "CommissionAccrual" a
+         JOIN "CollectionEvent" e ON e.id = a."collectionEventId"
+         LEFT JOIN "SalesCollection" sc ON sc."collectionEventId" = e.id
+        WHERE a."employeeId" = $1 ORDER BY a."createdAt"`, [`${T}_rep`]);
+    const movementsOf = () => q(
+      `SELECT l.id, l.type::text, l.amount::text amt, l."collectionEventId" ev,
+              COALESCE((SELECT SUM(x.amount) FROM "CommissionLedgerCorrection" x WHERE x."correctsEntryId" = l.id),0)::text taken
+         FROM "CommissionLedgerEntry" l
+        WHERE l."employeeId" = $1 AND l."collectionEventId" IS NOT NULL
+        ORDER BY l."createdAt"`, [`${T}_rep`]);
+
+    // BEFORE — worked by hand from the plan, not read from the engine:
+    //   after e1: cumulative 800  -> 800x1%                = 8.00   (delta +8.00)
+    //   after e2: cumulative 1600 -> 1600x1% + 600x1 point = 22.00  (delta +14.00)
+    const before = await accrualsOf();
+    const beforeMov = await movementsOf();
+    check("two accruals exist", before.length === 2, S(before.map((x) => x.amt)));
+    check("the first is worth 8.00 — all of it below the tier",
+      Number(before[0].amt) === 8, S(before[0]));
+    check("the second adds 14.00, not another 8.00 — 600 of it crossed the tier",
+      Number(before[1].amt) === 14, S(before[1]));
+    check("so the period holds 22.00", beforeMov.reduce((a, m) => a + Number(m.amt), 0) === 22,
+      S(beforeMov.map((m) => m.amt)));
+
+    // Reverse the FIRST one. By hand: only e2 remains, cumulative 800 -> target 8.00,
+    // already recorded 22.00, so the delta is -14.00 — of which 8.00 is e1's own
+    // contribution and 6.00 is the tier progress e1 was giving e2.
+    await decide(fin, s1.json.collectionId, "reverse", "D14 — tiered causality");
+    const after = await accrualsOf();
+    const afterMov = await movementsOf();
+
+    check("the period now holds 8.00 — what e2 alone is worth",
+      afterMov.reduce((a, m) => a + Number(m.amt), 0) === 8, S(afterMov.map((m) => m.amt)));
+    const rev = afterMov.find((m) => m.type === "REVERSAL");
+    check("the reversal is -14.00, not -8.00", Number(rev.amt) === -14, S(rev));
+
+    const alloc = await q(
+      `SELECT x."correctsEntryId" target, x.amount::text amt FROM "CommissionLedgerCorrection" x
+        WHERE x."entryId" = $1`, [rev.id]);
+    const ownMov = beforeMov.find((m) => m.ev === before[0].ev && m.type === "ACCRUAL");
+    const otherMov = beforeMov.find((m) => m.ev === before[1].ev && m.type === "ACCRUAL");
+    const toOwn = alloc.find((a) => a.target === ownMov.id);
+    const toOther = alloc.find((a) => a.target === otherMov.id);
+    check("it is split across BOTH earlier movements, not charged to one",
+      alloc.length === 2, S(alloc));
+    check("8.00 against the reversed event's own movement — exact causal attribution",
+      toOwn && Number(toOwn.amt) === 8, S(toOwn));
+    check("6.00 against the other event's movement — exactly the tier progress it loses",
+      toOther && Number(toOther.amt) === 6, S(toOther));
+    check("and nothing is left unallocated",
+      alloc.reduce((a, x) => a + Number(x.amt), 0) === 14, S(alloc));
+
+    // Over-allocation must be impossible, including on replay and in parallel.
+    await Promise.all([0, 1].map(() => decide(fin, s1.json.collectionId, "reverse", "D14 — concurrent replay")));
+    await decide(fin, s1.json.collectionId, "reverse", "D14 — sequential replay");
+    const finalMov = await movementsOf();
+    for (const m of finalMov.filter((x) => x.type === "ACCRUAL")) {
+      check(`no movement is over-compensated (${m.amt} taken ${m.taken})`,
+        Number(m.taken) <= Number(m.amt) + 1e-9, S(m));
+    }
+    check("replay created no extra movement", finalMov.length === afterMov.length, S(finalMov.length));
+    const allocAfter = await q(
+      `SELECT count(*)::int n FROM "CommissionLedgerCorrection" x WHERE x."entryId" = $1`, [rev.id]);
+    check("and no extra allocation row", allocAfter[0].n === 2, S(allocAfter[0].n));
+
+    // The finding this case exposes, asserted so it cannot regress silently.
+    check("KNOWN: the reversed event's ACCRUAL row absorbs the whole delta and goes negative",
+      Number(after.find((a) => a.ev === before[0].ev).amt) === -6,
+      S(after.map((a) => ({ ref: a.ref, amt: a.amt }))));
+    check("while the other accrual still reads its original 14.00",
+      Number(after.find((a) => a.ev === before[1].ev).amt) === 14, S(after.map((a) => a.amt)));
+    check("the two still sum to the ledger, so the period reconciles",
+      after.reduce((a, x) => a + Number(x.amt), 0) === 8, S(after.map((a) => a.amt)));
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   section("E — THE APPROVAL WORKFLOW, THROUGH THREE SEPARATE IDENTITIES");
   //
