@@ -2223,4 +2223,804 @@ model CollectionEvidence {
   uploadedAt   DateTime @default(now())
 
   @@index([collectionId])
+
+// Finance — Cash Management, Receipt Allocation, Monthly Cash Budget (additive)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Six concepts are kept in separate records on purpose (docs/finance/CASH_BUDGET.md):
+//   BankTransaction    money that actually entered or left a company account
+//   AllocationEntry    an INTERNAL earmark of existing cash to a purpose - never an expense,
+//                      never a bank transfer, never a journal entry
+//   PaymentReservation part of a category's balance held for one approved payment request
+//   (payment)          an outgoing BankTransaction, linked to a reservation / obligation
+//   accounting revenue/expense - lives in the Accounting module (JournalEntry), untouched here
+//   FinForecastItem    an expected future receipt or payment; never counted as cash
+//
+// Money is Decimal(18,2) SAR in the database and integer halalas in every calculation.
+// Employee / Order / Supplier references are plain id strings (the Accounting S0 precedent)
+// so this block adds no relation fields to existing models.
+// Scoping key everywhere: branchKey = "COMPANY" or a FinBranch id.
+
+enum CashAccountType {
+  BANK
+  CASH
+  GATEWAY_CLEARING
+}
+
+enum BankTxnStatus {
+  PENDING
+  CONFIRMED
+  VOID
+}
+
+enum BankTxnSource {
+  MANUAL
+  CSV_IMPORT
+  CONNECTOR
+}
+
+enum BankTxnReview {
+  NEEDS_REVIEW
+  REVIEWED
+}
+
+/// What a bank line IS at company level. Drives eligibility for allocation and whether it
+/// can ever count as an operating receipt/payment. Transfers, loans and owner money are
+/// never operating receipts; loan principal is never an operating payment.
+enum BankTxnClass {
+  UNCLASSIFIED
+  CUSTOMER_RECEIPT
+  POS_SETTLEMENT
+  GATEWAY_SETTLEMENT
+  OTHER_OPERATING_RECEIPT
+  INTERNAL_TRANSFER
+  LOAN_PROCEEDS
+  OWNER_CONTRIBUTION
+  REFUND_RECEIVED
+  SUPPLIER_PAYMENT
+  PAYROLL
+  RENT
+  UTILITIES_OPERATING
+  TAX_PAYMENT
+  LOAN_PRINCIPAL_REPAYMENT
+  LOAN_INTEREST
+  BANK_FEE
+  CUSTOMER_REFUND
+  OWNER_DRAWING
+  OTHER_OPERATING_PAYMENT
+}
+
+enum FinCategoryKind {
+  RECEIPT
+  PAYMENT
+}
+
+enum FinMatchTarget {
+  ORDER
+  OBLIGATION
+  PURCHASE_RECORD
+  /// Reserved for feature/sales-crm-commissions (SalesCollection). Refused by the service
+  /// until that model exists on this branch.
+  SALES_COLLECTION
+}
+
+enum FinReconStatus {
+  DRAFT
+  COMPLETED
+}
+
+enum AllocFundingType {
+  /// Fund up to targetAmount per calendar month. Spending does NOT reopen the gap.
+  MONTHLY_TARGET
+  /// Keep the balance at targetAmount; replenished after spending only if `replenish`.
+  RESERVE_TARGET
+  /// Funded by obligations due, percentage, or remainder only.
+  OPEN
+}
+
+enum AllocRollover {
+  CARRY_FORWARD
+  SWEEP_TO_UNALLOCATED
+}
+
+enum AllocRuleStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  SUPERSEDED
+  REJECTED
+}
+
+enum AllocMethod {
+  PERCENT_OF_BASE
+  FILL_TARGET
+  FUND_OBLIGATIONS
+  RECEIPT_TAX_COMPONENT
+  WEIGHTED_REMAINDER
+  LEAVE_UNALLOCATED
+}
+
+enum AllocEntryType {
+  ALLOCATION
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  PAYMENT
+}
+
+enum AllocSourceType {
+  RECEIPT
+  OPENING_BALANCE
+  CATEGORY_TRANSFER
+  RECEIPT_REVERSAL
+  PAYMENT
+  MANUAL_ADJUSTMENT
+  PERIOD_SWEEP
+}
+
+enum ReservationStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  EXECUTED
+  RELEASED
+  REJECTED
+}
+
+enum ObligationType {
+  SUPPLIER_BILL
+  PURCHASE_ORDER
+  PAYROLL
+  RENT
+  TAX
+  LOAN_REPAYMENT
+  UTILITIES
+  OTHER
+}
+
+enum ObligationStatus {
+  OPEN
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+  SUPERSEDED
+}
+
+enum ForecastItemKind {
+  RECEIPT
+  PAYMENT
+}
+
+enum ForecastItemStatus {
+  OPEN
+  REALIZED
+  CANCELLED
+}
+
+enum BudgetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  CLOSED
+}
+
+enum BudgetRevisionStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum BudgetBasis {
+  CASH
+  ACCRUAL
+}
+
+enum BudgetLineKind {
+  RECEIPT
+  PAYMENT
+  /// Expected SALES - informational, never part of cash totals (collections are RECEIPT lines).
+  SALES_MEMO
+}
+
+enum PhasingMethod {
+  DUE_DATE
+  CUSTOM_WEIGHTS
+  STRAIGHT_LINE
+}
+
+enum FinApprovalType {
+  BUDGET_APPROVAL
+  ALLOCATION_RULES
+  CATEGORY_TRANSFER
+  SPEND_OVERRIDE
+  PERIOD_REOPEN
+}
+
+enum FinApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum VarianceNoteStatus {
+  OPEN
+  RESOLVED
+}
+
+model FinSettings {
+  id                     String   @id @default("singleton")
+  baseCurrency           String   @default("SAR")
+  timezone               String   @default("Asia/Riyadh")
+  reconciliationDueDays  Int      @default(7)
+  alertAmountThreshold   Decimal  @default(1000) @db.Decimal(18, 2)
+  alertPercentThreshold  Decimal  @default(10) @db.Decimal(7, 2)
+  /// EITHER: alert when the amount OR the percent threshold is crossed. BOTH: only when both are.
+  alertThresholdMode     String   @default("EITHER")
+  obligationAlertDays    Int      @default(7)
+  conservativeDelayWeeks Int      @default(2)
+  conservativeCollectPct Int      @default(80)
+  updatedAt              DateTime @updatedAt
+  updatedBy              String?
+}
+
+model FinBranch {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  nameEn    String
+  nameAr    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  access FinBranchAccess[]
+}
+
+/// Which branches a finance user without `all_branches` may read and write.
+model FinBranchAccess {
+  id         String    @id @default(cuid())
+  employeeId String
+  branchId   String
+  branch     FinBranch @relation(fields: [branchId], references: [id])
+  createdAt  DateTime  @default(now())
+  createdBy  String?
+
+  @@unique([employeeId, branchId])
+  @@index([employeeId])
+}
+
+model FinCostCenter {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  nameEn    String
+  nameAr    String?
+  branchKey String   @default("COMPANY")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  createdBy String?
+}
+
+/// Receipt / payment categories of the CASH budget, also used to classify bank lines.
+model FinCategory {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  nameEn      String
+  nameAr      String?
+  kind        FinCategoryKind
+  /// Financing and transfer categories are excluded from operating totals.
+  isOperating Boolean         @default(true)
+  active      Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  createdBy   String?
+}
+
+model CashAccount {
+  id                 String          @id @default(cuid())
+  code               String          @unique
+  nameEn             String
+  nameAr             String?
+  type               CashAccountType @default(BANK)
+  branchKey          String          @default("COMPANY")
+  currency           String          @default("SAR")
+  bankName           String?
+  /// Last four digits only. No full account numbers and no online-banking credentials.
+  accountLast4       String?
+  /// Restricted cash (deposits, guarantees) is reported but never allocatable.
+  isRestricted       Boolean         @default(false)
+  openingBalance     Decimal         @default(0) @db.Decimal(18, 2)
+  openingBalanceDate DateTime        @db.Date
+  /// Optional link to the Accounting S0 chart of accounts (reference only; no postings).
+  glAccountId        String?
+  active             Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  createdBy          String?
+
+  transactions    BankTransaction[]
+  importBatches   BankImportBatch[]
+  reconciliations BankReconciliation[]
+
+  @@index([branchKey])
+}
+
+model BankTransaction {
+  id                    String              @id @default(cuid())
+  cashAccountId         String
+  cashAccount           CashAccount         @relation(fields: [cashAccountId], references: [id])
+  branchKey             String
+  txnDate               DateTime            @db.Date
+  /// Signed net cash movement: positive = into the account, negative = out.
+  amount                Decimal             @db.Decimal(18, 2)
+  currency              String              @default("SAR")
+  /// Settlements received net of fees: grossAmount - feeAmount = amount.
+  grossAmount           Decimal?            @db.Decimal(18, 2)
+  feeAmount             Decimal?            @db.Decimal(18, 2)
+  bankReference         String?
+  description           String?
+  counterparty          String?
+  status                BankTxnStatus       @default(CONFIRMED)
+  source                BankTxnSource       @default(MANUAL)
+  classification        BankTxnClass        @default(UNCLASSIFIED)
+  reviewStatus          BankTxnReview       @default(NEEDS_REVIEW)
+  reviewNote            String?
+  reviewedBy            String?
+  reviewedAt            DateTime?
+  /// Import dedup identity: sha256(account, date, amount, reference, description, occurrence).
+  sourceFingerprint     String?
+  /// Client-generated key for manual entry; a double-submitted form lands once.
+  idempotencyKey        String?
+  /// Set on import when a line with the same date and amount exists but the fingerprint
+  /// differs. Flagged for a human, never auto-rejected.
+  possibleDuplicateOfId String?
+  /// The other leg of a transfer between two company accounts.
+  transferPeerId        String?             @unique
+  importBatchId         String?
+  importBatch           BankImportBatch?    @relation(fields: [importBatchId], references: [id])
+  reconciliationId      String?
+  reconciliation        BankReconciliation? @relation(fields: [reconciliationId], references: [id])
+  /// Set when a bank statement row confirmed this already-recorded line (no new line created).
+  statementBatchId      String?
+  statementConfirmedAt  DateTime?
+  voidedAt              DateTime?
+  voidedBy              String?
+  voidReason            String?
+  createdAt             DateTime            @default(now())
+  createdBy             String?
+  updatedAt             DateTime            @updatedAt
+
+  splits  BankTransactionSplit[]
+  matches BankTransactionMatch[]
+
+  @@unique([cashAccountId, sourceFingerprint])
+  @@unique([createdBy, idempotencyKey])
+  @@index([branchKey, txnDate])
+  @@index([cashAccountId, txnDate])
+  @@index([reviewStatus])
+  @@index([classification])
+}
+
+/// Budget classification of a bank line. Splits must sum exactly to the parent amount.
+model BankTransactionSplit {
+  id            String          @id @default(cuid())
+  transactionId String
+  transaction   BankTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  finCategoryId String
+  costCenterId  String?
+  /// Signed like the parent.
+  amount        Decimal         @db.Decimal(18, 2)
+  note          String?
+  createdAt     DateTime        @default(now())
+
+  @@index([transactionId])
+  @@index([finCategoryId])
+}
+
+/// A link from a bank line to an existing ERP document. Linking never creates a receipt.
+model BankTransactionMatch {
+  id            String          @id @default(cuid())
+  transactionId String
+  transaction   BankTransaction @relation(fields: [transactionId], references: [id])
+  targetType    FinMatchTarget
+  targetId      String
+  /// Portion of the bank line applied to this document (always positive).
+  amount        Decimal         @db.Decimal(18, 2)
+  /// VAT portion of `amount`, taken from the document by the reviewer. Drives the tax reserve.
+  taxAmount     Decimal         @default(0) @db.Decimal(18, 2)
+  active        Boolean         @default(true)
+  removedAt     DateTime?
+  removedBy     String?
+  createdAt     DateTime        @default(now())
+  createdBy     String?
+
+  @@index([transactionId])
+  @@index([targetType, targetId])
+}
+
+model BankImportBatch {
+  id             String      @id @default(cuid())
+  cashAccountId  String
+  cashAccount    CashAccount @relation(fields: [cashAccountId], references: [id])
+  fileName       String
+  fileHash       String
+  mapping        Json
+  rowCount       Int
+  importedCount  Int
+  /// Statement rows that confirmed an already-recorded line instead of creating one.
+  attachedCount  Int         @default(0)
+  duplicateCount Int
+  flaggedCount   Int
+  errorCount     Int
+  errors         Json
+  createdAt      DateTime    @default(now())
+  createdBy      String?
+
+  transactions BankTransaction[]
+
+  @@index([cashAccountId, createdAt])
+}
+
+model BankReconciliation {
+  id               String         @id @default(cuid())
+  cashAccountId    String
+  cashAccount      CashAccount    @relation(fields: [cashAccountId], references: [id])
+  statementDate    DateTime       @db.Date
+  statementBalance Decimal        @db.Decimal(18, 2)
+  ledgerBalance    Decimal        @db.Decimal(18, 2)
+  pendingTotal     Decimal        @default(0) @db.Decimal(18, 2)
+  difference       Decimal        @db.Decimal(18, 2)
+  status           FinReconStatus @default(DRAFT)
+  notes            String?
+  createdAt        DateTime       @default(now())
+  createdBy        String?
+  completedAt      DateTime?
+  completedBy      String?
+
+  transactions BankTransaction[]
+
+  @@index([cashAccountId, statementDate])
+}
+
+model FinAttachment {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  fileName    String
+  contentType String
+  sizeBytes   Int
+  content     Bytes
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  @@index([entityType, entityId])
+}
+
+model AllocationCategory {
+  id                 String           @id @default(cuid())
+  code               String           @unique
+  nameEn             String
+  nameAr             String?
+  branchKey          String           @default("COMPANY")
+  priority           Int              @default(100)
+  fundingType        AllocFundingType @default(OPEN)
+  targetAmount       Decimal?         @db.Decimal(18, 2)
+  /// RESERVE_TARGET only: refill after spending. Without it the reserve is a one-time fill.
+  replenish          Boolean          @default(false)
+  targetStartMonth   String?
+  targetEndMonth     String?
+  dueDay             Int?
+  rollover           AllocRollover    @default(CARRY_FORWARD)
+  /// A single payment above this needs a SPEND_OVERRIDE approval.
+  spendingLimit      Decimal?         @db.Decimal(18, 2)
+  approverEmployeeId String?
+  finCategoryId      String?
+  costCenterId       String?
+  /// Tax categories may only be funded from document tax or tax obligations - never from a
+  /// flat percentage of deposits.
+  isTaxReserve       Boolean          @default(false)
+  active             Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  createdBy          String?
+
+  entries      AllocationEntry[]
+  reservations PaymentReservation[]
+
+  @@index([branchKey])
+}
+
+model AllocationRuleVersion {
+  id          String          @id @default(cuid())
+  branchKey   String          @default("COMPANY")
+  versionNo   Int
+  status      AllocRuleStatus @default(DRAFT)
+  /// Receipt classifications forming the base of PERCENT_OF_BASE. Stored per version so a
+  /// percentage can never be silently applied to a different base.
+  baseClasses BankTxnClass[]
+  /// Run automatically on newly confirmed eligible receipts. Only honoured while ACTIVE.
+  autoExecute Boolean         @default(false)
+  notes       String?
+  createdAt   DateTime        @default(now())
+  createdBy   String?
+  approvedAt  DateTime?
+  approvedBy  String?
+  activatedAt DateTime?
+
+  steps AllocationRuleStep[]
+  runs  AllocationRun[]
+
+  @@unique([branchKey, versionNo])
+}
+
+model AllocationRuleStep {
+  id         String                @id @default(cuid())
+  versionId  String
+  version    AllocationRuleVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  seq        Int
+  method     AllocMethod
+  categoryId String?
+  /// Percent with up to four decimals (65.0000). PERCENT_OF_BASE only.
+  percent    Decimal?              @db.Decimal(7, 4)
+  weight     Int?
+  capAmount  Decimal?              @db.Decimal(18, 2)
+
+  @@unique([versionId, seq])
+}
+
+/// One execution of a rule version against one source receipt. The unique source is what
+/// makes a retried or concurrent run a no-op instead of a second allocation.
+model AllocationRun {
+  id              String                @id @default(cuid())
+  versionId       String
+  version         AllocationRuleVersion @relation(fields: [versionId], references: [id])
+  sourceTxnId     String                @unique
+  baseAmount      Decimal               @db.Decimal(18, 2)
+  allocatedTotal  Decimal               @db.Decimal(18, 2)
+  leftUnallocated Decimal               @db.Decimal(18, 2)
+  trigger         String                @default("MANUAL")
+  createdAt       DateTime              @default(now())
+  createdBy       String?
+
+  entries AllocationEntry[]
+}
+
+/// Append-only envelope ledger. Balances are sums of these rows; nothing is rewritten.
+model AllocationEntry {
+  id                  String             @id @default(cuid())
+  categoryId          String
+  category            AllocationCategory @relation(fields: [categoryId], references: [id])
+  branchKey           String
+  entryType           AllocEntryType
+  sourceType          AllocSourceType
+  /// Always positive; direction comes from entryType.
+  amount              Decimal            @db.Decimal(18, 2)
+  /// Calendar month (Asia/Riyadh) the entry counts toward, YYYY-MM.
+  periodMonth         String
+  sourceTxnId         String?
+  sourceCashAccountId String?
+  runId               String?
+  run                 AllocationRun?     @relation(fields: [runId], references: [id])
+  ruleVersionId       String?
+  stepSeq             Int?
+  reservationId       String?
+  approvalId          String?
+  reversesEntryId     String?            @unique
+  reason              String?
+  createdAt           DateTime           @default(now())
+  createdBy           String?
+
+  @@index([categoryId, periodMonth])
+  @@index([sourceTxnId])
+  @@index([branchKey])
+}
+
+model PaymentReservation {
+  id               String             @id @default(cuid())
+  categoryId       String
+  category         AllocationCategory @relation(fields: [categoryId], references: [id])
+  branchKey        String
+  obligationId     String?
+  amount           Decimal            @db.Decimal(18, 2)
+  payee            String
+  purpose          String
+  dueDate          DateTime?          @db.Date
+  status           ReservationStatus  @default(ACTIVE)
+  requiresOverride Boolean            @default(false)
+  approvalId       String?
+  executedTxnId    String?
+  executedAt       DateTime?
+  executedBy       String?
+  releasedAt       DateTime?
+  releasedBy       String?
+  releaseReason    String?
+  idempotencyKey   String?
+  createdAt        DateTime           @default(now())
+  createdBy        String?
+
+  @@unique([createdBy, idempotencyKey])
+  @@index([categoryId, status])
+  @@index([obligationId])
+}
+
+model FinObligation {
+  id                   String           @id @default(cuid())
+  branchKey            String           @default("COMPANY")
+  type                 ObligationType
+  description          String
+  counterparty         String?
+  amount               Decimal          @db.Decimal(18, 2)
+  currency             String           @default("SAR")
+  dueDate              DateTime         @db.Date
+  status               ObligationStatus @default(OPEN)
+  /// MANUAL, PURCHASE_RECORD, ... plus that record's id. Unique, so one source document can
+  /// only ever become one obligation.
+  sourceType           String           @default("MANUAL")
+  sourceId             String?
+  /// PO -> supplier bill: the bill supersedes the PO; a SUPERSEDED obligation is never
+  /// counted again anywhere.
+  supersedesId         String?          @unique
+  allocationCategoryId String?
+  finCategoryId        String?
+  costCenterId         String?
+  cancelledAt          DateTime?
+  cancelledBy          String?
+  cancelReason         String?
+  createdAt            DateTime         @default(now())
+  createdBy            String?
+  updatedAt            DateTime         @updatedAt
+
+  @@unique([sourceType, sourceId])
+  @@index([branchKey, dueDate])
+  @@index([status])
+}
+
+/// Expected receipts / payments that are NOT represented by an obligation.
+model FinForecastItem {
+  id            String             @id @default(cuid())
+  branchKey     String             @default("COMPANY")
+  kind          ForecastItemKind
+  description   String
+  counterparty  String?
+  amount        Decimal            @db.Decimal(18, 2)
+  expectedDate  DateTime           @db.Date
+  finCategoryId String?
+  status        ForecastItemStatus @default(OPEN)
+  realizedTxnId String?
+  createdAt     DateTime           @default(now())
+  createdBy     String?
+  updatedAt     DateTime           @updatedAt
+
+  @@index([branchKey, expectedDate])
+}
+
+model FinBudget {
+  id           String       @id @default(cuid())
+  month        String
+  branchKey    String       @default("COMPANY")
+  costCenterId String?
+  basis        BudgetBasis  @default(CASH)
+  status       BudgetStatus @default(DRAFT)
+  title        String?
+  createdAt    DateTime     @default(now())
+  createdBy    String?
+  closedAt     DateTime?
+  closedBy     String?
+
+  revisions BudgetRevision[]
+
+  @@unique([month, branchKey])
+}
+
+model BudgetRevision {
+  id           String               @id @default(cuid())
+  budgetId     String
+  budget       FinBudget            @relation(fields: [budgetId], references: [id])
+  revisionNo   Int
+  status       BudgetRevisionStatus @default(DRAFT)
+  reason       String?
+  createdAt    DateTime             @default(now())
+  createdBy    String?
+  submittedAt  DateTime?
+  submittedBy  String?
+  decidedAt    DateTime?
+  decidedBy    String?
+  decisionNote String?
+
+  lines BudgetLine[]
+
+  @@unique([budgetId, revisionNo])
+}
+
+model BudgetLine {
+  id              String         @id @default(cuid())
+  revisionId      String
+  revision        BudgetRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  /// Stable identity across revisions (kind + category + cost centre).
+  lineKey         String
+  finCategoryId   String
+  costCenterId    String?
+  kind            BudgetLineKind
+  plannedAmount   Decimal        @db.Decimal(18, 2)
+  ownerEmployeeId String?
+  assumptions     String?
+  dueDate         DateTime?      @db.Date
+  phasing         PhasingMethod  @default(DUE_DATE)
+  /// CUSTOM_WEIGHTS: { "1": w, "15": w } day-of-month -> weight.
+  phasingWeights  Json?
+
+  @@unique([revisionId, lineKey])
+}
+
+model FinVarianceNote {
+  id                    String             @id @default(cuid())
+  budgetId              String
+  lineKey               String
+  explanation           String
+  correctiveAction      String?
+  responsibleEmployeeId String?
+  followUpDate          DateTime?          @db.Date
+  status                VarianceNoteStatus @default(OPEN)
+  createdAt             DateTime           @default(now())
+  createdBy             String?
+  resolvedAt            DateTime?
+  resolvedBy            String?
+
+  @@index([budgetId, lineKey])
+}
+
+/// Dated forecast snapshot. Never modifies a budget revision.
+model FinForecastSnapshot {
+  id         String   @id @default(cuid())
+  kind       String
+  branchKey  String   @default("COMPANY")
+  budgetId   String?
+  month      String?
+  cutoffDate DateTime @db.Date
+  data       Json
+  createdAt  DateTime @default(now())
+  createdBy  String?
+
+  @@index([kind, branchKey, cutoffDate])
+}
+
+model FinApprovalRequest {
+  id           String            @id @default(cuid())
+  type         FinApprovalType
+  branchKey    String            @default("COMPANY")
+  entityType   String
+  entityId     String
+  summary      String
+  payload      Json
+  /// The finance sub-privilege allowed to decide this request.
+  requiredSub  String
+  /// A named approver when the category names one; otherwise any holder of requiredSub.
+  assignedToId String?
+  status       FinApprovalStatus @default(PENDING)
+  requestedBy  String
+  requestedAt  DateTime          @default(now())
+  reason       String?
+  decidedBy    String?
+  decidedAt    DateTime?
+  decisionNote String?
+
+  @@index([status, requiredSub])
+  @@index([assignedToId, status])
+  @@index([entityType, entityId])
+}
+
+/// Append-only audit trail for every finance write.
+model FinAuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String
+  branchKey  String?
+  before     Json?
+  after      Json?
+  reason     String?
+  refs       Json?
+  userId     String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }

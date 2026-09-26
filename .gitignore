@@ -63,3 +63,6 @@ tests/harness/app.css
 tests/harness/bundle.js
 tests/harness/_tw.css
 test-results/
+
+# Local disposable PostgreSQL for this worktree (finance cash budget)
+/.local-postgres/

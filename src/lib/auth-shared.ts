@@ -37,6 +37,8 @@ export const ALL_MODULES = [
   "accounting",
   "sales",
   "commissions",
+  // Finance — cash management, receipt allocation and the monthly cash budget.
+  "finance",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -59,6 +61,7 @@ export const MODULE_LABELS: Record<string, string> = {
   settings: "System Settings",
   customers: "Customers / CRM",
   accounting: "Accounting",
+  finance: "Finance (Cash & Budget)",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -156,6 +159,21 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "journal_post", label: "Post journal entries" },
     { key: "journal_reverse", label: "Reverse posted journal entries" },
     { key: "export_view", label: "View Qoyod export records" },
+  ],
+  // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
+  // key alone, allow approving it; and no request can be decided by its own requester
+  // (enforced in the service and by database triggers, with no configurable exception).
+  finance: [
+    { key: "txn_enter", label: "Enter, import and classify bank transactions" },
+    { key: "reconcile", label: "Reconcile accounts against bank statements" },
+    { key: "budget_prepare", label: "Prepare budgets, obligations, forecasts and allocation rules" },
+    { key: "budget_approve", label: "Approve budgets, revisions and allocation percentage changes" },
+    { key: "allocate", label: "Run allocations, reserve and record payments" },
+    { key: "transfer_approve", label: "Approve transfers between allocation categories" },
+    { key: "spend_override_approve", label: "Approve spending above a category limit or balance" },
+    { key: "period_close", label: "Close or reopen budget periods" },
+    { key: "all_branches", label: "Company-wide access (all branches and company-level records)" },
+    { key: "settings_manage", label: "Manage finance settings, accounts, categories and branch access" },
   ],
 };
 
