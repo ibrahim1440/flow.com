@@ -816,6 +816,53 @@ export function PreparationReviewTable({
         </div>
       )}
 
+      {/* Order-level outcome BEFORE the lines, per FZ-B: the operator should know what
+          pressing Commit will do to the order as a whole before reading every row.
+          Everything here is a PREVIEW read from the shelf a moment ago — nothing is
+          reserved until the button is pressed, and another order may take the stock in
+          between. The two predicted quantities carry dashed borders to say so; the two
+          counts are facts about this order and are drawn solid. */}
+      {canEdit && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-oo-text-muted uppercase tracking-wide">
+              {t("prepSummaryTitle")}
+            </span>
+            <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-oo-bg-subtle border border-oo-border-default text-oo-text-secondary">
+              {t("prepPreviewNotReserved")}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {[
+              { label: t("prepSummaryToReserve"), value: commitSummary.toReserve,
+                tone: "text-oo-action-primary", box: "border-dashed border-oo-action-primary bg-oo-action-primary-subtle" },
+              { label: t("prepSummaryProductionNeeded"), value: commitSummary.productionNeeded,
+                tone: "text-oo-status-waiting", box: "border-dashed border-oo-status-waiting bg-oo-status-waiting-bg" },
+              // Blocked before fully-covered, matching FZ-B: the exception is read before
+              // the reassurance.
+              { label: t("prepSummaryBlocked"), value: commitSummary.blocked,
+                tone: commitSummary.blocked > 0 ? "text-oo-status-blocked" : "text-oo-text-muted",
+                box: commitSummary.blocked > 0
+                  ? "border-oo-status-blocked bg-oo-status-blocked-bg"
+                  : "border-oo-border-default bg-oo-bg-default" },
+              { label: t("prepSummaryFullyCovered"), value: commitSummary.fullyCovered,
+                tone: "text-oo-status-success", box: "border-oo-status-success bg-oo-status-success-bg" },
+            ].map((s) => (
+              <div key={s.label} className={`rounded-oo-medium border-2 px-3.5 py-3 flex flex-col gap-1 ${s.box}`}>
+                <span className={`text-[11px] font-semibold ${s.tone}`}>{s.label}</span>
+                <span className={`text-2xl font-bold tabular-nums leading-none ${s.tone}`}>{s.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-oo-medium border-[1.5px] border-oo-status-preparing/40 bg-oo-status-preparing-bg px-3.5 py-2.5">
+            <p className="text-[13px] font-semibold text-oo-status-preparing">
+              {t("prepSummaryExpectedState")}:{" "}
+              {commitSummary.expectedReady ? t("orderStatusReadyForShipping") : t("orderStatusPreparing")}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm stack-table">
           <thead>
@@ -960,42 +1007,8 @@ export function PreparationReviewTable({
           {!stockLoading && (stockError || missingStock) && (
             <p className="text-xs font-bold text-red-600">{t("stockPreviewUnavailable")}</p>
           )}
-          {/* Order-level summary of what committing will do. Everything above is a PREVIEW
-              read from the shelf a moment ago: nothing is reserved until this button is
-              pressed, and another order may take the stock in between. */}
-          <div className="rounded-oo-medium border border-oo-border-default bg-white px-3 py-2.5 space-y-1.5">
-            <p className="text-xs font-bold text-oo-text-muted uppercase tracking-wide">
-              {t("prepSummaryTitle")}
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryToReserve")}</span>
-                <span className="font-bold tabular-nums">{commitSummary.toReserve}</span>
-              </div>
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryProductionNeeded")}</span>
-                <span className="font-bold tabular-nums">{commitSummary.productionNeeded}</span>
-              </div>
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryFullyCovered")}</span>
-                <span className="font-bold tabular-nums">{commitSummary.fullyCovered}</span>
-              </div>
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryBlocked")}</span>
-                <span className={`font-bold tabular-nums ${commitSummary.blocked > 0 ? "text-oo-status-blocked" : ""}`}>
-                  {commitSummary.blocked}
-                </span>
-              </div>
-            </div>
-            <p className="text-[11px] text-oo-text-muted">
-              {t("prepSummaryExpectedState")}:{" "}
-              <span className="font-semibold">
-                {commitSummary.expectedReady ? t("orderStatusReadyForShipping") : t("orderStatusPreparing")}
-              </span>
-            </p>
-            <p className="text-[11px] text-oo-text-muted italic">{t("prepPreviewNotReserved")}</p>
-          </div>
-
+          {/* The summary that used to sit here now renders BEFORE the table, which is
+              where FZ-B puts it. Only the action remains below the lines. */}
           <button
             onClick={handleSave}
             disabled={submitting || !canSave}

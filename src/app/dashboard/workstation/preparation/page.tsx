@@ -1,18 +1,16 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  PackageCheck, Clock, ChevronDown, ChevronUp, ClipboardList, MessageSquare,
-  ShoppingCart, RefreshCw, PauseCircle, CheckCircle2, Hammer,
+  PackageCheck, Clock, ShoppingCart, RefreshCw, PauseCircle, CheckCircle2,
+  ChevronRight as OpenLtr, ChevronLeft as OpenRtl,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
 import {
-  OrderStatusBadge, NeedsAttentionBadge, ActivityTimeline, AddNoteForm,
-  StatusActionsBar, PreparationReviewTable, OrderProgressStepper, type LifecycleActivity,
+  OrderStatusBadge, NeedsAttentionBadge, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
-import { ProductionRequirementPanel } from "@/components/ProductionRequirementPanel";
 
 // Orders currently relevant to Preparation — live or paused, not finished.
 //
@@ -67,24 +65,33 @@ function isToday(isoDate: string): boolean {
 }
 
 export default function PreparationWorkstationPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [orders, setOrders] = useState<WorkstationOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The affordance points the way the operator reads, into the order's own screen.
+  const Open = lang === "ar" ? OpenRtl : OpenLtr;
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    setLoading(true);
+  // Declared before the effect that runs it, and told when it has been abandoned, so a
+  // response arriving after the operator has left cannot set state on an unmounted page.
+  const loadData = useCallback(async (cancelled?: () => boolean) => {
+    // No setLoading(true) here: `loading` already starts true, and this is the only
+    // caller. Setting it synchronously would make the effect below dispatch during the
+    // same render, which is the cascade the linter is warning about.
     try {
       const res = await fetch("/api/orders");
-      setOrders(res.ok ? await res.json() : []);
+      const data = res.ok ? await res.json() : [];
+      if (cancelled?.() === true) return;
+      setOrders(data);
     } finally {
-      setLoading(false);
+      if (cancelled?.() !== true) setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    let gone = false;
+    void loadData(() => gone);
+    return () => { gone = true; };
+  }, [loadData]);
 
   // Sort per S0 spec: (1) On Hold / Blocked first, (2) earliest delivery date — SKIPPED,
   // Order has no delivery-due-date field in this schema, so this tier cannot be applied;
@@ -163,98 +170,40 @@ export default function PreparationWorkstationPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {visible.map((order) => {
             const attention = orderNeedsAttention(order);
-            const isOpen = openId === order.id;
             return (
-              <div
+              // A worklist entry, not a workspace. Preparing an order is a task with its
+              // own screen; doing it inside a grid cell meant the operator read the lines
+              // in a third of the width and the queue carried a second, parallel copy of
+              // the whole workflow.
+              <a
                 key={order.id}
+                href={`/dashboard/workstation/preparation/${order.id}`}
                 data-testid={`ws-order-${order.orderNumber}`}
-                className={`bg-oo-bg-default rounded-oo-large border-2 shadow-sm overflow-hidden transition-colors ${
-                  attention ? "border-red-300" : "border-oo-border-default"
-                } ${isOpen ? "xl:col-span-3 md:col-span-2" : ""}`}
+                className={`block rounded-oo-large border-2 p-5 bg-oo-bg-default transition-colors
+                  hover:bg-oo-bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2
+                  focus-visible:outline-oo-action-primary ${
+                  attention ? "border-oo-status-blocked/40" : "border-oo-border-default"
+                }`}
               >
-                <button
-                  type="button"
-                  onClick={() => setOpenId(isOpen ? null : order.id)}
-                  className="w-full text-start p-5 hover:bg-oo-bg-subtle/50 active:bg-oo-bg-subtle transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-lg font-bold text-oo-text-primary">#{order.orderNumber}</p>
-                      <p className="text-sm text-oo-text-secondary font-medium">{order.customer.name}</p>
-                    </div>
-                    {isOpen ? (
-                      <ChevronUp size={22} className="text-oo-text-muted flex-shrink-0" />
-                    ) : (
-                      <ChevronDown size={22} className="text-oo-text-muted flex-shrink-0" />
-                    )}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-oo-text-primary">#{order.orderNumber}</p>
+                    <p className="text-sm text-oo-text-secondary font-medium truncate">{order.customer.name}</p>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap mt-3">
-                    <OrderStatusBadge status={order.status} />
-                    {attention && <NeedsAttentionBadge />}
-                  </div>
-                  <div className="flex items-center justify-between mt-3 text-xs text-oo-text-secondary font-medium">
-                    <span>{order.items.length} {t("itemCountLabel")}</span>
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} /> {formatDate(lastActivityTime(order))}
-                    </span>
-                  </div>
-                </button>
-
-                {isOpen && (
-                  <div className="border-t border-oo-border-default p-4 bg-oo-bg-subtle space-y-3">
-                    {/* Progress Stepper — lifecycle milestones, not the activity log */}
-                    <div className="bg-white rounded-oo-medium border border-oo-border-default px-4 py-3">
-                      <OrderProgressStepper status={order.status} items={order.items} />
-                    </div>
-
-                    {/* Desktop: two-column (main content + right rail). Tablet and below:
-                        single column, timeline/status actions fall below preparation. */}
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-                      <div className="xl:col-span-2 space-y-3">
-                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
-                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
-                            <ClipboardList size={16} /> {t("preparationReviewLabel")}
-                          </p>
-                          <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
-                        </div>
-
-                        {/* Step 9: what the shelf could not cover, and the button that
-                            turns exactly that into a production order. */}
-                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
-                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
-                            <Hammer size={16} /> {t("productionReqTitle")}
-                          </p>
-                          <ProductionRequirementPanel itemIds={order.items.map((i) => i.id)} />
-                        </div>
-
-                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
-                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
-                            <MessageSquare size={16} /> {t("addNoteLabel")}
-                          </p>
-                          <AddNoteForm orderId={order.id} onSuccess={loadData} />
-                        </div>
-                      </div>
-
-                      <div className="xl:col-span-1 space-y-3">
-                        <StatusActionsBar
-                          orderId={order.id}
-                          status={order.status}
-                          ownerId={order.ownerId}
-                          onSuccess={loadData}
-                          large
-                        />
-
-                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
-                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
-                            <Clock size={16} /> {t("activityTimelineLabel")}
-                          </p>
-                          <ActivityTimeline activities={order.activities} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+                  <Open size={18} className="text-oo-text-muted shrink-0 mt-1" aria-hidden="true" />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap mt-3">
+                  <OrderStatusBadge status={order.status} />
+                  {attention && <NeedsAttentionBadge />}
+                </div>
+                <div className="flex items-center justify-between mt-3 text-xs text-oo-text-secondary font-medium">
+                  <span>{order.items.length} {t("itemCountLabel")}</span>
+                  <span className="flex items-center gap-1">
+                    <Clock size={12} aria-hidden="true" /> {formatDate(lastActivityTime(order))}
+                  </span>
+                </div>
+                <span className="sr-only">{t("prepOpenOrder")}</span>
+              </a>
             );
           })}
         </div>

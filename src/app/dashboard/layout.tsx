@@ -9,6 +9,7 @@ import { UserContext, type User } from "./user-context";
 import { Nav } from "./_components/Nav";
 import { Breadcrumbs } from "./_components/Breadcrumbs";
 import { ContextualNav } from "./_components/ContextualNav";
+import { PageCrumbProvider } from "./_components/page-crumb";
 
 function DashboardShell({
   user,
@@ -44,6 +45,9 @@ function DashboardShell({
   }
 
   return (
+    // The provider wraps both the header and the content, because the breadcrumb lives in
+    // one and the page that names the record lives in the other.
+    <PageCrumbProvider>
     <div className="h-screen overflow-hidden flex bg-oo-bg-app">
       {drawerOpen && (
         <div
@@ -112,6 +116,7 @@ function DashboardShell({
         </main>
       </div>
     </div>
+    </PageCrumbProvider>
   );
 }
 

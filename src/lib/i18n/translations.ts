@@ -295,6 +295,18 @@ export const translations = {
   orderStatusRejected:          { en: "Rejected",                     ar: "مرفوض" },
 
   preparationReviewLabel:     { en: "Preparation Review",           ar: "مراجعة التجهيز" },
+
+  // ── Dedicated Preparation detail screen ───────────────────────────────
+  orderLabel:                 { en: "Order",                        ar: "الطلب" },
+  prepBackToQueue:            { en: "Back to Preparation Queue",    ar: "العودة إلى طابور التجهيز" },
+  prepOpenOrder:              { en: "Open preparation",             ar: "فتح التجهيز" },
+  prepOrderNotFoundTitle:     { en: "This order is not available",  ar: "هذا الطلب غير متاح" },
+  // Deliberately the same message whether the order does not exist or the caller may not
+  // see it — telling them apart would confirm a record's existence across a permission
+  // boundary.
+  prepOrderNotFoundBody:      { en: "It may have been completed or cancelled, or it is not part of your work.",
+                                ar: "ربما اكتمل أو أُلغي، أو أنه ليس ضمن نطاق عملك." },
+
   requestedQtyLabel:          { en: "Requested Qty",                ar: "الكمية المطلوبة" },
   availableQuantityLabel:     { en: "Available Quantity",           ar: "الكمية المتوفرة" },
   onShelfFreeLabel:           { en: "Free on Shelf",                ar: "متاح على الرف" },

@@ -123,18 +123,31 @@ export async function openOrderCard(page: Page, orderNumber: number) {
 
 // ─── Preparation workstation ────────────────────────────────────────────────
 
+/**
+ * Open an order for preparation and return the region its workflow lives in.
+ *
+ * The queue is a worklist: an order opens onto its own screen rather than unfolding inside
+ * a grid cell. Callers are unchanged — they still receive a Locator scoped to that order's
+ * preparation workflow — so every assertion written against the old expanded card keeps
+ * its meaning. What moved is where the workflow is, not what it does.
+ */
 export async function openWorkstationOrder(page: Page, orderNumber: number) {
   await page.goto("/dashboard/workstation/preparation");
-  const card = wsCard(page, orderNumber);
-  await expect(card).toBeVisible({ timeout: 60_000 });
-  // The whole card header is the expand control, and it also contains the status badge —
-  // so it must be clicked by position, never by a text match, or a later "Review" lookup
-  // will hit the header and collapse the card again.
-  const commitBtn = card.getByRole("button", { name: /Commit Allocation/i });
-  if (!(await commitBtn.isVisible().catch(() => false))) {
-    await card.locator("button").first().click();
-  }
-  return card;
+  const entry = wsCard(page, orderNumber);
+  await expect(entry, `order #${orderNumber} should be in the preparation queue`)
+    .toBeVisible({ timeout: 60_000 });
+  await entry.click();
+  // The detail route carries the order id, which the queue entry never exposed.
+  await page.waitForURL(/\/dashboard\/workstation\/preparation\/.+/, { timeout: 60_000 });
+  const workflow = page.getByRole("main");
+  // Wait on the section itself, not on Commit Allocation: an operator without
+  // prepare_review sees this screen read-only and never gets that button, and the
+  // production and QC roles open it exactly that way.
+  await expect(
+    workflow.getByRole("heading", { name: /Preparation Review|مراجعة التجهيز/ }),
+    "the preparation workflow should be on the order's own screen"
+  ).toBeVisible({ timeout: 60_000 });
+  return workflow;
 }
 
 /**

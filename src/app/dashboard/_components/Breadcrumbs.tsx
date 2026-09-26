@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { breadcrumb, firstDestination, type Viewer } from "@/lib/nav/registry";
+import { usePageCrumb } from "./page-crumb";
 
 /**
  * Module › Subunit › Page, above the content.
@@ -24,9 +25,12 @@ export function Breadcrumbs({ viewer }: { viewer: Viewer }) {
   const pathname = usePathname();
   const { lang } = useI18n();
   const trail = breadcrumb(pathname);
+  // A record the page knows about and the registry cannot — "Order #10248". Appended
+  // rather than derived, because it is data, not a route.
+  const pageCrumb = usePageCrumb();
 
   // One crumb is the page naming itself — the page title already says that.
-  if (trail.length < 2) return null;
+  if (trail.length + (pageCrumb ? 1 : 0) < 2) return null;
 
   const Chevron = lang === "ar" ? ChevronLeft : ChevronRight;
 
@@ -34,7 +38,9 @@ export function Breadcrumbs({ viewer }: { viewer: Viewer }) {
     <nav aria-label={lang === "ar" ? "مسار التنقل" : "Breadcrumb"}>
       <ol className="flex items-center gap-2 list-none m-0 p-0 text-[12px]">
         {trail.map((node, i) => {
-          const last = i === trail.length - 1;
+          // With a page crumb appended, the registry's own last entry is no longer the
+          // current page — it becomes a link back to the list this record came from.
+          const last = !pageCrumb && i === trail.length - 1;
           const href = last ? null : firstDestination(viewer, node);
           return (
             <li key={node.id} className="flex items-center gap-2 min-w-0">
@@ -54,6 +60,16 @@ export function Breadcrumbs({ viewer }: { viewer: Viewer }) {
             </li>
           );
         })}
+        {pageCrumb && (
+          <li className="flex items-center gap-2 min-w-0">
+            {trail.length > 0 && (
+              <Chevron size={12} className="text-oo-border-strong shrink-0" aria-hidden="true" />
+            )}
+            <span aria-current="page" className="font-semibold text-oo-text-primary truncate">
+              {pageCrumb}
+            </span>
+          </li>
+        )}
       </ol>
     </nav>
   );
