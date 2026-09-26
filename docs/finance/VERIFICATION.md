@@ -5,6 +5,37 @@ Branch `feature/finance-cash-budget` (worktree `C:\Projects\ERP-finance-cash-bud
 Every database operation below ran against the portable PostgreSQL on `127.0.0.1:54329`
 (ENVIRONMENT.md); no Neon endpoint was contacted.
 
+## 00. Release candidate `release/finance-sales-20260927` (2026-09-27)
+
+`57b99db` = UAT `4ec5baf` + Sales `c8b37dd` (merge, no conflicts) on `origin/main` `4640cbe`.
+Production steps were not executed (RELEASE-20260927.md §6).
+
+| Check | Result |
+|---|---|
+| Typecheck; lint (finance, nav, Sales services, tests); build | clean; clean; compiles |
+| Finance unit | 52/52 |
+| Finance DB (incl. 5 Sales-collection tests) | 40/40, 0 skipped |
+| Application server connected **as `finance_app`** (DML only) on a disposable database: HTTP authz/identity/decisions | 11/11 |
+| same server: integrated navigation (4 roles); decision checks D2–D6 | 4/4; pass |
+| same server: 11-step walkthrough (Sales collection → allocation once → budget → approvals → reservation → pending line → record payment → statement confirms → actuals) | 11/11; balances identical to the UAT candidate |
+| Local migration rehearsal (8 migrations) on a fresh database built by the production commit's own migrations + seed + synthetic volume | 43 existing tables identical; no existing table altered; empty drift; 12/12 triggers; `finance_app` refused all 10 privileged writes; **production build's client reads all 43 models on the migrated schema**; recovery from the server-side copy identical to the baseline |
+| Clean-checkout backend regression (no `.env`, disposable DB) vs `origin/main` | the same 26 failing assertions as `main` — none new, none fixed (below) |
+| Clean-checkout Playwright (critical-path, permissions, responsive, ui-resilience) | 32 passed, 2 failed, 15 did not run (serial suites stop at the first failure) — the same two failures as the Sales baseline |
+
+**Pre-existing failures, not waived** (fail identically on `main`, i.e. in production today):
+- `production-concurrency` (13) and `lifecycle-locks`/`workflow-alignment` (4): when a hold or
+  cancel commits first, a production requirement, roast or delivery is still accepted (201
+  instead of 409; green stock 120 → 117); a lot-reservation conflict on delivery; the committing
+  operator is not recorded on Commit Allocation. These concern core operations and need their own
+  investigation and fix; this release neither causes nor changes them.
+- `reset-safety` (9): the disposable test database is not configured as an authorized reset
+  target, so the guarded training/factory reset refuses — environment, not product.
+- Playwright: "Dispatch ships the order in full" and "UAT Sales sees only the modules they hold"
+  fail on the Sales baseline too.
+
+Not tested: production data and volume, Neon branch copy, point-in-time restore, the
+`ui-ux-alignment` branch, the Sales shell suite on this commit (35/35 at `995b3bf`).
+
 ## 0. Local UAT candidate (2026-09-26) — `uat/finance-sales-20260926`
 
 Started from `9351e74710343259767e460f3f5cf6629e30c266`; adds the resolved decisions D2–D6,
