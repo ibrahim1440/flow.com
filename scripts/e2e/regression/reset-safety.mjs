@@ -38,6 +38,9 @@ const P = "RSF";
 // suite therefore provisions its own reset-capable operator. Employee rows survive both
 // resets by design, so this user is still there afterwards to make the second call.
 const RESET_PIN = "770021";
+// An operator with settings access but explicitly WITHOUT the reset sub-privileges, so
+// C0 can prove refusal against a known-unprivileged actor rather than an assumed one.
+const NORESET_PIN = "770022";
 
 // The delete order admin/reset uses, verbatim. Kept next to the test that depends on it so
 // that a change to the route which forgets this list fails section B loudly.
@@ -175,17 +178,37 @@ async function main() {
   await loginAs(RESET_PIN);
 
   sub("C0. authorization is still checked, and checked FIRST");
-  // Proof that the guard has not become a way around privilege: the seeded administrator has
-  // no reset privilege and must still be refused, and refused with an authorization message
-  // that reveals nothing about how destructive resets are configured here.
-  await loginAs(ADMIN_PIN);
+  // Proof that the guard has not become a way around privilege: an operator WITHOUT
+  // settings.reset must still be refused, with an authorization message that reveals
+  // nothing about how destructive resets are configured here.
+  //
+  // The unprivileged operator is created here rather than borrowed. This used ADMIN_PIN
+  // on the assumption that the seeded administrator holds no reset privilege — true of
+  // the account prisma/seed.ts creates, but the harness only PREFERS that row and falls
+  // back to any active admin. On a database seeded by the browser fixtures the fallback
+  // holds every sub-privilege there is, so the reset SUCCEEDED, this check failed, and
+  // C1 failed after it because the packaging history it needs had just been deleted by
+  // the very call that should have been refused.
+  //
+  // Nothing about the rule is relaxed by naming the actor explicitly. It is the only way
+  // this assertion tests authorization rather than testing how the database was seeded.
+  await ensureUser(`${P}_emp_noreset`, `${P} No-Reset Operator`, "admin", {
+    dashboard: { access: "edit" },
+    settings: { access: "edit", sub: { reset: false, training_reset: false } },
+  }, NORESET_PIN);
+  await loginAs(NORESET_PIN);
   const unprivileged = await api("/api/admin/reset", {
-    method: "POST", body: { phrase: "RESET HIQBAH", pin: ADMIN_PIN },
+    method: "POST", body: { phrase: "RESET HIQBAH", pin: NORESET_PIN },
   });
   check("a user without settings.reset is refused", unprivileged.status === 403,
     `status=${unprivileged.status} ${S(unprivileged.json).slice(0, 90)}`);
   check("and the refusal discloses nothing about reset configuration",
     !/ERP_|allowlist|DATABASE_URL|host/i.test(S(unprivileged.json)), S(unprivileged.json).slice(0, 120));
+  // A refusal, not a silent no-op: the data the next section depends on is still there.
+  const afterRefusal = await snapshot();
+  check("the refused reset changed nothing",
+    afterRefusal.RoastingBatch > 0 && afterRefusal.PackagingOperation > 0,
+    `RoastingBatch=${afterRefusal.RoastingBatch}, PackagingOperation=${afterRefusal.PackagingOperation}`);
   await loginAs(RESET_PIN);
 
   sub("C1. training reset succeeds, and its success proves the delete order");
