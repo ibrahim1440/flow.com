@@ -23,8 +23,17 @@
 /**
  * Endpoints that must never be written to, whatever database is named and whatever the
  * environment says. Deliberately not overridable.
+ *
+ * Both of this deployment's real computes are listed. The second is here because the
+ * reset-safety self-test already names it as one of the two endpoints that guard exists
+ * to protect; a list that protected one of them and not the other would be a list nobody
+ * could reason about. Listing an endpoint that turns out to be retired costs nothing —
+ * the only consequence is that a regression suite refuses to run against it.
  */
-export const PROTECTED_ENDPOINTS = Object.freeze(["ep-dawn-dust-aqn1u1uf"]);
+export const PROTECTED_ENDPOINTS = Object.freeze([
+  "ep-dawn-dust-aqn1u1uf",
+  "ep-jolly-feather-aqne6cp1",
+]);
 
 /** The isolated regression project. Override with ERP_TEST_DB_ENDPOINT if it moves. */
 export const DEFAULT_APPROVED_ENDPOINTS = Object.freeze(["ep-small-hat-aw2kcuac"]);

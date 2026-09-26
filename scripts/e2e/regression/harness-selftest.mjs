@@ -1402,6 +1402,14 @@ check("PRODUCTION endpoint + a different database is REFUSED",
   verdict(at(PROD_EP, "erp_mvp_test")).allowed === false, verdict(at(PROD_EP, "erp_mvp_test")).reason);
 check("PRODUCTION endpoint via its POOLED hostname is REFUSED",
   verdict(at(PROD_EP, "neondb", true)).allowed === false, verdict(at(PROD_EP, "neondb", true)).reason);
+// The reset-safety guard names two endpoints as the ones it exists to protect; this guard
+// protects the same two, so the lists cannot disagree about what production is.
+check("the SECOND protected endpoint is REFUSED too",
+  verdict(at("ep-jolly-feather-aqne6cp1", "neondb")).allowed === false,
+  verdict(at("ep-jolly-feather-aqne6cp1", "neondb")).reason);
+check("every endpoint the reset guard protects is protected here as well",
+  ["ep-dawn-dust-aqn1u1uf", "ep-jolly-feather-aqne6cp1"]
+    .every((ep) => verdict(at(ep, "erp_mvp_test")).allowed === false), "");
 check("test endpoint + neondb is REFUSED (the name Production also carries)",
   verdict(at(TEST_EP, "neondb")).allowed === false, verdict(at(TEST_EP, "neondb")).reason);
 check("test endpoint + erp_mvp_test is ALLOWED",
