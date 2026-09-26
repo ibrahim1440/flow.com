@@ -2223,7 +2223,9 @@ model CollectionEvidence {
   uploadedAt   DateTime @default(now())
 
   @@index([collectionId])
+}
 
+// ═══════════════════════════════════════════════════════════════════════════════
 // Finance — Cash Management, Receipt Allocation, Monthly Cash Budget (additive)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
