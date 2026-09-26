@@ -281,7 +281,7 @@ test("Dispatch ships the order in full and it completes", async ({ page }) => {
   // "Quantity (kg) — Max: 0", which no operator could ship from.
   // The visible limit under the quantity field names the unit. (`getByText(/Units/i).first()`
   // matched a hidden element before the visible hint and failed on a correct form.)
-  await expect(modal.getByText(/Max:s*d+s*units/i), "the form asks for units, not kilograms").toBeVisible();
+  await expect(modal.getByText(/Max:\s*\d+\s*units/i), "the form asks for units, not kilograms").toBeVisible();
   // The lot list is fetched when the dialog opens and takes a few seconds against a
   // remote database; until it lands the field is a spinner, not a select. Wait for the
   // real control rather than racing it — the earlier version silently picked up the
