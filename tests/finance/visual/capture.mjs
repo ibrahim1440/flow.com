@@ -24,7 +24,11 @@ const SHOTS = [
   { id: "FIN-09", route: "/dashboard/finance", w: 1024 },
   { id: "FIN-10", route: "/dashboard/finance", w: 1440, user: "fin.manager.en" },
   // Dialogs, driven through the real UI (element screenshots of the dialog panel).
-  { id: "FIN-07a", route: "/dashboard/finance", w: 1440, user: "fin.approver", dialog: async (p) => { await p.getByRole("button", { name: /الموافقات/ }).click(); await p.getByText("نقل 5000.00").first().click().catch(() => p.locator("[role=dialog] button.text-start").first().click()); } },
+  { id: "FIN-07a", route: "/dashboard/finance", w: 1440, user: "fin.approver", dialog: async (p) => {
+      await p.getByRole("button", { name: /الموافقات/ }).click();
+      await p.getByText("نقل 5,000.00").first().click().catch(() => p.getByText("نقل 5000.00").first().click()).catch(() => p.locator("[role=dialog] button.text-start").first().click());
+      await p.locator("[role=dialog] textarea, [role=dialog] input[type=text]").first().fill("مقبول — الشحنة مؤكدة").catch(() => {});
+    } },
   { id: "FIN-07b", route: "/dashboard/finance/transactions", w: 1440, dialog: async (p) => {
       await p.getByRole("button", { name: /استيراد CSV/ }).click();
       await p.locator("[role=dialog] input[type=file]").setInputFiles({ name: "snb-statement-oct.csv", mimeType: "text/csv", buffer: Buffer.from("Date,Amount,Reference,Description\n2026-09-26,2300.00,TRF88213,INCOMING TRANSFER 88213\n2026-09-26,125.00,,Cafe sale\n2026-09-26,125.00,,Cafe sale\n31/09/2026,10.00,,bad date\n2026-09-25,\"1,20\",,bad amount\n") });
@@ -85,6 +89,17 @@ try {
       await page.locator("tbody tr").first().click();
       await page.waitForLoadState("networkidle");
       await page.waitForTimeout(600);
+      // The state drawn in FIN-02: classification chosen, budget line picked, and the
+      // reconciliation previewed against the statement balance (capture state, not app code).
+      const panel = page.locator("div.bg-white.rounded-2xl", { hasText: "مراجعة سطر بنكي" }).first();
+      await panel.locator("select").first().selectOption("CUSTOMER_RECEIPT").catch(() => {});
+      const split = panel.getByLabel("بند الميزانية");
+      const opts = await split.locator("option").allTextContents().catch(() => []);
+      const i = opts.findIndex((o) => o.includes("تحصيلات عملاء الجملة"));
+      if (i >= 0) await split.selectOption({ index: i });
+      await page.getByLabel("رصيد الكشف").fill("132032.25");
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(800);
     }
     const file = path.join(out, `${s.id}-app-${s.w}.png`);
     if (s.dialog) {

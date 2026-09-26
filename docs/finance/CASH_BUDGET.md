@@ -56,16 +56,29 @@ computed). Purchase records can become one obligation each (they carry no paymen
 | Accounting revenue/expense | Accounting module (untouched) | inferred from cash |
 | Forecast | `FinForecastItem`, obligations, `FinForecastSnapshot` | counted as cash |
 
-Balances: category balance = opening carried + allocations + incoming − payments − outgoing;
-available = balance − open reservations; **eligible cash = confirmed unrestricted book cash −
-pending outgoing lines** (pending incoming lines are never counted); unallocated = eligible cash
-− all category balances. Allocated + unallocated = eligible cash, exactly (acceptance 18).
+Balances (policy D1, adopted 2026-09-26): **confirmed outgoing payment commitments reduce the
+cash available for new allocation before bank settlement, and each economic payment reduces it
+exactly once** (`src/lib/finance/exactly-once.ts`, `server/ledger.ts`).
 
-Why pending outflows are deducted (changed 2026-09-26): a payment made in online banking is
-recorded as a PENDING outgoing line and the reservation is paid against it. Without the
-deduction the category balance fell while book cash had not, so the same money became
-"unallocated" and could be allocated again until the statement arrived. The regression test
-(`tests/finance/integration/lifecycle.test.ts`) fails if the deduction is removed.
+- category balance = opening carried + allocations + incoming − payments − outgoing;
+  category available = balance − open requests (approved and awaiting approval).
+- **eligible cash** = unrestricted confirmed book cash − pending outgoing lines that are
+  *confirmed commitments* (entered by a person, paid against a request, or reviewed). An
+  imported pending outflow nobody has confirmed is **awaiting review**: shown on the pool
+  card and in the review queue, not deducted. Pending inflows never count. A possible-duplicate
+  pair counts once until a reviewer merges or separates it.
+- **allocated** (held back) = Σ max(category balance, approved requests, 0): an approved request
+  beyond the category's balance holds back the excess; an overspent category frees nothing.
+- **unallocated** = eligible − allocated: the cap for every new allocation. allocated +
+  unallocated = eligible cash, exactly (acceptance 18).
+- One payment has up to four records — request, recorded payment, pending line, settled line.
+  They are traced, not added: an outgoing line for exactly an approved request's amount that is
+  not yet linked is treated as that request's payment (reported, counted once) until "Record
+  payment made" links it; a settled statement row confirms the pending line it was imported as
+  (import status SETTLES); a failed payment (line voided) reopens the request, so availability
+  returns only when the request itself is released.
+- Step-by-step balances for each case: `evidence/d1-balances.md` (from
+  `tests/finance/integration/exactly-once.test.ts`).
 
 ### Paying: "Record payment made" (no bank connector)
 
@@ -133,8 +146,12 @@ live match per line/document) and append-only triggers (`AllocationEntry`, `Allo
 change). `20260926092523_finance_statement_matching_and_db_controls` — statement-matching
 columns and **database-level four-eyes controls** (see VERIFICATION.md §3): approval requests
 cannot be deleted, decided requests cannot change, a decision needs a decider who is not the
-requester (unless `FinSettings.allowSelfApproval`); budget revisions and allocation-rule
-versions cannot be approved by their author. Money is `Decimal(18,2)` SAR.
+requester; budget revisions and allocation-rule versions cannot be approved by their author.
+`20260926140000_finance_strict_four_eyes` — removes the self-approval setting entirely (column
+and helper dropped; no setting or session variable is consulted); requests must be created
+pending; a held payment request, a rule going live, an approved revision, a category transfer
+and a reopened period each require an APPROVED request decided by someone other than its
+requester. Money is `Decimal(18,2)` SAR.
 
 `schema.prisma` differs from `origin/main` by one appended block only. Do not run `prisma
 format` on this repository: `origin/main` is not formatted and the tool rewrites unrelated models.
@@ -170,8 +187,8 @@ note in the main checkout's `CLAUDE.md` is out of date.
 
 | Suite | Command | Result |
 |---|---|---|
-| Pure unit (acceptance 1, 5/6 pure, 10, 11, 12, 14, rounding, CSV, forecast, DB guard, sales-collection matching rule) | `npm run test:finance:unit` | 31/31 pass |
-| DB integration on `erp_finance_test` (acceptance 1–9, 13, 15–19, workflow, lifecycle with statement matching, duplicate merge, opening balances, DB controls as `finance_app`) | `npm run test:finance:db` | 21 pass, 0 fail, 5 skipped (planned sales-collection tests) |
+| Pure unit (acceptance 1, 5/6 pure, 10, 11, 12, 14, rounding, CSV, forecast, DB guard, sales-collection matching rule, exactly-once rules) | `npm run test:finance:unit` | 36/36 pass |
+| DB integration on `erp_finance_test` (acceptance 1–9, 13, 15–19, workflow, lifecycle with statement matching, duplicate merge, opening balances, D1 exactly-once, DB controls and bypass attempts as `finance_app`) | `npm run test:finance:db` | 28 pass, 0 fail, 5 skipped (sales-collection specifications) |
 | HTTP on a running server (acceptance 16, 17; first grant by an administrator) | `npm run test:finance:http` | 6/6 pass |
 | UI workflow in Chrome (classify → allocate → budget → approve → override → record payment made against a pending line → statement import confirms it → actuals once) | `npm run test:finance:ui` | 10/10 steps pass |
 | Typecheck / production build | `npx tsc --noEmit`, `npm run build` | clean / compiles |

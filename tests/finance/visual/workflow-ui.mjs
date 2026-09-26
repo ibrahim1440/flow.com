@@ -54,7 +54,8 @@ try {
 
   // 2. Create an empty budget for next month, add a line, submit it.
   await p.goto(`${BASE}/dashboard/finance/budget`);
-  await p.getByRole("button", { name: "ميزانية جديدة" }).click();
+  // New budget is the last option of the month selector (as in the design: no extra toolbar button).
+  await p.getByLabel("الشهر").selectOption("__new");
   const dlg = p.locator("[role=dialog]");
   await dlg.locator("input[type=month]").fill("2026-11");
   await dlg.locator("select").nth(1).selectOption("EMPTY");

@@ -1,11 +1,11 @@
 # Finance — verification record and review handoff (2026-09-26)
 
 Branch `feature/finance-cash-budget` (worktree `C:\Projects\ERP-finance-cash-budget`), base
-`origin/main` `4640cbe`. Local checkpoint commit only — **not pushed, not merged, not deployed**.
+`origin/main` `4640cbe`. Local commits only — **not pushed, not merged, not deployed**.
 Every database operation below ran against the portable PostgreSQL on `127.0.0.1:54329`
 (ENVIRONMENT.md); no Neon endpoint was contacted.
 
-## 1. Commands and results
+## 1. Commands and results (closure pass)
 
 Prerequisite: `npm run db:local` (portable PostgreSQL running). Suites that log in read the
 fixture password from the gitignored `.env`, e.g.
@@ -16,17 +16,21 @@ fixture password from the gitignored `.env`, e.g.
 | 1 | `npx tsc --noEmit` | clean |
 | 2 | `npx eslint src/app/dashboard/finance src/lib/finance tests/finance --quiet` | clean |
 | 3 | `npm run build` (no migrations run by the build) | compiles |
-| 4 | `npm run test:finance:unit` | **31/31** pass (pure finance 19, DB guard 4, sales-collection rule 8) |
-| 5 | `npm run test:finance:db` (erp_finance_test, `--test-concurrency=1`) | **21 pass, 0 fail, 5 skipped** (the 5 are the planned sales-collection tests) |
-| 6 | `npx next start -p 3040` then `npm run finance:fixture -- --reset` | server up on the fixture |
-| 7 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:http` | **6/6** pass (reset fixture first) |
-| 8 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:ui` | **10/10** workflow steps pass (reset fixture first) |
-| 9 | `FIN_PASSWORD=… node tests/finance/visual/capture.mjs <dir>` / `states.mjs <dir>` | 13 screens, 12 states/breakpoints captured |
-| 10 | `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` (with `.env.test`) | empty — migrated DB and schema agree |
-| 11 | Repository regression suites, `npm run regression` (see §4) | 21/26 suites pass; the 5 that fail also fail on unmodified `origin/main` or for an environmental reason |
+| 4 | `npm run test:finance:unit` | **36/36** (pure finance 19, DB guard 4, sales-collection rule 8, exactly-once rules 5) |
+| 5 | `npm run test:finance:db` (`erp_finance_test`) | **28 pass, 0 fail, 5 skipped** — the 5 are the sales-collection specifications (§7) |
+| 6 | `npx next start -p 3040`; `npm run finance:fixture -- --reset` | fixture server |
+| 7 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:http` | **6/6** |
+| 8 | `BASE_URL=http://localhost:3040 FIN_PASSWORD=… npm run test:finance:ui` | **10/10** workflow steps |
+| 9 | `capture.mjs` / `states.mjs` / `decision-crops.mjs` | 13 screens, 13 states/breakpoints, 16 decision crops |
+| 10 | `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` (`.env.test`) | empty |
+| 11 | Repository backend regression, **clean checkout** of `90b64ae` (no `.env`; configuration from the process environment; disposable `erp_e2e`) vs clean `origin/main` (`erp_mvp_test`) | §4: identical to baseline; `harness-selftest` **375/375** |
+| 12 | Playwright `permissions`, `responsive`, `ui-resilience`, `critical-path` — same clean checkouts | this branch **44 passed, 1 failed**; `origin/main` **44 passed, 1 failed** — the same test (§4) |
+| 13 | Same Playwright suites on the trial integration branch (sales + finance) vs the sales head `aa9ef8c` alone | trial **32 passed, 2 failed**; sales alone **32 passed, 2 failed** — the same two: the dispatch test above and `permissions` "UAT Sales sees only the modules they hold" (the sales registry moved Orders; pre-existing on the sales branch) |
+| 14 | Trial integration branch: finance unit / DB | 36/36; **33/33, 0 skipped** |
 
-Mutation check: with the eligible-cash fix (§2) reverted, the lifecycle test fails; restored,
-it passes.
+Mutation checks: disabling the request↔line tracing in `ledger.ts` makes the first D1 test fail
+("available falls once"); restoring it passes. The earlier eligible-cash mutation check (first
+pass) still applies to the lifecycle test.
 
 ## 2. Financial lifecycle (area 3) — what the tests prove
 
@@ -52,44 +56,64 @@ it passes.
    opening balance …");
    four concurrent 4,000 allocations → exactly one succeeds; category total = opening balance.
 
+**D1 exactly-once** (`tests/finance/integration/exactly-once.test.ts`, closure pass) traces one
+6,000.00 payment against a 5,000.00 category through: request held for override (not a
+commitment) → approved (available −1,000) → transfer entered as a pending line before linking →
+"Record payment made" → the bank feed shows it pending (attached) → the statement shows it
+settled (SETTLES) → the same statement again: **available stays 4,000.00 from approval on**, one
+bank line, one PAYMENT entry. Also: bank feed before recording; release before paying; a failed
+transfer (line voided: the request reopens, nothing is freed until it is released); a rejected
+override; an unmatched pending card purchase (awaiting review until confirmed, then −450 once);
+races (one line cannot pay two requests; one request is paid once; four allocations of more than
+half the room → one). Cash, eligible, reserved, allocated and available at every step:
+`evidence/d1-balances.md`.
+
 The same path runs in the real UI (`workflow-ui.mjs` steps 7–10) with screenshots in
 `evidence/workflow/`.
 
-## 3. Controls: database vs service layer
+## 3. Controls: database vs service layer, and the trust boundary
 
-**Enforced by PostgreSQL** — tested by connecting as the application role `finance_app`
+**Enforced by PostgreSQL**, tested by connecting as the application role `finance_app`
 (`lifecycle.test.ts`, "database controls under the application role"):
 
 | Control | Mechanism | Evidence |
 |---|---|---|
-| Allocation ledger, allocation runs, finance audit log are append-only | `BEFORE UPDATE OR DELETE` triggers | UPDATE/DELETE on `AllocationEntry`, DELETE on `FinAuditLog` refused |
-| Bank lines are voided, never deleted | trigger | DELETE on `BankTransaction` refused |
-| Approved budget revisions and their lines are immutable | triggers | UPDATE of an approved `BudgetLine`, revert of an approved `BudgetRevision` refused |
-| Approval requests: no delete, decided requests frozen, decision needs a decider ≠ requester, request fields cannot be rewritten | `FinApprovalRequest_guard` | self-decision via raw SQL refused; delete refused; editing a decided request refused |
-| Budget revision approved only by someone other than its submitter | `BudgetRevision_four_eyes` | raw-SQL self-approval refused |
-| Allocation rule version activated only by someone other than its author | `AllocationRuleVersion_four_eyes` | (same mechanism; service tests cover the path) |
-| Amount signs, net = gross − fee, etc. | CHECK constraints | acceptance tests |
-| One allocation run per receipt, one live match per line/document, one active rule version per scope, one completed reconciliation per account/date | unique / partial unique indexes | acceptance tests |
-| App role cannot TRUNCATE, cannot disable triggers, is not superuser/owner | role privileges | `TRUNCATE` → permission denied; `ALTER TABLE … DISABLE TRIGGER` → must be owner |
+| Allocation ledger, runs, finance audit log append-only | `BEFORE UPDATE OR DELETE` triggers | UPDATE/DELETE refused |
+| Bank lines voided, never deleted | trigger | DELETE refused |
+| Approved budget revisions and their lines immutable | triggers | UPDATE/revert refused |
+| **No self-approval, no exception** | `FinApprovalRequest_guard`; the `allowSelfApproval` column and its helper were **dropped** (migration `20260926140000`); no setting or session variable is consulted | re-enabling (column gone), re-adding the column, replacing the guard function, dropping or disabling the trigger, `SET session_replication_role = replica`: all refused; a raw-SQL self-decision refused |
+| Requests are born pending | same trigger on INSERT | a forged, already-APPROVED request refused |
+| Approval-gated states only through an approved four-eyes request | `PaymentReservation_override_approval`, `BudgetRevision_four_eyes`, `AllocationRuleVersion_four_eyes`, `AllocationEntry_transfer_approval`, `FinBudget_reopen_approval` | releasing a held payment, approving a revision (even naming another decider) and inserting a transfer entry directly: all refused |
+| Nothing changes when a bypass fails | — | an md5 snapshot of 9 tables (requests, revisions, budgets, reservations, allocation entries, rule versions, audit log, bank lines, settings) is identical before and after all the attempts |
+| Named approver ≠ requester | service (`createApproval`) | "cannot be the approver of your own request" |
+| Signs, net = gross − fee, … | CHECK constraints | acceptance tests |
+| One run per receipt, one live match per line/document, one active rule version, one completed reconciliation per account/date | (partial) unique indexes | acceptance tests |
+| App role privileges | DML only; no TRUNCATE/TRIGGER/REFERENCES; owns nothing | TRUNCATE → permission denied; DISABLE TRIGGER / DROP TRIGGER / CREATE OR REPLACE FUNCTION → must be owner |
 
-Limits of the database controls, stated plainly:
+**Enforced only in the service layer** (every route goes through `financeHandler`; tested over
+HTTP): which duty may prepare, approve, allocate, reconcile, close, manage settings; branch scope
+(404 outside); routing to the named approver; spending limits and available balances;
+validation; statement matching; idempotency keys; the pool advisory lock.
 
-- A table **owner or superuser bypasses all of this** (can disable triggers). Production must
-  run the application as a non-owner role (ENVIRONMENT.md §6). This is not yet the case on
-  the shared Neon databases as far as this work could tell (not inspected — not connected).
-- The database checks the **recorded** decider id; it cannot know which human is connected. It
-  stops bugs and accidental self-approval, not a malicious SQL session that writes another
-  user's id.
-- `FinSettings.allowSelfApproval` is writable by `finance_app`. The service audits changes and
-  requires `settings_manage`, but a raw SQL session could turn it on. Production follow-up:
-  column privilege or a trigger that requires an approval to change it.
+**Trust boundary — what the database does not and cannot protect against:**
 
-**Enforced only in the service layer** (every API route goes through `financeHandler` →
-module + sub-privilege check; tested over HTTP in `tests/finance/http/`):
-who may prepare, approve, allocate, reconcile, close periods, manage settings; branch scope
-(out-of-scope records → 404); routing of overrides to the named approver; spending limits and
-available-balance checks; amount/phasing/date validation; statement-matching rules; idempotency
-keys; the pool advisory lock (a PostgreSQL feature, invoked by the service).
+1. **The application's word about who is acting.** The database compares the ids it is given
+   (`requestedBy`, `decidedBy`, `approvedBy`); it cannot authenticate a human. Code, or anyone
+   holding the `finance_app` credential, could record a different employee as the decider.
+   What stops that: authentication in the application; the credential kept out of reach of
+   users; and the append-only audit log, which records every decision with its actor and cannot
+   be edited by the application role. Forging therefore leaves a permanent record naming the
+   impersonated person.
+2. **Privileged database administrators.** A table owner or superuser — locally
+   `finance_local`; on Neon, by default, `neondb_owner` — can disable or drop the triggers,
+   replace the guard functions, rewrite rows and truncate the audit log. These controls do not
+   constrain them and are not meant to. Production requirements: run the application as a
+   separate non-owner role (like `finance_app`); keep the owner credential only for migrations,
+   held by named administrators; rely on Neon's point-in-time restore and the provider's
+   project audit trail for owner actions. None of this can be verified from here; the live
+   database was not connected to (ENVIRONMENT.md §1).
+3. **Migrations** run as the owner. A malicious migration could remove every control, so
+   migrations need the same review as code.
 
 ## 4. Shared code and existing consumers (area 4)
 
@@ -109,19 +133,25 @@ existing money/date helpers are untouched and no file outside the finance folder
 anything from `src/lib/finance` (grep). Their unit tests cover halala conversion, rounding
 (largest remainder), Riyadh date boundaries (21:00 UTC = next day) and month boundaries.
 
-**Existing regression suites** (`npm run regression`, 26 suites, 2,267 assertions) were run
-against a production build of this branch on a separate disposable database `erp_e2e`, then
-against a production build of unmodified `origin/main` on a freshly seeded copy of the same
-database (baseline, detached scratch worktree, removed afterwards):
+**Existing suites, clean checkouts.** The regression harness is designed to run from a
+checkout without a developer `.env`, taking everything from the process environment (its
+self-test runs the shipped validator from the repository root with a scrubbed environment).
+Two detached, disposable worktrees were therefore used — this branch at `90b64ae` and
+`origin/main` at `4640cbe` — each with its own disposable database (`erp_e2e`,
+`erp_mvp_test`), migrated and seeded with random PINs held only in session scratch files, built
+and served with environment-only configuration. The working `.env` and the tests were not changed.
 
-| Suite | This branch | `origin/main` baseline | Cause |
+| | This branch `90b64ae` | `origin/main` `4640cbe` | Classification |
 |---|---|---|---|
-| 21 suites (incl. `hardening`, `platform-hardening`, `h2a-hardening`, `h2b-hardening` — authentication, sessions, PIN credentials, authorization) | pass | pass | — |
-| `workflow-alignment`, `production-concurrency`, `lifecycle-locks`, `reset-safety` | fail (27 assertions) | **fail, identical assertions** | pre-existing / environment (`reset-safety` needs training-reset configuration) |
-| `harness-selftest` | 2 assertions fail | pass | environmental: its "wholly unconfigured environment" case runs `scripts/validate-env.ts`, which loads `.env` from the checkout (`dotenv/config`); this worktree has a local `.env`, the baseline checkout had none |
+| `harness-selftest` | 375/375 | 375/375 | resolved (earlier failure was the worktree's `.env`) |
+| 21 other suites incl. `hardening`, `platform-hardening`, `h2a-hardening`, `h2b-hardening` (auth, sessions, PINs, authorization) | pass | pass | — |
+| `workflow-alignment`, `production-concurrency`, `reset-safety` | fail | fail — identical assertions | **baseline** (pre-existing; `reset-safety` needs training-reset configuration) |
+| `lifecycle-locks` | 3 fail (+1 flaky) | 3 fail | **baseline**; the extra "concurrent work overlapped rather than serializing" is a timing heuristic — rerun three times on this branch: pass, fail (37 vs 15 ms), pass; it also failed on `origin/main` in the first baseline |
+| Playwright `permissions`, `responsive`, `ui-resilience`, `critical-path` | 44 passed, 1 failed | 44 passed, 1 failed | **baseline**: the same test fails on both — `critical-path` "Dispatch ships the order in full and it completes" (the delivery form's unit label is hidden) |
 
-The Playwright UI suites under `tests/e2e/` were not run (they need the full seeded UI
-environment); `tests/e2e/permissions.spec.ts` builds roles from the same constants.
+No regression introduced by Finance was found. The sales branch's own shell navigation suite
+(`test:shell`) was **not** run: its guard binds it to the `sales_preview` database on Neon
+endpoint `ep-wandering-leaf-aqjtuin5`, a production-derived branch this work does not connect to.
 
 **First grant without a circular dependency** (`tests/finance/http/admin-grant.test.mjs`):
 an administrator whose stored permissions predate Finance gets 403 on Finance; through the
@@ -144,7 +174,7 @@ Local only: `npm run db:local`, `npm run build`, `npx next start -p 3040`,
    before review". Classification "Other operating receipt", budget line "مقبوضات تشغيلية أخرى",
    **Save and mark reviewed** → **Allocate by approved rules**. Expect the allocation summary
    and a remaining unallocated amount.
-2. *Preparer* → Monthly budget → **New budget** (next month, empty) → **Edit lines** → add Rent
+2. *Preparer* → Monthly budget → month selector → **+ New budget…** (next month, empty) → **Edit lines** → add Rent
    12,000.00 due on the 1st → **Save draft** → **Submit for approval**. Try to approve it from
    Approvals: the preparer cannot see it as decidable.
 3. *Approver* → Approvals → open the budget → **Approve**.
@@ -155,7 +185,9 @@ Local only: `npm run db:local`, `npm run build`, `npx next start -p 3040`,
 6. *Preparer* makes the transfer **in online banking (outside the app)**, then Transactions →
    **Manual entry**: account SNB-CUR, −31,200.00, status **Pending**, bank reference
    `TRF-AC771`, description → Save; open it, classify as supplier payment / green coffee →
-   Save and mark reviewed.
+   Save and mark reviewed. Cash allocation → the company pool card now says one outgoing line
+   matches an approved request not yet recorded (counted once) — **unallocated is the same as
+   after step 5**: the payment is not subtracted twice.
 7. *Preparer* → Cash allocation → the open request → **تسجيل الدفع المنفّذ / Record payment
    made**. Read the dialog text: the app sends no money. Choose the pending −31,200.00 line →
    **Record**. The request leaves the open list; the category is reduced; unallocated cash is
@@ -170,24 +202,40 @@ Local only: `npm run db:local`, `npm run build`, `npx next start -p 3040`,
 10. *Either* → Reports & settings → Audit log: the budget, approvals, reservation, payment and
     `statement_confirmed` events with users and times.
 
-## 6. Verified locally vs ready for live integration
+## 6. Closure table
 
-**Verified locally (this machine, disposable databases, production build):** everything in
-§1–§5; Figma parity as recorded in FIGMA_PARITY.md (with the differences and decisions listed
-there); guards refusing non-disposable targets.
+| # | Issue | Fix or decision | Evidence | Status |
+|---|---|---|---|---|
+| 1 | The application role could enable self-approval (`FinSettings.allowSelfApproval`) | Exception removed: column and helper dropped; guards consult no setting or session variable; requests born pending; approval-gated states (held payment, rule activation, revision approval, category transfer, period reopen) require an APPROVED request decided by someone else; named approver ≠ requester (`20260926140000_finance_strict_four_eyes`, `d954c78`) | `lifecycle.test.ts` "no self-approval bypass" as `finance_app`: every bypass refused; 9-table snapshot unchanged; legitimate approval still works | **Closed** at the database boundary for the application role. Residual trust (§3): the recorded actor id, privileged DB administrators, migrations |
+| 2 | D1 — commitments before settlement, exactly once | Implemented (`exactly-once.ts`, `ledger.ts`, import `SETTLES`, request↔line tracing, awaiting-review class) | `exactly-once.test.ts` (5 scenarios incl. races) with per-step balances in `evidence/d1-balances.md`; unit tests; mutation check | **Closed** |
+| 3a | Straightforward visual discrepancies | App aligned to Figma: typography (line height), FIN-03 branch tables and title, FIN-04 toolbar and variance card, FIN-08 empty state and duplicate-reference warning, dialog labels | FIGMA_PARITY.md §1, §3 (FIN-01 geometry within 1–4 px), parity side-by-sides | **Closed** |
+| 3b | Genuine design/usability choices | D2, D3a, D3b, D4a, D4b, D5, D6, D7 — one sheet with crops, impact and a recommendation each | DECISIONS.md | **Open — needs your decision**; FIN-02/03/04/05/06 stay "Differs" |
+| 4 | Which database serves www.beanflow.net | Read-only evidence: Vercel `flow-com` production deployment `dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq` (main `4640cbe`) → Neon `dark-lab-61530722` / branch `br-weathered-bread-aqais7hp` / endpoint **`ep-dawn-dust-aqn1u1uf`** (woken by one `/api/health` GET) | ENVIRONMENT.md §1 | **Resolved**. Owner action: `CLAUDE.md` (not modified) labels it "demo" and names a non-existent production endpoint; the main checkout's `.env` points at production. Guards unchanged |
+| 5a | Approved sales/navigation integration commit | None exists (no PR, no remote integration branch; `ui-ux-alignment` unpushed and moving) | SALES_INTEGRATION.md §4 | **Blocked — dependency on an approval** |
+| 5b | Five sales-collection tests | Implemented and passing on the disposable local branch `trial/finance-sales-integration-20260926` (merge `71b3043` of sales `aa9ef8c` + finance `4bb76bb`; head `04419a7`); specs complete and skipped on this branch; patches in `docs/finance/integration/` | trial: finance DB 33/33, 0 skipped; SALES_INTEGRATION.md §5 | **Verified on the trial branch only** |
+| 5c | `aeb384a` | Ordinary commit on `feature/finance-cash-budget`, parent `597dd9c`; documents a trial merge; not a merge commit; no trial branch existed then | `git log`, SALES_INTEGRATION.md §6 | **Answered** |
+| 6a | `harness-selftest` failure | Run in the intended isolated configuration: clean checkout, no `.env`, environment-only configuration | 375/375 on this branch and on `origin/main` | **Closed** |
+| 6b | Existing Playwright + regression suites | Clean checkouts of this branch and `origin/main`, disposable databases | §4: identical to baseline; one baseline Playwright failure, one flaky timing assertion | **Closed** — no Finance regression found, on this branch or on the integration; `test:shell` not runnable (preview database on Neon) |
 
-**Not ready for live integration until:**
+**Commits on `feature/finance-cash-budget` (local, not pushed):** `597dd9c` checkpoint → `aeb384a` →
+`d954c78` four-eyes + D1 → `4bb76bb` environment evidence → `6991fb8` sales specs and patches →
+`90b64ae` visual alignment → closure documentation commit.
 
-1. The owner resolves the Neon endpoint classification (ENVIRONMENT.md §1) and names the target.
-2. The sales branch is merged first and this branch is rebased/merged on top, resolving the
-   five conflicts and the navigation registry (SALES_INTEGRATION.md), then the planned
-   sales-collection tests are implemented and pass.
-3. Migrations are rehearsed on a Neon **branch copy** of the target, with a backup, and the
-   application connects as a non-owner role (ENVIRONMENT.md §6); `allowSelfApproval` protected.
-4. Product decisions D1–D7 (FIGMA_PARITY.md §4) are taken; D1 (pending outflows reduce
-   eligible cash) is a business rule.
-5. The Playwright UI suites and a manual pass run on the integrated branch.
-6. Known gaps accepted or scheduled: CSV only (no bank connector); receipts matched to orders
-   without invoice values; no payroll module; accrual view off; server error messages in English;
-   no cost-centre screen; `/dashboard/finance` not selectable as an employee's default route
-   (same as Accounting).
+## 7. Verified locally vs ready for live integration
+
+**Verified locally** (disposable databases, production builds, Chrome emulation): everything in
+§1–§6 marked Closed; the sales-collection behaviour on the trial branch.
+
+**Not ready for live integration.** Remaining blockers:
+
+1. **Decisions D2–D7** (DECISIONS.md) — material UI differences stay unresolved until you accept
+   or reject each recommendation.
+2. **Approved integration commit** for sales/navigation — then apply the patches there, remove
+   the five skips, and run the suites (incl. `test:shell` in its own environment).
+3. **Production database roles** — confirm the application connects to `ep-dawn-dust` as a
+   non-owner role and that the owner credential is restricted (§3); cannot be verified from here.
+4. **Migration rehearsal** on a Neon branch copy of `ep-dawn-dust`'s branch, with a backup, by
+   someone authorised to touch it.
+5. Known functional gaps unchanged: CSV import only (no bank connector); receipts matched to
+   orders without invoice values; no payroll module; accrual view off; English server error
+   detail; no cost-centre screen; `/dashboard/finance` not selectable as a default route.

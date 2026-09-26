@@ -84,7 +84,7 @@ local targets only, opens a read-only session to confirm what it actually reache
 .env      DIRECT_URL    (same)                                                                                          connected: db=erp_finance_dev pg=17.10 marker=ok
 .env.test DATABASE_URL  host=127.0.0.1 port=54329 database=erp_finance_test user=f…(13) password=present  class=LOCAL DISPOSABLE  connected: db=erp_finance_test pg=17.10 marker=ok
 .env.test DIRECT_URL    (same)                                                                                          connected: db=erp_finance_test pg=17.10 marker=ok
-../ERP/.env DATABASE_URL host=ep-dawn-dust-aqn1u1uf-pooler.…  class=SHARED NEON — POTENTIALLY PRODUCTION  not connected
+../ERP/.env DATABASE_URL host=ep-dawn-dust-aqn1u1uf-pooler.…  class=LIVE PRODUCTION — serves www.beanflow.net (verified 2026-09-26; never use)  not connected
 ```
 
 There is no `SHADOW_DATABASE_URL`; `prisma migrate deploy` does not use a shadow database.
@@ -128,12 +128,14 @@ running" → start → both databases reachable, markers intact, data preserved.
 
 To remove everything: stop the server, then delete `.local-postgres/` in this worktree.
 
-## 5. Other disposable database used for verification
+## 5. Other disposable databases used for verification
 
-`erp_e2e` on the same local server (marker `hiqbah-regression-disposable`) was created only to
-run the repository's existing backend regression suites, which have their own guard
-(`ERP_TEST_DATABASE_URL` + name allowlist, never `DATABASE_URL`). It held seed data generated
-with random PINs kept in the session scratchpad, and was dropped after the run.
+All on the same local server, all loopback-only:
+
+| Database | Marker | Used for | State |
+|---|---|---|---|
+| `erp_e2e`, `erp_mvp_test` | `hiqbah-regression-disposable` | the repository's own backend regression and Playwright suites, which have their own guards (`ERP_TEST_DATABASE_URL` / exact-name allowlists, never the developer `.env`); seeded with random PINs held only in session scratch files | **dropped** after the runs; the scratch env files deleted |
+| `erp_finance_integration` | `hiqbah-finance-disposable` | the disposable sales + finance integration branch (SALES_INTEGRATION.md §4); allowed only by that branch's copy of the guard | kept with the trial branch; drop with `DROP DATABASE erp_finance_integration` when the branch is deleted |
 
 ## 6. What production needs that this environment does not prove
 

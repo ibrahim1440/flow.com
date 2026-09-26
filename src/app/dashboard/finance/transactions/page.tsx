@@ -429,6 +429,8 @@ function ManualDialog({ open, onClose, accounts, onDone }: { open: boolean; onCl
     catch (e) { setServerErr((e as Error).message); } finally { setBusy(false); }
   }
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const ref = f.bankReference.trim();
+  const sameRef = useApi<{ total: number }>(ref.length >= 3 && f.cashAccountId ? withBranch(`/api/finance/transactions?take=1&accountId=${encodeURIComponent(f.cashAccountId)}&reference=${encodeURIComponent(ref)}`, branch) : null);
   return (
     <Dialog open={open} onClose={onClose} title={L("قيد يدوي", "Manual entry")} sub={L("سطر بنكي أو نقدي فعلي. للمبالغ الصادرة استخدم إشارة سالبة.", "An actual bank or cash line. Use a negative amount for money out.")}>
       <Field label={L("الحساب", "Account")}><select className={INPUT} value={f.cashAccountId} onChange={set("cashAccountId")}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
@@ -440,6 +442,12 @@ function ManualDialog({ open, onClose, accounts, onDone }: { open: boolean; onCl
         <Field label={L("الحالة", "Status")}><select className={INPUT} value={f.status} onChange={set("status")}><option value="CONFIRMED">{L("مؤكد", "Confirmed")}</option><option value="PENDING">{L("معلّق", "Pending")}</option></select></Field>
         <Field label={L("المرجع البنكي", "Bank reference")}><input className={INPUT} value={f.bankReference} onChange={set("bankReference")} /></Field>
       </div>
+      {sameRef.data && sameRef.data.total > 0 && (
+        <Notice tone="warn">
+          <p className="font-bold">{L("يوجد سطر بالمرجع نفسه في هذا الحساب", "A line with the same reference exists on this account")}</p>
+          <p className="text-xs">{L("سيُحفظ ويُعلَّم للمراجعة كتكرار محتمل — لا يُرفض تلقائياً.", "It will be saved and flagged for review as a possible duplicate — not rejected automatically.")}</p>
+        </Notice>
+      )}
       <Field label={L("الوصف", "Description")}><input className={INPUT} value={f.description} onChange={set("description")} /></Field>
       <Field label={L("الطرف", "Counterparty")}><input className={INPUT} value={f.counterparty} onChange={set("counterparty")} /></Field>
       {serverErr && <Notice tone="bad">{serverErr}</Notice>}

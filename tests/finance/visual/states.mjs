@@ -87,7 +87,7 @@ try {
     const { ctx, page } = await session("fin.viewer", 1440);
     await page.goto(`${BASE}/dashboard/finance`);
     await page.getByText("لا توجد حسابات بنكية أو نقدية بعد").waitFor();
-    await shot(page, "STATE-empty-1440", "fin.viewer: Finance access, no branch access → empty scope; real EmptyState, no interception");
+    await shot(page, "STATE-empty-1440", "fin.viewer: Finance access, no branch access → empty scope; no set-up actions for a user who cannot set Finance up");
     await ctx.close();
   }
   // Validation — manual entry with an invalid amount.
@@ -103,9 +103,45 @@ try {
     await shot(page, "STATE-validation-dialog", "Manual entry: 3-decimal amount and empty date → field errors, nothing saved", { element: "[role=dialog]" });
     await d.getByLabel("المبلغ (سالب للمبالغ الصادرة)").fill("-250.00");
     await d.getByLabel("التاريخ").fill("2030-01-01");
+    const acc = d.getByLabel(/^الحساب/).first();
+    const ao = await acc.locator("option").allTextContents();
+    await acc.selectOption({ index: ao.findIndex((o) => o.includes("SNB-CUR")) });
+    await d.getByLabel("المرجع البنكي").fill("TRF88213");
+    await page.waitForTimeout(700);
     await d.getByRole("button", { name: "حفظ" }).click();
     await page.waitForTimeout(400);
-    await shot(page, "STATE-validation-future-confirmed", "Manual entry: a CONFIRMED line dated in the future is refused (record it as pending)", { element: "[role=dialog]" });
+    await shot(page, "STATE-validation-future-confirmed", "Manual entry: a CONFIRMED line dated in the future is refused; a reference already on the account is flagged inline (as in FIN-08)", { element: "[role=dialog]" });
+    await ctx.close();
+  }
+  // Empty, as the person who sets Finance up sees it: a new branch with no accounts yet.
+  // Built through the real APIs: the pre-Finance administrator grants new.preparer Finance
+  // settings duties (Employees), and the Finance manager gives them access to a new branch.
+  {
+    const admin = await session("legacy.admin", 1440);
+    const r = await admin.page.evaluate(async () => {
+      const staff = await (await fetch("/api/employees")).json();
+      const e = staff.find((x) => x.username === "new.preparer");
+      const perms = typeof e.permissions === "string" ? JSON.parse(e.permissions) : e.permissions;
+      const keys = ["txn_enter", "reconcile", "budget_prepare", "budget_approve", "allocate", "transfer_approve", "spend_override_approve", "period_close", "all_branches", "settings_manage"];
+      perms.finance = { access: "edit", sub: Object.fromEntries(keys.map((k) => [k, ["settings_manage", "budget_prepare", "txn_enter"].includes(k)])) };
+      return (await fetch(`/api/employees/${e.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: e.name, role: e.role, permissions: perms }) })).status + ":" + e.id;
+    });
+    await admin.ctx.close();
+    const [status, empId] = r.split(":");
+    if (status !== "200") throw new Error("grant failed " + status);
+    const mgr = await session("fin.manager", 1440);
+    const ok = await mgr.page.evaluate(async (employeeId) => {
+      const j = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((x) => x.json());
+      const br = await j("/api/finance/setup/branches", { code: "WH", nameEn: "Warehouse", nameAr: "المستودع" });
+      const res = await j("/api/finance/setup/branch-access", { employeeId, branchId: br.id, grant: true });
+      return !!res.ok;
+    }, empId);
+    await mgr.ctx.close();
+    if (!ok) throw new Error("branch access failed");
+    const { ctx, page } = await session("new.preparer", 1440);
+    await page.goto(`${BASE}/dashboard/finance`);
+    await page.getByText("لا توجد حسابات بنكية أو نقدية بعد").waitFor();
+    await shot(page, "STATE-empty-setup-1440", "A user who can set Finance up, on a new branch with no accounts: both set-up actions offered (as in FIN-08)");
     await ctx.close();
   }
   // No permission.
