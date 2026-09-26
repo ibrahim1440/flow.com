@@ -1894,6 +1894,7 @@ model CommissionPlanVersion {
   assignments   CommissionAssignment[]
   accruals      CommissionAccrual[]
 
+  ledgerEntries  CommissionLedgerEntry[]
   createdById   String?
   createdAt     DateTime           @default(now())
 
@@ -1975,6 +1976,8 @@ model CollectionEvent {
   note          String?
 
   accruals      CommissionAccrual[]
+
+  ledgerEntries  CommissionLedgerEntry[]
   /// The finance-verified receipt that produced this event, when one did. Sandbox events
   /// have none, which is how the two sources stay tellable apart.
   salesCollection SalesCollection?    @relation("CollectionCommissionEvent")
@@ -2055,7 +2058,9 @@ model CommissionLedgerEntry {
 
   accrualId   String?
   accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id])
-  /// The entry this one corrects or reverses.
+  /// A single entry this one corrects. Kept for the manual `adjust` path, which targets at
+  /// most one. Engine reversals use `corrects` below, because one negative movement can
+  /// compensate several earlier ones once tiers or splits are involved.
   correctsId  String?
 
   periodStart DateTime
@@ -2063,11 +2068,67 @@ model CommissionLedgerEntry {
   currency    String            @default("SAR")
   reason      String?
 
+  /// ── Durable provenance ───────────────────────────────────────────────────────────
+  ///
+  /// Written once, at the moment of the movement, and never updated. The accrual row is a
+  /// mutable projection of what an event currently contributes; these fields are the
+  /// immutable record of what was actually awarded when the money moved, so a later
+  /// recomputation cannot restate history. Null on entries written before this existed and
+  /// on manual adjustments, which have no engine computation behind them.
+  collectionEventId    String?
+  collectionEvent      CollectionEvent?       @relation(fields: [collectionEventId], references: [id])
+  planVersionId        String?
+  planVersion          CommissionPlanVersion? @relation(fields: [planVersionId], references: [id])
+  /// The share of this event's qualifying base that this movement was computed on.
+  qualifyingBase       Decimal?               @db.Decimal(18, 2)
+  sharePercent         Decimal?               @db.Decimal(5, 2)
+  /// The period's effective rate at the time — which is why a tiered month's marginal
+  /// amount is not simply base x headline rate.
+  effectiveRatePercent Decimal?               @db.Decimal(9, 6)
+
+  /// What this movement compensates, and by how much of itself. A partial reversal, a
+  /// split across two earners, or a tier change that reaches back over several earlier
+  /// movements all produce more than one row here.
+  corrects    CommissionLedgerCorrection[] @relation("CorrectingEntry")
+  correctedBy CommissionLedgerCorrection[] @relation("CorrectedEntry")
+
   actorId     String?
   createdAt   DateTime          @default(now())
 
   @@index([employeeId, periodStart])
   @@index([type, createdAt])
+  @@index([collectionEventId])
+  @@index([accrualId])
+}
+
+/// Which earlier movement a negative movement compensates, and by how much.
+///
+/// A join table rather than a second nullable column because the relationship is genuinely
+/// many-to-many in amount: reversing one collection in a tiered month lowers the period's
+/// effective rate, so the single negative delta pays back part of its own event's movement
+/// AND part of movements belonging to other events. Recording one `correctsId` would have
+/// to pick one of them and silently drop the rest.
+///
+/// Allocation is decided at write time from the append-only log, never reconstructed later
+/// by matching amounts or timestamps.
+model CommissionLedgerCorrection {
+  id        String @id @default(cuid())
+
+  /// The negative movement doing the compensating.
+  entryId   String
+  entry     CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
+
+  /// The earlier movement being compensated.
+  correctsEntryId String
+  corrects        CommissionLedgerEntry @relation("CorrectedEntry", fields: [correctsEntryId], references: [id], onDelete: Restrict)
+
+  /// A positive figure: how much of `entry` is applied against `corrects`. The rows for one
+  /// entry sum to at most the absolute value of that entry's amount.
+  amount    Decimal @db.Decimal(18, 2)
+  createdAt DateTime @default(now())
+
+  @@unique([entryId, correctsEntryId])
+  @@index([correctsEntryId])
 }
 
 /// A monthly sales target for a person. Deliberately separate from commission: hitting

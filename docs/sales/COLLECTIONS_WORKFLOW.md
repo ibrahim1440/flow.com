@@ -369,3 +369,72 @@ The constraints are not decoration; each is tested by attempting the write:
 
 `prisma migrate deploy` is **not** part of `npm run build`; the build is
 `validate-env && prisma generate && next build`.
+
+---
+
+## 11. Provenance: what each record is for
+
+The two halves of the commission model answer different questions, and conflating them is
+what made a reversal hard to audit.
+
+| | Contract | Mutable? |
+| --- | --- | --- |
+| `CommissionAccrual` | What one collection event **currently** contributes to a period | **Yes, while `ACCRUED`.** Frozen the moment it is `APPROVED` or `PAID` |
+| `CommissionLedgerEntry` | A **movement** — money recognised or given back at a point in time | **No.** Append-only |
+
+The accrual is deliberately a projection. `postDelta` replaces its base, split and effective
+rate and increments its amount, so reversing a collection walks its row back towards zero
+and the rows of a period keep summing to the period's total. That is why reconciliation
+compares the ledger against the accrual rows *less the frozen-and-since-reversed ones*: an
+approved row keeps the figure it was approved at while the ledger moves on.
+
+The gap this closes: **the immutable half recorded no provenance.** A ledger row held an
+amount, an employee and a period. The accrual it came from could legitimately be recomputed
+afterwards, so once that happened nothing anywhere recorded what a movement had been awarded
+on — and a negative row could be tied to the positive it compensated only by comparing
+amounts and clocks.
+
+### What a movement now carries
+
+Written once, at the moment of the movement, and never updated:
+
+| Field | What it fixes |
+| --- | --- |
+| `collectionEventId` | Which receipt the money came from |
+| `accrualId` | Which accrual row it belongs to |
+| `planVersionId` | Which plan governed it — a later plan revision cannot restate it |
+| `qualifyingBase` | The share of that event's net the movement was computed on |
+| `sharePercent` | The split in force at the time |
+| `effectiveRatePercent` | The period's effective rate, which is why a tiered month's marginal amount is not base × headline rate |
+
+### What a reversal compensates
+
+`CommissionLedgerCorrection` joins a negative movement to the earlier movements it pays
+back, **with the amount applied to each**. A join table rather than one nullable column
+because the relationship is genuinely many-to-many in amount: reversing one collection in a
+tiered month lowers the whole period's effective rate, so a single negative delta pays back
+part of its own event's movement *and* part of movements belonging to other events.
+
+Allocation happens at write time, in a defined order: **the reversed event's own earlier
+movements first**, because that is where the money demonstrably came from, then the rest of
+the period oldest-first, because the append-only log is the only defensible order in which
+to unwind a tier change. Each target takes what it has left, so a partial reversal stops
+part-way through one target and a split or tier change reaches across several.
+
+Nothing consults an amount or a timestamp to *decide* correspondence — the event id does
+that. Whatever cannot be allocated is reported as `unallocatedReversal` on the review
+screen rather than hidden.
+
+### Historical rows
+
+`scripts/sales-preview/backfill-ledger-provenance.ts` links only what is provable: an
+(employee, period) holding exactly one accrual has exactly one candidate. On the preview
+database that was **1 movement of 24**; 18 are permanently ambiguous (two periods holding
+9 movements against 2 and 5 accruals) and 5 are adjustments and payouts with no engine
+accrual behind them. Reversal targets are not backfilled at all.
+
+Even for the provable one it copies only the three **stable** identities — accrual,
+collection event, plan version. It does not copy the base, split or rate, because the
+accrual is a projection and its present values are not evidence of what a movement was
+computed on months ago. Those stay null, which is honest where a plausible number would not
+be.

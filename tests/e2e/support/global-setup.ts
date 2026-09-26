@@ -91,6 +91,7 @@ async function teardown() {
   await withDb(async (db) => {
     const q = (sql: string) => db.query(sql);
 
+    await q(`DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" IN (${CRM_EMPLOYEES})) OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" IN (${CRM_EMPLOYEES}))`);
     await q(`DELETE FROM "CommissionLedgerEntry" WHERE "employeeId" IN (${CRM_EMPLOYEES})`);
     await q(`DELETE FROM "CommissionAccrual" WHERE "employeeId" IN (${CRM_EMPLOYEES})`);
     await q(`DELETE FROM "CollectionEvent" WHERE "externalRef" LIKE '${TAG}%'`);

@@ -96,6 +96,7 @@ async function cleanup() {
   // actually puts in the data.
   const prefix = `${P}%`;
   for (const sql of [
+    `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%') OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%')`,
     `DELETE FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CommissionAccrual" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CollectionEvent" WHERE "externalRef" LIKE '${P}%'`,

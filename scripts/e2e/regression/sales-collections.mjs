@@ -121,6 +121,7 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM "CollectionEvidence" WHERE "uploadedById" LIKE '${P}%'`,
     `DELETE FROM "SalesCollection" WHERE "submittedById" LIKE '${P}%'`,
+    `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%') OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%')`,
     `DELETE FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CommissionAccrual" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CollectionEvent" WHERE "opportunityId" IN (SELECT id FROM "Opportunity" WHERE title LIKE '${P}%')`,
@@ -962,6 +963,98 @@ async function main() {
       S(over.json?.error ?? over.json?.message).slice(0, 140));
     const exact = await submit(repA, uOpp, 575);
     check("and exactly the capacity is accepted", exact.status === 201, S(exact.status));
+  }
+
+
+  {
+    sub("D12. every movement says where it came from, and every reversal what it pays back");
+    //
+    // A correct total is not a defensible one. Before this, the ledger — the append-only
+    // half of the model, the half that is supposed to BE the history — recorded an amount,
+    // an employee, a period and nothing else. The accrual row it came from is a projection
+    // that legitimately gets recomputed, so once it moved there was no record anywhere of
+    // what a movement had actually been awarded on, and a negative entry could be tied to
+    // the positive it compensated only by looking at amounts and clocks.
+    const { oppId: pOpp } = await mkDeal("prov", ids.repA, 2300, 300);   // net 2,000
+
+    const movements = (employeeId) =>
+      q(`SELECT l.id, l.type::text, l.amount::text, l."collectionEventId", l."accrualId",
+                l."planVersionId", l."qualifyingBase"::text base, l."sharePercent"::text share,
+                l."effectiveRatePercent"::text rate,
+                COALESCE((SELECT sum(x.amount) FROM "CommissionLedgerCorrection" x WHERE x."entryId" = l.id), 0)::text applied,
+                (SELECT count(*)::int FROM "CommissionLedgerCorrection" x WHERE x."entryId" = l.id) targets
+           FROM "CommissionLedgerEntry" l
+          WHERE l."employeeId" = $1 AND l."collectionEventId" IS NOT NULL
+          ORDER BY l."createdAt"`, [employeeId]);
+
+    // ── a partial collection, approved ──
+    const first = await submit(repA, pOpp, 1150);          // half the deal
+    const firstId = first.json.collectionId;
+    await decide(fin, firstId, "approve");
+    let m = await movements(ids.repA);
+    const m1 = m[m.length - 1];
+    check("the movement records the collection event it came from", !!m1.collectionEventId, S(m1));
+    check("and the accrual it belongs to", !!m1.accrualId, S(m1.accrualId));
+    check("and the plan version that governed it", !!m1.planVersionId, S(m1.planVersionId));
+    check("and the base it was computed on — half the deal's net", m1.base === "1000.00", S(m1.base));
+    check("and the split it was computed at", Number(m1.share) === 100, S(m1.share));
+    // The PERIOD's effective rate, not the headline one: this rep already has earlier
+    // collections this month, so the cumulative base has moved and the ratio carries the
+    // rounding of every step. What matters is that the figure was captured at all.
+    check("and the effective rate the period was at when it moved",
+      m1.rate !== null && Math.abs(Number(m1.rate) - 1) < 0.01, S(m1.rate));
+    check("10.00 on 1,000.00 at 1%", m1.amount === "10.00", S(m1.amount));
+
+    // ── the rest of the deal, approved ──
+    const second = await submit(repA, pOpp, 1150);
+    const secondId = second.json.collectionId;
+    await decide(fin, secondId, "approve");
+    m = await movements(ids.repA);
+    const m2 = m[m.length - 1];
+    check("the second movement points at its OWN event, not the first's",
+      m2.collectionEventId !== m1.collectionEventId, `${m2.collectionEventId} vs ${m1.collectionEventId}`);
+    check("with its own base", m2.base === "1000.00", S(m2.base));
+
+    // ── reverse the SECOND one: the compensation must name what it pays back ──
+    await decide(fin, secondId, "reverse", "D12 — traceability of a reversal");
+    m = await movements(ids.repA);
+    const rev = m[m.length - 1];
+    check("the reversal is negative", Number(rev.amount) < 0, S(rev.amount));
+    check("it names the event that was reversed", rev.collectionEventId === m2.collectionEventId,
+      `${rev.collectionEventId} vs ${m2.collectionEventId}`);
+    check("it is allocated, not left dangling", Number(rev.applied) > 0, S(rev.applied));
+    check("the allocation equals the whole reversal", Number(rev.applied) === -Number(rev.amount),
+      `${rev.applied} vs ${rev.amount}`);
+    const against = await q(
+      `SELECT x."correctsEntryId", x.amount::text FROM "CommissionLedgerCorrection" x WHERE x."entryId" = $1`,
+      [rev.id]);
+    check("and it compensates its own event's movement first",
+      against.some((a) => a.correctsEntryId === m2.id), S(against));
+    check("not the unrelated earlier one",
+      !against.some((a) => a.correctsEntryId === m1.id) || against.length > 1, S(against));
+
+    // ── replaying the reversal must add nothing at all ──
+    const beforeCount = (await q(`SELECT count(*)::int n FROM "CommissionLedgerCorrection"`))[0].n;
+    await decide(fin, secondId, "reverse", "D12 — replay");
+    const afterCount = (await q(`SELECT count(*)::int n FROM "CommissionLedgerCorrection"`))[0].n;
+    check("a replayed reversal writes no second allocation", afterCount === beforeCount,
+      `${beforeCount} → ${afterCount}`);
+
+    // ── the first collection is untouched by all of it ──
+    const m1After = (await movements(ids.repA)).find((x) => x.id === m1.id);
+    check("the first movement's recorded base is unchanged by the reversal",
+      m1After.base === "1000.00", S(m1After.base));
+    check("and it was not itself compensated", Number(m1After.applied) === 0, S(m1After.applied));
+
+    // ── and the period still reconciles, with traceability reported ──
+    const rev2 = await fin.api("/api/commissions/review");
+    const mine = (rev2.json?.employees ?? []).find((e) => e.employeeId === ids.repA);
+    if (mine) {
+      check("the period still reconciles", mine.reconciled === true, S(mine));
+      check("no reversal money is unaccounted for", mine.unallocatedReversal === "0.00", S(mine.unallocatedReversal));
+    } else {
+      check("the rep appears on the review screen", false, S((rev2.json?.employees ?? []).map((e) => e.employeeId)));
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
