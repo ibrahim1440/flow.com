@@ -65,6 +65,10 @@ for (const role of Object.keys(NAV_FOR) as RoleName[]) {
   test(`${ROLES[role].name} sees only the modules they hold`, async ({ page }) => {
     await loginAs(page, role);
     const nav = page.locator("nav");
+    // Grouped navigation renders a group's links only while it is open, and groups the
+    // current page is not in start closed. Open every group, then assert the same sets.
+    const closed = nav.locator('button[aria-expanded="false"]');
+    for (let i = 0; i < 20 && (await closed.count()) > 0; i++) await closed.first().click();
     for (const re of NAV_FOR[role].visible) {
       await expect(nav.getByRole("link", { name: re }), `${role} should see ${re}`).toHaveCount(1);
     }

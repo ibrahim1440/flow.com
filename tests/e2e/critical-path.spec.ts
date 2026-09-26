@@ -279,7 +279,9 @@ test("Dispatch ships the order in full and it completes", async ({ page }) => {
   // A SKU line must be offered in UNITS, not kilograms. Until GET /api/orders carried the
   // productSku relation the dispatch screen could not tell the two apart and offered
   // "Quantity (kg) — Max: 0", which no operator could ship from.
-  await expect(modal.getByText(/Units/i).first(), "the form asks for units, not kilograms").toBeVisible();
+  // The visible limit under the quantity field names the unit. (`getByText(/Units/i).first()`
+  // matched a hidden element before the visible hint and failed on a correct form.)
+  await expect(modal.getByText(/Max:s*d+s*units/i), "the form asks for units, not kilograms").toBeVisible();
   // The lot list is fetched when the dialog opens and takes a few seconds against a
   // remote database; until it lands the field is a spinner, not a select. Wait for the
   // real control rather than racing it — the earlier version silently picked up the
