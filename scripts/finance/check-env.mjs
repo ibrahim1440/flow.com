@@ -30,7 +30,7 @@ const mask = (s) => (s ? `${s[0]}…(${s.length})` : "—");
 function classify(u) {
   const h = u.hostname;
   const ep = SHARED_ENDPOINTS.find((e) => h.includes(e));
-  if (ep === "ep-dawn-dust-aqn1u1uf") return "SHARED NEON — POTENTIALLY PRODUCTION (do not use)";
+  if (ep === "ep-dawn-dust-aqn1u1uf") return "LIVE PRODUCTION — serves www.beanflow.net (verified 2026-09-26; never use)";
   if (ep) return `SHARED NEON (${ep}) — do not use`;
   if (/neon\.tech/.test(h)) return "HOSTED NEON (unknown branch) — do not use";
   if ((h === "127.0.0.1" || h === "localhost") && u.port === "54329") return "LOCAL DISPOSABLE (portable PostgreSQL)";

@@ -3,25 +3,41 @@
 Nothing in this branch's work connected to, migrated, seeded or tested against any Neon
 endpoint. Every database write went to a portable PostgreSQL on `127.0.0.1:54329`.
 
-## 1. Conflicting classifications of the shared Neon endpoints (unresolved)
+## 1. Which database serves www.beanflow.net — resolved by evidence (2026-09-26)
 
-The repository and its branches disagree about what `ep-dawn-dust-aqn1u1uf` is. This document
-records the disagreement; it does not resolve it, and the main checkout's `CLAUDE.md` was not
-modified.
+**Answer: `ep-dawn-dust-aqn1u1uf` is the live production database**, even though its Neon
+branch is named `hiqbah-demo-training-20260529` and two repository sources call it "demo".
+Every finance guard keeps refusing it (and every other shared endpoint).
 
-| Source | `ep-dawn-dust-aqn1u1uf` | Production is | Notes |
+Method — read-only, no database connection, no connection string read:
+
+| # | Evidence | Source | Result |
 |---|---|---|---|
-| `C:\Projects\ERP\CLAUDE.md` (main checkout, contains the owner's uncommitted edits) | **demo** — "the `.env` file should only ever contain the demo endpoint" | `ep-icy-field-aq4upc3z` | |
-| `prisma/seed.ts` on `origin/main` (`PROTECTED_ENDPOINTS`) | **"Demo / training — never from this path"** | `ep-jolly-feather-aqne6cp1` ("production-primary") | Says it was verified against the Neon control plane on 2026-09-16 and that `ep-icy-field-aq4upc3z` "exists in no project of this organization" |
-| `docs/sales/DATABASE_ISOLATION.md` on `feature/sales-crm-commissions` (read-only) | **"Production is `ep-dawn-dust-aqn1u1uf` on branch `br-weathered-bread-aqais7hp`, which is what serves www.beanflow.net"** | same, plus root branch `production` = `ep-jolly-feather-aqne6cp1` is "a different compute again" | Also repeats that `ep-icy-field` exists nowhere |
-| `C:\Projects\ERP\.env` (main checkout; host read only, never connected) | `DATABASE_URL` points here | — | |
+| 1 | Public response headers of `https://www.beanflow.net` | `curl -I` | `Server: Vercel`, `X-Powered-By: Next.js`, function region `iad1`; DNS `www.beanflow.net` → `vercel-dns-017.com` |
+| 2 | Vercel project owning the domain | Vercel API (existing authorisation), `get_project` | project **`flow-com`** (`prj_bBAuuOg4luOQYmkTls2nnQoAP6dG`), account scope `ibrahimmutambak-4927s-projects` (`team_z7AUzCwCyqrP3upYSGHOuX7q`); domains `www.beanflow.net`, `beanflow.net`, `flow-com-delta.vercel.app`, … |
+| 3 | Current production deployment | `list_deployments target=production state=READY` | **`dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq`**, created 2026-09-19 05:56 UTC from `main` @ **`4640cbe`** (the base of this branch), repo `ibrahim1440/flow.com` |
+| 4 | Database variables of that environment (names and metadata only, never decrypted) | `filter_project_envs decrypt=false` | Production: `DATABASE_URL` (id `utHcUVSmtDnNhptT`, type **sensitive** — Vercel never returns the value, so the host cannot be read from Vercel; last edited 2026-09-09 06:07 UTC), `JWT_SECRET`, `PIN_LOOKUP_SECRET`; **no production `DIRECT_URL`**. Preview-only, branch-scoped copies exist for `feature/sales-crm-commissions`, `release/rc-order-operations-20260906`, `-20260908` and `release/pre-go-live-20260904` |
+| 5 | Neon project, branches and computes | Neon control-plane API (metadata only; `describe_branch`, which queries the database, was not used) | Project **`hiqbah`** (`dark-lab-61530722`, `aws-us-east-1`). Branch **`production`** (`br-fragrant-poetry-aqd0ndyx`, endpoint `ep-jolly-feather-aqne6cp1` "production-primary"): suspended since **2026-09-17 11:56 UTC**, 86 KB transferred in its lifetime. Branch `hiqbah-demo-training-20260529` (`br-weathered-bread-aqais7hp`, endpoint `ep-dawn-dust-aqn1u1uf`): last active 2026-09-25 23:42 UTC, ~400 MB transferred; every `pre-go-live` / `pre-cutover` / `pre-migration` backup branch since 2026-09-17 was cut **from this branch** |
+| 6 | Which compute the live site wakes | one `GET https://www.beanflow.net/api/health` at 10:45:00 UTC (the public, unauthenticated uptime endpoint on `main`: bounded `SELECT 1`, no writes, returns only up/down) → HTTP 200 in 2.74 s (cold start; the route documents ~167 ms warm) | **`ep-dawn-dust-aqn1u1uf` compute started at 10:45:03 UTC**; `ep-jolly-feather-aqne6cp1` stayed suspended |
 
-**Treatment in this work:** `ep-dawn-dust-aqn1u1uf`, `ep-jolly-feather-aqne6cp1`,
-`ep-icy-field-aq4upc3z` and `ep-wandering-leaf-aqjtuin5` are all treated as potentially
-production. They are hard-coded as refused in `scripts/finance/local-db-guard.mjs`
-(`SHARED_ENDPOINTS`) in addition to the positive allowlist below. **Decision needed from the
-owner:** which endpoint serves www.beanflow.net, and whether `CLAUDE.md` should be corrected —
-the main checkout's `.env` currently points at the endpoint one source calls production.
+Non-secret identifiers of the live database: Neon project `dark-lab-61530722` (`hiqbah`),
+branch `br-weathered-bread-aqais7hp`, endpoint `ep-dawn-dust-aqn1u1uf`, hosts
+`ep-dawn-dust-aqn1u1uf.c-8.us-east-1.aws.neon.tech` / `…-pooler.c-8.us-east-1.aws.neon.tech`.
+Which of the two hosts the sensitive variable uses, and the database name inside it, cannot be
+read without decrypting the value; the owner can confirm both in the Vercel dashboard.
+
+Consequences the owner should act on (nothing was changed by this work):
+
+| Source | Says | Now known |
+|---|---|---|
+| `C:\Projects\ERP\CLAUDE.md` (owner's uncommitted edits) | `ep-dawn-dust` = demo; production = `ep-icy-field-aq4upc3z`; ".env should only ever contain the demo endpoint" | **Wrong on both.** `ep-icy-field` exists in no Neon project of this organisation. The main checkout's `.env` therefore points at production. |
+| `prisma/seed.ts` on `origin/main` | `ep-dawn-dust` = "Demo / training", `ep-jolly-feather` = production | Both are refused by the seed guard, so it is safe, but the labels are inverted in practice |
+| `docs/sales/DATABASE_ISOLATION.md` (sales branch) | `ep-dawn-dust` serves www.beanflow.net | **Correct** |
+| Neon branch `erp-regression-r1` (`ep-wandering-leaf-aqjtuin5`) | a regression target | A **child of the production branch** (production-derived data) and active today — treat as sensitive |
+
+Guards: `scripts/finance/local-db-guard.mjs` keeps `ep-dawn-dust-aqn1u1uf`,
+`ep-jolly-feather-aqne6cp1`, `ep-icy-field-aq4upc3z` and `ep-wandering-leaf-aqjtuin5` in
+`SHARED_ENDPOINTS`, in addition to the positive loopback-only allowlist.
 
 ## 2. Executable safeguards (not just `NODE_ENV`)
 
