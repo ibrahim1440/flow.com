@@ -46,36 +46,67 @@ async function expectPageRefused(page: Page, url: string, label: string) {
     .toBe("refused");
 }
 
-const NAV_FOR: Record<RoleName, { visible: RegExp[]; hidden: RegExp[] }> = {
+// Each module is identified by its route. The labels changed when navigation became
+// grouped ("Order Preparation" → "Order preparation", "Quotations and orders" for holders
+// of the sales module); the routes, and which roles may see them, did not.
+const M = {
+  orders: "/dashboard/orders",
+  prep: "/dashboard/workstation/preparation",
+  customers: "/dashboard/customers",
+  production: "/dashboard/production",
+  productionOrders: "/dashboard/production-orders",
+  qc: "/dashboard/qc",
+  packaging: "/dashboard/packaging",
+  dispatch: "/dashboard/dispatch",
+  employees: "/dashboard/employees",
+  leads: "/dashboard/sales/leads",
+  pipeline: "/dashboard/sales/pipeline",
+  followUps: "/dashboard/sales/activities",
+  quotes: "/dashboard/sales/quotes",
+  myCommissions: "/dashboard/sales/my-commissions",
+  plans: "/dashboard/commissions/plans",
+  review: "/dashboard/commissions/review",
+  targets: "/dashboard/sales/targets",
+  reports: "/dashboard/sales/reports"
+} as const;
+// Multi-page subunits (src/lib/nav/registry.ts): the sidebar links to one page the role may
+// open, and its siblings are offered on that page's contextual bar (the third level).
+const SUBUNITS: string[][] = [
+  [M.leads, M.customers],
+  [M.pipeline, M.followUps],
+  [M.quotes, M.orders],
+  [M.targets, M.reports, M.myCommissions, M.review, M.plans],
+];
+const NAV_FOR: Record<RoleName, { visible: string[]; hidden: string[] }> = {
   sales: {
-    visible: [/^Orders$/, /Order Preparation/, /Customers/],
-    hidden: [/^Production$/, /Production Orders/, /Quality Control/, /^Packaging$/, /^Dispatch$/, /Employees/],
+    visible: [M.orders, M.prep, M.customers],
+    hidden: [M.production, M.productionOrders, M.qc, M.packaging, M.dispatch, M.employees],
   },
   production: {
-    visible: [/^Production$/, /Production Orders/],
-    hidden: [/Quality Control/, /^Dispatch$/, /Employees/, /Customers/],
+    visible: [M.production, M.productionOrders],
+    hidden: [M.qc, M.dispatch, M.employees, M.customers],
   },
-  qc: { visible: [/Quality Control/], hidden: [/^Orders$/, /^Dispatch$/, /^Packaging$/, /Employees/] },
-  packaging: { visible: [/^Packaging$/], hidden: [/^Orders$/, /^Dispatch$/, /Quality Control/, /Employees/] },
-  dispatch: { visible: [/^Dispatch$/, /^Orders$/], hidden: [/^Production$/, /Quality Control/, /^Packaging$/, /Employees/] },
-  admin: { visible: [/^Orders$/, /^Production$/, /Quality Control/, /^Packaging$/, /^Dispatch$/, /Employees/], hidden: [] },
+  qc: { visible: [M.qc], hidden: [M.orders, M.dispatch, M.packaging, M.employees] },
+  packaging: { visible: [M.packaging], hidden: [M.orders, M.dispatch, M.qc, M.employees] },
+  dispatch: { visible: [M.dispatch, M.orders], hidden: [M.production, M.qc, M.packaging, M.employees] },
+  admin: { visible: [M.orders, M.production, M.qc, M.packaging, M.dispatch, M.employees], hidden: [] },
 
   // ── The CRM roles ─────────────────────────────────────────────────────────
   // The hidden lists carry the point. A rep must not be offered commission
   // administration or the team review; finance must not be offered the pipeline at all.
   crmRep: {
-    visible: [/^Leads$/, /^Pipeline$/, /Follow-ups/, /Quotations/, /My commissions/],
-    hidden: [/Commission plans/, /Commission review/, /^Production$/, /Quality Control/, /Employees/],
+    visible: [M.leads, M.pipeline, M.followUps, M.quotes, M.myCommissions],
+    hidden: [M.plans, M.review, M.production, M.qc, M.employees],
   },
   crmManager: {
-    visible: [/^Leads$/, /^Pipeline$/, /Quotations/, /Sales targets/, /Sales reports/, /Commission plans/],
-    hidden: [/^Production$/, /Quality Control/, /^Dispatch$/, /Employees/],
+    visible: [M.leads, M.pipeline, M.quotes, M.targets, M.reports, M.plans],
+    hidden: [M.production, M.qc, M.dispatch, M.employees],
   },
   crmFinance: {
-    visible: [/My commissions/, /Commission review/],
+    visible: [M.myCommissions, M.review],
     // Finance holds no sales module at all, so the entire CRM section is absent — not
     // merely the parts they cannot act on.
-    hidden: [/^Leads$/, /^Pipeline$/, /Quotations/, /Sales targets/, /Commission plans/, /^Orders$/],
+    hidden: [M.leads, M.pipeline, M.quotes, M.targets, M.plans, M.orders],
   },
 };
 
@@ -90,11 +121,21 @@ for (const role of Object.keys(NAV_FOR) as RoleName[]) {
     await page.waitForLoadState("networkidle");
     const closed = nav.locator('button[aria-expanded="false"]');
     for (let i = 0; i < 20 && (await closed.count()) > 0; i++) await closed.first().click();
-    for (const re of NAV_FOR[role].visible) {
-      await expect(nav.getByRole("link", { name: re }), `${role} should see ${re}`).toHaveCount(1);
+    const sidebar = await nav.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")!));
+    const offered = new Set(sidebar);
+    for (const unit of SUBUNITS) {
+      const entry = unit.find((h) => offered.has(h));
+      if (!entry) continue;
+      await page.goto(entry);
+      await page.waitForLoadState("networkidle");
+      const bar = page.getByTestId("contextual-nav");
+      if (await bar.count()) for (const h of await bar.locator("a[href]").evaluateAll((as) => as.map((a) => a.getAttribute("href")!))) offered.add(h);
     }
-    for (const re of NAV_FOR[role].hidden) {
-      await expect(nav.getByRole("link", { name: re }), `${role} must not see ${re}`).toHaveCount(0);
+    for (const href of NAV_FOR[role].visible) {
+      expect(offered.has(href), `${role} should be offered ${href} (offered: ${[...offered].join(", ")})`).toBe(true);
+    }
+    for (const href of NAV_FOR[role].hidden) {
+      expect(offered.has(href), `${role} must not be offered ${href}`).toBe(false);
     }
   });
 }
