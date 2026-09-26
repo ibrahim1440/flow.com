@@ -111,9 +111,49 @@ allocation or a budget actual; linking adds exactly one `BankTransactionMatch`
 7. Permissions: matching stays `finance.txn_enter`; verifying stays
    `commissions.collection_verify` — two different people by default.
 
-## 4. Tests
+## 4. Approval status and the integration run
 
-| Test | Where | State |
-|---|---|---|
-| Decision rule: exact halalas, Riyadh date, reference normalisation, window, one-to-one, status and method gates, ambiguity | `tests/finance/unit/collections-match.test.ts` | **8/8 pass** now |
-| Approve moves no finance cash/allocation/actual; statement receipt counted once; one link each way (409); reversal flags only; re-import inserts nothing | `tests/finance/integration/sales-collection.planned.test.ts` | **5 skipped** until `SalesCollection` exists on the merged branch — they document the contract and must be implemented, not deleted, at merge time |
+**No approved sales/navigation integration commit exists.** The GitHub repository has one pull
+request ever (#1, Accounting S0, merged); none for `feature/sales-crm-commissions` or
+`feature/ui-ux-alignment`, and no integration branch on the remote. `feature/ui-ux-alignment`
+is not pushed and was being committed to by another session during this work
+(`fdc5e4d` → `901a50a`). Dependency: **someone must approve a sales (and navigation) commit to
+integrate against.** Until then the finance branch keeps the five tests skipped, with their
+exact assertions (`tests/finance/integration/sales-collection.planned.test.ts`).
+
+To prove the behaviour now, the combination was run on a **disposable, local-only** branch:
+
+| | |
+|---|---|
+| Trial branch | `trial/finance-sales-integration-20260926` (not pushed; worktree in the session scratchpad) |
+| Merge commit | `71b3043` — parents `aa9ef8c` (sales) and `4bb76bb` (finance) |
+| Follow-ups | `bf1aec9` schema rebuilt as sales schema + finance-appended block (the text merge had split a model); `bbf8008` sales-collection links + the five tests implemented; `04419a7` trial-only guard change for its database |
+| Database | `erp_finance_integration` on the local server (marked disposable; guard allow-listed only on the trial branch) |
+| Conflicts resolved | `.gitignore`, `package.json`, `prisma/schema.prisma` (keep both); `auth-shared.ts` (`sales`, `commissions`, `finance`); `layout.tsx` (sales registry) + `finance.cash` node in `src/lib/nav/registry.ts`, group opened to `finance` and `accounting` holders |
+| Results | typecheck clean; `npm run build` compiles; finance unit 36/36; finance DB **33/33 with 0 skipped** (the five sales-collection tests run and pass); Playwright `permissions`/`responsive`/`ui-resilience`/`critical-path` 32 passed, 2 failed — **the same two fail on the sales head `aa9ef8c` alone** (a dispatch test also failing on `origin/main`, and `permissions` expecting a top-level Orders link the sales registry moved), so the integration adds no failure |
+| Kept as patches | `docs/finance/integration/sales-collection-integration.patch` (links, suggestion, reversal alert, unique indexes, tests) and `nav-registry-finance-node.patch` — apply with `git apply --ignore-whitespace` on the approved integration commit |
+
+Source branches (`feature/sales-crm-commissions`, `feature/ui-ux-alignment`, `main`) were not
+changed.
+
+## 5. What the implemented tests prove (trial branch)
+
+One approved collection matched to one bank receipt is exactly one economic cash receipt and
+cannot be allocated twice:
+
+| Test | Proves |
+|---|---|
+| approving a collection moves no finance cash, allocation or actual | `approveCollection` creates the CollectionEvent only; bank lines, eligible cash, allocation entries/runs and budget receipts unchanged |
+| statement receipt is the only cash; allocation and actual counted once, even when retried or raced | one bank line; `decideCollectionMatch` → MATCH by reference; the same link twice returns the same match (retry); VAT 1,050.00 from the collection; three concurrent `runAllocation` → one AllocationRun, a later retry changes nothing; eligible 8,050.00 once; actual 8,050.00 once |
+| one collection ↔ one bank line: a second link either way is refused | service 409 both ways; direct INSERT of a duplicate active link violates the partial unique index; two concurrent identical links resolve to one |
+| a reversed collection flags the link and changes no cash | after `reverseCollection`: cash, allocations and runs unchanged; overview raises `COLLECTION_REVERSED`; the reversed collection cannot be re-linked elsewhere |
+| re-import after linking inserts nothing and keeps the link | fingerprint duplicate; link unchanged |
+
+## 6. Commit `aeb384a`
+
+`aeb384a` is an ordinary single-parent commit on `feature/finance-cash-budget` (parent
+`597dd9c`; also reachable from the trial branch below only as an ancestor of its merge). It changes one documentation file: it **records** the re-run of the trial merges
+against the moving `ui-ux-alignment` head. It is **not** a merge commit, and no trial branch
+existed then: those trial merges were done with `--no-commit` in detached, temporary worktrees
+that were removed afterwards. The only trial branch is `trial/finance-sales-integration-20260926`
+above, created in the closure pass.
