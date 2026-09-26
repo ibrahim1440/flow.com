@@ -13,7 +13,11 @@ type Cat = {
   openingCarried: number; allocations: number; incoming: number; payments: number; outgoing: number; balance: number; reserved: number; available: number;
   obligationsRemaining: number; unfunded: number; fundingNeed: number; fundedThisMonth: number;
 };
-type Pool = { branchKey: string; eligibleCash: number; allocated: number; unallocated: number; restrictedCash: number; pendingIn: number; pendingOut: number };
+type Pool = {
+  branchKey: string; eligibleCash: number; allocated: number; unallocated: number; restrictedCash: number; pendingIn: number; pendingOut: number;
+  pendingOutAwaitingReview: number; committedBeyondBalance: number; overspent: number; duplicatePairs: number; duplicateAdjustment: number;
+  unlinkedPayments: { reservationId: string; lineId: string; amount: number }[]; unlinkedPaymentsAmbiguous: number;
+};
 type Step = { seq: number; method: string; categoryId: string | null; percent: string | null; weight: number | null; capAmount: string | null };
 type Version = { id: string; branchKey: string; versionNo: number; status: string; baseClasses: string[]; autoExecute: boolean; notes: string | null; approvedAt: string | null; approvedBy: string | null; steps: Step[] };
 type Setup = { branches: { id: string; code: string; nameEn: string; nameAr: string | null }[]; people: { id: string; name: string; duties: string[] }[]; finCategories: { id: string; code: string; nameEn: string; nameAr: string | null; kind: string }[]; scope: { all: boolean } };
@@ -88,6 +92,11 @@ export default function AllocationPage() {
             <div className="flex gap-5 flex-wrap text-xs text-brown">
               <span>{L(`مستبعد من التخصيص: نقد مقيد ${money(p.restrictedCash)}`, `Excluded: restricted cash ${money(p.restrictedCash)}`)}</span>
               <span>{L(`وارد معلّق غير محتسب: ${money(p.pendingIn)} · صادر معلّق مخصوم من المؤهل: ${money(p.pendingOut)}`, `Pending in, not counted: ${money(p.pendingIn)} · pending out, deducted from eligible: ${money(p.pendingOut)}`)}</span>
+              {p.pendingOutAwaitingReview > 0 && <span className="text-amber-700">{L(`صادر معلّق بانتظار المراجعة (غير مخصوم بعد): ${money(p.pendingOutAwaitingReview)}`, `Pending out awaiting review (not deducted yet): ${money(p.pendingOutAwaitingReview)}`)}</span>}
+              {p.committedBeyondBalance > 0 && <span>{L(`التزامات معتمدة تتجاوز رصيد فئاتها (ضمن المخصص): ${money(p.committedBeyondBalance)}`, `Approved commitments beyond category balances (inside allocated): ${money(p.committedBeyondBalance)}`)}</span>}
+              {p.overspent > 0 && <span>{L(`صُرف من فئات بأكثر من رصيدها: ${money(p.overspent)}`, `Spent beyond category balances: ${money(p.overspent)}`)}</span>}
+              {p.unlinkedPayments.length > 0 && <span className="text-amber-700">{L(`${p.unlinkedPayments.length} سطر صادر يطابق طلب دفع معتمداً ولم يُسجَّل الدفع عليه — محتسب مرة واحدة؛ استخدم «تسجيل الدفع المنفّذ»`, `${p.unlinkedPayments.length} outgoing line(s) match an approved payment request not yet recorded — counted once; use "Record payment made"`)}</span>}
+              {p.duplicatePairs > 0 && <span className="text-amber-700">{L(`${p.duplicatePairs} تكرار محتمل محتسب مرة واحدة حتى المراجعة (${money(p.duplicateAdjustment)})`, `${p.duplicatePairs} possible duplicates counted once until reviewed (${money(p.duplicateAdjustment)})`)}</span>}
               {p.unallocated < 0 && <Badge tone="bad">{L("التخصيصات تتجاوز النقد — راجع الفئات", "Allocations exceed cash — review categories")}</Badge>}
             </div>
           </Card>

@@ -34,7 +34,7 @@ export async function updateSettings(actor: FinanceActor, body: Record<string, u
     if (body.alertThresholdMode !== "EITHER" && body.alertThresholdMode !== "BOTH") throw new FinanceError("Mode must be EITHER or BOTH.", 400);
     data.alertThresholdMode = body.alertThresholdMode;
   }
-  if (body.allowSelfApproval !== undefined) data.allowSelfApproval = body.allowSelfApproval === true;
+  if (body.allowSelfApproval !== undefined) throw new FinanceError("Self-approval is not available: a request is always decided by someone other than its requester.", 400);
   return prisma.$transaction(async (tx) => {
     const after = await tx.finSettings.update({ where: { id: "singleton" }, data: { ...data, updatedBy: actor.id } });
     await audit(tx, { action: "settings.updated", entityType: "FinSettings", entityId: "singleton", before, after, userId: actor.id });

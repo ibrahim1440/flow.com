@@ -1581,8 +1581,6 @@ model FinSettings {
   id                     String   @id @default("singleton")
   baseCurrency           String   @default("SAR")
   timezone               String   @default("Asia/Riyadh")
-  /// Four-eyes by default: whoever requests an approval cannot decide it.
-  allowSelfApproval      Boolean  @default(false)
   reconciliationDueDays  Int      @default(7)
   alertAmountThreshold   Decimal  @default(1000) @db.Decimal(18, 2)
   alertPercentThreshold  Decimal  @default(10) @db.Decimal(7, 2)

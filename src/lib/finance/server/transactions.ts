@@ -124,8 +124,10 @@ function parseMapping(raw: unknown): CsvMapping {
 type ImportRowResult = {
   rowNo: number; txnDate: string; amount: Minor; reference: string | null; description: string | null;
   accountId: string; accountCode: string; fingerprint: string;
-  status: "NEW" | "DUPLICATE" | "FLAGGED" | "EXISTING"; flaggedReason?: string; possibleDuplicateOfId?: string;
-  /** EXISTING: the already-recorded line this statement row confirms (no new line is created). */
+  status: "NEW" | "DUPLICATE" | "FLAGGED" | "EXISTING" | "SETTLES"; flaggedReason?: string; possibleDuplicateOfId?: string;
+  /** EXISTING: the already-recorded line this statement row confirms (no new line is created).
+   *  SETTLES: the same statement row was imported earlier as PENDING; this settled copy
+   *  confirms that line (same fingerprint — never a second line). */
   existingId?: string;
 };
 
@@ -171,8 +173,10 @@ async function analyseImport(db: Db, scope: FinanceScope, body: Record<string, u
   for (const r of withAccount) groups.set(r.account.id, [...(groups.get(r.account.id) ?? []), r]);
   for (const [accountId, list] of groups) {
     const fps = fingerprintRows(accountId, list);
-    const existing = await db.bankTransaction.findMany({ where: { cashAccountId: accountId, sourceFingerprint: { in: fps } }, select: { sourceFingerprint: true } });
-    const known = new Set(existing.map((e) => e.sourceFingerprint));
+    const existing = await db.bankTransaction.findMany({ where: { cashAccountId: accountId, sourceFingerprint: { in: fps } }, select: { id: true, status: true, sourceFingerprint: true } });
+    const known = new Map(existing.map((e) => [e.sourceFingerprint, e]));
+    const settling = body.importAsPending !== true;
+    const today = riyadhDateString();
     const dates = [...new Set(list.map((l) => l.txnDate))].map(dbDate);
     const sameDay = await db.bankTransaction.findMany({
       where: { cashAccountId: accountId, txnDate: { in: dates }, status: { not: "VOID" } },
@@ -190,7 +194,13 @@ async function analyseImport(db: Db, scope: FinanceScope, body: Record<string, u
         rowNo: r.rowNo, txnDate: r.txnDate, amount: r.amount, reference: r.reference, description: r.description,
         accountId, accountCode: r.account.code, fingerprint: fps[i],
       };
-      if (known.has(fps[i])) { results.push({ ...base, status: "DUPLICATE" }); return; }
+      const k = known.get(fps[i]);
+      if (k) {
+        // Seen before. A pending line whose settled row now arrives is confirmed, not duplicated.
+        if (k.status === "PENDING" && settling && r.txnDate <= today) results.push({ ...base, status: "SETTLES", existingId: k.id });
+        else results.push({ ...base, status: "DUPLICATE" });
+        return;
+      }
       const sameMoney = recorded.filter((x) => !claimed.has(x.id) && toMinor(x.amount) === r.amount);
       const byRef = r.reference ? sameMoney.filter((x) => normRef(x.bankReference) === normRef(r.reference)) : [];
       const inWindow = sameMoney.filter((x) => {
@@ -218,7 +228,7 @@ export async function previewImport(actor: FinanceActor, scope: FinanceScope, bo
   const count = (s: string) => a.results.filter((r) => r.status === s).length;
   return {
     header: a.header, rowCount: a.rowCount,
-    summary: { new: count("NEW"), duplicate: count("DUPLICATE"), flagged: count("FLAGGED"), existing: count("EXISTING"), errors: a.errors.length },
+    summary: { new: count("NEW"), duplicate: count("DUPLICATE"), flagged: count("FLAGGED"), existing: count("EXISTING") + count("SETTLES"), errors: a.errors.length },
     rows: a.results.slice(0, 500), errors: a.errors.slice(0, 500),
   };
 }
@@ -233,6 +243,7 @@ export async function commitImport(actor: FinanceActor, scope: FinanceScope, bod
     const today = riyadhDateString();
     const toInsert = a.results.filter((r) => r.status === "NEW" || r.status === "FLAGGED");
     const toAttach = a.results.filter((r) => r.status === "EXISTING");
+    const toSettle = a.results.filter((r) => r.status === "SETTLES");
     const batch = await tx.bankImportBatch.create({
       data: {
         cashAccountId: a.defaultAccount.id, fileName, fileHash: fileHash(a.text), mapping: a.mapping as unknown as Prisma.InputJsonValue,
@@ -261,6 +272,18 @@ export async function commitImport(actor: FinanceActor, scope: FinanceScope, bod
       } else {
         // Lost a race with another import or a merge: land it as a flagged new line instead.
         toInsert.push({ ...r, status: "FLAGGED", possibleDuplicateOfId: r.existingId, flaggedReason: "The recorded line was confirmed by another statement meanwhile" });
+      }
+    }
+    // Pending lines whose settled statement row has arrived: confirmed in place.
+    for (const r of toSettle) {
+      const res = await tx.bankTransaction.updateMany({
+        where: { id: r.existingId!, status: "PENDING" },
+        data: { status: "CONFIRMED", statementBatchId: batch.id, statementConfirmedAt: new Date() },
+      });
+      if (res.count === 1) {
+        attached++;
+        const after = await tx.bankTransaction.findUniqueOrThrow({ where: { id: r.existingId! } });
+        await audit(tx, { action: "bank_txn.settled", entityType: "BankTransaction", entityId: after.id, branchKey: after.branchKey, before: { status: "PENDING" }, after: { status: after.status }, refs: { importBatchId: batch.id, rowNo: r.rowNo }, userId: actor.id });
       }
     }
     const accountBranch = new Map<string, string>();

@@ -120,7 +120,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester
-  // unless FinSettings.allowSelfApproval is switched on.
+  // (enforced in the service and by database triggers, with no configurable exception).
   finance: [
     { key: "txn_enter", label: "Enter, import and classify bank transactions" },
     { key: "reconcile", label: "Reconcile accounts against bank statements" },

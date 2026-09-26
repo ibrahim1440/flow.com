@@ -7,7 +7,7 @@ import { useUser } from "../../user-context";
 import { Badge, Button, Card, CardTitle, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, api, useApi, useFinance, useHasSub, useL, withBranch } from "../_components/ui";
 
 type Setup = {
-  settings: { alertAmountThreshold: string; alertPercentThreshold: string; alertThresholdMode: string; reconciliationDueDays: number; obligationAlertDays: number; conservativeDelayWeeks: number; conservativeCollectPct: number; allowSelfApproval: boolean };
+  settings: { alertAmountThreshold: string; alertPercentThreshold: string; alertThresholdMode: string; reconciliationDueDays: number; obligationAlertDays: number; conservativeDelayWeeks: number; conservativeCollectPct: number };
   finCategories: { id: string; code: string; nameEn: string; nameAr: string | null; kind: string; isOperating: boolean; active: boolean }[];
   branches: { id: string; code: string; nameEn: string; nameAr: string | null }[];
   branchAccess: { employeeId: string; branchId: string }[];
@@ -115,7 +115,6 @@ export default function ReportsPage() {
             <Field label={L("تنبيه الالتزامات قبل (يوم)", "Obligation alert before (days)")}><input className={INPUT} value={s.obligationAlertDays} onChange={(e) => setS({ ...s, obligationAlertDays: Number(e.target.value) })} /></Field>
             <Field label={L("تأخر التحصيل — متحفظ (أسبوع)", "Collection delay — conservative (weeks)")}><input className={INPUT} value={s.conservativeDelayWeeks} onChange={(e) => setS({ ...s, conservativeDelayWeeks: Number(e.target.value) })} /></Field>
             <Field label={L("نسبة التحصيل — متحفظ (%)", "Collection rate — conservative (%)")}><input className={INPUT} value={s.conservativeCollectPct} onChange={(e) => setS({ ...s, conservativeCollectPct: Number(e.target.value) })} /></Field>
-            <Field label={L("اعتماد الطالب لطلبه", "Requester may approve own request")}><select className={INPUT} value={String(s.allowSelfApproval)} onChange={(e) => setS({ ...s, allowSelfApproval: e.target.value === "true" })}><option value="false">{L("غير مسموح", "Not allowed")}</option><option value="true">{L("مسموح", "Allowed")}</option></select></Field>
           </fieldset>
         </Card>
       )}

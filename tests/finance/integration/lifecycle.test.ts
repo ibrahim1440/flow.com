@@ -173,4 +173,72 @@ describe("database controls under the application role (finance_app)", () => {
       await assert.rejects(c.query(`UPDATE "BudgetRevision" SET status = 'DRAFT' WHERE "budgetId" = $1`, [b.id]), /cannot be changed/);
     } finally { await c.end(); }
   });
+  test("no self-approval bypass: the application role cannot enable one, forge one, or skip the request", async () => {
+    const s = await setup();
+    const { requestCategoryTransfer } = await import("../../../src/lib/finance/server/allocation");
+    const { submitBudget } = await import("../../../src/lib/finance/server/budgets");
+    const k1 = await createCategory(s.prep, s.ps, { code: "K1", nameEn: "K1", spendingLimit: "100", approverEmployeeId: s.appr.id });
+    const k2 = await createCategory(s.prep, s.ps, { code: "K2", nameEn: "K2" });
+    await manualAllocate(s.prep, s.ps, { categoryId: k1.id, amount: "500", sourceCashAccountId: s.bank.id, reason: "fund" });
+    // Four pending requests, all raised by the preparer.
+    const b = await createBudget(s.prep, s.ps, { month });
+    await prisma.budgetLine.create({ data: { revisionId: (await prisma.budgetRevision.findFirstOrThrow({ where: { budgetId: b.id } })).id, lineKey: "PAYMENT:x:-", finCategoryId: s.fin["PY-RENT"], kind: "PAYMENT", plannedAmount: "10" } });
+    const budgetReq = await submitBudget(s.prep, s.ps, b.id, {});
+    const res = await createReservation(s.prep, s.ps, { categoryId: k1.id, amount: "300", payee: "P", purpose: "over the 100 limit" });
+    assert.equal(res.reservation.status, "PENDING_APPROVAL");
+    const transferReq = await requestCategoryTransfer(s.prep, s.ps, { fromCategoryId: k1.id, toCategoryId: k2.id, amount: "50", reason: "move" });
+    const requests = await prisma.finApprovalRequest.findMany({ orderBy: { requestedAt: "asc" } });
+    assert.equal(requests.length, 3);
+    assert.ok(requests.every((r) => r.status === "PENDING" && r.requestedBy === s.prep.id));
+    const overrideReq = requests.find((r) => r.type === "SPEND_OVERRIDE")!;
+    const transferId = requests.find((r) => r.type === "CATEGORY_TRANSFER")!.id;
+    assert.ok(transferReq && budgetReq);
+
+    // Snapshot everything a bypass could change, as the owner.
+    const snap = async () => Object.fromEntries(await Promise.all(["FinApprovalRequest", "BudgetRevision", "FinBudget", "PaymentReservation", "AllocationEntry", "AllocationRuleVersion", "FinAuditLog", "BankTransaction", "FinSettings"].map(async (t) =>
+      [t, (await prisma.$queryRawUnsafe<{ h: string }[]>(`SELECT md5(COALESCE(json_agg(x ORDER BY x."id")::text, '')) AS h FROM "${t}" x`))[0].h])));
+    const before = await snap();
+
+    const c = await appClient();
+    try {
+      // 1. The exception no longer exists and cannot be re-created or re-enabled.
+      await assert.rejects(c.query(`UPDATE "FinSettings" SET "allowSelfApproval" = true`), /column "allowSelfApproval" .*does not exist/);
+      await assert.rejects(c.query(`ALTER TABLE "FinSettings" ADD COLUMN "allowSelfApproval" boolean DEFAULT true`), /must be owner/);
+      await assert.rejects(c.query(`CREATE OR REPLACE FUNCTION fin_guard_approval_request() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql`), /must be owner|permission denied/);
+      await assert.rejects(c.query(`DROP TRIGGER "FinApprovalRequest_guard" ON "FinApprovalRequest"`), /must be owner/);
+      await assert.rejects(c.query(`ALTER TABLE "FinApprovalRequest" DISABLE TRIGGER USER`), /must be owner/);
+      // A session setting is not a way around it either: disabling triggers per session needs superuser.
+      await assert.rejects(c.query(`SET session_replication_role = replica`), /permission denied/);
+      // 2. Self-approval, directly.
+      await assert.rejects(c.query(`UPDATE "FinApprovalRequest" SET status = 'APPROVED', "decidedBy" = "requestedBy", "decidedAt" = now() WHERE id = $1`, [overrideReq.id]), /cannot decide their own request/);
+      // 3. A forged, already-approved request.
+      await assert.rejects(c.query(`INSERT INTO "FinApprovalRequest" (id, type, "branchKey", "entityType", "entityId", summary, payload, "requiredSub", "requestedBy", status, "decidedBy", "decidedAt")
+        SELECT 'forged', type, "branchKey", "entityType", "entityId", summary, payload, "requiredSub", "requestedBy", 'APPROVED', $2, now() FROM "FinApprovalRequest" WHERE id = $1`, [overrideReq.id, s.appr.id]), /must be created pending/);
+      // 4. Skipping the request: approval-gated states cannot be written without an approved request.
+      await assert.rejects(c.query(`UPDATE "PaymentReservation" SET status = 'ACTIVE' WHERE id = $1`, [res.reservation.id]), /approved override request/);
+      await assert.rejects(c.query(`UPDATE "BudgetRevision" SET status = 'APPROVED', "decidedBy" = $2, "decidedAt" = now() WHERE "budgetId" = $1`, [b.id, s.appr.id]), /through an approved request/);
+      await assert.rejects(c.query(`INSERT INTO "AllocationEntry" (id, "categoryId", "branchKey", "entryType", "sourceType", amount, "periodMonth", "approvalId", "createdBy") VALUES ('forged-t', $1, 'COMPANY', 'TRANSFER_IN', 'CATEGORY_TRANSFER', 50, $2, $3, $4)`, [k2.id, month, transferId, s.prep.id]), /approved transfer request/);
+    } finally { await c.end(); }
+
+    // Nothing changed: requests, approval state, reservations, ledgers, audit, bank lines, settings.
+    assert.deepEqual(await snap(), before);
+    const after = await prisma.finApprovalRequest.findMany();
+    assert.ok(after.every((r) => r.status === "PENDING" && r.decidedBy === null));
+
+    // The service refuses the requester too, and the real path still works for someone else.
+    await assert.rejects(decideApproval(s.prep, s.ps, overrideReq.id, { decision: "APPROVE" }), /cannot decide a request you raised|do not hold the duty/);
+    await decideApproval(s.appr, s.as, overrideReq.id, { decision: "APPROVE" });
+    assert.equal((await prisma.paymentReservation.findUniqueOrThrow({ where: { id: res.reservation.id } })).status, "ACTIVE");
+  });
+
+  test("a category's named approver cannot be the person raising the request", async () => {
+    const s = await setup();
+    const both = await makeUser("Both duties", [...ALL_SCOPE_SUBS, "spend_override_approve"]);
+    const bs = await resolveScope(both);
+    const k = await createCategory(s.prep, s.ps, { code: "K", nameEn: "K", spendingLimit: "10", approverEmployeeId: both.id });
+    await manualAllocate(s.prep, s.ps, { categoryId: k.id, amount: "100", sourceCashAccountId: s.bank.id, reason: "fund" });
+    await assert.rejects(createReservation(both, bs, { categoryId: k.id, amount: "50", payee: "P", purpose: "x" }), /cannot be the approver of your own request/);
+    assert.equal(await prisma.paymentReservation.count(), 0);
+  });
 });
+

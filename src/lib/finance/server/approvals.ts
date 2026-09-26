@@ -1,9 +1,9 @@
 // The approval queue and decisions. A request is shown to — and decidable by — only the
 // named approver, or (when none is named) any holder of the required duty with access to
-// the branch. The requester never decides their own request unless allowSelfApproval.
+// the branch. The requester never decides their own request — there is no exception.
 import { prisma } from "@/lib/db";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { audit, FinanceError, getSettings, str, type Db, type FinanceActor, type FinanceScope } from "./context";
+import { audit, FinanceError, str, type Db, type FinanceActor, type FinanceScope } from "./context";
 import { assertMayDecide } from "./approval-core";
 import { activateRuleVersion, executeCategoryTransfer } from "./allocation";
 import { decideRevision } from "./budgets";
@@ -21,8 +21,7 @@ export async function approvalQueue(db: Db, actor: FinanceActor, scope: FinanceS
   const raised = await db.finApprovalRequest.findMany({ where: { requestedBy: actor.id }, orderBy: { requestedAt: "desc" }, take: 50 });
   const ids = [...new Set([...mine, ...raised].flatMap((r) => [r.requestedBy, r.assignedToId, r.decidedBy]).filter(Boolean) as string[])];
   const people = await db.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
-  const selfOk = (await getSettings(db)).allowSelfApproval;
-  return { toDecide: mine.filter((r) => selfOk || r.requestedBy !== actor.id), raisedByMe: raised, people };
+  return { toDecide: mine.filter((r) => r.requestedBy !== actor.id), raisedByMe: raised, people };
 }
 
 export async function decideApproval(actor: FinanceActor, scope: FinanceScope, id: string, body: Record<string, unknown>) {
@@ -36,6 +35,14 @@ export async function decideApproval(actor: FinanceActor, scope: FinanceScope, i
     const req = await tx.finApprovalRequest.findUnique({ where: { id } });
     if (!req) throw new FinanceError("Not found", 404);
     await assertMayDecide(tx, actor, scope, req);
+
+    // The decision is written first: the database lets an approval-gated state change (a
+    // rule going live, a held payment released, a transfer, a reopened period, an approved
+    // revision) only under an APPROVED request decided by someone other than its requester.
+    const upd = await tx.finApprovalRequest.update({
+      where: { id },
+      data: { status: approve ? "APPROVED" : "REJECTED", decidedBy: actor.id, decidedAt: new Date(), decisionNote: note },
+    });
 
     switch (req.type) {
       case "BUDGET_APPROVAL":
@@ -62,10 +69,6 @@ export async function decideApproval(actor: FinanceActor, scope: FinanceScope, i
         }
         break;
     }
-    const upd = await tx.finApprovalRequest.update({
-      where: { id },
-      data: { status: approve ? "APPROVED" : "REJECTED", decidedBy: actor.id, decidedAt: new Date(), decisionNote: note },
-    });
     await audit(tx, {
       action: `approval.${approve ? "approved" : "rejected"}`, entityType: "FinApprovalRequest", entityId: id, branchKey: req.branchKey,
       before: { status: req.status }, after: { status: upd.status }, reason: note, refs: { type: req.type, entityType: req.entityType, entityId: req.entityId }, userId: actor.id,

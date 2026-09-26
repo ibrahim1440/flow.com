@@ -4,20 +4,28 @@
 //   Book cash            opening balance + CONFIRMED lines, per account. Pending and void
 //                        lines are excluded.
 //   Restricted cash      book cash of accounts flagged restricted — reported, never allocatable.
-//   Eligible cash        book cash of unrestricted accounts in the scope, LESS pending outgoing
-//                        lines (money already paid out but not yet on a statement). Pending
+//   Eligible cash        unrestricted book cash LESS pending outgoing lines that are confirmed
+//                        commitments, each economic movement counted once (exactly-once.ts):
+//                        unreviewed imported pending outflows are "awaiting review" (shown, not
+//                        deducted); possible-duplicate pairs count once until reviewed; pending
 //                        incoming lines are never added. This is the allocation pool.
 //   Category balance     opening carried + allocations + incoming adjustments/transfers
 //                        − payments − outgoing adjustments/transfers.
 //   Reserved             ACTIVE + PENDING_APPROVAL payment reservations.
 //   Available in category = category balance − reserved.
-//   Unallocated cash     eligible cash − Σ category balances. This is the only figure that
-//                        means "not earmarked for anything". It can go negative when cash
-//                        left the bank outside any category; that is shown as a shortfall.
+//   Allocated (pool)     Σ categoryCommitment = Σ max(balance, approved reservations, 0): money
+//                        held back from new allocation. An approved commitment beyond a
+//                        category's balance holds back the difference; an overspent category
+//                        (negative balance) holds nothing and frees nothing.
+//   Unallocated cash     eligible cash − allocated: the only figure that means "not earmarked
+//                        or committed", and the cap for new allocations. Negative is shown as a
+//                        shortfall.
 //   Pending receipts     PENDING inflows — shown, never counted as cash.
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { toMinor, type Minor } from "../money";
+import { categoryCommitment, eligibleEffect, matchReservationPayments, type CashLine } from "../exactly-once";
+import { addDays } from "../dates";
 import type { Db, FinanceScope } from "./context";
 
 const IN_TYPES = ["ALLOCATION", "TRANSFER_IN", "ADJUSTMENT_IN"] as const;
@@ -52,10 +60,10 @@ export async function categoryLedgers(
   return out;
 }
 
-export async function reservedByCategory(db: Db, categoryIds?: string[]): Promise<Map<string, Minor>> {
+export async function reservedByCategory(db: Db, categoryIds?: string[], statuses: ("ACTIVE" | "PENDING_APPROVAL")[] = ["ACTIVE", "PENDING_APPROVAL"]): Promise<Map<string, Minor>> {
   const rows = await db.paymentReservation.groupBy({
     by: ["categoryId"],
-    where: { status: { in: ["ACTIVE", "PENDING_APPROVAL"] }, ...(categoryIds ? { categoryId: { in: categoryIds } } : {}) },
+    where: { status: { in: statuses }, ...(categoryIds ? { categoryId: { in: categoryIds } } : {}) },
     _sum: { amount: true },
   });
   return new Map(rows.map((r) => [r.categoryId, toMinor(r._sum.amount)]));
@@ -132,13 +140,61 @@ export type PoolSummary = {
   bookCash: Minor;
   restrictedCash: Minor;
   eligibleCash: Minor;
+  /** Σ max(balance, approved reservations, 0) — held back from new allocation. */
   allocated: Minor;
+  /** Eligible − allocated: the cap for new allocations. */
   unallocated: Minor;
+  /** Σ category balances as booked (can include negative, overspent categories). */
+  ledgerAllocated: Minor;
+  /** Approved commitments beyond their category's balance (already inside "allocated"). */
+  committedBeyondBalance: Minor;
+  /** Σ −balance of overspent categories (cash already gone; frees nothing). */
+  overspent: Minor;
   reserved: Minor;
+  reservedApproved: Minor;
+  reservedAwaitingApproval: Minor;
   pendingIn: Minor;
+  /** Pending outgoing commitments deducted from eligible cash. */
   pendingOut: Minor;
+  /** Imported pending outgoing lines nobody has confirmed: not deducted, alerted. */
+  pendingOutAwaitingReview: Minor;
+  /** Unresolved possible-duplicate pairs (counted once) and the amount not double-counted. */
+  duplicatePairs: number;
+  duplicateAdjustment: Minor;
+  /** Approved payment requests with an unlinked outgoing line of the same amount: counted once, awaiting "Record payment made". */
+  unlinkedPayments: { reservationId: string; lineId: string; amount: Minor }[];
+  unlinkedPaymentsAmbiguous: number;
   negativeCategories: number;
 };
+
+const LINE_SELECT = { id: true, cashAccountId: true, amount: true, status: true, source: true, reviewStatus: true, transferPeerId: true, possibleDuplicateOfId: true, txnDate: true } as const;
+type LineRow = { id: string; cashAccountId: string; amount: Prisma.Decimal; status: CashLine["status"]; source: CashLine["source"]; reviewStatus: CashLine["reviewStatus"]; transferPeerId: string | null; possibleDuplicateOfId: string | null; txnDate: Date };
+
+async function withPayments(db: Db, rows: LineRow[]): Promise<(CashLine & { txnDate: string })[]> {
+  const pay = rows.length
+    ? await db.allocationEntry.groupBy({ by: ["sourceTxnId", "entryType"], where: { sourceTxnId: { in: rows.map((r) => r.id) }, sourceType: "PAYMENT" }, _sum: { amount: true } })
+    : [];
+  return rows.map((r) => ({
+    id: r.id, cashAccountId: r.cashAccountId, amount: toMinor(r.amount), status: r.status, source: r.source, reviewStatus: r.reviewStatus,
+    transferPeerId: r.transferPeerId, possibleDuplicateOfId: r.possibleDuplicateOfId, txnDate: r.txnDate.toISOString().slice(0, 10),
+    paymentsBooked: pay.filter((p) => p.sourceTxnId === r.id).reduce((acc, p) => acc + (p.entryType === "PAYMENT" ? 1 : -1) * toMinor(p._sum.amount), 0),
+  }));
+}
+
+/**
+ * Lines that can differ from "confirmed only": pending lines, possible-duplicate pairs, and —
+ * when approved payment requests are open — outgoing lines that could be their payment.
+ */
+async function uncertainLines(db: Db, accountIds: string[], openSince: string | null): Promise<(CashLine & { txnDate: string })[]> {
+  if (accountIds.length === 0) return [];
+  const or: Prisma.BankTransactionWhereInput[] = [{ status: "PENDING" }, { possibleDuplicateOfId: { not: null } }];
+  if (openSince) or.push({ amount: { lt: 0 }, transferPeerId: null, txnDate: { gte: new Date(`${addDays(openSince, -3)}T00:00:00Z`) } });
+  const first = await db.bankTransaction.findMany({ where: { cashAccountId: { in: accountIds }, status: { not: "VOID" }, OR: or }, select: LINE_SELECT });
+  const have = new Set(first.map((l) => l.id));
+  const partnerIds = [...new Set(first.map((l) => l.possibleDuplicateOfId).filter((x): x is string => !!x && !have.has(x)))];
+  const partners = partnerIds.length ? await db.bankTransaction.findMany({ where: { id: { in: partnerIds } }, select: LINE_SELECT }) : [];
+  return withPayments(db, [...first, ...partners]);
+}
 
 /** Pool figures per branch key. Allocated + unallocated = eligible cash, exactly. */
 export async function poolSummaries(db: Db, scope: FinanceScope): Promise<PoolSummary[]> {
@@ -148,19 +204,39 @@ export async function poolSummaries(db: Db, scope: FinanceScope): Promise<PoolSu
     select: { id: true, branchKey: true },
   });
   const ledgers = await categoryLedgers(db, { categoryId: { in: cats.map((c) => c.id) } });
-  const reserved = await reservedByCategory(db, cats.map((c) => c.id));
+  const approved = await reservedByCategory(db, cats.map((c) => c.id), ["ACTIVE"]);
+  const waiting = await reservedByCategory(db, cats.map((c) => c.id), ["PENDING_APPROVAL"]);
+  const open = await db.paymentReservation.findMany({ where: { categoryId: { in: cats.map((c) => c.id) }, status: "ACTIVE" }, select: { id: true, categoryId: true, branchKey: true, amount: true, createdAt: true } });
+  const openSince = open.length ? open.map((r) => r.createdAt.toISOString().slice(0, 10)).sort()[0] : null;
+  const lines = await uncertainLines(db, accounts.filter((a) => !a.isRestricted).map((a) => a.id), openSince);
   const keys = new Set<string>([...accounts.map((a) => a.branchKey), ...cats.map((c) => c.branchKey)]);
   return [...keys].sort().map((k) => {
     const accs = accounts.filter((a) => a.branchKey === k);
     const kc = cats.filter((c) => c.branchKey === k);
-    const bookCash = accs.reduce((s, a) => s + a.bookBalance, 0);
-    const restrictedCash = accs.filter((a) => a.isRestricted).reduce((s, a) => s + a.bookBalance, 0);
-    // A payment made outside the application and recorded as a pending line has already left
-    // (or is leaving) the bank: it reduces what can be earmarked before the statement confirms it.
-    // Otherwise a category payment recorded against it would free the same cash twice.
-    const pendingOutUnrestricted = accs.filter((a) => !a.isRestricted).reduce((s, a) => s + a.pendingOut, 0);
-    const eligibleCash = bookCash - restrictedCash - pendingOutUnrestricted;
-    const allocated = kc.reduce((s, c) => s + (ledgers.get(c.id)?.balance ?? 0), 0);
+    const bookCash = accs.reduce((acc, a) => acc + a.bookBalance, 0);
+    const restrictedCash = accs.filter((a) => a.isRestricted).reduce((acc, a) => acc + a.bookBalance, 0);
+    const ids = new Set(accs.filter((a) => !a.isRestricted).map((a) => a.id));
+    // An approved request and its not-yet-linked payment line are one payment: treat the pair
+    // as linked (line = committed outflow, category balance and reservation both reduced).
+    const { matches, ambiguous } = matchReservationPayments(
+      open.filter((r) => r.branchKey === k).map((r) => ({ id: r.id, categoryId: r.categoryId, amount: toMinor(r.amount), createdDate: r.createdAt.toISOString().slice(0, 10) })),
+      lines.filter((l) => ids.has(l.cashAccountId)),
+      addDays,
+    );
+    const linked = new Map(matches.map((m) => [m.lineId, m.amount]));
+    const catAdj = new Map<string, Minor>();
+    for (const m of matches) catAdj.set(m.categoryId, (catAdj.get(m.categoryId) ?? 0) + m.amount);
+    const kl = lines.filter((l) => ids.has(l.cashAccountId)).map((l) => (linked.has(l.id) ? { ...l, paymentsBooked: linked.get(l.id)! } : l));
+    // Confirmed lines are already in book cash; add only what the uncertain lines change.
+    const e = eligibleEffect(kl);
+    const confirmedInLines = kl.filter((l) => l.status === "CONFIRMED").reduce((acc, l) => acc + l.amount, 0);
+    const eligibleCash = bookCash - restrictedCash + (e.effect - confirmedInLines);
+    const bal = (id: string) => ledgers.get(id)?.balance ?? 0;
+    const allocated = kc.reduce((acc, c) => acc + categoryCommitment(bal(c.id) - (catAdj.get(c.id) ?? 0), (approved.get(c.id) ?? 0) - (catAdj.get(c.id) ?? 0)), 0);
+    const ledgerAllocated = kc.reduce((acc, c) => acc + bal(c.id), 0);
+    const overspent = kc.reduce((acc, c) => acc + Math.max(0, -bal(c.id)), 0);
+    const reservedApproved = kc.reduce((acc, c) => acc + (approved.get(c.id) ?? 0), 0);
+    const reservedAwaitingApproval = kc.reduce((acc, c) => acc + (waiting.get(c.id) ?? 0), 0);
     return {
       branchKey: k,
       bookCash,
@@ -168,10 +244,20 @@ export async function poolSummaries(db: Db, scope: FinanceScope): Promise<PoolSu
       eligibleCash,
       allocated,
       unallocated: eligibleCash - allocated,
-      reserved: kc.reduce((s, c) => s + (reserved.get(c.id) ?? 0), 0),
-      pendingIn: accs.reduce((s, a) => s + a.pendingIn, 0),
-      pendingOut: accs.reduce((s, a) => s + a.pendingOut, 0),
-      negativeCategories: kc.filter((c) => (ledgers.get(c.id)?.balance ?? 0) < 0).length,
+      ledgerAllocated,
+      committedBeyondBalance: allocated - ledgerAllocated - overspent,
+      overspent,
+      reserved: reservedApproved + reservedAwaitingApproval,
+      reservedApproved,
+      reservedAwaitingApproval,
+      pendingIn: accs.reduce((acc, a) => acc + a.pendingIn, 0),
+      pendingOut: e.pendingOutCommitted,
+      pendingOutAwaitingReview: e.pendingOutAwaitingReview,
+      duplicatePairs: e.duplicatePairs,
+      duplicateAdjustment: e.duplicateAdjustment,
+      unlinkedPayments: matches.map((m) => ({ reservationId: m.reservationId, lineId: m.lineId, amount: m.amount })),
+      unlinkedPaymentsAmbiguous: ambiguous,
+      negativeCategories: kc.filter((c) => bal(c.id) < 0).length,
     };
   });
 }

@@ -1,7 +1,7 @@
 // Creating approval requests and deciding who may decide them. Effects live in approvals.ts.
 import { Prisma } from "@/generated/prisma/client";
 import { hasSubPrivilege, parsePermissions, buildDefaultPermissions } from "@/lib/auth-shared";
-import { audit, can, FinanceError, getSettings, inScope, type Db, type FinanceActor, type FinanceScope, type FinanceSub } from "./context";
+import { audit, can, FinanceError, inScope, type Db, type FinanceActor, type FinanceScope, type FinanceSub } from "./context";
 
 export type ApprovalType = "BUDGET_APPROVAL" | "ALLOCATION_RULES" | "CATEGORY_TRANSFER" | "SPEND_OVERRIDE" | "PERIOD_REOPEN";
 
@@ -27,6 +27,11 @@ export async function createApproval(
     assignedToId?: string | null;
   },
 ) {
+  // Four-eyes has no exception: naming yourself as the approver would leave a request no one
+  // may decide.
+  if (input.assignedToId && input.assignedToId === actor.id) {
+    throw new FinanceError("You cannot be the approver of your own request. Name another approver for this category.", 409);
+  }
   // A named approver must actually hold the duty, or the request would sit forever.
   if (input.assignedToId) {
     const emp = await tx.employee.findUnique({ where: { id: input.assignedToId }, select: { active: true, role: true, permissions: true } });
@@ -73,8 +78,6 @@ export async function assertMayDecide(
   if (req.assignedToId && req.assignedToId !== actor.id) {
     throw new FinanceError("This request is assigned to a named approver.", 403);
   }
-  if (req.requestedBy === actor.id) {
-    const settings = await getSettings(db);
-    if (!settings.allowSelfApproval) throw new FinanceError("You cannot decide a request you raised.", 403);
-  }
+  // No setting can relax this; the database refuses it too (FinApprovalRequest_guard).
+  if (req.requestedBy === actor.id) throw new FinanceError("You cannot decide a request you raised.", 403);
 }

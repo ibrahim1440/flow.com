@@ -55,7 +55,7 @@ test("finance viewer (no duties) can read but every financial write is refused",
     [`/api/finance/budgets/${budgets[0].id}/close`, {}],
   ];
   for (const [path, json] of writes) assert.equal((await s(path, { method: "POST", json })).status, 403, path);
-  assert.equal((await s("/api/finance/setup/settings", { method: "PATCH", json: { allowSelfApproval: true } })).status, 403);
+  assert.equal((await s("/api/finance/setup/settings", { method: "PATCH", json: { alertAmountThreshold: "1" } })).status, 403);
   assert.equal(approvals.body.toDecide.length, 0, "a viewer has nothing to decide");
 });
 
