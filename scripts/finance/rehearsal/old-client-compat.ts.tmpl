@@ -1,0 +1,21 @@
+// Copied into the baseline checkout (the production commit) and run AFTER the candidate
+// migrations: the production build's own Prisma client reads every model it knows, so an
+// incompatible schema change (dropped/renamed column, type change) would fail here.
+import { Prisma } from "../src/generated/prisma/client";
+import { prisma } from "../src/lib/db";
+
+const url = process.env.DATABASE_URL ?? "";
+if (!/@127\.0\.0\.1:54329\/erp_rehearsal[a-z0-9_]*$/.test(url)) { console.error("Refusing: local erp_rehearsal* only."); process.exit(1); }
+
+async function main() {
+  const models = Object.values(Prisma.ModelName) as string[];
+  const failed: string[] = [];
+  let rows = 0;
+  for (const m of models) {
+    const d = (prisma as unknown as Record<string, { findMany: (a: unknown) => Promise<unknown[]>; count: () => Promise<number> }>)[m[0].toLowerCase() + m.slice(1)];
+    try { await d.findMany({ take: 5 }); rows += await d.count(); } catch (e) { failed.push(`${m}: ${(e as Error).message.split("\n").slice(-1)[0]}`); }
+  }
+  console.log(JSON.stringify({ productionClientModels: models.length, readFailures: failed, rowsVisible: rows }));
+  if (failed.length) process.exitCode = 2;
+}
+main().then(async () => { await prisma.$disconnect(); process.exit(process.exitCode ?? 0); });

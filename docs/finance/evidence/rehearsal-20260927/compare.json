@@ -1,0 +1,20 @@
+{
+ "applicationTables": 43,
+ "applicationRows": 789,
+ "preserved": true,
+ "problems": [],
+ "newTables": 49,
+ "existingTablesWithAddedColumns": [],
+ "newMigrations": [
+  "20260924090000_add_sales_crm_and_commissions",
+  "20260925130833_add_sales_collections",
+  "20260925131140_add_pipeline_stage_purpose",
+  "20260926005011_add_finance_cash_budget",
+  "20260926092523_finance_statement_matching_and_db_controls",
+  "20260926140000_finance_strict_four_eyes",
+  "20260926150000_finance_sales_collection_links",
+  "20260926190000_commission_movement_provenance"
+ ],
+ "triggersBefore": 0,
+ "triggersAfter": 12
+}

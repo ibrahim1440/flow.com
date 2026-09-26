@@ -24,6 +24,7 @@ if [ ! -d "$BASE" ]; then git -C "$CAND" worktree add --detach "$BASE" "$BASE_CO
 git -C "$BASE" log --oneline -1
 [ -e "$BASE/node_modules" ] || cmd //c mklink //J "$(cygpath -w "$BASE/node_modules")" "$(cygpath -w "$CAND/node_modules")" >/dev/null
 cp "$CAND/scripts/finance/rehearsal/synthetic-baseline.ts.tmpl" "$BASE/scripts/rehearsal-synthetic-baseline.ts"
+cp "$CAND/scripts/finance/rehearsal/old-client-compat.ts.tmpl" "$BASE/scripts/rehearsal-old-client-compat.ts"
 
 step "1. fresh database, baseline migrations, baseline seed, synthetic volume"
 $TOOL create $DB
@@ -64,6 +65,9 @@ const have=new Set(a.triggers.map(t=>t.trigger));const miss=need.filter(n=>!have
 const cols=a.tables.FinSettings.columns;const idx=a.indexes.map(i=>i.name);
 console.log(JSON.stringify({requiredTriggersPresent:need.length-miss.length+"/"+need.length,missing:miss,allowSelfApprovalColumn:cols.includes("allowSelfApproval"),checkConstraints:a.constraints.filter(c=>c.type==="c"&&/^(Fin|Bank|Allocation|Budget|Payment|Cash)/.test(c.table)).length,collectionOnceIndexes:idx.filter(n=>/collection_once|_once/.test(n))},null,1));
 if(miss.length||cols.includes("allowSelfApproval"))process.exit(2);' "$OUT/after.json"
+
+step "5a. the production build (baseline commit) reads every model on the migrated schema"
+( cd "$BASE" && npx tsx scripts/rehearsal-old-client-compat.ts ) | tee "$OUT/old-client-compat.json"
 
 step "5b. runtime role (finance_app: DML only)"
 $TOOL grant-app $DB
