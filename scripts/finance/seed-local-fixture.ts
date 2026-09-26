@@ -15,7 +15,7 @@
 import { checkUrl, assertDisposableFinanceDb } from "./local-db-guard.mjs";
 {
   // Cheap checks before anything connects; the marker check runs once prisma is up.
-  const problems = checkUrl(process.env.DATABASE_URL, "erp_finance_dev");
+  const problems = checkUrl(process.env.DATABASE_URL, process.env.FIN_DISPOSABLE_DB === "erp_finance_integration_dev" ? "erp_finance_integration_dev" : "erp_finance_dev");
   if (problems.length) { console.error(`Refusing: ${problems.join("; ")}.`); process.exit(1); }
 }
 const password = process.env.FIN_FIXTURE_PASSWORD;
