@@ -20,6 +20,10 @@ import path from "node:path";
 // The `free` figure every suite reads is computed by this module so that
 // harness-selftest.mjs proves the SHIPPED path rather than a copy of it.
 import { freeUnits } from "./oversell.mjs";
+// Also pure, also import-safe before the rails: it decides WHERE these suites may write.
+import {
+  classifyTarget, DEFAULT_APPROVED_ENDPOINTS, DEFAULT_APPROVED_DATABASES,
+} from "./db-target.mjs";
 
 // Resolved from this file's own location so the suites run from any checkout — a clean
 // clone, a CI workspace, a git worktree — rather than from one developer's directory.
@@ -34,23 +38,13 @@ export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DB_URL = process.env.ERP_TEST_DATABASE_URL;
 export const BASE = process.env.ERP_TEST_BASE_URL;
 
-/**
- * Database names these suites are allowed to touch.
- *
- * Fail-closed by construction: the name must MATCH one of these, so a database this list
- * has never heard of is refused rather than allowed. Override for your own throwaway
- * database with ERP_TEST_DB_ALLOWLIST as a comma-separated list of exact names.
- */
-const DEFAULT_ALLOWLIST = ["erp_mvp_test", "erp_test", "erp_e2e", "erp_demo"];
-const ALLOWLIST = (process.env.ERP_TEST_DB_ALLOWLIST ?? DEFAULT_ALLOWLIST.join(","))
-  .split(",").map((s) => s.trim()).filter(Boolean);
-
 function refuse(reason) {
   console.error(`\nREFUSING TO RUN: ${reason}\n`);
-  console.error("These suites create, mutate and delete data. They require an explicitly");
-  console.error("nominated throwaway database. Set:");
-  console.error("  ERP_TEST_DATABASE_URL   a connection string whose database name is one of:");
-  console.error(`                          ${ALLOWLIST.join(", ")}`);
+  console.error("These suites create, mutate and delete data. They run against one");
+  console.error("specific isolated database and nowhere else. Set:");
+  console.error("  ERP_TEST_DATABASE_URL   the isolated regression database");
+  console.error(`                          endpoint ${DEFAULT_APPROVED_ENDPOINTS.join(", ")}`);
+  console.error(`                          database ${DEFAULT_APPROVED_DATABASES.join(", ")}`);
   console.error("  ERP_TEST_BASE_URL       the running test server, e.g. http://localhost:3010");
   console.error("  ERP_TEST_ADMIN_PIN      the seeded administrator PIN for that database");
   console.error("  PIN_LOOKUP_SECRET       the same value the test server is running with");
@@ -61,19 +55,16 @@ function refuse(reason) {
 if (!DB_URL) refuse("ERP_TEST_DATABASE_URL is not set.");
 if (!BASE) refuse("ERP_TEST_BASE_URL is not set.");
 
-let dbName;
-try {
-  dbName = new URL(DB_URL).pathname.replace(/^\//, "").split("?")[0];
-} catch {
-  refuse("ERP_TEST_DATABASE_URL is not a valid connection URL.");
-}
-if (!dbName) refuse("ERP_TEST_DATABASE_URL names no database.");
-if (!ALLOWLIST.includes(dbName)) {
-  refuse(
-    `database "${dbName}" is not on the approved test allowlist (${ALLOWLIST.join(", ")}).\n` +
-    "  If this really is a throwaway database, add its name to ERP_TEST_DB_ALLOWLIST."
-  );
-}
+// Host AND database, with protected production endpoints refused first and
+// unconditionally. See db-target.mjs for why a database name alone is not an identity.
+const TARGET = classifyTarget(DB_URL, {
+  endpoints: process.env.ERP_TEST_DB_ENDPOINT,
+  databases: process.env.ERP_TEST_DB_ALLOWLIST,
+});
+if (!TARGET.allowed) refuse(TARGET.reason);
+
+/** endpoint/database of the approved target — safe to print, carries no credential. */
+export const TARGET_LABEL = `${TARGET.endpoint}/${TARGET.database}`;
 
 // The PIN is a credential, even for a seeded demo account, so it is supplied by the
 // environment rather than written into the repository.

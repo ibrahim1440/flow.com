@@ -27,16 +27,45 @@ throwaway database explicitly:
 | `ERP_TEST_BASE_URL` | The running application under test, e.g. `http://localhost:3010`. |
 | `ERP_TEST_ADMIN_PIN` | The seeded administrator PIN for that database. Six digits. |
 | `PIN_LOOKUP_SECRET` | **The same value the application under test is running with.** |
-| `ERP_TEST_DB_ALLOWLIST` | Optional. Comma-separated database names that may be used. |
+| `ERP_TEST_DB_ENDPOINT` | Optional. Comma-separated approved Neon endpoint ids. |
+| `ERP_TEST_DB_ALLOWLIST` | Optional. Comma-separated approved database names. |
 
 They deliberately **do not read `DATABASE_URL`**. On any machine where the application has
 been run, that variable points at real data, and a suite that fell back to it would run
 destructive tests against production. There is no fall-back path: the variable is never
 consulted.
 
-The database name must appear in the allowlist, which defaults to
-`erp_mvp_test, erp_test, erp_e2e, erp_demo`. An unrecognised name is refused rather than
-allowed, so a database this list has never heard of cannot be touched by accident.
+## Which database these suites will write to
+
+The target is identified by **where it is and what it is called** — endpoint *and*
+database — and both must match. A name alone is not an identity.
+
+Neon names the first database in every project `neondb`. Production is `neondb`, and a
+freshly created test project is also `neondb`: the same string, two different servers, one
+of them holding the company's real orders. The original guard allowlisted the name only,
+so wiring up a new test project meant adding `neondb` to the list — and that single edit
+would have admitted the Production connection string to a suite that creates, mutates and
+deletes data.
+
+The decision, in order:
+
+1. parse the connection string; anything unparseable is refused
+2. **refuse every protected Production endpoint, before any allowlist is read** — this
+   cannot be configured away, and applies whatever database is named
+3. require an exactly approved endpoint
+4. require an exactly approved database on it
+5. refuse if either differs
+
+Defaults are endpoint `ep-small-hat-aw2kcuac` with database `erp_mvp_test`. The pooled and
+direct hostnames of one Neon compute are treated as the same endpoint, so the pooled form
+of a protected host cannot slip past.
+
+The decision lives in `db-target.mjs` as a pure function with no environment access, and
+`harness-selftest.mjs` — the first suite in the run — proves every branch of it on every
+run, including that Production is refused with its own database and with any other, and
+that an environment override cannot admit a protected endpoint. That proof has to be
+offline: demonstrating the guard refuses Production by pointing it at Production is not a
+test anyone should run.
 
 No credential appears in these files. The administrator PIN comes from the environment;
 suites that need their own operator generate a random PIN per run and delete the account

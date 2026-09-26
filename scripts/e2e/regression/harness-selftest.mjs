@@ -58,6 +58,7 @@ import { evaluatePinLookupSecret, pinLookup, pinVerifierInput } from "../../../s
 import {
   readDeliveryRequestKey, normalizeDeliveryIntent, deliveryIntentHash, roundKg,
 } from "../../../src/lib/services/delivery-idempotency.ts";
+import { classifyTarget } from "./db-target.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -1309,6 +1310,68 @@ const leaking = clientFiles.filter((f) =>
   /from\s+["'][^"']*(server-env|pin-lookup|db-config)["']/.test(srcTexts.get(f)));
 check("no use-client module imports the server env or the PIN/database config",
   leaking.length === 0, leaking.map((f) => f.replace(REPO, "")).join(", "));
+
+// ─────────────────────────────────────────────────────────────────────────────
+sub("Regression target guard — host AND database, protected endpoints first");
+
+// These suites write. The guard deciding WHERE they write is the most dangerous decision
+// in the harness, and it cannot be exercised against a live database: proving it refuses
+// Production would mean pointing it at Production. So it is a pure function, and every
+// branch is proved here, on every run, before any suite opens a connection.
+//
+// The case that matters most is "test endpoint + neondb". Neon names the first database
+// in every project `neondb`, so the isolated regression project has one too — the same
+// string as Production. Under the previous name-only allowlist, making that project work
+// meant allowing the name `neondb`, and that single edit would have admitted the
+// Production connection string as well. The guard now refuses that pairing on the
+// database while refusing Production on the endpoint, so neither edit opens the door.
+
+const PROD_EP = "ep-dawn-dust-aqn1u1uf";
+const TEST_EP = "ep-small-hat-aw2kcuac";
+// Obvious placeholders. These strings are inputs to a pure function and are never dialled.
+const at = (ep, db, pooled = false) =>
+  `postgresql://user:placeholder@${ep}${pooled ? "-pooler" : ""}.c-0.us-east-1.aws.neon.tech/${db}?sslmode=require`;
+const verdict = (url, opts) => classifyTarget(url, opts);
+
+check("PRODUCTION endpoint + neondb is REFUSED",
+  verdict(at(PROD_EP, "neondb")).allowed === false, verdict(at(PROD_EP, "neondb")).reason);
+check("PRODUCTION endpoint + a different database is REFUSED",
+  verdict(at(PROD_EP, "erp_mvp_test")).allowed === false, verdict(at(PROD_EP, "erp_mvp_test")).reason);
+check("PRODUCTION endpoint via its POOLED hostname is REFUSED",
+  verdict(at(PROD_EP, "neondb", true)).allowed === false, verdict(at(PROD_EP, "neondb", true)).reason);
+check("test endpoint + neondb is REFUSED (the name Production also carries)",
+  verdict(at(TEST_EP, "neondb")).allowed === false, verdict(at(TEST_EP, "neondb")).reason);
+check("test endpoint + erp_mvp_test is ALLOWED",
+  verdict(at(TEST_EP, "erp_mvp_test")).allowed === true, verdict(at(TEST_EP, "erp_mvp_test")).reason);
+check("test endpoint + erp_mvp_test via the POOLED hostname is ALLOWED",
+  verdict(at(TEST_EP, "erp_mvp_test", true)).allowed === true, verdict(at(TEST_EP, "erp_mvp_test", true)).reason);
+check("an unknown endpoint + erp_mvp_test is REFUSED",
+  verdict(at("ep-somebody-elses-project", "erp_mvp_test")).allowed === false,
+  verdict(at("ep-somebody-elses-project", "erp_mvp_test")).reason);
+check("a malformed connection string is REFUSED",
+  verdict("not-a-url").allowed === false, verdict("not-a-url").reason);
+check("a non-postgres URL is REFUSED",
+  verdict("https://example.com/erp_mvp_test").allowed === false, verdict("https://example.com/erp_mvp_test").reason);
+check("a URL naming no database is REFUSED",
+  verdict(`postgresql://u:p@${TEST_EP}.c-0.us-east-1.aws.neon.tech/`).allowed === false, "");
+check("a missing connection string is REFUSED",
+  verdict(undefined).allowed === false && verdict("").allowed === false, "");
+
+// The protected list is not an allowlist entry that a configuration change can outvote.
+check("PRODUCTION stays refused even when an override names it approved",
+  verdict(at(PROD_EP, "neondb"), { endpoints: PROD_EP, databases: "neondb" }).allowed === false,
+  "an environment override must never be able to admit a protected endpoint");
+
+// The verdict must never carry the credential into a log.
+check("the refusal reason never contains the connection string",
+  !/placeholder|user:/.test(verdict(at(PROD_EP, "neondb")).reason), "");
+
+// And the shipped harness must be wired to this function, not to a copy of it.
+const guardWiring = readFileSync(join(REPO, "scripts", "e2e", "regression", "harness.mjs"), "utf8");
+check("harness.mjs decides with classifyTarget and refuses on its verdict",
+  /classifyTarget\(/.test(guardWiring) && /TARGET\.allowed/.test(guardWiring), "");
+check("harness.mjs no longer allowlists on database name alone",
+  !/ALLOWLIST\.includes\(dbName\)/.test(guardWiring), "");
 
 // ─────────────────────────────────────────────────────────────────────────────
 section("HARNESS SELF-TEST");
