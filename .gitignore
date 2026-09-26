@@ -56,3 +56,6 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /tests/e2e/support/catalog.json
+
+# Local disposable PostgreSQL for this worktree (finance cash budget)
+/.local-postgres/

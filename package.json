@@ -23,7 +23,15 @@
     "uat": "playwright test",
     "uat:desktop": "playwright test --project=desktop",
     "uat:report": "playwright show-report",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "test:finance:unit": "tsx --test tests/finance/unit/*.test.ts",
+    "test:finance:db": "tsx --env-file=.env.test --test --test-concurrency=1 --test-force-exit tests/finance/integration/*.test.ts",
+    "db:local": "node scripts/finance/local-postgres.mjs start",
+    "test:finance:http": "node --test tests/finance/http/*.test.mjs",
+    "test:finance:ui": "node tests/finance/visual/workflow-ui.mjs",
+    "finance:fixture": "tsx --env-file=.env scripts/finance/seed-local-fixture.ts",
+    "db:local:stop": "node scripts/finance/local-postgres.mjs stop",
+    "db:local:status": "node scripts/finance/local-postgres.mjs status"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

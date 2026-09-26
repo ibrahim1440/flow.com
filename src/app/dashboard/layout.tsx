@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box,
   Truck, History, TrendingUp, Tag, Users, LogOut, Menu, X, ChevronRight,
   Settings, UserCircle, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
-  ClipboardList, ShieldAlert,
+  ClipboardList, ShieldAlert, Landmark,
 } from "lucide-react";
 import { ROLE_LABELS, hasModuleAccess } from "@/lib/auth-shared";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
@@ -32,6 +32,8 @@ const NAV_ITEMS: { key: TranslationKey; icon: React.ElementType; href: string; m
   { key: "cupping",    icon: FlaskConical,    href: "/dashboard/cupping" },
   { key: "customers",  icon: Users2,          href: "/dashboard/customers" },
   { key: "accounting", icon: Wallet,          href: "/dashboard/accounting" },
+  // One entry for the whole Finance section; its six areas are tabs inside the page.
+  { key: "finance",    icon: Landmark,        href: "/dashboard/finance" },
   { key: "settings",   icon: Settings,        href: "/dashboard/settings" },
 ];
 
