@@ -20,6 +20,7 @@ type Accrual = { accrual: { available: boolean; reasons: string[] } };
 type Budget = { id: string; month: string; branchKey: string };
 
 const ACTION: Record<string, [string, string]> = {
+  "bank_txn.collection_linked": ["ربط تحصيل مبيعات", "Sales collection linked"], "bank_txn.statement_confirmed": ["تأكيد من كشف البنك", "Confirmed by statement"], "bank_txn.settled": ["تأكيد سطر معلّق", "Pending line settled"], "bank_txn.duplicate_resolved": ["دمج تكرار", "Duplicate merged"], "bank_txn.transfer_linked": ["ربط تحويل", "Transfer linked"],
   "approval.requested": ["طلب موافقة", "Approval requested"], "approval.approved": ["اعتماد", "Approved"], "approval.rejected": ["رفض", "Rejected"], "approval.withdrawn": ["سحب طلب", "Request withdrawn"],
   "forecast.snapshot": ["لقطة توقع", "Forecast snapshot"], "bank_import.committed": ["استيراد كشف", "Statement import"], "bank_txn.created": ["قيد بنكي", "Bank line"], "bank_txn.reviewed": ["مراجعة سطر", "Line reviewed"],
   "bank_txn.voided": ["إلغاء سطر", "Line voided"], "bank_txn.matched": ["ربط بمستند", "Linked to document"], "allocation.run": ["تشغيل التخصيص", "Allocation run"], "allocation.manual": ["تخصيص يدوي", "Manual allocation"],
