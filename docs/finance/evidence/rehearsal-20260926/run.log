@@ -1,0 +1,158 @@
+
+== 0. baseline checkout of 4640cbe (detached, no .env)
+21:14:30
+4640cbe test(packaging): measure sellable stock, not free stock, after packing for an order
+
+== 1. fresh database, baseline migrations, baseline seed, synthetic volume
+21:14:30
+erp_rehearsal created and marked
+env for erp_rehearsal written (values not printed)
+Applying migrations to 127.0.0.1
+The following migration(s) have been applied:
+All migrations have been successfully applied.
+Seed completed successfully!
+synthetic baseline: 40 customers, 150 orders, 300 items, 50 deliveries
+
+Database schema is up to date!
+
+== 2. baseline snapshot
+21:15:00
+erp_rehearsal: 44 tables, 809 rows, 20 migrations, 0 triggers
+
+== 3. backup: server-side copy
+21:15:01
+erp_rehearsal_backup is a server-side copy of erp_rehearsal
+
+== 4. candidate migrations (repository command)
+21:15:14
+Following migrations have not yet been applied:
+20260924090000_add_sales_crm_and_commissions
+20260925130833_add_sales_collections
+20260925131140_add_pipeline_stage_purpose
+20260926005011_add_finance_cash_budget
+20260926092523_finance_statement_matching_and_db_controls
+20260926140000_finance_strict_four_eyes
+20260926150000_finance_sales_collection_links
+target confirmed: erp_rehearsal on 127.0.0.1:54329
+Applying migrations to 127.0.0.1
+The following migration(s) have been applied:
+All migrations have been successfully applied.
+
+== 5. post-checks
+21:15:17
+
+Database schema is up to date!
+schema diff lines: 0
+-- This is an empty migration.
+
+erp_rehearsal: 92 tables, 816 rows, 27 migrations, 12 triggers
+{
+ "applicationTables": 43,
+ "applicationRows": 789,
+ "preserved": true,
+ "problems": [],
+ "newTables": 48,
+ "existingTablesWithAddedColumns": [],
+ "newMigrations": [
+  "20260924090000_add_sales_crm_and_commissions",
+  "20260925130833_add_sales_collections",
+  "20260925131140_add_pipeline_stage_purpose",
+  "20260926005011_add_finance_cash_budget",
+  "20260926092523_finance_statement_matching_and_db_controls",
+  "20260926140000_finance_strict_four_eyes",
+  "20260926150000_finance_sales_collection_links"
+ ],
+ "triggersBefore": 0,
+ "triggersAfter": 12
+}
+{
+ "requiredTriggersPresent": "12/12",
+ "missing": [],
+ "allowSelfApprovalColumn": false,
+ "checkConstraints": 16,
+ "collectionOnceIndexes": [
+  "BankTransactionMatch_collection_once"
+ ]
+}
+
+== 5b. runtime role (finance_app: DML only)
+21:15:24
+finance_app granted DML only on erp_rehearsal
+[
+ {
+  "check": "TRUNCATE refused",
+  "refused": true,
+  "error": "permission denied for table FinAuditLog"
+ },
+ {
+  "check": "disabling triggers refused",
+  "refused": true,
+  "error": "must be owner of table FinApprovalRequest"
+ },
+ {
+  "check": "dropping a trigger refused",
+  "refused": true,
+  "error": "must be owner of relation FinApprovalRequest"
+ },
+ {
+  "check": "session_replication_role refused",
+  "refused": true,
+  "error": "permission denied to set parameter \"session_replication_role\""
+ },
+ {
+  "check": "DDL on an existing table refused",
+  "refused": true,
+  "error": "must be owner of table Customer"
+ },
+ {
+  "check": "dropping a table refused",
+  "refused": true,
+  "error": "must be owner of table Customer"
+ },
+ {
+  "check": "self-decision refused",
+  "refused": true,
+  "error": "The requester cannot decide their own request"
+ },
+ {
+  "check": "forged pre-approved request refused",
+  "refused": true,
+  "error": "An approval request must be created pending and undecided"
+ },
+ {
+  "check": "deleting an audit row refused",
+  "refused": true,
+  "error": "DELETE on FinAuditLog is not allowed: this is an append-only financial record"
+ },
+ {
+  "check": "editing an audit row refused",
+  "refused": true,
+  "error": "UPDATE on FinAuditLog is not allowed: this is an append-only financial record"
+ },
+ {
+  "check": "ordinary read works",
+  "refused": false,
+  "rows": 59
+ }
+]
+
+== 6. recovery rehearsal: recreate from the backup copy, verify against the baseline
+21:15:24
+erp_rehearsal is a server-side copy of erp_rehearsal_backup
+erp_rehearsal: 44 tables, 809 rows, 20 migrations, 0 triggers
+{
+ "applicationTables": 43,
+ "applicationRows": 789,
+ "preserved": true,
+ "problems": [],
+ "newTables": 0,
+ "existingTablesWithAddedColumns": [],
+ "newMigrations": [],
+ "triggersBefore": 0,
+ "triggersAfter": 0
+}
+restored database has exactly the baseline tables and migration list
+
+== rehearsal complete
+21:15:45
+exit 0

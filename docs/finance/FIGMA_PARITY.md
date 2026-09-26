@@ -25,15 +25,17 @@ not marked Match while a material difference is open.
 | Screen | Figma | Route | Viewport | Height Figma / app | Status | Remaining differences |
 |---|---|---|---|---|---|---|
 | Overview | [FIN-01](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=326-2) | `/dashboard/finance` (`fin.manager`) | 1440 | 1403 / 1404 | Match, documented differences | Blocks within 1–4 px of the frame after the typography fix; shell header (existing code) 3 px taller and uses Arabic-Indic digits |
-| Transactions & reconciliation | [FIN-02](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=329-2) | `/dashboard/finance/transactions` | 1440 | 1231 / 1498 | **Differs — D2** | Review panel sections not drawn (suggestions, allocation from receipt, note, history) |
-| Cash allocation | [FIN-03](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=331-2) | `/dashboard/finance/allocation` | 1440 | 1786 / 1824 | **Differs — D3a/D3b** | "+ new category" button; profit footnote |
-| Monthly budget & variance | [FIN-04](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=332-2) | `/dashboard/finance/budget` | 1440 | 2082 / 2234 | **Differs — D4a** | Owner and "may be incomplete" under lines (D4b closed: frame corrected to the permission policy) |
-| Obligations & forecasts | [FIN-05](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=334-2) | `/dashboard/finance/obligations` | 1440 | 1384 / 1616 | **Differs — D5** | Cancel per obligation, counterparty, show-all, Export |
-| Reports & settings | [FIN-06](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=335-2) | `/dashboard/finance/reports` | 1440 | 1865 / 2369 | **Differs — D6** | Account, branch-access and category forms not drawn |
+| Transactions & reconciliation | [FIN-02](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=329-2) | `/dashboard/finance/transactions` | 1440 | 1231 / 1498 | **Decision D2 applied (UAT)** | Frame redrawn to the decision: status badge; link / note / allocation / history as collapsed rows. Functional match of the changed area; pixel parity not re-measured |
+| Cash allocation | [FIN-03](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=331-2) | `/dashboard/finance/allocation` | 1440 | 1786 / 1824 | **Decisions D3a/D3b applied (UAT)** | "+ فئة جديدة" drawn; profit explanation next to a profit-like category (example row). Functional match; pixel parity not re-measured |
+| Monthly budget & variance | [FIN-04](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=332-2) | `/dashboard/finance/budget` | 1440 | 2082 / 2234 | **Decision D4a applied (UAT)** | Owners under lines; per-row "not yet verified: …" on zero rows (D4b closed earlier). Functional match; pixel parity not re-measured |
+| Obligations & forecasts | [FIN-05](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=334-2) | `/dashboard/finance/obligations` | 1440 | 1384 / 1616 | **Decision D5 applied (UAT)** | Cancel column, counterparties, Show all, Export drawn; cancel dialog in FIN-07e. Functional match; pixel parity not re-measured |
+| Reports & settings | [FIN-06](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=335-2) | `/dashboard/finance/reports` | 1440 | 1865 / 2369 | **Decision D6 applied (UAT)** | Account fields, optional suggestions + inline form, administrator-only access note; administrator view in FIN-06b. Functional match; pixel parity not re-measured |
 | Approvals dialog | [FIN-07a](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-2) | header → Approvals (`fin.approver`) | 1440 | 434 / 486 | Match, documented differences | Queue order follows the data |
 | CSV import preview | [FIN-07b](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-36) | Transactions → Import CSV | 1440 | 541 / 544 | Match, documented differences | Native select/file controls per ERP convention (D7); counts reflect a 5-row sample |
 | Payment request | [FIN-07c](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=336-111) | Allocation → Payment request | 1440 | 574 / 576 | Match, documented differences | Native select/date controls per ERP convention (D7) |
 | Record payment made | [FIN-07d](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=361-6616) | Allocation → open request | 1440 | 236 / 241 | Match, documented differences | Native select per ERP convention (D7) |
+| Cancel obligation | [FIN-07e](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=377-5836) (new, D5) | Obligations → Cancel | 1440 | — | New frame for the decision | Effects first; reason required; confirm disabled until a reason is typed |
+| Branch access (administrator) | [FIN-06b](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=377-5901) (new, D6) | Settings as `fin.admin` | 1440 | — | New frame for the decision | Grant/revoke only for administrators; own name not offered |
 | States | [FIN-08](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=337-2) | §2 | 1440 | — | Match, documented differences | All five panels match (both set-up actions for a user who can set up; inline duplicate-reference warning); a view-only user sees no set-up actions, per FIN-08's own rule |
 | Overview — tablet | [FIN-09](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=337-5712) | `/dashboard/finance` | 1024 | 2282 / 2255 | Match, documented differences | As FIN-01 |
 | Overview — English | [FIN-10](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=338-2) | `/dashboard/finance` (`fin.manager.en`) | 1440 | 1403 / 1404 | Match, documented differences | As FIN-01 |
@@ -103,6 +105,11 @@ Figma (every change, with its classification):
 | 2026-09-26 | FIN-01/03/09/10 | figures briefly set to the first D1 rule (−450.00), then **restored to the original values** when the final D1 rule was adopted | Business-rule change (D1); no net change to those figures |
 | 2026-09-26 | FIN-04 | "إغلاق الفترة" removed from the preparer toolbar (D4b) | Design error: the frame contradicted the permission policy |
 | 2026-09-26 | FIN-03 | pending sentence split: "pending out deducted: 0.00" and "pending out awaiting review (not deducted yet): 450.00" | Business-rule change (D1) |
+| 2026-09-26 (UAT) | FIN-02 | review-status badge; link / note / allocation / history as collapsed rows; attachments before the link row | Decision D2 |
+| 2026-09-26 (UAT) | FIN-03 | "+ فئة جديدة"; profit-like example row with the explanation | Decisions D3a/D3b |
+| 2026-09-26 (UAT) | FIN-04 | owners under three lines; per-row zero-state indicators | Decision D4a |
+| 2026-09-26 (UAT) | FIN-05 | cancel column, counterparties, Show all, Export; FIN-07e (new) cancel dialog | Decision D5 |
+| 2026-09-26 (UAT) | FIN-06 | second row of account fields; "إضافة المقترحة (اختياري)" + inline form; administrator-only note; FIN-06b (new) administrator view | Decision D6 |
 
 Application (aligned to the design — no Figma change):
 

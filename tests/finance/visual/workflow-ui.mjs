@@ -72,10 +72,12 @@ try {
   await cp.getByRole("button", { name: "حفظ ووضع علامة مُراجعة" }).click();
   await cp.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).waitFor();
   const reviewed = await pool(p, "Receipt reviewed as a customer receipt");
-  assert.equal(reviewed.eligible - start.eligible, 575000, "the receipt is eligible cash once: 5,750.00");
+  // The statement receipt was confirmed cash from the moment it was imported (5,750.00 is
+  // already in the seeded pool); linking the collection and reviewing the line add nothing.
+  assert.equal(reviewed.eligible, start.eligible, "reviewing a linked receipt adds no cash: it was counted once, at import");
   await cp.getByRole("button", { name: "تخصيص حسب القواعد المعتمدة" }).click();
   await cp.getByTestId("section-allocated").locator("summary").click();
-  await cp.getByText("ضريبة القيمة المضافة").first().waitFor();
+  await cp.getByTestId("section-allocated").getByText("احتياطي ضريبة القيمة المضافة").first().waitFor();
   const allocated = await pool(p, "Allocated by approved rules");
   assert.equal(allocated.eligible, reviewed.eligible, "allocation moves no cash");
   const vatEntry = await cp.getByTestId("section-allocated").locator("div", { hasText: "احتياطي ضريبة القيمة المضافة" }).last().textContent();
@@ -85,7 +87,7 @@ try {
   const retried = await pool(p, "Allocation retried (refused or no-op)");
   assert.deepEqual([retried.eligible, retried.allocated], [allocated.eligible, allocated.allocated], `a retried allocation changes nothing (HTTP ${again})`);
   await snap(p, "0b-collection-allocated");
-  step(`Approved Sales collection (Al Qasr, 5,750.00 incl. 750.00 VAT) linked to its receipt; reviewed and allocated once — eligible +5,750.00, allocated +${money(allocated.allocated - reviewed.allocated)}`);
+  step(`Approved Sales collection (Al Qasr, 5,750.00 incl. 750.00 VAT) linked to its receipt; reviewed and allocated once — eligible cash unchanged (counted once, at import), allocated +${money(allocated.allocated - reviewed.allocated)}; a retry changes nothing`);
 
   // 1. Classify the unknown deposit and allocate it.
   await p.goto(`${BASE}/dashboard/finance/transactions`);

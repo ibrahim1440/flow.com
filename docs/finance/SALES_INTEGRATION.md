@@ -136,6 +136,20 @@ To prove the behaviour now, the combination was run on a **disposable, local-onl
 Source branches (`feature/sales-crm-commissions`, `feature/ui-ux-alignment`, `main`) were not
 changed.
 
+## 4a. Local UAT candidate (2026-09-26)
+
+The owner designated `9351e74710343259767e460f3f5cf6629e30c266` (candidate r2: Sales `aa9ef8c`
+with its own navigation + Finance `87d7f02`) as the starting point for local UAT. The branch
+`uat/finance-sales-20260926` adds the resolved design decisions and the review-panel link from
+a receipt to its approved Sales collection (suggested by the tested decision rule; a person
+confirms it). `feature/ui-ux-alignment` is **deferred**: kept outside this Finance review, not a
+prerequisite. Candidate, results, walkthrough and expected balances: UAT.md.
+
+The Sales shell navigation suite, previously blocked because its guard binds it to the
+production-derived preview database, reads no existing records (it creates three disposable
+`NAV_` logins and one synthetic lead, then removes them). It was run unchanged against an
+isolated local database through `playwright.shell.local.config.ts` (UAT.md, VERIFICATION.md).
+
 ## 5. What the implemented tests prove (trial branch)
 
 One approved collection matched to one bank receipt is exactly one economic cash receipt and
