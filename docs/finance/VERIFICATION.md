@@ -5,6 +5,40 @@ Branch `feature/finance-cash-budget` (worktree `C:\Projects\ERP-finance-cash-bud
 Every database operation below ran against the portable PostgreSQL on `127.0.0.1:54329`
 (ENVIRONMENT.md); no Neon endpoint was contacted.
 
+## 0. Local UAT candidate (2026-09-26) — `uat/finance-sales-20260926`
+
+Started from `9351e74710343259767e460f3f5cf6629e30c266`; adds the resolved decisions D2–D6,
+the Sales-collection link in the review panel, fixture additions, rehearsal tooling and a local
+Sales shell config (UAT.md). Outside Finance files, this pass changed only test tooling
+(`playwright.shell.local.config.ts`, `tests/shell/local-*.ts`). Run on the final commit, with
+the server built from it on http://localhost:3080 against `erp_finance_integration_dev`:
+
+| # | Check | Result |
+|---|---|---|
+| U1 | `npx tsc --noEmit`; `eslint` (finance, `src/lib/nav`, tests, scripts/finance); `npm run build` | clean; clean; compiles |
+| U2 | Finance unit (`tsx --test tests/finance/unit/*.test.ts`) | **52/52** (36 + 16 new: D4a completeness, D3b profit names) |
+| U3 | Finance DB (`erp_finance_integration`) | **40/40, 0 skipped** (33 + 6 decision tests + 1 collection-suggestion test) |
+| U4 | HTTP (authz, first grant, approver identity, decisions) | **11/11** |
+| U5 | Integrated navigation (Finance entry in the Sales registry, 4 roles) | **4/4** |
+| U6 | Decision checks on the running build (`uat-decisions-ui.mjs`), screenshots in `decisions/uat/` | D2, D3a/D3b, D4a, D5, D6 **pass** |
+| U7 | Walkthrough automated (`workflow-ui.mjs`): approved Sales collection → receipt → allocation once → budget → approval → payment request → override → pending line → record payment → statement confirms → actuals | **11/11 steps**; balances per step in UAT.md |
+| U8 | Sales shell navigation suite, **unchanged spec**, on an isolated local database `erp_shell_local` (3 disposable `NAV_` logins + 1 synthetic collection created through the Sales services) | **35/35** |
+| U9 | Migration rehearsal on a fresh local database (MIGRATION_REHEARSAL.md §0) | preserved, no drift, 12/12 triggers, runtime role refused every privileged write, recovery from the copy identical to the baseline |
+
+Earlier evidence kept for areas this pass did not change: the clean-checkout backend
+regression and Playwright `permissions` / `responsive` / `ui-resilience` / `critical-path` at
+`9351e74` (26 baseline-identical regression failures, 32 passed / 2 baseline Playwright
+failures, no new failure) — not re-run, because this pass changed no non-Finance application
+code.
+
+**U8, precisely.** The suite reads no pre-existing record except one kind: the Finance user's
+collections screen must list at least one collection (the first local run, with none, failed
+exactly that assertion: 34/35). One synthetic collection makes the local database represent
+the preview faithfully for what the suite asserts. Remaining gap: the preview database's
+*real* records (volume, and any data shapes only production-derived data has) are not
+exercised; the spec, its assertions and the preview guard are unchanged
+(`git diff 9351e74 -- tests/shell/navigation.spec.ts playwright.shell.config.ts scripts/sales-preview/` is empty).
+
 ## 1. Commands and results (closure pass)
 
 Prerequisite: `npm run db:local` (portable PostgreSQL running). Suites that log in read the

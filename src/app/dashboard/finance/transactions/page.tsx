@@ -247,7 +247,7 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
           <Link2 size={14} className="mt-0.5 text-green-700 flex-shrink-0" />
           <div>
             <p className="font-bold text-green-700">{L("مرتبط بتحصيل مبيعات معتمد", "Linked to an approved Sales collection")}</p>
-            <p>{custName(cv.linked)} · {money(cv.linked.amountGross)} ({L("منها ضريبة", "incl. VAT")} {money(cv.linked.amountTax)}){cv.linked.referenceNumber && <> · <bdi dir="ltr">{cv.linked.referenceNumber}</bdi></>}</p>
+            <p>{custName(cv.linked)} · {money(cv.linked.amountGross)} ({L("منها ضريبة", "incl. VAT")} {money(cv.linked.amountTax)}){cv.linked.referenceNumber && <> · <bdi dir="ltr" className="whitespace-nowrap">{cv.linked.referenceNumber}</bdi></>}</p>
             <p className="text-brown-light">{L("الربط لا يُنشئ نقداً ولا تخصيصاً إضافياً؛ هذا السطر هو النقد.", "The link adds no cash and no allocation; this bank line is the cash.")}</p>
           </div>
         </div>
@@ -257,7 +257,7 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
           <p className="font-bold">{cv.decision.kind === "MATCH" ? L("تحصيل مبيعات مقترح لهذا الإيصال", "Suggested Sales collection for this receipt") : cv.decision.kind === "AMBIGUOUS" ? L("أكثر من تحصيل مطابق — اختر الصحيح", "More than one matching collection — choose the right one") : L("تحصيل مطابق بانتظار تحقق المبيعات", "A matching collection is awaiting verification in Sales")}</p>
           {cv.candidates.map((c) => (
             <div key={c.id} className="flex items-center justify-between gap-2">
-              <span>{custName(c)} · {money(c.amountGross)} ({L("ضريبة", "VAT")} {money(c.amountTax)}){c.referenceNumber && <> · <bdi dir="ltr">{c.referenceNumber}</bdi></>} · {c.collectedAt.slice(0, 10)}{cv.decision?.kind === "MATCH" ? ` · ${cv.decision.basis === "REFERENCE" ? L("بالمرجع", "by reference") : L("بالمبلغ والتاريخ", "by amount and date")}` : ""}</span>
+              <span>{custName(c)} · {money(c.amountGross)} ({L("ضريبة", "VAT")} {money(c.amountTax)}){c.referenceNumber && <> · <bdi dir="ltr" className="whitespace-nowrap">{c.referenceNumber}</bdi></>} · <bdi dir="ltr" className="whitespace-nowrap">{c.collectedAt.slice(0, 10)}</bdi>{cv.decision?.kind === "MATCH" ? ` · ${cv.decision.basis === "REFERENCE" ? L("بالمرجع", "by reference") : L("بالمبلغ والتاريخ", "by amount and date")}` : ""}</span>
               {canEnter && c.status === "APPROVED" && <Button kind="primary" busy={busy} onClick={() => act(`/api/finance/transactions/${id}/collection`, { collectionId: c.id })}>{L("ربط التحصيل", "Link collection")}</Button>}
             </div>
           ))}
