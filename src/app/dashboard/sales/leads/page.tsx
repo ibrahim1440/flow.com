@@ -11,6 +11,7 @@ import {
   LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, DataTable, Toolbar,
   SearchField, FilterSelect, formatWhen, num,
 } from "../_components/ui";
+import { useUnsavedGuard, isDirtyAgainst } from "../../_components/useUnsavedGuard";
 import ImportDialog from "./ImportDialog";
 
 /**
@@ -44,6 +45,12 @@ const SOURCES = ["WALK_IN", "REFERRAL", "PHONE", "SOCIAL", "EXHIBITION", "WEBSIT
 
 // The shared map, so this screen and the settings screen name a source identically.
 const SOURCE_LABELS = LEAD_SOURCE_LABELS;
+
+/** An untouched create form. Also the baseline the unsaved-work guard compares against. */
+const EMPTY_LEAD_FORM = {
+  companyName: "", companyNameAr: "", contactName: "", phone: "",
+  email: "", city: "", source: "REFERRAL", nextFollowUpAt: "", notes: "",
+};
 
 // Status labels and colours now come from the shared map in `_components/ui`, so this screen
 // and every other one render a stored value identically. The local copy this replaced painted
@@ -156,10 +163,11 @@ export default function LeadsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
-  const [form, setForm] = useState({
-    companyName: "", companyNameAr: "", contactName: "", phone: "",
-    email: "", city: "", source: "REFERRAL", nextFollowUpAt: "", notes: "",
-  });
+  const [form, setForm] = useState(EMPTY_LEAD_FORM);
+
+  // Nine fields somebody may have spent a minute filling in. Navigating away used to
+  // discard them without a word.
+  useUnsavedGuard(isDirtyAgainst(showForm, form, EMPTY_LEAD_FORM));
 
   const [converting, setConverting] = useState<string | null>(null);
   /**

@@ -68,3 +68,22 @@ export function useUnsavedGuard(enabled: boolean, message?: string) {
     };
   }, [enabled, message]);
 }
+
+/**
+ * Is there unsaved work, compared with a baseline the caller already has?
+ *
+ * A plain comparison rather than a hook holding a snapshot. The first version kept the
+ * baseline in a ref written during render, which the React Compiler lint refuses — rightly,
+ * because a ref read during render is a value React cannot reason about. Asking the caller
+ * for the baseline it already owns is simpler and has no hidden state at all.
+ *
+ * `active` is what makes this cheap to use: a closed form is never dirty, so a page passes
+ * whatever flag reveals its editor.
+ *
+ * Why not just `active`: prompting somebody who opened a form, typed nothing and clicked
+ * away is how people learn to dismiss prompts without reading them.
+ */
+export function isDirtyAgainst(active: boolean, value: unknown, baseline: unknown): boolean {
+  if (!active) return false;
+  return JSON.stringify(value) !== JSON.stringify(baseline);
+}

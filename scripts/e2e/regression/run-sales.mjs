@@ -24,10 +24,12 @@ const SUITES = [
   "follow-up-workflow",     // two-write scheduling: failure, retry, double submit — no database
   "sales-rtl-audit",       // RTL and responsive statics — no database, no browser
   "navigation",            // the menu registry against the real roles — no database, no browser
+  "navigation-roles",      // the menu against every account that exists — real PostgreSQL
   "sales-lifecycle-collections", // qualification rules, tax allocation, commission deltas — no database
   "sales-commissions-db",   // constraints, concurrency, rollback — real PostgreSQL
   "sales-security",         // what is refused — real HTTP API
   "sales-collections",      // constraints, races, separation of duties — PostgreSQL and HTTP
+  "reviewer-collections",   // the workflow as the ACTUAL reviewer accounts — PostgreSQL and HTTP
   "sales-workflow",         // the ordinary path, end to end — real HTTP API
 ];
 

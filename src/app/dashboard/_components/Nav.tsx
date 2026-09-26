@@ -157,6 +157,15 @@ export function SidebarNav({
 /**
  * The pages of the subunit you are standing in.
  *
+ * ── On the colour ──
+ * Uses the SHELL's primary (`--orange`, which has held #7C3AED since the theme refresh in
+ * dcefa3d and is no longer orange at all), not the Sales design system's
+ * `--oo-action-primary` #4F46E5. Both are deliberate: the shell was recoloured for the whole
+ * ERP, and the Sales screens were later built on their own token set. This bar is shell
+ * furniture sitting directly beneath the sidebar, so it matches the sidebar rather than
+ * showing two different purples inside one navigation system. The wider reconciliation of
+ * the two palettes is a design decision, not something a navigation change should settle.
+ *
  * Renders nothing when there is no choice to make: a subunit with one destination would
  * otherwise show a single tab, which is decoration pretending to be navigation.
  */
@@ -186,7 +195,7 @@ export function ContextualNav({ viewer, lang }: { viewer: Viewer; lang: string }
                 data-testid={`ctx-${p.id}`}
                 className={`inline-flex items-center whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors ${
                   current
-                    ? "border-oo-action-primary text-oo-action-primary"
+                    ? "border-orange text-orange"
                     : "border-transparent text-oo-text-secondary hover:border-oo-border-strong hover:text-oo-text-primary"
                 }`}
               >

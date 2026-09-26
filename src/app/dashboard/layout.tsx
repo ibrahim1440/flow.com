@@ -149,7 +149,11 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
             <Breadcrumbs viewer={viewer} lang={lang} />
           </div>
           <div className="hidden sm:block text-sm text-brown font-medium flex-shrink-0">
-            {new Date().toLocaleDateString(lang === "ar" ? "ar-SA" : "en-US", {
+            {/* Arabic locale, LATIN digits, Gregorian calendar — the same rule the Sales
+                formatters follow. Plain "ar-SA" renders ٢٦ سبتمبر ٢٠٢٦, which is the one
+                thing this interface is not allowed to do, and the Sales digit audit never
+                caught it because the audit mounts page components and this is the shell. */}
+            {new Date().toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-latn-ca-gregory" : "en-GB", {
               weekday: "long",
               year: "numeric",
               month: "long",

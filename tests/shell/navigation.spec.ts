@@ -298,3 +298,150 @@ test.describe("the record, for the report", () => {
     await page.screenshot({ path: path.join(SHOTS, "finance-collections-desktop-1440.png"), fullPage: false });
   });
 });
+
+test.describe("unsaved work is not discarded silently", () => {
+  /**
+   * The lead detail page's edit panel is the case that matters: it is INLINE, so every
+   * navigation control stays clickable while a draft is on screen. The create form on the
+   * leads list is a fixed overlay — nothing behind it can be clicked — so the click guard
+   * is not what protects it, and this suite does not pretend otherwise.
+   *
+   * Uses an isolated synthetic lead it creates and deletes itself. It never touches a lead
+   * anybody is reviewing.
+   */
+  const SYNTHETIC = "SHELL_GUARD مقهى";
+
+  async function makeLead(page: Page): Promise<string> {
+    const id = await page.evaluate(async (name) => {
+      const r = await fetch("/api/sales/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: name, contactName: "Guard Test", source: "REFERRAL" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      return j?.lead?.id ?? null;
+    }, SYNTHETIC);
+    expect(id, "the synthetic lead must be created").toBeTruthy();
+    return id as string;
+  }
+  async function removeLead(page: Page, id: string) {
+    await page.evaluate(async (leadId) => {
+      await fetch(`/api/sales/leads/${leadId}`, { method: "DELETE" });
+    }, id);
+  }
+
+  test("an edited lead asks before a navigation throws the edits away", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    const id = await makeLead(page);
+    try {
+      await page.goto(`/dashboard/sales/leads/${id}`);
+      await page.waitForSelector("aside nav");
+      await page.waitForLoadState("networkidle");
+      await page.getByTestId("toggle-edit").click();
+      const company = page.locator("#companyName");
+      await expect(company).toBeVisible();
+      await company.fill("SHELL_GUARD تم التعديل");
+
+      let asked = 0;
+      const decline = (d: import("@playwright/test").Dialog) => { asked++; void d.dismiss(); };
+      page.on("dialog", decline);
+      await page.getByTestId("nav-sales.pipeline").click();
+      await page.waitForTimeout(700);
+      expect(asked, "leaving an edited form must ask").toBeGreaterThan(0);
+      expect(page.url(), "declining keeps you on the page").toContain(`/leads/${id}`);
+      await expect(company, "and keeps the typing").toHaveValue("SHELL_GUARD تم التعديل");
+      page.off("dialog", decline);
+
+      page.on("dialog", (d) => void d.accept());
+      await page.getByTestId("nav-sales.pipeline").click();
+      await page.waitForURL("**/dashboard/sales/pipeline");
+    } finally {
+      await page.goto("/dashboard/sales/leads");
+      await removeLead(page, id);
+    }
+  });
+
+  test("an untouched edit panel does not nag", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    const id = await makeLead(page);
+    try {
+      await page.goto(`/dashboard/sales/leads/${id}`);
+      await page.waitForSelector("aside nav");
+      await page.waitForLoadState("networkidle");
+      await page.getByTestId("toggle-edit").click();
+      await expect(page.locator("#companyName")).toBeVisible();
+
+      let asked = 0;
+      page.on("dialog", (d) => { asked++; void d.accept(); });
+      await page.getByTestId("nav-sales.pipeline").click();
+      await page.waitForURL("**/dashboard/sales/pipeline");
+      expect(asked, "a prompt nobody needs is a prompt people learn to ignore").toBe(0);
+    } finally {
+      await page.goto("/dashboard/sales/leads");
+      await removeLead(page, id);
+    }
+  });
+
+  test("a refresh with unsaved edits is guarded by the browser's own prompt", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, PIN.rep, "/dashboard/sales/leads");
+    const id = await makeLead(page);
+    try {
+      await page.goto(`/dashboard/sales/leads/${id}`);
+      await page.waitForSelector("aside nav");
+      await page.waitForLoadState("networkidle");
+      await page.getByTestId("toggle-edit").click();
+      await page.locator("#companyName").fill("SHELL_GUARD معدَّل");
+
+      // Playwright auto-dismisses beforeunload, so what is asserted is that the handler is
+      // registered and armed — the browser owns the dialog and its wording.
+      const armed = await page.evaluate(() => {
+        const e = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+      expect(armed, "beforeunload must be armed while the draft is dirty").toBe(true);
+    } finally {
+      await page.goto("/dashboard/sales/leads");
+      await removeLead(page, id);
+    }
+  });
+});
+
+test.describe("the shell renders Latin digits", () => {
+  /**
+   * The Sales digit audit mounts page COMPONENTS against fixtures. The shell — header,
+   * breadcrumb, sidebar, contextual bar — is not in it, which is how the header date went
+   * on rendering "السبت، ٢٦ سبتمبر ٢٠٢٦" through every previous green run.
+   */
+  const ARABIC_INDIC = /[٠-٩۰-۹]/;
+
+  for (const vp of WIDTHS) {
+    test(`no Arabic-Indic digit in the chrome at ${vp.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await signIn(page, PIN.rep, "/dashboard/sales/leads");
+      if (vp.width < 1024) {
+        await page.getByRole("button", { name: /فتح القائمة|Open menu/ }).click();
+        await page.waitForTimeout(300);
+      }
+      const offenders = await page.evaluate(() => {
+        const bad: string[] = [];
+        for (const sel of ["header", "aside", "[data-testid=contextual-nav]", "[data-testid=breadcrumbs]"]) {
+          for (const el of document.querySelectorAll(sel)) {
+            const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+            let n: Node | null;
+            while ((n = walk.nextNode())) {
+              const t = (n.textContent ?? "").trim();
+              if (/[٠-٩۰-۹]/.test(t)) bad.push(t.slice(0, 60));
+            }
+          }
+        }
+        return bad;
+      });
+      expect(offenders, `chrome shows Arabic-Indic digits: ${offenders.join(" | ")}`).toEqual([]);
+      expect(ARABIC_INDIC.test("٢٠٢٦"), "the detector must actually detect").toBe(true);
+    });
+  }
+});

@@ -61,10 +61,20 @@ a placeholder would be a page that exists only to fill a row in a menu.
 | Module | Contents |
 | --- | --- |
 | المالية | التحصيلات · مراجعة العمولات · عمولاتي · المحاسبة |
-| العمليات | تجهيز الطلبات · الإنتاج · أوامر الإنتاج · التعبئة · التسليم · الجودة · التذوق |
+| العمليات | الطلبات* · تجهيز الطلبات · الإنتاج · أوامر الإنتاج · التعبئة · التسليم · الجودة · التذوق |
 | المخزون والمنتجات | المخزون · المشتريات · المنتجات · الملصقات |
 | التقارير والسجل | التحليلات · السجل |
 | singles | لوحة التحكم · الموظفون · الإعدادات |
+
+* **Orders is placed deterministically, once.** `/dashboard/orders` is a sales order to a
+salesperson and the thing being prepared to operations, and both need it. The Sales
+placement carries `requiresAll: [sales]`; the Operations placement carries
+`unlessAny: [sales]`. So whoever holds the sales module meets it under Sales, everybody
+else meets it under Operations, and **nobody meets it twice**. Dispatch, production and the
+legacy order-taking role no longer see a "Sales" heading that exists to hold one link.
+العملاء works the same way: under Sales for a CRM user, a plain top-level entry for anybody
+else. Asserted for all nine role definitions and all fifteen accounts in the preview
+database.
 
 **Order preparation moved to Operations**, which is where fulfilment belongs. Its route and its
 permissions are untouched; only its listing changed. The order it prepares is the same record
@@ -193,3 +203,89 @@ roles, a detail-page breadcrumb, 1440, 1024 and the mobile drawer open and close
    user holds `orders` without the `sales` module and will therefore see a Sales group
    containing only طلبات البيع. Nothing is hidden; gating the group on `sales` instead **would**
    hide it, which is why it was not done.
+
+---
+
+## 7. The two purples — determined, with evidence
+
+**Both are intentional. Neither is an implementation bug.** They come from two design
+decisions taken at different times, and nothing had reconciled them.
+
+`git log -S` on `src/app/globals.css` gives the history directly. Commit **`dcefa3d`**,
+*"style(ui): refresh theme to clean purple interface"*, changed:
+
+```
+-  --orange: #E25D2F;          →  +  --orange: #7C3AED;
+-  --sidebar-active: #E25D2F;  →  +  --sidebar-active: #7C3AED;
+```
+
+The ERP shell was deliberately recoloured from a warm orange to violet for the whole
+application. The variable kept its old name, which is why `--orange` holds a violet — a
+**naming** defect, not a colour one. The Sales design system arrived later with its own
+`--oo-action-primary: #4F46E5`.
+
+So: 31 files use the shell token, 23 use the Sales token, and the boundary between them was
+never drawn.
+
+**What was corrected here:** the navigation I introduced straddled that boundary — a violet
+sidebar beside an indigo contextual bar, two purples inside one navigation system. The bar
+now uses the shell token, so the whole navigation chrome is one colour. The Figma component
+was updated to follow the corrected code, and its description records why.
+
+**What was not corrected, and should be decided rather than guessed:** whether the ERP
+unifies on `#7C3AED` or `#4F46E5`, and whether `--orange` is renamed. That touches 54 files
+across every module and is a design decision, not a navigation change.
+
+---
+
+## 8. Unsaved work — the full inventory
+
+Every dashboard page with an editable field, classified by whether a client-side navigation
+can actually lose anything. A field inside a dialog is dismissed with the dialog; a search
+or filter loses nothing; a page-level draft saved by an explicit button is the real risk.
+
+| Route | Page-level fields | Risk | Guard |
+| --- | --- | --- | --- |
+| `/sales/quotes/[id]` | 8 (line editor) | **real** — inline, explicit Save | **yes** |
+| `/sales/leads/[id]` | 16 (edit panel) | **real** — inline, explicit Save | **yes** |
+| `/sales/leads` | 9 (create form) | low — a fixed overlay covers the page, so nav is unreachable while open | yes (covers refresh/close) |
+| `/orders` | 15 | **real** — order entry, explicit Save | no |
+| `/qc` | 15 | **real** | no |
+| `/inventory` | 10 | **real** | no |
+| `/purchases` | 9 | **real** | no |
+| `/employees` | 6 | **real** | no |
+| `/dispatch` | 5 | **real** | no |
+| `/products` | 2 page + 21 dialog | low — the editing is in dialogs | no |
+| `/commissions/plans`, `/commissions/review`, `/sales/deals/[id]`, `/sales/collections`, `/sales/settings`, `/sales/targets` | 0–1 | none — all editing is in dialogs | n/a |
+| `/customers`, `/cupping`, `/history`, `/labels`, `/packaging`, `/production`, `/profile`, `/settings`, `/sales/pipeline`, `/production-orders/[id]` | filters, or no explicit save | none | n/a |
+
+**Six pages outside the Sales module remain unprotected** — `/orders`, `/qc`, `/inventory`,
+`/purchases`, `/employees`, `/dispatch`. Each needs its own notion of "dirty" (what the
+baseline is, when a save resets it), which is a change to those pages and their tests, not
+to the navigation. They are listed here rather than left to be discovered.
+
+`isDirtyAgainst(active, value, baseline)` is a plain comparison, not a hook holding a
+snapshot: the first version kept the baseline in a ref written during render, which the
+React Compiler lint refuses, and rightly.
+
+**A latent bug found while testing this:** `load()` on the lead detail page re-seeded the
+form from the server unconditionally, so a reload arriving while the edit panel was open
+discarded whatever had been typed. React StrictMode makes it reproducible in development by
+running the mount effect twice. It now re-seeds only when the panel is closed — and
+`saveEdits` closes the panel before reloading, so a save still refreshes correctly.
+
+---
+
+## 9. Latin digits in the shell
+
+The Sales digit audit mounts page **components** against fixtures. The shell is not in it,
+and the header date was calling `toLocaleDateString("ar-SA")`, which renders
+**السبت، ٢٦ سبتمبر ٢٠٢٦** — Arabic-Indic digits, through every previous green run.
+
+Corrected to `ar-SA-u-nu-latn-ca-gregory`, the same locale the Sales formatters use, and
+covered by a shell-level audit at all three widths so it cannot come back.
+
+**Still outstanding, outside this module:** `dashboard/page.tsx:223`,
+`inventory/page.tsx:554`, and three call sites in `purchases/page.tsx` use raw `"ar-SA"`
+and will render Arabic-Indic digits. Whether the Latin-digit rule extends beyond Sales is a
+product decision; the locations are recorded so it is a decision and not a discovery.

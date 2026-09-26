@@ -253,6 +253,40 @@ for (const r of ["dispatch", "production", "admin"] as RoleName[]) {
   }
 }
 
+sub("C8. a shared destination appears once, and in the right frame");
+{
+  // Orders is a sales order to a salesperson and the thing being prepared to operations.
+  // Both need it; neither should meet it twice, and a dispatch operator should not be
+  // shown a "Sales" heading for it.
+  const place = (r: RoleName) => {
+    const hits = destinations(visibleNav(viewer(r))).filter((d) => d.node.href === "/dashboard/orders");
+    return hits.map((h) => h.trail[0]?.id ?? "(top level)");
+  };
+  for (const r of ["crmRep", "crmManager", "admin"] as RoleName[]) {
+    check(`${r}: orders under Sales, exactly once`, S(place(r)) === S(["sales"]), S(place(r)));
+  }
+  for (const r of ["sales", "dispatch", "production"] as RoleName[]) {
+    check(`${r}: orders under Operations, exactly once`, S(place(r)) === S(["operations"]), S(place(r)));
+  }
+  for (const r of ["qc", "packaging"] as RoleName[]) {
+    check(`${r}: holds no orders ability, so it is absent`, place(r).length === 0, S(place(r)));
+  }
+
+  // And nobody is shown a Sales group that exists only to hold one operational link.
+  for (const r of ["sales", "dispatch", "production"] as RoleName[]) {
+    const top = visibleNav(viewer(r)).map((n) => n.id);
+    check(`${r}: no Sales group at all`, !top.includes("sales"), S(top));
+  }
+
+  // Customers is the same shape: the CRM framing for a CRM user, a plain entry otherwise.
+  const custPlace = (r: RoleName) => destinations(visibleNav(viewer(r)))
+    .filter((d) => d.node.href === "/dashboard/customers")
+    .map((h) => h.trail[0]?.id ?? "(top level)");
+  check("crmRep: customers under Sales", S(custPlace("crmRep")) === S(["sales"]), S(custPlace("crmRep")));
+  check("the legacy sales role: customers at the top level, once",
+    S(custPlace("sales")) === S(["(top level)"]), S(custPlace("sales")));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 section("D — NOTHING REACHABLE TODAY BECOMES UNREACHABLE");
 //

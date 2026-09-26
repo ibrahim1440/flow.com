@@ -15,6 +15,7 @@ import {
   Select, TextArea, EmptyState, Spinner, LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS,
   ROW_ACTION, formatWhen, formatDay, num,
 } from "../../_components/ui";
+import { useUnsavedGuard, isDirtyAgainst } from "../../../_components/useUnsavedGuard";
 import { ACTIVITY_OUTCOMES, QUALIFYING_OUTCOMES as QUALIFYING } from "@/lib/services/sales/qualification";
 
 /**
@@ -108,10 +109,16 @@ export default function LeadDetailPage() {
   const [busy, setBusy] = useState("");
 
   const [editing, setEditing] = useState(false);
+  /** The last values the server gave us — what "unsaved" is measured against. */
+  const [saved, setSaved] = useState<Record<string, string> | null>(null);
   const [form, setForm] = useState({
     companyName: "", companyNameAr: "", contactName: "", phone: "", email: "",
     city: "", address: "", source: "REFERRAL", sourceNote: "", notes: "", status: "NEW",
   });
+
+  // The edit panel holds a draft of the whole lead until Save. Leaving with it open and
+  // changed used to lose every edit silently.
+  useUnsavedGuard(isDirtyAgainst(editing, form, saved));
 
   const [logType, setLogType] = useState("CALL");
   const [logOutcome, setLogOutcome] = useState<string>("NOTE_ONLY");
@@ -143,13 +150,20 @@ export default function LeadDetailPage() {
     if (res.ok) {
       const data = await res.json();
       setLead(data.lead);
-      setForm({
+      const fromServer = {
         companyName: data.lead.companyName ?? "", companyNameAr: data.lead.companyNameAr ?? "",
         contactName: data.lead.contactName ?? "", phone: data.lead.phone ?? "",
         email: data.lead.email ?? "", city: data.lead.city ?? "", address: data.lead.address ?? "",
         source: data.lead.source ?? "REFERRAL", sourceNote: data.lead.sourceNote ?? "",
         notes: data.lead.notes ?? "", status: data.lead.status ?? "NEW",
-      });
+      };
+      setSaved(fromServer);
+      // Never overwrite a draft somebody is in the middle of. `saveEdits` closes the panel
+      // before it reloads, so a save still re-seeds; what this stops is a reload arriving
+      // while the panel is open and silently discarding what has been typed. React's
+      // StrictMode makes that concrete in development by running the mount effect twice —
+      // the second response used to land on top of the first keystrokes.
+      if (!editing) setForm(fromServer);
     } else {
       setLead(null);
       // 404 covers "does not exist" and "not yours" with one message on purpose: telling a

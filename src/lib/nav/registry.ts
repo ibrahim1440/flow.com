@@ -55,6 +55,17 @@ export type NavNode = {
    * without touching who may reach the page.
    */
   requiresAll?: Ability[];
+  /**
+   * Hides this PLACEMENT from anyone holding any of these — the mirror of `requiresAll`.
+   *
+   * Orders is the reason. It is a sales order to a salesperson and the thing being prepared
+   * to operations, and both need it. Listing it only under Sales showed a dispatch operator
+   * a "Sales" group containing one link; listing it in both showed a salesperson the same
+   * destination twice. So each placement excludes the other's audience and the result is
+   * deterministic: whoever holds the sales module meets it under Sales, everybody else
+   * meets it under Operations, and nobody meets it twice.
+   */
+  unlessAny?: Ability[];
   /** Admin-only double guard, kept from the previous sidebar for the settings screen. */
   adminOnly?: boolean;
   children?: NavNode[];
@@ -99,6 +110,9 @@ export const NAV: NavNode[] = [
             ar: "العملاء", en: "Customers",
             href: "/dashboard/customers",
             anyOf: [{ module: "customers" }],
+            // The CRM framing. The plain top-level entry near the bottom of this file is
+            // the same screen for somebody who has no Sales CRM; the two never coexist.
+            requiresAll: IN_SALES,
           },
         ],
       },
@@ -143,6 +157,7 @@ export const NAV: NavNode[] = [
             ar: "طلبات البيع", en: "Sales orders",
             href: "/dashboard/orders",
             anyOf: [{ module: "orders" }],
+            requiresAll: IN_SALES,
           },
         ],
       },
@@ -272,6 +287,16 @@ export const NAV: NavNode[] = [
       {
         // Fulfilment, not Sales. The route and its permissions are untouched; only where
         // it is listed has changed.
+        // The same route and the same permission as the Sales placement above — one
+        // destination, framed for whoever is looking at it. `unlessAny` keeps the two from
+        // ever both appearing.
+        id: "operations.orders",
+        ar: "الطلبات", en: "Orders",
+        href: "/dashboard/orders",
+        anyOf: [{ module: "orders" }],
+        unlessAny: [sales()],
+      },
+      {
         id: "operations.preparation",
         ar: "تجهيز الطلبات", en: "Order preparation",
         href: "/dashboard/workstation/preparation",
@@ -371,6 +396,17 @@ export const NAV: NavNode[] = [
   },
 
   {
+    // Where the customer list lives for somebody without the Sales CRM — the legacy
+    // order-taking role holds `customers` and no `sales`. It was a top-level entry before
+    // the restructuring and stays one for them, rather than becoming a Sales group of one.
+    id: "customers",
+    ar: "العملاء", en: "Customers",
+    icon: Users2,
+    href: "/dashboard/customers",
+    anyOf: [{ module: "customers" }],
+    unlessAny: [sales()],
+  },
+  {
     id: "employees",
     ar: "الموظفون", en: "Employees",
     icon: Users,
@@ -404,6 +440,7 @@ function holds(v: Viewer, a: Ability): boolean {
 export function nodePermitted(v: Viewer, n: NavNode): boolean {
   if (n.adminOnly && v.role !== "admin") return false;
   if (n.requiresAll && !n.requiresAll.every((a) => holds(v, a))) return false;
+  if (n.unlessAny && n.unlessAny.some((a) => holds(v, a))) return false;
   if (!n.anyOf || n.anyOf.length === 0) return true;
   return n.anyOf.some((a) => holds(v, a));
 }
