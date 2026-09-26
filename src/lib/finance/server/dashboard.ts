@@ -152,6 +152,12 @@ export async function overview(db: Db, scope: FinanceScope) {
     const due = a.lastReconciledDate ? diffDays(a.lastReconciledDate, today) > settings.reconciliationDueDays : true;
     if (due) alerts.push({ kind: "RECONCILIATION_OVERDUE", severity: "low", message: `${a.code}: ${a.lastReconciledDate ? `last reconciled ${a.lastReconciledDate}` : "never reconciled"}`, ref: a.id, date: a.lastReconciledDate ?? undefined, data: { code: a.code, nameEn: a.nameEn, nameAr: a.nameAr, last: a.lastReconciledDate } });
   }
+  // Sales reversed a collection that Finance had linked to a receipt: the money is still in
+  // the bank, so nothing moves automatically; a person decides (refund line or re-link).
+  const { reversedCollectionLinks } = await import("./transactions");
+  for (const r of await reversedCollectionLinks(db, scope)) {
+    alerts.push({ kind: "COLLECTION_REVERSED", severity: "high", message: `A linked sales collection was reversed in Sales (${r.amount / 100} SAR) — review the receipt`, amount: r.amount, ref: r.txnId, data: { amount: r.amount, reason: r.reason } });
+  }
   for (const p of pools) {
     if (p.unallocated < 0) alerts.push({ kind: "OVER_ALLOCATED", severity: "high", message: `${p.branchKey === COMPANY ? "Company" : p.branchKey}: allocations exceed eligible cash by ${-p.unallocated / 100} SAR — review categories`, amount: p.unallocated, data: { branchKey: p.branchKey, over: -p.unallocated } });
     if (p.negativeCategories > 0) alerts.push({ kind: "NEGATIVE_CATEGORY", severity: "high", message: `${p.negativeCategories} category balance(s) are negative after a reversal — funds were already spent`, amount: p.negativeCategories, data: { count: p.negativeCategories } });

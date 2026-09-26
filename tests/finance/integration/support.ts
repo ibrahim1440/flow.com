@@ -18,7 +18,7 @@ const FIN_TABLES = [
 let verified = false;
 export async function reset() {
   if (!verified) {
-    await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_test", query: (q: string) => prisma.$queryRawUnsafe(q) });
+    await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_integration", query: (q: string) => prisma.$queryRawUnsafe(q) });
     verified = true;
   }
   const list = [...FIN_TABLES, "Delivery", "OrderItem", "OrderActivity", "Order", "Customer", "PurchaseRecord", "Supplier", "Employee"].map((t) => `"${t}"`).join(", ");

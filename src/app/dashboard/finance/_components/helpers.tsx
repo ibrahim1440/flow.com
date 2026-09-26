@@ -20,6 +20,7 @@ export function useAlertText() {
       case "UNCLASSIFIED": return [L(`${d.count} سطر بنكي بانتظار المراجعة والتصنيف`, `${d.count} bank lines awaiting review and classification`), L("المعاملات والتسوية", "Transactions & Reconciliation")];
       case "RECONCILIATION_OVERDUE": return [L(`${d.code} — ${name({ nameAr: d.nameAr, nameEn: d.nameEn })}: ${d.last ? `آخر تسوية ${d.last}` : "لم تتم تسويته مطلقاً"}`, `${d.code} — ${name({ nameAr: d.nameAr, nameEn: d.nameEn })}: ${d.last ? `last reconciled ${d.last}` : "never reconciled"}`), L("التسوية متأخرة", "Reconciliation overdue")];
       case "OVER_ALLOCATED": return [L(`التخصيصات تتجاوز النقد المؤهل بمبلغ ${money(d.over)} ر.س`, `Allocations exceed eligible cash by SAR ${money(d.over)}`), L("تخصيص النقد", "Cash Allocation")];
+      case "COLLECTION_REVERSED": return [L(`تحصيل مبيعات مرتبط بإيصال عُكس في المبيعات (${money(d.amount)} ر.س) — راجع الإيصال`, `A linked sales collection was reversed in Sales (SAR ${money(d.amount)}) — review the receipt`), L("المعاملات والتسوية", "Transactions & Reconciliation")];
       case "NEGATIVE_CATEGORY": return [L(`${d.count} فئة برصيد سالب بعد عكس إيصال — صُرفت الأموال مسبقاً`, `${d.count} categories are negative after a reversal — funds were already spent`), L("تخصيص النقد", "Cash Allocation")];
       case "BUDGET_VARIANCE": {
         const nm = name({ nameAr: d.nameAr, nameEn: d.nameEn });

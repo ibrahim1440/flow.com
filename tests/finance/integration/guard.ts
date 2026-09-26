@@ -3,6 +3,6 @@
 // support.ts before the first TRUNCATE.
 import { checkUrl } from "../../../scripts/finance/local-db-guard.mjs";
 
-const problems = checkUrl(process.env.DATABASE_URL, "erp_finance_test");
+const problems = checkUrl(process.env.DATABASE_URL, "erp_finance_integration");
 if (problems.length) throw new Error(`Refusing to run finance integration tests: ${problems.join("; ")}.`);
 export {};

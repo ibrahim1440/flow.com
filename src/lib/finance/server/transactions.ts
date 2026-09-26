@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { fromMinor, parseMoney, toMinor, type Minor } from "../money";
 import { addDays, dbDate, isDateString, riyadhDateString } from "../dates";
+import { collectionMinor, decideCollectionMatch } from "../collections-match";
 import { fileHash, fingerprintRows, mapRows, parseCsv, type CsvMapping } from "../csv";
 import { ALL_CLASSES, classDirection, isAllocatableClass, SETTLEMENT_CLASSES, type TxnClass } from "../classes";
 import {
@@ -603,10 +604,8 @@ export async function addMatch(actor: FinanceActor, scope: FinanceScope, txnId: 
   assertCan(actor, "txn_enter");
   const targetType = String(body.targetType);
   if (!["ORDER", "OBLIGATION", "PURCHASE_RECORD", "SALES_COLLECTION"].includes(targetType)) throw new FinanceError("Unknown document type.", 400);
-  if (targetType === "SALES_COLLECTION") {
-    throw new FinanceError("Sales collections are not available on this branch yet (feature/sales-crm-commissions). Link to the order instead.", 409);
-  }
   const targetId = reqStr(body.targetId, "Document", 40);
+  if (targetType === "SALES_COLLECTION") return linkSalesCollection(actor, scope, txnId, targetId);
   const amount = parseMoney(body.amount);
   if (amount === null || amount <= 0) throw new FinanceError("Amount must be positive.", 400);
   const taxAmount = body.taxAmount === undefined || body.taxAmount === "" ? 0 : parseMoney(body.taxAmount);
@@ -646,6 +645,70 @@ export async function addMatch(actor: FinanceActor, scope: FinanceScope, txnId: 
     await audit(tx, { action: "bank_txn.matched", entityType: "BankTransaction", entityId: txnId, branchKey: t.branchKey, after: m, userId: actor.id });
     return m;
   });
+}
+
+/**
+ * Link one APPROVED sales collection to the bank receipt that brought the money in.
+ *
+ * The bank line is the cash. Linking adds exactly one BankTransactionMatch: it creates no
+ * bank line, no allocation and no budget actual (those come from the line's own review and
+ * allocation, once). One collection ↔ one line, enforced here and by partial unique indexes.
+ * Repeating the same link returns the existing one. VAT comes from the collection.
+ */
+export async function linkSalesCollection(actor: FinanceActor, scope: FinanceScope, txnId: string, collectionId: string) {
+  assertCan(actor, "txn_enter");
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "BankTransaction" WHERE id = ${txnId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "SalesCollection" WHERE id = ${collectionId} FOR UPDATE`;
+    const t = await tx.bankTransaction.findUnique({ where: { id: txnId } });
+    if (!t) throw new FinanceError("Not found", 404);
+    assertScope(scope, t.branchKey);
+    const c = await tx.salesCollection.findUnique({ where: { id: collectionId } });
+    if (!c) throw new FinanceError("Sales collection not found.", 404);
+    const existing = await tx.bankTransactionMatch.findFirst({ where: { targetType: "SALES_COLLECTION", targetId: collectionId, active: true } });
+    if (existing?.transactionId === txnId) return existing; // retry of the same link
+    if (existing) throw new FinanceError("This collection is already linked to another bank line.", 409);
+    const other = await tx.bankTransactionMatch.findFirst({ where: { transactionId: txnId, targetType: "SALES_COLLECTION", active: true } });
+    if (other) throw new FinanceError("This bank line already settles another sales collection.", 409);
+    if (t.status !== "CONFIRMED" || toMinor(t.amount) <= 0) throw new FinanceError("A sales collection is linked to a confirmed receipt.", 409);
+    if (c.status !== "APPROVED") throw new FinanceError(c.status === "PENDING_VERIFICATION" ? "The collection has not been verified yet." : "Only an approved collection can be linked.", 409);
+    if (c.currency !== "SAR") throw new FinanceError("Only SAR collections can be linked.", 409);
+    const gross = collectionMinor(c.amountGross.toString());
+    if (gross === null) throw new FinanceError("The collection amount is not a valid SAR amount.", 409);
+    const used = await tx.bankTransactionMatch.aggregate({ where: { transactionId: txnId, active: true }, _sum: { amount: true } });
+    if (gross + toMinor(used._sum.amount) > toMinor(t.amount)) throw new FinanceError("The collection is larger than the unmatched part of this receipt.", 409);
+    const m = await tx.bankTransactionMatch.create({
+      data: { transactionId: txnId, targetType: "SALES_COLLECTION", targetId: collectionId, amount: fromMinor(gross), taxAmount: c.amountTax.toString(), createdBy: actor.id },
+    });
+    await audit(tx, { action: "bank_txn.collection_linked", entityType: "BankTransaction", entityId: txnId, branchKey: t.branchKey, after: m, refs: { collectionId }, userId: actor.id });
+    return m;
+  });
+}
+
+/** Suggestion for one receipt, using the tested decision rule (collections-match.ts). */
+export async function suggestSalesCollection(db: Db, scope: FinanceScope, txnId: string) {
+  const t = await db.bankTransaction.findUnique({ where: { id: txnId } });
+  if (!t) throw new FinanceError("Not found", 404);
+  assertScope(scope, t.branchKey);
+  const amount = Number(t.amount);
+  const cands = await db.salesCollection.findMany({
+    where: { amountGross: amount.toFixed(2), status: { in: ["APPROVED", "PENDING_VERIFICATION"] } },
+    select: { id: true, status: true, paymentMethod: true, amountGross: true, currency: true, referenceNumber: true, collectedAt: true },
+  });
+  const links = await db.bankTransactionMatch.findMany({ where: { targetType: "SALES_COLLECTION", active: true, targetId: { in: cands.map((c) => c.id) } } });
+  const lineLinked = await db.bankTransactionMatch.count({ where: { transactionId: txnId, targetType: "SALES_COLLECTION", active: true } });
+  return decideCollectionMatch(
+    { id: t.id, amount: toMinor(t.amount), txnDate: t.txnDate.toISOString().slice(0, 10), status: t.status, bankReference: t.bankReference, hasCollectionMatch: lineLinked > 0 },
+    cands.map((c) => ({ id: c.id, status: c.status, paymentMethod: c.paymentMethod, amountGross: c.amountGross.toString(), currency: c.currency, referenceNumber: c.referenceNumber, collectedAt: c.collectedAt.toISOString(), linkedTxnId: links.find((l) => l.targetId === c.id)?.transactionId ?? null })),
+  );
+}
+
+/** Linked collections that Sales has since reversed: flagged for review; cash is untouched. */
+export async function reversedCollectionLinks(db: Db, scope: FinanceScope) {
+  const links = await db.bankTransactionMatch.findMany({ where: { targetType: "SALES_COLLECTION", active: true, transaction: scopeWhere(scope) }, include: { transaction: { select: { id: true, branchKey: true, amount: true } } } });
+  if (links.length === 0) return [];
+  const reversed = await db.salesCollection.findMany({ where: { id: { in: links.map((l) => l.targetId) }, status: "REVERSED" }, select: { id: true, reversalReason: true, reversedAt: true } });
+  return links.filter((l) => reversed.some((r) => r.id === l.targetId)).map((l) => ({ matchId: l.id, txnId: l.transactionId, collectionId: l.targetId, amount: toMinor(l.amount), reason: reversed.find((r) => r.id === l.targetId)!.reversalReason }));
 }
 
 export async function removeMatch(actor: FinanceActor, scope: FinanceScope, matchId: string, reason: string) {
