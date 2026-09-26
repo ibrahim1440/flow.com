@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, ShoppingCart, ChevronDown, ChevronUp, Trash2, UserPlus, X, Pencil, Save, Clock, ClipboardList, MessageSquare } from "lucide-react";
+import { Plus, Search, ShoppingCart, ChevronDown, ChevronUp, Trash2, UserPlus, X, Pencil, Save, Clock, ClipboardList, MessageSquare, AlertTriangle } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -117,6 +117,7 @@ export default function OrdersPage() {
   const [products, setProducts] = useState<ProductSummary[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const [showForm, setShowForm] = useState(false);
   // In-flight guard for the create-order write, so the button cannot be pressed twice.
   //
@@ -347,80 +348,138 @@ export default function OrdersPage() {
     });
   }
 
+  // Orders the operator has to do something about. The predicate is the shared one the
+  // card badge already uses, so the count beside the filter and the badges inside the list
+  // can never disagree.
+  const attentionCount = orders.filter(orderNeedsAttention).length;
+
   const filtered = orders.filter((o) => {
     const matchSearch = `${o.orderNumber} ${o.customer.name} ${o.quotationNumber || ""}`.toLowerCase().includes(search.toLowerCase());
+    if (attentionOnly && !orderNeedsAttention(o)) return false;
     if (statusFilter === "all") return matchSearch;
     return matchSearch && o.items.some((i) => i.productionStatus === statusFilter);
   });
+
+  // The same four choices the status <select> offered. They are item production statuses,
+  // not order lifecycle statuses, and the filtering rule below is unchanged — only the
+  // control is: four options are quicker to hit as chips than to open as a menu, and the
+  // set is small enough that showing all of them costs nothing.
+  const STATUS_FACETS: { value: string; label: string }[] = [
+    { value: "all", label: t("allStatuses") },
+    { value: "Pending", label: t("pending") },
+    { value: "In Production", label: t("statusInProd") },
+    { value: "Completed", label: t("statusCompleted") },
+  ];
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("orders")}</h1>
-          <p className="text-brown text-sm font-medium">{orders.length} {t("totalOrdersCount")}</p>
+          <h1 className="text-2xl font-bold text-oo-text-primary">{t("orders")}</h1>
+          <p className="text-oo-text-secondary text-sm font-medium">{orders.length} {t("totalOrdersCount")}</p>
         </div>
         {canCreate && (
-          <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold">
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 bg-oo-action-primary text-white rounded-lg hover:bg-oo-action-primary-dark shadow-md shadow-oo-action-primary/20 hover:shadow-oo-action-primary/35 active:scale-[0.98] transition-all duration-200 font-bold">
             <Plus size={18} /> {t("newOrder")}
           </button>
         )}
       </div>
 
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder={t("searchOrders")} value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:ring-2 focus:ring-orange/30 focus:border-orange outline-none transition-colors" />
+      {/* One bar: what to search, which statuses, and the exception — in that order, so
+          the eye starts at the reading edge and the exception sits apart from the facets
+          rather than reading as a fifth status. */}
+      <div className="flex items-center gap-2.5 flex-wrap bg-oo-bg-default border border-oo-border-default rounded-oo-large px-3.5 py-2.5">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={15} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-oo-text-muted" aria-hidden="true" />
+          <input
+            type="search"
+            aria-label={t("searchOrders")}
+            placeholder={t("searchOrders")}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full ltr:pl-9 rtl:pr-9 ltr:pr-3 rtl:pl-3 py-2 text-[12.5px] border border-oo-border-default rounded-oo-medium bg-oo-bg-subtle focus:bg-oo-bg-default focus:ring-2 focus:ring-oo-action-primary/25 focus:border-oo-action-primary outline-none transition-colors"
+          />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2.5 border-2 border-border rounded-xl bg-white focus:ring-2 focus:ring-orange/30 focus:border-orange outline-none transition-colors">
-          <option value="all">{t("allStatuses")}</option>
-          <option value="Pending">{t("pending")}</option>
-          <option value="In Production">{t("statusInProd")}</option>
-          <option value="Completed">{t("statusCompleted")}</option>
-        </select>
+
+        <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label={t("allStatuses")}>
+          {STATUS_FACETS.map((f) => {
+            const on = statusFilter === f.value;
+            return (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setStatusFilter(f.value)}
+                aria-pressed={on}
+                className={`px-3 py-1.5 rounded-full text-[11.5px] transition-colors border ${
+                  on
+                    ? "bg-oo-action-primary text-white border-oo-action-primary font-semibold"
+                    : "bg-oo-bg-subtle text-oo-text-secondary border-oo-border-default hover:text-oo-text-primary"
+                }`}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <span className="flex-1" />
+
+        {attentionCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setAttentionOnly((v) => !v)}
+            aria-pressed={attentionOnly}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold border transition-colors ${
+              attentionOnly
+                ? "bg-oo-status-blocked text-white border-oo-status-blocked"
+                : "bg-oo-status-blocked-bg text-oo-status-blocked border-oo-status-blocked/40 hover:border-oo-status-blocked"
+            }`}
+          >
+            <AlertTriangle size={13} aria-hidden="true" />
+            {t("needsAttention")} · {attentionCount}
+          </button>
+        )}
       </div>
 
       {showForm && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-charcoal mb-4">{t("newOrder")}</h2>
+          <div className="bg-oo-bg-default rounded-oo-large p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-oo-text-primary mb-4">{t("newOrder")}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t("customer")}</label>
                 <div className="flex gap-2">
                   <select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}
-                    className="flex-1 px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
+                    className="flex-1 px-3 py-2 border-2 border-oo-border-default rounded-oo-medium focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" required>
                     <option value="">{t("selectCustomer")}</option>
                     {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                   <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}
-                    className={`p-2 rounded-lg border ${showNewCustomer ? "bg-red-50 border-red-200 text-red-600" : "bg-cream border-border text-brown"} hover:opacity-80`}
+                    className={`p-2 rounded-lg border ${showNewCustomer ? "bg-red-50 border-red-200 text-red-600" : "bg-oo-bg-subtle border-oo-border-default text-oo-text-secondary"} hover:opacity-80`}
                     title={showNewCustomer ? t("cancel") : t("addNewCustomer")}>
                     {showNewCustomer ? <X size={18} /> : <UserPlus size={18} />}
                   </button>
                 </div>
                 {showNewCustomer && (
-                  <div className="mt-2 p-3 bg-cream border border-border rounded-lg space-y-2">
-                    <p className="text-xs font-semibold text-brown">{t("newCustomerLabel")}</p>
+                  <div className="mt-2 p-3 bg-oo-bg-subtle border border-oo-border-default rounded-lg space-y-2">
+                    <p className="text-xs font-semibold text-oo-text-secondary">{t("newCustomerLabel")}</p>
                     <input type="text" placeholder={t("nameEnglish") + " *"} value={newCustomer.name}
                       onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-                      className="w-full px-3 py-1.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                      className="w-full px-3 py-1.5 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
                     <input type="text" placeholder={t("nameArabic")} dir="rtl" value={newCustomer.nameAr}
                       onChange={(e) => setNewCustomer({ ...newCustomer, nameAr: e.target.value })}
-                      className="w-full px-3 py-1.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                      className="w-full px-3 py-1.5 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
                     <input type="tel" placeholder={t("phone")} value={newCustomer.phone}
                       onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                      className="w-full px-3 py-1.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                      className="w-full px-3 py-1.5 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
                     <input type="email" placeholder={t("emailLabel")} value={newCustomer.email}
                       onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
-                      className="w-full px-3 py-1.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                      className="w-full px-3 py-1.5 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
                     <input type="text" placeholder={t("address")} value={newCustomer.address}
                       onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
-                      className="w-full px-3 py-1.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                      className="w-full px-3 py-1.5 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
                     <button type="button" onClick={createCustomer} disabled={!newCustomer.name.trim()}
-                      className="w-full py-1.5 bg-orange text-white rounded-lg text-sm hover:bg-orange-dark disabled:opacity-50 shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold">
+                      className="w-full py-1.5 bg-oo-action-primary text-white rounded-lg text-sm hover:bg-oo-action-primary-dark disabled:opacity-50 shadow-md shadow-oo-action-primary/20 hover:shadow-oo-action-primary/35 active:scale-[0.98] transition-all duration-200 font-bold">
                       {t("addCustomer")}
                     </button>
                   </div>
@@ -429,7 +488,7 @@ export default function OrdersPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t("quotationNumber")}</label>
                 <input type="text" value={form.quotationNumber} onChange={(e) => setForm({ ...form, quotationNumber: e.target.value })}
-                  className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                  className="w-full px-3 py-2 border-2 border-oo-border-default rounded-oo-medium focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
               </div>
               {(() => {
                 // Section 8: one search box, then a quantity. No bean picker, no product
@@ -444,7 +503,7 @@ export default function OrdersPage() {
                         const sku = catalog.find((c) => c.id === item.productSkuId);
                         const row = item.productSkuId ? previewBySku.get(item.productSkuId) : undefined;
                         return (
-                          <div key={idx} className="mb-2 border-2 border-border rounded-xl p-2.5">
+                          <div key={idx} className="mb-2 border-2 border-oo-border-default rounded-oo-medium p-2.5">
                             <div className="flex gap-2 items-start">
                               <div className="flex-1">
                                 <input
@@ -458,7 +517,7 @@ export default function OrdersPage() {
                                     updateItem(idx, "productSkuId", chosen ? chosen.id : "");
                                   }}
                                   placeholder={t("searchProductLabel")}
-                                  className="w-full px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                                  className="w-full px-3 py-2 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors"
                                 />
                                 <datalist id={`sku-list-${idx}`}>
                                   {catalog
@@ -477,14 +536,14 @@ export default function OrdersPage() {
                                 placeholder={t("quantityUnitsLabel")}
                                 value={item.quantityUnits || ""}
                                 onChange={(e) => updateItem(idx, "quantityUnits", parseInt(e.target.value, 10) || 0)}
-                                className="w-24 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                                className="w-24 px-3 py-2 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors"
                                 required
                               />
                               {form.items.length > 1 && (
                                 <button
                                   type="button"
                                   onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}
-                                  className="px-2 py-2 text-brown/60 hover:text-red-600"
+                                  className="px-2 py-2 text-oo-text-secondary hover:text-red-600"
                                   aria-label="Remove line"
                                 >
                                   <X size={16} />
@@ -493,13 +552,13 @@ export default function OrdersPage() {
                             </div>
 
                             {sku ? (
-                              <p className="mt-1.5 text-xs text-brown/70 font-medium">
+                              <p className="mt-1.5 text-xs text-oo-text-secondary/70 font-medium">
                                 {sku.skuCode} · {sku.packSize} · {sku.price.toFixed(2)} · {t("availableLabel")}:{" "}
-                                <span className="font-bold text-charcoal">{sku.availableUnits}</span>
+                                <span className="font-bold text-oo-text-primary">{sku.availableUnits}</span>
                                 {!sku.hasBom && <span className="text-red-600 font-bold"> · {t("noBomWarning")}</span>}
                               </p>
                             ) : (
-                              <p className="mt-1.5 text-xs text-brown/50 font-medium">{t("noProductSelected")}</p>
+                              <p className="mt-1.5 text-xs text-oo-text-muted font-medium">{t("noProductSelected")}</p>
                             )}
 
                             {/* Section 5: what the shelf covers, and what has to be produced. */}
@@ -521,13 +580,13 @@ export default function OrdersPage() {
                           </div>
                         );
                       })}
-                      <button type="button" onClick={addItem} className="text-sm text-brown hover:underline">
+                      <button type="button" onClick={addItem} className="text-sm text-oo-text-secondary hover:underline">
                         {t("addItem")}
                       </button>
                     </div>
 
                     {preview && preview.totals.orderedUnits > 0 && (
-                      <div className="rounded-xl bg-cream border border-border px-3 py-2 text-xs font-semibold text-brown flex gap-4 flex-wrap">
+                      <div className="rounded-oo-medium bg-oo-bg-subtle border border-oo-border-default px-3 py-2 text-xs font-semibold text-oo-text-secondary flex gap-4 flex-wrap">
                         <span>{t("fulfilmentCheckTitle")}</span>
                         <span className="text-green-700">
                           {t("fromShelfLabel")}: {preview.totals.allocatedUnits}
@@ -542,7 +601,7 @@ export default function OrdersPage() {
                       <button
                         type="submit"
                         disabled={blocked}
-                        className={`flex-1 py-2 rounded-lg font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${blocked ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20 hover:shadow-orange/35"}`}
+                        className={`flex-1 py-2 rounded-lg font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${blocked ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-oo-action-primary text-white hover:bg-oo-action-primary-dark shadow-oo-action-primary/20 hover:shadow-oo-action-primary/35"}`}
                       >
                         {t("createOrder")}
                       </button>
@@ -560,24 +619,24 @@ export default function OrdersPage() {
 
       <div className="space-y-3">
         {filtered.map((order) => (
-          <div key={order.id} data-testid={`order-card-${order.orderNumber}`} className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-cream/50" onClick={() => setExpanded(expanded === order.id ? null : order.id)}>
+          <div key={order.id} data-testid={`order-card-${order.orderNumber}`} className="bg-oo-bg-default rounded-oo-large border border-oo-border-default shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-oo-bg-subtle/50" onClick={() => setExpanded(expanded === order.id ? null : order.id)}>
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-cream rounded-lg flex items-center justify-center">
-                  <ShoppingCart size={18} className="text-brown" />
+                <div className="w-10 h-10 bg-oo-bg-subtle rounded-lg flex items-center justify-center">
+                  <ShoppingCart size={18} className="text-oo-text-secondary" />
                 </div>
                 <div>
                   <p className="font-semibold flex items-center gap-2 flex-wrap">
                     #{order.orderNumber} — {order.customer.name}
                     {orderNeedsAttention(order) && <NeedsAttentionBadge />}
                   </p>
-                  <p className="text-xs text-brown">
+                  <p className="text-xs text-oo-text-secondary">
                     {order.quotationNumber || t("noQuotation")} | {formatDate(order.createdAt)} | {order.items.length} {t("itemsTotal")} | {order.items.reduce((s, i) => s + i.quantityKg, 0)} kg {t("total")}
                   </p>
-                  <p className="text-xs text-brown/70 flex items-center gap-3 mt-1 flex-wrap">
+                  <p className="text-xs text-oo-text-secondary/70 flex items-center gap-3 mt-1 flex-wrap">
                     <OwnerDisplay owner={order.owner} />
                     <span className="flex items-center gap-1">
-                      <Clock size={12} className="text-brown/50" />
+                      <Clock size={12} className="text-oo-text-muted" />
                       {t("lastActivityLabel")}: {lastActivityOf(order) ? formatDate(lastActivityOf(order)!.createdAt) : "—"}
                     </span>
                   </p>
@@ -593,7 +652,7 @@ export default function OrdersPage() {
             </div>
 
             {expanded === order.id && (
-              <div className="border-t border-border p-3.5 bg-cream">
+              <div className="border-t border-oo-border-default p-3.5 bg-oo-bg-subtle">
                 {/* Approve / Reject / Reset-to-Pending are deliberately absent. Routine
                     approval is not part of the normal order path any more: an order goes
                     from Created straight into Preparation, and the operator's next action
@@ -603,7 +662,7 @@ export default function OrdersPage() {
                 <div className="flex justify-end gap-2 mb-3">
                   {canEditOrder && editingId !== order.id && (
                     <button onClick={() => startEdit(order)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-orange bg-orange-light border border-orange/20 rounded-lg hover:bg-orange/10">
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-oo-action-primary bg-oo-action-primary-light border border-oo-action-primary/20 rounded-lg hover:bg-oo-action-primary/10">
                       <Pencil size={14} /> {t("editOrder")}
                     </button>
                   )}
@@ -616,7 +675,7 @@ export default function OrdersPage() {
                 </div>
 
                 {/* Progress Stepper — lifecycle milestones, not the activity log */}
-                <div className="bg-white rounded-xl border border-border px-4 py-3 mb-3">
+                <div className="bg-white rounded-oo-medium border border-oo-border-default px-4 py-3 mb-3">
                   <OrderProgressStepper status={order.status} approvalStatus={order.approvalStatus} items={order.items} />
                 </div>
 
@@ -624,26 +683,26 @@ export default function OrdersPage() {
                     timeline/status actions fall below preparation. */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 mb-4">
                   <div className="xl:col-span-2 space-y-3">
-                    <div className="bg-white rounded-xl border border-border p-3.5 flex flex-wrap items-center gap-6">
+                    <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5 flex flex-wrap items-center gap-6">
                       <div>
-                        <p className="text-[11px] font-bold text-brown/50 uppercase tracking-wide mb-1">{t("orderStatusLabel")}</p>
+                        <p className="text-[11px] font-bold text-oo-text-muted uppercase tracking-wide mb-1">{t("orderStatusLabel")}</p>
                         <OrderStatusBadge status={order.status} />
                       </div>
                       <div>
-                        <p className="text-[11px] font-bold text-brown/50 uppercase tracking-wide mb-1">{t("orderOwnerLabel")}</p>
+                        <p className="text-[11px] font-bold text-oo-text-muted uppercase tracking-wide mb-1">{t("orderOwnerLabel")}</p>
                         <OwnerDisplay owner={order.owner} />
                       </div>
                     </div>
 
-                    <div className="bg-white rounded-xl border border-border p-3.5">
-                      <p className="text-xs font-bold text-brown mb-2 flex items-center gap-1.5">
+                    <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                      <p className="text-xs font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                         <ClipboardList size={14} /> {t("preparationReviewLabel")}
                       </p>
                       <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
                     </div>
 
-                    <div className="bg-white rounded-xl border border-border p-3.5">
-                      <p className="text-xs font-bold text-brown mb-2 flex items-center gap-1.5">
+                    <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                      <p className="text-xs font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                         <MessageSquare size={14} /> {t("addNoteLabel")}
                       </p>
                       <AddNoteForm orderId={order.id} onSuccess={loadData} />
@@ -653,8 +712,8 @@ export default function OrdersPage() {
                   <div className="xl:col-span-1 space-y-3">
                     <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />
 
-                    <div className="bg-white rounded-xl border border-border p-3.5">
-                      <p className="text-xs font-bold text-brown mb-2 flex items-center gap-1.5">
+                    <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                      <p className="text-xs font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                         <Clock size={14} /> {t("activityTimelineLabel")}
                       </p>
                       <ActivityTimeline activities={order.activities} />
@@ -666,9 +725,9 @@ export default function OrdersPage() {
                   const editWarnings = getEditStockWarnings();
                   const hasEditStockError = editWarnings.some((w) => w !== null);
                   return (
-                    <div className="bg-white rounded-xl border border-border p-4 mb-4 space-y-3">
+                    <div className="bg-white rounded-oo-medium border border-oo-border-default p-4 mb-4 space-y-3">
                       <div>
-                        <label className="block text-xs font-semibold text-brown mb-2">{t("orderItemsLabel")}</label>
+                        <label className="block text-xs font-semibold text-oo-text-secondary mb-2">{t("orderItemsLabel")}</label>
                         {editForm.items.map((item, idx) => (
                           <div key={idx} className="mb-2">
                             <div className="flex gap-2 items-center">
@@ -676,12 +735,12 @@ export default function OrdersPage() {
                                 const bean = beans.find((b) => b.id === e.target.value);
                                 updateEditItem(idx, "greenBeanId", e.target.value);
                                 if (bean) updateEditItem(idx, "beanTypeName", bean.beanType);
-                              }} className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                              }} className="flex-1 px-3 py-1.5 border-2 border-oo-border-default rounded-lg text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors">
                                 <option value="">{t("selectBean")}</option>
                                 {beans.map((b) => <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg}kg)</option>)}
                               </select>
                               <input type="number" placeholder="kg" value={item.quantityKg || ""} onChange={(e) => updateEditItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
-                                className="w-24 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
+                                className="w-24 px-3 py-1.5 border-2 border-oo-border-default rounded-lg text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors" />
                               {editForm.items.length > 1 && (
                                 <button type="button" onClick={() => setEditForm({ ...editForm, items: editForm.items.filter((_, i) => i !== idx) })}
                                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
@@ -691,13 +750,13 @@ export default function OrdersPage() {
                               <select value={item.productId} onChange={(e) => {
                                 updateEditItem(idx, "productId", e.target.value);
                                 updateEditItem(idx, "productSkuId", "");
-                              }} className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                              }} className="flex-1 px-3 py-1.5 border-2 border-oo-border-default rounded-lg text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors">
                                 <option value="">No product</option>
                                 {products.map((p) => <option key={p.id} value={p.id}>{p.productNameEn}</option>)}
                               </select>
                               {item.productId && (
                                 <select value={item.productSkuId} onChange={(e) => updateEditItem(idx, "productSkuId", e.target.value)}
-                                  className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
+                                  className="flex-1 px-3 py-1.5 border-2 border-oo-border-default rounded-lg text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors">
                                   <option value="">No SKU</option>
                                   {(products.find((p) => p.id === item.productId)?.productSkus ?? []).map((s) => (
                                     <option key={s.id} value={s.id}>{s.skuCode} ({s.weightGrams}g)</option>
@@ -711,13 +770,13 @@ export default function OrdersPage() {
                           </div>
                         ))}
                         <button type="button" onClick={() => setEditForm({ ...editForm, items: [...editForm.items, { beanTypeName: "", quantityKg: 0, greenBeanId: "", productId: "", productSkuId: "" }] })}
-                          className="text-sm text-brown hover:underline">{t("addItem")}</button>
+                          className="text-sm text-oo-text-secondary hover:underline">{t("addItem")}</button>
                       </div>
                       <div className="flex gap-2 justify-end">
                         <button onClick={() => setEditingId(null)}
                           className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">{t("cancel")}</button>
                         <button onClick={handleEditSave} disabled={hasEditStockError}
-                          className={`flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg font-bold shadow-md ${hasEditStockError ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
+                          className={`flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg font-bold shadow-md ${hasEditStockError ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-oo-action-primary text-white hover:bg-oo-action-primary-dark shadow-oo-action-primary/20"}`}>
                           <Save size={14} /> {t("saveChanges")}
                         </button>
                       </div>
@@ -762,7 +821,7 @@ export default function OrdersPage() {
                               <div className="flex flex-col items-end gap-0.5">
                                 <span className="font-bold text-amber-700">+{surplus}kg</span>
                                 <span className="text-[10px] text-amber-600 font-semibold">{t("surplusToInventory")}</span>
-                                <span className="text-[10px] text-brown/50">{t("totalProducedLabel")}: {completionTotal.toFixed(2)}kg — {t("requiredQtyLabel")}: {item.quantityKg}kg</span>
+                                <span className="text-[10px] text-oo-text-muted">{t("totalProducedLabel")}: {completionTotal.toFixed(2)}kg — {t("requiredQtyLabel")}: {item.quantityKg}kg</span>
                               </div>
                             ) : (
                               item.remainingQty
@@ -775,10 +834,10 @@ export default function OrdersPage() {
                 </table>
                 {order.items.some((i) => i.roastingBatches.length > 0) && (
                   <div className="mt-3 pt-3 border-t">
-                    <p className="text-xs font-semibold text-brown mb-2">{t("linkedBatches")}</p>
+                    <p className="text-xs font-semibold text-oo-text-secondary mb-2">{t("linkedBatches")}</p>
                     <div className="flex flex-wrap gap-2">
                       {order.items.flatMap((i) => i.roastingBatches).map((b) => (
-                        <span key={b.batchNumber} className="px-2 py-1 bg-orange-light text-brown rounded text-xs font-mono">
+                        <span key={b.batchNumber} className="px-2 py-1 bg-oo-action-primary-light text-oo-text-secondary rounded text-xs font-mono">
                           {b.batchNumber} ({b.greenBeanQuantity}kg → {b.roastedBeanQuantity}kg)
                         </span>
                       ))}
@@ -790,7 +849,7 @@ export default function OrdersPage() {
           </div>
         ))}
         {filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border">
+          <div className="text-center py-12 text-gray-400 bg-oo-bg-default rounded-oo-large border">
             <ShoppingCart size={40} className="mx-auto mb-2" />
             <p>{t("noOrdersFound")}</p>
           </div>
