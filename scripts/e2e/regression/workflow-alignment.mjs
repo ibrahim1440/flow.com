@@ -106,10 +106,21 @@ async function main() {
   check("commit accepted", c4.status === 200, `status=${c4.status}`);
   const owner4 = (await orderRow(o4.id)).ownerId;
   check("an owner is now set", owner4 !== null, S(owner4));
-  const adminId = (await one(
-    `SELECT id FROM "Employee" WHERE active=true AND role='admin' AND username='admin' LIMIT 1`))?.id;
+
+  // Who this suite is actually signed in as, asked of the application rather than assumed.
+  //
+  // This previously looked up username='admin' — the account prisma/seed.ts creates. But
+  // the harness only PREFERS that row: ensureAdminPinLookup() falls back to any active
+  // admin when it is absent. On a database seeded by the browser fixtures rather than the
+  // seed script there is no such username, so the lookup returned undefined and the check
+  // compared a perfectly correct owner against nothing. The rule under test is that
+  // ownership follows the operator who committed, so the operator is the thing to ask for;
+  // that is right in both environments and does not depend on how the database was seeded.
+  const whoami = await api("/api/auth/me");
+  const operatorId = whoami.json?.user?.id;
+  check("the caller's identity is known", Boolean(operatorId), `status=${whoami.status}`);
   check("and it is the operator who committed, not the approver",
-    owner4 === adminId, `${owner4} vs ${adminId}`);
+    owner4 === operatorId, `${owner4} vs ${operatorId}`);
   check("profile route is reachable for identity context", me.status === 200 || me.status === 404, `status=${me.status}`);
 
   sub("A5. a second Commit Allocation does not change the owner");

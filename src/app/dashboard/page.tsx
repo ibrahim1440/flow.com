@@ -49,11 +49,16 @@ type AnalyticsData = {
 
 // ─── Brand colors (for Recharts — must use hex) ───────────────────────────────
 
-const C_ORANGE   = "#4f46e5";
-const C_BROWN    = "#6B7280";
-const C_GREEN    = "#22c55e";
-const C_RED      = "#ef4444";
-const C_CREAM    = "#EDE9FE";
+// Chart colours. Recharts takes literals rather than CSS custom properties, so these
+// mirror the design tokens by value and must be kept in step with them. The old names
+// described a palette this console no longer uses — "orange" was a violet, "brown" a
+// mid grey — so they are named for their role here instead.
+const C_PRIMARY = "#4f46e5"; // --oo-action-primary  · the measured series
+const C_MUTED   = "#d4d4d8"; // --oo-border-strong   · the comparison series
+const C_GOOD    = "#16a34a"; // --oo-status-success
+const C_WARN    = "#d97706"; // --oo-status-waiting
+const C_BAD     = "#dc2626"; // --oo-status-blocked
+const C_TRACK   = "#f4f4f5"; // --oo-bg-subtle       · meter track
 
 // ─── Custom bar tooltip ───────────────────────────────────────────────────────
 
@@ -66,8 +71,8 @@ function BarTooltip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white border border-border rounded-xl px-3 py-2 shadow-lg text-xs">
-      <p className="font-bold text-charcoal mb-1">{label}</p>
+    <div className="bg-white border border-oo-border-default rounded-oo-medium px-3 py-2 shadow-lg text-xs">
+      <p className="font-bold text-oo-text-primary mb-1">{label}</p>
       {payload.map((p) => (
         <p key={p.name} style={{ color: p.color }} className="font-medium">
           {p.name}: {p.value} كغ
@@ -79,43 +84,69 @@ function BarTooltip({
 
 // ─── KPI card ─────────────────────────────────────────────────────────────────
 
+/**
+ * One measured figure.
+ *
+ * The label leads with a muted icon and the reading edge; the figure is the largest thing
+ * in the card; the movement against last month, where the API supplies one, sits on the
+ * far side so a row of cards can be scanned for change alone. `tone` colours the figure
+ * itself, which is what carries the state — the previous card put a saturated square of
+ * colour in the corner and left the number black, so the eye landed on decoration rather
+ * than on the measurement.
+ */
 function KpiCard({
-  icon: Icon, iconBg, label, value, unit, sub, trend, trendLabel, children,
+  icon: Icon, label, value, unit, sub, trend, trendLabel, tone = "text-oo-text-primary", children,
 }: {
-  icon: React.ElementType; iconBg: string;
+  icon: React.ElementType;
   label: string; value: string | number; unit?: string;
   sub?: string; trend?: number | null; trendLabel?: string;
+  tone?: string;
   children?: React.ReactNode;
 }) {
+  const up = (trend ?? 0) > 0;
+  const down = (trend ?? 0) < 0;
   return (
-    <div className="bg-white rounded-2xl p-5 border border-border hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300 group flex flex-col gap-3">
-      <div className="flex items-start justify-between">
-        <div className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform shrink-0`}>
-          <Icon size={18} className="text-white" />
-        </div>
+    <div className="bg-oo-bg-default rounded-oo-large p-4 border border-oo-border-default flex flex-col gap-2.5">
+      <div className="flex items-center gap-2">
+        <Icon size={15} className="text-oo-text-muted shrink-0" aria-hidden="true" />
+        <span className="text-[11.5px] font-semibold text-oo-text-secondary">{label}</span>
+        <span className="flex-1" />
         {trend !== undefined && trend !== null && (
-          <div className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
-            trend > 0 ? "bg-green-100 text-green-700" : trend < 0 ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-500"
-          }`}>
-            {trend > 0 ? <ArrowUp size={11} /> : trend < 0 ? <ArrowDown size={11} /> : <Minus size={11} />}
+          <span
+            className={`flex items-center gap-0.5 text-[10.5px] font-semibold px-1.5 py-0.5 rounded-full tabular-nums ${
+              up ? "bg-oo-status-success-bg text-oo-status-success"
+                 : down ? "bg-oo-status-blocked-bg text-oo-status-blocked"
+                        : "bg-oo-bg-subtle text-oo-text-muted"
+            }`}
+          >
+            {up ? <ArrowUp size={10} /> : down ? <ArrowDown size={10} /> : <Minus size={10} />}
             {Math.abs(trend)}%
-          </div>
+          </span>
         )}
       </div>
-      <div>
-        <p className="text-3xl font-extrabold text-charcoal leading-none tabular-nums">
-          {value}
-          {unit && <span className="text-sm font-semibold text-brown/50 ltr:ml-1 rtl:mr-1">{unit}</span>}
-        </p>
-        <p className="text-xs font-bold text-brown/60 mt-1.5 uppercase tracking-wide">{label}</p>
-        {sub && <p className="text-[11px] text-brown/40 mt-0.5">{sub}</p>}
-        {trendLabel && trend !== null && trend !== undefined && (
-          <p className={`text-[11px] mt-0.5 font-medium ${trend > 0 ? "text-green-600" : trend < 0 ? "text-red-500" : "text-brown/40"}`}>
-            {trendLabel}
-          </p>
-        )}
-      </div>
+
+      <p className={`flex items-baseline gap-1 leading-none ${tone}`}>
+        <span className="text-[28px] font-bold tabular-nums">{value}</span>
+        {unit && <span className="text-[12px] font-medium text-oo-text-muted">{unit}</span>}
+      </p>
+
+      {sub && <p className="text-[10.5px] text-oo-text-muted">{sub}</p>}
+      {trendLabel && trend !== null && trend !== undefined && (
+        <p className="text-[10.5px] text-oo-text-muted">{trendLabel}</p>
+      )}
       {children}
+    </div>
+  );
+}
+
+/** A thin band under a figure. Never the only carrier of its state — the text says it too. */
+function Meter({ pct, colorVar }: { pct: number; colorVar: string }) {
+  return (
+    <div className="w-full bg-oo-bg-subtle rounded-full h-1.5 overflow-hidden">
+      <div
+        className="h-1.5 rounded-full transition-all duration-500"
+        style={{ width: `${Math.max(0, Math.min(pct, 100))}%`, backgroundColor: colorVar }}
+      />
     </div>
   );
 }
@@ -124,9 +155,9 @@ function KpiCard({
 
 function PipelinePill({ count, label, cls }: { count: number; label: string; cls: string }) {
   return (
-    <div className={`flex-1 flex flex-col items-center gap-1 py-4 rounded-xl border ${cls}`}>
-      <span className="text-2xl font-extrabold tabular-nums">{count}</span>
-      <span className="text-xs font-semibold text-center leading-tight px-2">{label}</span>
+    <div className={`flex-1 flex flex-col items-center gap-1 py-4 rounded-oo-medium border ${cls}`}>
+      <span className="text-[26px] font-bold tabular-nums leading-none">{count}</span>
+      <span className="text-[11.5px] font-semibold text-center leading-tight px-2">{label}</span>
     </div>
   );
 }
@@ -168,9 +199,9 @@ export default function DashboardPage() {
 
   function statusColor(s: string) {
     if (s === "Pending")       return "bg-amber-100 text-amber-700";
-    if (s === "In Production") return "bg-orange/10 text-orange";
+    if (s === "In Production") return "bg-oo-action-primary/10 text-oo-action-primary";
     if (s === "Completed")     return "bg-green-100 text-green-700";
-    return "bg-cream text-brown";
+    return "bg-oo-bg-subtle text-oo-text-secondary";
   }
 
   function statusLabel(s: string) {
@@ -184,26 +215,26 @@ export default function DashboardPage() {
   const hasQcData    = (kpi?.qcTotalCount ?? 0) > 0;
 
   const lossColor =
-    !kpi?.avgLossPct ? "text-charcoal" :
+    !kpi?.avgLossPct ? "text-oo-text-primary" :
     kpi.avgLossPct > 20 ? "text-red-600" :
     kpi.avgLossPct > 14 ? "text-amber-600" : "text-green-600";
 
   const qcColor =
-    !kpi?.qcPassRate ? "text-charcoal" :
+    !kpi?.qcPassRate ? "text-oo-text-primary" :
     kpi.qcPassRate >= 90 ? "text-green-600" :
     kpi.qcPassRate >= 70 ? "text-amber-600" : "text-red-500";
 
   const donutData = [
-    { name: t("passLabel"), value: kpi?.qcPassCount ?? 0,                              color: C_GREEN },
-    { name: t("failLabel"), value: (kpi?.qcTotalCount ?? 0) - (kpi?.qcPassCount ?? 0), color: C_RED  },
+    { name: t("passLabel"), value: kpi?.qcPassCount ?? 0,                              color: C_GOOD },
+    { name: t("failLabel"), value: (kpi?.qcTotalCount ?? 0) - (kpi?.qcPassCount ?? 0), color: C_BAD  },
   ].filter((d) => d.value > 0);
 
   if (!loading && !data) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center">
-        <Package size={40} className="text-brown/30 mb-3" />
-        <p className="text-lg font-bold text-charcoal">{t("noDashboardAccess")}</p>
-        <p className="text-sm text-brown/60 mt-1">{t("useSidebar")}</p>
+        <Package size={40} className="text-oo-text-muted mb-3" />
+        <p className="text-lg font-bold text-oo-text-primary">{t("noDashboardAccess")}</p>
+        <p className="text-sm text-oo-text-secondary mt-1">{t("useSidebar")}</p>
       </div>
     );
   }
@@ -214,19 +245,19 @@ export default function DashboardPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("execDashTitle")}</h1>
-          <p className="text-brown text-sm font-medium">{t("execDashSubtitle")}</p>
+          <h1 className="text-2xl font-bold text-oo-text-primary">{t("execDashTitle")}</h1>
+          <p className="text-oo-text-secondary text-sm font-medium">{t("execDashSubtitle")}</p>
         </div>
         <div className="flex items-center gap-3">
           {lastUpdated && (
-            <p className="text-xs text-brown/50 hidden sm:block">
+            <p className="text-xs text-oo-text-muted hidden sm:block">
               {t("lastUpdated")}: {lastUpdated.toLocaleTimeString(lang === "ar" ? "ar-SA" : "en-US", { timeStyle: "short" })}
             </p>
           )}
           <button
             onClick={() => fetchData(true)}
             disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2 bg-white border-2 border-border rounded-xl text-sm font-bold text-brown hover:border-orange hover:text-orange transition-all disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-white border-2 border-oo-border-default rounded-oo-medium text-sm font-bold text-oo-text-secondary hover:border-oo-action-primary hover:text-oo-action-primary transition-all disabled:opacity-50"
           >
             <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
             {t("refreshData")}
@@ -239,8 +270,9 @@ export default function DashboardPage() {
 
         {/* Production This Month */}
         <KpiCard
-          icon={Factory} iconBg="bg-orange"
+          icon={Factory}
           label={t("productionThisMonth")}
+          tone="text-oo-action-primary"
           value={loading ? "—" : (kpi?.currentMonthKg.toFixed(1) ?? "0")}
           unit={t("kgUnit")}
           sub={loading ? "" : `${kpi?.batchCount ?? 0} ${t("batchesCount")}`}
@@ -250,24 +282,20 @@ export default function DashboardPage() {
 
         {/* Avg Roast Loss */}
         <KpiCard
-          icon={TrendingDown} iconBg="bg-brown"
+          icon={TrendingDown}
           label={t("avgRoastLoss")}
+          tone="text-oo-status-waiting"
           value={loading ? "—" : (kpi?.avgLossPct != null ? kpi.avgLossPct.toFixed(1) : "—")}
           unit={kpi?.avgLossPct != null ? "%" : ""}
           sub={t("last30Days")}
         >
           {!loading && kpi?.avgLossPct != null && (
-            <div className="mt-auto space-y-1">
-              <div className="w-full bg-cream rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-1.5 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${Math.min(kpi.avgLossPct * 3.5, 100)}%`,
-                    backgroundColor: kpi.avgLossPct > 20 ? C_RED : kpi.avgLossPct > 14 ? "#f59e0b" : C_GREEN,
-                  }}
-                />
-              </div>
-              <p className={`text-[11px] font-bold ${lossColor}`}>
+            <div className="mt-auto space-y-1.5">
+              <Meter
+                pct={kpi.avgLossPct * 3.5}
+                colorVar={kpi.avgLossPct > 20 ? C_BAD : kpi.avgLossPct > 14 ? C_WARN : C_GOOD}
+              />
+              <p className={`text-[10.5px] font-semibold ${lossColor}`}>
                 {kpi.avgLossPct <= 14 ? "ضمن الحد المقبول" : kpi.avgLossPct <= 20 ? "مرتفع قليلاً" : "مرتفع — مراجعة مطلوبة"}
               </p>
             </div>
@@ -276,24 +304,20 @@ export default function DashboardPage() {
 
         {/* QC Pass Rate */}
         <KpiCard
-          icon={CheckCircle2} iconBg="bg-green-600"
+          icon={CheckCircle2}
           label={t("qcPassRateLabel")}
+          tone="text-oo-status-success"
           value={loading ? "—" : (kpi?.qcPassRate != null ? kpi.qcPassRate.toFixed(0) : "—")}
           unit={kpi?.qcPassRate != null ? "%" : ""}
           sub={loading ? "" : `${kpi?.qcPassCount ?? 0} / ${kpi?.qcTotalCount ?? 0} ${t("qcRecordsCount")}`}
         >
           {!loading && kpi?.qcPassRate != null && (
-            <div className="mt-auto space-y-1">
-              <div className="w-full bg-cream rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-1.5 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${kpi.qcPassRate}%`,
-                    backgroundColor: kpi.qcPassRate >= 90 ? C_GREEN : kpi.qcPassRate >= 70 ? "#f59e0b" : C_RED,
-                  }}
-                />
-              </div>
-              <p className={`text-[11px] font-bold ${qcColor}`}>
+            <div className="mt-auto space-y-1.5">
+              <Meter
+                pct={kpi.qcPassRate}
+                colorVar={kpi.qcPassRate >= 90 ? C_GOOD : kpi.qcPassRate >= 70 ? C_WARN : C_BAD}
+              />
+              <p className={`text-[10.5px] font-semibold ${qcColor}`}>
                 {kpi.qcPassRate >= 90 ? "ممتاز" : kpi.qcPassRate >= 70 ? "مقبول" : "يحتاج تحسين"}
               </p>
             </div>
@@ -302,28 +326,26 @@ export default function DashboardPage() {
 
         {/* Inventory Weight */}
         <KpiCard
-          icon={Layers} iconBg="bg-charcoal"
+          icon={Layers}
           label={t("inventoryWeightLabel")}
           value={loading ? "—" : ((kpi?.rawMaterialKg ?? 0) + (kpi?.finishedGoodsKg ?? 0)).toFixed(1)}
           unit={t("kgUnit")}
         >
           {!loading && kpi && (
             <div className="mt-auto space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-brown/60 font-medium">{t("rawLabel")}</span>
-                <span className="font-bold text-charcoal font-mono">{kpi.rawMaterialKg.toFixed(1)} {t("kgUnit")}</span>
+              <div className="flex justify-between text-[11px]">
+                <span className="text-oo-text-secondary">{t("rawLabel")}</span>
+                <span className="font-semibold text-oo-text-primary tabular-nums">{kpi.rawMaterialKg.toFixed(1)} {t("kgUnit")}</span>
               </div>
-              <div className="w-full bg-cream rounded-full h-1.5 overflow-hidden">
-                {kpi.rawMaterialKg + kpi.finishedGoodsKg > 0 && (
-                  <div
-                    className="h-1.5 rounded-full bg-brown transition-all duration-700"
-                    style={{ width: `${(kpi.rawMaterialKg / (kpi.rawMaterialKg + kpi.finishedGoodsKg)) * 100}%` }}
-                  />
-                )}
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-brown/60 font-medium">{t("finishedLabel")}</span>
-                <span className="font-bold text-green-600 font-mono">{kpi.finishedGoodsKg.toFixed(1)} {t("kgUnit")}</span>
+              <Meter
+                pct={kpi.rawMaterialKg + kpi.finishedGoodsKg > 0
+                  ? (kpi.rawMaterialKg / (kpi.rawMaterialKg + kpi.finishedGoodsKg)) * 100
+                  : 0}
+                colorVar={C_MUTED}
+              />
+              <div className="flex justify-between text-[11px]">
+                <span className="text-oo-text-secondary">{t("finishedLabel")}</span>
+                <span className="font-semibold text-oo-status-success tabular-nums">{kpi.finishedGoodsKg.toFixed(1)} {t("kgUnit")}</span>
               </div>
             </div>
           )}
@@ -334,21 +356,21 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* Bar chart — weekly production */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-border p-5">
+        <div className="lg:col-span-2 bg-oo-bg-default rounded-oo-large border border-oo-border-default p-5">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h3 className="font-extrabold text-charcoal">{t("weeklyProdChart")}</h3>
-              <p className="text-xs text-brown/50 mt-0.5">
+              <h3 className="font-bold text-oo-text-primary">{t("weeklyProdChart")}</h3>
+              <p className="text-xs text-oo-text-muted mt-0.5">
                 {t("greenInput")} vs {t("roastedInput")}
               </p>
             </div>
-            <BarChart2 size={18} className="text-brown/30" />
+            <BarChart2 size={18} className="text-oo-text-muted" />
           </div>
 
           {loading ? (
-            <div className="h-52 bg-cream/60 rounded-xl animate-pulse" />
+            <div className="h-52 bg-oo-bg-subtle/60 rounded-oo-medium animate-pulse" />
           ) : !hasChartData ? (
-            <div className="h-52 flex flex-col items-center justify-center text-brown/40">
+            <div className="h-52 flex flex-col items-center justify-center text-oo-text-muted">
               <BarChart2 size={36} className="mb-2" />
               <p className="text-sm">{t("noChartData")}</p>
             </div>
@@ -356,41 +378,41 @@ export default function DashboardPage() {
             <>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={data!.weeklyProduction} barGap={2} barSize={12} margin={{ left: -10, right: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={C_CREAM} vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: C_BROWN }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: C_BROWN }} axisLine={false} tickLine={false} width={36} />
-                  <Tooltip content={<BarTooltip />} cursor={{ fill: C_CREAM }} />
-                  <Bar dataKey="greenKg"   name={t("greenInput")}   fill={C_BROWN}  radius={[4, 4, 0, 0]} opacity={0.55} />
-                  <Bar dataKey="roastedKg" name={t("roastedInput")} fill={C_ORANGE} radius={[4, 4, 0, 0]} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={C_TRACK} vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: C_MUTED }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: C_MUTED }} axisLine={false} tickLine={false} width={36} />
+                  <Tooltip content={<BarTooltip />} cursor={{ fill: C_TRACK }} />
+                  <Bar dataKey="greenKg"   name={t("greenInput")}   fill={C_MUTED}  radius={[4, 4, 0, 0]} opacity={0.55} />
+                  <Bar dataKey="roastedKg" name={t("roastedInput")} fill={C_PRIMARY} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
               <div className="flex items-center gap-5 justify-center mt-2">
-                <span className="flex items-center gap-1.5 text-xs text-brown/70">
-                  <span className="w-3 h-3 rounded-sm inline-block opacity-55" style={{ backgroundColor: C_BROWN }} />
+                <span className="flex items-center gap-1.5 text-xs text-oo-text-secondary/70">
+                  <span className="w-3 h-3 rounded-sm inline-block opacity-55" style={{ backgroundColor: C_MUTED }} />
                   {t("greenInput")}
                 </span>
-                <span className="flex items-center gap-1.5 text-xs text-brown/70">
-                  <span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: C_ORANGE }} />
+                <span className="flex items-center gap-1.5 text-xs text-oo-text-secondary/70">
+                  <span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: C_PRIMARY }} />
                   {t("roastedInput")}
                 </span>
               </div>
             </>
           ) : (
-            <div className="h-52 bg-cream/30 rounded-xl" />
+            <div className="h-52 bg-oo-bg-subtle/30 rounded-oo-medium" />
           )}
         </div>
 
         {/* Donut — QC breakdown */}
-        <div className="bg-white rounded-2xl border border-border p-5 flex flex-col">
+        <div className="bg-oo-bg-default rounded-oo-large border border-oo-border-default p-5 flex flex-col">
           <div className="flex items-center justify-between mb-5">
-            <h3 className="font-extrabold text-charcoal">{t("qcBreakdownChart")}</h3>
-            <CheckCircle2 size={18} className="text-brown/30" />
+            <h3 className="font-bold text-oo-text-primary">{t("qcBreakdownChart")}</h3>
+            <CheckCircle2 size={18} className="text-oo-text-muted" />
           </div>
 
           {loading ? (
-            <div className="flex-1 min-h-[180px] bg-cream/60 rounded-xl animate-pulse" />
+            <div className="flex-1 min-h-[180px] bg-oo-bg-subtle/60 rounded-oo-medium animate-pulse" />
           ) : !hasQcData ? (
-            <div className="flex-1 min-h-[180px] flex flex-col items-center justify-center text-brown/40">
+            <div className="flex-1 min-h-[180px] flex flex-col items-center justify-center text-oo-text-muted">
               <CheckCircle2 size={36} className="mb-2" />
               <p className="text-sm text-center">{t("noChartData")}</p>
             </div>
@@ -419,35 +441,35 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
                 {/* Center label overlay */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <p className={`text-2xl font-extrabold ${qcColor}`}>
+                  <p className={`text-2xl font-bold ${qcColor}`}>
                     {kpi?.qcPassRate?.toFixed(0)}%
                   </p>
-                  <p className="text-[10px] text-brown/50 font-semibold">{t("passLabel")}</p>
+                  <p className="text-[10px] text-oo-text-muted font-semibold">{t("passLabel")}</p>
                 </div>
               </div>
               <div className="flex justify-center gap-5 mt-3">
                 {donutData.map((d) => (
-                  <div key={d.name} className="flex items-center gap-1.5 text-xs text-brown/70">
+                  <div key={d.name} className="flex items-center gap-1.5 text-xs text-oo-text-secondary/70">
                     <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: d.color }} />
                     <span className="font-medium">{d.name}</span>
-                    <span className="font-bold text-charcoal">{d.value}</span>
+                    <span className="font-bold text-oo-text-primary">{d.value}</span>
                   </div>
                 ))}
               </div>
             </>
           ) : (
-            <div className="flex-1 min-h-[180px] bg-cream/30 rounded-xl" />
+            <div className="flex-1 min-h-[180px] bg-oo-bg-subtle/30 rounded-oo-medium" />
           )}
         </div>
       </div>
 
       {/* ── Pipeline strip ── */}
       {data?.pipeline && (
-        <div className="bg-white rounded-2xl border border-border p-5">
-          <h3 className="font-extrabold text-charcoal mb-4">{t("pipelineTitle")}</h3>
+        <div className="bg-oo-bg-default rounded-oo-large border border-oo-border-default p-5">
+          <h3 className="font-bold text-oo-text-primary mb-4">{t("pipelineTitle")}</h3>
           <div className="flex gap-3">
             <PipelinePill count={data.pipeline.pending}         label={t("pendingProd")}   cls="bg-amber-50 text-amber-800 border-amber-200" />
-            <PipelinePill count={data.pipeline.inProduction}    label={t("statusInProd")}  cls="bg-orange/8 text-orange border-orange/20" />
+            <PipelinePill count={data.pipeline.inProduction}    label={t("statusInProd")}  cls="bg-oo-action-primary/8 text-oo-action-primary border-oo-action-primary/20" />
             <PipelinePill count={data.pipeline.readyToDispatch} label={t("readyDispatch")} cls="bg-green-50 text-green-800 border-green-200" />
           </div>
         </div>
@@ -457,16 +479,16 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
         {/* Active Orders */}
-        <div className="bg-white rounded-2xl border border-border p-5">
-          <h3 className="font-extrabold text-charcoal mb-4">{t("activeOrdersTitle")}</h3>
+        <div className="bg-oo-bg-default rounded-oo-large border border-oo-border-default p-5">
+          <h3 className="font-bold text-oo-text-primary mb-4">{t("activeOrdersTitle")}</h3>
           {loading ? (
             <div className="space-y-2">
-              {[1, 2, 3].map((i) => <div key={i} className="h-14 bg-cream/60 animate-pulse rounded-xl" />)}
+              {[1, 2, 3].map((i) => <div key={i} className="h-14 bg-oo-bg-subtle/60 animate-pulse rounded-oo-medium" />)}
             </div>
           ) : !data?.recentActiveOrders.length ? (
             <div className="flex flex-col items-center py-8 text-center">
               <CheckCircle2 size={28} className="text-green-400 mb-2" />
-              <p className="text-sm font-semibold text-brown/60">{t("noActiveOrders")}</p>
+              <p className="text-sm font-semibold text-oo-text-secondary">{t("noActiveOrders")}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -477,12 +499,12 @@ export default function DashboardPage() {
                 }, {});
                 const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Pending";
                 return (
-                  <div key={order.id} className="flex items-center justify-between p-3 bg-cream/50 rounded-xl border border-border">
+                  <div key={order.id} className="flex items-center justify-between p-3 bg-oo-bg-subtle/50 rounded-oo-medium border border-oo-border-default">
                     <div className="min-w-0">
-                      <p className="text-sm font-bold text-charcoal truncate">
+                      <p className="text-sm font-bold text-oo-text-primary truncate">
                         #{order.orderNumber} — {disp(order.customer.name, order.customer.nameAr)}
                       </p>
-                      <p className="text-xs text-brown/50 font-medium">
+                      <p className="text-xs text-oo-text-muted font-medium">
                         {totalKg} {t("kgUnit")} · {order.items.length} {t("itemsTotal")}
                       </p>
                     </div>
@@ -501,17 +523,17 @@ export default function DashboardPage() {
 
           {/* Low stock alerts */}
           {(data?.inventoryAlerts?.length ?? 0) > 0 && (
-            <div className="bg-white rounded-2xl border border-border p-5">
+            <div className="bg-oo-bg-default rounded-oo-large border border-oo-border-default p-5">
               <div className="flex items-center gap-2 mb-3">
                 <AlertTriangle size={16} className="text-amber-500" />
-                <h3 className="font-extrabold text-charcoal">{t("inventoryAlertsTitle")}</h3>
+                <h3 className="font-bold text-oo-text-primary">{t("inventoryAlertsTitle")}</h3>
                 <span className="ltr:ml-auto rtl:mr-auto text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
                   {data!.inventoryAlerts.length}
                 </span>
               </div>
               <div className="space-y-1.5">
                 {data!.inventoryAlerts.slice(0, 5).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between text-sm px-3 py-2 bg-amber-50/50 rounded-xl">
+                  <div key={a.id} className="flex items-center justify-between text-sm px-3 py-2 bg-amber-50/50 rounded-oo-medium">
                     <span className="font-medium truncate">{disp(a.beanType, a.beanTypeAr)}</span>
                     <span className={`font-bold font-mono shrink-0 ltr:ml-2 rtl:mr-2 ${a.quantityKg < 20 ? "text-red-600" : "text-amber-600"}`}>
                       {a.quantityKg.toFixed(1)} {t("kgUnit")}
@@ -524,27 +546,27 @@ export default function DashboardPage() {
 
           {/* QC batch alerts */}
           {(data?.qcBatchAlerts?.length ?? 0) > 0 && (
-            <div className="bg-white rounded-2xl border border-border p-5">
+            <div className="bg-oo-bg-default rounded-oo-large border border-oo-border-default p-5">
               <div className="flex items-center gap-2 mb-3">
-                <Clock size={16} className="text-orange" />
-                <h3 className="font-extrabold text-charcoal">{t("openQcBatches")}</h3>
-                <span className="ltr:ml-auto rtl:mr-auto text-xs font-bold bg-orange/10 text-orange px-2 py-0.5 rounded-full">
+                <Clock size={16} className="text-oo-action-primary" />
+                <h3 className="font-bold text-oo-text-primary">{t("openQcBatches")}</h3>
+                <span className="ltr:ml-auto rtl:mr-auto text-xs font-bold bg-oo-action-primary/10 text-oo-action-primary px-2 py-0.5 rounded-full">
                   {data!.qcBatchAlerts.length}
                 </span>
               </div>
               <div className="space-y-1.5">
                 {data!.qcBatchAlerts.slice(0, 5).map((b) => (
-                  <div key={b.id} className={`flex items-center justify-between text-sm px-3 py-2 rounded-xl border ${
-                    b.isOverdue ? "bg-red-50 border-red-200" : b.isUrgent ? "bg-amber-50 border-amber-200" : "bg-cream/50 border-border"
+                  <div key={b.id} className={`flex items-center justify-between text-sm px-3 py-2 rounded-oo-medium border ${
+                    b.isOverdue ? "bg-red-50 border-red-200" : b.isUrgent ? "bg-amber-50 border-amber-200" : "bg-oo-bg-subtle/50 border-oo-border-default"
                   }`}>
                     <div className="min-w-0">
-                      <p className="font-bold text-charcoal font-mono">{b.batchNumber}</p>
-                      <p className="text-xs text-brown/50">
+                      <p className="font-bold text-oo-text-primary font-mono">{b.batchNumber}</p>
+                      <p className="text-xs text-oo-text-muted">
                         {b.origin} · {b.testerCount} {b.testerCount !== 1 ? t("testers") : t("tester")}
                       </p>
                     </div>
                     <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-lg ltr:ml-2 rtl:mr-2 ${
-                      b.isOverdue ? "bg-red-100 text-red-700" : b.isUrgent ? "bg-amber-100 text-amber-700" : "bg-cream text-brown"
+                      b.isOverdue ? "bg-red-100 text-red-700" : b.isUrgent ? "bg-amber-100 text-amber-700" : "bg-oo-bg-subtle text-oo-text-secondary"
                     }`}>
                       {b.isOverdue ? t("overdue") : b.isUrgent ? t("dueSoon") : t("pending")}
                     </span>
