@@ -28,7 +28,10 @@
     "db:generate": "prisma generate",
     "build:test-domain": "tsc -p tsconfig.test-domain.json",
     "harness:build": "node tests/harness/build.mjs",
-    "harness:ui": "node tests/harness/build.mjs && playwright test -c playwright.harness.config.ts"
+    "harness:ui": "node tests/harness/build.mjs && playwright test -c playwright.harness.config.ts",
+    "test:shell": "playwright test -c playwright.shell.config.ts",
+    "preview:nav-fixtures": "tsx scripts/sales-preview/nav-fixtures.ts",
+    "preview:nav-fixtures:remove": "tsx scripts/sales-preview/nav-fixtures.ts --remove"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

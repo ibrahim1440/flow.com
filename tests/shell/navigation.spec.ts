@@ -7,19 +7,28 @@
  * that the drawer closes behind you, or that a phone does not scroll sideways. That is
  * what this is for.
  *
+ * ── Running it ──
+ *   npm run test:shell
+ *
  * ── Identities ──
- * Three disposable `NAV_` fixtures, created by `scripts/sales-preview/nav-fixtures.ts` from
- * the same ROLES the other suites use. Never the `RVW_` reviewer accounts: their PINs are
- * issued once and somebody may be holding a session. Nothing here writes business data.
+ * Three disposable `NAV_` fixtures built from the same ROLES the other suites use, created
+ * by the config's global setup and deleted by its teardown however the run ends. Never the
+ * `RVW_` reviewer accounts: their PINs are issued once and somebody may be holding a
+ * session. Nothing here writes business data.
  */
 import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { NAV_PEOPLE } from "../../scripts/sales-preview/preview-guard";
 
 const SHOTS = path.join(process.cwd(), "docs/sales/nav-shots");
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const PIN = { rep: "940011", manager: "940022", finance: "940033" };
+// One definition, shared with the provisioning script, so the suite and the accounts it
+// signs in as cannot drift apart.
+const PIN = Object.fromEntries(
+  NAV_PEOPLE.map((p) => [p.id.replace(/^NAV_/, ""), p.pin]),
+) as Record<"rep" | "manager" | "finance", string>;
 
 const WIDTHS = [
   { name: "desktop-1440", width: 1440, height: 900 },

@@ -160,8 +160,10 @@ change to those forms, not to the navigation.
 
 | Suite | What it proves | Assertions |
 | --- | --- | --- |
-| `scripts/e2e/regression/navigation.ts` | The tree, against the real roles and the routes on disk | **104** |
-| `tests/shell/navigation.spec.ts` | The rendered shell in a real browser, at three widths | **29** |
+| `scripts/e2e/regression/navigation.ts` | The tree, against the real roles and the routes on disk | **117** |
+| `scripts/e2e/regression/navigation-roles.ts` | The tree against every active account in the preview database | **108** |
+| `scripts/e2e/regression/reviewer-collections.ts` | The actual `RVW_` reviewers, submitting and deciding | **49** |
+| `tests/shell/navigation.spec.ts` | The rendered shell in a real browser, at three widths | **35** |
 
 The registry suite runs through `tsx` against the **source** registry and the **source** role
 definitions the browser suites use, so it cannot drift from either. It asserts, for all nine
@@ -175,6 +177,45 @@ Forward, deep links, the mobile drawer's focus and Escape behaviour, and that no
 the document sideways at 1440, 1024 or 390.
 
 **Neither is authorisation evidence.** The API suites are.
+
+### Running the browser suite
+
+One command. Nothing to set up first, and nothing left behind:
+
+```
+npm run test:shell
+```
+
+Four things happen, in order:
+
+1. **It guards.** `scripts/sales-preview/preview-guard.ts` reads the preview app env file
+   and refuses unless the connection string is the approved preview endpoint, the
+   `sales_preview` database and the restricted `sales_preview_app` role — plus the same
+   denylist of protected endpoints and privileged roles that `withpreview.mjs` applies to
+   processes. Production is unreachable from here by construction, not by convention.
+   `PREVIEW_ENV` overrides the file; the default is the one the other Preview suites use.
+2. **It provisions** the three disposable `NAV_` identities from the shared `ROLES`
+   definitions (Playwright `globalSetup`). Their PINs live in `preview-guard.ts`, shared
+   with the suite so the two cannot drift, and are never printed to a terminal or a report.
+3. **It starts a dev server on :3100** through the existing `withpreview.mjs`, which
+   refuses to boot Next against anything but the preview database. Its own port, so it is
+   never confused with an ordinary `npm run dev`. Set `SHELL_BASE_URL` to manage the server
+   yourself and the launcher is skipped.
+4. **It deletes every `NAV_` account** afterwards (`globalTeardown`), whether the run
+   passed, failed or was interrupted — and prefix-wide, so it also clears fixtures an
+   earlier aborted run abandoned. If the delete itself cannot run it says so and fails
+   loudly, rather than exiting quietly with accounts still live.
+
+To drive the browser by hand, `npm run preview:nav-fixtures` and
+`npm run preview:nav-fixtures:remove` are the same two steps on their own.
+
+Never the `RVW_` reviewer accounts: their PINs were issued once, somebody may be holding a
+session, and rotating one would invalidate it. To exercise a *real* reviewer's stored
+authorisation, `scripts/e2e/regression/reviewer-collections.ts` mints a session instead —
+`getUserWithPermissions` reads `active`, `role` and `permissions` live from the employee row
+on every request, so the token proves only identity and the authorisation under test is the
+one really stored. That is authorisation evidence. It is **not** evidence that hosted login,
+cookies or action visibility work in a browser; only a hosted sign-in shows that.
 
 ---
 

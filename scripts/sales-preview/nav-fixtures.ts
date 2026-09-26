@@ -6,60 +6,34 @@
  * `ROLES` definitions the test suites use, so what the browser shows is what those roles
  * really grant rather than a hand-written approximation.
  *
- * Idempotent. Re-running reissues the same fixed PINs — these are throwaway logins on an
- * isolated preview database, not credentials.
+ * Idempotent, and it prints no PINs — the shell suite imports them from `preview-guard.ts`
+ * rather than reading them off a terminal. `playwright.shell.config.ts` calls the two
+ * functions below as its global setup and teardown, so a normal run leaves nothing behind;
+ * the CLI is for driving the browser by hand.
  *
  *   PREVIEW_ENV=<app env file> npx tsx scripts/sales-preview/nav-fixtures.ts [--remove]
  */
-import { readFileSync } from "node:fs";
 import { hashSync } from "bcryptjs";
 import { Client } from "pg";
 import { pinLookup, pinVerifierInput } from "../../src/lib/pin-lookup";
-import { ROLES, type RoleName } from "../../tests/e2e/support/roles";
+import { ROLES } from "../../tests/e2e/support/roles";
+import { NAV_PEOPLE, NAV_PREFIX, PreviewRefusal, loadPreviewEnv } from "./preview-guard";
 
-const P = "NAV";
-const ENVFILE = process.env.PREVIEW_ENV;
-if (!ENVFILE) { console.error("REFUSE: PREVIEW_ENV is not set."); process.exit(3); }
-
-const env: Record<string, string> = {};
-for (const line of readFileSync(ENVFILE, "utf8").split(/\r?\n/)) {
-  const t = line.trim();
-  if (!t || t.startsWith("#")) continue;
-  const i = t.indexOf("=");
-  if (i > 0) env[t.slice(0, i).trim()] = t.slice(i + 1).trim().replace(/^["']|["']$/g, "");
-}
-
-const ALLOWED_ENDPOINT = "ep-wandering-leaf-aqjtuin5";
-const ALLOWED_DATABASE = "sales_preview";
-const ALLOWED_ROLE = "sales_preview_app";
-
-const url = env.DATABASE_URL;
-if (!url) { console.error("REFUSE: DATABASE_URL is not in that env file"); process.exit(3); }
-let u: URL;
-try { u = new URL(url); } catch { console.error("REFUSE: unusable connection string"); process.exit(3); }
-if (!u.hostname.startsWith(ALLOWED_ENDPOINT)) { console.error("REFUSE: not the approved preview endpoint"); process.exit(3); }
-if (u.pathname.replace(/^\//, "") !== ALLOWED_DATABASE) { console.error("REFUSE: not the approved preview database"); process.exit(3); }
-if (u.username !== ALLOWED_ROLE) { console.error(`REFUSE: must run as ${ALLOWED_ROLE}`); process.exit(3); }
-
-const secret = env.PIN_LOOKUP_SECRET;
-if (!secret || secret.length < 32) { console.error("REFUSE: PIN_LOOKUP_SECRET missing or too short"); process.exit(3); }
-
-const PEOPLE: { id: string; name: string; pin: string; role: RoleName }[] = [
-  { id: `${P}_rep`, name: `${P} Sales Rep`, pin: "940011", role: "crmRep" },
-  { id: `${P}_manager`, name: `${P} Sales Manager`, pin: "940022", role: "crmManager" },
-  { id: `${P}_finance`, name: `${P} Finance`, pin: "940033", role: "crmFinance" },
-];
-
-async function main() {
+async function withPreview<T>(fn: (c: Client, secret: string) => Promise<T>): Promise<T> {
+  const { url, secret } = loadPreviewEnv();
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
-    if (process.argv.includes("--remove")) {
-      const r = await client.query(`DELETE FROM "Employee" WHERE id LIKE '${P}\\_%'`);
-      console.log(`removed ${r.rowCount} navigation fixtures`);
-      return;
-    }
-    for (const p of PEOPLE) {
+    return await fn(client, secret);
+  } finally {
+    await client.end();
+  }
+}
+
+/** Create or refresh the three fixtures. Returns their ids — never their PINs. */
+export async function provisionNavFixtures(): Promise<string[]> {
+  return withPreview(async (client, secret) => {
+    for (const p of NAV_PEOPLE) {
       const role = ROLES[p.role];
       await client.query(
         `INSERT INTO "Employee"
@@ -77,12 +51,41 @@ async function main() {
           role.role, JSON.stringify(role.permissions),
         ],
       );
-      console.log(`  ${p.id.padEnd(14)} ${p.role.padEnd(12)} pin ${p.pin}`);
     }
-    console.log("\nDisposable. Remove with --remove when the checks are done.");
-  } finally {
-    await client.end();
-  }
+    return NAV_PEOPLE.map((p) => p.id);
+  });
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+/**
+ * Delete every `NAV_` account, whether this run created it or an earlier one abandoned it.
+ * Unconditional on purpose: teardown must not depend on setup having got that far.
+ */
+export async function removeNavFixtures(): Promise<number> {
+  return withPreview(async (client) => {
+    const r = await client.query(`DELETE FROM "Employee" WHERE id LIKE '${NAV_PREFIX}\\_%'`);
+    return r.rowCount ?? 0;
+  });
+}
+
+async function main() {
+  if (process.argv.includes("--remove")) {
+    console.log(`removed ${await removeNavFixtures()} navigation fixtures`);
+    return;
+  }
+  const ids = await provisionNavFixtures();
+  for (const id of ids) console.log(`  ${id}`);
+  console.log("\nDisposable. Remove with --remove when the checks are done.");
+}
+
+// Only when run as a script. Playwright imports this file for its global setup, and an
+// import must not also execute the CLI.
+if (typeof require !== "undefined" && require.main === module) {
+  main().catch((e) => {
+    if (e instanceof PreviewRefusal) {
+      console.error(e.message);
+      process.exit(3);
+    }
+    console.error(e);
+    process.exit(1);
+  });
+}
