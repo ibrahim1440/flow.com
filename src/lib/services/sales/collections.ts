@@ -90,7 +90,22 @@ export type CollectionSummary = {
   /** Submitted and awaiting a decision. Reserved against the ceiling, not yet earned. */
   pendingGross: PrismaNS.Decimal;
   reversedGross: PrismaNS.Decimal;
-  /** What may still be claimed: the document less what is approved and what is pending. */
+  /**
+   * What the customer still owes: the document less the approved collections. A pending
+   * submission is somebody's claim, not a payment, so it does not reduce the debt.
+   */
+  unpaidGross: PrismaNS.Decimal;
+  /**
+   * How much MORE may be submitted right now: the unpaid balance less what is already
+   * reserved by pending submissions. This is the submission ceiling, not a balance — the
+   * two differ by exactly `pendingGross` and coincide only when nothing is pending.
+   */
+  availableToSubmitGross: PrismaNS.Decimal;
+  /**
+   * @deprecated The old name for `availableToSubmitGross`, kept so existing callers keep
+   * working. It was labelled "outstanding" in the UI, which read as the unpaid balance and
+   * was not: it is submission capacity. Use one of the two explicit fields above.
+   */
   remainingGross: PrismaNS.Decimal;
   state: PaymentState;
 };
@@ -136,7 +151,11 @@ export async function collectionSummary(tx: Tx, opportunityId: string): Promise<
   reversedGross = roundMoney(reversedGross);
 
   const ceiling = document?.gross ?? ZERO;
-  const remaining = roundMoney(ceiling.minus(approvedGross).minus(pendingGross));
+  // Two different questions, and conflating them is how a reviewer reads submission
+  // capacity as a debt. The debt ignores pending claims; the capacity does not.
+  const unpaid = roundMoney(ceiling.minus(approvedGross));
+  const available = roundMoney(unpaid.minus(pendingGross));
+  const floor0 = (d: PrismaNS.Decimal) => (d.lessThan(0) ? ZERO : d);
 
   // Derived from approved money only. A pending claim does not make a deal "partially
   // collected" — nobody has agreed that anything arrived.
@@ -154,7 +173,11 @@ export async function collectionSummary(tx: Tx, opportunityId: string): Promise<
     approvedNet,
     pendingGross,
     reversedGross,
-    remainingGross: remaining.lessThan(0) ? ZERO : remaining,
+    unpaidGross: floor0(unpaid),
+    availableToSubmitGross: floor0(available),
+    // Unchanged in value: the submission ceiling and its concurrency check still read the
+    // same number they always did.
+    remainingGross: floor0(available),
     state,
   };
 }
@@ -264,12 +287,15 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
         "There is no exchange-rate policy in this system, so it cannot be converted.",
     };
   }
-  if (input.amountGross.greaterThan(summary.remainingGross)) {
+  // The ceiling itself is unchanged; only its wording, which used to call submission
+  // capacity "outstanding" and so reported a number that was not the unpaid balance.
+  if (input.amountGross.greaterThan(summary.availableToSubmitGross)) {
     throw {
       _appCode: 409,
       message:
-        `Only ${summary.remainingGross.toFixed(2)} ${summary.document.currency} is still outstanding on ` +
-        "this deal, counting what is already awaiting verification. Overpayment is not recorded here.",
+        `Only ${summary.availableToSubmitGross.toFixed(2)} ${summary.document.currency} may still be ` +
+        `submitted on this deal (unpaid balance ${summary.unpaidGross.toFixed(2)}, less what is already ` +
+        "awaiting verification). Overpayment is not recorded here.",
     };
   }
 

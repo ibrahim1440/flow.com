@@ -889,6 +889,81 @@ async function main() {
       `${financeList.status} ${S(financeList.json?.scope)}`);
   }
 
+
+  {
+    sub("D11. the unpaid balance and the submission capacity are two different numbers");
+    //
+    // Reported from the hosted Preview: the only balance-shaped figure on the screen was
+    // labelled «المتبقي» / "outstanding" and carried total − approved − PENDING, i.e.
+    // submission capacity. With anything awaiting verification that is not what the
+    // customer owes, and a reviewer deciding on a payment reads it as the debt. The
+    // arithmetic was right for the ceiling; the name was wrong and the debt was missing.
+    const { oppId: uOpp } = await mkDeal("bal", ids.repA, 1150, 150);
+
+    const readSummary = async () => {
+      const r = await repA.api(`/api/sales/opportunities/${uOpp}`);
+      return r.json?.collectionSummary ?? {};
+    };
+    const eligible = async () =>
+      ((await repA.api("/api/sales/collections")).json?.eligibleDeals ?? []).find((d) => d.id === uOpp) ?? {};
+
+    // Nothing yet: with no pending claim the two figures genuinely coincide, which is
+    // exactly why the old single figure looked correct for so long.
+    let s = await readSummary();
+    check("with nothing submitted, unpaid is the whole quotation",
+      s.unpaidGross === "1150.00", S(s.unpaidGross));
+    check("and capacity equals it, because nothing is reserved",
+      s.availableToSubmitGross === "1150.00", S(s.availableToSubmitGross));
+
+    // One pending claim: the debt is untouched, the capacity is not.
+    const first = await submit(repA, uOpp, 345);
+    check("a pending submission is accepted", first.status === 201, S(first.status));
+    s = await readSummary();
+    check("a PENDING claim does not reduce the unpaid balance",
+      s.unpaidGross === "1150.00", S(s.unpaidGross));
+    check("but it does reserve capacity", s.availableToSubmitGross === "805.00", S(s.availableToSubmitGross));
+    check("pending is reported separately", s.pendingGross === "345.00", S(s.pendingGross));
+
+    // Approved: now the debt moves.
+    const appr = await decide(fin, first.json.collectionId, "approve");
+    check("Finance approves it", appr.status === 200, S(appr.status));
+    s = await readSummary();
+    check("approval is what reduces the unpaid balance", s.unpaidGross === "805.00", S(s.unpaidGross));
+    check("and capacity, with nothing pending, equals it again",
+      s.availableToSubmitGross === "805.00", S(s.availableToSubmitGross));
+
+    // Both non-zero and DIFFERENT — the case the single figure could not express.
+    const second = await submit(repA, uOpp, 230);
+    check("a second submission is accepted", second.status === 201, S(second.status));
+    s = await readSummary();
+    check("unpaid stays at what is owed", s.unpaidGross === "805.00", S(s.unpaidGross));
+    check("capacity drops by the new reservation", s.availableToSubmitGross === "575.00", S(s.availableToSubmitGross));
+    check("the two figures now differ by exactly what is pending",
+      Number(s.unpaidGross) - Number(s.availableToSubmitGross) === Number(s.pendingGross),
+      `${s.unpaidGross} - ${s.availableToSubmitGross} vs ${s.pendingGross}`);
+
+    // Compatibility: the old name still answers, and still answers the ceiling question.
+    check("the deprecated remainingGross is unchanged in meaning and value",
+      s.remainingGross === s.availableToSubmitGross, `${S(s.remainingGross)} vs ${S(s.availableToSubmitGross)}`);
+
+    const e = await eligible();
+    check("the eligible-deal list carries the unpaid balance", e.unpaid === "805.00", S(e.unpaid));
+    check("and the capacity, explicitly named", e.availableToSubmit === "575.00", S(e.availableToSubmit));
+    check("with the old field preserved for existing callers",
+      e.remaining === e.availableToSubmit, `${S(e.remaining)} vs ${S(e.availableToSubmit)}`);
+
+    // The ceiling itself must not have moved: capacity, not the unpaid balance, bounds it.
+    const over = await submit(repA, uOpp, 576);
+    check("one riyal over the CAPACITY is refused, not over the unpaid balance",
+      over.status === 409, S(over.status));
+    check("and the refusal quotes the capacity and the unpaid balance separately",
+      /575\.00/.test(S(over.json?.error ?? over.json?.message)) &&
+      /805\.00/.test(S(over.json?.error ?? over.json?.message)),
+      S(over.json?.error ?? over.json?.message).slice(0, 140));
+    const exact = await submit(repA, uOpp, 575);
+    check("and exactly the capacity is accepted", exact.status === 201, S(exact.status));
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   section("E — THE APPROVAL WORKFLOW, THROUGH THREE SEPARATE IDENTITIES");
   //

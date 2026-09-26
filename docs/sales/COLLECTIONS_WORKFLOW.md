@@ -58,12 +58,36 @@ Checked in the service, behind a `FOR UPDATE` lock on the deal — not in the br
 - zero, negative, or more than two decimal places
 - a currency the accepted quotation is not in (there is no exchange-rate policy, so it is
   refused rather than converted at an invented rate)
-- more than the outstanding balance, **counting what is already awaiting verification**
+- more than **what is available to submit** — the unpaid balance less what is already awaiting verification (the two are not the same number; see below)
 - a deal with no accepted quotation
 - another salesperson's deal (404, which does not confirm the deal exists)
 - a replay of the same `idempotencyKey` by the same submitter
 - a receipt dated in the future
 - approving, rejecting or reversing something already terminal
+
+## Two balances, and why one number was not enough
+
+A deal has **two** figures that both look like "what is left", and for most of this module's
+life the screen showed only the second under a word that means the first:
+
+| | Definition | Answers |
+| --- | --- | --- |
+| **المتبقي غير المسدد** — unpaid balance | accepted total − approved collections | what the customer still owes |
+| **المتاح لتسجيل تحصيل إضافي** — available to submit | unpaid balance − pending collections | how much more may be claimed right now |
+
+They differ by exactly the pending total, so they coincide only while nothing is awaiting
+verification — which is never, on a screen whose purpose is reviewing pending items.
+
+Worked from the hosted fixture: a 1,150.00 quotation with 345.00 approved and 230.00 pending
+has an unpaid balance of **805.00** and capacity of **575.00**. Before the fix the deal panel
+showed 575.00 labelled «المتبقي» / "Outstanding", and a reviewer deciding on a payment would
+have read the debt as 575.00.
+
+**The arithmetic never changed.** `remainingGross` always carried
+`total − approved − pending`, and the submission ceiling and its `FOR UPDATE` concurrency
+check still read exactly that number. What changed is that the value now has an honest name
+(`availableToSubmitGross`), the debt is computed and displayed beside it (`unpaidGross`), and
+`remainingGross` remains as a deprecated alias so existing callers keep working.
 
 **The salesperson never types the VAT.** They enter the gross received; the server splits it
 using the document's own tax-to-gross ratio, and the settling payment takes whatever tax is
