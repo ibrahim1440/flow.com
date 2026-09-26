@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import {
   AlertTriangle, Clock, ClipboardClock, MessageSquare, PauseCircle, RotateCcw, Ban, CheckCircle2,
   ClipboardList, UserCircle2, Loader2, Send, RefreshCw, PackageCheck, XCircle, Hammer,
-  CircleDashed, CircleDotDashed, Check, Flame,
+  CircleDashed, CircleDotDashed, Check, Flame, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useUser } from "@/app/dashboard/user-context";
@@ -219,25 +219,33 @@ function stageStateLabelKey(state: StageState, negativeKind?: "cancelled" | "rej
   }
 }
 
+/**
+ * How a stage is drawn.
+ *
+ * FZ-B draws each stage as a labelled box rather than a dot on a rail, and the reason is
+ * legibility rather than taste: the box carries the stage name AND its state on two lines
+ * at a readable size, where a dot has to push both underneath a 6px circle. `box` is the
+ * container treatment; `fg` colours the stage name.
+ */
 function stageVisual(state: StageState, negativeKind?: "cancelled" | "rejected") {
   switch (state) {
     case "complete":
-      return { Icon: Check, fg: "text-oo-status-success", ring: "border-oo-status-success bg-oo-status-success-bg", line: "bg-oo-status-success/40" };
+      return { Icon: Check, fg: "text-oo-status-success", box: "border-oo-status-success/40 bg-oo-status-success-bg" };
     case "paused":
-      return { Icon: PauseCircle, fg: "text-oo-status-hold", ring: "border-oo-status-hold bg-oo-status-hold-bg", line: "bg-oo-border-default" };
+      return { Icon: PauseCircle, fg: "text-oo-status-hold", box: "border-oo-status-hold bg-oo-status-hold-bg" };
     case "negative":
       return negativeKind === "rejected"
-        ? { Icon: Ban, fg: "text-oo-status-rejected", ring: "border-oo-status-rejected bg-oo-status-rejected-bg", line: "bg-oo-border-default" }
-        : { Icon: XCircle, fg: "text-oo-status-cancelled", ring: "border-oo-status-cancelled bg-oo-status-cancelled-bg", line: "bg-oo-border-default" };
+        ? { Icon: Ban, fg: "text-oo-status-rejected", box: "border-oo-status-rejected bg-oo-status-rejected-bg" }
+        : { Icon: XCircle, fg: "text-oo-status-cancelled", box: "border-oo-status-cancelled bg-oo-status-cancelled-bg" };
     case "active":
-      return { Icon: null, fg: "text-oo-action-primary", ring: "border-oo-action-primary bg-oo-bg-default", line: "bg-oo-border-default" };
+      // The one stage the order is actually at, and the only one with a heavier border.
+      return { Icon: null, fg: "text-oo-status-preparing", box: "border-[1.5px] border-oo-status-preparing bg-oo-status-preparing-bg" };
     case "pending":
-      // Deliberately identical to "future" (hollow, muted ring, no fill/icon) — this
-      // is an undecided yes/no gate, not work in progress. Slightly less-muted text
-      // than "future" so it still reads as "next up" without implying completion.
-      return { Icon: null, fg: "text-oo-text-secondary", ring: "border-oo-border-default bg-oo-bg-subtle", line: "bg-oo-border-default" };
+      // Deliberately identical to "future" — this is an undecided yes/no gate, not work in
+      // progress. Slightly less-muted text so it still reads as "next up".
+      return { Icon: null, fg: "text-oo-text-secondary", box: "border-oo-border-default bg-oo-bg-default" };
     default: // future
-      return { Icon: null, fg: "text-oo-text-muted", ring: "border-oo-border-default bg-oo-bg-subtle", line: "bg-oo-border-default" };
+      return { Icon: null, fg: "text-oo-text-muted", box: "border-oo-border-default bg-oo-bg-default" };
   }
 }
 
@@ -250,11 +258,15 @@ export function OrderProgressStepper({
   approvalStatus?: string;
   items: { preparationDecision: string | null }[];
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { states, negativeKind } = computeProgressStages({ status, approvalStatus, items });
 
+  // The arrow points along the reading direction, so progress runs the way the language
+  // does rather than being mirrored by hand.
+  const Arrow = lang === "ar" ? ChevronLeft : ChevronRight;
+
   return (
-    <ol className="flex items-start w-full" aria-label={t("stepperLabel")}>
+    <ol className="flex items-stretch w-full gap-1" aria-label={t("stepperLabel")}>
       {STEPPER_STAGES.map((stage, i) => {
         const state = states[i];
         const visual = stageVisual(state, negativeKind);
@@ -266,23 +278,25 @@ export function OrderProgressStepper({
           <li
             key={stage}
             {...(isCurrent ? { "aria-current": "step" as const } : {})}
-            className="flex-1 flex flex-col items-center min-w-0"
+            className="flex-1 min-w-0 flex items-center gap-1"
           >
-            <div className="flex items-center w-full">
-              <div className={`flex-1 h-0.5 ${i === 0 ? "opacity-0" : visual.line}`} />
-              <div className={`flex items-center justify-center w-6 h-6 rounded-full border-2 flex-shrink-0 ${visual.ring}`}>
-                {visual.Icon ? (
-                  <visual.Icon size={12} className={visual.fg} aria-hidden="true" />
-                ) : (
-                  <span className={`w-1.5 h-1.5 rounded-full ${state === "active" ? "bg-oo-action-primary" : ""}`} aria-hidden="true" />
-                )}
-              </div>
-              <div className={`flex-1 h-0.5 ${i === STEPPER_STAGES.length - 1 ? "opacity-0" : visual.line}`} />
+            {i > 0 && (
+              <Arrow size={13} className="shrink-0 text-oo-text-muted" aria-hidden="true" />
+            )}
+            <div
+              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5
+                rounded-oo-medium border px-2 py-2 text-center ${visual.box}`}
+            >
+              <span className={`flex items-center gap-1 text-[12px] font-semibold leading-tight truncate max-w-full ${visual.fg}`}>
+                {visual.Icon && <visual.Icon size={11} className="shrink-0" aria-hidden="true" />}
+                {t(STAGE_LABEL_KEY[stage])}
+              </span>
+              {/* The state, shown rather than hidden. It was sr-only, which meant a sighted
+                  operator had to infer "not started" from a pale border. */}
+              <span className="text-[9.5px] leading-tight text-oo-text-muted truncate max-w-full">
+                {t(stageStateLabelKey(state, negativeKind))}
+              </span>
             </div>
-            <span className={`mt-1 text-[11px] font-semibold text-center leading-tight px-0.5 ${visual.fg}`}>
-              {t(STAGE_LABEL_KEY[stage])}
-            </span>
-            <span className="sr-only">{t(stageStateLabelKey(state, negativeKind))}</span>
           </li>
         );
       })}
