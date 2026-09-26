@@ -123,7 +123,7 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
 
       {rows.map((row) => {
         return (
-          <div key={row.orderItemId} className="rounded-xl border border-oo-border-default p-2.5">
+          <div key={row.orderItemId} className="rounded-oo-medium border border-oo-border-default p-2.5">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="font-mono text-xs font-bold text-oo-text-primary">{row.skuCode}</span>
               <span className="text-xs text-oo-text-secondary">
@@ -174,7 +174,7 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                     type="button"
                     disabled={busy === row.orderItemId}
                     onClick={() => create(row)}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-oo-action-primary text-white text-xs font-bold hover:bg-oo-action-primary-hover disabled:opacity-50 transition-colors"
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-oo-medium bg-oo-action-primary text-white text-xs font-bold hover:bg-oo-action-primary-hover disabled:opacity-50 transition-colors"
                   >
                     {busy === row.orderItemId ? (
                       <Loader2 size={13} className="animate-spin" />

@@ -126,16 +126,16 @@ export default function PreparationWorkstationPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-2">
-          <PackageCheck size={24} className="text-orange" /> {t("workstationPreparation")}
+        <h1 className="text-2xl font-bold text-oo-text-primary flex items-center gap-2">
+          <PackageCheck size={24} className="text-oo-action-primary" /> {t("workstationPreparation")}
         </h1>
-        <p className="text-brown text-sm font-medium">{t("workstationSubtitle")}</p>
+        <p className="text-oo-text-secondary text-sm font-medium">{t("workstationSubtitle")}</p>
       </div>
 
       {loading ? (
         <div className="text-center py-16">
-          <div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-brown text-sm font-medium">{t("loading")}</p>
+          <div className="w-10 h-10 border-4 border-oo-action-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-oo-text-secondary text-sm font-medium">{t("loading")}</p>
         </div>
       ) : visible.length === 0 ? (
         <div className="space-y-4">
@@ -147,14 +147,14 @@ export default function PreparationWorkstationPage() {
               { label: t("summaryOnHold"), value: summary.onHold, Icon: PauseCircle },
               { label: t("summaryCompletedToday"), value: summary.completedToday, Icon: CheckCircle2 },
             ].map((card) => (
-              <div key={card.label} className="bg-white rounded-xl border border-oo-border-default p-3 sm:p-3.5 flex flex-col items-center text-center gap-1">
+              <div key={card.label} className="bg-white rounded-oo-medium border border-oo-border-default p-3 sm:p-3.5 flex flex-col items-center text-center gap-1">
                 <card.Icon size={16} className="text-oo-text-secondary" aria-hidden="true" />
-                <span className="text-xl font-extrabold text-oo-text-primary">{card.value}</span>
+                <span className="text-xl font-bold text-oo-text-primary">{card.value}</span>
                 <span className="text-[11px] font-semibold text-oo-text-muted">{card.label}</span>
               </div>
             ))}
           </div>
-          <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
+          <div className="text-center py-16 text-gray-400 bg-oo-bg-default rounded-oo-large border">
             <PackageCheck size={40} className="mx-auto mb-2" />
             <p>{t("workstationEmpty")}</p>
           </div>
@@ -168,31 +168,31 @@ export default function PreparationWorkstationPage() {
               <div
                 key={order.id}
                 data-testid={`ws-order-${order.orderNumber}`}
-                className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-colors ${
-                  attention ? "border-red-300" : "border-border"
+                className={`bg-oo-bg-default rounded-oo-large border-2 shadow-sm overflow-hidden transition-colors ${
+                  attention ? "border-red-300" : "border-oo-border-default"
                 } ${isOpen ? "xl:col-span-3 md:col-span-2" : ""}`}
               >
                 <button
                   type="button"
                   onClick={() => setOpenId(isOpen ? null : order.id)}
-                  className="w-full text-start p-5 hover:bg-cream/50 active:bg-cream transition-colors"
+                  className="w-full text-start p-5 hover:bg-oo-bg-subtle/50 active:bg-oo-bg-subtle transition-colors"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-lg font-extrabold text-charcoal">#{order.orderNumber}</p>
-                      <p className="text-sm text-brown font-medium">{order.customer.name}</p>
+                      <p className="text-lg font-bold text-oo-text-primary">#{order.orderNumber}</p>
+                      <p className="text-sm text-oo-text-secondary font-medium">{order.customer.name}</p>
                     </div>
                     {isOpen ? (
-                      <ChevronUp size={22} className="text-brown/50 flex-shrink-0" />
+                      <ChevronUp size={22} className="text-oo-text-muted flex-shrink-0" />
                     ) : (
-                      <ChevronDown size={22} className="text-brown/50 flex-shrink-0" />
+                      <ChevronDown size={22} className="text-oo-text-muted flex-shrink-0" />
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap mt-3">
                     <OrderStatusBadge status={order.status} />
                     {attention && <NeedsAttentionBadge />}
                   </div>
-                  <div className="flex items-center justify-between mt-3 text-xs text-brown/60 font-medium">
+                  <div className="flex items-center justify-between mt-3 text-xs text-oo-text-secondary font-medium">
                     <span>{order.items.length} {t("itemCountLabel")}</span>
                     <span className="flex items-center gap-1">
                       <Clock size={12} /> {formatDate(lastActivityTime(order))}
@@ -201,9 +201,9 @@ export default function PreparationWorkstationPage() {
                 </button>
 
                 {isOpen && (
-                  <div className="border-t border-border p-4 bg-cream space-y-3">
+                  <div className="border-t border-oo-border-default p-4 bg-oo-bg-subtle space-y-3">
                     {/* Progress Stepper — lifecycle milestones, not the activity log */}
-                    <div className="bg-white rounded-xl border border-border px-4 py-3">
+                    <div className="bg-white rounded-oo-medium border border-oo-border-default px-4 py-3">
                       <OrderProgressStepper status={order.status} items={order.items} />
                     </div>
 
@@ -211,8 +211,8 @@ export default function PreparationWorkstationPage() {
                         single column, timeline/status actions fall below preparation. */}
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                       <div className="xl:col-span-2 space-y-3">
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
+                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                             <ClipboardList size={16} /> {t("preparationReviewLabel")}
                           </p>
                           <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
@@ -220,15 +220,15 @@ export default function PreparationWorkstationPage() {
 
                         {/* Step 9: what the shelf could not cover, and the button that
                             turns exactly that into a production order. */}
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
+                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                             <Hammer size={16} /> {t("productionReqTitle")}
                           </p>
                           <ProductionRequirementPanel itemIds={order.items.map((i) => i.id)} />
                         </div>
 
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
+                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                             <MessageSquare size={16} /> {t("addNoteLabel")}
                           </p>
                           <AddNoteForm orderId={order.id} onSuccess={loadData} />
@@ -244,8 +244,8 @@ export default function PreparationWorkstationPage() {
                           large
                         />
 
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
+                        <div className="bg-white rounded-oo-medium border border-oo-border-default p-3.5">
+                          <p className="text-sm font-bold text-oo-text-secondary mb-2 flex items-center gap-1.5">
                             <Clock size={16} /> {t("activityTimelineLabel")}
                           </p>
                           <ActivityTimeline activities={order.activities} />

@@ -332,7 +332,7 @@ export function ActivityTimeline({ activities }: { activities: LifecycleActivity
   const { t } = useI18n();
 
   if (activities.length === 0) {
-    return <p className="text-xs text-brown/50 italic">{t("noActivityYet")}</p>;
+    return <p className="text-xs text-oo-text-muted italic">{t("noActivityYet")}</p>;
   }
 
   return (
@@ -341,24 +341,24 @@ export function ActivityTimeline({ activities }: { activities: LifecycleActivity
         const Icon = ACTIVITY_ICON[a.type] ?? Clock;
         const label = ACTIVITY_LABEL_KEYS[a.type] ? t(ACTIVITY_LABEL_KEYS[a.type]) : a.type;
         return (
-          <li key={a.id} className="flex gap-2.5 bg-white border border-border rounded-xl p-2.5">
-            <div className="w-7 h-7 rounded-lg bg-cream flex items-center justify-center flex-shrink-0">
-              <Icon size={14} className="text-brown" />
+          <li key={a.id} className="flex gap-2.5 bg-white border border-oo-border-default rounded-oo-medium p-2.5">
+            <div className="w-7 h-7 rounded-lg bg-oo-bg-subtle flex items-center justify-center flex-shrink-0">
+              <Icon size={14} className="text-oo-text-secondary" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-charcoal">{label}</span>
+                <span className="text-xs font-bold text-oo-text-primary">{label}</span>
                 {a.department && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-light text-brown font-semibold">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-oo-action-primary-light text-oo-text-secondary font-semibold">
                     {a.department}
                   </span>
                 )}
-                <span className="text-[10px] text-brown/50 ltr:ml-auto rtl:mr-auto">
+                <span className="text-[10px] text-oo-text-muted ltr:ml-auto rtl:mr-auto">
                   {a.authorName} — {formatDate(a.createdAt)}
                 </span>
               </div>
               {/* Rendered as plain text only — never dangerouslySetInnerHTML. */}
-              <p className="text-xs text-charcoal/80 mt-1 whitespace-pre-wrap break-words">{a.message}</p>
+              <p className="text-xs text-oo-text-primary/80 mt-1 whitespace-pre-wrap break-words">{a.message}</p>
             </div>
           </li>
         );
@@ -414,7 +414,7 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-oo-medium">
           <AlertTriangle size={13} /> {error}
         </div>
       )}
@@ -422,7 +422,7 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
         <select
           value={department}
           onChange={(e) => setDepartment(e.target.value as OrderNoteDepartment)}
-          className="sm:w-44 px-3 py-2 border-2 border-border rounded-xl text-sm bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+          className="sm:w-44 px-3 py-2 border-2 border-oo-border-default rounded-oo-medium text-sm bg-white focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors"
         >
           {DEPARTMENT_OPTIONS.map((d) => (
             <option key={d.value} value={d.value}>{t(d.labelKey)}</option>
@@ -433,17 +433,17 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
           onChange={(e) => setMessage(e.target.value)}
           placeholder={t("notePlaceholder")}
           rows={2}
-          className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors resize-none"
+          className="flex-1 px-3 py-2 border-2 border-oo-border-default rounded-oo-medium text-sm focus:border-oo-action-primary focus:ring-2 focus:ring-oo-action-primary/20 outline-none transition-colors resize-none"
         />
       </div>
       <div className="flex items-center justify-between gap-2">
-        <span className={`text-[11px] font-semibold ${overLimit ? "text-red-600" : "text-brown/40"}`}>
+        <span className={`text-[11px] font-semibold ${overLimit ? "text-red-600" : "text-oo-text-muted"}`}>
           {message.length}/{NOTE_MAX_LENGTH}
         </span>
         <button
           type="submit"
           disabled={submitting || !message.trim() || overLimit}
-          className="flex items-center gap-1.5 px-4 py-2 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
+          className="flex items-center gap-1.5 px-4 py-2 bg-oo-action-primary text-white rounded-lg text-sm font-bold hover:bg-oo-action-primary-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
         >
           {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
           {t("submitNoteBtn")}
@@ -517,7 +517,7 @@ export function StatusActionsBar({
   return (
     <div className="space-y-2">
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-oo-medium">
           <AlertTriangle size={13} /> {error}
         </div>
       )}
@@ -789,15 +789,15 @@ export function PreparationReviewTable({
   return (
     <div className="space-y-3">
       {!canEdit && (
-        <p className="text-xs text-brown/50 italic">{t("readOnlyPrepNotice")}</p>
+        <p className="text-xs text-oo-text-muted italic">{t("readOnlyPrepNotice")}</p>
       )}
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-oo-medium">
           <AlertTriangle size={13} /> {error}
         </div>
       )}
       {savedMsg && (
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-2 rounded-xl">
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-2 rounded-oo-medium">
           <CheckCircle2 size={13} /> {savedMsg}
         </div>
       )}
@@ -805,7 +805,7 @@ export function PreparationReviewTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm stack-table">
           <thead>
-            <tr className="text-xs text-brown/60">
+            <tr className="text-xs text-oo-text-secondary">
               <th className="text-start px-2 py-1 font-semibold">{t("beanType")}</th>
               <th className="text-end px-2 py-1 font-semibold">{t("prepColRequired")}</th>
               <th className="text-end px-2 py-1 font-semibold">{t("prepColAvailableNow")}</th>
@@ -842,13 +842,13 @@ export function PreparationReviewTable({
                       <td className="px-2 py-1.5 text-end font-medium" data-label={t("prepColRequired")}>{item.quantityKg}</td>
                       <td className="px-2 py-1.5 text-end tabular-nums" data-label={t("prepColAvailableNow")}>
                         {stockLoading && !s ? (
-                          <span className="text-brown/40">…</span>
+                          <span className="text-oo-text-muted">…</span>
                         ) : s ? (
-                          <span className={s.freeToPromiseQty > 0 ? "text-green-600 font-semibold" : "text-brown/40"}>
+                          <span className={s.freeToPromiseQty > 0 ? "text-green-600 font-semibold" : "text-oo-text-muted"}>
                             {s.freeToPromiseQty}
                           </span>
                         ) : (
-                          <span className="text-brown/40">—</span>
+                          <span className="text-oo-text-muted">—</span>
                         )}
                       </td>
                       {/* A committed, unblocked line shows stock this order actually holds,
@@ -857,7 +857,7 @@ export function PreparationReviewTable({
                         <span
                           className={
                             isBlocked
-                              ? "text-brown/40"
+                              ? "text-oo-text-muted"
                               : item.preparationDecision
                                 ? "font-bold text-oo-status-ready"
                                 : undefined
@@ -885,7 +885,7 @@ export function PreparationReviewTable({
                               aria-pressed={isBlocked}
                               className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                                 isBlocked
-                                  ? "text-oo-text-muted bg-white border-oo-border-default hover:bg-cream"
+                                  ? "text-oo-text-muted bg-white border-oo-border-default hover:bg-oo-bg-subtle"
                                   : "text-oo-status-blocked bg-oo-status-blocked-bg border-oo-status-blocked/30 hover:bg-oo-status-blocked/10"
                               }`}
                             >
@@ -912,7 +912,7 @@ export function PreparationReviewTable({
                                 rows={2}
                                 required
                                 aria-required="true"
-                                className={`w-full px-3 py-2 border-2 rounded-xl text-sm focus:ring-2 outline-none transition-colors resize-none ${
+                                className={`w-full px-3 py-2 border-2 rounded-oo-medium text-sm focus:ring-2 outline-none transition-colors resize-none ${
                                   blockedWithoutNote
                                     ? "border-oo-status-blocked focus:border-oo-status-blocked focus:ring-oo-status-blocked/20"
                                     : "border-oo-border-default focus:border-oo-action-primary focus:ring-oo-action-primary/20"
@@ -949,7 +949,7 @@ export function PreparationReviewTable({
           {/* Order-level summary of what committing will do. Everything above is a PREVIEW
               read from the shelf a moment ago: nothing is reserved until this button is
               pressed, and another order may take the stock in between. */}
-          <div className="rounded-xl border border-oo-border-default bg-white px-3 py-2.5 space-y-1.5">
+          <div className="rounded-oo-medium border border-oo-border-default bg-white px-3 py-2.5 space-y-1.5">
             <p className="text-xs font-bold text-oo-text-muted uppercase tracking-wide">
               {t("prepSummaryTitle")}
             </p>
@@ -985,7 +985,7 @@ export function PreparationReviewTable({
           <button
             onClick={handleSave}
             disabled={submitting || !canSave}
-            className="w-full xl:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
+            className="w-full xl:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 bg-oo-action-primary text-white rounded-lg text-sm font-bold hover:bg-oo-action-primary-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
           >
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
             {t("commitAllocation")}
@@ -999,9 +999,9 @@ export function PreparationReviewTable({
 export function OwnerDisplay({ owner }: { owner: { name: string } | null }) {
   const { t } = useI18n();
   return (
-    <span className="inline-flex items-center gap-1.5 text-sm text-charcoal">
-      <UserCircle2 size={15} className="text-brown/50" />
-      {owner ? owner.name : <span className="text-brown/40 italic">{t("unassignedOwner")}</span>}
+    <span className="inline-flex items-center gap-1.5 text-sm text-oo-text-primary">
+      <UserCircle2 size={15} className="text-oo-text-muted" />
+      {owner ? owner.name : <span className="text-oo-text-muted italic">{t("unassignedOwner")}</span>}
     </span>
   );
 }
