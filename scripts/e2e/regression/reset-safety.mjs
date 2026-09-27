@@ -38,6 +38,7 @@ const P = "RSF";
 // suite therefore provisions its own reset-capable operator. Employee rows survive both
 // resets by design, so this user is still there afterwards to make the second call.
 const RESET_PIN = "770021";
+const NO_RESET_PIN = "770022";
 
 // The delete order admin/reset uses, verbatim. Kept next to the test that depends on it so
 // that a change to the route which forgets this list fails section B loudly.
@@ -175,12 +176,21 @@ async function main() {
   await loginAs(RESET_PIN);
 
   sub("C0. authorization is still checked, and checked FIRST");
-  // Proof that the guard has not become a way around privilege: the seeded administrator has
-  // no reset privilege and must still be refused, and refused with an authorization message
-  // that reveals nothing about how destructive resets are configured here.
-  await loginAs(ADMIN_PIN);
+  // Proof that the guard has not become a way around privilege: an administrator WITHOUT the
+  // reset privilege must still be refused, and refused with an authorization message that
+  // reveals nothing about how destructive resets are configured here.
+  //
+  // Not the seeded administrator: it is stored with empty permissions, which resolve to the
+  // admin role defaults (getUserWithPermissions), and those include settings.reset. Asking it
+  // therefore performed a real factory reset whenever this database was an authorized target —
+  // and C1 then found nothing left to delete. This operator is explicitly denied the privilege.
+  await ensureUser(`${P}_emp_noreset`, `${P} Admin Without Reset`, "admin", {
+    dashboard: { access: "edit" },
+    settings: { access: "edit", sub: { reset: false, training_reset: false } },
+  }, NO_RESET_PIN);
+  await loginAs(NO_RESET_PIN);
   const unprivileged = await api("/api/admin/reset", {
-    method: "POST", body: { phrase: "RESET HIQBAH", pin: ADMIN_PIN },
+    method: "POST", body: { phrase: "RESET HIQBAH", pin: NO_RESET_PIN },
   });
   check("a user without settings.reset is refused", unprivileged.status === 403,
     `status=${unprivileged.status} ${S(unprivileged.json).slice(0, 90)}`);
