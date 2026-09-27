@@ -70,6 +70,9 @@ export function composeBankLines(input: { amount: Prisma.Decimal; cashAccountId:
 
 export async function translateBank(tx: Prisma.TransactionClient, ev: Ev): Promise<Translation> {
   const { transactionId } = ev.payload as { transactionId: string };
+  // Lock the line (and a transfer's other leg) so an edit and a posting cannot interleave: an edit
+  // committed first is what posts; an edit after the journal is refused by the database guard.
+  await tx.$queryRaw`SELECT 1 FROM "BankTransaction" WHERE "id" = ${transactionId} OR "transferPeerId" = ${transactionId} ORDER BY "id" FOR UPDATE`;
   const t = await tx.bankTransaction.findUnique({
     where: { id: transactionId },
     include: { cashAccount: true, splits: true, matches: { where: { active: true } } },

@@ -30,6 +30,7 @@ import { createFiscalYear, lockFiscalPeriod, closeFiscalPeriod } from "../../src
 import { createManualJournalEntry, submitJournalEntry, approveJournalEntry, postJournalEntry, rejectJournalEntry, requestJournalReversal } from "../../src/lib/accounting/journal-service";
 import { draftPolicy, approvePolicy, approveCommissionPlanVersion } from "../../src/lib/accounting/policy-service";
 import { processPendingEvents } from "../../src/lib/accounting/event-processor";
+import { requestBankCorrection, approveBankCorrection } from "../../src/lib/accounting/bank-correction-service";
 import { accountingDate, todayAccountingDate } from "../../src/lib/accounting/dates";
 
 const YEAR = Number(todayAccountingDate().toISOString().slice(0, 4));
@@ -69,14 +70,18 @@ async function main() {
   }
   if (process.argv.includes("--reset")) {
     // Stage-2 fixture rows share Finance tables, so they are removed by their ACC- tag only.
-    await prisma.$executeRawUnsafe(`DELETE FROM "BankTransactionMatch" WHERE "transactionId" IN (SELECT t.id FROM "BankTransaction" t JOIN "CashAccount" c ON c.id = t."cashAccountId" WHERE c.code LIKE 'ACC-%')`);
-    await prisma.$executeRawUnsafe(`UPDATE "BankTransaction" SET "transferPeerId" = NULL WHERE "cashAccountId" IN (SELECT id FROM "CashAccount" WHERE code LIKE 'ACC-%')`);
-    // Bank lines are append-only (Finance trigger). On this verified disposable database the
-    // guard is suspended for the fixture's own ACC- lines only, inside one transaction.
+    // Bank lines are append-only and, once posted, immutable (Finance and accounting triggers).
+    // On this verified disposable database those guards are suspended for the fixture's own ACC-
+    // lines only, inside one transaction, and re-enabled before it commits.
+    const acc = `SELECT t.id FROM "BankTransaction" t JOIN "CashAccount" c ON c.id = t."cashAccountId" WHERE c.code LIKE 'ACC-%'`;
+    const guards: [string, string][] = [["BankTransaction", "BankTransaction_no_delete"], ["BankTransaction", "BankTransaction_posted_guard"], ["BankTransactionSplit", "BankTransactionSplit_posted_guard"], ["BankTransactionMatch", "BankTransactionMatch_posted_guard"], ["BankCorrection", "BankCorrection_guard"]];
     await prisma.$transaction([
-      prisma.$executeRawUnsafe(`ALTER TABLE "BankTransaction" DISABLE TRIGGER "BankTransaction_no_delete"`),
-      prisma.$executeRawUnsafe(`DELETE FROM "BankTransaction" WHERE "cashAccountId" IN (SELECT id FROM "CashAccount" WHERE code LIKE 'ACC-%')`),
-      prisma.$executeRawUnsafe(`ALTER TABLE "BankTransaction" ENABLE TRIGGER "BankTransaction_no_delete"`),
+      ...guards.map(([t, g]) => prisma.$executeRawUnsafe(`ALTER TABLE "${t}" DISABLE TRIGGER "${g}"`)),
+      prisma.$executeRawUnsafe(`DELETE FROM "BankCorrection" WHERE "transactionId" IN (${acc})`),
+      prisma.$executeRawUnsafe(`DELETE FROM "BankTransactionMatch" WHERE "transactionId" IN (${acc})`),
+      prisma.$executeRawUnsafe(`UPDATE "BankTransaction" SET "transferPeerId" = NULL, "replacesTransactionId" = NULL WHERE id IN (${acc})`),
+      prisma.$executeRawUnsafe(`DELETE FROM "BankTransaction" WHERE id IN (${acc})`),
+      ...guards.map(([t, g]) => prisma.$executeRawUnsafe(`ALTER TABLE "${t}" ENABLE TRIGGER "${g}"`)),
     ]);
     await prisma.$executeRawUnsafe(`DELETE FROM "CashAccount" WHERE code LIKE 'ACC-%'`);
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupplierBill" DISABLE TRIGGER "SupplierBill_accounting_guard"`);
@@ -93,12 +98,16 @@ async function main() {
   }
   if (await prisma.account.count()) { console.log("Accounting fixture already present (use --reset)."); return; }
 
-  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create"];
-  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage"];
+  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request"];
+  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve"];
   const prep = await user("acc.preparer", "سارة القحطاني", perms(PREP));
   const appr = await user("acc.approver", "خالد العتيبي", perms(APPR));
   await user("acc.approver.en", "Khalid Al-Otaibi (EN)", perms(APPR), "en");
   await user("acc.viewer", "نورة الشهري", perms("view"));
+  // A Finance clerk (bank lines), to show that Finance cannot change a line once it has posted.
+  const clerk = perms("none");
+  clerk.finance = { access: "edit", sub: { txn_enter: true, all_branches: true } } as never;
+  await user("acc.finclerk", "ريم — المالية (حركات البنك)", clerk);
   await user("no.accounting", "موظف بلا صلاحية محاسبة", perms("none"));
   const salesAdmin = await user("sales.plans", "مدير المبيعات", perms("none"));
   const rep1 = await user("rep.fahad", "فهد الدوسري", perms("none"));
@@ -283,6 +292,12 @@ async function main() {
   void needsReview;
   await review([pMilk, pPack, fee, unmatched, mkt, rcpt, tOut, tIn]);
   void bElec;
+  await processPendingEvents();
+
+  // Corrections of posted bank lines (ACC-28): one applied (a bank fee keyed wrongly), one waiting.
+  const feeCorr = await requestBankCorrection(fee, { kind: "REPLACE", reason: "الرسوم الصحيحة 40.50 حسب كشف البنك", replacement: { txnDate: `${YEAR}-09-20`, amount: "-40.50", classification: "BANK_FEE", splits: [{ finCategoryId: C.FEES, amount: "-40.50" }] } }, prep);
+  await approveBankCorrection(feeCorr.id, appr);
+  await requestBankCorrection(pPack, { kind: "REPLACE", reason: "الدفعة الفعلية 2,100 وليست 2,000", replacement: { txnDate: `${YEAR}-09-18`, amount: "-2100.00", classification: "SUPPLIER_PAYMENT", splits: [{ finCategoryId: C.SUP, amount: "-2100.00" }], matches: [{ targetType: "OBLIGATION", targetId: await ob(bPack), amount: "2100.00" }] } }, prep);
   await processPendingEvents();
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);
 }

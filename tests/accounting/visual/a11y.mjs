@@ -44,6 +44,8 @@ const PAGES = [
   ["ACC-24 bank", "/dashboard/accounting/bank"],
   ["ACC-25 bank reconciliation", "/dashboard/accounting/bank?view=reconcile"],
   ["ACC-26 mobile bills", "/dashboard/accounting/payables?status=PENDING", undefined, undefined, 390],
+  ["ACC-28 bank corrections", "/dashboard/accounting/bank?view=corrections"],
+  ["ACC-28 correction request", "/dashboard/accounting/bank?view=corrections", "acc.preparer", async (p) => { await p.locator("tr", { hasText: "TRF-2291" }).getByRole("button", { name: "طلب تصحيح" }).click(); }],
   ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 

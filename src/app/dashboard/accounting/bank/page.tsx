@@ -1,11 +1,13 @@
 "use client";
 
 // Figma: ACC-24 (bank → ledger mappings, start date, unposted lines) and ACC-25 (bank ↔ ledger
-// reconciliation per cash account, every difference itemised). ?view=reconcile opens ACC-25.
+// reconciliation per cash account, every difference itemised). ?view=reconcile opens ACC-25;
+// ?view=corrections opens ACC-28 (reversal-and-replacement of posted lines).
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError, Badge, Button, Card, CardTitle, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, useApi, useL } from "../../finance/_components/ui";
 import { riyadhToday, useAmount, useCan, useDay, useExplain } from "../_components/kit";
+import { Corrections } from "./corrections";
 
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; controlKind: string; allowPosting: boolean; isActive: boolean };
 type Mappings = {
@@ -21,11 +23,13 @@ export default function BankPage() {
   const { L } = useL();
   const sp = useSearchParams();
   const router = useRouter();
-  const view = sp.get("view") === "reconcile" ? "reconcile" : "map";
-  return view === "map" ? <Mapping onReconcile={() => router.push("/dashboard/accounting/bank?view=reconcile")} /> : <Reconcile onBack={() => router.push("/dashboard/accounting/bank")} L={L} />;
+  const v = sp.get("view");
+  const back = () => router.push("/dashboard/accounting/bank");
+  if (v === "corrections") return <Corrections onBack={back} />;
+  return v === "reconcile" ? <Reconcile onBack={back} L={L} /> : <Mapping onReconcile={() => router.push("/dashboard/accounting/bank?view=reconcile")} onCorrections={() => router.push("/dashboard/accounting/bank?view=corrections")} />;
 }
 
-function Mapping({ onReconcile }: { onReconcile: () => void }) {
+function Mapping({ onReconcile, onCorrections }: { onReconcile: () => void; onCorrections: () => void }) {
   const { L } = useL();
   const day = useDay();
   const amt = useAmount();
@@ -56,7 +60,7 @@ function Mapping({ onReconcile }: { onReconcile: () => void }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardTitle title={L("الترحيل البنكي إلى دفتر الأستاذ", "Bank posting to the ledger")} sub={L("الحركات المؤكدة والمراجَعة في وحدة المالية تُرحّل مرة واحدة من تاريخ البدء · قبله تبقى القيود اليدوية", "Confirmed and reviewed bank lines in Finance post once from the start date · before it, manual journals stay")}
-          right={<Button onClick={onReconcile}>{L("مطابقة البنك مع الأستاذ ←", "Bank ↔ ledger reconciliation →")}</Button>} />
+          right={<div className="flex gap-2 flex-wrap"><Button onClick={onCorrections}>{L("تصحيح حركات مرحّلة", "Correct posted lines")}</Button><Button onClick={onReconcile}>{L("مطابقة البنك مع الأستاذ ←", "Bank ↔ ledger reconciliation →")}</Button></div>} />
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <Field label={L("تاريخ بدء الترحيل البنكي", "Bank posting start date")} hint={L("لا يتغير بعد أول ترحيل بنكي · من هذا التاريخ لا تُقبل قيود يدوية على الحسابات النقدية", "Fixed after the first bank posting · from this date, no manual journals on cash accounts")}>
             <div className="flex gap-2">

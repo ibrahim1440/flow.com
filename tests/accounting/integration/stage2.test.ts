@@ -11,6 +11,7 @@ import { createFiscalYear, lockFiscalPeriod } from "../../../src/lib/accounting/
 import { draftPolicy, approvePolicy } from "../../../src/lib/accounting/policy-service";
 import { processEvent, processPendingEvents } from "../../../src/lib/accounting/event-processor";
 import { createBill, submitBill, approveBill, rejectBill, postBill, reverseBill, updateDraftBill, computeLine, isKsaVatNumber, type BillInput } from "../../../src/lib/accounting/payables-service";
+import { requestBankCorrection, approveBankCorrection } from "../../../src/lib/accounting/bank-correction-service";
 import { apAging, supplierStatement, bankReconciliation, setCashAccountGl, setCategoryGl } from "../../../src/lib/accounting/stage2-service";
 import { createManualJournalEntry, submitJournalEntry, approveJournalEntry, postJournalEntry } from "../../../src/lib/accounting/journal-service";
 import { accountingDate, todayAccountingDate } from "../../../src/lib/accounting/dates";
@@ -254,8 +255,11 @@ describe("stage 2 — bank to ledger", () => {
     const till = rec.accounts.find((a) => a.cashAccount.code === "CASH1")!;
     assert.equal(till.book, "5000.00"); assert.equal(till.ledger, "5000.00"); assert.equal(till.difference, "0.00");
     assert.deepEqual(till.items.notPosted, [], "the transfer's receiving leg is not reported as unposted");
-    await prisma.bankTransaction.update({ where: { id: out }, data: { status: "VOID", voidedAt: new Date(`${D(3, 12)}T08:00:00Z`), voidReason: "duplicate" } });
-    await processPendingEvents();
+    // A posted line is voided only through an approved correction (both legs of a transfer).
+    await rejects(prisma.bankTransaction.update({ where: { id: out }, data: { status: "VOID", voidedAt: new Date(), voidedBy: w.appr, voidReason: "duplicate" } }), /only through an approved correction/);
+    const c = await requestBankCorrection(out, { kind: "VOID", reason: "duplicate transfer" }, w.prep);
+    const applied = await approveBankCorrection(c.id, w.appr);
+    assert.deepEqual(new Set(applied.voided), new Set([out, inn]));
     const ev = await eventOf(`bank:${out}:voided`);
     assert.equal(ev?.status, "TRANSLATED", ev?.errorMessage ?? "");
     assert.deepEqual((await journalLines(ev!.journalEntryId!)).map((l) => `${l.code}:${l.dr}:${l.cr}`), ["1110:0.00:5000.00", "1120:5000.00:0.00"]);

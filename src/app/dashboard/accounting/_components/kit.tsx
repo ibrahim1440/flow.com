@@ -9,7 +9,7 @@ export type Sub =
   | "settings_manage" | "coa_manage" | "tax_category_manage" | "period_lock" | "period_close" | "journal_create"
   | "journal_submit" | "journal_approve" | "journal_post" | "journal_reverse" | "export_view" | "mapping_manage"
   | "policy_prepare" | "policy_approve" | "events_process" | "unlock_period"
-  | "ap_bill_create" | "ap_bill_approve" | "ap_bill_post" | "bank_posting_manage";
+  | "ap_bill_create" | "ap_bill_approve" | "ap_bill_post" | "bank_posting_manage" | "bank_correction_request" | "bank_correction_approve";
 
 /** Whether the signed-in user holds an accounting duty. Display only — the server decides. */
 export function useCan() {

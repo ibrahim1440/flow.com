@@ -6,7 +6,7 @@ import { Download } from "lucide-react";
 import { Badge, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
 import { riyadhToday, useAmount, useDay } from "../../_components/kit";
 
-type Aging = { asOf: string; rows: { supplierId: string; supplier: string; bills: number; buckets: Record<string, string>; total: string }[]; totals: Record<string, string>; subledger: string; ledger: string | null; difference: string | null; reconciled: boolean; explanation: { paymentsMatchedNotYetPostedFromBank: string; billsPostedWithoutJournal: number } };
+type Aging = { asOf: string; rows: { supplierId: string; supplier: string; bills: number; buckets: Record<string, string>; total: string }[]; totals: Record<string, string>; subledger: string; overpaidTotal: string; overpaid: { billId: string; billNo: number; supplier: string; amount: string }[]; ledger: string | null; difference: string | null; reconciled: boolean; explanation: { paymentsMatchedNotYetPostedFromBank: string; billsPostedWithoutJournal: number } };
 type Statement = { supplier: { name: string; vatNumber: string | null; paymentTermsDays: number }; opening: string; closing: string; ledgerBalance: string | null; totals: { debit: string; credit: string }; lines: { date: string; kind: string; ref: string; refId: string; text: string; debit: string; credit: string; balance: string }[] };
 type Tab = "AGING" | "STATEMENT";
 const BUCKETS = ["current", "d1_30", "d31_60", "d61_90", "d90p"] as const;
@@ -48,6 +48,7 @@ export default function PayablesAgingPage() {
                 <Td num>{amt(r.total)}</Td>
               </tr>
             ))}
+            {aging.data.overpaid.length > 0 && <tr><Td>{L(`أرصدة مدينة لموردين (مدفوع بالزيادة): ${aging.data.overpaid.map((o) => `ف-${o.billNo}`).join("، ")}`, `Supplier debit balances (overpaid): ${aging.data.overpaid.map((o) => `B-${o.billNo}`).join(", ")}`)}</Td>{BUCKETS.map((b) => <Td key={b}>{""}</Td>)}<Td num>{amt(aging.data.overpaidTotal)}</Td></tr>}
             <tr className="bg-cream-dark font-extrabold"><Td>{L("المجموع", "Total")}</Td>{BUCKETS.map((b) => <Td key={b} num>{amt(aging.data!.totals[b])}</Td>)}<Td num>{amt(aging.data.subledger)}</Td></tr>
           </tbody>
         </Table>

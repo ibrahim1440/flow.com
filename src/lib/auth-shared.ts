@@ -168,6 +168,8 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "ap_bill_approve", label: "Approve or reject supplier bills" },
     { key: "ap_bill_post", label: "Post and reverse supplier bills" },
     { key: "bank_posting_manage", label: "Map cash accounts and budget categories to the ledger; set the bank posting start date" },
+    { key: "bank_correction_request", label: "Request the correction (void or replacement) of a posted bank line" },
+    { key: "bank_correction_approve", label: "Approve or reject corrections of posted bank lines (not one's own)" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

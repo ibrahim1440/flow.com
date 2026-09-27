@@ -2808,6 +2808,9 @@ model BankTransaction {
 
   splits  BankTransactionSplit[]
   matches BankTransactionMatch[]
+  /// Accounting correction: the posted line this one replaces (reversal-and-replacement).
+  replacesTransactionId String?          @unique
+  corrections           BankCorrection[]
 
   @@unique([cashAccountId, sourceFingerprint])
   @@unique([createdBy, idempotencyKey])
@@ -3329,4 +3332,45 @@ enum CashFlowClass {
   FINANCING
   /// Moves only through opening or closing entries (retained earnings, opening-balance equity).
   EXCLUDED
+}
+
+enum BankCorrectionKind {
+  VOID
+  REPLACE
+}
+
+enum BankCorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+/// Correction of a bank line that has posted to the ledger. Posted lines are immutable in the
+/// database; the only way to change one is an approved correction: the original is voided (its
+/// journal mirrored) and, for REPLACE, a new line carrying the corrected data is created and posts.
+/// Append-only: status moves PENDING → APPROVED → APPLIED or PENDING → REJECTED (DB trigger).
+model BankCorrection {
+  id                       String               @id @default(cuid())
+  correctionNo             Int                  @unique @default(autoincrement())
+  transactionId            String
+  transaction              BankTransaction      @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  kind                     BankCorrectionKind
+  reason                   String
+  /// REPLACE: { txnDate, amount, classification, description, splits[], matches[] } — validated by the service.
+  replacement              Json?
+  status                   BankCorrectionStatus @default(PENDING)
+  requestedBy              String
+  requestedAt              DateTime             @default(now())
+  approvedBy               String?
+  approvedAt               DateTime?
+  rejectedBy               String?
+  rejectedAt               DateTime?
+  rejectReason             String?
+  appliedAt                DateTime?
+  replacementTransactionId String?              @unique
+  updatedAt                DateTime             @updatedAt
+
+  @@index([transactionId])
+  @@index([status])
 }
