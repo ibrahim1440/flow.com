@@ -43,9 +43,11 @@ export const COA_TEMPLATE: TemplateAccount[] = [
   { code: "2170", en: "Output VAT", ar: "ضريبة القيمة المضافة على المخرجات", type: "LIABILITY", parent: "21", control: "TAX", manual: true },
   { code: "2180", en: "Zakat payable", ar: "الزكاة المستحقة", type: "LIABILITY", parent: "21" },
   { code: "2190", en: "Payments clearing", ar: "حساب وسيط للمدفوعات", type: "LIABILITY", parent: "21", control: "CLEARING", manual: false },
+  { code: "2195", en: "Payables for fixed assets", ar: "دائنو شراء الأصول الثابتة", type: "LIABILITY", parent: "21" },
   { code: "2410", en: "Customer advances", ar: "دفعات مقدمة من العملاء", type: "LIABILITY", parent: "21", control: "CUSTOMER_ADVANCES", manual: false },
   { code: "22", en: "Non-current liabilities", ar: "الالتزامات غير المتداولة", type: "LIABILITY", parent: "2", header: true },
   { code: "2210", en: "End-of-service benefits", ar: "مخصص مكافأة نهاية الخدمة", type: "LIABILITY", parent: "22" },
+  { code: "2220", en: "Long-term loans", ar: "قروض طويلة الأجل", type: "LIABILITY", parent: "22" },
   { code: "3", en: "Equity", ar: "حقوق الملكية", type: "EQUITY", header: true },
   { code: "3100", en: "Capital", ar: "رأس المال", type: "EQUITY", parent: "3" },
   { code: "3200", en: "Retained earnings", ar: "الأرباح المبقاة", type: "EQUITY", parent: "3" },
@@ -55,6 +57,7 @@ export const COA_TEMPLATE: TemplateAccount[] = [
   { code: "4200", en: "Sales — café", ar: "مبيعات المقهى", type: "REVENUE", parent: "4" },
   { code: "4300", en: "Sales — bakery and desserts", ar: "مبيعات المخبوزات والحلويات", type: "REVENUE", parent: "4" },
   { code: "4900", en: "Sales returns and discounts", ar: "مردودات وخصومات المبيعات", type: "REVENUE", parent: "4" },
+  { code: "4800", en: "Gain on disposal of fixed assets", ar: "أرباح بيع أصول ثابتة", type: "REVENUE", parent: "4" },
   { code: "5", en: "Cost of sales", ar: "تكلفة المبيعات", type: "EXPENSE", header: true },
   { code: "5100", en: "Cost of goods sold", ar: "تكلفة البضاعة المباعة", type: "EXPENSE", parent: "5" },
   { code: "5300", en: "Abnormal roasting loss", ar: "فاقد تحميص غير طبيعي", type: "EXPENSE", parent: "5" },
@@ -74,6 +77,7 @@ export const COA_TEMPLATE: TemplateAccount[] = [
   { code: "6800", en: "Professional fees", ar: "أتعاب مهنية", type: "EXPENSE", parent: "6" },
   { code: "6900", en: "Bank fees", ar: "رسوم بنكية", type: "EXPENSE", parent: "6" },
   { code: "6950", en: "Zakat", ar: "الزكاة", type: "EXPENSE", parent: "6" },
+  { code: "6960", en: "Loss on disposal of fixed assets", ar: "خسائر بيع أصول ثابتة", type: "EXPENSE", parent: "6" },
 ];
 
 /** Default role → template code. Applied with the template; each is editable afterwards. */
