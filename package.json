@@ -41,7 +41,8 @@
     "db:local:stop": "node scripts/finance/local-postgres.mjs stop",
     "db:local:status": "node scripts/finance/local-postgres.mjs status",
     "test:accounting:unit": "tsx --test tests/accounting/unit/*.test.ts",
-    "test:accounting:db": "tsx --env-file=.env.test --test --test-concurrency=1 --test-force-exit tests/accounting/integration/*.test.ts"
+    "test:accounting:db": "tsx --env-file=.env.test --test --test-concurrency=1 --test-force-exit tests/accounting/integration/*.test.ts",
+    "test:accounting:runtime": "node --test --test-concurrency=1 tests/accounting/http/runtime-workflow.test.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
