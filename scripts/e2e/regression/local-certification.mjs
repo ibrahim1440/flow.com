@@ -39,7 +39,8 @@ if (!["127.0.0.1", "localhost"].includes(base.hostname)) { console.error("Refusi
 const admin = new URL(base); admin.pathname = "/postgres";
 const target = new URL(base); target.pathname = `/${DB}`;
 
-const run = (cmd, args, opts = {}) => { const r = spawnSync(cmd, args, { stdio: opts.quiet ? "pipe" : "inherit", encoding: "utf8", ...opts }); if (r.status !== 0) { console.error(`failed: ${cmd} ${args[0] ?? ""}`); process.exit(r.status ?? 1); } return r; };
+const mask = (s) => String(s ?? "").replace(/postgres(ql)?:\/\/\S+/g, "<url>");
+const run = (cmd, args, opts = {}) => { const r = spawnSync(cmd, args, { stdio: opts.quiet ? "pipe" : "inherit", encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts }); if (r.status !== 0) { console.error(`failed: ${cmd} ${args.slice(0, 2).join(" ")}`); console.error(mask((r.stderr || r.stdout || "").split("\n").filter((l) => !/^\s+at /.test(l)).slice(-12).join("\n"))); process.exit(r.status ?? 1); } return r; };
 const psql = (url, sql) => run("psql", [url.toString(), "-qAt", "-v", "ON_ERROR_STOP=1", "-c", sql], { quiet: true });
 
 // 1. clean worktree of the commit under test (tracked files only: no .env, no local state)
@@ -62,6 +63,7 @@ const env = {
   RATE_LIMIT_SECRET: randomBytes(32).toString("base64"),
 };
 const cwd = wt;
+run("npx", ["prisma", "generate"], { cwd, env, quiet: true }); // src/generated is not tracked
 run("npx", ["prisma", "migrate", "deploy"], { cwd, env, quiet: true });
 run("npx", ["tsx", "prisma/seed.ts"], { cwd, env: { ...env, ERP_SEED_ENABLED: "true", SEED_PIN_ADMIN: pAdmin, SEED_PIN_INVENTORY: pInv, SEED_PIN_ROASTING: pRoast, SEED_PIN_QC: pQc, SEED_PIN_DISPATCH: pDisp }, quiet: true });
 const orphans = psql(target, `SELECT count(*) FROM "RoastingBatch" WHERE "greenBeanId" IS NULL`).stdout.trim();
