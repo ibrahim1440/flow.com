@@ -10,7 +10,7 @@
  *   npx tsx --env-file=.env scripts/accounting/seed-local-fixture.ts --reset
  */
 import { checkUrl, assertDisposableFinanceDb } from "../finance/local-db-guard.mjs";
-import { PREVIEW, isPreviewTarget } from "./preview-target.mjs";
+import { isPreviewTarget, IDENTITY_SQL, identityProblems } from "./preview-target.mjs";
 // Two permitted targets: the local disposable erp_finance_dev, or the one named Neon preview
 // database (scripts/accounting/preview-target.mjs), which must also carry the disposable marker.
 const previewMode = isPreviewTarget(process.env.DATABASE_URL);
@@ -60,8 +60,10 @@ const TABLES = ["AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "Jou
 
 async function main() {
   if (previewMode) {
-    const [r] = await prisma.$queryRawUnsafe<{ db: string; marker: string | null }[]>("SELECT current_database() AS db, shobj_description(oid, 'pg_database') AS marker FROM pg_database WHERE datname = current_database()");
-    if (r?.db !== PREVIEW.database || r?.marker !== "hiqbah-finance-disposable") { console.error("Refusing: the preview database is not the marked disposable accounting_preview."); process.exit(1); }
+    // Server-reported identity (Neon project/branch/endpoint ids, database, marker) — not the URL.
+    const [r] = await prisma.$queryRawUnsafe<Record<string, string | null>[]>(IDENTITY_SQL);
+    const problems = identityProblems(r);
+    if (problems.length) { console.error(`Refusing: ${problems.join("; ")}.`); process.exit(1); }
   } else {
     await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_dev", query: (q: string) => prisma.$queryRawUnsafe(q) });
   }
@@ -172,4 +174,5 @@ async function main() {
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);
 }
 
-main().then(() => prisma.$disconnect()).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });
+// Exit explicitly: the pg Pool behind the driver adapter keeps the event loop alive after $disconnect.
+main().then(async () => { await prisma.$disconnect(); process.exit(0); }).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });
