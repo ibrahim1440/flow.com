@@ -1,146 +1,146 @@
-# Credential incident — exposed `neondb_owner` password (production project)
+# Credential incident: exposed `neondb_owner` password (production project)
 
-Status: **OPEN — no credential has been rotated. The rotation below requires the owner's approval.**
-Opened 2026-09-27. No secret value appears in this document, in the repository, or in any command
-shown here.
+Status: **OPEN. No credential has been rotated.** The owner has approved *preparing* rotation and
+recovery (2026-09-27). That is **not** authorisation to change a production credential. No secret
+value appears in this document, the repository, or any command shown here.
 
-## 1. What was exposed
+Every statement below is labelled **FACT** (observed directly, with how) or **HYPOTHESIS** (inferred,
+with what would confirm it). Until a hypothesis is resolved, the affected item is treated as exposed.
 
-| Item | Value |
-|---|---|
-| Credential | Password of Postgres role **`neondb_owner`** (database owner; creates/alters/drops objects, owns every table) |
-| Neon project | **`dark-lab-61530722`** ("hiqbah") — the production project |
-| How | During the accounting migration rehearsal (2026-09-27, shortly after 15:02 UTC) the Neon `get_connection_string` tool was called for rehearsal branch `br-billowing-fire-aq5eyiku`. It returned a full URL including the password, which entered (a) this agent session's transcript and (b) the text of the shell command that wrote a local `.env.rehearsal` file |
-| Not exposed | `erp_app` (production runtime role, created 2026-09-27 06:21:45 UTC); `sales_preview_app` / `sales_preview_migrator` (on `br-bold-forest`); the test project `dry-smoke-16360248` owner (see §6) |
+## 1. The exposure
 
-### Where copies exist now
-
-| Location | State | Evidence |
-|---|---|---|
-| Git history of `flow.com` (all local commits including this branch) | **None** | `git grep` for Neon password tokens across all revisions: 0 files. The only URL-with-password matches are fixtures `u:p@…` and `hunter2SUPERSECRET` (synthetic) |
-| Workspace files (`flow.com`, `flow-baseline`, `hiqbah_share2`, scratch/tmp) | **None** — `.env.rehearsal` deleted | recursive search for Neon password tokens, match count only: 0 |
-| Agent session transcript / tool-result files held by the platform | **Retained; cannot be redacted from inside the session** | The platform keeps the conversation history. Local session files live in this ephemeral container and are reclaimed with it, but copies held server-side are outside my control |
-| Figma, screenshots, evidence PNGs | None (synthetic data only) | — |
-
-Redaction is therefore **not possible** for the one place that matters, and even where it is possible it would
-not remove the risk. **Rotation is the remedy.**
-
-## 2. Affected branches — the same password is on all ten
-
-Neon copies roles (with their passwords) into a child branch at creation. A password reset applies to
-**one branch only**. The role metadata below was read through the Neon API (no secrets). `neondb_owner`
-has `updated_at = 2026-05-10T07:43:33Z` on every branch — the password has never been reset anywhere, so
-**the exposed password is valid on every branch that has, or is given, a compute endpoint.**
-
-| Branch id | Name (names are not trusted for identity) | Compute endpoint | Role `updated_at` | Notes |
-|---|---|---|---|---|
-| `br-weathered-bread-aqais7hp` | hiqbah-demo-training-20260529 | `ep-dawn-dust-aqn1u1uf` | 2026-05-10 07:43:33 | **LIVE PRODUCTION** (verified by application-written marker, RELEASE-20260927 §1b) |
-| `br-fragrant-poetry-aqd0ndyx` | production (project default, *not* live) | `ep-jolly-feather-aqne6cp1` | same | parent of the live branch |
-| `br-bold-forest-aq3z2qjq` | erp-regression-r1 | `ep-wandering-leaf-aqjtuin5` | same | full copy of production data (2026-09-11) |
-| `br-billowing-fire-aq5eyiku` | rehearsal-accounting-ledger-core-20260927 | `ep-noisy-night-aq3qczk4` | same | branch the URL was issued for |
-| `br-rough-violet-aq9nwnom` | rehearsal-finance-sales-20260927 | `ep-lingering-wave-aqtxp32f` | same | |
-| `br-wild-credit-aqn8vqh6` | pre-deploy-backup-20260904 (**archived**) | `ep-proud-block-aq9mtqql` | same | |
-| `br-cold-wave-aqrk91we` | rehearsal-migrated-preserved-20260927 | none | same | usable as soon as an endpoint is added |
-| `br-fancy-unit-aqxm3hef` | backup-pre-finance-sales-20260927T0617Z | none | same | **designated restore source for production** (RELEASE-20260927 rollback plan) |
-| `br-quiet-sky-aqgw77yy` | pre-pkgv2-migration20-20260919 | none | same | |
-| `br-crimson-glitter-aq2ncfll` | pre-migration19-20260918 | none | same | |
-
-All ten hold customer-derived data (copies of production at various dates), so each is in scope. A
-connection test from here is impossible (the sandbox has no route to port 5432), so validity per branch
-is established from metadata, and must be confirmed by connection after rotation (§5).
-
-**Log evidence.** A Neon log query on the live branch for the exposure window, and for the whole last
-24 hours, returned no records at all even though the compute was active — logs are not available as
-evidence on this plan. Unauthorised use can therefore be neither shown nor ruled out. A read-only
-`pg_stat_activity` probe (2026-09-27 16:05 UTC) found only Neon system sessions on a freshly woken
-compute, which proves nothing either way.
-
-## 3. Known consumers of the owner credential
-
-| Consumer | Uses the exposed credential? | How established | Action at rotation |
+| # | Statement | Label | Basis |
 |---|---|---|---|
-| Vercel **Production** `DATABASE_URL` | **No, expected** — switched to `erp_app` pooled URL on 2026-09-27 06:22:59 | RELEASE-20260927 §1e (Vercel values are sensitive/unreadable) | none; verify with `classify-db-urls.mjs` (§4 A1) |
-| Vercel **Production** `DIRECT_URL` | not present | RELEASE-20260927 (env metadata) | none |
-| Vercel **Preview** `DIRECT_URL` (scope: all Preview branches) | **Unknown — prime suspect.** If it points at `ep-dawn-dust` as `neondb_owner`, every preview build carries the production owner credential | metadata only; value unreadable to this session (Vercel access 403) | remove from Preview, or replace with a test-project URL; must not hold a production credential regardless of rotation |
-| Vercel **Preview** `DATABASE_URL` scoped to `release/pre-go-live-20260904`, `release/rc-order-operations-20260906`, `…0908` | **Unknown** | same | classify; delete or re-point to test databases |
-| Vercel deployment **`dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq`** (the documented rollback candidate) and any production deployment built before 06:22:59 | **Yes** — built with the owner URL baked in (RELEASE-20260927: "keeps the `neondb_owner` credential it was built with") | release doc | **Rotation breaks instant rollback to these deployments.** Choose a rollback candidate built on `erp_app` first |
-| `scripts/migrate-deploy.mjs` + `prisma.config.ts` (`DIRECT_URL`) | Yes when an operator runs production migrations; value is supplied from the operator's shell, never from the repo | code | operator uses the new URL; nothing to change in code |
-| Owner's local checkout `../ERP/.env` (classified by `scripts/finance/check-env.mjs`, host only) | Possibly | check-env output (host classification) | owner replaces the value |
-| `scripts/finance/rehearsal/rehearsal-db.mjs` | writes temporary env files with rehearsal-branch URLs | code | delete any retained rehearsal env files on operator machines |
-| `scripts/sales-preview/*` | No — refuses any role other than `sales_preview_migrator` / `_app` | code (`ALLOWED_ROLE`) | none |
-| GitHub Actions | No workflows in the repository (`.github/` absent). Repository/organisation secrets not visible to this session | repo | owner checks *Settings → Secrets and variables* once |
-| Neon console / Neon MCP / passwordless `psql` | No — account-authenticated, not the role password | Neon | none (note: `passwordless_access` is enabled on all endpoints; account security is the control there) |
+| E1 | The password of role `neondb_owner` in Neon project `dark-lab-61530722` ("hiqbah") was returned in clear by the Neon `get_connection_string` tool, for branch `br-billowing-fire-aq5eyiku` (endpoint `ep-noisy-night-aq3qczk4`), on 2026-09-27 shortly after 15:02 UTC | FACT | the tool output in this agent session |
+| E2 | The same URL appeared in the text of a shell command that wrote a local `.env.rehearsal` file (since deleted) | FACT | this session's command history |
+| E3 | The password was valid for `br-billowing-fire` at that moment | FACT | Neon issued it for that branch |
+| E4 | No copy exists in `flow.com` git history (every revision) or in workspace files | FACT | pattern search reporting counts only: 0 |
+| E5 | Copies remain in this session's transcript and tool-result files. The platform retains them, and they cannot be redacted from inside the session | FACT | — |
+| E6 | Nobody is known to have used the password | HYPOTHESIS; cannot be tested | Neon log queries returned no records at all for the live branch, even when active, so logs are unavailable as evidence either way |
 
-**Not rotated: `erp_app`.** It was not exposed, is the production runtime role, and rotating it would
-force a production redeploy for no security gain.
+Redaction is not possible where it matters (E5), and would not be a substitute anyway.
+**Rotation is the remedy.**
 
-## 4. Rotation procedure — for approval
+## 2. Which branches are affected
 
-The reset itself is to be performed **by the owner in the Neon console** (or `neonctl` on the owner's
-machine). If this agent performed it through the Neon tool, the new password would be returned into the
-conversation and the incident would repeat. The agent performs only the metadata checks.
+| # | Statement | Label | Basis / what resolves it |
+|---|---|---|---|
+| B1 | Roles are branch-scoped. A child branch receives a copy of the parent's roles when it is created, and a password reset affects one branch only | FACT (vendor documentation) | Neon docs, *Manage roles*: "roles in the parent branch are duplicated in the child branch"; "Resets are branch-scoped, so reset the role on each branch where it is used" |
+| B2 | All 10 branches of `dark-lab-61530722` carry `neondb_owner` with `created_at 2026-05-10T07:43:27Z` and `updated_at 2026-05-10T07:43:33Z` | FACT | Neon API role metadata, read per branch (no secrets) |
+| B3 | Every branch has the **same password** as E1 | **HYPOTHESIS**, likely | B1 + B2 are consistent with it, but an unchanged `updated_at` does not prove the password is identical (for example, SQL `ALTER ROLE … PASSWORD` may not update that metadata). Resolved only by an authentication test per endpoint (§6), which needs TCP 5432 |
+| B4 | The four branches without a compute endpoint (`br-cold-wave`, `br-fancy-unit`, `br-quiet-sky`, `br-crimson-glitter`) cannot be logged into today, but would accept the password as soon as an endpoint is added or they are restored into another branch | HYPOTHESIS from B1 | Treat as exposed. `br-fancy-unit` is the documented restore source for production, so a restore from it must be followed by a re-check (§6, V5) |
 
-**A. Preconditions (read-only)**
-1. `vercel env pull --environment=preview /tmp/p.env` and `--environment=production /tmp/prod.env`
-   (plus `--git-branch=<b>` for each branch-scoped set), then
-   `node scripts/accounting/classify-db-urls.mjs /tmp/p.env /tmp/prod.env`; delete the files after.
-   Record which variables are `EXPOSED OWNER CREDENTIAL` / `PRODUCTION DATABASE IN PREVIEW`.
-2. Confirm the current production deployment's `DATABASE_URL` role is `erp_app` (A1 output) and that it
-   was built after 2026-09-27 06:22:59 UTC. Pick the rollback candidate from deployments built after
-   that time; record that `dpl_6Aa8…` stops being a valid rollback target after step B2.
-3. Quiet window agreed (no production migrations in progress).
+**Treated as exposed until resolved:** all 10 branches (table in §8).
 
-**B. Rotation (requires approval — production credential change)**
-1. Preview first: delete or re-point every Preview variable found in A1 that holds a production-project
-   URL. (No production impact; removes the credential from preview builds.)
-2. Live branch `br-weathered-bread-aqais7hp` → Roles → `neondb_owner` → *Reset password*. Store the new
-   value only in the owner's password manager / local `.env` used for migrations. Do not add it to
-   Vercel (production has no `DIRECT_URL`; keep it that way). Runtime traffic uses `erp_app` and is not
-   affected; if Neon reconfigures the compute, pooled connections reconnect.
-3. The other nine branches, same action each — the reset is per branch. Endpoint-less branches
-   (`br-cold-wave`, `br-fancy-unit`, `br-quiet-sky`, `br-crimson-glitter`) accept the reset through the
-   API/console without a compute. For the archived `br-wild-credit`, reset if the console allows it
-   on an archived branch; otherwise the owner decides between unarchive-then-reset and deletion (deletion
-   is not performed by the agent without a separate explicit instruction).
-4. Alternative the owner may prefer for stale copies: delete branches that are no longer needed
-   (separate decision; copies of production data are a liability in themselves). `br-fancy-unit` stays
-   while it is the documented restore source.
+## 3. Consumers of the credential
 
-**C. Verification**
-1. Agent: `list_postgres_roles` on all ten branches — `neondb_owner.updated_at` later than the rotation
-   start on every one; `erp_app.updated_at` still 2026-09-27T06:21:45Z (live) / 06:03:15Z (`br-cold-wave`).
-2. Owner's machine (needs TCP 5432):
-   `OLD_OWNER_URL_FILE=… NEW_OWNER_URL_FILE=… node scripts/accounting/verify-credential-rotation.mjs`
-   — every endpoint must refuse the old password with SQLSTATE `28P01`; the new live URL must connect as
-   `neondb_owner` to `neondb`. Output contains only endpoint ids, PASS/FAIL and SQLSTATE codes.
-3. `npx prisma migrate status` with the new `DIRECT_URL` → reports the expected migration list (proves the
-   migration tooling works with the new credential).
-4. Production smoke: sign-in and one read on www.beanflow.net; Vercel runtime logs show no database
-   authentication errors for 30 minutes.
-5. Re-run A1 on the Preview and Production env pulls: zero `EXPOSED OWNER CREDENTIAL` rows.
-6. After any future branch **restore** or new branch creation, re-check C1 — restores and new children
-   copy role state from their source.
+| Consumer | Kind | Label | How established (no secret read) |
+|---|---|---|---|
+| `scripts/migrate-deploy.mjs`, via `DIRECT_URL` (and `prisma.config.ts` `directUrl`) | migration | FACT (code path) | code: production migrations use `DIRECT_URL`, which the operator supplies from their shell |
+| The operator who ran the 2026-09-27 production migration and created `erp_app` | migration / operational | FACT (documented) | `docs/finance/RELEASE-20260927.md` §1e: "value from stdin" as the owner |
+| Your local checkout `../ERP/.env` | operational | **HYPOTHESIS** | `scripts/finance/check-env.mjs` reads that file's `DATABASE_URL` host. Whether it holds the owner credential is unknown (the tool prints the host class only) |
+| Vercel Preview `DIRECT_URL` (all Preview branches) | deployment | **HYPOTHESIS: suspected, not confirmed** | RELEASE-20260927 lists that the variable *exists* (metadata). Its value is sensitive and unread; which database or role it points to is unknown |
+| Vercel Preview `DATABASE_URL` for three named release branches | deployment | **HYPOTHESIS** | same |
+| Vercel Production `DATABASE_URL` | deployment | FACT (documented): **not** the owner. It points to `erp_app` since 2026-09-27 06:22:59 UTC | RELEASE-20260927 §1e; to be re-confirmed with `classify-db-urls.mjs` (§5, P2) |
+| Rollback deployment `dpl_6Aa8nwC1xyyB3nmtrYCffCSKM4Cq`, and any production deployment built before 06:22:59 UTC | deployment | **HYPOTHESIS, likely** | Not inspected (no Vercel access; the value would be sensitive). Basis: (a) RELEASE-20260927 states this deployment "keeps the `neondb_owner` credential it was built with", written by the operator who switched the variable; (b) Vercel applies environment-variable changes only to deployments built afterwards. Confirmation: in Vercel, check that deployment's build time against the variable's last-updated time (metadata only) |
+| `scripts/finance/rehearsal/rehearsal-db.mjs` | operational | FACT (code path) | writes temporary env files carrying rehearsal-branch URLs; leftovers may exist on operator machines |
+| `scripts/sales-preview/*` | — | FACT: **not** a consumer | refuses any role but `sales_preview_migrator` / `sales_preview_app` |
+| GitHub Actions | — | FACT: none in the repository (`.github/` absent). Organisation or repository secrets: unknown | check *Settings → Secrets* |
+| Neon console / Neon MCP / passwordless `psql` | — | FACT: not password-based | account-authenticated |
 
-**D. Close-out**: record times and results in §7, update RELEASE-20260927's rollback section, destroy the
-old-URL file used in C2.
+## 4. `erp_app` and active sessions
 
-## 5. What this session will not do
+- **`erp_app` is not rotated.** The role exists on the live branch and its copies, but its password
+  was not part of E1/E2 (only the owner URL was returned), and the running production application
+  uses it. Rotating it would force a
+  redeploy for no security gain.
+- **A reset does not end sessions that are already open** (Neon: "The old password stops working on
+  the next connection"; PostgreSQL checks passwords only at login). Any `neondb_owner` session opened
+  before the reset keeps working until it disconnects.
+- `neondb_owner` is a member of `neon_superuser`, and `pg_signal_backend` does not let one
+  `neon_superuser` member terminate another's sessions. So lingering owner sessions cannot be killed
+  from SQL as the owner.
+- **Handling (part of the approved window):**
+  1. List `neondb_owner` sessions (`pg_stat_activity`, read only) just before the reset.
+  2. After resetting, if any remain that are not the operator's own, **restart the compute endpoint**
+     of that branch. That closes every connection, including `erp_app`'s pooled ones for a few
+     seconds. The application reconnects on its next request, and `erp_app`'s password is
+     unchanged, so nothing needs redeploying.
+  3. Schedule this in a quiet window and announce a possible brief error on in-flight requests.
 
-Rotate or reset any credential, delete or unarchive branches, change Vercel variables, or read secret
-values. These wait for approval (and Vercel/network access for A1).
+## 5. Recovery path that does not depend on the old credential (prepare and verify first)
 
-## 6. Test project `dry-smoke-16360248`
+| Step | Purpose | Verified by |
+|---|---|---|
+| P1 | **Account-based access works:** you can sign in to the Neon console (with MFA) and open the SQL Editor on `br-weathered-bread-aqais7hp` as `neondb_owner` *without a password*. The console, API and passwordless `psql` authenticate with your Neon account, not the role password | you run `select current_user, current_setting('neon.endpoint_id', true);` in the SQL Editor → `neondb_owner`, `ep-dawn-dust-aqn1u1uf` |
+| P2 | **Consumers known before the change:** `vercel env pull` (Preview and Production, per branch) into temporary files, then `node scripts/accounting/classify-db-urls.mjs <files>`. It prints role, endpoint and verdict, never values. Delete the files afterwards | output table saved with the incident record |
+| P3 | **Rollback candidate that does not use the owner credential:** pick a production deployment built after 06:22:59 UTC and record it. Do not rely on `dpl_6Aa8` after rotation | Vercel deployment list (metadata) |
+| P4 | **Data recovery is independent of credentials:** `br-fancy-unit-aqxm3hef` (backup before finance/sales) remains, and restore works through the console or API | exists (Neon metadata). No new branch is created without your approval (cost) |
+| P5 | **Break-glass:** if the console is unavailable during the window, the Neon API with an API key (created beforehand, stored in your password manager) can reset the password again or create a new role. Test the key with a read-only call (`GET /projects/dark-lab-61530722`) | HTTP 200 on the read-only call |
 
-Its `neondb_owner` (branch `br-withered-art-aw2zp5kr`, updated 2026-09-05) is a different credential and
-is not known to be exposed. The accounting Preview will not use it at runtime: a restricted
-`accounting_app` role is to be created by the owner in the console (so its password never passes through
-this session), after which the agent applies grants by SQL. Precautionary reset of this test-project
-owner is recommended before Preview variables are set; it needs no production approval.
+## 6. Rotation and verification procedure (for approval; not yet authorised)
 
-## 7. Log
+1. **R1 — Preview first (no production impact).** Remove or re-point every Preview variable that P2
+   shows holds a `dark-lab-61530722` credential.
+2. **R2 — Live branch** `br-weathered-bread-aqais7hp`: Console → Roles → `neondb_owner` →
+   *Reset password*. Only you see the new value, and it goes straight into your password manager.
+   Then apply §4 handling. Do not add it to Vercel (production has no `DIRECT_URL`; keep it that way).
+3. **R3 — The other 9 branches**, one reset each (per branch, B1), including the endpoint-less ones.
+   For the archived `br-wild-credit`, reset if the console allows it on an archived branch; otherwise
+   you choose between unarchiving and resetting, or deleting it (deletion needs its own explicit
+   instruction).
+4. **R4 — Update migration consumers:** your local `.env` / shell profile used for `DIRECT_URL`.
+   Delete any rehearsal temp env files.
+
+**Verification:**
+
+- **V1 (metadata):** `neondb_owner.updated_at` on all 10 branches is later than the reset start;
+  `erp_app.updated_at` is unchanged (live 2026-09-27T06:21:45Z; `br-cold-wave` 06:03:15Z).
+- **V2 (authentication, where TCP 5432 exists):**
+  ```
+  OLD_OWNER_URL_FILE=… NEW_OWNER_URL_FILE=… node scripts/accounting/verify-credential-rotation.mjs
+  ```
+  - Credentials are read only from files. Command-line or plain-environment URLs are refused.
+  - **PASS** requires the intended endpoint to be reachable (TCP connect) **and** the old password
+    to be rejected with SQLSTATE `28P01`. A timeout, DNS or network failure, TLS error or any other
+    error is **INCONCLUSIVE**, never success.
+  - The new credential must connect, and the server must report `neon.endpoint_id =
+    ep-dawn-dust-aqn1u1uf`, user `neondb_owner` and database `neondb`.
+  - Output shows only endpoint ids, verdicts and SQLSTATE classes.
+  - Tested locally: `tests/accounting/scripts/rotation-verifier.test.mjs`.
+- **V3:** `npx prisma migrate status` with the new `DIRECT_URL` lists the expected migrations.
+- **V4:** production smoke (sign-in, one read); no database authentication errors in Vercel runtime
+  logs for 30 minutes; `pg_stat_activity` shows `erp_app` sessions only, plus the operator's own.
+- **V5:** re-run V1 after any branch restore or new branch creation.
+
+## 7. Test project `dry-smoke-16360248`
+
+Its `neondb_owner` is a different credential, and the work log has no record of it being exposed.
+A precautionary reset is recommended before Preview variables are set; it needs no production
+approval. The Preview runtime will use a restricted `accounting_app` role that you create in the
+console, so its password never passes through this session. Grants come from
+`scripts/accounting/runtime-grants.sql`.
+
+## 8. Branch register (treat as exposed until V1 and V2 pass)
+
+| Branch id | Endpoint | Role `updated_at` | Notes |
+|---|---|---|---|
+| `br-weathered-bread-aqais7hp` | `ep-dawn-dust-aqn1u1uf` | 2026-05-10 07:43:33 | live production (RELEASE-20260927 §1b; to be re-confirmed from Vercel config when access exists) |
+| `br-fragrant-poetry-aqd0ndyx` | `ep-jolly-feather-aqne6cp1` | same | project default, named "production", not live |
+| `br-bold-forest-aq3z2qjq` | `ep-wandering-leaf-aqjtuin5` | same | production-data copy |
+| `br-billowing-fire-aq5eyiku` | `ep-noisy-night-aq3qczk4` | same | E1 source |
+| `br-rough-violet-aq9nwnom` | `ep-lingering-wave-aqtxp32f` | same | |
+| `br-wild-credit-aqn8vqh6` | `ep-proud-block-aq9mtqql` | same | archived |
+| `br-cold-wave-aqrk91we` | — | same | |
+| `br-fancy-unit-aqxm3hef` | — | same | restore source |
+| `br-quiet-sky-aqgw77yy` | — | same | |
+| `br-crimson-glitter-aq2ncfll` | — | same | |
+
+## 9. Log
 
 | Time (UTC) | Event |
 |---|---|
-| 2026-09-27 ~15:0x | exposure (get_connection_string on `br-billowing-fire`) |
-| 2026-09-27 (same session, before 16:00) | local `.env.rehearsal` deleted |
-| 2026-09-27 16:00–16:10 | scope established (this document); no rotation |
+| 2026-09-27 ~15:0x | exposure (E1) |
+| 2026-09-27, before 16:00 | local `.env.rehearsal` deleted |
+| 2026-09-27 16:00–16:10 | scope from metadata |
+| 2026-09-27 ~19:00 | facts separated from hypotheses; recovery path and strict verifier prepared; no rotation |
