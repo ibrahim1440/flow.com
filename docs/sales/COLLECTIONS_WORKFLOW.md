@@ -407,6 +407,17 @@ Written once, at the moment of the movement, and never updated:
 | `sharePercent` | The split in force at the time |
 | `effectiveRatePercent` | The period's effective rate, which is why a tiered month's marginal amount is not base × headline rate |
 
+These three foreign keys are `ON DELETE RESTRICT`, matching `CommissionAccrual.collectionEvent`:
+a record a movement was computed from cannot be deleted while the movement refers to it.
+Prisma's default for an optional relation is `SET NULL`, which would quietly *erase* the
+provenance instead of refusing — a test cleanup demonstrated exactly that, leaving two
+movements carrying a base and a plan version but no source. No application path deletes a
+collection event, accrual, movement, plan or plan version today (the only DELETE handlers
+are activities, leads, DRAFT-only quotations and targets), so this closes the database
+hole rather than an open one. The two already-orphaned rows are left as they are: they are
+automated-test residue, they net to 0.00, and inventing links for them would be the very
+guessing the backfill refuses.
+
 ### What a reversal compensates
 
 `CommissionLedgerCorrection` joins a negative movement to the earlier movements it pays
@@ -438,3 +449,89 @@ collection event, plan version. It does not copy the base, split or rate, becaus
 accrual is a projection and its present values are not evidence of what a movement was
 computed on months ago. Those stay null, which is honest where a plausible number would not
 be.
+
+### Allocation is a policy, not a causal proof — and where the difference bites
+
+A reversal in a tiered period does not only cancel its own event. It lowers the period's
+cumulative base, which changes what the *other* events were worth. So one negative delta
+has to be charged against more than one earlier movement, and "which accrual does this
+adjust" has more than one honest answer.
+
+Worked, from `sales-collections` D14. Plan: 1% base, plus 1 point above 1,000.
+
+| | cumulative base | period is worth | movement written |
+| --- | --- | --- | --- |
+| e1 approved (net 800) | 800 | 800 × 1% = **8.00** | +8.00 |
+| e2 approved (net 800) | 1,600 | 1,600 × 1% + 600 × 1pt = **22.00** | +14.00 |
+| **e1 reversed** | 800 | **8.00** | **−14.00** |
+
+The −14.00 is allocated 8.00 against e1's own movement and 6.00 against e2's. Of those:
+
+- **8.00 is exact causal attribution.** It is e1's own movement, identified by event id.
+- **6.00 is exactly right in total** — it is precisely the tier progress e1 was lending e2 —
+  but *which* earlier movement absorbs it is decided by an **explicit policy**: own event
+  first, then the rest of the period oldest-first. With one other movement, policy and
+  causality coincide. With three, the total remains exact and the split among them is
+  policy. **It is not a derivation of which movement "really" caused the change**, because
+  with a shared cumulative base no such fact exists — the tier effect is joint.
+
+That is the honest claim: **exact at the event level and in aggregate; conventional in how
+a joint effect is apportioned among several non-own movements.** The convention is recorded
+in the data, so a reviewer can see what was done rather than infer it.
+
+Nothing is decided from an amount or a timestamp. Over-allocation is impossible: each
+target takes at most its own remaining amount, computed inside the same transaction that
+writes the correction, and an already-terminal collection is refused before any recompute —
+D14 asserts this under sequential and concurrent replay.
+
+### A known skew, asserted so it cannot drift
+
+The **accrual rows** do not carry this split. `postDelta` increments the reversed event's
+own accrual by the whole delta, so after the reversal above:
+
+| accrual | reads | "what this event contributed" |
+| --- | --- | --- |
+| e1 | **−6.00** | should be 0.00 |
+| e2 | 14.00 | should be 8.00 |
+| sum | **8.00** ✓ | reconciles against the ledger |
+
+The period total is right and reconciliation passes; the per-row figures are not a
+per-event contribution any more. The movement ledger now records the correct split, so the
+information exists — the accrual projection simply does not restate itself to match.
+Changing that means re-pointing rows that may be APPROVED and frozen, which is the one
+thing the append-only design exists to prevent, so it is **left as-is and asserted** rather
+than quietly fixed.
+
+### The contractual rate and the derived rate are different numbers
+
+A movement can record `effectiveRatePercent = 1.000018` under a plan whose rate is 1%.
+That is not drift, not a tier, and not a defect. The two quantities are:
+
+- **Contractual rate** — `CommissionPlanVersion.baseRatePercent`, plus any tier points.
+  What the plan promises. Here: **1%**, no tiers.
+- **Derived effective rate** — computed *after* the money is rounded, so that the rate
+  shown and the riyals paid agree:
+
+```
+amount = roundHalfUp₂( cumulativeBase × contractualRate / 100 )
+rate   = round₆( 100 × amount / cumulativeBase )
+```
+
+Worked independently for the movement that recorded 1.000018, using the events' own
+qualifying bases as the input — never the engine's answer:
+
+```
+cumulative base                9,647.83
+1% of it                       96.4783
+rounded to the riyal (½ up)    96.48        ← the money actually moved
+back-computed rate   100 × 96.48 / 9,647.83 = 1.00001762…
+rounded to 6 dp                1.000018     ← matches the recorded value
+```
+
+The rounding gain is **0.0017 SAR**, and expressing that as a percentage of the base is
+the whole of the difference. The rate equals the contractual rate exactly only when the
+cumulative base is a multiple of 100 — every other base leaves a sub-riyal remainder that
+has to go somewhere, and it goes into the derived rate rather than into the payment.
+
+`sales-collections` D13 now asserts this by recomputing the expected rate from the inputs
+and comparing, so the two can never quietly diverge.

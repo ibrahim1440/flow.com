@@ -2057,7 +2057,7 @@ model CommissionLedgerEntry {
   employee    Employee          @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
 
   accrualId   String?
-  accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id])
+  accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
   /// A single entry this one corrects. Kept for the manual `adjust` path, which targets at
   /// most one. Engine reversals use `corrects` below, because one negative movement can
   /// compensate several earlier ones once tiers or splits are involved.
@@ -2069,6 +2069,11 @@ model CommissionLedgerEntry {
   reason      String?
 
   /// ── Durable provenance ───────────────────────────────────────────────────────────
+  /// These three are `Restrict`, matching `CommissionAccrual.collectionEvent`: a record a
+  /// movement was computed from cannot be deleted while the movement refers to it. The
+  /// Prisma default for an optional relation is SET NULL, which would quietly erase the
+  /// provenance instead of refusing — demonstrated by a test cleanup that deleted events
+  /// and left movements carrying a base and a plan version but no source.
   ///
   /// Written once, at the moment of the movement, and never updated. The accrual row is a
   /// mutable projection of what an event currently contributes; these fields are the
@@ -2076,9 +2081,9 @@ model CommissionLedgerEntry {
   /// recomputation cannot restate history. Null on entries written before this existed and
   /// on manual adjustments, which have no engine computation behind them.
   collectionEventId    String?
-  collectionEvent      CollectionEvent?       @relation(fields: [collectionEventId], references: [id])
+  collectionEvent      CollectionEvent?       @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
   planVersionId        String?
-  planVersion          CommissionPlanVersion? @relation(fields: [planVersionId], references: [id])
+  planVersion          CommissionPlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
   /// The share of this event's qualifying base that this movement was computed on.
   qualifyingBase       Decimal?               @db.Decimal(18, 2)
   sharePercent         Decimal?               @db.Decimal(5, 2)
