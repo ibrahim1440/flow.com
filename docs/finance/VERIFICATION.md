@@ -96,6 +96,25 @@ Design note (not changed here): an administrator stored with empty permissions i
 sub-privilege, including factory reset. Production is protected by the environment gate; whether
 reset should be excluded from the admin defaults is an owner decision.
 
+### 00b″. Sales through `822f30c` (release `4102c39`) — checks affected by the merge
+
+`822f30c` adds migration `20260927100000_protect_movement_provenance` (three foreign keys on
+`CommissionLedgerEntry` become `ON DELETE RESTRICT`) and makes the page behind the mobile
+drawer `inert`. Only the checks those changes can affect were re-run:
+
+| Check | Result |
+|---|---|
+| Typecheck; lint (changed files); build | clean; clean; compiles |
+| Finance unit; Finance DB (incl. Sales-collection links, which truncate the commission tables) | 52/52; 40/40 |
+| Sales shell suite (`playwright.shell.local.config.ts`, `erp_shell_local` + one synthetic collection), incl. three new drawer keyboard tests | 38/38 |
+| Clean checkout: operational regression (26 suites, 2,293 assertions) | 8 failed — all `reset-safety` environment refusals (§00b′); every core-operation suite passes |
+| Clean checkout: Playwright (critical-path, permissions, responsive, ui-resilience) | 49/0/0 |
+| Local rehearsal of the 9 migrations | ran to completion (exit 0); results not yet recorded |
+
+Not re-run: the DB-backed Sales suites (`npm run regression:sales`) — they are locked to the Sales
+preview database (`ep-wandering-leaf` / `sales_preview`, role `sales_preview_app`); the Sales
+branch reports 1,062 assertions in 13 suites green at `822f30c`.
+
 ### 00c. The production application on the migrated database, as the restricted role
 
 `4640cbe` (fresh worktree, own `npm ci`, own build) served on a database built by its own
