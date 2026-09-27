@@ -596,15 +596,74 @@ still right; the rows were lying.
 
 ### Execution protections
 
-Every operation that can move a balance — approve, reverse, pay — takes
-`pg_advisory_xact_lock` on the same key, `commission-balance:<employee>:<period>`. Prisma
-runs transactions at Read Committed, so without a shared lock two payouts can each read the
-same available balance, each find it sufficient, and each write. The lock also makes a
-payout racing a reversal serialise instead of interleaving.
+Every operation that can move a balance takes `pg_advisory_xact_lock` on the same key,
+`commission-balance:<employee>:<period>`. Prisma runs transactions at Read Committed, so
+without a shared lock two of them can each read the same available balance, each find it
+sufficient, and each write. The writers, audited:
 
-A payout may carry an `idempotencyKey`, unique per employee and period. A retry returns the
-original entry with `replayed: true` and `200` instead of creating a second payment. The
-check happens **inside** the lock, so two simultaneous retries cannot both pass it.
+| writer | where | takes the lock |
+| --- | --- | --- |
+| `accrueForCollection` → `postDelta` | an approval or a reversal of a collection | yes, per employee share |
+| `approvePeriod` | the `approve` action | yes |
+| `adjust` | the `adjust` action | yes |
+| the payout branch | the `payout` action | yes, plus a second lock on the key |
+
+`approvePeriod` and `adjust` did not, which left two windows. An approval landing between
+a payout's balance read and its write would let the payout spend entitlement it never saw;
+a negative adjustment racing a payout would have both read the same balance before either
+removed anything from it. Both take the lock inside the function rather than at the call
+site, so a future caller cannot forget.
+
+The tests prove the lock rather than infer it from timing: the suite holds
+`commission-balance:<employee>:<period>` on its own connection and then fires the request.
+A writer that takes the same key must wait, and one that does not will sail straight
+through — a direct observation rather than a guess from how long something took.
+
+### Idempotency, end to end
+
+A payout **requires** an `idempotencyKey`. It used to be optional, which made the whole
+protection opt-in — and the one caller that mattered, the payout dialog, never sent one. A
+retried payment therefore landed twice whenever the balance still covered it, which is not
+a rare case: it is exactly what a **partial** payment leaves behind, since the remainder is
+by definition enough for a duplicate to succeed.
+
+- **Required.** A payout with no key is refused with `400` before anything is read.
+- **Globally unique**, not per employee and period. A key identifies one payment; the same
+  key arriving for a different person or month is a client fault, and the narrower
+  constraint would have accepted it as a second payment. Enforced by a unique index —
+  Postgres treats NULLs as distinct, so every keyless movement is unaffected.
+- **Bound to its payload.** A replay is only a replay when the employee, period, amount and
+  reason all match. The same key with a different amount is refused with `409`: replaying
+  would silently discard a real payment and writing would defeat the key, so neither is
+  guessed at.
+- **Checked inside the lock**, and under a second advisory lock on the key itself, so two
+  simultaneous retries cannot both pass — one writes, the other replays. The two locks are
+  always taken in the same order, so no pair of transactions can deadlock on them.
+
+The dialog mints one key per intended payment and keeps it while the payload is unchanged,
+so pressing the button again after a timeout retries the **same** payment. Changing the
+amount or the reason mints a new one, because that is a different payment.
+
+### Fail closed while entitlement is unresolved
+
+A payout is refused outright when the period's entitlement cannot be fully derived —
+checked **before** the amount, because an amount is only meaningful once the balance it is
+measured against is derivable. Two shapes:
+
+- a movement that belongs to no accrual, so nothing can say what it is worth now;
+- a negative movement nothing has been applied against, sitting beside positive linked
+  entitlement that looks perfectly payable.
+
+**Completeness is never inferred from a signed total.** An unattributed `+10.00` and an
+unattributed `-10.00` sum to exactly zero while two movements remain unexplained, and a
+zero there would have declared the period healthy and let it be paid. The gate reads
+`unattributedCount`, `unattributedPositive`, `unattributedNegative` and
+`unallocatedReversal` — counts and magnitudes, which cannot cancel.
+
+The refusal is inert. No allocation is invented to clear it, no record is altered, and the
+period stays exactly as it is until somebody reconciles it. `payoutBlock` names the reason
+— `ENTITLEMENT_UNRESOLVED`, `RECOVERY_OUTSTANDING` or `NOTHING_PAYABLE` — and the screen
+renders the same code, so the API and the UI cannot disagree about why nothing may be paid.
 
 ### What this endpoint is, and is not
 
@@ -630,3 +689,9 @@ approved and unapproved entitlement. It cannot reach `availableToPay` by any rou
 it payable needs a documented reconciliation that establishes its eligibility independently
 — not a guess, and not a default. New, fully-attributed entitlement stays distinguishable
 from unresolved history through `fullyAttributed` and the `unattributed` figure beside it.
+
+Being excluded from the totals is not enough on its own, though. An accrual left out of
+both approved and unapproved entitlement cannot be paid **directly**, but the period around
+it could still be, and its own figures would be missing from the balance the reviewer
+authorised against. So an unresolved accrual blocks payment for that employee and period
+entirely — see *Fail closed while entitlement is unresolved* above.

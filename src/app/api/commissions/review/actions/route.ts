@@ -5,8 +5,13 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Decimal, ZERO, roundMoney, riyadhMonthStart } from "@/lib/services/commissions/engine";
 import { approvePeriod, adjust, periodStatement } from "@/lib/services/commissions/accrual";
-import { payoutBalances, serialiseBalances } from "@/lib/services/commissions/entitlement";
-import { payoutLockKey } from "@/lib/services/commissions/lock";
+import {
+  payoutBalances,
+  serialiseBalances,
+  payoutBlock,
+  unresolvedDetail,
+} from "@/lib/services/commissions/entitlement";
+import { payoutLockKey, payoutKeyLock } from "@/lib/services/commissions/lock";
 
 /**
  * POST /api/commissions/review/actions — approve a period, adjust it, or record a payout.
@@ -156,8 +161,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A payout must be greater than zero." }, { status: 400 });
     }
 
+    /**
+     * Required, not optional.
+     *
+     * It used to be accepted when absent, which made the protection opt-in — and the one
+     * caller that mattered, the payout dialog, never sent it. A retried payment therefore
+     * landed twice whenever the balance still covered it, which is precisely the case a
+     * partial payment leaves behind. A payment without a way to recognise its own retry is
+     * refused instead.
+     */
     const idempotencyKey =
       typeof b.idempotencyKey === "string" && b.idempotencyKey.trim() ? b.idempotencyKey.trim() : null;
+    if (!idempotencyKey) {
+      return NextResponse.json(
+        {
+          error:
+            "idempotencyKey is required for a payout. Send the same key when retrying the same " +
+            "payment so the retry is recognised, and a new one for a different payment.",
+        },
+        { status: 400 },
+      );
+    }
+    if (idempotencyKey.length > 200) {
+      return NextResponse.json({ error: "idempotencyKey is too long (200 characters max)." }, { status: 400 });
+    }
+    const reason = typeof b.reason === "string" ? b.reason.trim() || null : null;
 
     const result = await prisma.$transaction(async (tx) => {
       // One writer per employee-period. Prisma's transactions are Read Committed, so two
@@ -166,21 +194,67 @@ export async function POST(request: Request) {
       // reversal path, so a payout racing a reversal serialises rather than interleaves.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutLockKey(employeeId, periodStart)}))`;
 
-      // A retry must land once. Checked inside the lock so two simultaneous retries of the
-      // same request cannot both pass it.
-      if (idempotencyKey) {
-        const seen = await tx.commissionLedgerEntry.findFirst({
-          where: { type: "PAYOUT", employeeId, periodStart, idempotencyKey },
-          select: { id: true },
-        });
-        if (seen) {
-          const now = await payoutBalances(tx, employeeId, periodStart);
-          const st = await periodStatement(tx, employeeId, periodStart);
-          return { entryId: seen.id, balances: now, replayed: true, markedPaid: 0, statement: st };
+      // Second, on the key itself. The lock above is per employee and period, so without
+      // this one the same key replayed against a different employee would take a different
+      // lock and slip past the reuse check below. Always taken in this order; see lock.ts.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutKeyLock(idempotencyKey)}))`;
+
+      // A retry must land once. Searched across the whole ledger rather than within this
+      // employee and period, because a key identifies a payment, and the same key arriving
+      // for a different person is a client bug rather than a second legitimate payment.
+      const seen = await tx.commissionLedgerEntry.findFirst({
+        where: { type: "PAYOUT", idempotencyKey },
+        select: { id: true, employeeId: true, periodStart: true, amount: true, reason: true },
+      });
+      if (seen) {
+        // Same key, same payment → the original, not a second one.
+        const samePayment =
+          seen.employeeId === employeeId &&
+          seen.periodStart.getTime() === periodStart.getTime() &&
+          new Decimal(seen.amount.toString()).equals(amount) &&
+          (seen.reason ?? null) === reason;
+
+        if (!samePayment) {
+          // Same key, different payment. Neither outcome is safe to guess at: replaying
+          // would silently discard a real payment, and writing would defeat the key. Say so.
+          throw {
+            _appCode: 409,
+            message:
+              "This idempotencyKey was already used for a different payment " +
+              `(${new Decimal(seen.amount.toString()).toFixed(2)} SAR recorded against ` +
+              `${seen.periodStart.toISOString().slice(0, 10)}). Use a new key for a new payment, ` +
+              "or resend the original amount and reason to retry the one that was recorded.",
+          };
         }
+
+        const now = await payoutBalances(tx, employeeId, periodStart);
+        const st = await periodStatement(tx, employeeId, periodStart);
+        return { entryId: seen.id, balances: now, replayed: true, markedPaid: 0, statement: st };
       }
 
       const before = await payoutBalances(tx, employeeId, periodStart);
+
+      // ── Fail closed while entitlement is unresolved ──
+      //
+      // Checked before the amount, because an amount is only meaningful once the balance it
+      // is checked against is derivable. A period holding an unallocated reversal or a
+      // movement that belongs to no accrual has positive linked entitlement that LOOKS
+      // payable and a negative one nothing has been applied to yet; paying the first while
+      // the second is outstanding is an overpayment the ledger cannot even report.
+      //
+      // Nothing here is inferred from a signed total. `fullyAttributed` counts movements and
+      // reads magnitudes, because a +10.00 gap and a -10.00 gap sum to zero while both are
+      // still unexplained. No allocation is invented to clear the block and no record is
+      // altered: the period stays exactly as it is until somebody reconciles it.
+      if (!before.fullyAttributed) {
+        throw {
+          _appCode: 409,
+          message:
+            `${employee.name}'s entitlement for this period cannot be fully derived, so nothing ` +
+            `in it is payable: ${unresolvedDetail(before)}. Reconcile the period first — the ` +
+            "records are preserved as they are and no allocation is assumed.",
+        };
+      }
 
       // Approved entitlement only. An unapproved accrual is not payable, and a recovery
       // balance is not cancelled by earnings nobody has signed off.
@@ -208,7 +282,7 @@ export async function POST(request: Request) {
           // so storing a negative here would ADD the payout to what is owed — the ledger
           // would report a bigger balance every time somebody was paid.
           amount,
-          reason: typeof b.reason === "string" ? b.reason.trim() || null : null,
+          reason,
           actorId: user.id,
           idempotencyKey,
         },
@@ -242,6 +316,8 @@ export async function POST(request: Request) {
         /** How many accrual rows this payout settled in full. Zero for a partial payment. */
         accrualsMarkedPaid: result.markedPaid,
         balances: serialiseBalances(result.balances),
+        /** Why nothing further may be paid, if anything. Same codes the screen renders. */
+        payoutBlock: payoutBlock(result.balances),
         // The older shape, kept so existing callers keep working. `outstanding` here is
         // earned-less-paid and still counts unapproved money — `balances.availableToPay`
         // is the figure that governs what may be paid.

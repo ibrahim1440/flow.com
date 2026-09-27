@@ -1261,6 +1261,10 @@ async function main() {
       return (r.json?.employees ?? []).find((e) => e.employeeId === `${T}_rep`) ?? null;
     };
     const payout = (s, body) => s.api("/api/commissions/review/actions", { method: "POST", body });
+    // A payout now REQUIRES a key. One per intended payment: a shared key means "this is
+    // the same payment again", which is a retry, not a second one.
+    let idemSeq = 0;
+    const K = () => `${P}-idem-${Date.now()}-${++idemSeq}`;
 
     let row = await review();
     check("the tiered rep is on the review screen", !!row, S(row));
@@ -1283,7 +1287,7 @@ async function main() {
     check("all of it is still unapproved", row.balances.unapprovedEntitlement === "8.00", S(row.balances));
     check("so approved entitlement is 0.00", row.balances.approvedEntitlement === "0.00", S(row.balances));
     check("and nothing is available to pay", row.balances.availableToPay === "0.00", S(row.balances));
-    const tooEarly = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "8.00" });
+    const tooEarly = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "8.00", idempotencyKey: K() });
     check("a payout against unapproved earnings is refused", tooEarly.status === 409, S(tooEarly.json).slice(0, 160));
     check("and the refusal says the money is not approved yet",
       /not yet approved|available to pay/i.test(S(tooEarly.json)), S(tooEarly.json).slice(0, 160));
@@ -1295,7 +1299,7 @@ async function main() {
     check("8.00 is now approved entitlement", row.balances.approvedEntitlement === "8.00", S(row.balances));
     check("and 8.00 is available to pay", row.balances.availableToPay === "8.00", S(row.balances));
 
-    const part = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00" });
+    const part = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00", idempotencyKey: K() });
     check("a partial payout of 3.00 is accepted", part.status === 201, S(part.json).slice(0, 160));
     check("it is recorded as an already-completed external payment",
       part.json?.settlement === "RECORDED_AS_COMPLETED_EXTERNALLY", S(part.json?.settlement));
@@ -1309,7 +1313,7 @@ async function main() {
     check("and no accrual falsely reads PAID after a partial payment", stillApproved[0].n === 0, S(stillApproved[0]));
 
     sub("D15d. a retry lands once; two at once spend the balance once");
-    const key = `${P}-idem-${Date.now()}`;
+    const key = K();
     const first = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "2.00", idempotencyKey: key });
     const retry = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "2.00", idempotencyKey: key });
     check("the first retry-keyed payout is created", first.status === 201, S(first.json).slice(0, 140));
@@ -1324,8 +1328,10 @@ async function main() {
 
     // Two concurrent payouts for the whole remaining balance: one must lose.
     const [c1, c2] = await Promise.all([
-      payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00" }),
-      payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00" }),
+      // Two DIFFERENT intended payments racing, so two different keys. Sharing one would
+      // be a retry, which is a separate case — D16 covers it.
+      payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00", idempotencyKey: K() }),
+      payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00", idempotencyKey: K() }),
     ]);
     const created = [c1, c2].filter((r) => r.status === 201).length;
     const refused = [c1, c2].filter((r) => r.status === 409).length;
@@ -1348,7 +1354,7 @@ async function main() {
     check("the signed balance is -8.00", row.balances.signedBalance === "-8.00", S(row.balances));
     check("shown as a recovery of 8.00, not hidden behind zero", row.balances.recoveryBalance === "8.00", S(row.balances));
     check("and nothing is available to pay", row.balances.availableToPay === "0.00", S(row.balances));
-    const afterRecovery = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "1.00" });
+    const afterRecovery = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "1.00", idempotencyKey: K() });
     check("a further payout is refused while a recovery is outstanding", afterRecovery.status === 409, S(afterRecovery.json).slice(0, 170));
     check("and the refusal names the recovery", /owed back|recovery/i.test(S(afterRecovery.json)), S(afterRecovery.json).slice(0, 170));
 
@@ -1371,6 +1377,245 @@ async function main() {
     check("and so is a salesperson", repTries.status === 403, S(repTries.json).slice(0, 140));
     const selfPay = await payout(payer, { action: "payout", employeeId: ids.payer, month, amount: "1.00" });
     check("nobody pays themselves", selfPay.status === 403, S(selfPay.json).slice(0, 140));
+
+    // ───────────────────────────────────────────────────────────────────────
+    // D16–D18 each need a period nobody else has spent. `${T}_rep` ends D15 owing a
+    // recovery, so every payout against it is correctly refused and would prove nothing
+    // about the cases below. Three separate people, one purpose each.
+    // ───────────────────────────────────────────────────────────────────────
+    const solo = async (tag, pin) => {
+      const id = `${P}_${tag}`;
+      await mkEmployee(id, `${P} ${tag}`, pin, repPerms);
+      await c.query(
+        `INSERT INTO "CommissionAssignment" (id,"employeeId","planId","planVersionId","effectiveFrom","createdAt")
+         VALUES ($1,$2,$3,$4,$5,now())`,
+        [`${P}_asg_${id}`, id, planId, pvId, new Date("2026-01-01T00:00:00Z")]);
+      const sess = await session().login(pin);
+      // Net 1000 on a flat 1% plan: 10.00, worked from the plan rather than read back.
+      const { oppId } = await mkDeal(tag, id, 1150, 150);
+      const sub_ = await submit(sess, oppId, 1150);
+      await decide(fin, sub_.json.collectionId, "approve");
+      return { id, sess, collectionId: sub_.json.collectionId };
+    };
+    const rowOf = async (employeeId) => {
+      const r = await fin.api(`/api/commissions/review?month=${month}`);
+      return (r.json?.employees ?? []).find((e) => e.employeeId === employeeId) ?? null;
+    };
+    const payoutRows = (employeeId) =>
+      q(`SELECT id, amount::text amt, "idempotencyKey" k FROM "CommissionLedgerEntry"
+          WHERE "employeeId"=$1 AND type='PAYOUT' ORDER BY "createdAt"`, [employeeId]);
+
+    sub("D16. one key, one payment — end to end");
+    //
+    // The protection existed on the server and was never reached: the dialog sent no key
+    // and the route accepted its absence, so a retried payment landed twice whenever the
+    // balance still covered it. That is not a rare case — it is exactly what a PARTIAL
+    // payment leaves behind, since the remainder is by definition enough for a duplicate.
+    const idem = await solo("idem", "920101");
+    await payout(payer, { action: "approve", employeeId: idem.id, month });
+    let r16 = await rowOf(idem.id);
+    check("the fixture starts with 10.00 available", r16?.balances.availableToPay === "10.00", S(r16?.balances));
+
+    const noKey = await payout(payer, { action: "payout", employeeId: idem.id, month, amount: "3.00" });
+    check("a payout with no idempotencyKey is refused", noKey.status === 400, S(noKey.json).slice(0, 150));
+    check("and the refusal names the key", /idempotencyKey/.test(S(noKey.json)), S(noKey.json).slice(0, 150));
+    check("nothing was written", (await payoutRows(idem.id)).length === 0, "expected no payout rows");
+
+    const kA = K();
+    const p1 = await payout(payer, { action: "payout", employeeId: idem.id, month, amount: "3.00", idempotencyKey: kA, reason: "first tranche" });
+    check("a partial payout of 3.00 with a key is accepted", p1.status === 201, S(p1.json).slice(0, 150));
+    r16 = await rowOf(idem.id);
+    check("7.00 remains available — enough for a duplicate to succeed", r16.balances.availableToPay === "7.00", S(r16.balances));
+
+    // The case that matters: the balance would happily absorb a second 3.00.
+    const p1r = await payout(payer, { action: "payout", employeeId: idem.id, month, amount: "3.00", idempotencyKey: kA, reason: "first tranche" });
+    check("retrying the SAME partial payment is recognised, not repeated",
+      p1r.status === 200 && p1r.json?.replayed === true, S(p1r.json).slice(0, 150));
+    check("and it returns the original entry", p1r.json?.entryId === p1.json?.entryId,
+      `${p1.json?.entryId} vs ${p1r.json?.entryId}`);
+    check("exactly one payout row exists, though 7.00 was free to take",
+      (await payoutRows(idem.id)).length === 1, S(await payoutRows(idem.id)));
+    r16 = await rowOf(idem.id);
+    check("and the balance is untouched by the retry", r16.balances.availableToPay === "7.00", S(r16.balances));
+    check("3.00 recorded in total, not 6.00", r16.balances.completedPayouts === "3.00", S(r16.balances));
+
+    // A key identifies a payment, so the same key with a different payload is a client
+    // fault. Neither answer is safe to guess: replaying discards a real payment, writing
+    // defeats the key. It is refused and says why.
+    const diffAmt = await payout(payer, { action: "payout", employeeId: idem.id, month, amount: "4.00", idempotencyKey: kA, reason: "first tranche" });
+    check("the same key with a DIFFERENT amount is refused", diffAmt.status === 409, S(diffAmt.json).slice(0, 180));
+    check("and the refusal says the key was already used",
+      /already used for a different payment/i.test(S(diffAmt.json)), S(diffAmt.json).slice(0, 180));
+    const diffReason = await payout(payer, { action: "payout", employeeId: idem.id, month, amount: "3.00", idempotencyKey: kA, reason: "second tranche" });
+    check("the same key with a different reason is refused too", diffReason.status === 409, S(diffReason.json).slice(0, 180));
+    check("still exactly one payout row", (await payoutRows(idem.id)).length === 1, S(await payoutRows(idem.id)));
+
+    // Scope: a key means one payment across the ledger, not one per person.
+    const other = await solo("idem2", "920102");
+    await payout(payer, { action: "approve", employeeId: other.id, month });
+    const crossed = await payout(payer, { action: "payout", employeeId: other.id, month, amount: "3.00", idempotencyKey: kA, reason: "first tranche" });
+    check("the same key aimed at a DIFFERENT employee is refused", crossed.status === 409, S(crossed.json).slice(0, 180));
+    check("and that employee received nothing", (await payoutRows(other.id)).length === 0, S(await payoutRows(other.id)));
+
+    const kB = K();
+    const [q1, q2] = await Promise.all([
+      payout(payer, { action: "payout", employeeId: idem.id, month, amount: "2.00", idempotencyKey: kB }),
+      payout(payer, { action: "payout", employeeId: idem.id, month, amount: "2.00", idempotencyKey: kB }),
+    ]);
+    const made = [q1, q2].filter((x) => x.status === 201).length;
+    const echoed = [q1, q2].filter((x) => x.status === 200 && x.json?.replayed === true).length;
+    check("two simultaneous retries of one key: one writes, one replays",
+      made === 1 && echoed === 1, `${q1.status}/${q2.status}`);
+    check("and only one more row exists", (await payoutRows(idem.id)).length === 2, S(await payoutRows(idem.id)));
+    r16 = await rowOf(idem.id);
+    check("5.00 remains after 3.00 + 2.00", r16.balances.availableToPay === "5.00", S(r16.balances));
+
+    sub("D17. every writer that moves a balance takes the same lock");
+    //
+    // Proved by holding the lock rather than by inferring it from timing. This suite's own
+    // connection takes `commission-balance:<employee>:<period>` and keeps it; if a writer
+    // takes the same key it MUST block, and if it does not it will sail through. That is a
+    // direct observation of the lock, not a guess from how long something took.
+    const race = await solo("race", "920103");
+    const periodDay = (await one(
+      `SELECT to_char("periodStart",'YYYY-MM-DD') d FROM "CommissionAccrual" WHERE "employeeId"=$1 LIMIT 1`,
+      [race.id]))?.d;
+    check("the period key is readable from the accrual", !!periodDay, S(periodDay));
+    const lockKey = `commission-balance:${race.id}:${periodDay}`;
+
+    /** Hold the lock on a second connection, fire the request, and see whether it waited. */
+    const blockedBy = async (label, run) => {
+      const holder = new pg.Client({ connectionString: URL_ });
+      await holder.connect();
+      await holder.query("BEGIN");
+      await holder.query("SELECT pg_advisory_xact_lock(hashtext($1))", [lockKey]);
+      let settled = false;
+      const inflight = run().then((v) => { settled = true; return v; });
+      await new Promise((res) => setTimeout(res, 1500));
+      const waited = !settled;
+      await holder.query("COMMIT");
+      await holder.end();
+      const out = await inflight;
+      check(`${label} waits for the employee-period lock`, waited, `settled early: ${S(out?.status)}`);
+      return out;
+    };
+
+    const apprRes = await blockedBy("approvePeriod", () =>
+      payout(payer, { action: "approve", employeeId: race.id, month }));
+    check("and then approves", apprRes.status === 200, S(apprRes.json).slice(0, 140));
+
+    const adjRes = await blockedBy("adjust", () =>
+      payout(payer, { action: "adjust", employeeId: race.id, month, amount: "1.00", reason: "D17 lock probe" }));
+    check("and then records the adjustment", adjRes.status === 201, S(adjRes.json).slice(0, 140));
+
+    const payRes = await blockedBy("payout", () =>
+      payout(payer, { action: "payout", employeeId: race.id, month, amount: "1.00", idempotencyKey: K() }));
+    check("and then records the payout", payRes.status === 201, S(payRes.json).slice(0, 140));
+
+    // A negative adjustment racing a payout. Both orders are legitimate, so the assertion
+    // is serialisability: the period must end in exactly one of the two schedules a lock
+    // permits, with the arithmetic exact — never a third state, and never a payout that
+    // spent a balance the adjustment had already removed AND left the books disagreeing.
+    const duel = await solo("duel", "920104");
+    await payout(payer, { action: "approve", employeeId: duel.id, month });
+    let rD = await rowOf(duel.id);
+    check("the duel fixture starts with 10.00 approved and available",
+      rD.balances.approvedEntitlement === "10.00" && rD.balances.availableToPay === "10.00", S(rD.balances));
+
+    const [adjOut, payOut] = await Promise.all([
+      payout(payer, { action: "adjust", employeeId: duel.id, month, amount: "-6.00", reason: "D17 clawback" }),
+      payout(payer, { action: "payout", employeeId: duel.id, month, amount: "8.00", idempotencyKey: K() }),
+    ]);
+    rD = await rowOf(duel.id);
+    const paidFirst =
+      payOut.status === 201 && adjOut.status === 201 &&
+      rD.balances.completedPayouts === "8.00" && rD.balances.adjustments === "-6.00" &&
+      rD.balances.signedBalance === "-4.00" && rD.balances.recoveryBalance === "4.00" &&
+      rD.balances.availableToPay === "0.00";
+    const adjustedFirst =
+      adjOut.status === 201 && payOut.status === 409 &&
+      rD.balances.completedPayouts === "0.00" && rD.balances.adjustments === "-6.00" &&
+      rD.balances.signedBalance === "4.00" && rD.balances.availableToPay === "4.00";
+    check("a negative adjustment racing a payout lands in exactly one serial schedule",
+      paidFirst !== adjustedFirst && (paidFirst || adjustedFirst),
+      `adjust=${adjOut.status} payout=${payOut.status} ${S(rD.balances)}`);
+    check("  (which one: " + (paidFirst ? "payout first, leaving a 4.00 recovery" : "adjustment first, payout refused") + ")",
+      true);
+    check("the ledger and the derived balance agree either way",
+      Number(rD.balances.signedBalance) ===
+        Number(rD.balances.approvedEntitlement) + Number(rD.balances.adjustments) - Number(rD.balances.completedPayouts),
+      S(rD.balances));
+
+    sub("D18. an unresolved period is not payable, and nothing is invented to clear it");
+    const gate = await solo("gate", "920105");
+    await payout(payer, { action: "approve", employeeId: gate.id, month });
+    let rG = await rowOf(gate.id);
+    check("the gate fixture is payable to begin with",
+      rG.balances.availableToPay === "10.00" && rG.balances.fullyAttributed === true, S(rG.balances));
+    check("and reports no block", rG.balances.payoutBlock === null, S(rG.balances.payoutBlock));
+
+    const injectOrphan = (id, type, amt) => c.query(
+      `INSERT INTO "CommissionLedgerEntry" (id,type,"employeeId","periodStart",amount,currency,reason,"createdAt")
+       SELECT $1,$2::"LedgerEntryType",$3,a."periodStart",$4,'SAR','D18 residue',now()
+         FROM "CommissionAccrual" a WHERE a."employeeId"=$3 LIMIT 1`,
+      [id, type, gate.id, amt]);
+
+    // THE case the old test could not see. Two movements belong to no accrual and their
+    // signed sum is exactly zero, so a completeness check built on that sum reports a
+    // healthy period — while +10.00 of unexplained entitlement sits beside -10.00 of
+    // unexplained clawback and neither has been accounted for.
+    await injectOrphan(`${P}_orphan_pos`, "ACCRUAL", "10.00");
+    await injectOrphan(`${P}_orphan_neg`, "REVERSAL", "-10.00");
+    rG = await rowOf(gate.id);
+    check("the two gaps cancel to a signed net of exactly 0.00", rG.balances.unattributed === "0.00", S(rG.balances));
+    check("but two movements are counted, and a count cannot cancel",
+      rG.balances.unattributedCount === 2, S(rG.balances.unattributedCount));
+    check("+10.00 and -10.00 are both reported at full magnitude",
+      rG.balances.unattributedPositive === "10.00" && rG.balances.unattributedNegative === "10.00", S(rG.balances));
+    check("so the period is NOT fully attributed", rG.balances.fullyAttributed === false, S(rG.balances));
+    check("and the block is named", rG.balances.payoutBlock === "ENTITLEMENT_UNRESOLVED", S(rG.balances.payoutBlock));
+    const gateRefused = await payout(payer, { action: "payout", employeeId: gate.id, month, amount: "1.00", idempotencyKey: K() });
+    check("a payout is refused although 10.00 still reads as available", gateRefused.status === 409, S(gateRefused.json).slice(0, 200));
+    check("and the refusal counts the movements rather than quoting a net",
+      /2 movements belong to no accrual/.test(S(gateRefused.json)), S(gateRefused.json).slice(0, 200));
+    check("nothing was written", (await payoutRows(gate.id)).length === 0, S(await payoutRows(gate.id)));
+
+    await c.query(`DELETE FROM "CommissionLedgerEntry" WHERE id IN ($1,$2)`,
+      [`${P}_orphan_pos`, `${P}_orphan_neg`]);
+    rG = await rowOf(gate.id);
+    check("with the residue gone the period is payable again — the gate was the cause",
+      rG.balances.fullyAttributed === true && rG.balances.payoutBlock === null, S(rG.balances));
+
+    // The second shape: a negative movement that IS linked to an accrual but that nothing
+    // has been applied against. The linked entitlement beside it is positive and looks
+    // payable; paying it while an unaccounted negative stands is an overpayment the ledger
+    // could not even report afterwards.
+    const gateAccrual = await one(
+      `SELECT a.id, a."collectionEventId" ev FROM "CommissionAccrual" a WHERE a."employeeId"=$1 LIMIT 1`, [gate.id]);
+    await c.query(
+      `INSERT INTO "CommissionLedgerEntry" (id,type,"employeeId","periodStart",amount,currency,reason,"accrualId","collectionEventId","createdAt")
+       SELECT $1,'REVERSAL',$2,a."periodStart",'-4.00','SAR','D18 unallocated',$3,$4,now()
+         FROM "CommissionAccrual" a WHERE a.id=$3`,
+      [`${P}_unalloc`, gate.id, gateAccrual.id, gateAccrual.ev]);
+    rG = await rowOf(gate.id);
+    check("every movement is placed, so the gap count is zero", rG.balances.unattributedCount === 0, S(rG.balances));
+    check("but 4.00 of reversal is unallocated", rG.balances.unallocatedReversal === "4.00", S(rG.balances));
+    check("the linked entitlement is still positive", Number(rG.balances.approvedEntitlement) > 0, S(rG.balances));
+    check("and it is NOT payable", rG.balances.fullyAttributed === false && rG.balances.payoutBlock === "ENTITLEMENT_UNRESOLVED", S(rG.balances));
+    const unallocRefused = await payout(payer, { action: "payout", employeeId: gate.id, month, amount: "1.00", idempotencyKey: K() });
+    check("the payout is refused", unallocRefused.status === 409, S(unallocRefused.json).slice(0, 200));
+    check("and the refusal names the unallocated reversal",
+      /4\.00 of reversal is unallocated/.test(S(unallocRefused.json)), S(unallocRefused.json).slice(0, 200));
+
+    // The refusal must be inert. A gate that quietly allocated the reversal to clear itself
+    // would be worse than no gate at all.
+    const invented = await q(
+      `SELECT count(*)::int n FROM "CommissionLedgerCorrection" WHERE "entryId"=$1`, [`${P}_unalloc`]);
+    check("no allocation was invented to clear the block", invented[0].n === 0, S(invented[0]));
+    const preserved = await q(
+      `SELECT count(*)::int n FROM "CommissionLedgerEntry" WHERE "employeeId"=$1`, [gate.id]);
+    check("and every historical movement is still there", preserved[0].n >= 2, S(preserved[0]));
+    await c.query(`DELETE FROM "CommissionLedgerEntry" WHERE id=$1`, [`${P}_unalloc`]);
   }
 
   }

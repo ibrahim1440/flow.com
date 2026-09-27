@@ -34,10 +34,16 @@
  * ── What cannot be derived ──
  *
  * Movements written before provenance existed carry no accrual, so they belong to no row.
- * They are summed into `unattributed` and reported, never guessed at. A reversal whose
- * allocation could not be completed leaves `unallocated`. Both are period-level and both
- * are visible, because an entitlement nobody can attribute is exactly the thing that must
- * not quietly become payable.
+ * They are reported, never guessed at. A reversal whose allocation could not be completed
+ * leaves `unallocatedReversal`. Both are period-level and both are visible, because an
+ * entitlement nobody can attribute is exactly the thing that must not quietly become
+ * payable — and the payout route refuses the whole employee-period while either stands.
+ *
+ * **Completeness is counted, never summed.** `unattributed` is reported as a signed net
+ * because that is what a reader wants to see, but an unattributed +10.00 and an
+ * unattributed −10.00 net to exactly zero while two movements remain unexplained. So
+ * `fullyAttributed` reads `unattributedCount` and the two magnitudes beside it, which
+ * cannot cancel each other out.
  */
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney } from "./engine";
@@ -87,11 +93,23 @@ export type PayoutBalances = {
   availableToPay: PrismaNS.Decimal;
   /** The negative face: what is owed back. Zero when the balance is positive. */
   recoveryBalance: PrismaNS.Decimal;
-  /** Entitlement that belongs to no accrual, because its movements predate provenance. */
+  /**
+   * The NET of the movements that belong to no accrual. Reportable, but **never** a test of
+   * completeness: an unattributed +10.00 and an unattributed -10.00 net to zero while two
+   * movements remain unexplained. Use `unattributedCount` for that.
+   */
   unattributed: PrismaNS.Decimal;
+  /** The positive half of the gap, at full magnitude. */
+  unattributedPositive: PrismaNS.Decimal;
+  /** The negative half of the gap, as a positive magnitude. */
+  unattributedNegative: PrismaNS.Decimal;
+  /** How many movements carry no accrual. Zero is the only value that means "none". */
+  unattributedCount: number;
+  /** Accruals whose entitlement could not be derived, so only a stored projection exists. */
+  nonDerivedCount: number;
   /** Reversal money that could not be allocated to the movements it compensates. */
   unallocatedReversal: PrismaNS.Decimal;
-  /** True when every movement in the period could be attributed. */
+  /** True only when every movement is placed and every reversal is fully allocated. */
   fullyAttributed: boolean;
 };
 
@@ -206,10 +224,23 @@ export async function payoutBalances(
   const completedPayouts = sumOf("PAYOUT");
 
   // Movements the model could not place: no accrual to attribute them to.
-  const unattributed = roundMoney(
-    ledger
-      .filter((l) => (l.type === "ACCRUAL" || l.type === "REVERSAL") && l.accrualId === null)
-      .reduce((s, l) => s.plus(D(l.amount)), ZERO),
+  //
+  // Counted in three ways on purpose. The signed net is what a reader wants to see, but it
+  // is worthless as a completeness test, because an unattributed +10.00 and an unattributed
+  // -10.00 sum to exactly zero while two movements remain unexplained — and a zero there
+  // would have declared the period fully attributed and let it be paid. Magnitudes and a
+  // count cannot cancel, so those are what the gate below actually reads.
+  const orphans = ledger.filter(
+    (l) => (l.type === "ACCRUAL" || l.type === "REVERSAL") && l.accrualId === null,
+  );
+  const unattributed = roundMoney(orphans.reduce((s, l) => s.plus(D(l.amount)), ZERO));
+  const unattributedPositive = roundMoney(
+    orphans.filter((l) => D(l.amount).greaterThan(0)).reduce((s, l) => s.plus(D(l.amount)), ZERO),
+  );
+  const unattributedNegative = roundMoney(
+    orphans
+      .filter((l) => D(l.amount).lessThan(0))
+      .reduce((s, l) => s.plus(D(l.amount).negated()), ZERO),
   );
 
   // Reversal money with nothing left to compensate.
@@ -236,8 +267,14 @@ export async function payoutBalances(
     availableToPay: signedBalance.greaterThan(0) ? signedBalance : ZERO,
     recoveryBalance: signedBalance.lessThan(0) ? signedBalance.negated() : ZERO,
     unattributed,
+    unattributedPositive,
+    unattributedNegative,
+    unattributedCount: orphans.length,
+    nonDerivedCount: rows.length - derived.length,
     unallocatedReversal,
-    fullyAttributed: unattributed.isZero() && unallocatedReversal.isZero() && rows.every((r) => r.derived),
+    // Counts and magnitudes, never a signed sum. See `orphans` above.
+    fullyAttributed:
+      orphans.length === 0 && unallocatedReversal.isZero() && rows.every((r) => r.derived),
   };
 }
 
@@ -253,7 +290,56 @@ export function serialiseBalances(b: PayoutBalances) {
     availableToPay: b.availableToPay.toFixed(2),
     recoveryBalance: b.recoveryBalance.toFixed(2),
     unattributed: b.unattributed.toFixed(2),
+    unattributedPositive: b.unattributedPositive.toFixed(2),
+    unattributedNegative: b.unattributedNegative.toFixed(2),
+    unattributedCount: b.unattributedCount,
+    nonDerivedCount: b.nonDerivedCount,
     unallocatedReversal: b.unallocatedReversal.toFixed(2),
     fullyAttributed: b.fullyAttributed,
+    payoutBlock: payoutBlock(b),
   };
+}
+
+/**
+ * Why a payout cannot be recorded right now, as a code both the API and the screen render.
+ *
+ * Ordered by severity, because the reasons are not equally informative. An unresolved
+ * period is reported as unresolved even when it also happens to show a recovery: the
+ * recovery figure is computed from entitlement that the period has just admitted it cannot
+ * derive, so quoting it as the reason would be quoting a number that is not yet trustworthy.
+ */
+export type PayoutBlockCode =
+  | "ENTITLEMENT_UNRESOLVED"
+  | "RECOVERY_OUTSTANDING"
+  | "NOTHING_PAYABLE"
+  | null;
+
+export function payoutBlock(b: PayoutBalances): PayoutBlockCode {
+  if (!b.fullyAttributed) return "ENTITLEMENT_UNRESOLVED";
+  if (b.recoveryBalance.greaterThan(0)) return "RECOVERY_OUTSTANDING";
+  if (b.availableToPay.lessThanOrEqualTo(0)) return "NOTHING_PAYABLE";
+  return null;
+}
+
+/**
+ * The unresolved period, spelled out in figures rather than as a flag. Every clause names a
+ * count or a magnitude; none of them is a signed sum that a matching gap could cancel.
+ */
+export function unresolvedDetail(b: PayoutBalances): string {
+  const parts: string[] = [];
+  if (b.unattributedCount > 0) {
+    parts.push(
+      `${b.unattributedCount} movement${b.unattributedCount === 1 ? "" : "s"} belong to no accrual ` +
+        `(+${b.unattributedPositive.toFixed(2)} and -${b.unattributedNegative.toFixed(2)})`,
+    );
+  }
+  if (b.nonDerivedCount > 0) {
+    parts.push(
+      `${b.nonDerivedCount} accrual${b.nonDerivedCount === 1 ? "" : "s"} carry no derivable entitlement`,
+    );
+  }
+  if (b.unallocatedReversal.greaterThan(0)) {
+    parts.push(`${b.unallocatedReversal.toFixed(2)} of reversal is unallocated`);
+  }
+  return parts.join("; ");
 }

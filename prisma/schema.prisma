@@ -2100,12 +2100,15 @@ model CommissionLedgerEntry {
   actorId     String?
   createdAt   DateTime          @default(now())
 
-  /// Client-supplied, for PAYOUT only: a retried request lands once instead of paying
-  /// twice. Scoped to the employee and period rather than globally, because the same
-  /// human-chosen reference may legitimately recur for a different month.
-  idempotencyKey String?
-
-  @@unique([employeeId, periodStart, idempotencyKey])
+  /// Client-supplied and REQUIRED for PAYOUT: a retried request lands once instead of
+  /// paying twice.
+  ///
+  /// Unique across the whole table, not per employee and period. A key identifies one
+  /// payment; the same key arriving for a different person or month is a client fault, and
+  /// scoping the constraint to the period would have let it through as a second payment.
+  /// Postgres treats NULLs as distinct, so the movements that carry no key — every accrual,
+  /// reversal and adjustment — are unaffected.
+  idempotencyKey String? @unique
   @@index([employeeId, periodStart])
   @@index([type, createdAt])
   @@index([collectionEventId])
