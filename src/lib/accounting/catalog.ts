@@ -23,6 +23,9 @@ export const POLICIES: PolicyDef[] = [
     ar: "إثبات عمولات المبيعات",
     governs: ["commission.accrual", "commission.reversal", "commission.adjustment", "commission.payout"],
     defaultStatement:
+      "يُثبت مصروف العمولة والالتزام المقابل عندما يُنتج تحصيلٌ تحققت منه المالية حركةً في دفتر العمولات، بتاريخ تلك الحركة وبالمبلغ الذي يحسبه إصدار الخطة المعتمد. " +
+      "تُثبت العكوس والتسويات عند تسجيلها ولا يُعدَّل قيد سابق. يسوّي الصرفُ الالتزامَ مقابل حساب وسيط لمدفوعات العمولات، ويُقفل البنكُ ذلك الحساب عند المطابقة فلا يُحمَّل المصروف مرتين. " +
+      "لا يُرحّل إلا من إصدارات خطط معتمدة محاسبياً.\n\n" +
       "Commission expense and the related liability are recognised when a finance-verified sales collection " +
       "produces a commission ledger movement, on that movement's date, for the amount the approved plan version " +
       "computes. Reversals and adjustments are recognised when recorded, never by editing an earlier entry. " +
