@@ -50,6 +50,22 @@ export async function ledgerTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   }
 }
 
+
+/**
+ * From the bank posting start date, cash moves in the ledger only through bank lines
+ * (translators/bank.ts). A manual journal touching a cash account's mapped GL account would
+ * count the same money twice, so it is refused. Opening entries are exempt.
+ */
+export async function assertNoBankLedgerLines(tx: Tx, entryDate: Date, type: string, accountIds: string[]) {
+  if (type === "OPENING" || type === "REVERSAL") return;
+  const settings = await tx.accountingSettings.findUnique({ where: { id: "singleton" }, select: { bankPostingFrom: true } });
+  if (!settings?.bankPostingFrom || entryDate < settings.bankPostingFrom) return;
+  const cash = await tx.cashAccount.findMany({ where: { glAccountId: { in: accountIds } }, select: { code: true } });
+  if (cash.length) {
+    throw new AccountingError(`From ${settings.bankPostingFrom.toISOString().slice(0, 10)} cash accounts are posted from bank lines only; ${cash.map((c) => c.code).join(", ")} cannot be used in a manual journal. Record the movement in Finance → bank instead.`, 409);
+  }
+}
+
 async function buildLines(tx: Tx, entryType: string, rawLines: ManualJournalLineInput[]) {
   if (!Array.isArray(rawLines) || rawLines.length < 2) throw new AccountingError("A journal entry needs at least two lines.", 400);
   if (rawLines.length > 500) throw new AccountingError("A journal entry may have at most 500 lines.", 400);
@@ -125,6 +141,7 @@ export async function createManualJournalEntry(input: CreateManualJournalEntryIn
   return ledgerTx(async (tx) => {
     const period = await openPeriodFor(tx, input.entryDate);
     const built = await buildLines(tx, type, input.lines);
+    await assertNoBankLedgerLines(tx, input.entryDate, type, input.lines.map((l) => l.accountId));
     const entry = await tx.journalEntry.create({
       data: {
         entryDate: input.entryDate, fiscalPeriodId: period.id, type, status: "DRAFT", sourceModule: "manual",
@@ -147,6 +164,7 @@ export async function updateDraftJournalEntry(id: string, input: CreateManualJou
     if (existing.type === "REVERSAL" || existing.type === "AUTO") throw new AccountingError("A reversal or automatic entry cannot be edited.", 409);
     const period = await openPeriodFor(tx, input.entryDate);
     const built = await buildLines(tx, existing.type, input.lines);
+    await assertNoBankLedgerLines(tx, input.entryDate, existing.type, input.lines.map((l) => l.accountId));
     await tx.journalEntryLine.deleteMany({ where: { journalEntryId: id } });
     const entry = await tx.journalEntry.update({
       where: { id },
@@ -227,6 +245,8 @@ export async function postJournalEntry(id: string, userId: string) {
     if (!e) throw new AccountingError("Journal entry not found.", 404);
     if (e.status !== "APPROVED") throw new AccountingError(`Only an approved entry can be posted (this one is ${e.status}).`, 409);
     assertPeriodOpen(e.fiscalPeriod);
+    const lineAccounts = await tx.journalEntryLine.findMany({ where: { journalEntryId: id }, select: { accountId: true } });
+    await assertNoBankLedgerLines(tx, e.entryDate, e.type, lineAccounts.map((l) => l.accountId));
     const entry = await transition(tx, id, ["APPROVED"], "POSTED", { postedAt: new Date(), postedBy: userId });
     if (e.type === "REVERSAL" && e.reversesEntryId) {
       const flipped = await tx.journalEntry.updateMany({ where: { id: e.reversesEntryId, status: "POSTED" }, data: { status: "REVERSED" } });

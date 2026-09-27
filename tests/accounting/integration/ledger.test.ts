@@ -11,7 +11,7 @@ import {
   requestJournalReversal, deleteDraftJournalEntry, updateDraftJournalEntry,
 } from "../../../src/lib/accounting/journal-service";
 import { trialBalance, incomeStatement, balanceSheet, generalLedger } from "../../../src/lib/accounting/reports";
-import { COA_TEMPLATE } from "../../../src/lib/accounting/coa-template";
+import { COA_TEMPLATE, TEMPLATE_MAPPINGS } from "../../../src/lib/accounting/coa-template";
 import { accountingDate, todayAccountingDate } from "../../../src/lib/accounting/dates";
 
 const YEAR = Number(todayAccountingDate().toISOString().slice(0, 4));
@@ -47,7 +47,7 @@ describe("set-up", () => {
     assert.equal(ap.allowManualPosting, false);
     const header = await prisma.account.findUniqueOrThrow({ where: { code: "11" } });
     assert.equal(header.allowPosting, false);
-    assert.equal(await prisma.accountMapping.count(), 5);
+    assert.equal(await prisma.accountMapping.count(), Object.keys(TEMPLATE_MAPPINGS).length);
     await rejects(applyChartTemplate(prep), /already has/);
   });
 

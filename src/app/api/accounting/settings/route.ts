@@ -11,17 +11,22 @@ export const GET = accountingRoute(null, () => getSettings());
 // decision (docs/accounting/POLICIES.md) and no code reads them yet.
 export const PATCH = accountingRoute("settings_manage", async ({ user, request }) => {
   const b = await body(request);
-  const patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean } = {};
+  const patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean; bankPostingFrom?: Date | null } = {};
   if ("ledgerCutoverDate" in b) {
     const auth = await requireSub("accounting", "mapping_manage");
     if (auth.error) throw new AccountingError("Setting the cutover date needs the mapping permission.", 403);
     patch.ledgerCutoverDate = b.ledgerCutoverDate === null ? null : accountingDate(b.ledgerCutoverDate);
   }
+  if ("bankPostingFrom" in b) {
+    const auth = await requireSub("accounting", "bank_posting_manage");
+    if (auth.error) throw new AccountingError("Setting the bank posting start date needs the bank posting permission.", 403);
+    patch.bankPostingFrom = b.bankPostingFrom === null ? null : accountingDate(b.bankPostingFrom);
+  }
   if ("setupComplete" in b) {
     if (typeof b.setupComplete !== "boolean") throw new AccountingError("setupComplete must be true or false.", 400);
     patch.setupComplete = b.setupComplete;
   }
-  const other = Object.keys(b).filter((k) => !["ledgerCutoverDate", "setupComplete"].includes(k));
+  const other = Object.keys(b).filter((k) => !["ledgerCutoverDate", "setupComplete", "bankPostingFrom"].includes(k));
   if (other.length) throw new AccountingError(`These settings are not editable yet: ${other.join(", ")}.`, 400);
   if (!Object.keys(patch).length) throw new AccountingError("Nothing to change.", 400);
   return updateSettings(patch, user.id);

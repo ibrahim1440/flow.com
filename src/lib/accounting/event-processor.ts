@@ -12,6 +12,8 @@ import { POLICY_BY_EVENT } from "./catalog";
 import { createEngineEntry } from "./posting";
 import { resolvePostingMode } from "./policy";
 import { translateCommission } from "./translators/commissions";
+import { translateSupplierBill } from "./translators/payables";
+import { translateBank } from "./translators/bank";
 import type { Translation } from "./translators/types";
 
 type Tx = Prisma.TransactionClient;
@@ -22,6 +24,10 @@ const TRANSLATORS: Record<string, (tx: Tx, ev: EventRow) => Promise<Translation>
   "commission.reversal": translateCommission,
   "commission.adjustment": translateCommission,
   "commission.payout": translateCommission,
+  "ap.bill.posted": translateSupplierBill,
+  "ap.bill.reversed": translateSupplierBill,
+  "bank.transaction.confirmed": translateBank,
+  "bank.transaction.voided": translateBank,
 };
 
 export type ProcessOutcome = { eventId: string; status: AccountingEventStatus | "BUSY"; journalEntryId?: string; message?: string; provisional?: boolean };

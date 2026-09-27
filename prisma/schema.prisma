@@ -470,6 +470,15 @@ model Supplier {
   contact   String?
   createdAt DateTime         @default(now())
   purchases PurchaseRecord[]
+
+  // Accounting (stage 2). A KSA VAT registration number is 15 digits, starting and ending in 3;
+  // input VAT on a bill is claimable only when it is present.
+  vatNumber        String?
+  crNumber         String?
+  address          String?
+  paymentTermsDays Int            @default(30)
+  active           Boolean        @default(true)
+  bills            SupplierBill[]
 }
 
 model PurchaseRecord {
@@ -1226,6 +1235,11 @@ model AccountingSettings {
   /// decided yet, and automatic events stay PENDING rather than guess.
   ledgerCutoverDate DateTime?
 
+  /// First bank date whose confirmed, reviewed transactions post to the ledger. Earlier bank
+  /// lines are SKIPPED (carried by opening balances or manual journals). From this date manual
+  /// journals may no longer touch a cash account's mapped GL account. Null = bank posting off.
+  bankPostingFrom DateTime? @db.Date
+
   // Posting is blocked everywhere except setup routes while this is false. Must not
   // default to true — there is no setup wizard in S0, so setup is never complete by default.
   setupComplete Boolean @default(false)
@@ -1257,6 +1271,8 @@ model Account {
 
   journalEntryLines JournalEntryLine[]
   mappings          AccountMapping[]
+  finCategories     FinCategory[]
+  billLines         SupplierBillLine[]
 
   @@index([type])
   @@index([parentId])
@@ -2708,6 +2724,10 @@ model FinCategory {
   sortOrder   Int             @default(0)
   createdAt   DateTime        @default(now())
   createdBy   String?
+  /// Ledger account a bank split in this category posts to (stage 2 bank-to-ledger). A category
+  /// mapped to a control account (payables) posts only when backed by matches to posted bills.
+  glAccountId String?
+  glAccount   Account?        @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
 }
 
 model CashAccount {
@@ -3217,4 +3237,84 @@ model FinAuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ─── Accounting stage 2: payables ─────────────────────────────────────────────
+
+enum SupplierBillStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+  REVERSED
+}
+
+enum BillLineKind {
+  /// An expense or asset account chosen on the line.
+  EXPENSE
+  /// Goods received: posts to the GRNI posting role until stage 4 values receipts.
+  STOCK_RECEIPT
+}
+
+model SupplierBill {
+  id                   String             @id @default(cuid())
+  billNo               Int                @unique @default(autoincrement())
+  supplierId           String
+  supplier             Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplierInvoiceNo    String
+  billDate             DateTime           @db.Date
+  dueDate              DateTime           @db.Date
+  branchId             String?
+  description          String?
+  currency             String             @default("SAR")
+  status               SupplierBillStatus @default(DRAFT)
+  totalNet             Decimal            @default(0) @db.Decimal(18, 2)
+  totalVat             Decimal            @default(0) @db.Decimal(18, 2)
+  totalGross           Decimal            @default(0) @db.Decimal(18, 2)
+  /// PO obligation this bill replaces in cash planning (superseded on posting).
+  purchaseObligationId String?
+  /// The FinObligation created for this bill when it posts (one liability in cash planning).
+  obligationId         String?            @unique
+  createdBy            String
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  submittedBy          String?
+  submittedAt          DateTime?
+  approvedBy           String?
+  approvedAt           DateTime?
+  postedBy             String?
+  postedAt             DateTime?
+  rejectedBy           String?
+  rejectedAt           DateTime?
+  rejectedReason       String?
+  reversedBy           String?
+  reversedAt           DateTime?
+  reversalReason       String?
+
+  lines SupplierBillLine[]
+
+  @@unique([supplierId, supplierInvoiceNo])
+  @@index([status])
+  @@index([supplierId, billDate])
+}
+
+model SupplierBillLine {
+  id            String       @id @default(cuid())
+  billId        String
+  bill          SupplierBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  lineNo        Int
+  kind          BillLineKind @default(EXPENSE)
+  accountId     String
+  account       Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  description   String?
+  quantity      Decimal      @db.Decimal(18, 4)
+  unitPrice     Decimal      @db.Decimal(18, 4)
+  net           Decimal      @db.Decimal(18, 2)
+  taxCategoryId String?
+  vatRate       Decimal      @default(0) @db.Decimal(5, 2)
+  vat           Decimal      @default(0) @db.Decimal(18, 2)
+  gross         Decimal      @db.Decimal(18, 2)
+  costCenterId  String?
+
+  @@unique([billId, lineNo])
 }

@@ -7,6 +7,8 @@ import { assertDisposableFinanceDb } from "../../../scripts/finance/local-db-gua
 export { prisma };
 
 const TABLES = [
+  "SupplierBillLine", "SupplierBill", "BankTransactionMatch", "BankTransactionSplit", "BankTransaction", "CashAccount",
+  "PaymentReservation", "FinObligation", "FinCategory", "PurchaseRecord", "Supplier",
   "AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "JournalEntry", "FiscalPeriod", "AccountMapping", "AccountingPolicy",
   "Account", "TaxCategory", "AccountingSettings", "FinAuditLog", "FinCostCenter", "FinBranchAccess", "FinBranch",
   "CommissionLedgerCorrection", "CommissionLedgerEntry", "CommissionAccrual", "CommissionAssignment", "CommissionTier",

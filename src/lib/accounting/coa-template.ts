@@ -20,6 +20,7 @@ export const COA_TEMPLATE: TemplateAccount[] = [
   { code: "1140", en: "Employee custody and advances", ar: "عهد وسلف الموظفين", type: "ASSET", parent: "11" },
   { code: "1150", en: "Prepaid expenses", ar: "مصروفات مدفوعة مقدماً", type: "ASSET", parent: "11" },
   { code: "1160", en: "Input VAT", ar: "ضريبة القيمة المضافة على المدخلات", type: "ASSET", parent: "11", control: "TAX", manual: true },
+  { code: "1180", en: "Supplier advances", ar: "دفعات مقدمة للموردين", type: "ASSET", parent: "11", control: "CLEARING", manual: false },
   { code: "117", en: "Inventory", ar: "المخزون", type: "ASSET", parent: "11", header: true },
   { code: "1171", en: "Inventory — raw materials", ar: "مخزون مواد خام", type: "ASSET", parent: "117", control: "INVENTORY", manual: false },
   { code: "1172", en: "Inventory — packaging and consumables", ar: "مخزون مواد تغليف ومستهلكات", type: "ASSET", parent: "117", control: "INVENTORY", manual: false },
@@ -82,4 +83,9 @@ export const TEMPLATE_MAPPINGS: Record<string, string> = {
   COMMISSION_PAYMENT_CLEARING: "2190",
   RETAINED_EARNINGS: "3200",
   OPENING_BALANCE_EQUITY: "3900",
+  AP_CONTROL: "2110",
+  GRNI: "2120",
+  INPUT_VAT: "1160",
+  SUPPLIER_ADVANCES: "1180",
+  BANK_FEES: "6900",
 };

@@ -57,7 +57,7 @@ export async function setMapping(role: string, accountId: string, userId: string
   });
 }
 
-export async function updateSettings(patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean }, userId: string) {
+export async function updateSettings(patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean; bankPostingFrom?: Date | null }, userId: string) {
   return ledgerTx(async (tx) => {
     const before = await getSettings(tx);
     if (patch.ledgerCutoverDate !== undefined && before.ledgerCutoverDate && patch.ledgerCutoverDate?.getTime() !== before.ledgerCutoverDate.getTime()) {
@@ -69,14 +69,21 @@ export async function updateSettings(patch: { ledgerCutoverDate?: Date | null; s
       if (!accounts) throw new AccountingError("Set-up cannot be completed without postable accounts.", 409);
       if (!periods) throw new AccountingError("Set-up cannot be completed without an open fiscal period.", 409);
     }
+    if (patch.bankPostingFrom !== undefined && before.bankPostingFrom && patch.bankPostingFrom?.getTime() !== before.bankPostingFrom.getTime()) {
+      const posted = await tx.journalEntry.count({ where: { sourceModule: "bank" } });
+      if (posted > 0) throw new AccountingError("The bank posting start date cannot change after bank lines have posted.", 409);
+    }
+    if (patch.bankPostingFrom && before.ledgerCutoverDate && patch.bankPostingFrom < before.ledgerCutoverDate) {
+      throw new AccountingError("Bank posting cannot start before the ledger cutover date.", 400);
+    }
     const after = await tx.accountingSettings.update({
       where: { id: "singleton" },
-      data: { ...(patch.ledgerCutoverDate !== undefined ? { ledgerCutoverDate: patch.ledgerCutoverDate } : {}), ...(patch.setupComplete !== undefined ? { setupComplete: patch.setupComplete } : {}), updatedBy: userId },
+      data: { ...(patch.ledgerCutoverDate !== undefined ? { ledgerCutoverDate: patch.ledgerCutoverDate } : {}), ...(patch.setupComplete !== undefined ? { setupComplete: patch.setupComplete } : {}), ...(patch.bankPostingFrom !== undefined ? { bankPostingFrom: patch.bankPostingFrom } : {}), updatedBy: userId },
     });
     await auditAccounting(tx, {
       action: "settings.update", entityType: "settings", entityId: "singleton", userId,
-      before: { ledgerCutoverDate: before.ledgerCutoverDate, setupComplete: before.setupComplete },
-      after: { ledgerCutoverDate: after.ledgerCutoverDate, setupComplete: after.setupComplete },
+      before: { ledgerCutoverDate: before.ledgerCutoverDate, setupComplete: before.setupComplete, bankPostingFrom: before.bankPostingFrom },
+      after: { ledgerCutoverDate: after.ledgerCutoverDate, setupComplete: after.setupComplete, bankPostingFrom: after.bankPostingFrom },
     });
     return after;
   });

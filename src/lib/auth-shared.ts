@@ -164,6 +164,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "policy_approve", label: "Approve accounting policies and commission plans for posting" },
     { key: "events_process", label: "Run and retry automatic postings" },
     { key: "unlock_period", label: "Unlock a locked fiscal period (with a reason)" },
+    { key: "ap_bill_create", label: "Prepare and submit supplier bills" },
+    { key: "ap_bill_approve", label: "Approve or reject supplier bills" },
+    { key: "ap_bill_post", label: "Post and reverse supplier bills" },
+    { key: "bank_posting_manage", label: "Map cash accounts and budget categories to the ledger; set the bank posting start date" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester
