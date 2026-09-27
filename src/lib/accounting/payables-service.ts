@@ -9,7 +9,7 @@ import { prisma } from "@/lib/db";
 import { AccountingError } from "./errors";
 import { ledgerTx } from "./journal-service";
 import { auditAccounting } from "./audit";
-import { ZERO, dec, round2 } from "./money";
+import { ZERO, dec } from "./money";
 import { accountingDate } from "./dates";
 import { resolveRoles } from "./posting";
 import { processEvent, type ProcessOutcome } from "./event-processor";
