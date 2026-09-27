@@ -61,6 +61,9 @@ const SHOTS = [
   { id: "ACC-24", route: "/dashboard/accounting/bank" },
   { id: "ACC-25", route: "/dashboard/accounting/bank?view=reconcile" },
   { id: "ACC-26", route: "/dashboard/accounting/payables?status=PENDING", w: 390 },
+  { id: "ACC-27", route: "/dashboard/accounting/reports", act: async (p) => { await p.getByRole("button", { name: "التدفقات النقدية" }).click(); } },
+  { id: "ACC-27-390", route: "/dashboard/accounting/reports", w: 390, act: async (p) => { await p.getByRole("button", { name: "التدفقات النقدية" }).click(); } },
+  { id: "ACC-27-en", route: "/dashboard/accounting/reports", user: "acc.approver.en", act: async (p) => { await p.getByRole("button", { name: "Cash flow" }).click(); } },
 ];
 
 async function login(page, user, password) {

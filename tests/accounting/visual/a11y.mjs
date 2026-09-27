@@ -44,6 +44,7 @@ const PAGES = [
   ["ACC-24 bank", "/dashboard/accounting/bank"],
   ["ACC-25 bank reconciliation", "/dashboard/accounting/bank?view=reconcile"],
   ["ACC-26 mobile bills", "/dashboard/accounting/payables?status=PENDING", undefined, undefined, 390],
+  ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
