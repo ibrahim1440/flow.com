@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "feature/sales-crm-commissions": true
+      "feature/sales-crm-commissions": true,
+      "release/finance-sales-20260927": false
     }
   }
 }

@@ -71,6 +71,31 @@ names. C1/C3 (roast) still refuse with 409 without the barrier, because the roas
 re-read inside the same advisory lock and a held/cancelled order has no remaining demand; that
 is a second, independent refusal, not a gap. Restored afterwards (no changes left).
 
+### 00b′. The two remaining regression items, resolved (release `c5c778c`)
+
+**`lifecycle-locks` G1** measured wall-clock overlap of two reviews that draw on the same stock
+lot (where serializing is legitimate) against a biased baseline (a re-review). It now proves the
+property with locks: a separate session holds order M's `Order` and `OrderItem` rows; a review of
+order N must complete meanwhile, and a review of M must be seen waiting on a lock (`8c56814`).
+Result: 39/39 in 3 of 3 runs. Negative control — the session also locks the shared lots, i.e. a
+global serialization: the unrelated review times out and G1 fails. No product defect.
+
+**`reset-safety`** was re-run with the server configured as an authorized reset target
+(`ERP_TRAINING_RESET_ENABLED=true`, `ERP_RESET_ALLOWED_HOST=127.0.0.1`,
+`ERP_RESET_ALLOWED_DATABASE=erp_e2e`). That exposed a test fault hidden behind the environment
+refusal: C0 "a user without settings.reset is refused" asked the seeded administrator, whose stored
+permissions are `{}` and resolve to the admin role defaults (`getUserWithPermissions`, since
+`df884d0`), which include `settings.reset` — so C0 performed a real factory reset of the disposable
+database and C1 found nothing to delete. C0 now uses an admin with the privilege explicitly false
+(`1ac674d`). Results: authorized target **30/30**; unauthorized target 8 failures, every one the
+environment refusal ("not an authorized destructive-reset target", 403) or its consequence.
+Production has none of the three variables, so the factory/training reset is refused there by the
+environment gate regardless of privilege.
+
+Design note (not changed here): an administrator stored with empty permissions inherits every
+sub-privilege, including factory reset. Production is protected by the environment gate; whether
+reset should be excluded from the admin defaults is an owner decision.
+
 ### 00c. The production application on the migrated database, as the restricted role
 
 `4640cbe` (fresh worktree, own `npm ci`, own build) served on a database built by its own
