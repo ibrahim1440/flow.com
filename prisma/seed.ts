@@ -126,6 +126,7 @@ async function main() {
     { serialNumber: "GB-012", beanType: "Guatemala Wycan", country: "Guatemala", region: "Wycan", variety: "Bourbon", process: "Washed", altitude: "1600 - 1800", quantityKg: 90 },
     { serialNumber: "GB-013", beanType: "Colombia La Presa", country: "Colombia", region: "Quindio", variety: "Castillo", process: "Natural", altitude: "1700 - 1900", quantityKg: 110 },
     { serialNumber: "GB-014", beanType: "Indonesia Peach", country: "Indonesia", region: "Quindio", variety: "Castillo", process: "Innoculated", altitude: "1400 - 1450", quantityKg: 45 },
+    { serialNumber: "GB-015", beanType: "Brazil Falcao", country: "Brazil", region: "Sul de Minas", variety: "Yellow Bourbon", process: "Natural", altitude: "1100 - 1250", quantityKg: 120 },
   ];
   const beanMap: Record<string, string> = {};
   for (const b of beans) {
@@ -133,13 +134,26 @@ async function main() {
     beanMap[b.beanType] = created.id;
   }
 
-  // Helper to find closest bean
-  function findBean(name: string): string | undefined {
-    const lower = name.toLowerCase();
-    for (const [key, id] of Object.entries(beanMap)) {
-      if (key.toLowerCase().includes(lower) || lower.includes(key.toLowerCase())) return id;
-    }
-    return undefined;
+  // The order history below names beans in Arabic; the inventory above is keyed in English.
+  // Matching by substring never succeeded across the two scripts, so every seeded order item and
+  // roasting batch was created without a green bean. An explicit alias table makes each link
+  // deliberate, and an unknown name now stops the seed instead of silently producing an orphan.
+  const BEAN_ALIASES: Record<string, string> = {
+    "اثيوبي قوجي": "Ethiopia Guji",
+    "اندونيسيا": "Indonesia Wanoja",
+    "برازيل فالكاو": "Brazil Falcao",
+    "برازيل موجيانا": "Brazil Mogiana",
+    "رواندا باهو": "Rwanda Baho",
+    "غواتيمالا انتيجوا": "Guatemala Antigua",
+    "قواتيمالا": "Guatemala Antigua",
+    "كولمبيا ويلا": "Colombia Huila",
+    "نيكارجو": "Nicaragua El Suyatal",
+  };
+  function findBean(name: string): string {
+    const beanType = BEAN_ALIASES[name.trim()] ?? (beanMap[name] ? name : undefined);
+    const id = beanType ? beanMap[beanType] : undefined;
+    if (!id) throw new Error(`Seed: no green bean for order bean "${name}" — add it to BEAN_ALIASES.`);
+    return id;
   }
 
   // Orders from B2B 2025 data
