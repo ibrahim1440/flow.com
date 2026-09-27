@@ -1,4 +1,7 @@
 import { Client } from "pg";
+// Plain ESM, shared with the regression harness so both layers enforce exactly the same
+// rule rather than two drifting copies of it.
+import { guardClient } from "../../../scripts/e2e/identity-guard.mjs";
 
 // ── Safety rail ──────────────────────────────────────────────────────────────
 // This suite creates orders, consumes stock and deliberately attempts invalid
@@ -11,8 +14,16 @@ import { Client } from "pg";
  * safety boundary, and a boundary that whoever sets the variables can move is not one.
  * No wildcard and no prefix match — "erp_mvp_preprod" must not pass merely because it
  * begins with "erp_mvp" — and an unrecognised name is refused rather than allowed.
+ *
+ * `sales_preview` is the CRM suites' target: a database created EMPTY on a non-production
+ * branch, holding nothing copied from anywhere, and reached with a role that owns nothing and
+ * cannot run DDL. It replaced `sales_crm_preview` — same branch, but that one is reached with
+ * `neondb_owner`, a member of neon_superuser and therefore of pg_read_all_data and
+ * pg_write_all_data, which can read every table in every database here. Named in full for the
+ * same reason the other two are: widening this boundary must be a visible edit to a literal,
+ * never a pattern quietly matching something new.
  */
-const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e"];
+const ALLOWED_TEST_DATABASES = ["erp_mvp_test", "erp_e2e", "sales_preview"];
 
 function refuseTestDatabase(why: string): Error {
   return new Error(
@@ -47,7 +58,9 @@ export async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   const db = new Client({ connectionString: assertTestDatabase() });
   await db.connect();
   try {
-    return await fn(db);
+    // Every statement this suite issues goes through here, and the guard refuses — before
+    // execution — any mutation that could reach an identity the suite does not own.
+    return await fn(guardClient(db, "the Playwright suite") as Client);
   } finally {
     await db.end();
   }

@@ -1,0 +1,149 @@
+{
+  "browser": "Chrome 153.0.8010.36",
+  "emulation": "Playwright Chrome viewport emulation (not a physical device)",
+  "captures": [
+    {
+      "id": "STATE-loading-1440",
+      "file": "STATE-loading-1440.png",
+      "note": "API requests held open by interception; real LoadingState",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "STATE-error-1440",
+      "file": "STATE-error-1440.png",
+      "note": "HTTP 500 injected on /api/finance/overview; real ErrorState with retry",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "STATE-empty-1440",
+      "file": "STATE-empty-1440.png",
+      "note": "fin.viewer: Finance access, no branch access → empty scope; no set-up actions for a user who cannot set Finance up",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "STATE-validation-dialog",
+      "file": "STATE-validation-dialog.png",
+      "note": "Manual entry: 3-decimal amount and empty date → field errors, nothing saved",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "STATE-validation-future-confirmed",
+      "file": "STATE-validation-future-confirmed.png",
+      "note": "Manual entry: a CONFIRMED line dated in the future is refused; a reference already on the account is flagged inline (as in FIN-08)",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "STATE-empty-setup-1440",
+      "file": "STATE-empty-setup-1440.png",
+      "note": "A user who can set Finance up, on a new branch with no accounts: both set-up actions offered (as in FIN-08)",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "STATE-noperm-1440",
+      "file": "STATE-noperm-1440.png",
+      "note": "no.finance: no Finance module → NoPermission; API also 403 (tests/finance/http)",
+      "innerWidth": 1440,
+      "clientWidth": 1440,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "BP-1023",
+      "file": "BP-1023.png",
+      "note": "Overview at 1023px viewport",
+      "innerWidth": 1023,
+      "clientWidth": 1023,
+      "lgMediaQuery": false,
+      "sidebarOnCanvas": false,
+      "menuButtonVisible": true,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "BP-1023-drawer-open",
+      "file": "BP-1023-drawer-open.png",
+      "note": "Below lg: navigation opens as an overlay drawer from the menu button",
+      "innerWidth": 1023,
+      "clientWidth": 1023,
+      "lgMediaQuery": false,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": true,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "BP-1024",
+      "file": "BP-1024.png",
+      "note": "Overview at 1024px viewport",
+      "innerWidth": 1024,
+      "clientWidth": 1024,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "BP-1025",
+      "file": "BP-1025.png",
+      "note": "Overview at 1025px viewport",
+      "innerWidth": 1025,
+      "clientWidth": 1025,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "BP-1023-budget",
+      "file": "BP-1023-budget.png",
+      "note": "Monthly budget table at 1023px (table scrolls inside its card; page must not overflow)",
+      "innerWidth": 1023,
+      "clientWidth": 1023,
+      "lgMediaQuery": false,
+      "sidebarOnCanvas": false,
+      "menuButtonVisible": true,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "BP-1025-budget",
+      "file": "BP-1025-budget.png",
+      "note": "Monthly budget table at 1025px (table scrolls inside its card; page must not overflow)",
+      "innerWidth": 1025,
+      "clientWidth": 1025,
+      "lgMediaQuery": true,
+      "sidebarOnCanvas": true,
+      "menuButtonVisible": false,
+      "horizontalOverflow": false
+    }
+  ]
+}

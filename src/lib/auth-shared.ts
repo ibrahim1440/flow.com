@@ -35,12 +35,18 @@ export const ALL_MODULES = [
   "settings",
   "customers",
   "accounting",
+  "sales",
+  "commissions",
+  // Finance — cash management, receipt allocation and the monthly cash budget.
+  "finance",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
 
 export const MODULE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
+  sales: "Sales / CRM",
+  commissions: "Commissions",
   inventory: "Inventory",
   orders: "Orders",
   production: "Production",
@@ -55,9 +61,48 @@ export const MODULE_LABELS: Record<string, string> = {
   settings: "System Settings",
   customers: "Customers / CRM",
   accounting: "Accounting",
+  finance: "Finance (Cash & Budget)",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
+  sales: [
+    { key: "lead_write", label: "Create / edit leads" },
+    { key: "lead_assign", label: "Assign or reassign a lead's owner" },
+    { key: "lead_convert", label: "Convert a lead into a customer and a deal" },
+    { key: "lead_import", label: "Import leads from a file" },
+    { key: "lead_export", label: "Export leads" },
+    { key: "deal_close", label: "Mark a deal Won or Lost" },
+    { key: "deal_reopen", label: "Reopen a closed deal" },
+    { key: "quote_write", label: "Create / edit quotations" },
+    { key: "quote_approve_discount", label: "Approve a discount above the threshold" },
+    { key: "stage_manage", label: "Configure pipeline stages" },
+    // Collections. Submitting one is a selling act and lives here; DECIDING one is a
+    // finance duty and lives under commissions, which is what stops a rep who can record a
+    // receipt from also being able to bless it.
+    { key: "collection_submit", label: "Record a collection against an owned deal" },
+    { key: "collection_view_team", label: "See the team's collections, not only my own" },
+  ],
+  // Fine-grained on purpose: every key below decides either what somebody is paid or who
+  // gets to see it, and "manage_plans" in particular must never fall to the person the
+  // plan pays.
+  commissions: [
+    { key: "view_own", label: "See my own commission" },
+    { key: "view_team", label: "See the team's commission" },
+    { key: "manage_plans", label: "Create / edit commission plans and assignments" },
+    { key: "approve", label: "Approve accrued commission" },
+    { key: "record_payout", label: "Record a commission payout" },
+    { key: "sandbox_collections", label: "Record sandbox collection events (non-production only)" },
+    // The finance duty. Approve and refuse are separate keys because they are separate
+    // abilities; a deployment will normally grant them together, and granting only one is
+    // an unusual but coherent configuration rather than a broken state.
+    //
+    // Reversal is its own key and a stronger one: it undoes a figure somebody has already
+    // been told they earned, and it is the only act in the module that makes a commission
+    // go backwards.
+    { key: "collection_verify", label: "Verify a recorded collection (this is what creates commission)" },
+    { key: "collection_reject", label: "Reject a recorded collection" },
+    { key: "collection_reverse", label: "Reverse an approved collection" },
+  ],
   inventory: [
     { key: "receive", label: "Receive new beans" },
     { key: "adjust", label: "Edit / adjust stock" },
@@ -114,6 +159,21 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "journal_post", label: "Post journal entries" },
     { key: "journal_reverse", label: "Reverse posted journal entries" },
     { key: "export_view", label: "View Qoyod export records" },
+  ],
+  // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
+  // key alone, allow approving it; and no request can be decided by its own requester
+  // (enforced in the service and by database triggers, with no configurable exception).
+  finance: [
+    { key: "txn_enter", label: "Enter, import and classify bank transactions" },
+    { key: "reconcile", label: "Reconcile accounts against bank statements" },
+    { key: "budget_prepare", label: "Prepare budgets, obligations, forecasts and allocation rules" },
+    { key: "budget_approve", label: "Approve budgets, revisions and allocation percentage changes" },
+    { key: "allocate", label: "Run allocations, reserve and record payments" },
+    { key: "transfer_approve", label: "Approve transfers between allocation categories" },
+    { key: "spend_override_approve", label: "Approve spending above a category limit or balance" },
+    { key: "period_close", label: "Close or reopen budget periods" },
+    { key: "all_branches", label: "Company-wide access (all branches and company-level records)" },
+    { key: "settings_manage", label: "Manage finance settings, accounts, categories and branch access" },
   ],
 };
 

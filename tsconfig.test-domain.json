@@ -1,0 +1,31 @@
+{
+  // Compiles the pure domain services on their own so a regression suite can import and
+  // exercise them directly, with no Next.js runtime and no database.
+  //
+  // Inherits the project's compilerOptions so the `@/` path alias resolves the same way it
+  // does in the application. A standalone `tsc` invocation does not read paths from the
+  // command line, which is why this file exists rather than a longer command.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-build",
+    "rootDir": "src",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2022",
+    "jsx": "react-jsx",
+    "declaration": false,
+    "sourceMap": false,
+    // The generated Prisma client is large and already type-checked by the app build.
+    "skipLibCheck": true
+  },
+  // auth-shared is in here so the suites can build a role from the application's own
+  // privilege list: a typo then becomes a missing key rather than a silently weaker role
+  // that makes a permission test pass for the wrong reason.
+  "include": [
+    "src/lib/services/commissions/**/*.ts",
+    "src/lib/services/sales/**/*.ts",
+    "src/lib/auth-shared.ts"
+  ],
+  "exclude": ["node_modules", ".next", "src/generated"]
+}

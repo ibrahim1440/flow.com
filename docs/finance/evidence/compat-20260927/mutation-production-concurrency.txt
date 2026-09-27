@@ -1,0 +1,17 @@
+── Catalog: 3 origins, 5 SKUs, 4 packaging materials ───────────
+── A1. Hold commits first -> requirement refused 409, no production order 
+  [FAIL] requirement refused with 409  
+  [FAIL]   and the refusal names the status  
+  [FAIL] no production order survived the rollback  
+── A2. Requirement wins first -> hold waits, then proceeds ─────
+── B1. Cancel commits first -> requirement refused, zero production orders 
+  [FAIL] requirement refused with 409  
+  [FAIL] no production order for the cancelled order  
+── B2. Requirement wins first -> cancel waits, then proceeds ───
+── C1. Hold commits first -> roast refused, green unchanged, nothing written 
+── C2. Roast wins first -> hold waits, roast committed before the hold 
+── C3. Cancel commits first -> roast refused, no batch, no movement, green unchanged 
+── D1. review vs production requirement — no incompatible decision/shortfall snapshot 
+── D2. review vs roasting ──────────────────────────────────────
+── E1. exactly one production order; the loser gets an intentional 409 
+32 passed, 5 failed

@@ -1,0 +1,6 @@
+{
+  "name": "local-postgres",
+  "private": true,
+  "description": "Pinned portable PostgreSQL for the finance worktree (installed into .local-postgres/ by scripts/finance/local-postgres.mjs setup)",
+  "dependencies": { "embedded-postgres": "17.10.0-beta.17" }
+}

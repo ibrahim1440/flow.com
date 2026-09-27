@@ -1,0 +1,25 @@
+diff --git a/src/lib/nav/registry.ts b/src/lib/nav/registry.ts
+index 981232d..1ca67a9 100644
+--- a/src/lib/nav/registry.ts
++++ b/src/lib/nav/registry.ts
+@@ -239,8 +239,20 @@ export const NAV: NavNode[] = [
+       commissions("collection_verify"),
+       commissions("collection_reject"),
+       commissions("collection_reverse"),
++      // Cash & budget and Accounting holders reach their screens through this group too;
++      // without these an accounting-only or finance-only user would lose the whole group.
++      { module: "finance" },
++      { module: "accounting" },
+     ],
+     children: [
++      {
++        // Cash management, receipt allocation and the monthly cash budget. Its six areas are
++        // tabs inside the page.
++        id: "finance.cash",
++        ar: "النقد والميزانية", en: "Cash & budget",
++        href: "/dashboard/finance",
++        anyOf: [{ module: "finance" }],
++      },
+       {
+         id: "finance.collections",
+         ar: "التحصيلات", en: "Collections",

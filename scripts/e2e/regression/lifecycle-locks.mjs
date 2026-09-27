@@ -10,7 +10,7 @@
 // surfaces through this application as a generic 500. So every case here asserts BOTH the
 // business outcome AND that no 500 was produced by a deadlock.
 import {
-  ADMIN_PIN, db, api, check, issue, section, sub, one, all, num, near, invariants, loginAs, greenStock, results,
+  ADMIN_PIN, DB_URL, Client, db, api, check, issue, section, sub, one, all, num, near, invariants, loginAs, greenStock, results,
 } from "./harness.mjs";
 import { buildCatalog, teardown, roastAndPass} from "./catalog.mjs";
 
@@ -186,9 +186,13 @@ async function main() {
   await stockShelf(20);
   const oE = await mkOrder(C.customers.retail.id, "dispatch vs cancel", 8);
   await review(oE);
+  // The lot the preparation review reserved for THIS line. The oldest lot with free units for
+  // the SKU may be fully reserved by earlier orders in this run, and shipping from it is
+  // (correctly) refused as stock promised to someone else — which is not what D tests.
   const lotE = (await one(
-    `SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND "unitsAvailable">0 ORDER BY "createdAt" LIMIT 1`,
-    [C.skus.bra250.id]))?.id;
+    `SELECT "finishedGoodsLotId" id FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED' ORDER BY "createdAt" LIMIT 1`,
+    [oE.items[0].id]))?.id;
+  check("the review reserved a lot for this line", Boolean(lotE), String(lotE));
   const availBefore = await lotAvail(lotE);
   const delRowsBefore = await deliveryRows(oE.items[0].id);
   const delE = deliver(oE.items[0], 3, lotE);
@@ -210,9 +214,13 @@ async function main() {
   await stockShelf(20);
   const oF = await mkOrder(C.customers.retail.id, "dispatch then cancel", 8);
   await review(oF);
+  // The lot the preparation review reserved for THIS line. The oldest lot with free units for
+  // the SKU may be fully reserved by earlier orders in this run, and shipping from it is
+  // (correctly) refused as stock promised to someone else — which is not what D tests.
   const lotF = (await one(
-    `SELECT id FROM "FinishedGoodsLot" WHERE "productSkuId"=$1 AND "unitsAvailable">0 ORDER BY "createdAt" LIMIT 1`,
-    [C.skus.bra250.id]))?.id;
+    `SELECT "finishedGoodsLotId" id FROM "StockAllocation" WHERE "orderItemId"=$1 AND status='RESERVED' ORDER BY "createdAt" LIMIT 1`,
+    [oF.items[0].id]))?.id;
+  check("the review reserved a lot for this line", Boolean(lotF), String(lotF));
   const dF = await deliver(oF.items[0], 3, lotF);
   const canF = await statusAct(oF, "cancel", P + " cancel after dispatch");
   noDeadlock("dispatch-then-cancel", dF, canF);
@@ -316,21 +324,43 @@ async function main() {
   // ═════════════════════════════════════════════════════════════════════════
   section("G — UNRELATED ORDERS STAY CONCURRENT");
 
-  sub("G1. two different orders overlap in wall-clock time");
+  // Proven with locks, not stopwatches. The previous version compared wall-clock times, which
+  // cannot distinguish a global lock from the legitimate wait on a stock lot both orders draw
+  // from, and whose "single" baseline re-reviewed an order that was already reviewed. Here a
+  // separate session holds order M's own rows (Order, OrderItem) — the per-order end of the
+  // canonical lock order — and the suite shows that a review of N does not wait for them
+  // while a review of M does.
+  sub("G1. a review waits only for its own order's locks");
   await stockShelf(40);
   const oM = await mkOrder(C.customers.cafe.id, "concurrent M", 6);
   const oN = await mkOrder(C.customers.retail.id, "concurrent N", 6);
-  const t0 = Date.now();
-  const [mRes, nRes] = await Promise.all([review(oM), review(oN)]);
-  const together = Date.now() - t0;
+  const gate = new Client({ connectionString: DB_URL });
+  await gate.connect();
+  let nRes, mRes, parked = 0;
+  try {
+    await gate.query("BEGIN");
+    await gate.query(`SELECT id FROM "Order" WHERE id = $1 FOR UPDATE`, [oM.id]);
+    await gate.query(`SELECT id FROM "OrderItem" WHERE "orderId" = $1 ORDER BY id FOR UPDATE`, [oM.id]);
+    const TIMEOUT = { status: "timeout", json: null };
+    nRes = await Promise.race([review(oN), sleep(20_000).then(() => TIMEOUT)]);
+    check("a review of an unrelated order completes while another order's rows are locked",
+      nRes.status === 200, `${nRes.status} ${S(nRes.json).slice(0, 120)}`);
+    const pending = review(oM);
+    for (let i = 0; i < 100 && !parked; i++) {
+      await sleep(100);
+      parked = num((await db.query(
+        `SELECT count(*) n FROM pg_stat_activity WHERE datname = current_database()
+           AND wait_event_type = 'Lock' AND pid <> $1`, [gate.processID])).rows[0].n);
+    }
+    check("a review of the locked order waits for it", parked >= 1, `waiting backends: ${parked}`);
+    await gate.query("COMMIT");
+    mRes = await pending;
+  } finally {
+    await gate.query("ROLLBACK").catch(() => {});
+    await gate.end();
+  }
   noDeadlock("unrelated orders", mRes, nRes);
-  const t1 = Date.now();
-  await review(oM);
-  const single = Date.now() - t1;
-  console.log(`    two orders reviewed concurrently in ${together} ms; one alone takes ${single} ms`);
-  check("both succeeded", mRes.status === 200 && nRes.status === 200, `${mRes.status} / ${nRes.status}`);
-  check("concurrent work overlapped rather than serializing end to end",
-    together < single * 1.8, `together ${together} ms vs single ${single} ms — looks serialized`);
+  check("both succeeded once the lock was released", mRes.status === 200 && nRes.status === 200, `${mRes.status} / ${nRes.status}`);
 
   await invariants("after the lifecycle-lock suite");
 

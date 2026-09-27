@@ -1,0 +1,11 @@
+{
+ "applicationTables": 43,
+ "applicationRows": 789,
+ "preserved": true,
+ "problems": [],
+ "newTables": 0,
+ "existingTablesWithAddedColumns": [],
+ "newMigrations": [],
+ "triggersBefore": 0,
+ "triggersAfter": 0
+}

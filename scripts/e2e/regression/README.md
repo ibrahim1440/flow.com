@@ -16,6 +16,32 @@ or one at a time:
 npm run regression -- production-gate reservation-cas
 ```
 
+## The Sales CRM suites are a SEPARATE runner, against a different database
+
+```
+npm run regression:sales                      # all five
+npm run regression:sales -- commission-engine # one at a time
+```
+
+Separate on purpose, not by oversight. The five sales suites refuse to touch any database
+except the verified preview one (`sales_crm_preview`), and `npm run regression` above runs
+against the regression database — so registering them in one list would give whichever
+runner you invoked a guaranteed refusal. Two runners, two targets, one explicit boundary.
+
+| Suite | Needs |
+|---|---|
+| `commission-engine` | nothing — pure arithmetic, no database, no HTTP |
+| `quotes-domain` | nothing — pricing, lifecycle and CSV, no database, no HTTP |
+| `sales-commissions-db` | PostgreSQL |
+| `sales-security` | a running app |
+| `sales-workflow` | a running app |
+
+The two pure suites need `npm run build:test-domain` first — they import the compiled
+domain so the test exercises exactly what ships, rather than a second copy of the
+arithmetic.
+
+The browser UAT for the same module is `npm run uat:sales`.
+
 ## What they need
 
 These suites create, mutate and delete data. They will not start until you nominate a

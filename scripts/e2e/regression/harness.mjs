@@ -16,6 +16,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { guardClient } from "../identity-guard.mjs";
 // Pure arithmetic, no imports of its own — safe to load before the safety rails below.
 // The `free` figure every suite reads is computed by this module so that
 // harness-selftest.mjs proves the SHIPPED path rather than a copy of it.
@@ -118,7 +119,10 @@ export function pinVerifierInput(pin, secret = PIN_LOOKUP_SECRET.trim()) {
   return createHmac("sha384", secret).update("pin:verify:v1:" + pin).digest("base64");
 }
 
-export const db = new Client({ connectionString: DB_URL });
+const rawDb = new Client({ connectionString: DB_URL });
+
+// The same pre-execution identity guard the Playwright layer uses. One rule, one file.
+export const db = guardClient(rawDb, "the regression harness");
 
 // ── Reporting ────────────────────────────────────────────────────────────────
 export const results = { pass: 0, fail: 0, failures: [], issues: [] };

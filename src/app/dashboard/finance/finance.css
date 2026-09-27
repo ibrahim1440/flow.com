@@ -1,0 +1,15 @@
+/*
+ * Finance section typography, matched to the agreed Figma frames (page "15 — Finance").
+ *
+ * Every text layer in those frames uses Figma's "Auto" line height, which renders Tajawal at
+ * 1.2 × the font size (measured: 11→13, 12→14, 13→16, 14→17, 15→18, 20→24, 24→29 px). The
+ * shell's Tailwind base sets 1.5, which made every text-bearing block in the section taller
+ * than the design (tabs +5 px, KPI cards +5 px, the alerts card +62 px); the browser's
+ * `normal` is taller still for Tajawal, so the measured ratio is used. Scoped to the Finance
+ * root so no other module changes; unlayered on purpose so it wins over Tailwind's layered
+ * utilities.
+ */
+[data-finance-root],
+[data-finance-root] * {
+  line-height: 1.2;
+}

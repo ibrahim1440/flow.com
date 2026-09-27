@@ -9,12 +9,16 @@
 //   production-first: production reaches the barrier first and holds the Order row. The
 //                     transition must WAIT, then apply its own conditional state machine.
 //
-// Timing is controlled by how long each request has been running before the other is
-// fired. Production transactions here take well over a second at ~167 ms per round trip,
-// so a 350 ms head start lands the transition inside production's window, and firing the
-// transition after production has finished gives the other ordering.
+// Lifecycle-first is FORCED, not timed. The production-requirement and roasting transactions
+// take pg_advisory_xact_lock(7762, key(orderItem)) as their first statement; a separate
+// session holding that lock parks them at the start of their transaction, the hold/cancel is
+// sent and commits (it does not take that lock), and releasing the lock lets production run
+// to its late barrier. A timed head start (the previous approach) only produced this ordering
+// against a remote database; on a fast one production finished before the transition was
+// fired, so the barrier was never exercised and the suite failed on a legitimate
+// serialization. Production-first is produced by letting production finish before firing.
 import {
-  ADMIN_PIN, db, api, check, section, sub, one, all, num, near, invariants, loginAs, greenStock, results,
+  ADMIN_PIN, DB_URL, Client, db, api, check, section, sub, one, all, num, near, invariants, loginAs, greenStock, results,
 } from "./harness.mjs";
 import { buildCatalog, teardown} from "./catalog.mjs";
 
@@ -57,6 +61,31 @@ const batchCount = async (itemId) =>
   num((await one('SELECT COUNT(*)::int n FROM "RoastingBatch" WHERE "orderItemId"=$1', [itemId])).n);
 const movements = async () => num((await one('SELECT COUNT(*)::int n FROM "InventoryMovement"')).n);
 
+// Same hash as src/lib/services/production-planning.ts advisoryKey.
+const advisoryKey = (id) => { let h = 0; for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0; return h; };
+/**
+ * Run `work` (a production requirement or roast for this order line) parked behind the line's
+ * advisory lock, commit `lifecycle` while it is parked, then release it. `parked` reports
+ * whether the work was observed waiting on the lock when the lifecycle action was sent.
+ */
+async function lifecycleWhileParked(orderItemId, work, lifecycle) {
+  const gate = new Client({ connectionString: DB_URL });
+  await gate.connect();
+  await gate.query("BEGIN");
+  await gate.query("SELECT pg_advisory_xact_lock(7762, $1::int)", [advisoryKey(orderItemId)]);
+  const pending = work();
+  let parked = false;
+  for (let i = 0; i < 60 && !parked; i++) {
+    await sleep(50);
+    parked = num((await one(
+      "SELECT COUNT(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND wait_event='advisory' AND datname=current_database()")).n) > 0;
+  }
+  const transition = await lifecycle();
+  await gate.query("COMMIT");
+  await gate.end();
+  return { parked, transition, result: await pending };
+}
+
 async function main() {
   await db.connect();
   await teardown(P);
@@ -68,10 +97,9 @@ async function main() {
 
   sub("A1. Hold commits first -> requirement refused 409, no production order");
   const oA = await mkOrder(C.customers.cafe.id, "hold first");
-  const pA = requirementPost(oA.items[0].id);
-  await sleep(350);
-  const hA = await statusAct(oA, "hold", P + " hold wins");
-  const rA = await pA;
+  const { parked: parkedA, transition: hA, result: rA } = await lifecycleWhileParked(
+    oA.items[0].id, () => requirementPost(oA.items[0].id), () => statusAct(oA, "hold", P + " hold wins"));
+  check("the requirement was parked mid-transaction when the hold was sent", parkedA);
   console.log(`    requirement -> ${rA.status}   hold -> ${hA.status}   final: ${await statusOf(oA.id)}`);
   check("requirement refused with 409", rA.status === 409, `status=${rA.status} ${S(rA.json).slice(0, 140)}`);
   check("  and the refusal names the status", /in status .{0,2}On Hold/i.test(S(rA.json)), S(rA.json).slice(0, 150));
@@ -94,10 +122,9 @@ async function main() {
 
   sub("B1. Cancel commits first -> requirement refused, zero production orders");
   const oC = await mkOrder(C.customers.cafe.id, "cancel first");
-  const pC = requirementPost(oC.items[0].id);
-  await sleep(350);
-  const cC = await statusAct(oC, "cancel", P + " cancel wins");
-  const rC = await pC;
+  const { parked: parkedC, transition: cC, result: rC } = await lifecycleWhileParked(
+    oC.items[0].id, () => requirementPost(oC.items[0].id), () => statusAct(oC, "cancel", P + " cancel wins"));
+  check("the requirement was parked mid-transaction when the cancel was sent", parkedC);
   console.log(`    requirement -> ${rC.status}   cancel -> ${cC.status}   final: ${await statusOf(oC.id)}`);
   check("requirement refused with 409", rC.status === 409, `status=${rC.status} ${S(rC.json).slice(0, 140)}`);
   check("no production order for the cancelled order", (await poCount(oC.items[0].id)) === 0, "a production order exists");
@@ -116,10 +143,9 @@ async function main() {
   const oE = await mkOrder(C.customers.retail.id, "roast vs hold");
   const gBefore = await greenStock(C.beans.brazil.id);
   const mBefore = await movements();
-  const pE = roast(oE.items[0]);
-  await sleep(350);
-  const hE = await statusAct(oE, "hold", P + " hold wins roast");
-  const rE = await pE;
+  const { parked: parkedE, transition: hE, result: rE } = await lifecycleWhileParked(
+    oE.items[0].id, () => roast(oE.items[0]), () => statusAct(oE, "hold", P + " hold wins roast"));
+  check("the roast was parked mid-transaction when the hold was sent", parkedE);
   const gAfter = await greenStock(C.beans.brazil.id);
   console.log(`    roast -> ${rE.status}   hold -> ${hE.status}   green ${gBefore} -> ${gAfter}   final: ${await statusOf(oE.id)}`);
   check("roast refused with 409", rE.status === 409, `status=${rE.status} ${S(rE.json).slice(0, 140)}`);
@@ -142,10 +168,9 @@ async function main() {
   const oG = await mkOrder(C.customers.retail.id, "roast vs cancel");
   const gG0 = await greenStock(C.beans.brazil.id);
   const mG0 = await movements();
-  const pG = roast(oG.items[0]);
-  await sleep(350);
-  const cG = await statusAct(oG, "cancel", P + " cancel wins roast");
-  const rG = await pG;
+  const { parked: parkedG, transition: cG, result: rG } = await lifecycleWhileParked(
+    oG.items[0].id, () => roast(oG.items[0]), () => statusAct(oG, "cancel", P + " cancel wins roast"));
+  check("the roast was parked mid-transaction when the cancel was sent", parkedG);
   const gG1 = await greenStock(C.beans.brazil.id);
   console.log(`    roast -> ${rG.status}   cancel -> ${cG.status}   green ${gG0} -> ${gG1}`);
   check("roast refused with 409", rG.status === 409, `status=${rG.status} ${S(rG.json).slice(0, 140)}`);

@@ -1,0 +1,34 @@
+// Synthetic operational volume for the PRE-FINANCE baseline of the migration rehearsal.
+// Copied into a detached checkout of the production commit and run there, against that
+// commit's own schema and client, after its seed. Fictional names; deterministic.
+//
+//   npx tsx scripts/rehearsal-synthetic-baseline.ts      (inside the baseline checkout)
+import { prisma } from "../src/lib/db";
+
+const url = process.env.DATABASE_URL ?? "";
+if (!/@127\.0\.0\.1:54329\/erp_rehearsal[a-z0-9_]*$/.test(url)) {
+  console.error("Refusing: DATABASE_URL must be a local erp_rehearsal* database.");
+  process.exit(1);
+}
+
+async function main() {
+  const beans = ["Ethiopia Guji", "Colombia Huila", "Brazil Cerrado", "Kenya Nyeri", "Yemen Haraz"];
+  const customers = [];
+  for (let i = 1; i <= 40; i++) {
+    customers.push(await prisma.customer.create({ data: { name: `Synthetic Café ${String(i).padStart(2, "0")}`, nameAr: `مقهى تجريبي ${i}` } }));
+  }
+  let items = 0, deliveries = 0;
+  for (let n = 0; n < 150; n++) {
+    const c = customers[n % customers.length];
+    const o = await prisma.order.create({ data: { orderNumber: 5001 + n, customerId: c.id, approvalStatus: n % 5 === 0 ? "Pending" : "Yes", status: n % 3 === 0 ? "Completed" : "In Progress" } });
+    for (let k = 0; k <= n % 3; k++) {
+      const it = await prisma.orderItem.create({ data: { orderId: o.id, beanTypeName: beans[(n + k) % beans.length], quantityKg: 5 + ((n * 7 + k * 3) % 40) } });
+      items++;
+      if (n % 3 === 0) { await prisma.delivery.create({ data: { orderItemId: it.id, quantityKg: it.quantityKg, deliveryType: "full" } }); deliveries++; }
+    }
+  }
+  console.log(`synthetic baseline: ${customers.length} customers, 150 orders, ${items} items, ${deliveries} deliveries`);
+}
+
+// The adapter keeps its pool open after $disconnect; exit explicitly.
+main().then(async () => { await prisma.$disconnect(); process.exit(0); }).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });

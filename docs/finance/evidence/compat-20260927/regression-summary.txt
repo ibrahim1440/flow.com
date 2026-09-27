@@ -1,0 +1,88 @@
+  [PASS] a failed PIN writes the candidate row and the marker together
+375 passed, 0 failed
+71 passed, 0 failed
+  [FAIL] and it is the operator who committed, not the approver  
+43 passed, 1 failed
+  [FAIL] requirement refused with 409  
+  [FAIL]   and the refusal names the status  
+  [FAIL] no production order survived the rollback  
+  [FAIL] requirement refused with 409  
+  [FAIL] no production order for the cancelled order  
+  [FAIL] roast refused with 409  
+  [FAIL] green coffee unchanged (120 -> 117)  
+  [FAIL] no roasting batch written  
+  [FAIL] no inventory movement written  
+  [FAIL] roast refused with 409  
+  [FAIL] green coffee unchanged (114 -> 111)  
+  [FAIL] no roasting batch written  
+  [FAIL] no inventory movement written  
+20 passed, 13 failed
+  [FAIL]   and the refusal names the status  
+  [FAIL] delivery committed  
+  [FAIL] delivered units recorded  
+36 passed, 3 failed
+70 passed, 0 failed
+22 passed, 0 failed
+── E4. a QC-passed batch IS packable stock ─────────────────────
+49 passed, 0 failed
+24 passed, 0 failed
+  [PASS] neither request failed with a server error
+  [PASS] neither request failed with a server error
+64 passed, 0 failed
+73 passed, 0 failed
+  [PASS] (the unauthorized roast attempt also failed)
+183 passed, 0 failed
+53 passed, 0 failed
+81 passed, 0 failed
+105 passed, 0 failed
+132 passed, 0 failed
+117 passed, 0 failed
+47 passed, 0 failed
+145 passed, 0 failed
+── R2. one failed PIN writes exactly two rows ──────────────────
+  [PASS] an operator who has not just failed is unaffected
+── R9. under constraint an address that just failed is refused ─
+── R11. a successful PIN login clears its marker; a different failed candidate lingers harmlessly 
+165 passed, 0 failed
+61 passed, 0 failed
+22 passed, 0 failed
+137 passed, 0 failed
+88 passed, 0 failed
+66 passed, 0 failed
+  [FAIL] and the refusal discloses nothing about reset configuration  
+  [FAIL] the authorized training reset is accepted  
+  [FAIL] packaging operations are gone  
+  [FAIL] roasting batches are gone  
+  [FAIL] finished stock is gone  
+  [FAIL] the whole operational dataset is gone  
+  [FAIL] the authorized factory reset is accepted  
+  [FAIL] a wrong confirmation phrase is still refused  
+  [FAIL] a wrong PIN is still refused  
+21 passed, 9 failed
+  harness-selftest          375 passed    0 failed  exit 0  ok
+  production-gate            71 passed    0 failed  exit 0  ok
+  workflow-alignment         43 passed    1 failed  exit 1  exited 1
+  production-concurrency     20 passed   13 failed  exit 1  exited 1
+  lifecycle-locks            36 passed    3 failed  exit 1  exited 1
+  completion-gate            70 passed    0 failed  exit 0  ok
+  reservation-cas            22 passed    0 failed  exit 0  ok
+  packaging-stock            49 passed    0 failed  exit 0  ok
+  packaging-concurrency      24 passed    0 failed  exit 0  ok
+  packaging-idempotency      64 passed    0 failed  exit 0  ok
+  packaging-identity         73 passed    0 failed  exit 0  ok
+  unified-packaging         183 passed    0 failed  exit 0  ok
+  legacy-packaging-routes    53 passed    0 failed  exit 0  ok
+  production-demand          81 passed    0 failed  exit 0  ok
+  blend-integrity           105 passed    0 failed  exit 0  ok
+  po-lifecycle              132 passed    0 failed  exit 0  ok
+  hardening                 117 passed    0 failed  exit 0  ok
+  platform-hardening         47 passed    0 failed  exit 0  ok
+  h2a-hardening             145 passed    0 failed  exit 0  ok
+  h2b-hardening             165 passed    0 failed  exit 0  ok
+  finished-products          61 passed    0 failed  exit 0  ok
+  delivery                   22 passed    0 failed  exit 0  ok
+  order-edit-integrity      137 passed    0 failed  exit 0  ok
+  order-to-delivery          88 passed    0 failed  exit 0  ok
+  release-simulation         66 passed    0 failed  exit 0  ok
+  reset-safety               21 passed    9 failed  exit 1  exited 1
+  26 suite(s), 2270 harness assertions, 26 failed
