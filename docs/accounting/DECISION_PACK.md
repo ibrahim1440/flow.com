@@ -16,6 +16,7 @@ and the opening balances have been reconciled.
 | 4 | Revenue and COGS timing | At transfer of control: POS/café at sale, B2B at delivery, services when performed | sales invoices, COGS |
 | 5 | Advance payments and VAT | Customer advance (liability) plus VAT at receipt, with a prepayment tax invoice; final invoice deducts the advance | customer receipts before delivery |
 | 6 | Opening balances | Trial balance at cutover from Qoyod plus open-item subledgers; tie-out to zero before go-live | go-live |
+| 7 | Cash-flow classification | Adopt the template defaults in §7 and review each account | the cash-flow statement as a published report |
 
 ---
 
@@ -177,3 +178,43 @@ checked against delivery records and the existing Qoyod entries, then flagged fo
 - a UAT period run in parallel with Qoyod and reconciled (same month, same totals)
 - the credential incident closed (`CREDENTIAL_INCIDENT.md`)
 - the regression failures classified and dispositioned (`TEST_RESULTS.md`)
+
+---
+
+## 7. Cash-flow classification
+
+The cash-flow statement uses the indirect method from the ledger. Each balance-sheet account has
+a class: **cash**, **operating**, **investing**, **financing** or **excluded**. The chart
+template assigns the defaults below. They are **provisional** until you approve them. Any account
+can be changed in the chart of accounts (class selector). An account without a class uses the
+default and is marked with * on the statement.
+
+| Accounts | Default class | Why |
+|---|---|---|
+| 1110, 1120 (cash control) | Cash | These are the cash balances the statement explains |
+| 1130–1180 (receivables, VAT, prepayments, inventory, advances) | Operating | Working capital |
+| 1210–1230 (fixed assets) | Investing | Purchase or sale of long-term assets |
+| 1290 Accumulated depreciation | Operating | Depreciation is added back through operating |
+| 21xx, 22xx liabilities | Operating | Working capital and provisions |
+| 3100 Capital and other equity | Financing | Owner funding |
+| 3200 Retained earnings, 3900 Opening balance equity | Excluded | Moves only through closing or opening entries. A non-zero movement here is flagged for review |
+
+Questions for you:
+1. Should any loans or owner current accounts be added as **financing** accounts?
+2. Should zakat and dividends paid be shown as operating or financing?
+3. Is **excluded** right for 3200 and 3900?
+
+Synthetic example (from the automated test): opening cash 100,000; capital 50,000; machine 30,000;
+cash sales 20,000; accrued rent 5,000; depreciation 1,000; prepaid rent 2,400. This gives
+operating 17,600, investing −30,000, financing 50,000, and a cash change of 37,600.
+
+## Provisional test assumptions (implementation and synthetic tests only)
+
+These are **not** decisions. They let the code be built and tested, and they block production
+activation until replaced by your decisions:
+
+- The local fixture approves the commission, `payables.recognition` and `bank.posting` policies in
+  the disposable databases.
+- Stock lines on supplier bills post to GRNI 2120 (pending D-1).
+- The cash-flow classes in §7 are template defaults.
+- Customer receipts on the bank stay blocked until the receivables stage and D-2.

@@ -1,6 +1,6 @@
 # Stage 2 — Bank-to-ledger and payables (design)
 
-Status: design accepted for implementation on the feature branch. Production activation is gated
+Status: **implemented on the feature branch and tested locally** (2026-09-27): migration `20260928120000_accounting_payables_bank`, services, API, screens ACC-20..26, and the cash-flow statement (ACC-27, migration `20260928130000_accounting_cash_flow_class`). Not yet run on Neon or Vercel. Production activation is gated
 (see §6). Builds on the existing Finance models rather than adding parallel ones: `CashAccount`,
 `BankTransaction` (+ splits, matches), `FinObligation`, `Supplier`, `PurchaseRecord`.
 
@@ -108,3 +108,16 @@ REJECTED and REVERSED:
 | Cash-account → GL mapping reviewed by the accountant | bank posting |
 | Cutover date and opening balances (decision pack §6), including open AP per supplier | everything in production |
 | Stock-purchase lines to GRNI are cleared only in stage 4 (valuation, D-1) | stock bills in production (non-stock bills may activate earlier) |
+
+## 7. Implementation notes and known limitations
+
+- **Bank line edited after posting.** Only the confirmation and the void emit events. An amount
+  or split edited after the line has posted is not re-posted. The reconciliation report shows the
+  resulting difference as an itemised line. Recommended fix before activation: void and re-enter,
+  or add an edit event with reversal.
+- **Stock lines on bills** debit GRNI 2120. This is a **provisional test assumption** until D-1
+  (inventory valuation) is decided; GRNI is not cleared until stage 4.
+- **Fixture approvals.** The local fixture approves the `payables.recognition` and `bank.posting`
+  policies so the screens and HTTP tests can run. These approvals exist in the disposable
+  databases only; production has none.
+- **Attachments** on bills are not implemented.
