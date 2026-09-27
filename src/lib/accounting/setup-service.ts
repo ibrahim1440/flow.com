@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { AccountingError } from "./errors";
 import { auditAccounting } from "./audit";
+import { defaultCashFlowClass } from "./cashflow-rules";
 import { COA_TEMPLATE, TEMPLATE_MAPPINGS } from "./coa-template";
 import { POSTING_ROLES, ROLE_SET } from "./catalog";
 import { ledgerTx } from "./journal-service";
@@ -25,6 +26,7 @@ export async function applyChartTemplate(userId: string) {
         data: {
           code: a.code, nameEn: a.en, nameAr: a.ar, type: a.type, parentId: a.parent ? idByCode.get(a.parent)! : null,
           allowPosting: !a.header, controlKind: a.control ?? "NONE", allowManualPosting: a.manual ?? true,
+          cashFlowClass: a.header ? null : defaultCashFlowClass({ code: a.code, type: a.type, control: a.control }),
           createdBy: userId, updatedBy: userId,
         },
       });

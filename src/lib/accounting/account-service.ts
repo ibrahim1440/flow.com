@@ -1,18 +1,20 @@
 // Chart of accounts writes. The database guard stops an account with postings changing type
 // or becoming a parent; this adds the checks it cannot express cheaply (hierarchy cycles,
 // parent/child type agreement, mapped accounts staying postable) and audits every change.
-import type { AccountControlKind, AccountType, Prisma } from "@/generated/prisma/client";
+import type { AccountControlKind, AccountType, CashFlowClass, Prisma } from "@/generated/prisma/client";
 import { AccountingError } from "./errors";
 import { auditAccounting } from "./audit";
 import { ledgerTx } from "./journal-service";
 
 type Tx = Prisma.TransactionClient;
 const TYPES = new Set(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
+const CASH_FLOW = new Set(["CASH", "OPERATING", "INVESTING", "FINANCING", "EXCLUDED"]);
 const CONTROLS = new Set(["NONE", "RECEIVABLE", "PAYABLE", "INVENTORY", "TAX", "COMMISSION_PAYABLE", "CUSTOMER_ADVANCES", "CASH", "CLEARING"]);
 
 export type AccountInput = {
   code?: unknown; nameEn?: unknown; nameAr?: unknown; type?: unknown; parentId?: unknown; allowPosting?: unknown;
   isActive?: unknown; controlKind?: unknown; allowManualPosting?: unknown; qoyodAccountId?: unknown;
+  cashFlowClass?: unknown;
 };
 
 function text(v: unknown, field: string, required: boolean, max = 120): string | null | undefined {
@@ -45,6 +47,14 @@ async function checkParent(tx: Tx, id: string | null, parentId: string, type: st
   if (parent.allowPosting) await tx.account.update({ where: { id: parent.id }, data: { allowPosting: false } });
 }
 
+/** Cash-flow class: null (or "") falls back to the template default (see cashflow-rules.ts). */
+function cashFlow(v: unknown): CashFlowClass | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  if (!CASH_FLOW.has(String(v))) throw new AccountingError("Unknown cash-flow class.", 400);
+  return String(v) as CashFlowClass;
+}
+
 export async function createAccount(input: AccountInput, userId: string) {
   const code = text(input.code, "Code", true, 20)!;
   if (!/^[0-9A-Za-z.-]+$/.test(code)) throw new AccountingError("Code may contain letters, digits, dots and dashes only.", 400);
@@ -52,6 +62,7 @@ export async function createAccount(input: AccountInput, userId: string) {
   if (!TYPES.has(type)) throw new AccountingError("Choose an account type.", 400);
   const controlKind = String(input.controlKind ?? "NONE");
   if (!CONTROLS.has(controlKind)) throw new AccountingError("Unknown control type.", 400);
+  const cashFlowClass = cashFlow(input.cashFlowClass) ?? null;
   return ledgerTx(async (tx) => {
     const parentId = typeof input.parentId === "string" && input.parentId ? input.parentId : null;
     if (parentId) await checkParent(tx, null, parentId, type);
@@ -61,7 +72,7 @@ export async function createAccount(input: AccountInput, userId: string) {
         type: type as AccountType, parentId, allowPosting: bool(input.allowPosting, "allowPosting") ?? true,
         isActive: bool(input.isActive, "isActive") ?? true, controlKind: controlKind as AccountControlKind,
         allowManualPosting: bool(input.allowManualPosting, "allowManualPosting") ?? controlKind === "NONE",
-        qoyodAccountId: text(input.qoyodAccountId, "Qoyod id", false) ?? null, createdBy: userId, updatedBy: userId,
+        qoyodAccountId: text(input.qoyodAccountId, "Qoyod id", false) ?? null, cashFlowClass, createdBy: userId, updatedBy: userId,
       },
     });
     await auditAccounting(tx, { action: "account.create", entityType: "account", entityId: a.id, userId, after: a });
@@ -111,6 +122,8 @@ export async function updateAccount(id: string, input: AccountInput, userId: str
     if (manual !== undefined) data.allowManualPosting = manual;
     const q = text(input.qoyodAccountId, "Qoyod id", false);
     if (q !== undefined) data.qoyodAccountId = q;
+    const cf = cashFlow(input.cashFlowClass);
+    if (cf !== undefined) data.cashFlowClass = cf;
     const after = await tx.account.update({ where: { id }, data });
     await auditAccounting(tx, { action: "account.update", entityType: "account", entityId: id, userId, before, after });
     return after;

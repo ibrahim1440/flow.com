@@ -9,7 +9,7 @@ import { Download } from "lucide-react";
 import { Badge, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, useApi, useL } from "../../finance/_components/ui";
 import { Pager, SOURCE_LABEL, riyadhToday, useAutoText, useDay } from "../_components/kit";
 
-type View = "tb" | "is" | "bs" | "gl" | "com";
+type View = "tb" | "is" | "bs" | "cf" | "gl" | "com";
 type TBLine = { accountId: string; code: string; nameEn: string; nameAr: string | null; openingDebit: number; openingCredit: number; periodDebit: number; periodCredit: number; closingDebit: number; closingCredit: number };
 type TB = { lines: TBLine[]; totals: Omit<TBLine, "accountId" | "code" | "nameEn" | "nameAr">; balanced: boolean; provisionalEntries: number };
 type Section = { key: string; en: string; ar: string; lines: { accountId: string; code: string; nameEn: string; nameAr: string | null; amount: number }[]; total: number };
@@ -18,6 +18,9 @@ type BS = { assets: Section[]; liabilities: Section[]; equity: Section[]; curren
 type GL = { account: { code: string; nameEn: string; nameAr: string | null; debitNormal: boolean }; opening: number; closing: number; periodDebit: number; periodCredit: number; page: number; pageSize: number; total: number;
   lines: { id: string; entryId: string; entryNo: number; entryDate: string; description: string | null; debit: number; credit: number; balance: number; sourceModule: string; isProvisional: boolean }[] };
 type Rec = { account: { code: string; nameEn: string; nameAr: string | null } | null; rows: { employeeId: string; name: string; ledgerBalance: number; subledgerPosted: number; difference: number; waitingAmount: number; waitingCount: number; beforeCutoverOrSkipped: number; withoutEventCount: number }[]; totals: { ledgerBalance: number; subledgerPosted: number; difference: number }; reconciled: boolean };
+type CFLine = { accountId: string; code: string; nameEn: string; nameAr: string | null; amount: string; defaulted: boolean };
+type CFPart = { lines: CFLine[]; total: string };
+type CF = { netProfit: string; operating: CFPart; investing: CFPart; financing: CFPart; excluded: CFPart; netChange: string; cashOpening: string; cashClosing: string; reconciled: boolean; defaultedAccounts: string[]; provisionalEntries: number };
 type Acc = { id: string; code: string; nameEn: string; nameAr: string | null; allowPosting: boolean };
 
 export default function ReportsPage() {
@@ -37,6 +40,7 @@ export default function ReportsPage() {
   const tb = useApi<TB>(view === "tb" ? `/api/accounting/reports/trial-balance?${qs}` : null);
   const is = useApi<IS>(view === "is" ? `/api/accounting/reports/income-statement?${qs}` : null);
   const bs = useApi<BS>(view === "bs" ? `/api/accounting/reports/balance-sheet?${qs}` : null);
+  const cf = useApi<CF>(view === "cf" ? `/api/accounting/reports/cash-flow?${qs}` : null);
   const gl = useApi<GL>(view === "gl" && accountId ? `/api/accounting/reports/general-ledger?${qs}&accountId=${accountId}&page=${page}` : null);
   const rec = useApi<Rec>(view === "com" ? "/api/accounting/reports/commission-reconciliation" : null);
   const accounts = useApi<Acc[]>(view === "gl" ? "/api/accounting/coa" : null);
@@ -57,10 +61,14 @@ export default function ReportsPage() {
     ...s.lines.map((l) => <tr key={l.accountId} className="hover:bg-cream/40 cursor-pointer" onClick={() => drill(l.accountId)}><Td><span className="ps-4">{l.code} · {name(l)}</span></Td><Td num>{money(l.amount)}</Td></tr>),
   ]);
 
+  const minor = (v: string) => Math.round(Number(v) * 100);
+  const signed = (v: string) => { const m = minor(v); return <span className={m < 0 ? "text-red-700" : ""}>{m < 0 ? `(${money(-m)})` : money(m)}</span>; };
+  const cfLines = (ls: CFLine[]) => ls.map((l) => <tr key={l.accountId} className="hover:bg-cream/40 cursor-pointer" onClick={() => drill(l.accountId)}><Td><span className="ps-4">{l.code} · {name(l)}{l.defaulted ? " *" : ""}</span></Td><Td num>{signed(l.amount)}</Td></tr>);
+
   return (
     <Card>
       <div className="flex items-end gap-3 flex-wrap">
-        <Segmented<View> value={view} onChange={setView} options={[{ value: "tb", label: L("ميزان المراجعة", "Trial balance") }, { value: "is", label: L("قائمة الدخل", "Income statement") }, { value: "bs", label: L("المركز المالي", "Balance sheet") }, { value: "gl", label: L("دفتر الأستاذ", "General ledger") }, { value: "com", label: L("مطابقة العمولات", "Commission reconciliation") }]} />
+        <Segmented<View> value={view} onChange={setView} options={[{ value: "tb", label: L("ميزان المراجعة", "Trial balance") }, { value: "is", label: L("قائمة الدخل", "Income statement") }, { value: "bs", label: L("المركز المالي", "Balance sheet") }, { value: "cf", label: L("التدفقات النقدية", "Cash flow") }, { value: "gl", label: L("دفتر الأستاذ", "General ledger") }, { value: "com", label: L("مطابقة العمولات", "Commission reconciliation") }]} />
         {view !== "com" && <>
           {view !== "bs" && <Field label={L("من", "From")}><input type="date" className={INPUT} value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} /></Field>}
           <Field label={view === "bs" ? L("كما في", "As of") : L("إلى", "To")}><input type="date" className={INPUT} value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} /></Field>
@@ -117,7 +125,31 @@ export default function ReportsPage() {
           </tbody>
         </Table>
         <div className="flex items-center gap-2">{bs.data.balanced ? <Badge tone="ok">{L("الأصول = الالتزامات + حقوق الملكية ✓", "Assets = liabilities + equity ✓")}</Badge> : <Badge tone="bad">{L("غير متوازن", "Not balanced")}</Badge>}</div>
-        <Notice tone="warn">{L("قائمة التدفقات النقدية ليست في هذا الإصدار: تحتاج ربط الحسابات البنكية بدفتر الأستاذ. التوقعات النقدية في وحدة المالية ليست قائمة تدفقات تاريخية.", "The cash-flow statement is not in this release: it needs bank accounts linked to the ledger. Finance's cash forecast is not a historical cash-flow statement.")}</Notice>
+      </>)}
+
+      {view === "cf" && (cf.error ? <ErrorState error={cf.error} onRetry={cf.reload} /> : !cf.data ? <LoadingState /> : <>
+        {provNote(cf.data.provisionalEntries)}
+        <Notice tone="warn">{L("تصنيف الحسابات في هذه القائمة افتراضي من قالب الدليل وبانتظار اعتماد المحاسب؛ يمكن تغييره لكل حساب من دليل الحسابات. القيود الافتتاحية تُعامل كأرصدة افتتاحية.", "Account classification here is the chart template's default, awaiting the accountant's approval; it can be changed per account in the chart of accounts. Opening entries count as opening balances.")}</Notice>
+        <Table>
+          <thead><tr><Th>{L("البند", "Line")}</Th><Th num>{L("المبلغ (ر.س)", "Amount (SAR)")}</Th></tr></thead>
+          <tbody>
+            <tr className="font-extrabold"><Td>{L("الأنشطة التشغيلية", "Operating activities")}</Td><Td num>{signed(cf.data.operating.total)}</Td></tr>
+            <tr><Td><span className="ps-4">{L("صافي الربح (الخسارة)", "Net profit (loss)")}</span></Td><Td num>{signed(cf.data.netProfit)}</Td></tr>
+            {cfLines(cf.data.operating.lines)}
+            <tr className="font-extrabold"><Td>{L("الأنشطة الاستثمارية", "Investing activities")}</Td><Td num>{signed(cf.data.investing.total)}</Td></tr>
+            {cfLines(cf.data.investing.lines)}
+            <tr className="font-extrabold"><Td>{L("الأنشطة التمويلية", "Financing activities")}</Td><Td num>{signed(cf.data.financing.total)}</Td></tr>
+            {cfLines(cf.data.financing.lines)}
+            {cf.data.excluded.lines.length > 0 && <><tr className="font-extrabold"><Td>{L("حركات مستبعدة (تحتاج مراجعة)", "Excluded movements (review)")}</Td><Td num>{signed(cf.data.excluded.total)}</Td></tr>{cfLines(cf.data.excluded.lines)}</>}
+            <tr className="bg-cream-dark font-extrabold"><Td>{L("صافي التغير في النقد", "Net change in cash")}</Td><Td num>{signed(cf.data.netChange)}</Td></tr>
+            <tr><Td>{L("النقد أول الفترة", "Cash at start of period")}</Td><Td num>{signed(cf.data.cashOpening)}</Td></tr>
+            <tr className="font-extrabold"><Td>{L("النقد آخر الفترة", "Cash at end of period")}</Td><Td num>{signed(cf.data.cashClosing)}</Td></tr>
+          </tbody>
+        </Table>
+        <div className="flex flex-wrap items-center gap-2">
+          {cf.data.reconciled ? <Badge tone="ok">{L("التشغيلية + الاستثمارية + التمويلية = التغير في النقد ✓", "Operating + investing + financing = change in cash ✓")}</Badge> : <Badge tone="bad">{L("لا تطابق التغير في النقد", "Does not match the change in cash")}</Badge>}
+          {cf.data.defaultedAccounts.length > 0 && <span className="text-[12px] text-amber-800">{L(`* حسابات بتصنيف افتراضي: ${cf.data.defaultedAccounts.join("، ")}`, `* Default-classified accounts: ${cf.data.defaultedAccounts.join(", ")}`)}</span>}
+        </div>
       </>)}
 
       {view === "gl" && <>

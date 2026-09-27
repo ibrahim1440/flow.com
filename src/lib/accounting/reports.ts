@@ -20,7 +20,7 @@ async function accountsById() {
   return new Map<string, AccountRow>(rows.map((r) => [r.id, r as AccountRow]));
 }
 
-async function provisionalCount(from: Date | null, to: Date) {
+export async function provisionalCount(from: Date | null, to: Date) {
   const r = await prisma.journalEntry.count({ where: { isProvisional: true, status: { in: ["POSTED", "REVERSED"] }, entryDate: { lte: to, ...(from ? { gte: from } : {}) } } });
   return r;
 }

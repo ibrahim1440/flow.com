@@ -1263,6 +1263,9 @@ model Account {
   controlKind        AccountControlKind @default(NONE)
   /// Only meaningful on a control account: whether a manual journal may post to it.
   allowManualPosting Boolean            @default(true)
+  /// Cash-flow statement class for balance-sheet accounts (indirect method). Template default,
+  /// reviewed by the accountant; null falls back by account type and is reported as defaulted.
+  cashFlowClass      CashFlowClass?
   qoyodAccountId     String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -3317,4 +3320,13 @@ model SupplierBillLine {
   costCenterId  String?
 
   @@unique([billId, lineNo])
+}
+
+enum CashFlowClass {
+  CASH
+  OPERATING
+  INVESTING
+  FINANCING
+  /// Moves only through opening or closing entries (retained earnings, opening-balance equity).
+  EXCLUDED
 }

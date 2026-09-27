@@ -8,7 +8,7 @@ import { Plus, Upload } from "lucide-react";
 import { ApiError, Badge, Button, Card, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, api, useApi, useL, useFinance } from "../../finance/_components/ui";
 import { ROLE_LABELS, useCan } from "../_components/kit";
 
-type Account = { id: string; code: string; nameEn: string; nameAr: string | null; type: string; parentId: string | null; allowPosting: boolean; isActive: boolean; controlKind: string; allowManualPosting: boolean; lineCount: number; roles: string[] };
+type Account = { id: string; code: string; nameEn: string; nameAr: string | null; type: string; parentId: string | null; allowPosting: boolean; isActive: boolean; controlKind: string; allowManualPosting: boolean; cashFlowClass: string | null; lineCount: number; roles: string[] };
 const TYPE_LABEL: Record<string, [string, string]> = { ASSET: ["أصول", "Asset"], LIABILITY: ["التزامات", "Liability"], EQUITY: ["حقوق ملكية", "Equity"], REVENUE: ["إيرادات", "Revenue"], EXPENSE: ["مصروفات", "Expense"] };
 const CONTROL_LABEL: Record<string, [string, string]> = {
   RECEIVABLE: ["مراقبة · ذمم مدينة", "Control · receivables"], PAYABLE: ["مراقبة · ذمم دائنة", "Control · payables"], INVENTORY: ["مراقبة · مخزون", "Control · inventory"],
@@ -16,7 +16,8 @@ const CONTROL_LABEL: Record<string, [string, string]> = {
   CASH: ["نقدية", "Cash"], CLEARING: ["وسيط", "Clearing"],
 };
 type Filter = "ALL" | "POSTABLE" | "CONTROL" | "INACTIVE";
-type Form = { id?: string; code: string; nameEn: string; nameAr: string; type: string; parentId: string; allowPosting: boolean; isActive: boolean; controlKind: string; allowManualPosting: boolean };
+const CASH_FLOW_LABEL: Record<string, [string, string]> = { CASH: ["نقد", "Cash"], OPERATING: ["تشغيلية", "Operating"], INVESTING: ["استثمارية", "Investing"], FINANCING: ["تمويلية", "Financing"], EXCLUDED: ["مستبعد", "Excluded"] };
+type Form = { id?: string; code: string; nameEn: string; nameAr: string; type: string; parentId: string; allowPosting: boolean; isActive: boolean; controlKind: string; allowManualPosting: boolean; cashFlowClass: string };
 
 export default function AccountsPage() {
   const { L, name } = useL();
@@ -66,7 +67,7 @@ export default function AccountsPage() {
   if (data.length === 0) return (
     <EmptyState title={L("دليل الحسابات فارغ", "The chart of accounts is empty")} body={L("حمّل القالب المبدئي (بانتظار مراجعة المحاسب) أو أنشئ الحسابات يدوياً.", "Load the starting template (pending the accountant's review) or create accounts by hand.")}>
       {can("coa_manage") && <><Button kind="primary" icon={Upload} busy={busy} onClick={loadTemplate}>{L("تحميل القالب", "Load template")}</Button>
-        <Button icon={Plus} onClick={() => setForm({ code: "", nameEn: "", nameAr: "", type: "EXPENSE", parentId: "", allowPosting: true, isActive: true, controlKind: "NONE", allowManualPosting: true })}>{L("حساب جديد", "New account")}</Button></>}
+        <Button icon={Plus} onClick={() => setForm({ code: "", nameEn: "", nameAr: "", type: "EXPENSE", parentId: "", allowPosting: true, isActive: true, controlKind: "NONE", allowManualPosting: true, cashFlowClass: "" })}>{L("حساب جديد", "New account")}</Button></>}
     </EmptyState>
   );
 
@@ -77,7 +78,7 @@ export default function AccountsPage() {
           <Segmented<Filter> value={filter} onChange={setFilter} options={[{ value: "ALL", label: L("الكل", "All") }, { value: "POSTABLE", label: L("قابلة للترحيل", "Postable") }, { value: "CONTROL", label: L("مراقبة", "Control") }, { value: "INACTIVE", label: L("غير نشطة", "Inactive") }]} />
           <Field label={L("بحث", "Search")}><input className={INPUT} placeholder={L("رمز أو اسم الحساب…", "Account code or name…")} value={q} onChange={(e) => setQ(e.target.value)} /></Field>
         </div>
-        {can("coa_manage") && <Button kind="primary" icon={Plus} onClick={() => setForm({ code: "", nameEn: "", nameAr: "", type: "EXPENSE", parentId: "", allowPosting: true, isActive: true, controlKind: "NONE", allowManualPosting: true })}>{L("حساب جديد", "New account")}</Button>}
+        {can("coa_manage") && <Button kind="primary" icon={Plus} onClick={() => setForm({ code: "", nameEn: "", nameAr: "", type: "EXPENSE", parentId: "", allowPosting: true, isActive: true, controlKind: "NONE", allowManualPosting: true, cashFlowClass: "" })}>{L("حساب جديد", "New account")}</Button>}
       </div>
       <Table>
         <thead><tr><Th>{L("الرمز", "Code")}</Th><Th>{L("الحساب", "Account")}</Th><Th>{L("النوع", "Type")}</Th><Th>{L("الخصائص", "Properties")}</Th><Th>{L("دور الترحيل", "Posting role")}</Th><Th></Th></tr></thead>
@@ -97,7 +98,7 @@ export default function AccountsPage() {
                 </span>
               </Td>
               <Td><span className="flex gap-1 flex-wrap">{a.roles.map((r) => <Badge key={r} tone="brand">{L(...(ROLE_LABELS[r] ?? [r, r]))}</Badge>)}</span></Td>
-              <Td>{can("coa_manage") && <button type="button" className="text-[13px] font-bold text-orange hover:underline" onClick={() => setForm({ id: a.id, code: a.code, nameEn: a.nameEn, nameAr: a.nameAr ?? "", type: a.type, parentId: a.parentId ?? "", allowPosting: a.allowPosting, isActive: a.isActive, controlKind: a.controlKind, allowManualPosting: a.allowManualPosting })}>{L("تعديل", "Edit")}</button>}</Td>
+              <Td>{can("coa_manage") && <button type="button" className="text-[13px] font-bold text-orange hover:underline" onClick={() => setForm({ id: a.id, code: a.code, nameEn: a.nameEn, nameAr: a.nameAr ?? "", type: a.type, parentId: a.parentId ?? "", allowPosting: a.allowPosting, isActive: a.isActive, controlKind: a.controlKind, allowManualPosting: a.allowManualPosting, cashFlowClass: a.cashFlowClass ?? "" })}>{L("تعديل", "Edit")}</button>}</Td>
             </tr>
           ))}
         </tbody>
@@ -123,6 +124,11 @@ export default function AccountsPage() {
                   <option value="NONE">{L("بدون", "None")}</option>{Object.entries(CONTROL_LABEL).map(([k, v]) => <option key={k} value={k}>{L(...v)}</option>)}
                 </select>
               </Field>
+              {!["REVENUE", "EXPENSE"].includes(form.type) && <Field label={L("تصنيف التدفقات النقدية", "Cash-flow class")}>
+                <select className={INPUT} value={form.cashFlowClass} onChange={(e) => setForm({ ...form, cashFlowClass: e.target.value })}>
+                  <option value="">{L("افتراضي القالب", "Template default")}</option>{Object.entries(CASH_FLOW_LABEL).map(([k, v]) => <option key={k} value={k}>{L(...v)}</option>)}
+                </select>
+              </Field>}
             </div>
             <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={form.allowPosting} onChange={(e) => setForm({ ...form, allowPosting: e.target.checked })} />{L("يقبل الترحيل", "Accepts postings")}</label>
             <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />{L("نشط", "Active")}</label>
