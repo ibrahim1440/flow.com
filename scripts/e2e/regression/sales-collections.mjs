@@ -1353,6 +1353,12 @@ async function main() {
     check("the payout history is preserved at 8.00", row.balances.completedPayouts === "8.00", S(row.balances));
     check("the signed balance is -8.00", row.balances.signedBalance === "-8.00", S(row.balances));
     check("shown as a recovery of 8.00, not hidden behind zero", row.balances.recoveryBalance === "8.00", S(row.balances));
+    // Every movement here is placed, so the shortfall IS a finding about what happened
+    // rather than a hole in the record. That is what makes "owed back" a true statement.
+    check("the balance is RESOLVED, so the recovery is an established figure",
+      row.balances.balanceStatus === "RESOLVED", S(row.balances.balanceStatus));
+    check("and nothing is reported as an unexplained shortfall",
+      row.balances.unresolvedShortfall === "0.00", S(row.balances.unresolvedShortfall));
     check("and nothing is available to pay", row.balances.availableToPay === "0.00", S(row.balances));
     const afterRecovery = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "1.00", idempotencyKey: K() });
     check("a further payout is refused while a recovery is outstanding", afterRecovery.status === 409, S(afterRecovery.json).slice(0, 170));
@@ -1573,7 +1579,13 @@ async function main() {
     check("+10.00 and -10.00 are both reported at full magnitude",
       rG.balances.unattributedPositive === "10.00" && rG.balances.unattributedNegative === "10.00", S(rG.balances));
     check("so the period is NOT fully attributed", rG.balances.fullyAttributed === false, S(rG.balances));
-    check("and the block is named", rG.balances.payoutBlock === "ENTITLEMENT_UNRESOLVED", S(rG.balances.payoutBlock));
+    check("and the block is named", rG.balances.payoutBlock === "BALANCE_UNRESOLVED", S(rG.balances.payoutBlock));
+    check("the balance is marked UNRESOLVED rather than reported as a figure",
+      rG.balances.balanceStatus === "UNRESOLVED", S(rG.balances.balanceStatus));
+    // The derivable part is +10.00 and it is NOT offered as payable. A number in that
+    // field reads as "this may be paid", and on a period nobody can derive, none may.
+    check("nothing is available to pay, though the derivable part is positive",
+      rG.balances.availableToPay === "0.00" && rG.balances.provisionalBalance === "10.00", S(rG.balances));
     const gateRefused = await payout(payer, { action: "payout", employeeId: gate.id, month, amount: "1.00", idempotencyKey: K() });
     check("a payout is refused although 10.00 still reads as available", gateRefused.status === 409, S(gateRefused.json).slice(0, 200));
     check("and the refusal counts the movements rather than quoting a net",
@@ -1601,7 +1613,7 @@ async function main() {
     check("every movement is placed, so the gap count is zero", rG.balances.unattributedCount === 0, S(rG.balances));
     check("but 4.00 of reversal is unallocated", rG.balances.unallocatedReversal === "4.00", S(rG.balances));
     check("the linked entitlement is still positive", Number(rG.balances.approvedEntitlement) > 0, S(rG.balances));
-    check("and it is NOT payable", rG.balances.fullyAttributed === false && rG.balances.payoutBlock === "ENTITLEMENT_UNRESOLVED", S(rG.balances));
+    check("and it is NOT payable", rG.balances.fullyAttributed === false && rG.balances.payoutBlock === "BALANCE_UNRESOLVED", S(rG.balances));
     const unallocRefused = await payout(payer, { action: "payout", employeeId: gate.id, month, amount: "1.00", idempotencyKey: K() });
     check("the payout is refused", unallocRefused.status === 409, S(unallocRefused.json).slice(0, 200));
     check("and the refusal names the unallocated reversal",
@@ -1616,6 +1628,64 @@ async function main() {
       `SELECT count(*)::int n FROM "CommissionLedgerEntry" WHERE "employeeId"=$1`, [gate.id]);
     check("and every historical movement is still there", preserved[0].n >= 2, S(preserved[0]));
     await c.query(`DELETE FROM "CommissionLedgerEntry" WHERE id=$1`, [`${P}_unalloc`]);
+
+    sub("D19. a shortfall is not a debt until the history behind it is complete");
+    //
+    // The case that made this necessary, seen on the preview database: a rep showed a 3.00
+    // "recovery owed" while the nine movements the model could not place netted to exactly
+    // +3.00. Adopt them and the period closes at zero. Nothing was ever owed — the figure
+    // was the hole in the data with a minus sign in front of it, and the screen was
+    // asserting a debt against a real person on the strength of it.
+    //
+    // So: overpay a period, THEN make it underivable, and watch what the balance claims.
+    const debt = await solo("debt", "920106");
+    await payout(payer, { action: "approve", employeeId: debt.id, month });
+    await payout(payer, { action: "payout", employeeId: debt.id, month, amount: "10.00", idempotencyKey: K() });
+    let rDbt = await rowOf(debt.id);
+    check("the period is settled and resolved", rDbt.balances.balanceStatus === "RESOLVED"
+      && rDbt.balances.availableToPay === "0.00" && rDbt.balances.recoveryBalance === "0.00", S(rDbt.balances));
+
+    // A manual clawback on COMPLETE history. This one really is a debt.
+    const claw = await payout(payer, { action: "adjust", employeeId: debt.id, month, amount: "-4.00", reason: "D19 — agreed clawback" });
+    check("a negative adjustment is recorded", claw.status === 201, S(claw.json).slice(0, 140));
+    rDbt = await rowOf(debt.id);
+    check("it produces a real recovery of 4.00", rDbt.balances.recoveryBalance === "4.00", S(rDbt.balances));
+    check("because the balance is RESOLVED", rDbt.balances.balanceStatus === "RESOLVED", S(rDbt.balances.balanceStatus));
+    check("and no unexplained shortfall is claimed", rDbt.balances.unresolvedShortfall === "0.00", S(rDbt.balances));
+
+    // Now break the derivability of the very same period.
+    const dbtPeriod = `${P}_debt_orphan`;
+    await c.query(
+      `INSERT INTO "CommissionLedgerEntry" (id,type,"employeeId","periodStart",amount,currency,reason,"createdAt")
+       SELECT $1,'ACCRUAL',$2,a."periodStart",'5.00','SAR','D19 residue',now()
+         FROM "CommissionAccrual" a WHERE a."employeeId"=$2 LIMIT 1`, [dbtPeriod, debt.id]);
+    rDbt = await rowOf(debt.id);
+
+    check("the same period is now UNRESOLVED", rDbt.balances.balanceStatus === "UNRESOLVED", S(rDbt.balances.balanceStatus));
+    // THE assertion. The arithmetic has not changed; what it is allowed to claim has.
+    check("the 4.00 is NO LONGER reported as a recovery owed",
+      rDbt.balances.recoveryBalance === "0.00", S(rDbt.balances.recoveryBalance));
+    check("it is reported as an unexplained shortfall of 4.00 instead",
+      rDbt.balances.unresolvedShortfall === "4.00", S(rDbt.balances.unresolvedShortfall));
+    check("the arithmetic itself is unchanged and still visible",
+      rDbt.balances.provisionalBalance === "-4.00" && rDbt.balances.signedBalance === "-4.00", S(rDbt.balances));
+    check("and the block says the BALANCE is unresolved, not that money is owed",
+      rDbt.balances.payoutBlock === "BALANCE_UNRESOLVED", S(rDbt.balances.payoutBlock));
+
+    const dbtRefused = await payout(payer, { action: "payout", employeeId: debt.id, month, amount: "1.00", idempotencyKey: K() });
+    check("a payout is refused", dbtRefused.status === 409, S(dbtRefused.json).slice(0, 200));
+    check("and the refusal says unresolved rather than owed",
+      /balance for this period is unresolved/i.test(S(dbtRefused.json))
+        && !/owed back/i.test(S(dbtRefused.json)), S(dbtRefused.json).slice(0, 220));
+    check("naming the shortfall as a gap in the record",
+      /gap in the record rather than a debt/i.test(S(dbtRefused.json)), S(dbtRefused.json).slice(0, 260));
+
+    // Remove the residue: the debt was real all along, and must reappear as one.
+    await c.query(`DELETE FROM "CommissionLedgerEntry" WHERE id=$1`, [dbtPeriod]);
+    rDbt = await rowOf(debt.id);
+    check("with the record complete again the 4.00 is a recovery once more",
+      rDbt.balances.balanceStatus === "RESOLVED" && rDbt.balances.recoveryBalance === "4.00"
+        && rDbt.balances.unresolvedShortfall === "0.00", S(rDbt.balances));
   }
 
   }

@@ -57,8 +57,14 @@ type EmployeeRow = {
     adjustments: string;
     completedPayouts: string;
     signedBalance: string;
+    /** Whether the signed balance may be read as a statement about what is owed. */
+    balanceStatus: "RESOLVED" | "UNRESOLVED";
+    provisionalBalance: string;
     availableToPay: string;
+    /** Only ever non-zero on a RESOLVED period. A debt, established from complete history. */
     recoveryBalance: string;
+    /** The negative face of an UNRESOLVED balance. A gap in the record, not a debt. */
+    unresolvedShortfall: string;
     unattributed: string;
     unattributedPositive: string;
     unattributedNegative: string;
@@ -67,7 +73,7 @@ type EmployeeRow = {
     unallocatedReversal: string;
     fullyAttributed: boolean;
     /** Why nothing may be paid, if anything. Same codes the API returns. */
-    payoutBlock: "ENTITLEMENT_UNRESOLVED" | "RECOVERY_OUTSTANDING" | "NOTHING_PAYABLE" | null;
+    payoutBlock: "BALANCE_UNRESOLVED" | "RECOVERY_OUTSTANDING" | "NOTHING_PAYABLE" | null;
   };
   pendingCount: number;
   approvedCount: number;
@@ -325,11 +331,20 @@ export default function CommissionReviewPage() {
                 <Td><Money value={e.adjustments} /></Td>
                 <Td><Money value={e.paid} /></Td>
                 <Td>
-                  <Money value={e.balances.availableToPay} strong />
+                  {/* On an unresolved period the arithmetic result is shown as a dash, not
+                      as a figure. A number in this column reads as "this is what you may
+                      pay", and on a period the model cannot derive, nothing is. */}
+                  {e.balances.balanceStatus === "UNRESOLVED" ? (
+                    <span data-testid={`unresolved-amount-${e.employeeId}`} className="font-bold text-oo-text-muted">
+                      —
+                    </span>
+                  ) : (
+                    <Money value={e.balances.availableToPay} strong />
+                  )}
                   {/* Earned is not payable. Both are shown, because a reviewer asked to
                       authorise a payment needs the number they may actually pay, and a
                       reviewer reading a statement needs the number that was earned. */}
-                  {e.balances.availableToPay !== e.outstanding && (
+                  {e.balances.balanceStatus === "RESOLVED" && e.balances.availableToPay !== e.outstanding && (
                     <span
                       data-testid={`earned-${e.employeeId}`}
                       className="block text-[12px] leading-[18px] text-oo-text-muted"
@@ -345,7 +360,9 @@ export default function CommissionReviewPage() {
                       )}
                     </span>
                   )}
-                  {/* A debt is never shown as a zero. */}
+                  {/* A debt is never shown as a zero — and never shown at all unless the
+                      history behind it is complete. `recoveryBalance` is zero on an
+                      unresolved period by construction, so this cannot misfire. */}
                   {Number(e.balances.recoveryBalance) > 0 && (
                     <span
                       data-testid={`recovery-${e.employeeId}`}
@@ -361,15 +378,29 @@ export default function CommissionReviewPage() {
                   {/* An absent button explains nothing. When entitlement cannot be
                       derived the figure above is not trustworthy, and the reviewer is
                       told that rather than left to wonder where the action went. */}
-                  {e.balances.payoutBlock === "ENTITLEMENT_UNRESOLVED" && (
-                    <span
-                      data-testid={`unresolved-${e.employeeId}`}
-                      title={blockReason(e.balances.payoutBlock, e.balances, ar) ?? undefined}
-                      className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
-                    >
-                      <AlertTriangle size={12} aria-hidden />
-                      {ar ? "استحقاق غير مُسوّى — غير قابل للصرف" : "entitlement unresolved — not payable"}
-                    </span>
+                  {e.balances.payoutBlock === "BALANCE_UNRESOLVED" && (
+                    <>
+                      <span
+                        data-testid={`unresolved-${e.employeeId}`}
+                        title={blockReason(e.balances.payoutBlock, e.balances, ar) ?? undefined}
+                        className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
+                      >
+                        <AlertTriangle size={12} aria-hidden />
+                        {ar ? "الرصيد غير مُسوّى — تتطلب تسوية" : "balance unresolved — reconciliation required"}
+                      </span>
+                      {/* The arithmetic, shown so nothing is hidden, and worded so nobody
+                          collects it. This is the figure that used to read "recovery owed". */}
+                      {Number(e.balances.unresolvedShortfall) > 0 && (
+                        <span
+                          data-testid={`shortfall-${e.employeeId}`}
+                          className="block text-[12px] leading-[18px] text-oo-text-muted"
+                        >
+                          {ar ? "نقص غير مُفسَّر " : "unexplained shortfall "}
+                          <Money value={e.balances.unresolvedShortfall} />
+                          {ar ? " — ليس دَيناً" : " — not a debt"}
+                        </span>
+                      )}
+                    </>
                   )}
                   {/* Only the exception is worth a chip. A green "matches" on every row is
                       noise the reviewer learns to stop reading. */}
@@ -600,12 +631,13 @@ function blockReason(
   ar: boolean,
 ): string | null {
   if (code === "RECOVERY_OUTSTANDING") {
+    // Only reachable on a RESOLVED period, so this is a finding about complete history.
     return ar
-      ? `صُرف ${b.recoveryBalance} أكثر من الاستحقاق الحالي ويجب استرداده. لا يُصرف شيء قبل تسويته.`
-      : `${b.recoveryBalance} has been paid beyond the current entitlement and is owed back. ` +
-          "Nothing is payable until the recovery is resolved.";
+      ? `صُرف ${b.recoveryBalance} أكثر ممّا يدعمه سجلّ هذه الفترة الكامل، ويجب استرداده. لا يُصرف شيء قبل تسويته.`
+      : `${b.recoveryBalance} has been paid beyond the entitlement this period's complete history ` +
+          "supports, and is owed back. Nothing is payable until the recovery is resolved.";
   }
-  if (code === "ENTITLEMENT_UNRESOLVED") {
+  if (code === "BALANCE_UNRESOLVED") {
     const bits = ar
       ? [
           b.unattributedCount > 0
@@ -627,9 +659,18 @@ function blockReason(
             : null,
         ];
     const detail = bits.filter(Boolean).join(ar ? "؛ " : "; ");
+    // The shortfall is named as a gap, never as a debt. The parts the model could not
+    // place are exactly the ones that would close it, so a minus sign here is missing
+    // history rather than money somebody owes.
+    const shortfall =
+      Number(b.unresolvedShortfall) > 0
+        ? ar
+          ? ` الجزء القابل للاشتقاق ينقص ${b.unresolvedShortfall} — وهذا نقص في السجلّ لا دَيْن على الموظّف.`
+          : ` The derivable part is short by ${b.unresolvedShortfall} — that is a gap in the record, not a debt owed by the employee.`
+        : "";
     return ar
-      ? `تعذّر اشتقاق الاستحقاق لهذه الفترة، فلا شيء فيها قابل للصرف: ${detail}. تجب التسوية أولاً.`
-      : `This period's entitlement cannot be fully derived, so nothing in it is payable: ${detail}. ` +
+      ? `رصيد هذه الفترة غير مُسوّى، فلا شيء فيها قابل للصرف ولا للاسترداد: ${detail}.${shortfall} تجب التسوية أولاً.`
+      : `This period's balance is unresolved, so nothing in it is payable or recoverable: ${detail}.${shortfall} ` +
           "Reconcile the period first — the records are preserved exactly as they are.";
   }
   return null;

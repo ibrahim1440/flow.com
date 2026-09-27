@@ -644,6 +644,40 @@ The dialog mints one key per intended payment and keeps it while the payload is 
 so pressing the button again after a timeout retries the **same** payment. Changing the
 amount or the reason mints a new one, because that is a different payment.
 
+### A shortfall is not a debt
+
+`signedBalance` is computed from the **derivable** parts of a period alone. On a period
+that still holds movements nothing can place, the parts left out are exactly the ones that
+would close the gap — so a negative result says *this is what is missing*, not *this person
+was overpaid*.
+
+The preview database showed the problem plainly: a rep's row read **recovery owed 3.00**
+while the nine movements the model could not place netted to exactly **+3.00**. Adopt them
+and the period closes at zero. Nothing was ever owed. The screen was asserting a debt
+against a real person on the strength of a hole in the data.
+
+So the two faces of the balance are only populated once the period is resolved:
+
+| | RESOLVED | UNRESOLVED |
+| --- | --- | --- |
+| `availableToPay` | the positive face | **0.00** — nothing is payable |
+| `recoveryBalance` | the negative face: a debt, established | **0.00** — no debt is established |
+| `unresolvedShortfall` | 0.00 | the negative face, named for what it is |
+| `provisionalBalance` | the signed figure | the signed figure, unchanged and still shown |
+
+The arithmetic is never hidden — `provisionalBalance` and `signedBalance` report it either
+way. What changes is what the figure is allowed to *claim*. The screen shows «الرصيد غير
+مُسوّى — تتطلب تسوية» / "balance unresolved — reconciliation required" and, beneath it, the
+shortfall labelled "not a debt". The payable column shows a dash rather than a number,
+because a number there reads as *this is what you may pay*.
+
+The block code says the same thing: `BALANCE_UNRESOLVED`, not `ENTITLEMENT_UNRESOLVED`.
+The distinction is between "we cannot tell what this comes to" and "this person owes
+money", and only the first is true.
+
+`RECOVERY_OUTSTANDING` is reachable only past the resolution gate, so wherever it appears
+the history behind it is complete and *owed back* is a finding rather than a gap.
+
 ### Fail closed while entitlement is unresolved
 
 A payout is refused outright when the period's entitlement cannot be fully derived —

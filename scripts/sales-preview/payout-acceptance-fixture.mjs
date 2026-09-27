@@ -22,16 +22,28 @@
 //
 // Usage, always through the preview guard so it cannot reach another database:
 //
-//   node scripts/sales-preview/withpreview.mjs node scripts/sales-preview/payout-acceptance-fixture.mjs up
-//   node scripts/sales-preview/withpreview.mjs node scripts/sales-preview/payout-acceptance-fixture.mjs residue
-//   node scripts/sales-preview/withpreview.mjs node scripts/sales-preview/payout-acceptance-fixture.mjs report
-//   node scripts/sales-preview/withpreview.mjs node scripts/sales-preview/payout-acceptance-fixture.mjs down
+//   ... payout-acceptance-fixture.mjs up        provision the people and their deals
+//   ... payout-acceptance-fixture.mjs residue   make the second person's period underivable
+//   ... payout-acceptance-fixture.mjs report    what exists right now
+//   ... payout-acceptance-fixture.mjs disable   retire the identities, KEEP every financial row
+//   ... payout-acceptance-fixture.mjs purge     destructive full removal (see below)
 //
-// `up` provisions the people and their deals; the collections are then recorded through
-// the running application. `residue` adds the two unattributable movements that make the
-// second person's period underivable — a +9.00 and a -9.00 whose signed sum is exactly
-// zero, which is the shape a signed-sum completeness check cannot see. `down` removes
-// everything, including the residue.
+// `residue` adds the two unattributable movements that make the second person's period
+// underivable — a +9.00 and a -9.00 whose signed sum is exactly zero, which is the shape a
+// signed-sum completeness check cannot see.
+//
+// ── disable, not delete ──
+//
+// `disable` is how an acceptance run ends. It sets `active = false` on the two identities
+// and touches nothing else: every accrual, movement, correction and payout stays exactly
+// where it is, readable, with its actor and timestamp intact. A synthetic payment is still
+// a payment somebody recorded, and deleting the trail afterwards would mean the evidence
+// for an acceptance no longer exists once the acceptance is over. The identities are
+// retired instead; they could never sign in anyway.
+//
+// `purge` is the destructive one and exists only to reset before a NEW run. `up` refuses
+// to start on top of existing financial rows rather than quietly erasing them, so purging
+// is always something a person chose to do.
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,7 +78,8 @@ const c = new pg.Client({ connectionString: URL_ });
 await c.connect();
 const q = async (s, p = []) => (await c.query(s, p)).rows;
 
-async function down() {
+/** Destructive. Only for resetting before a new run — see the header. */
+async function purge() {
   for (const sql of [
     `DELETE FROM "CommissionLedgerCorrection" WHERE "entryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%')
         OR "correctsEntryId" IN (SELECT id FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%')`,
@@ -87,7 +100,16 @@ async function down() {
 }
 
 async function up() {
-  await down();
+  // A previous run's financial rows are evidence. Refuse rather than erase them; purging
+  // is a decision somebody makes on purpose.
+  const existing = (await q(
+    `SELECT count(*)::int n FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%'`))[0];
+  if (existing.n > 0) {
+    console.error(`REFUSE: ${existing.n} ${P} ledger rows already exist from an earlier run.`);
+    console.error("Run `report` to see them, or `purge` to remove them deliberately.");
+    process.exit(2);
+  }
+  await purge();
 
   const stage = (await q(`SELECT id FROM "PipelineStage" ORDER BY "position" LIMIT 1`))[0];
   if (!stage) throw new Error("no pipeline stage exists to hang a deal from");
@@ -189,13 +211,35 @@ async function report() {
        FROM "CommissionAccrual" a WHERE a."employeeId" LIKE '${P}%' ORDER BY a."employeeId"`));
 }
 
-const mode = process.argv[2] ?? "up";
+/**
+ * Retire the identities and keep every financial record they were involved in.
+ *
+ * `active = false` is what the login and the permission checks read, so a disabled
+ * identity cannot act — and these two never could, having no `pinLookup`. What matters is
+ * the other half: the accruals, movements, corrections and payouts stay untouched, so the
+ * acceptance run remains auditable after the acceptance is over.
+ */
+async function disable() {
+  const res = await c.query(
+    `UPDATE "Employee" SET active = false, "updatedAt" = now() WHERE id LIKE '${P}%' AND active`);
+  const kept = (await q(
+    `SELECT count(*)::int n FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%'`))[0];
+  const acc = (await q(
+    `SELECT count(*)::int n FROM "CommissionAccrual" WHERE "employeeId" LIKE '${P}%'`))[0];
+  console.log(`${res.rowCount} identity(ies) retired. Financial records kept: ${kept.n} movements, ${acc.n} accruals.`);
+}
+
+const mode = process.argv[2] ?? "report";
 try {
   if (mode === "up") await up();
-  else if (mode === "down") { await down(); console.log("HACC fixture removed."); }
   else if (mode === "residue") await residue();
   else if (mode === "report") await report();
-  else { console.error(`unknown mode "${mode}" — expected up, residue, report or down`); process.exitCode = 2; }
+  else if (mode === "disable") await disable();
+  else if (mode === "purge") { await purge(); console.log("HACC fixture purged, including its financial rows."); }
+  else {
+    console.error(`unknown mode "${mode}" — expected up, residue, report, disable or purge`);
+    process.exitCode = 2;
+  }
 } finally {
   await c.end();
 }

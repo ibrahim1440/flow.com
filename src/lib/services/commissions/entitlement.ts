@@ -89,10 +89,30 @@ export type PayoutBalances = {
    * disagree with each other.
    */
   signedBalance: PrismaNS.Decimal;
-  /** The positive face: what may still be paid. Zero when the balance is negative. */
+  /**
+   * Whether `signedBalance` may be read as a statement about what is owed at all.
+   *
+   * It is computed from the derivable parts of the period only. When some of the period is
+   * NOT derivable, the figure is missing those parts, so it is a provisional arithmetic
+   * result rather than a finding — and neither of its faces means what its name says.
+   */
+  balanceStatus: "RESOLVED" | "UNRESOLVED";
+  /** The signed figure as computed, resolved or not. Always populated; see `balanceStatus`. */
+  provisionalBalance: PrismaNS.Decimal;
+  /** What may still be paid. Zero whenever the balance is unresolved — nothing is. */
   availableToPay: PrismaNS.Decimal;
-  /** The negative face: what is owed back. Zero when the balance is positive. */
+  /**
+   * What is owed back. **Only ever non-zero on a resolved period**, because a shortfall
+   * computed from incomplete history is not a debt anybody owes — see
+   * `unresolvedShortfall`.
+   */
   recoveryBalance: PrismaNS.Decimal;
+  /**
+   * The negative face of an UNRESOLVED balance: an apparent shortfall whose cause is
+   * missing history, not overpayment. Reported so nothing is hidden, and named so nobody
+   * collects it.
+   */
+  unresolvedShortfall: PrismaNS.Decimal;
   /**
    * The NET of the movements that belong to no accrual. Reportable, but **never** a test of
    * completeness: an unattributed +10.00 and an unattributed -10.00 net to zero while two
@@ -257,6 +277,26 @@ export async function payoutBalances(
   const earnedNet = roundMoney(approvedEntitlement.plus(unapprovedEntitlement).plus(adjustments));
   const signedBalance = roundMoney(approvedEntitlement.plus(adjustments).minus(completedPayouts));
 
+  const fullyAttributed =
+    orphans.length === 0 && unallocatedReversal.isZero() && rows.every((r) => r.derived);
+
+  // ── A shortfall is not a debt until the history behind it is complete ──
+  //
+  // `signedBalance` is built from the derivable parts of the period ALONE. On a period that
+  // still holds movements nothing can place, the parts that were left out are exactly the
+  // ones that would close the gap — so a negative result says "this is what is missing",
+  // not "this person was overpaid". Presenting it as a recovery asserts a debt that no
+  // record establishes, against a real person, and invites somebody to collect it.
+  //
+  // Seen on the preview database: a rep shows a 3.00 shortfall while the nine movements
+  // the model could not place net to exactly +3.00. Adopt them and the period closes at
+  // zero. Nothing was ever owed; the figure was the hole in the data with a minus sign.
+  //
+  // So the two faces are only populated once the period is resolved. Until then the same
+  // number is reported under a name that says what it actually is, and nothing is payable
+  // — an unresolved period cannot be trusted in either direction.
+  const resolved = fullyAttributed;
+
   return {
     earnedNet,
     unapprovedEntitlement,
@@ -264,8 +304,11 @@ export async function payoutBalances(
     adjustments,
     completedPayouts,
     signedBalance,
-    availableToPay: signedBalance.greaterThan(0) ? signedBalance : ZERO,
-    recoveryBalance: signedBalance.lessThan(0) ? signedBalance.negated() : ZERO,
+    balanceStatus: resolved ? ("RESOLVED" as const) : ("UNRESOLVED" as const),
+    provisionalBalance: signedBalance,
+    availableToPay: resolved && signedBalance.greaterThan(0) ? signedBalance : ZERO,
+    recoveryBalance: resolved && signedBalance.lessThan(0) ? signedBalance.negated() : ZERO,
+    unresolvedShortfall: !resolved && signedBalance.lessThan(0) ? signedBalance.negated() : ZERO,
     unattributed,
     unattributedPositive,
     unattributedNegative,
@@ -273,8 +316,7 @@ export async function payoutBalances(
     nonDerivedCount: rows.length - derived.length,
     unallocatedReversal,
     // Counts and magnitudes, never a signed sum. See `orphans` above.
-    fullyAttributed:
-      orphans.length === 0 && unallocatedReversal.isZero() && rows.every((r) => r.derived),
+    fullyAttributed,
   };
 }
 
@@ -287,8 +329,11 @@ export function serialiseBalances(b: PayoutBalances) {
     adjustments: b.adjustments.toFixed(2),
     completedPayouts: b.completedPayouts.toFixed(2),
     signedBalance: b.signedBalance.toFixed(2),
+    balanceStatus: b.balanceStatus,
+    provisionalBalance: b.provisionalBalance.toFixed(2),
     availableToPay: b.availableToPay.toFixed(2),
     recoveryBalance: b.recoveryBalance.toFixed(2),
+    unresolvedShortfall: b.unresolvedShortfall.toFixed(2),
     unattributed: b.unattributed.toFixed(2),
     unattributedPositive: b.unattributedPositive.toFixed(2),
     unattributedNegative: b.unattributedNegative.toFixed(2),
@@ -309,13 +354,16 @@ export function serialiseBalances(b: PayoutBalances) {
  * derive, so quoting it as the reason would be quoting a number that is not yet trustworthy.
  */
 export type PayoutBlockCode =
-  | "ENTITLEMENT_UNRESOLVED"
+  | "BALANCE_UNRESOLVED"
   | "RECOVERY_OUTSTANDING"
   | "NOTHING_PAYABLE"
   | null;
 
 export function payoutBlock(b: PayoutBalances): PayoutBlockCode {
-  if (!b.fullyAttributed) return "ENTITLEMENT_UNRESOLVED";
+  // Renamed from ENTITLEMENT_UNRESOLVED: what is unresolved is the BALANCE, and saying so
+  // is the difference between "we cannot tell what this comes to" and "this person owes
+  // money". Only the first is true here.
+  if (b.balanceStatus === "UNRESOLVED") return "BALANCE_UNRESOLVED";
   if (b.recoveryBalance.greaterThan(0)) return "RECOVERY_OUTSTANDING";
   if (b.availableToPay.lessThanOrEqualTo(0)) return "NOTHING_PAYABLE";
   return null;
@@ -327,6 +375,12 @@ export function payoutBlock(b: PayoutBalances): PayoutBlockCode {
  */
 export function unresolvedDetail(b: PayoutBalances): string {
   const parts: string[] = [];
+  if (b.unresolvedShortfall.greaterThan(0)) {
+    parts.push(
+      `the derivable part comes to -${b.unresolvedShortfall.toFixed(2)}, which is a gap in the ` +
+        "record rather than a debt",
+    );
+  }
   if (b.unattributedCount > 0) {
     parts.push(
       `${b.unattributedCount} movement${b.unattributedCount === 1 ? "" : "s"} belong to no accrual ` +

@@ -246,13 +246,13 @@ export async function POST(request: Request) {
       // reads magnitudes, because a +10.00 gap and a -10.00 gap sum to zero while both are
       // still unexplained. No allocation is invented to clear the block and no record is
       // altered: the period stays exactly as it is until somebody reconciles it.
-      if (!before.fullyAttributed) {
+      if (before.balanceStatus === "UNRESOLVED") {
         throw {
           _appCode: 409,
           message:
-            `${employee.name}'s entitlement for this period cannot be fully derived, so nothing ` +
-            `in it is payable: ${unresolvedDetail(before)}. Reconcile the period first — the ` +
-            "records are preserved as they are and no allocation is assumed.",
+            `${employee.name}'s balance for this period is unresolved, so nothing in it is ` +
+            `payable in either direction: ${unresolvedDetail(before)}. Reconcile the period ` +
+            "first — the records are preserved as they are and no allocation is assumed.",
         };
       }
 
@@ -262,9 +262,12 @@ export async function POST(request: Request) {
         throw {
           _appCode: 409,
           message:
+            // Reachable only past the gate above, so the history behind this figure IS
+            // complete and "owed back" is a finding rather than a gap in the record.
             before.recoveryBalance.greaterThan(0)
               ? `${employee.name} has no payable balance for this period: ${before.recoveryBalance.toFixed(2)} ` +
-                "has been paid beyond the current entitlement and is owed back. Resolve the recovery first."
+                "has been paid beyond the entitlement this period's complete history supports, and is " +
+                "owed back. Resolve the recovery first."
               : `${employee.name} has ${before.availableToPay.toFixed(2)} available to pay for this period, ` +
                 `which is less than the ${amount.toFixed(2)} being paid` +
                 (before.unapprovedEntitlement.greaterThan(0)
