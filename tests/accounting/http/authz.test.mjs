@@ -66,7 +66,7 @@ test("separation of duties over HTTP: the preparer cannot approve; the approver 
   const accounts = (await prep("/api/accounting/coa")).body;
   const id = (code) => accounts.find((a) => a.code === code).id;
   const day = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
-  const created = await prep("/api/accounting/journals", { method: "POST", json: { entryDate: day, description: "HTTP test — petty cash", lines: [{ accountId: id("6900"), debit: "12.50", credit: "0" }, { accountId: id("1110"), debit: "0", credit: "12.50" }] } });
+  const created = await prep("/api/accounting/journals", { method: "POST", json: { entryDate: day, description: "HTTP test — employee custody", lines: [{ accountId: id("6900"), debit: "12.50", credit: "0" }, { accountId: id("1140"), debit: "0", credit: "12.50" }] } });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   const e = created.body.id;
   assert.equal((await appr("/api/accounting/journals", { method: "POST", json: { entryDate: day, lines: [] } })).status, 403, "approver has no journal_create");
@@ -82,7 +82,7 @@ test("separation of duties over HTTP: the preparer cannot approve; the approver 
   assert.equal(detail.status, "POSTED");
   assert.notEqual(detail.createdBy, detail.approvedBy);
   // Unbalanced and malformed bodies are 400 with a message, never 500.
-  const bad = await prep("/api/accounting/journals", { method: "POST", json: { entryDate: day, lines: [{ accountId: id("6900"), debit: "10", credit: "0" }, { accountId: id("1110"), debit: "0", credit: "9" }] } });
+  const bad = await prep("/api/accounting/journals", { method: "POST", json: { entryDate: day, lines: [{ accountId: id("6900"), debit: "10", credit: "0" }, { accountId: id("1140"), debit: "0", credit: "9" }] } });
   assert.equal(bad.status, 400);
   assert.match(bad.body.error, /must equal credits/);
   assert.equal((await prep("/api/accounting/journals", { method: "POST", body: "{not json" })).status, 400);

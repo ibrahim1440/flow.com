@@ -1,6 +1,7 @@
 // Runtime role, server started WITHOUT ACCOUNTING_PROVISIONAL_POSTING (production configuration):
 // an accrual under an unapproved plan version stays BLOCKED and produces no journal.
 //
+//   Run on a freshly seeded fixture, before any server with the switch has processed events.
 //   ACCOUNTING_PROVISIONAL_POSTING unset → /tmp/claude-0/serve-runtime.sh --no-switch
 //   BASE_URL=... FIN_PASSWORD=... RUNTIME_DATABASE_URL=... node --test tests/accounting/http/runtime-no-switch.test.mjs
 import { test } from "node:test";
@@ -19,7 +20,9 @@ test("without the isolated-test switch an unapproved plan version cannot post", 
   const db = new Client({ connectionString: DB_URL });
   await db.connect();
   try {
-    const ev = (await db.query(`select e.id from "AccountingEvent" e join "CommissionLedgerEntry" c on c.id = e."sourceDocumentId" join "CommissionPlanVersion" v on v.id = c."planVersionId" where v."accountingApproval" <> 'APPROVED' limit 1`)).rows[0];
+    const ev = (await db.query(`select e.id from "AccountingEvent" e join "CommissionLedgerEntry" c on c.id = e."sourceDocumentId" join "CommissionPlanVersion" v on v.id = c."planVersionId" where v."accountingApproval" <> 'APPROVED' and e.status in ('PENDING', 'BLOCKED') limit 1`)).rows[0];
+    // Needs a fresh fixture: a server running WITH the switch would already have posted these.
+    assert.ok(ev, "no unprocessed event under an unapproved plan version — reseed the fixture and run this suite first");
     const res = await fetch(`${BASE}/api/accounting/events/process`, { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: "{}" });
     assert.equal(res.status, 200);
     const one = await fetch(`${BASE}/api/accounting/events/${ev.id}/process`, { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: "{}" });

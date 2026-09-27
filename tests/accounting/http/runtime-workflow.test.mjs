@@ -59,8 +59,10 @@ test("journal workflow as the runtime role: create → submit → approve (four-
   const appr = await session("acc.approver");
   const acc = (await prep("/api/accounting/coa")).body;
   const id = (code) => acc.find((a) => a.code === code).id;
+  // Not a cash account: from the bank-posting start date (Stage 2) cash accounts take bank lines
+  // only, which stage2-workflow.test.mjs covers.
   const day = iso(9, 15);
-  const c = await prep("/api/accounting/journals", { method: "POST", json: { entryDate: day, description: "RT — bank fee", lines: [{ accountId: id("6900"), debit: "33.10", credit: "0" }, { accountId: id("1120"), debit: "0", credit: "33.10" }] } });
+  const c = await prep("/api/accounting/journals", { method: "POST", json: { entryDate: day, description: "RT — bank fee accrued", lines: [{ accountId: id("6900"), debit: "33.10", credit: "0" }, { accountId: id("2130"), debit: "0", credit: "33.10" }] } });
   assert.equal(c.status, 201, JSON.stringify(c.body));
   const e = c.body.id;
   assert.equal((await prep(`/api/accounting/journals/${e}/submit`, { method: "POST", json: {} })).status, 200);
