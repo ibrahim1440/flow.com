@@ -4,6 +4,7 @@ import {
   selectPlanVersion, riyadhMonthStart, riyadhMonthEnd,
   type PlanRules,
 } from "./engine";
+import { payoutLockKey } from "./lock";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -504,6 +505,10 @@ export async function accrueForCollection(
   const outcomes: AccrualOutcome[] = [];
 
   for (const share of shares) {
+    // The same consistency boundary a payout takes. An approval or a reversal changes the
+    // balance a payout is about to spend, so the two must serialise on the employee and
+    // period rather than each reading a figure the other is midway through changing.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutLockKey(share.employeeId, riyadhMonthStart(event.collectedAt))}))`;
     const outcome = await recomputeEmployeePeriod(
       tx, share.employeeId, event.collectedAt, actorId, collectionEventId,
     );

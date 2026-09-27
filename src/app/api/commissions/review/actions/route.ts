@@ -5,6 +5,8 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { Decimal, ZERO, roundMoney, riyadhMonthStart } from "@/lib/services/commissions/engine";
 import { approvePeriod, adjust, periodStatement } from "@/lib/services/commissions/accrual";
+import { payoutBalances, serialiseBalances } from "@/lib/services/commissions/entitlement";
+import { payoutLockKey } from "@/lib/services/commissions/lock";
 
 /**
  * POST /api/commissions/review/actions — approve a period, adjust it, or record a payout.
@@ -154,30 +156,46 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A payout must be greater than zero." }, { status: 400 });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const before = await periodStatement(tx, employeeId, periodStart);
+    const idempotencyKey =
+      typeof b.idempotencyKey === "string" && b.idempotencyKey.trim() ? b.idempotencyKey.trim() : null;
 
-      // Paying more than is owed is refused rather than recorded. An over-payment recorded
-      // as a payout leaves a negative outstanding balance that every later period inherits,
-      // and nobody reading it can tell whether it was a mistake or a policy.
-      if (amount.greaterThan(before.outstanding)) {
+    const result = await prisma.$transaction(async (tx) => {
+      // One writer per employee-period. Prisma's transactions are Read Committed, so two
+      // payouts could otherwise each read the same available balance, each find it
+      // sufficient, and each write — spending it twice. The same key is taken by the
+      // reversal path, so a payout racing a reversal serialises rather than interleaves.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutLockKey(employeeId, periodStart)}))`;
+
+      // A retry must land once. Checked inside the lock so two simultaneous retries of the
+      // same request cannot both pass it.
+      if (idempotencyKey) {
+        const seen = await tx.commissionLedgerEntry.findFirst({
+          where: { type: "PAYOUT", employeeId, periodStart, idempotencyKey },
+          select: { id: true },
+        });
+        if (seen) {
+          const now = await payoutBalances(tx, employeeId, periodStart);
+          const st = await periodStatement(tx, employeeId, periodStart);
+          return { entryId: seen.id, balances: now, replayed: true, markedPaid: 0, statement: st };
+        }
+      }
+
+      const before = await payoutBalances(tx, employeeId, periodStart);
+
+      // Approved entitlement only. An unapproved accrual is not payable, and a recovery
+      // balance is not cancelled by earnings nobody has signed off.
+      if (amount.greaterThan(before.availableToPay)) {
         throw {
           _appCode: 409,
           message:
-            `${employee.name} is owed ${before.outstanding.toFixed(2)} for this period, which is ` +
-            `less than the ${amount.toFixed(2)} being paid. Record an adjustment first if the ` +
-            "extra is deliberate.",
-        };
-      }
-
-      // A payout against nothing approved is a payout of a provisional figure.
-      const unapproved = await tx.commissionAccrual.count({
-        where: { employeeId, periodStart, status: "ACCRUED" },
-      });
-      if (unapproved > 0) {
-        throw {
-          _appCode: 409,
-          message: `${unapproved} accruals in this period are still waiting for approval. Approve them first.`,
+            before.recoveryBalance.greaterThan(0)
+              ? `${employee.name} has no payable balance for this period: ${before.recoveryBalance.toFixed(2)} ` +
+                "has been paid beyond the current entitlement and is owed back. Resolve the recovery first."
+              : `${employee.name} has ${before.availableToPay.toFixed(2)} available to pay for this period, ` +
+                `which is less than the ${amount.toFixed(2)} being paid` +
+                (before.unapprovedEntitlement.greaterThan(0)
+                  ? `. ${before.unapprovedEntitlement.toFixed(2)} more is earned but not yet approved.`
+                  : ". Record an adjustment first if the extra is deliberate."),
         };
       }
 
@@ -192,33 +210,59 @@ export async function POST(request: Request) {
           amount,
           reason: typeof b.reason === "string" ? b.reason.trim() || null : null,
           actorId: user.id,
+          idempotencyKey,
         },
         select: { id: true },
       });
 
-      await tx.commissionAccrual.updateMany({
-        where: { employeeId, periodStart, status: "APPROVED" },
-        data: { status: "PAID" },
-      });
+      const after = await payoutBalances(tx, employeeId, periodStart);
 
-      const after = await periodStatement(tx, employeeId, periodStart);
-      return { entryId: entry.id, after };
+      // ── Partial payouts ──
+      // This used to mark every APPROVED accrual PAID the moment any payout was written,
+      // so paying 1.00 of a 3.00 balance left three rows claiming to be settled. Payouts
+      // are period-level and accruals are not individually allocated to them, so PAID
+      // means one thing only: **the period's approved entitlement has been settled in
+      // full.** A partial payment leaves the rows APPROVED and the remainder available.
+      const settled = after.availableToPay.lessThanOrEqualTo(0);
+      const markedPaid = settled
+        ? (await tx.commissionAccrual.updateMany({
+            where: { employeeId, periodStart, status: "APPROVED" },
+            data: { status: "PAID" },
+          })).count
+        : 0;
+
+      const statement = await periodStatement(tx, employeeId, periodStart);
+      return { entryId: entry.id, balances: after, replayed: false, markedPaid, statement };
     }, TX_OPTS);
 
     return NextResponse.json(
       {
         entryId: result.entryId,
+        replayed: result.replayed,
+        /** How many accrual rows this payout settled in full. Zero for a partial payment. */
+        accrualsMarkedPaid: result.markedPaid,
+        balances: serialiseBalances(result.balances),
+        // The older shape, kept so existing callers keep working. `outstanding` here is
+        // earned-less-paid and still counts unapproved money — `balances.availableToPay`
+        // is the figure that governs what may be paid.
         statement: {
-          accrued: result.after.accrued.toFixed(2),
-          adjustments: result.after.adjustments.toFixed(2),
-          paid: result.after.paid.toFixed(2),
-          outstanding: result.after.outstanding.toFixed(2),
+          accrued: result.statement.accrued.toFixed(2),
+          adjustments: result.statement.adjustments.toFixed(2),
+          paid: result.statement.paid.toFixed(2),
+          outstanding: result.statement.outstanding.toFixed(2),
         },
+        /**
+         * The boundary, stated where nobody can miss it. This endpoint RECORDS a payment
+         * that has already been made somewhere else. It does not instruct, schedule or
+         * execute one: there is no payment integration, no bank connection and no payroll
+         * deduction anywhere in this system.
+         */
+        settlement: "RECORDED_AS_COMPLETED_EXTERNALLY",
         notice:
-          "This records that a payout was made. It does not move money — there is no payment " +
-          "integration in this system.",
+          "This records a payout that was already completed outside this system. It does not " +
+          "move money, request a transfer, or deduct anything from payroll.",
       },
-      { status: 201 },
+      { status: result.replayed ? 200 : 201 },
     );
   } catch (err) {
     return handleDomainError(err);

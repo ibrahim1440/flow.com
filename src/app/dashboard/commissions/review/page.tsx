@@ -43,6 +43,26 @@ type EmployeeRow = {
   expectedFromRows: string;
   reconciliationDifference: string;
   reconciled: boolean;
+  /** The entitlement model's own answer, and whether it agrees with the ledger. */
+  entitlementTotal: string;
+  entitlementReconciled: boolean;
+  /**
+   * The six balances. `outstanding` above is earned-less-paid and counts money nobody has
+   * approved yet, so it is NOT what may be paid — `balances.availableToPay` is.
+   */
+  balances: {
+    earnedNet: string;
+    unapprovedEntitlement: string;
+    approvedEntitlement: string;
+    adjustments: string;
+    completedPayouts: string;
+    signedBalance: string;
+    availableToPay: string;
+    recoveryBalance: string;
+    unattributed: string;
+    unallocatedReversal: string;
+    fullyAttributed: boolean;
+  };
   pendingCount: number;
   approvedCount: number;
 };
@@ -238,8 +258,13 @@ export default function CommissionReviewPage() {
             // The plan is not on the employee row; it is on that employee's accruals, which
             // is where the reviewer would look for it anyway.
             const pv = data.accruals.find((a) => a.employeeId === e.employeeId)?.planVersion;
+            // Availability, not earnings. `outstanding` includes accruals nobody has
+            // approved, so offering a payout against it invites a payment the server will
+            // refuse — or worse, one that spends a balance carrying a recovery.
             const canPay =
-              data.can.recordPayout && Number(e.outstanding) > 0 && e.pendingCount === 0;
+              data.can.recordPayout &&
+              Number(e.balances.availableToPay) > 0 &&
+              e.pendingCount === 0;
             return (
               <Tr key={e.employeeId} testId={`review-row-${e.employeeId}`}>
                 <Td>
@@ -289,7 +314,36 @@ export default function CommissionReviewPage() {
                 <Td><Money value={e.adjustments} /></Td>
                 <Td><Money value={e.paid} /></Td>
                 <Td>
-                  <Money value={e.outstanding} strong />
+                  <Money value={e.balances.availableToPay} strong />
+                  {/* Earned is not payable. Both are shown, because a reviewer asked to
+                      authorise a payment needs the number they may actually pay, and a
+                      reviewer reading a statement needs the number that was earned. */}
+                  {e.balances.availableToPay !== e.outstanding && (
+                    <span
+                      data-testid={`earned-${e.employeeId}`}
+                      className="block text-[12px] leading-[18px] text-oo-text-muted"
+                    >
+                      {ar ? "المستحق " : "earned "}
+                      <Money value={e.outstanding} />
+                      {Number(e.balances.unapprovedEntitlement) !== 0 && (
+                        <>
+                          {" · "}
+                          {ar ? "غير معتمد " : "unapproved "}
+                          <Money value={e.balances.unapprovedEntitlement} />
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {/* A debt is never shown as a zero. */}
+                  {Number(e.balances.recoveryBalance) > 0 && (
+                    <span
+                      data-testid={`recovery-${e.employeeId}`}
+                      className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-rejected bg-oo-status-rejected-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-rejected"
+                    >
+                      {ar ? "مستردّ مستحق " : "recovery owed "}
+                      <Money value={e.balances.recoveryBalance} />
+                    </span>
+                  )}
                   {/* Only the exception is worth a chip. A green "matches" on every row is
                       noise the reviewer learns to stop reading. */}
                   {!e.reconciled && (
@@ -394,7 +448,7 @@ export default function CommissionReviewPage() {
                     [ar ? "العميل" : "Customer", "w-[160px]"],
                     [ar ? "الأساس المؤهّل" : "Qualifying base", "w-[150px]"],
                     [ar ? "الحصة" : "Share", "w-[90px]"],
-                    [ar ? "النسبة الفعّالة" : "Effective rate", "w-[130px]"],
+                    [ar ? "النسبة المشتقّة" : "Derived rate", "w-[130px]"],
                     [ar ? "المبلغ" : "Amount", "w-[140px]"],
                     [ar ? "الخطة" : "Plan", "w-[140px]"],
                     [ar ? "الحالة" : "Status", "w-[150px]"],
@@ -445,8 +499,8 @@ export default function CommissionReviewPage() {
           </div>
           <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
             {ar
-              ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة الفعلية هي ما يشرح سبب اختلاف المبلغ عن الأساس × النسبة الأساسية بعد تجاوز شريحة."
-              : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The effective rate is what explains why the amount is not simply base × base rate once a tier has been crossed."}
+              ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة المشتقّة هي المبلغ ÷ الأساس، تُحسب بعد تقريب المبلغ إلى 0.01 ر.س — تشرح الشريحة وتشرح التقريب، لكنها ليست النسبة التعاقدية للخطة. النسبة التعاقدية تُقرأ من إصدار الخطة بجانب الصف."
+              : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The DERIVED rate is amount ÷ base, computed after the amount is rounded to 0.01 SAR — it explains a tier, and it explains the rounding, but it is not the plan's contractual rate. Read the contractual rate from the plan version beside the row."}
           </p>
         </Card>
       )}

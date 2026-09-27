@@ -2100,6 +2100,12 @@ model CommissionLedgerEntry {
   actorId     String?
   createdAt   DateTime          @default(now())
 
+  /// Client-supplied, for PAYOUT only: a retried request lands once instead of paying
+  /// twice. Scoped to the employee and period rather than globally, because the same
+  /// human-chosen reference may legitimately recur for a different month.
+  idempotencyKey String?
+
+  @@unique([employeeId, periodStart, idempotencyKey])
   @@index([employeeId, periodStart])
   @@index([type, createdAt])
   @@index([collectionEventId])

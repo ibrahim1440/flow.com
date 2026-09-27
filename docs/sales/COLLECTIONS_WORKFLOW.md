@@ -523,15 +523,110 @@ qualifying bases as the input — never the engine's answer:
 ```
 cumulative base                9,647.83
 1% of it                       96.4783
-rounded to the riyal (½ up)    96.48        ← the money actually moved
+rounded to 0.01 SAR (half-up)    96.48        ← the money actually moved
 back-computed rate   100 × 96.48 / 9,647.83 = 1.00001762…
 rounded to 6 dp                1.000018     ← matches the recorded value
 ```
 
-The rounding gain is **0.0017 SAR**, and expressing that as a percentage of the base is
+The rounding gain is **0.0017 SAR** (monetary rounding is to 0.01 SAR, not to whole riyals), and expressing that as a percentage of the base is
 the whole of the difference. The rate equals the contractual rate exactly only when the
 cumulative base is a multiple of 100 — every other base leaves a sub-riyal remainder that
 has to go somewhere, and it goes into the derived rate rather than into the payment.
 
 `sales-collections` D13 now asserts this by recomputing the expected rate from the inputs
 and comparing, so the two can never quietly diverge.
+
+---
+
+## 12. Payout balances — the six figures, and what moves each
+
+**Earned is not payable.** The screen used to show one figure, `outstanding = accrued +
+adjustments − paid`, where `accrued` counted every accrual in the period including ones
+nobody had approved. The payout route separately refused to pay while an unapproved accrual
+existed, so the money could not actually leave — but the number a reviewer was asked to
+authorise against overstated what they could pay. Six figures now, and the payable one is
+computed from approved entitlement alone.
+
+| figure | definition |
+| --- | --- |
+| **earnedNet** | approved + unapproved entitlement + manual adjustments |
+| **unapprovedEntitlement** | net entitlement of every accrual not `APPROVED`/`PAID`. **Never payable** |
+| **approvedEntitlement** | net entitlement of `APPROVED` and `PAID` accruals. The only base a payout may draw on |
+| **adjustments** | period-level manual `ADJUSTMENT` entries, signed |
+| **completedPayouts** | `PAYOUT` entries. Positive. Payments already made elsewhere |
+| **signedBalance** | `approvedEntitlement + adjustments − completedPayouts`, **kept signed internally** |
+| **availableToPay** | the positive face of `signedBalance`, else 0.00 |
+| **recoveryBalance** | the negative face of `signedBalance`, else 0.00 |
+
+`availableToPay` and `recoveryBalance` are two views of one signed number, so they cannot
+disagree. A debt is shown as a recovery, never flattened to a zero.
+
+### What each input moves
+
+| input | earnedNet | approvedEntitlement | availableToPay | recoveryBalance |
+| --- | --- | --- | --- | --- |
+| a collection approved by Finance | **+** | unchanged until the period is approved | unchanged | unchanged |
+| approving the period | unchanged | **+** | **+** | **−** |
+| a reversal before payment | **−** | **−** once it reaches an approved accrual | **−** | **+** if it overshoots |
+| a manual `ADJUSTMENT` | **±** | unchanged | **±** | **∓** |
+| recording a completed payout | unchanged | unchanged | **−** | **+** |
+
+A manual adjustment is a decision about the **period**, made by a person with a reason, so
+it is period-level and counts towards payability at once. An engine correction is a
+consequence of a **collection**, so it reaches a specific accrual through an allocation and
+changes entitlement rather than sitting beside it. That is the whole difference between the
+two, and it is why they are separate quantities.
+
+**Unapproved earnings never cancel a debt.** `availableToPay` is computed from approved
+entitlement only, so somebody who owes 8.00 after a reversed payment does not have it
+silently written off by 10.00 of new, unsigned-off commission. The recovery stays 8.00 and
+nothing is payable until it is resolved.
+
+### Partial payouts
+
+Payouts are **period-level**. There is no allocation of a payout to individual accruals and
+none is invented here, so `PAID` on an accrual means one thing only:
+
+> the period's approved entitlement has been settled in full.
+
+Paying 3.00 of an 8.00 balance leaves every row `APPROVED`, leaves 5.00 available, and marks
+nothing paid. This used to flip **every** approved row to `PAID` the moment any payout was
+written, so paying 1.00 of 3.00 left three rows claiming to be settled. The balance was
+still right; the rows were lying.
+
+### Execution protections
+
+Every operation that can move a balance — approve, reverse, pay — takes
+`pg_advisory_xact_lock` on the same key, `commission-balance:<employee>:<period>`. Prisma
+runs transactions at Read Committed, so without a shared lock two payouts can each read the
+same available balance, each find it sufficient, and each write. The lock also makes a
+payout racing a reversal serialise instead of interleaving.
+
+A payout may carry an `idempotencyKey`, unique per employee and period. A retry returns the
+original entry with `replayed: true` and `200` instead of creating a second payment. The
+check happens **inside** the lock, so two simultaneous retries cannot both pass it.
+
+### What this endpoint is, and is not
+
+`settlement: "RECORDED_AS_COMPLETED_EXTERNALLY"`. It records a payment **already made
+somewhere else**. It does not instruct, schedule or execute one: there is no payment
+integration, no bank connection and no payroll deduction anywhere in this system. A
+recovery balance is a figure to act on outside the system, not an automatic deduction.
+
+## 13. Which historical gaps matter, by movement type
+
+A provenance gap is only a gap where provenance is the right source. Classified:
+
+| movement | correct source | gap? |
+| --- | --- | --- |
+| `ACCRUAL` / `REVERSAL` from a collection | the collection event | **yes** if absent |
+| `PAYOUT` | the payout record itself — its actor, amount and reason | **no**. A payout has no collection behind it and requiring one would be wrong |
+| `ADJUSTMENT` | a person and a stated reason | **no**. It is independent by definition |
+| legacy `ACCRUAL`/`REVERSAL` with no event | unknowable | **ambiguous**, and left so |
+
+**Ambiguous history is not payable.** An accrual whose movements predate provenance cannot
+have its current value derived, so it is counted into `unattributed` and excluded from both
+approved and unapproved entitlement. It cannot reach `availableToPay` by any route. Making
+it payable needs a documented reconciliation that establishes its eligibility independently
+— not a guess, and not a default. New, fully-attributed entitlement stays distinguishable
+from unresolved history through `fullyAttributed` and the `unattributed` figure beside it.

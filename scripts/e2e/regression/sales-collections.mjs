@@ -178,11 +178,21 @@ async function main() {
   await cleanup();
 
   // ── identities ────────────────────────────────────────────────────────────
-  const PIN = { repA: "920011", repB: "920022", fin: "920033", fin2: "920044", dual: "920055", none: "920066", stale: "920077", mgr: "920088" };
+  const PIN = { repA: "920011", repB: "920022", fin: "920033", fin2: "920044", dual: "920055", none: "920066", stale: "920077", mgr: "920088", payer: "920100" };
   const repPerms = {
     dashboard: { access: "edit" },
     sales: { access: "edit", sub: { lead_write: true, lead_convert: true, quote_write: true, collection_submit: true } },
     commissions: { access: "view", sub: { view_own: true } },
+  };
+  // Paying is a third privilege, held by neither the verifier nor the manager. Kept as its
+  // own fixture so D15g can still prove that each of them is refused.
+  const payerPerms = {
+    dashboard: { access: "edit" },
+    sales: { access: "none" },
+    commissions: {
+      access: "edit",
+      sub: { view_own: true, view_team: true, approve: true, record_payout: true },
+    },
   };
   const finPerms = {
     dashboard: { access: "edit" },
@@ -207,6 +217,7 @@ async function main() {
   const ids = {
     repA: `${P}_rep_a`, repB: `${P}_rep_b`, fin: `${P}_fin`, fin2: `${P}_fin2`,
     dual: `${P}_dual`, none: `${P}_none`, stale: `${P}_stale`, mgr: `${P}_mgr`,
+    payer: `${P}_payer`,
   };
   // A salesperson whose role predates the privilege — the exact shape of the reported
   // defect. They can open the deal and see every figure; they just cannot record.
@@ -218,6 +229,7 @@ async function main() {
   await mkEmployee(ids.repA, `${P} Rep A`, PIN.repA, repPerms);
   await mkEmployee(ids.repB, `${P} Rep B`, PIN.repB, repPerms);
   await mkEmployee(ids.fin, `${P} Finance`, PIN.fin, finPerms);
+  await mkEmployee(ids.payer, `${P} Payer`, PIN.payer, payerPerms);
   await mkEmployee(ids.fin2, `${P} Finance Two`, PIN.fin2, finPerms);
   await mkEmployee(ids.dual, `${P} Both Hats`, PIN.dual, dualPerms);
   await mkEmployee(ids.none, `${P} No Access`, PIN.none, { dashboard: { access: "edit" } });
@@ -277,6 +289,7 @@ async function main() {
   const repA = await session().login(PIN.repA);
   const repB = await session().login(PIN.repB);
   const fin = await session().login(PIN.fin);
+  const payer = await session().login(PIN.payer);
   const fin2 = await session().login(PIN.fin2);
   const dual = await session().login(PIN.dual);
   const none = await session().login(PIN.none);
@@ -1231,6 +1244,135 @@ async function main() {
       Number(after.find((a) => a.ev === before[1].ev).amt) === 14, S(after.map((a) => a.amt)));
     check("the two still sum to the ledger, so the period reconciles",
       after.reduce((a, x) => a + Number(x.amt), 0) === 8, S(after.map((a) => a.amt)));
+
+  {
+    sub("D15. the derived entitlement, and what of it may actually be paid");
+    //
+    // D14 leaves the tiered rep with a reversed e1 and a surviving e2. The stored rows read
+    // -6.00 and 14.00 — arithmetically consistent, individually meaningless. This is the
+    // same period read through the entitlement model, which is now what payment eligibility
+    // and reconciliation use.
+    const month = (() => {
+      const d = new Date(Date.now());
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    })();
+    const review = async () => {
+      const r = await fin.api(`/api/commissions/review?month=${month}`);
+      return (r.json?.employees ?? []).find((e) => e.employeeId === `${T}_rep`) ?? null;
+    };
+    const payout = (s, body) => s.api("/api/commissions/review/actions", { method: "POST", body });
+
+    let row = await review();
+    check("the tiered rep is on the review screen", !!row, S(row));
+
+    const a1 = row.accruals.find((a) => a.netEntitlement === "0.00");
+    const a2 = row.accruals.find((a) => a.netEntitlement === "8.00");
+    check("e1: original +8.00", a1?.originalAward === "8.00", S(a1));
+    check("e1: linked adjustment -8.00", a1?.adjustments === "-8.00", S(a1));
+    check("e1: net 0.00", a1?.netEntitlement === "0.00", S(a1));
+    check("e2: original +14.00", a2?.originalAward === "14.00", S(a2));
+    check("e2: linked adjustment -6.00 — the tier progress it lost", a2?.adjustments === "-6.00", S(a2));
+    check("e2: net 8.00", a2?.netEntitlement === "8.00", S(a2));
+    check("the stored projection is preserved and still says -6.00, unrewritten",
+      a1?.storedAmount === "-6.00", S(a1?.storedAmount));
+    check("the period entitlement is 8.00", row.entitlementTotal === "8.00", S(row.entitlementTotal));
+    check("and the entitlement model agrees with the ledger", row.entitlementReconciled === true, S(row));
+
+    sub("D15b. nothing unapproved is payable");
+    check("8.00 is earned", row.balances.earnedNet === "8.00", S(row.balances));
+    check("all of it is still unapproved", row.balances.unapprovedEntitlement === "8.00", S(row.balances));
+    check("so approved entitlement is 0.00", row.balances.approvedEntitlement === "0.00", S(row.balances));
+    check("and nothing is available to pay", row.balances.availableToPay === "0.00", S(row.balances));
+    const tooEarly = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "8.00" });
+    check("a payout against unapproved earnings is refused", tooEarly.status === 409, S(tooEarly.json).slice(0, 160));
+    check("and the refusal says the money is not approved yet",
+      /not yet approved|available to pay/i.test(S(tooEarly.json)), S(tooEarly.json).slice(0, 160));
+
+    sub("D15c. approval makes it payable, and a PARTIAL payout leaves the rest");
+    const appr = await payout(payer, { action: "approve", employeeId: `${T}_rep`, month });
+    check("the period is approved", appr.status === 200, S(appr.json).slice(0, 140));
+    row = await review();
+    check("8.00 is now approved entitlement", row.balances.approvedEntitlement === "8.00", S(row.balances));
+    check("and 8.00 is available to pay", row.balances.availableToPay === "8.00", S(row.balances));
+
+    const part = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00" });
+    check("a partial payout of 3.00 is accepted", part.status === 201, S(part.json).slice(0, 160));
+    check("it is recorded as an already-completed external payment",
+      part.json?.settlement === "RECORDED_AS_COMPLETED_EXTERNALLY", S(part.json?.settlement));
+    check("it marks NO accrual paid — the period is not settled", part.json?.accrualsMarkedPaid === 0, S(part.json?.accrualsMarkedPaid));
+    row = await review();
+    check("5.00 remains available", row.balances.availableToPay === "5.00", S(row.balances));
+    check("3.00 is recorded as completed", row.balances.completedPayouts === "3.00", S(row.balances));
+    check("no recovery balance", row.balances.recoveryBalance === "0.00", S(row.balances));
+    const stillApproved = await q(
+      `SELECT count(*)::int n FROM "CommissionAccrual" WHERE "employeeId"=$1 AND status='PAID'`, [`${T}_rep`]);
+    check("and no accrual falsely reads PAID after a partial payment", stillApproved[0].n === 0, S(stillApproved[0]));
+
+    sub("D15d. a retry lands once; two at once spend the balance once");
+    const key = `${P}-idem-${Date.now()}`;
+    const first = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "2.00", idempotencyKey: key });
+    const retry = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "2.00", idempotencyKey: key });
+    check("the first retry-keyed payout is created", first.status === 201, S(first.json).slice(0, 140));
+    check("the retry is accepted but not repeated", retry.status === 200 && retry.json?.replayed === true, S(retry.json).slice(0, 140));
+    check("and both name the same entry", first.json?.entryId === retry.json?.entryId, `${first.json?.entryId} vs ${retry.json?.entryId}`);
+    const paidRows = await q(
+      `SELECT count(*)::int n FROM "CommissionLedgerEntry" WHERE "employeeId"=$1 AND type='PAYOUT'`, [`${T}_rep`]);
+    check("exactly two payout entries exist, not three", paidRows[0].n === 2, S(paidRows[0]));
+
+    row = await review();
+    check("3.00 remains available after 3.00 + 2.00 paid", row.balances.availableToPay === "3.00", S(row.balances));
+
+    // Two concurrent payouts for the whole remaining balance: one must lose.
+    const [c1, c2] = await Promise.all([
+      payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00" }),
+      payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "3.00" }),
+    ]);
+    const created = [c1, c2].filter((r) => r.status === 201).length;
+    const refused = [c1, c2].filter((r) => r.status === 409).length;
+    check("two simultaneous payouts of the whole balance: one wins, one is refused",
+      created === 1 && refused === 1, `${c1.status}/${c2.status}`);
+    row = await review();
+    check("the balance is spent exactly once", row.balances.availableToPay === "0.00", S(row.balances));
+    check("8.00 total paid, never 11.00", row.balances.completedPayouts === "8.00", S(row.balances));
+    // e1 was REVERSED and never approved, so there is exactly one row to settle.
+    check("and the one approved accrual now reads PAID, because the period IS settled",
+      (await q(`SELECT count(*)::int n FROM "CommissionAccrual" WHERE "employeeId"=$1 AND status='PAID'`, [`${T}_rep`]))[0].n === 1,
+      "expected the approved row to be PAID");
+
+    sub("D15e. a reversal AFTER payment leaves a recovery balance, not a silent zero");
+    // e2 is the one still standing. Reversing it removes the entitlement that was paid.
+    await decide(fin, s2.json.collectionId, "reverse", "D15 — reversal after payment");
+    row = await review();
+    check("entitlement drops to 0.00", row.balances.approvedEntitlement === "0.00", S(row.balances));
+    check("the payout history is preserved at 8.00", row.balances.completedPayouts === "8.00", S(row.balances));
+    check("the signed balance is -8.00", row.balances.signedBalance === "-8.00", S(row.balances));
+    check("shown as a recovery of 8.00, not hidden behind zero", row.balances.recoveryBalance === "8.00", S(row.balances));
+    check("and nothing is available to pay", row.balances.availableToPay === "0.00", S(row.balances));
+    const afterRecovery = await payout(payer, { action: "payout", employeeId: `${T}_rep`, month, amount: "1.00" });
+    check("a further payout is refused while a recovery is outstanding", afterRecovery.status === 409, S(afterRecovery.json).slice(0, 170));
+    check("and the refusal names the recovery", /owed back|recovery/i.test(S(afterRecovery.json)), S(afterRecovery.json).slice(0, 170));
+
+    sub("D15f. unapproved earnings do not cancel a debt");
+    // A fresh, unapproved collection for the same rep and period must not make the
+    // recovery disappear or become payable.
+    const { oppId: t3 } = await mkDeal("t3", `${T}_rep`, 1150, 150);
+    const s3 = await submit(tierRep, t3, 1150);
+    await decide(fin, s3.json.collectionId, "approve");
+    row = await review();
+    check("the new earning shows as unapproved entitlement",
+      Number(row.balances.unapprovedEntitlement) > 0, S(row.balances));
+    check("the recovery is unchanged at 8.00", row.balances.recoveryBalance === "8.00", S(row.balances));
+    check("and still nothing is payable", row.balances.availableToPay === "0.00", S(row.balances));
+
+    sub("D15g. the payout privilege is its own");
+    const noPay = await payout(mgr, { action: "payout", employeeId: `${T}_rep`, month, amount: "1.00" });
+    check("a manager without record_payout is refused", noPay.status === 403, S(noPay.json).slice(0, 140));
+    const repTries = await payout(repA, { action: "payout", employeeId: `${T}_rep`, month, amount: "1.00" });
+    check("and so is a salesperson", repTries.status === 403, S(repTries.json).slice(0, 140));
+    const selfPay = await payout(payer, { action: "payout", employeeId: ids.payer, month, amount: "1.00" });
+    check("nobody pays themselves", selfPay.status === 403, S(selfPay.json).slice(0, 140));
+  }
+
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -1195,6 +1195,9 @@ async function main() {
     });
     check("paying exactly what is owed is recorded", pay.status === 201, S(pay.json).slice(0, 220));
     check("and nothing remains outstanding", pay.json?.statement?.outstanding === "0.00", S(pay.json?.statement));
+    // The figure that now governs whether another payment may be made.
+    check("and nothing remains available to pay", pay.json?.balances?.availableToPay === "0.00", S(pay.json?.balances));
+    check("with no recovery owed", pay.json?.balances?.recoveryBalance === "0.00", S(pay.json?.balances));
     check("the response says plainly that no money moved",
       /does not move money/i.test(pay.json?.notice ?? ""), S(pay.json?.notice));
 
