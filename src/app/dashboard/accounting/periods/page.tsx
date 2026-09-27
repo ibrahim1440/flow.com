@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 import { ApiError, Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, api, useApi, useFinance, useL } from "../../finance/_components/ui";
 import { PERIOD_STATUS, useCan, useDay } from "../_components/kit";
 
-type Period = { id: string; year: number; periodNo: number; startDate: string; endDate: string; status: string; lockedBy: string | null; closedBy: string | null; entries: Record<string, number> };
+type Period = { id: string; year: number; periodNo: number; startDate: string; endDate: string; status: string; lockedBy: string | null; closedBy: string | null; lockedAt: string | null; closedAt: string | null; lockedByName: string | null; closedByName: string | null; entries: Record<string, number> };
 type Blockers = { blockers: { code: string; en: string; ar: string }[] };
 
 export default function PeriodsPage() {
@@ -29,6 +29,13 @@ export default function PeriodsPage() {
     finally { setBusy(null); }
   };
   const openClose = async (p: Period) => { setClosing({ p, blockers: null }); const b = await api<Blockers>(`/api/accounting/fiscal-periods/${p.id}/close-check`).catch(() => ({ blockers: [] })); setClosing({ p, blockers: b.blockers }); };
+  // Who closed (or else locked) the period, with the Riyadh calendar day it happened.
+  const by = (p: Period) => {
+    const name = p.status === "CLOSED" ? p.closedByName ?? p.lockedByName : p.status === "LOCKED" ? p.lockedByName : null;
+    const at = p.status === "CLOSED" ? p.closedAt : p.status === "LOCKED" ? p.lockedAt : null;
+    if (!name || !at) return "—";
+    return `${name} · ${new Date(at).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", timeZone: "Asia/Riyadh" })}`;
+  };
   const month = (p: Period) => new Date(p.startDate).toLocaleDateString(lang === "ar" ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 
   if (error) return <ErrorState error={error} onRetry={reload} />;
@@ -44,7 +51,7 @@ export default function PeriodsPage() {
           <CardTitle title={L(`السنة المالية ${y}`, `Fiscal year ${y}`)} sub={L("فترات شهرية · لا تداخل بين الفترات · القفل يمنع الترحيل ويمكن فكّه بسبب · الإقفال نهائي", "Monthly periods · no overlap · locking stops posting and can be undone with a reason · closing is final")}
             right={can("settings_manage") ? <Button icon={Plus} onClick={() => setYearForm({ year: String(y + 1), startMonth: String(new Date(data.filter((p) => p.year === y).sort((a, b) => a.periodNo - b.periodNo)[0].startDate).getUTCMonth() + 1) })}>{L("سنة مالية", "Fiscal year")}</Button> : undefined} />
           <Table>
-            <thead><tr><Th>{L("الفترة", "Period")}</Th><Th>{L("من – إلى", "From – to")}</Th><Th>{L("الحالة", "Status")}</Th><Th num>{L("قيود مرحّلة", "Posted")}</Th><Th num>{L("معلّقة", "Pending")}</Th><Th>{L("إجراء", "Action")}</Th></tr></thead>
+            <thead><tr><Th>{L("الفترة", "Period")}</Th><Th>{L("من – إلى", "From – to")}</Th><Th>{L("الحالة", "Status")}</Th><Th num>{L("قيود مرحّلة", "Posted")}</Th><Th num>{L("معلّقة", "Pending")}</Th><Th>{L("بواسطة", "By")}</Th><Th>{L("إجراء", "Action")}</Th></tr></thead>
             <tbody>
               {data.filter((p) => p.year === y).sort((a, b) => a.periodNo - b.periodNo).map((p) => {
                 const pending = (p.entries.DRAFT ?? 0) + (p.entries.SUBMITTED ?? 0) + (p.entries.APPROVED ?? 0);
@@ -56,11 +63,12 @@ export default function PeriodsPage() {
                     <Td><Badge tone={st.tone}>{L(st.ar, st.en)}</Badge></Td>
                     <Td num>{(p.entries.POSTED ?? 0) + (p.entries.REVERSED ?? 0)}</Td>
                     <Td num className={pending ? "font-bold text-amber-700" : ""}>{pending}</Td>
+                    <Td className="whitespace-nowrap">{by(p)}</Td>
                     <Td>
                       <span className="flex gap-3">
                         {p.status === "OPEN" && can("period_lock") && <button type="button" className="text-[13px] font-bold text-orange hover:underline disabled:opacity-50" disabled={!!busy} onClick={() => run(p.id, () => api(`/api/accounting/fiscal-periods/${p.id}/lock`, { method: "POST", json: {} }))}>{L("قفل", "Lock")}</button>}
                         {p.status === "LOCKED" && can("unlock_period") && <button type="button" className="text-[13px] font-bold text-orange hover:underline" onClick={() => { setReason(""); setUnlocking(p); }}>{L("فكّ القفل", "Unlock")}</button>}
-                        {p.status === "LOCKED" && can("period_close") && <button type="button" className="text-[13px] font-bold text-red-600 hover:underline" onClick={() => openClose(p)}>{L("إقفال", "Close")}</button>}
+                        {p.status === "LOCKED" && can("period_close") && <button type="button" className="text-[13px] font-bold text-red-700 hover:underline" onClick={() => openClose(p)}>{L("إقفال", "Close")}</button>}
                       </span>
                     </Td>
                   </tr>

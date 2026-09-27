@@ -88,19 +88,19 @@ export function JournalEditor({ initial, entryId, onSaved }: { initial?: EditorV
                   <option value="">{L("اختر حساباً…", "Choose an account…")}</option>
                   {postable.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}
                 </select>
-                {touched && lineErrors[i] && <span role="alert" className="block text-[11px] text-red-600 mt-1">{lineErrors[i]}</span>}
+                {touched && lineErrors[i] && <span role="alert" className="block text-[11px] text-red-700 mt-1">{lineErrors[i]}</span>}
               </Td>
               <Td className="min-w-[160px]"><input aria-label={L(`وصف السطر ${i + 1}`, `Line ${i + 1} description`)} className={INPUT} value={l.description} onChange={(e) => set(i, { description: e.target.value })} /></Td>
               <Td className="min-w-[120px]"><select aria-label={L(`فرع السطر ${i + 1}`, `Line ${i + 1} branch`)} className={INPUT} value={l.branchId} onChange={(e) => set(i, { branchId: e.target.value })}><option value="">—</option>{dims.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Td>
               <Td className="min-w-[120px]"><select aria-label={L(`مركز تكلفة السطر ${i + 1}`, `Line ${i + 1} cost centre`)} className={INPUT} value={l.costCenterId} onChange={(e) => set(i, { costCenterId: e.target.value })}><option value="">—</option>{dims.costCenters.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Td>
               <Td num className="min-w-[120px]"><input inputMode="decimal" dir="ltr" aria-label={L(`مدين السطر ${i + 1}`, `Line ${i + 1} debit`)} className={`${INPUT} text-end ${touched && parsed[i].d === null ? "border-red-300" : ""}`} value={l.debit} onChange={(e) => set(i, { debit: e.target.value, ...(e.target.value ? { credit: "" } : {}) })} /></Td>
               <Td num className="min-w-[120px]"><input inputMode="decimal" dir="ltr" aria-label={L(`دائن السطر ${i + 1}`, `Line ${i + 1} credit`)} className={`${INPUT} text-end ${touched && parsed[i].c === null ? "border-red-300" : ""}`} value={l.credit} onChange={(e) => set(i, { credit: e.target.value, ...(e.target.value ? { debit: "" } : {}) })} /></Td>
-              <Td><button type="button" aria-label={L(`حذف السطر ${i + 1}`, `Remove line ${i + 1}`)} disabled={v.lines.length <= 2} onClick={() => setV({ ...v, lines: v.lines.filter((_, j) => j !== i) })} className="p-2 text-brown-light hover:text-red-600 disabled:opacity-30"><X size={16} /></button></Td>
+              <Td><button type="button" aria-label={L(`حذف السطر ${i + 1}`, `Remove line ${i + 1}`)} disabled={v.lines.length <= 2} onClick={() => setV({ ...v, lines: v.lines.filter((_, j) => j !== i) })} className="p-2 text-brown hover:text-red-700 disabled:opacity-30"><X size={16} /></button></Td>
             </tr>
           ))}
           <tr className="bg-cream-dark font-bold">
             <Td></Td><Td>{L("المجموع", "Total")}</Td><Td></Td><Td></Td><Td></Td>
-            <Td num>{money(totalD)}</Td><Td num className={balanced || !touched ? "" : "text-red-600"}>{money(totalC)}</Td><Td></Td>
+            <Td num>{money(totalD)}</Td><Td num className={balanced || !touched ? "" : "text-red-700"}>{money(totalC)}</Td><Td></Td>
           </tr>
         </tbody>
       </Table>

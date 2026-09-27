@@ -65,7 +65,7 @@ export default function AccountingOverview() {
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi icon={ClipboardList} tone="warn" label={L("قيود بانتظار الاعتماد", "Entries awaiting approval")} value={o.journals.pendingApproval} sub={L("أعدّها غيرك ولم تُعتمد بعد", "Prepared, not yet approved")} />
         <Kpi icon={CheckCircle2} tone="blue" label={L("معتمدة لم تُرحّل", "Approved, not posted")} value={o.journals.approvedUnposted} sub={L("جاهزة للترحيل", "Ready to post")} />
-        <Kpi icon={AlertOctagon} tone={blocked ? "bad" : "slate"} valueClass={blocked ? "text-red-600" : ""} label={L("أحداث ترحيل محجوبة", "Blocked automatic postings")} value={blocked} sub={blocked ? L("تحتاج قراراً أو إعداداً", "Need a decision or set-up") : L("لا شيء محجوب", "Nothing blocked")} />
+        <Kpi icon={AlertOctagon} tone={blocked ? "bad" : "slate"} valueClass={blocked ? "text-red-700" : ""} label={L("أحداث ترحيل محجوبة", "Blocked automatic postings")} value={blocked} sub={blocked ? L("تحتاج قراراً أو إعداداً", "Need a decision or set-up") : L("لا شيء محجوب", "Nothing blocked")} />
         <Kpi icon={CalendarRange} tone="brand" label={L("الفترة المفتوحة الحالية", "Current open period")} value={openNow ? monthName(openNow) : "—"} sub={o.ledgerCutoverDate ? L(`بداية الدفتر ${day(o.ledgerCutoverDate)}`, `Ledger cutover ${day(o.ledgerCutoverDate)}`) : ""} />
       </div>
       {o.provisionalEntries > 0 && (

@@ -96,7 +96,7 @@ export default function ReportsPage() {
             {statement(is.data.revenue, "")}
             <tr className="font-extrabold"><Td>{L("المصروفات", "Expenses")}</Td><Td num>{money(is.data.totalExpenses)}</Td></tr>
             {statement(is.data.expenses, "")}
-            <tr className="bg-cream-dark font-extrabold"><Td>{L("صافي الربح (الخسارة)", "Net profit (loss)")}</Td><Td num className={is.data.netIncome < 0 ? "text-red-600" : ""}>{is.data.netIncome < 0 ? `(${money(-is.data.netIncome)})` : money(is.data.netIncome)}</Td></tr>
+            <tr className="bg-cream-dark font-extrabold"><Td>{L("صافي الربح (الخسارة)", "Net profit (loss)")}</Td><Td num className={is.data.netIncome < 0 ? "text-red-700" : ""}>{is.data.netIncome < 0 ? `(${money(-is.data.netIncome)})` : money(is.data.netIncome)}</Td></tr>
           </tbody>
         </Table>
       </>)}
@@ -112,7 +112,7 @@ export default function ReportsPage() {
             {statement(bs.data.liabilities, "")}
             <tr className="font-extrabold"><Td>{L("حقوق الملكية", "Equity")}</Td><Td num>{money(bs.data.totalEquity)}</Td></tr>
             {statement(bs.data.equity, "")}
-            <tr><Td><span className="ps-4">{L("أرباح (خسائر) السنة غير المقفلة", "Unclosed current earnings")}</span></Td><Td num className={bs.data.currentEarnings < 0 ? "text-red-600" : ""}>{money(bs.data.currentEarnings)}</Td></tr>
+            <tr><Td><span className="ps-4">{L("أرباح (خسائر) السنة غير المقفلة", "Unclosed current earnings")}</span></Td><Td num className={bs.data.currentEarnings < 0 ? "text-red-700" : ""}>{money(bs.data.currentEarnings)}</Td></tr>
             <tr className="bg-cream-dark font-extrabold"><Td>{L("الالتزامات + حقوق الملكية", "Liabilities + equity")}</Td><Td num>{money(bs.data.totalLiabilities + bs.data.totalEquity)}</Td></tr>
           </tbody>
         </Table>
@@ -157,7 +157,7 @@ export default function ReportsPage() {
             {rec.data.rows.map((r) => (
               <tr key={r.employeeId}>
                 <Td>{r.name}</Td><Td num>{money(r.ledgerBalance)}</Td><Td num>{money(r.subledgerPosted)}</Td>
-                <Td num className={r.difference ? "font-bold text-red-600" : ""}>{money(r.difference)}</Td>
+                <Td num className={r.difference ? "font-bold text-red-700" : ""}>{money(r.difference)}</Td>
                 <Td num>{r.waitingCount ? `${money(r.waitingAmount)} (${r.waitingCount})` : "—"}</Td><Td num>{r.beforeCutoverOrSkipped ? money(r.beforeCutoverOrSkipped) : "—"}</Td>
               </tr>
             ))}

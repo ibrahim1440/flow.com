@@ -143,9 +143,9 @@ export default function JournalDetail({ params }: { params: Promise<{ id: string
               <li key={s.title} className="flex items-start gap-2.5">
                 <span aria-hidden className={`mt-1 w-3 h-3 rounded-full flex-shrink-0 ${s.state === "done" ? "bg-green-600" : s.state === "now" ? "bg-amber-600" : "bg-gray-300"}`} />
                 <span className="flex flex-col">
-                  <span className={`text-[13px] font-bold ${s.state === "todo" ? "text-brown-light" : "text-charcoal"}`}>{s.title}{s.state === "now" && <span className="sr-only"> ({L("الخطوة الحالية", "current step")})</span>}</span>
+                  <span className={`text-[13px] font-bold ${s.state === "todo" ? "text-brown" : "text-charcoal"}`}>{s.title}{s.state === "now" && <span className="sr-only"> ({L("الخطوة الحالية", "current step")})</span>}</span>
                   {s.who && <span className="text-xs text-brown">{s.who}</span>}
-                  {s.when && <span className="text-[11px] text-brown-light">{s.when}</span>}
+                  {s.when && <span className="text-[11px] text-brown">{s.when}</span>}
                 </span>
               </li>
             ))}

@@ -94,7 +94,7 @@ export function CardTitle({ title, sub, right }: { title: ReactNode; sub?: React
 const TONES = {
   ok: "bg-green-100 text-green-700",
   warn: "bg-amber-100 text-amber-700",
-  bad: "bg-red-100 text-red-600",
+  bad: "bg-red-100 text-red-700",
   info: "bg-slate-100 text-slate-600",
   brand: "bg-orange-light text-orange",
 } as const;
@@ -131,7 +131,7 @@ export function Kpi({ label, value, sub, icon: Icon, tone = "brand", valueClass 
       <div className="min-w-0">
         <p className="text-xs font-bold text-brown truncate">{label}</p>
         <p className={`text-xl font-extrabold text-charcoal leading-tight tabular-nums ${valueClass}`}>{value}</p>
-        {sub && <p className="text-[11px] text-brown-light mt-0.5 truncate">{sub}</p>}
+        {sub && <p className="text-[11px] text-brown mt-0.5 truncate">{sub}</p>}
       </div>
     </div>
   );
@@ -144,8 +144,8 @@ export function Field({ label, error, children, hint }: { label?: string; error?
     <label className="flex flex-col gap-1.5 min-w-0">
       {label && <span className="text-xs font-bold text-brown">{label}</span>}
       {children}
-      {hint && !error && <span className="text-[11px] text-brown-light">{hint}</span>}
-      {error && <span className="text-[11px] text-red-600">{error}</span>}
+      {hint && !error && <span className="text-[11px] text-brown">{hint}</span>}
+      {error && <span className="text-[11px] text-red-700">{error}</span>}
     </label>
   );
 }
@@ -155,7 +155,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
     <div className="inline-flex p-[3px] gap-0.5 rounded-[10px] bg-cream-dark">
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${value === o.value ? "bg-white text-charcoal shadow-sm" : "text-brown hover:text-charcoal"}`}>
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${value === o.value ? "bg-white text-charcoal shadow-sm" : "text-gray-600 hover:text-charcoal"}`}>
           {o.label}
         </button>
       ))}
@@ -167,13 +167,14 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 
 export function Table({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-xl border border-border overflow-x-auto bg-white ${className}`}>
+    // tabIndex: a horizontally scrolling region must be reachable by keyboard (WCAG 2.1.1).
+    <div tabIndex={0} className={`rounded-xl border border-border overflow-x-auto bg-white focus-visible:outline-2 focus-visible:outline-orange ${className}`}>
       <table className="w-full text-[13px] border-collapse">{children}</table>
     </div>
   );
 }
 export function Th({ children, num, className = "" }: { children?: ReactNode; num?: boolean; className?: string }) {
-  return <th className={`bg-cream-dark px-3 py-2.5 text-[11px] font-bold text-brown whitespace-nowrap ${num ? "ltr:text-right rtl:text-left" : "text-start"} ${className}`}>{children}</th>;
+  return <th className={`bg-cream-dark px-3 py-2.5 text-[11px] font-bold text-gray-600 whitespace-nowrap ${num ? "ltr:text-right rtl:text-left" : "text-start"} ${className}`}>{children}</th>;
 }
 export function Td({ children, num, className = "", onClick }: { children?: ReactNode; num?: boolean; className?: string; onClick?: () => void }) {
   return <td onClick={onClick} className={`px-3 py-[11px] border-t border-border-light align-middle ${num ? "ltr:text-right rtl:text-left tabular-nums whitespace-nowrap" : "text-start"} ${className}`}>{children}</td>;
@@ -186,7 +187,7 @@ export function LoadingState({ label }: { label?: string }) {
   return (
     <div className="bg-white rounded-2xl border border-border p-5 flex flex-col gap-3" aria-busy="true">
       {[55, 90, 75, 90, 45].map((w, i) => <div key={i} className="h-3.5 rounded-full bg-border animate-pulse" style={{ width: `${w}%` }} />)}
-      <p className="text-xs text-brown-light">{label ?? L("جارٍ تحميل البيانات المالية…", "Loading financial data…")}</p>
+      <p className="text-xs text-brown">{label ?? L("جارٍ تحميل البيانات المالية…", "Loading financial data…")}</p>
     </div>
   );
 }
@@ -199,7 +200,7 @@ export function ErrorState({ error, onRetry }: { error: ApiError | Error; onRetr
       <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center"><AlertTriangle size={22} className="text-red-600" /></div>
       <h3 className="text-base font-extrabold text-charcoal">{L("تعذّر تحميل البيانات", "Could not load the data")}</h3>
       <p className="text-[13px] text-brown max-w-sm">{L("لم تُعرض أرقام ناقصة. أعد المحاولة، وإن استمر الخطأ فأبلغ مسؤول النظام.", "No partial figures are shown. Try again; if it persists, tell your system administrator.")}</p>
-      <p className="text-[11px] text-brown-light">{error.message}</p>
+      <p className="text-[11px] text-brown">{error.message}</p>
       {onRetry && <Button icon={RefreshCw} onClick={onRetry}>{L("إعادة المحاولة", "Try again")}</Button>}
     </div>
   );
