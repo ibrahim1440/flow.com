@@ -10,7 +10,11 @@
  *   npx tsx --env-file=.env scripts/accounting/seed-local-fixture.ts --reset
  */
 import { checkUrl, assertDisposableFinanceDb } from "../finance/local-db-guard.mjs";
-{
+import { PREVIEW, isPreviewTarget } from "./preview-target.mjs";
+// Two permitted targets: the local disposable erp_finance_dev, or the one named Neon preview
+// database (scripts/accounting/preview-target.mjs), which must also carry the disposable marker.
+const previewMode = isPreviewTarget(process.env.DATABASE_URL);
+if (!previewMode) {
   const problems = checkUrl(process.env.DATABASE_URL, "erp_finance_dev");
   if (problems.length) { console.error(`Refusing: ${problems.join("; ")}.`); process.exit(1); }
 }
@@ -55,7 +59,12 @@ const TABLES = ["AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "Jou
   "CommissionLedgerCorrection", "CommissionLedgerEntry", "CommissionAccrual", "CommissionAssignment", "CommissionTier", "CommissionPlanVersion", "CommissionPlan"];
 
 async function main() {
-  await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_dev", query: (q: string) => prisma.$queryRawUnsafe(q) });
+  if (previewMode) {
+    const [r] = await prisma.$queryRawUnsafe<{ db: string; marker: string | null }[]>("SELECT current_database() AS db, shobj_description(oid, 'pg_database') AS marker FROM pg_database WHERE datname = current_database()");
+    if (r?.db !== PREVIEW.database || r?.marker !== "hiqbah-finance-disposable") { console.error("Refusing: the preview database is not the marked disposable accounting_preview."); process.exit(1); }
+  } else {
+    await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_dev", query: (q: string) => prisma.$queryRawUnsafe(q) });
+  }
   if (process.argv.includes("--reset")) {
     await prisma.$executeRawUnsafe(`TRUNCATE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`);
     await prisma.$executeRawUnsafe(`DELETE FROM "FinAuditLog" WHERE "entityType" LIKE 'accounting.%'`).catch(() => undefined);
