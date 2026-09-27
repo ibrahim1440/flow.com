@@ -3,7 +3,8 @@
   "git": {
     "deploymentEnabled": {
       "feature/sales-crm-commissions": true,
-      "release/finance-sales-20260927": false
+      "release/finance-sales-20260927": false,
+      "claude/beanflow-accounting-module-wvh4wy": false
     }
   }
 }

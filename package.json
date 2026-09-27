@@ -39,7 +39,9 @@
     "test:finance:ui": "node tests/finance/visual/workflow-ui.mjs",
     "finance:fixture": "tsx --env-file=.env scripts/finance/seed-local-fixture.ts",
     "db:local:stop": "node scripts/finance/local-postgres.mjs stop",
-    "db:local:status": "node scripts/finance/local-postgres.mjs status"
+    "db:local:status": "node scripts/finance/local-postgres.mjs status",
+    "test:accounting:unit": "tsx --test tests/accounting/unit/*.test.ts",
+    "test:accounting:db": "tsx --env-file=.env.test --test --test-concurrency=1 --test-force-exit tests/accounting/integration/*.test.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

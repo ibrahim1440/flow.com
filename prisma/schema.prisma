@@ -36,18 +36,18 @@ model Employee {
 
   // Sales CRM & commissions (additive). Relation fields only — no columns are added to
   // this table, so the deployed build reads it unchanged.
-  leadsOwned           Lead[]                  @relation("LeadOwner")
-  opportunitiesOwned   Opportunity[]           @relation("OpportunityOwner")
-  opportunitySplits    OpportunityOwner[]      @relation("OpportunitySplitOwner")
-  activitiesOwned      Activity[]              @relation("ActivityOwner")
-  commissionAssignments CommissionAssignment[] @relation("CommissionAssignee")
-  commissionAccruals   CommissionAccrual[]     @relation("CommissionEarner")
-  commissionLedger     CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
-  salesTargets         SalesTarget[]           @relation("SalesTargetOwner")
-  collectionsSubmitted SalesCollection[]       @relation("CollectionSubmitter")
-  collectionsDecided   SalesCollection[]       @relation("CollectionDecider")
-  collectionsReversed  SalesCollection[]       @relation("CollectionReverser")
-  evidenceUploaded     CollectionEvidence[]    @relation("EvidenceUploader")
+  leadsOwned            Lead[]                  @relation("LeadOwner")
+  opportunitiesOwned    Opportunity[]           @relation("OpportunityOwner")
+  opportunitySplits     OpportunityOwner[]      @relation("OpportunitySplitOwner")
+  activitiesOwned       Activity[]              @relation("ActivityOwner")
+  commissionAssignments CommissionAssignment[]  @relation("CommissionAssignee")
+  commissionAccruals    CommissionAccrual[]     @relation("CommissionEarner")
+  commissionLedger      CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
+  salesTargets          SalesTarget[]           @relation("SalesTargetOwner")
+  collectionsSubmitted  SalesCollection[]       @relation("CollectionSubmitter")
+  collectionsDecided    SalesCollection[]       @relation("CollectionDecider")
+  collectionsReversed   SalesCollection[]       @relation("CollectionReverser")
+  evidenceUploaded      CollectionEvidence[]    @relation("EvidenceUploader")
 }
 
 model Customer {
@@ -133,12 +133,12 @@ model Order {
   // Sales CRM (additive, relation fields only).
   opportunityLinks OpportunityOrder[]
   collectionEvents CollectionEvent[]
+  salesCollections SalesCollection[]
 
   @@index([createdAt])
   @@index([customerId, createdAt])
   @@index([status])
   @@index([ownerId])
-  salesCollections SalesCollection[]
 }
 
 model OrderItem {
@@ -329,10 +329,10 @@ model Delivery {
   /// previous application version, which sends none, keeps inserting deliveries while this
   /// column already exists; unique so two concurrent retries of one dispatch collapse to a
   /// single shipment.
-  requestKey    String? @unique
+  requestKey String? @unique
   /// SHA-256 over a fixed-position array of the normalized dispatch intent. The same key
   /// carrying a different intent is a client error, not a second shipment.
-  intentHash    String?
+  intentHash String?
 
   @@index([date])
 }
@@ -729,19 +729,16 @@ enum PackagingMethod {
 
 /**
  * One packaging SUBMIT, recorded so that a retry can be recognised instead of re-executed.
- *
  * Packaging is not naturally idempotent and never can be. Packing a roast in several goes
  * is ordinary operational reality, so "the same request twice" and "two genuine partial
  * packs" are indistinguishable from the payload alone — the two are separated only by the
  * key the client chose. That is why identity lives here, on the operation, and not as a
  * single request key on RoastingBatch: one key per batch would make the second partial pack
  * look like a replay of the first.
- *
  * Scoped to (batchId, requestKey) rather than requestKey alone. A key is meaningful only
  * against the batch it was submitted for; a global unique would make two unrelated roasts
  * collide if a client ever reused a key, and would turn a local mistake into a cross-batch
  * failure.
- *
  * The row is written in the SAME transaction as the stock it describes, so a failed
  * packaging leaves no operation behind and the same key may legitimately be retried.
  */
@@ -889,18 +886,18 @@ model BomComponent {
 // it is made from is `product` (CoffeeProduct); the pack size is `weightGrams`.
 // Sales orders reference ONLY this model — never a green bean, never a CoffeeProduct.
 model ProductSKU {
-  id                String             @id @default(cuid())
-  productId         String
-  product           CoffeeProduct      @relation(fields: [productId], references: [id])
-  skuCode           String             @unique
-  weightGrams       Float // net weight of one sellable unit; master data for BOM/production maths
-  isBulk            Boolean            @default(false)
-  price             Float              @default(0)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  orderItems        OrderItem[]
-  finishedGoodsLots FinishedGoodsLot[]
-  productionOrders  ProductionOrder[]
+  id                  String               @id @default(cuid())
+  productId           String
+  product             CoffeeProduct        @relation(fields: [productId], references: [id])
+  skuCode             String               @unique
+  weightGrams         Float // net weight of one sellable unit; master data for BOM/production maths
+  isBulk              Boolean              @default(false)
+  price               Float                @default(0)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  orderItems          OrderItem[]
+  finishedGoodsLots   FinishedGoodsLot[]
+  productionOrders    ProductionOrder[]
   packagingOperations PackagingOperation[]
 
   // ─── Finished Products catalog (additive) ────────────────────────────────
@@ -1167,6 +1164,41 @@ enum AccountingEventStatus {
   PENDING
   TRANSLATED
   FAILED
+  /// Held by a rule, not broken: the governing policy or plan is not approved, an earlier
+  /// event for the same party is still unposted, or the period for its date is not open.
+  /// Retried by the processor once the cause is removed.
+  BLOCKED
+  /// Deliberately not posted (e.g. dated before the ledger cutover — opening balances
+  /// carry it). Terminal, with the reason recorded.
+  SKIPPED
+}
+
+/// What subledger an account is the control account for. Manual journals cannot post to a
+/// control account unless `allowManualPosting` is set, so a subledger and its control
+/// account cannot drift apart through a hand-typed entry.
+enum AccountControlKind {
+  NONE
+  RECEIVABLE
+  PAYABLE
+  INVENTORY
+  TAX
+  COMMISSION_PAYABLE
+  CUSTOMER_ADVANCES
+  CASH
+  CLEARING
+}
+
+enum AccountingPolicyStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+/// Accounting approval of a commission plan version, separate from the plan itself: the
+/// sales engine may calculate on a provisional plan, the ledger may not post from one.
+enum CommissionAccountingApproval {
+  PROVISIONAL
+  APPROVED
 }
 
 enum QoyodExportStatus {
@@ -1189,6 +1221,11 @@ model AccountingSettings {
 
   exportToQoyod Boolean @default(false)
 
+  /// Accounting date from which operational events post to this ledger. Events dated
+  /// earlier are SKIPPED: the opening balance at cutover carries them. Null = no cutover
+  /// decided yet, and automatic events stay PENDING rather than guess.
+  ledgerCutoverDate DateTime?
+
   // Posting is blocked everywhere except setup routes while this is false. Must not
   // default to true — there is no setup wizard in S0, so setup is never complete by default.
   setupComplete Boolean @default(false)
@@ -1199,23 +1236,27 @@ model AccountingSettings {
 }
 
 model Account {
-  id             String      @id @default(cuid())
-  code           String      @unique
-  nameAr         String?
-  nameEn         String
-  parentId       String?
-  parent         Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children       Account[]   @relation("AccountHierarchy")
-  type           AccountType
-  allowPosting   Boolean     @default(true)
-  isActive       Boolean     @default(true)
-  qoyodAccountId String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  createdBy      String?
-  updatedBy      String?
+  id                 String             @id @default(cuid())
+  code               String             @unique
+  nameAr             String?
+  nameEn             String
+  parentId           String?
+  parent             Account?           @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children           Account[]          @relation("AccountHierarchy")
+  type               AccountType
+  allowPosting       Boolean            @default(true)
+  isActive           Boolean            @default(true)
+  controlKind        AccountControlKind @default(NONE)
+  /// Only meaningful on a control account: whether a manual journal may post to it.
+  allowManualPosting Boolean            @default(true)
+  qoyodAccountId     String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  createdBy          String?
+  updatedBy          String?
 
   journalEntryLines JournalEntryLine[]
+  mappings          AccountMapping[]
 
   @@index([type])
   @@index([parentId])
@@ -1301,6 +1342,22 @@ model JournalEntry {
   // Set only on the reversal entry itself (explanation for why the original was reversed).
   reversalReason String?
 
+  /// Rejection returns an entry to DRAFT; the last rejection is kept on the entry and every
+  /// decision is in FinAuditLog.
+  rejectedAt      DateTime?
+  rejectedBy      String?
+  rejectionReason String?
+
+  /// Posted from a policy or plan that is not yet approved, in an isolated test database
+  /// only (a database trigger refuses it anywhere else). Reports label these entries.
+  isProvisional Boolean @default(false)
+  policyKey     String?
+  policyVersion Int?
+
+  /// The AccountingEvent this entry was translated from. Unique: one event, one entry —
+  /// the database, not the processor, is what makes a replay a no-op.
+  originEventId String? @unique
+
   lines              JournalEntryLine[]
   accountingEvents   AccountingEvent[]
   qoyodExportRecords QoyodExportRecord[]
@@ -1327,11 +1384,63 @@ model JournalEntryLine {
   description         String?
   taxCategorySnapshot Json?
 
+  lineNo Int @default(0)
+
+  /// Dimensions reuse the Finance masters rather than duplicating them.
+  branchId     String?
+  branch       FinBranch?     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  costCenterId String?
+  costCenter   FinCostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+
+  /// Subledger party: CUSTOMER | SUPPLIER | EMPLOYEE, with that record's id. Required on
+  /// lines hitting a control account from an automatic posting.
+  partyType String?
+  partyId   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([partyType, partyId])
+}
+
+/// Which account the posting engine uses for a role (COMMISSION_EXPENSE, AR_CONTROL, …).
+/// Translators never hard-code account codes; an unmapped role blocks the event.
+model AccountMapping {
+  id        String   @id @default(cuid())
+  role      String   @unique
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+/// A versioned accounting policy (commission recognition, inventory costing, revenue
+/// recognition, …). Posting that depends on a policy requires its APPROVED version;
+/// approval is four-eyes, enforced by a database trigger, and an approved version is
+/// immutable except for retirement.
+model AccountingPolicy {
+  id         String                 @id @default(cuid())
+  key        String
+  version    Int
+  status     AccountingPolicyStatus @default(DRAFT)
+  titleEn    String
+  titleAr    String?
+  /// The policy text an accountant approves, and the machine-read parameters.
+  statement  String
+  parameters Json?
+  preparedBy String
+  preparedAt DateTime               @default(now())
+  approvedBy String?
+  approvedAt DateTime?
+  retiredBy  String?
+  retiredAt  DateTime?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  @@unique([key, version])
+  @@index([key, status])
 }
 
 model AccountingEvent {
@@ -1354,12 +1463,19 @@ model AccountingEvent {
   journalEntry   JournalEntry?         @relation(fields: [journalEntryId], references: [id])
   errorMessage   String?
 
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+  /// Party the event concerns (e.g. EMPLOYEE:<id>). Events for one party post in order, so
+  /// a blocked earlier event holds later ones instead of letting a balance go negative.
+  partyKey      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([sourceModule, sourceDocumentId])
   @@index([status])
   @@index([eventType])
+  @@index([partyKey, occurredAt])
 }
 
 model QoyodExportRecord {
@@ -1417,29 +1533,29 @@ enum LeadSource {
 }
 
 model Lead {
-  id           String     @id @default(cuid())
+  id            String     @id @default(cuid())
   /// Business name. The person is a contact ON this lead, because a café has many
   /// people and none of them is the customer.
-  companyName  String
+  companyName   String
   companyNameAr String?
-  contactName  String
-  phone        String?
-  email        String?
-  city         String?
-  address      String?
-  source       LeadSource @default(OTHER)
-  sourceNote   String?
-  status       LeadStatus @default(NEW)
+  contactName   String
+  phone         String?
+  email         String?
+  city          String?
+  address       String?
+  source        LeadSource @default(OTHER)
+  sourceNote    String?
+  status        LeadStatus @default(NEW)
 
   /// Who is responsible. Ownership is the scoping key for every read and write.
-  ownerId      String
-  owner        Employee   @relation("LeadOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("LeadOwner", fields: [ownerId], references: [id])
 
   /// The next commitment. A lead with no next step is the thing this screen exists
   /// to make visible, so it is a first-class column rather than a derived guess.
   nextFollowUpAt DateTime?
 
-  notes        String?
+  notes String?
 
   /// Normalised duplicate-detection keys. Written by the service, never by a client.
   /// Deliberately NOT unique: two genuine contacts can share a company, and merging
@@ -1447,12 +1563,12 @@ model Lead {
   normalizedCompany String?
   normalizedPhone   String?
 
-  conversion   LeadConversion?
-  activities   Activity[]
+  conversion LeadConversion?
+  activities Activity[]
 
-  createdById  String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([ownerId, status])
   @@index([status, nextFollowUpAt])
@@ -1467,21 +1583,21 @@ model Lead {
 /// rows — never from counting leads and opportunities in a period and dividing,
 /// which measures nothing when the two sets are unrelated.
 model LeadConversion {
-  id            String      @id @default(cuid())
-  leadId        String      @unique
-  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  id     String @id @default(cuid())
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Restrict)
 
-  customerId    String
-  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   opportunityId String      @unique
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
 
   /// True when this conversion created the customer rather than linking an existing one.
-  customerCreated Boolean   @default(false)
+  customerCreated Boolean @default(false)
 
   convertedById String?
-  convertedAt   DateTime    @default(now())
+  convertedAt   DateTime @default(now())
 
   @@index([customerId])
   @@index([convertedAt])
@@ -1505,24 +1621,24 @@ enum PipelineStagePurpose {
 }
 
 model PipelineStage {
-  id          String        @id @default(cuid())
+  id          String                @id @default(cuid())
   /// Stable identity. The label may be translated; this may not change.
-  code        String        @unique
+  code        String                @unique
   nameEn      String
   nameAr      String
   position    Int
   /// Default probability offered when a deal enters this stage. Advisory only.
-  probability Int           @default(0)
+  probability Int                   @default(0)
   /// At most one stage may hold each purpose — the unique index is what stops two columns
   /// both claiming to be where quotations land.
   purpose     PipelineStagePurpose? @unique
-  isActive    Boolean       @default(true)
+  isActive    Boolean               @default(true)
 
   opportunities Opportunity[]
   stageEvents   OpportunityStageEvent[]
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([position])
 }
@@ -1537,46 +1653,46 @@ enum OpportunityOutcome {
 }
 
 model Opportunity {
-  id             String             @id @default(cuid())
-  title          String
-  customerId     String?
-  customer       Customer?          @relation(fields: [customerId], references: [id])
+  id         String    @id @default(cuid())
+  title      String
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  stageId        String
-  stage          PipelineStage      @relation(fields: [stageId], references: [id])
+  stageId String
+  stage   PipelineStage @relation(fields: [stageId], references: [id])
 
-  outcome        OpportunityOutcome @default(OPEN)
+  outcome    OpportunityOutcome @default(OPEN)
   /// Required by the service whenever outcome becomes LOST.
-  lostReason     String?
-  closedAt       DateTime?
+  lostReason String?
+  closedAt   DateTime?
 
   /// Expected value. Currency is explicit so a future multi-currency policy has
   /// somewhere to land; the commission engine refuses anything but SAR today.
-  amount         Decimal            @default(0) @db.Decimal(18, 2)
-  currency       String             @default("SAR")
-  probability    Int                @default(0)
+  amount          Decimal   @default(0) @db.Decimal(18, 2)
+  currency        String    @default("SAR")
+  probability     Int       @default(0)
   expectedCloseAt DateTime?
-  nextFollowUpAt DateTime?
+  nextFollowUpAt  DateTime?
 
-  ownerId        String
-  owner          Employee           @relation("OpportunityOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("OpportunityOwner", fields: [ownerId], references: [id])
 
-  conversion     LeadConversion?
-  owners         OpportunityOwner[]
-  stageEvents    OpportunityStageEvent[]
-  quotes         Quote[]
-  samples        SampleShipment[]
-  activities     Activity[]
-  orderLinks     OpportunityOrder[]
+  conversion  LeadConversion?
+  owners      OpportunityOwner[]
+  stageEvents OpportunityStageEvent[]
+  quotes      Quote[]
+  samples     SampleShipment[]
+  activities  Activity[]
+  orderLinks  OpportunityOrder[]
 
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  salesCollections SalesCollection[]
 
   @@index([ownerId, outcome])
   @@index([stageId, outcome])
   @@index([outcome, closedAt])
   @@index([nextFollowUpAt])
-  salesCollections SalesCollection[]
 }
 
 /// Split attribution. Percentages are stored, not inferred, and the service requires
@@ -1602,20 +1718,20 @@ model OpportunityOwner {
 /// Every stage move, owner change and value change, kept for the pipeline-duration
 /// report and for answering "who moved this and when".
 model OpportunityStageEvent {
-  id            String        @id @default(cuid())
+  id            String      @id @default(cuid())
   opportunityId String
-  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
-  fromStageId   String?
-  toStageId     String?
-  toStage       PipelineStage? @relation(fields: [toStageId], references: [id])
+  fromStageId String?
+  toStageId   String?
+  toStage     PipelineStage? @relation(fields: [toStageId], references: [id])
 
-  fromOutcome   OpportunityOutcome?
-  toOutcome     OpportunityOutcome?
+  fromOutcome OpportunityOutcome?
+  toOutcome   OpportunityOutcome?
 
-  reason        String?
-  actorId       String?
-  createdAt     DateTime      @default(now())
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
 
   @@index([opportunityId, createdAt])
 }
@@ -1633,15 +1749,15 @@ enum SampleStatus {
 /// path with its own guards, and a CRM screen must not become a second way to
 /// decrement a shelf.
 model SampleShipment {
-  id            String       @id @default(cuid())
+  id            String      @id @default(cuid())
   opportunityId String
-  opportunity   Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
-  productSkuId  String?
-  productSku    ProductSKU?  @relation(fields: [productSkuId], references: [id])
-  description   String?
-  quantity      Decimal      @default(0) @db.Decimal(12, 3)
-  unit          String       @default("KG")
+  productSkuId String?
+  productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
+  description  String?
+  quantity     Decimal     @default(0) @db.Decimal(12, 3)
+  unit         String      @default("KG")
 
   status        SampleStatus @default(PREPARING)
   sentAt        DateTime?
@@ -1649,9 +1765,9 @@ model SampleShipment {
   feedbackScore Int?
   feedbackNotes String?
 
-  createdById   String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([opportunityId, status])
 }
@@ -1695,10 +1811,10 @@ enum ActivityOutcome {
 /// Recording that contact happened is NOT sending a message. Nothing here dispatches
 /// email, SMS or WhatsApp, and no screen implies it does.
 model Activity {
-  id            String       @id @default(cuid())
-  type          ActivityType
-  subject       String
-  body          String?
+  id      String       @id @default(cuid())
+  type    ActivityType
+  subject String
+  body    String?
 
   leadId        String?
   lead          Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -1709,16 +1825,16 @@ model Activity {
 
   /// Nullable: every activity written before this existed has no recorded outcome, and
   /// inventing one for them would be a claim about conversations nobody witnessed.
-  outcome       ActivityOutcome?
+  outcome ActivityOutcome?
 
-  dueAt         DateTime?
-  completedAt   DateTime?
+  dueAt       DateTime?
+  completedAt DateTime?
 
-  ownerId       String
-  owner         Employee     @relation("ActivityOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("ActivityOwner", fields: [ownerId], references: [id])
 
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ownerId, completedAt, dueAt])
   @@index([leadId])
@@ -1735,58 +1851,58 @@ enum QuoteStatus {
 }
 
 model Quote {
-  id            String      @id @default(cuid())
+  id           String  @id @default(cuid())
   /// Human reference, unique per revision chain.
-  quoteNumber   String      @unique
-  revision      Int         @default(1)
+  quoteNumber  String  @unique
+  revision     Int     @default(1)
   /// Points at the quote this one revises, so a chain is walkable in both directions.
-  supersedesId  String?     @unique
-  supersedes    Quote?      @relation("QuoteRevision", fields: [supersedesId], references: [id])
-  supersededBy  Quote?      @relation("QuoteRevision")
+  supersedesId String? @unique
+  supersedes   Quote?  @relation("QuoteRevision", fields: [supersedesId], references: [id])
+  supersededBy Quote?  @relation("QuoteRevision")
 
   opportunityId String
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
   customerId    String?
   customer      Customer?   @relation(fields: [customerId], references: [id])
 
-  status        QuoteStatus @default(DRAFT)
-  currency      String      @default("SAR")
-  validUntil    DateTime?
+  status     QuoteStatus @default(DRAFT)
+  currency   String      @default("SAR")
+  validUntil DateTime?
 
   /// Totals computed on the server from the lines. Stored so an issued quote is a
   /// fixed document: recomputing it later from live prices would change history.
-  subtotal      Decimal     @default(0) @db.Decimal(18, 2)
-  discountTotal Decimal     @default(0) @db.Decimal(18, 2)
-  taxTotal      Decimal     @default(0) @db.Decimal(18, 2)
-  grandTotal    Decimal     @default(0) @db.Decimal(18, 2)
+  subtotal      Decimal @default(0) @db.Decimal(18, 2)
+  discountTotal Decimal @default(0) @db.Decimal(18, 2)
+  taxTotal      Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal    Decimal @default(0) @db.Decimal(18, 2)
 
   /// Frozen copy of the lines and prices at the moment of issue.
   issuedSnapshot Json?
-  issuedAt      DateTime?
-  acceptedAt    DateTime?
-  rejectedAt    DateTime?
-  rejectionNote String?
+  issuedAt       DateTime?
+  acceptedAt     DateTime?
+  rejectedAt     DateTime?
+  rejectionNote  String?
 
   /// Set when a discount above the configured threshold was authorised.
   discountApprovedById String?
   discountApprovedAt   DateTime?
 
-  lines         QuoteLine[]
-  orderLinks    OpportunityOrder[]
+  lines      QuoteLine[]
+  orderLinks OpportunityOrder[]
 
-  createdById   String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  salesCollections SalesCollection[]
 
   @@index([opportunityId, status])
   @@index([customerId])
-  salesCollections SalesCollection[]
 }
 
 model QuoteLine {
-  id           String     @id @default(cuid())
-  quoteId      String
-  quote        Quote      @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 
   productSkuId String?
   productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
@@ -1796,18 +1912,18 @@ model QuoteLine {
   /// Decimal(12,3) carries kilogram fractions honestly. Whether fractions are ALLOWED
   /// is a product question the service asks the SKU, not something the column decides:
   /// 1.5 kg of beans is ordinary, 1.5 retail bags is not.
-  quantity     Decimal    @db.Decimal(12, 3)
-  unit         String     @default("KG")
+  quantity Decimal @db.Decimal(12, 3)
+  unit     String  @default("KG")
 
-  unitPrice    Decimal    @db.Decimal(18, 2)
+  unitPrice       Decimal @db.Decimal(18, 2)
   discountPercent Decimal @default(0) @db.Decimal(5, 2)
   taxRatePercent  Decimal @default(0) @db.Decimal(5, 2)
 
-  lineSubtotal Decimal    @default(0) @db.Decimal(18, 2)
-  lineTax      Decimal    @default(0) @db.Decimal(18, 2)
-  lineTotal    Decimal    @default(0) @db.Decimal(18, 2)
+  lineSubtotal Decimal @default(0) @db.Decimal(18, 2)
+  lineTax      Decimal @default(0) @db.Decimal(18, 2)
+  lineTotal    Decimal @default(0) @db.Decimal(18, 2)
 
-  position     Int        @default(0)
+  position Int @default(0)
 
   @@index([quoteId, position])
 }
@@ -1829,11 +1945,11 @@ model OpportunityOrder {
 
   /// Distinguishes the first order won from the repeat orders that follow it, which
   /// the attribution policy may treat differently.
-  isFirstOrder  Boolean     @default(false)
-  requestKey    String      @unique
+  isFirstOrder Boolean @default(false)
+  requestKey   String  @unique
 
-  createdById   String?
-  createdAt     DateTime    @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@unique([quoteId, orderId])
   @@index([opportunityId])
@@ -1857,46 +1973,52 @@ enum CommissionTierMode {
 }
 
 model CommissionPlan {
-  id          String                  @id @default(cuid())
-  code        String                  @unique
+  id          String  @id @default(cuid())
+  code        String  @unique
   name        String
   nameAr      String?
   description String?
-  isActive    Boolean                 @default(true)
+  isActive    Boolean @default(true)
 
   versions    CommissionPlanVersion[]
   assignments CommissionAssignment[]
 
   createdById String?
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 /// A plan is versioned, and a version is immutable once anything has accrued against
 /// it. Editing a live rule in place would silently restate commissions people have
 /// already been told they earned.
 model CommissionPlanVersion {
-  id            String             @id @default(cuid())
-  planId        String
-  plan          CommissionPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
-  version       Int
+  id      String         @id @default(cuid())
+  planId  String
+  plan    CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  version Int
 
-  basis         CommissionBasis    @default(NET_COLLECTION)
-  tierMode      CommissionTierMode @default(INCREMENTAL)
+  basis           CommissionBasis    @default(NET_COLLECTION)
+  tierMode        CommissionTierMode @default(INCREMENTAL)
   /// The flat rate applied when no tier matches, as a percentage: 1.500000 = 1.5%.
-  baseRatePercent Decimal          @db.Decimal(9, 6)
-  currency      String             @default("SAR")
+  baseRatePercent Decimal            @db.Decimal(9, 6)
+  currency        String             @default("SAR")
 
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
-  tiers         CommissionTier[]
-  assignments   CommissionAssignment[]
-  accruals      CommissionAccrual[]
+  /// Ledger posting gate (docs/accounting/POLICIES.md). Four-eyes: the approver is not the
+  /// version's creator (database trigger).
+  accountingApproval   CommissionAccountingApproval @default(PROVISIONAL)
+  accountingApprovedBy String?
+  accountingApprovedAt DateTime?
 
-  ledgerEntries  CommissionLedgerEntry[]
+  tiers       CommissionTier[]
+  assignments CommissionAssignment[]
+  accruals    CommissionAccrual[]
+
+  ledgerEntries CommissionLedgerEntry[]
   createdById   String?
-  createdAt     DateTime           @default(now())
+  createdAt     DateTime                @default(now())
 
   @@unique([planId, version])
   @@index([effectiveFrom])
@@ -1904,15 +2026,15 @@ model CommissionPlanVersion {
 
 /// One band. `fromAmount` inclusive, `toAmount` exclusive; a null `toAmount` is "and above".
 model CommissionTier {
-  id              String                @id @default(cuid())
-  planVersionId   String
-  planVersion     CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
-  fromAmount      Decimal               @db.Decimal(18, 2)
-  toAmount        Decimal?              @db.Decimal(18, 2)
+  id            String                @id @default(cuid())
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fromAmount    Decimal               @db.Decimal(18, 2)
+  toAmount      Decimal?              @db.Decimal(18, 2)
   /// Added to the base rate for the portion inside this band, in percentage points:
   /// 0.500000 means "half a point more on this slice".
-  ratePercent     Decimal               @db.Decimal(9, 6)
-  position        Int                   @default(0)
+  ratePercent   Decimal               @db.Decimal(9, 6)
+  position      Int                   @default(0)
 
   @@index([planVersionId, position])
 }
@@ -1929,8 +2051,8 @@ model CommissionAssignment {
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
-  createdById   String?
-  createdAt     DateTime              @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@index([employeeId, effectiveFrom])
 }
@@ -1951,39 +2073,39 @@ enum CollectionEventStatus {
 /// told apart from sandbox data without guessing. The UI states that the source is a
 /// sandbox; nothing here is described as a working financial integration.
 model CollectionEvent {
-  id            String                @id @default(cuid())
-  sourceSystem  String                @default("SANDBOX")
+  id           String                @id @default(cuid())
+  sourceSystem String                @default("SANDBOX")
   /// The source's own identifier, so a re-delivered webhook is recognised, not re-accrued.
-  externalRef   String
-  status        CollectionEventStatus @default(RECORDED)
+  externalRef  String
+  status       CollectionEventStatus @default(RECORDED)
 
   customerId    String?
-  customer      Customer?             @relation(fields: [customerId], references: [id])
+  customer      Customer? @relation(fields: [customerId], references: [id])
   opportunityId String?
   orderId       String?
-  order         Order?                @relation(fields: [orderId], references: [id])
+  order         Order?    @relation(fields: [orderId], references: [id])
 
   /// Gross cash received, and the split that makes the qualifying base computable.
-  amountGross   Decimal               @db.Decimal(18, 2)
-  amountTax     Decimal               @default(0) @db.Decimal(18, 2)
+  amountGross         Decimal @db.Decimal(18, 2)
+  amountTax           Decimal @default(0) @db.Decimal(18, 2)
   /// Portion of the net that does not qualify (excluded products, freight, …).
-  amountNonQualifying Decimal         @default(0) @db.Decimal(18, 2)
-  currency      String                @default("SAR")
+  amountNonQualifying Decimal @default(0) @db.Decimal(18, 2)
+  currency            String  @default("SAR")
 
-  collectedAt   DateTime
-  reversedAt    DateTime?
-  reversalOfId  String?
-  note          String?
+  collectedAt  DateTime
+  reversedAt   DateTime?
+  reversalOfId String?
+  note         String?
 
-  accruals      CommissionAccrual[]
+  accruals CommissionAccrual[]
 
-  ledgerEntries  CommissionLedgerEntry[]
+  ledgerEntries   CommissionLedgerEntry[]
   /// The finance-verified receipt that produced this event, when one did. Sandbox events
   /// have none, which is how the two sources stay tellable apart.
-  salesCollection SalesCollection?    @relation("CollectionCommissionEvent")
+  salesCollection SalesCollection?        @relation("CollectionCommissionEvent")
 
-  createdById   String?
-  createdAt     DateTime              @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@unique([sourceSystem, externalRef])
   @@index([customerId, collectedAt])
@@ -2004,37 +2126,37 @@ enum AccrualStatus {
 /// event cannot accrue a second time for the same person on the same rules. Corrections
 /// are new rows, never edits to an approved one.
 model CommissionAccrual {
-  id                String                @id @default(cuid())
+  id                String          @id @default(cuid())
   collectionEventId String
-  collectionEvent   CollectionEvent       @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
+  collectionEvent   CollectionEvent @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
 
-  employeeId        String
-  employee          Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
-  planVersionId     String
-  planVersion       CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
+  employeeId    String
+  employee      Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
 
   /// Period the accrual belongs to, as an Asia/Riyadh month, stored as the UTC instant
   /// of that month's first moment in Riyadh.
-  periodStart       DateTime
-  periodEnd         DateTime
+  periodStart DateTime
+  periodEnd   DateTime
 
   /// The qualifying base this row was computed from, and the share applied to it.
-  qualifyingBase    Decimal               @db.Decimal(18, 2)
-  sharePercent      Decimal               @default(100) @db.Decimal(5, 2)
+  qualifyingBase       Decimal @db.Decimal(18, 2)
+  sharePercent         Decimal @default(100) @db.Decimal(5, 2)
   /// Effective rate actually applied, after tiers — recorded so the figure can be
   /// explained to the person who earned it without recomputing anything.
-  effectiveRatePercent Decimal            @db.Decimal(9, 6)
-  amount            Decimal               @db.Decimal(18, 2)
-  currency          String                @default("SAR")
+  effectiveRatePercent Decimal @db.Decimal(9, 6)
+  amount               Decimal @db.Decimal(18, 2)
+  currency             String  @default("SAR")
 
-  status            AccrualStatus         @default(ACCRUED)
-  approvedById      String?
-  approvedAt        DateTime?
+  status       AccrualStatus @default(ACCRUED)
+  approvedById String?
+  approvedAt   DateTime?
 
-  ledgerEntries     CommissionLedgerEntry[]
+  ledgerEntries CommissionLedgerEntry[]
 
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([collectionEventId, employeeId, planVersionId])
   @@index([employeeId, periodStart])
@@ -2051,21 +2173,21 @@ enum LedgerEntryType {
 /// Append-only commission ledger. An approved figure is never rewritten; a correction
 /// is a new entry that references what it corrects and says who made it and why.
 model CommissionLedgerEntry {
-  id          String            @id @default(cuid())
-  type        LedgerEntryType
-  employeeId  String
-  employee    Employee          @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
+  id         String          @id @default(cuid())
+  type       LedgerEntryType
+  employeeId String
+  employee   Employee        @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
 
-  accrualId   String?
-  accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
+  accrualId  String?
+  accrual    CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
   /// A single entry this one corrects. Kept for the manual `adjust` path, which targets at
   /// most one. Engine reversals use `corrects` below, because one negative movement can
   /// compensate several earlier ones once tiers or splits are involved.
-  correctsId  String?
+  correctsId String?
 
   periodStart DateTime
-  amount      Decimal           @db.Decimal(18, 2)
-  currency    String            @default("SAR")
+  amount      Decimal  @db.Decimal(18, 2)
+  currency    String   @default("SAR")
   reason      String?
 
   /// ── Durable provenance ───────────────────────────────────────────────────────────
@@ -2097,8 +2219,8 @@ model CommissionLedgerEntry {
   corrects    CommissionLedgerCorrection[] @relation("CorrectingEntry")
   correctedBy CommissionLedgerCorrection[] @relation("CorrectedEntry")
 
-  actorId     String?
-  createdAt   DateTime          @default(now())
+  actorId   String?
+  createdAt DateTime @default(now())
 
   @@index([employeeId, periodStart])
   @@index([type, createdAt])
@@ -2117,11 +2239,11 @@ model CommissionLedgerEntry {
 /// Allocation is decided at write time from the append-only log, never reconstructed later
 /// by matching amounts or timestamps.
 model CommissionLedgerCorrection {
-  id        String @id @default(cuid())
+  id String @id @default(cuid())
 
   /// The negative movement doing the compensating.
-  entryId   String
-  entry     CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
+  entryId String
+  entry   CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
 
   /// The earlier movement being compensated.
   correctsEntryId String
@@ -2129,7 +2251,7 @@ model CommissionLedgerCorrection {
 
   /// A positive figure: how much of `entry` is applied against `corrects`. The rows for one
   /// entry sum to at most the absolute value of that entry's amount.
-  amount    Decimal @db.Decimal(18, 2)
+  amount    Decimal  @db.Decimal(18, 2)
   createdAt DateTime @default(now())
 
   @@unique([entryId, correctsEntryId])
@@ -2150,9 +2272,9 @@ model SalesTarget {
   bonusAmount  Decimal  @default(0) @db.Decimal(18, 2)
   note         String?
 
-  createdById  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([employeeId, periodStart])
   @@index([periodStart])
@@ -2543,6 +2665,8 @@ model FinBranch {
   createdBy String?
 
   access FinBranchAccess[]
+
+  journalLines JournalEntryLine[]
 }
 
 /// Which branches a finance user without `all_branches` may read and write.
@@ -2567,6 +2691,8 @@ model FinCostCenter {
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   createdBy String?
+
+  journalLines JournalEntryLine[]
 }
 
 /// Receipt / payment categories of the CASH budget, also used to classify bank lines.

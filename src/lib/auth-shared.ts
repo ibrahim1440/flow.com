@@ -159,6 +159,11 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "journal_post", label: "Post journal entries" },
     { key: "journal_reverse", label: "Reverse posted journal entries" },
     { key: "export_view", label: "View Qoyod export records" },
+    { key: "mapping_manage", label: "Map posting roles to accounts and set the ledger cutover" },
+    { key: "policy_prepare", label: "Prepare accounting policy versions" },
+    { key: "policy_approve", label: "Approve accounting policies and commission plans for posting" },
+    { key: "events_process", label: "Run and retry automatic postings" },
+    { key: "unlock_period", label: "Unlock a locked fiscal period (with a reason)" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester
