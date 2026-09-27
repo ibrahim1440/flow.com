@@ -249,6 +249,11 @@ describe("stage 2 — bank to ledger", () => {
     assert.deepEqual((await journalLines(eo!.journalEntryId!)).map((l) => `${l.code}:${l.dr}:${l.cr}`), ["1110:5000.00:0.00", "1120:0.00:5000.00"]);
     assert.equal((await eventOf(`bank:${inn}:confirmed`))?.status, "SKIPPED");
     assert.equal((await eventOf(`bank:${early}:confirmed`))?.status, "SKIPPED");
+    // Reconciliation: the receiving leg is in the ledger through the paying leg's journal.
+    const rec = await bankReconciliation(accountingDate(D(3, 10)));
+    const till = rec.accounts.find((a) => a.cashAccount.code === "CASH1")!;
+    assert.equal(till.book, "5000.00"); assert.equal(till.ledger, "5000.00"); assert.equal(till.difference, "0.00");
+    assert.deepEqual(till.items.notPosted, [], "the transfer's receiving leg is not reported as unposted");
     await prisma.bankTransaction.update({ where: { id: out }, data: { status: "VOID", voidedAt: new Date(`${D(3, 12)}T08:00:00Z`), voidReason: "duplicate" } });
     await processPendingEvents();
     const ev = await eventOf(`bank:${out}:voided`);

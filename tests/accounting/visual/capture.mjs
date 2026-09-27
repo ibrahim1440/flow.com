@@ -20,6 +20,11 @@ const firstJournal = (status) => async (p) => {
   await p.goto(`${BASE}/dashboard/accounting/journals/${id}`);
 };
 
+const firstBill = (status) => async (p) => {
+  const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/bills?status=${s}`)).json()).rows[0]?.id, status);
+  await p.goto(`${BASE}/dashboard/accounting/payables/${id}`);
+};
+
 const SHOTS = [
   { id: "ACC-01", route: "/dashboard/accounting" },
   { id: "ACC-02", route: "/dashboard/accounting/journals" },
@@ -46,6 +51,16 @@ const SHOTS = [
   { id: "ACC-11", route: "/dashboard/accounting", w: 390, act: firstJournal("SUBMITTED") },
   { id: "ACC-12-en", route: "/dashboard/accounting", user: "acc.approver.en", act: firstJournal("SUBMITTED") },
   { id: "ACC-01-1024", route: "/dashboard/accounting", w: 1024 },
+  // Stage 2 — Figma page "18 — Accounting · Payables & Bank"
+  { id: "ACC-20", route: "/dashboard/accounting/payables" },
+  { id: "ACC-21", route: "/dashboard/accounting/payables/new", user: "acc.preparer" },
+  { id: "ACC-22", route: "/dashboard/accounting/payables", act: firstBill("SUBMITTED") },
+  { id: "ACC-22-posted-en", route: "/dashboard/accounting/payables", user: "acc.approver.en", act: firstBill("POSTED") },
+  { id: "ACC-23", route: "/dashboard/accounting/payables/aging" },
+  { id: "ACC-23-statement", route: "/dashboard/accounting/payables/aging", act: async (p) => { await p.getByRole("button", { name: "كشف حساب مورد" }).click(); } },
+  { id: "ACC-24", route: "/dashboard/accounting/bank" },
+  { id: "ACC-25", route: "/dashboard/accounting/bank?view=reconcile" },
+  { id: "ACC-26", route: "/dashboard/accounting/payables?status=PENDING", w: 390 },
 ];
 
 async function login(page, user, password) {

@@ -248,9 +248,14 @@ export async function overview() {
     prisma.journalEntry.count({ where: { isProvisional: true } }),
     prisma.accountMapping.count(),
   ]);
+  const [billsPending, bankBlocked] = await Promise.all([
+    prisma.supplierBill.count({ where: { status: { in: ["SUBMITTED", "APPROVED"] } } }),
+    prisma.accountingEvent.count({ where: { sourceModule: "bank", status: { in: ["BLOCKED", "FAILED"] } } }),
+  ]);
   return {
     setupComplete: settings?.setupComplete ?? false, ledgerCutoverDate: settings?.ledgerCutoverDate ?? null,
     accounts, mappings: unmapped, journals: { drafts, pendingApproval, approvedUnposted },
     events: { pending, blocked, failed }, periods: openPeriods, provisionalEntries: provisional,
+    payables: { pendingApproval: billsPending }, bank: { blocked: bankBlocked },
   };
 }

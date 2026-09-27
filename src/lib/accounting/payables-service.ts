@@ -15,11 +15,8 @@ import { resolveRoles } from "./posting";
 import { processEvent, type ProcessOutcome } from "./event-processor";
 
 type Tx = Prisma.TransactionClient;
-
-/** KSA VAT registration number: 15 digits, first and last digit 3. */
-export function isKsaVatNumber(v: unknown): boolean {
-  return typeof v === "string" && /^3\d{13}3$/.test(v.trim());
-}
+import { computeLine, isKsaVatNumber } from "./bill-rules";
+export { computeLine, isKsaVatNumber };
 
 const FOUR_DP = /^\d{1,14}(\.\d{1,4})?$/;
 function parseQty(raw: unknown, field: string): Prisma.Decimal {
@@ -28,13 +25,6 @@ function parseQty(raw: unknown, field: string): Prisma.Decimal {
   const d = new Prisma.Decimal(s);
   if (d.lte(0)) throw new AccountingError(`${field} must be greater than zero.`, 400);
   return d;
-}
-
-/** Line arithmetic, half-up to the halala at each step: net, then VAT on the net. */
-export function computeLine(quantity: Prisma.Decimal, unitPrice: Prisma.Decimal, ratePercent: Prisma.Decimal) {
-  const net = round2(quantity.mul(unitPrice));
-  const vat = round2(net.mul(ratePercent).div(100));
-  return { net, vat, gross: net.add(vat) };
 }
 
 export type BillLineInput = {

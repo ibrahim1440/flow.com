@@ -68,13 +68,33 @@ async function main() {
     await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: "erp_finance_dev", query: (q: string) => prisma.$queryRawUnsafe(q) });
   }
   if (process.argv.includes("--reset")) {
+    // Stage-2 fixture rows share Finance tables, so they are removed by their ACC- tag only.
+    await prisma.$executeRawUnsafe(`DELETE FROM "BankTransactionMatch" WHERE "transactionId" IN (SELECT t.id FROM "BankTransaction" t JOIN "CashAccount" c ON c.id = t."cashAccountId" WHERE c.code LIKE 'ACC-%')`);
+    await prisma.$executeRawUnsafe(`UPDATE "BankTransaction" SET "transferPeerId" = NULL WHERE "cashAccountId" IN (SELECT id FROM "CashAccount" WHERE code LIKE 'ACC-%')`);
+    // Bank lines are append-only (Finance trigger). On this verified disposable database the
+    // guard is suspended for the fixture's own ACC- lines only, inside one transaction.
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe(`ALTER TABLE "BankTransaction" DISABLE TRIGGER "BankTransaction_no_delete"`),
+      prisma.$executeRawUnsafe(`DELETE FROM "BankTransaction" WHERE "cashAccountId" IN (SELECT id FROM "CashAccount" WHERE code LIKE 'ACC-%')`),
+      prisma.$executeRawUnsafe(`ALTER TABLE "BankTransaction" ENABLE TRIGGER "BankTransaction_no_delete"`),
+    ]);
+    await prisma.$executeRawUnsafe(`DELETE FROM "CashAccount" WHERE code LIKE 'ACC-%'`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupplierBill" DISABLE TRIGGER "SupplierBill_accounting_guard"`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupplierBillLine" DISABLE TRIGGER "SupplierBillLine_accounting_guard"`);
+    await prisma.$executeRawUnsafe(`TRUNCATE "SupplierBillLine", "SupplierBill" RESTART IDENTITY`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupplierBill" ENABLE TRIGGER "SupplierBill_accounting_guard"`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupplierBillLine" ENABLE TRIGGER "SupplierBillLine_accounting_guard"`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "FinObligation" WHERE description LIKE 'ACC-FIXTURE%' OR "sourceType" = 'SUPPLIER_BILL'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Supplier" WHERE contact = 'fixture:accounting'`);
+    await prisma.$executeRawUnsafe(`UPDATE "FinCategory" SET "glAccountId" = NULL WHERE "glAccountId" IS NOT NULL`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "FinCategory" WHERE code LIKE 'ACC-%'`);
     await prisma.$executeRawUnsafe(`TRUNCATE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`);
     await prisma.$executeRawUnsafe(`DELETE FROM "FinAuditLog" WHERE "entityType" LIKE 'accounting.%'`).catch(() => undefined);
   }
   if (await prisma.account.count()) { console.log("Accounting fixture already present (use --reset)."); return; }
 
-  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view"];
-  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process"];
+  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create"];
+  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage"];
   const prep = await user("acc.preparer", "سارة القحطاني", perms(PREP));
   const appr = await user("acc.approver", "خالد العتيبي", perms(APPR));
   await user("acc.approver.en", "Khalid Al-Otaibi (EN)", perms(APPR), "en");
@@ -171,6 +191,89 @@ async function main() {
     const jul = await prisma.fiscalPeriod.findFirstOrThrow({ where: { year: YEAR, periodNo: 7 } });
     await lockFiscalPeriod(jul.id, appr);
   }
+
+  // ─── Stage 2: payables and bank-to-ledger (synthetic; tagged ACC- / fixture:accounting) ───
+  for (const key of ["payables.recognition", "bank.posting"]) { const pp = await draftPolicy(key, {}, prep); await approvePolicy(pp.id, appr); }
+  const vat15 = await prisma.taxCategory.upsert({ where: { code: "VAT15" }, update: { isActive: true }, create: { code: "VAT15", nameEn: "Standard rate 15%", nameAr: "النسبة الأساسية 15%", rate: new Prisma.Decimal("15.00"), isDefault: true, zatcaTaxCategoryCode: "S" } });
+  const zero = await prisma.taxCategory.upsert({ where: { code: "ZERO" }, update: { isActive: true }, create: { code: "ZERO", nameEn: "Zero-rated", nameAr: "خاضعة بنسبة صفر", rate: new Prisma.Decimal("0.00"), categoryType: "ZERO_RATED", zatcaTaxCategoryCode: "Z" } });
+  const sup = async (name: string, vatNumber: string | null, terms = 30, crNumber: string | null = null) =>
+    (await prisma.supplier.create({ data: { name, vatNumber, paymentTermsDays: terms, crNumber, contact: "fixture:accounting" } })).id;
+  const S1 = await sup("محمصة الوادي للتوريد", "310245678900003", 30, "1010987654");
+  const S2 = await sup("شركة التغليف الحديثة", "300987654300003", 30, "1010456789");
+  const S3 = await sup("مؤسسة الألبان الطازجة", "311122233300003", 15);
+  const S4 = await sup("شركة الكهرباء السعودية", "300000000000003", 21);
+  const S5 = await sup("ورشة صيانة المكائن", null, 30);
+  const bankAcc = await prisma.cashAccount.create({ data: { code: "ACC-BANK", nameEn: "Main bank account (synthetic)", nameAr: "الحساب البنكي الرئيسي (تجريبي)", type: "BANK", bankName: "بنك تجريبي", accountLast4: "0001", openingBalance: new Prisma.Decimal(0), openingBalanceDate: D(1, 1) } });
+  const till = await prisma.cashAccount.create({ data: { code: "ACC-TILL", nameEn: "Café till", nameAr: "صندوق المقهى", type: "CASH", openingBalance: new Prisma.Decimal(0), openingBalanceDate: D(1, 1) } });
+  const catRow = async (code: string, nameAr: string, kind: "PAYMENT" | "RECEIPT", gl: string | null) =>
+    (await prisma.finCategory.create({ data: { code, nameEn: code, nameAr, kind, glAccountId: gl ? A[gl] : null } })).id;
+  const C = {
+    SUP: await catRow("ACC-SUPPLIERS", "مدفوعات الموردين", "PAYMENT", "2110"), FEES: await catRow("ACC-BANKFEES", "رسوم بنكية", "PAYMENT", "6900"),
+    MKT: await catRow("ACC-MARKETING", "تسويق", "PAYMENT", null), SALES: await catRow("ACC-CAFE-SALES", "مبيعات المقهى", "RECEIPT", "4200"),
+  };
+  await prisma.cashAccount.update({ where: { id: bankAcc.id }, data: { glAccountId: A["1120"] } });
+  await prisma.cashAccount.update({ where: { id: till.id }, data: { glAccountId: A["1110"] } });
+
+  const { createBill, submitBill, approveBill, rejectBill, postBill } = await import("../../src/lib/accounting/payables-service");
+  const bill = async (supplierId: string, inv: string, date: Date, lines: { kind?: "EXPENSE" | "STOCK_RECEIPT"; code?: string; d: string; q: string; p: string; vat?: boolean }[], until: "DRAFT" | "SUBMITTED" | "POSTED", po?: string) => {
+    const b = await createBill({
+      supplierId, supplierInvoiceNo: inv, billDate: date.toISOString().slice(0, 10), purchaseObligationId: po ?? null,
+      lines: lines.map((l) => ({ kind: l.kind ?? "EXPENSE", accountId: l.code ? A[l.code] : undefined, description: l.d, quantity: l.q, unitPrice: l.p, taxCategoryId: l.vat === false ? zero.id : vat15.id })),
+    }, prep);
+    if (until === "DRAFT") return b;
+    await submitBill(b.id, prep);
+    if (until === "SUBMITTED") return b;
+    await approveBill(b.id, appr);
+    return (await postBill(b.id, appr)).bill;
+  };
+  const b1 = await bill(S5, "118", D(8, 20), [{ code: "6700", d: "صيانة مطحنة المقهى", q: "1", p: "900", vat: false }], "DRAFT");
+  void b1;
+  const bElec = await bill(S4, "300118876", D(8, 25), [{ code: "6300", d: "كهرباء المحمصة — أغسطس", q: "1", p: "3623.48" }], "POSTED");
+  const bMilk = await bill(S3, "A-7710", D(8, 28), [{ code: "5100", d: "حليب طازج — 1,090 لتر", q: "1090", p: "2" }], "POSTED");
+  const bPack = await bill(S2, "5521", D(9, 1), [{ kind: "STOCK_RECEIPT", d: "أكياس تغليف 1 كغ — 5,000 كيس", q: "5000", p: "0.65" }], "POSTED");
+  const po = await prisma.finObligation.create({ data: { branchKey: "COMPANY", type: "PURCHASE_ORDER", description: "ACC-FIXTURE PO-2026-0412 · محمصة الوادي", counterparty: "محمصة الوادي للتوريد", amount: new Prisma.Decimal("11500.00"), dueDate: D(10, 3), sourceType: "MANUAL", createdBy: prep } });
+  await bill(S1, "INV-88213", D(9, 3), [{ kind: "STOCK_RECEIPT", d: "بن إثيوبي جوجي 400 كغ", q: "400", p: "28.50" }, { code: "6500", d: "شحن من الميناء", q: "1", p: "1000" }], "SUBMITTED", po.id);
+  const rj = await bill(S2, "5560", D(9, 10), [{ code: "6400", d: "ملصقات عرض", q: "200", p: "3.25" }], "SUBMITTED");
+  await rejectBill(rj.id, appr, "الكمية لا تطابق إشعار الاستلام (180 وليس 200)");
+
+  // Bank lines (Finance module rows). Posting to the ledger starts 15th of the month: earlier
+  // cash movements stay with the manual journals above. The bank book is opened at the ledger's
+  // cash balance on that day, so the reconciliation shows only real differences.
+  const bankFrom = D(9, 15);
+  const bal = async (code: string) => {
+    const r = await prisma.journalEntryLine.aggregate({ where: { accountId: A[code], journalEntry: { status: { in: ["POSTED", "REVERSED"] }, entryDate: { lt: bankFrom } } }, _sum: { debit: true, credit: true } });
+    return new Prisma.Decimal(r._sum.debit ?? 0).sub(new Prisma.Decimal(r._sum.credit ?? 0));
+  };
+  const dayBefore = new Date(bankFrom.getTime() - 86_400_000);
+  await prisma.cashAccount.update({ where: { id: bankAcc.id }, data: { openingBalance: await bal("1120"), openingBalanceDate: dayBefore } });
+  await prisma.cashAccount.update({ where: { id: till.id }, data: { openingBalance: await bal("1110"), openingBalanceDate: dayBefore } });
+  await updateSettings({ bankPostingFrom: bankFrom }, appr);
+  const ob = async (b: { obligationId: string | null }) => b.obligationId!;
+  const bankRow = async (o: { acct?: string; day: number; amount: string; cls: string; ref: string; desc: string; splits?: [string, string][]; match?: [string, string] }) => {
+    const t = await prisma.bankTransaction.create({ data: {
+      cashAccountId: o.acct ?? bankAcc.id, branchKey: "COMPANY", txnDate: D(9, o.day), amount: new Prisma.Decimal(o.amount), status: "CONFIRMED",
+      classification: o.cls as never, reviewStatus: "NEEDS_REVIEW", bankReference: o.ref, description: o.desc, createdBy: prep,
+      splits: o.splits ? { create: o.splits.map(([c, a]) => ({ finCategoryId: c, amount: new Prisma.Decimal(a) })) } : undefined,
+      matches: o.match ? { create: [{ targetType: "OBLIGATION", targetId: o.match[0], amount: new Prisma.Decimal(o.match[1]), createdBy: prep }] } : undefined,
+    } });
+    return t.id;
+  };
+  const review = (ids: string[]) => prisma.bankTransaction.updateMany({ where: { id: { in: ids } }, data: { reviewStatus: "REVIEWED", reviewedBy: appr, reviewedAt: new Date() } });
+  const pMilk = await bankRow({ day: 16, amount: "-2507.00", cls: "SUPPLIER_PAYMENT", ref: "TRF-2291", desc: "سداد فاتورة الألبان A-7710", splits: [[C.SUP, "-2507.00"]], match: [await ob(bMilk), "2507.00"] });
+  const pPack = await bankRow({ day: 18, amount: "-2000.00", cls: "SUPPLIER_PAYMENT", ref: "TRF-2297", desc: "دفعة جزئية — التغليف الحديثة 5521", splits: [[C.SUP, "-2000.00"]], match: [await ob(bPack), "2000.00"] });
+  const fee = await bankRow({ day: 20, amount: "-45.50", cls: "BANK_FEE", ref: "FEE-0920", desc: "رسوم تحويلات", splits: [[C.FEES, "-45.50"]] });
+  const unmatched = await bankRow({ day: 21, amount: "-600.00", cls: "SUPPLIER_PAYMENT", ref: "TRF-2304", desc: "دفعة لمورد بلا فاتورة مرحّلة", splits: [[C.SUP, "-600.00"]] });
+  const mkt = await bankRow({ day: 22, amount: "-1200.00", cls: "OTHER_OPERATING_PAYMENT", ref: "CARD-7781", desc: "إعلانات ممولة", splits: [[C.MKT, "-1200.00"]] });
+  const rcpt = await bankRow({ day: 23, amount: "4830.00", cls: "CUSTOMER_RECEIPT", ref: "DEP-5510", desc: "تحصيل عميل جملة", splits: [[C.SALES, "4830.00"]] });
+  const tOut = await bankRow({ day: 24, amount: "-3000.00", cls: "INTERNAL_TRANSFER", ref: "TRF-2311", desc: "تعبئة صندوق المقهى" });
+  const tIn = await bankRow({ acct: till.id, day: 24, amount: "3000.00", cls: "INTERNAL_TRANSFER", ref: "TRF-2311", desc: "تعبئة صندوق المقهى" });
+  await prisma.bankTransaction.update({ where: { id: tOut }, data: { transferPeerId: tIn } });
+  await prisma.bankTransaction.update({ where: { id: tIn }, data: { transferPeerId: tOut } });
+  const needsReview = await bankRow({ day: 25, amount: "-310.00", cls: "UNCLASSIFIED", ref: "POS-REF-12", desc: "حركة غير مصنفة بعد" });
+  void needsReview;
+  await review([pMilk, pPack, fee, unmatched, mkt, rcpt, tOut, tIn]);
+  void bElec;
+  await processPendingEvents();
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);
 }
 

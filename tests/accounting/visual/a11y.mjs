@@ -16,6 +16,10 @@ const firstJournal = async (p) => {
   const id = await p.evaluate(async () => (await (await fetch(`/api/accounting/journals?status=SUBMITTED&sort=oldest`)).json()).rows.find((r) => r.type === "MANUAL")?.id);
   await p.goto(`${BASE}/dashboard/accounting/journals/${id}`);
 };
+const firstBill = (status) => async (p) => {
+  const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/bills?status=${s}`)).json()).rows[0]?.id, status);
+  await p.goto(`${BASE}/dashboard/accounting/payables/${id}`);
+};
 const tab = (name) => async (p) => { await p.getByRole("button", { name }).click(); };
 const PAGES = [
   ["ACC-01 overview", "/dashboard/accounting"],
@@ -32,6 +36,14 @@ const PAGES = [
   ["ACC-11 mobile detail", "/dashboard/accounting", undefined, firstJournal, 390],
   ["ACC-12 English detail", "/dashboard/accounting", "acc.approver.en", firstJournal],
   ["ACC-12 English reports", "/dashboard/accounting/reports", "acc.approver.en"],
+  ["ACC-20 bills", "/dashboard/accounting/payables"],
+  ["ACC-21 bill editor", "/dashboard/accounting/payables/new", "acc.preparer"],
+  ["ACC-22 bill detail", "/dashboard/accounting/payables", undefined, firstBill("SUBMITTED")],
+  ["ACC-22 bill detail EN", "/dashboard/accounting/payables", "acc.approver.en", firstBill("POSTED")],
+  ["ACC-23 aging", "/dashboard/accounting/payables/aging"],
+  ["ACC-24 bank", "/dashboard/accounting/bank"],
+  ["ACC-25 bank reconciliation", "/dashboard/accounting/bank?view=reconcile"],
+  ["ACC-26 mobile bills", "/dashboard/accounting/payables?status=PENDING", undefined, undefined, 390],
 ];
 
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});

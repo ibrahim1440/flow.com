@@ -8,7 +8,8 @@ import { Badge, Button, useL, type Tone } from "../../finance/_components/ui";
 export type Sub =
   | "settings_manage" | "coa_manage" | "tax_category_manage" | "period_lock" | "period_close" | "journal_create"
   | "journal_submit" | "journal_approve" | "journal_post" | "journal_reverse" | "export_view" | "mapping_manage"
-  | "policy_prepare" | "policy_approve" | "events_process" | "unlock_period";
+  | "policy_prepare" | "policy_approve" | "events_process" | "unlock_period"
+  | "ap_bill_create" | "ap_bill_approve" | "ap_bill_post" | "bank_posting_manage";
 
 /** Whether the signed-in user holds an accounting duty. Display only — the server decides. */
 export function useCan() {
@@ -38,7 +39,8 @@ const TYPES: Record<string, [string, string]> = {
 export function JournalType({ type, source }: { type: string; source?: string }) {
   const { L } = useL();
   const [ar, en] = TYPES[type] ?? [type, type];
-  const src = type === "AUTO" && source === "commissions" ? L(" · عمولات", " · commissions") : "";
+  const srcLabel: Record<string, [string, string]> = { commissions: [" · عمولات", " · commissions"], payables: [" · موردين", " · payables"], bank: [" · بنك", " · bank"] };
+  const src = type === "AUTO" && source && srcLabel[source] ? L(...srcLabel[source]) : "";
   return <Badge tone={type === "AUTO" ? "info" : type === "OPENING" ? "brand" : "info"}>{L(ar, en)}{src}</Badge>;
 }
 
@@ -62,7 +64,26 @@ export const ROLE_LABELS: Record<string, [string, string]> = {
   COMMISSION_PAYMENT_CLEARING: ["حساب وسيط لمدفوعات العمولات", "Commission payments clearing"],
   RETAINED_EARNINGS: ["الأرباح المبقاة", "Retained earnings"],
   OPENING_BALANCE_EQUITY: ["حقوق ملكية الأرصدة الافتتاحية", "Opening balance equity"],
+  AP_CONTROL: ["ذمم دائنة تجارية (مراقبة)", "Trade payables (control)"],
+  GRNI: ["بضاعة مستلمة لم تصل فاتورتها", "Goods received not invoiced"],
+  INPUT_VAT: ["ضريبة المدخلات", "Input VAT"],
+  SUPPLIER_ADVANCES: ["دفعات مقدمة للموردين", "Supplier advances"],
+  BANK_FEES: ["رسوم بنكية", "Bank fees"],
 };
+
+/** Supplier bill status; a posted bill shows whether it is paid, part-paid or overdue. */
+export function BillStatus({ status, rejected, remaining, gross, overdueDays }: { status: string; rejected?: boolean; remaining?: string | null; gross?: string; overdueDays?: number }) {
+  const { L } = useL();
+  if (status === "DRAFT" && rejected) return <Badge tone="bad">{L("مسودة · مرفوضة", "Draft · rejected")}</Badge>;
+  if (status === "POSTED" && remaining !== undefined && remaining !== null) {
+    const rem = Number(remaining);
+    if (rem <= 0) return <Badge tone="ok">{L("مسدّدة", "Paid")}</Badge>;
+    if (overdueDays && overdueDays > 0) return <Badge tone="bad">{L(`متأخرة ${overdueDays} يوماً`, `${overdueDays} days overdue`)}</Badge>;
+    if (gross && rem < Number(gross)) return <Badge tone="brand">{L("مرحّلة · مدفوعة جزئياً", "Posted · part-paid")}</Badge>;
+  }
+  const s = STATUS[status] ?? { ar: status, en: status, tone: "info" as Tone };
+  return <Badge tone={s.tone}>{L(s.ar, s.en)}</Badge>;
+}
 
 /** Today as a Riyadh calendar day, "YYYY-MM-DD". Call outside render (initialisers/handlers). */
 export function riyadhToday(): string { return new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10); }
@@ -96,6 +117,8 @@ export function Pager({ page, pageSize, total, onPage }: { page: number; pageSiz
 export const EVENT_LABEL: Record<string, [string, string]> = {
   "commission.accrual": ["استحقاق عمولة", "Commission accrual"], "commission.reversal": ["عكس عمولة", "Commission reversal"],
   "commission.adjustment": ["تسوية عمولة", "Commission adjustment"], "commission.payout": ["صرف عمولة", "Commission payout"],
+  "ap.bill.posted": ["ترحيل فاتورة مورد", "Supplier bill posted"], "ap.bill.reversed": ["عكس فاتورة مورد", "Supplier bill reversed"],
+  "bank.transaction.confirmed": ["حركة بنكية", "Bank line"], "bank.transaction.voided": ["إلغاء حركة بنكية", "Bank line voided"],
 };
 
 /** The posting engine's reasons are English sentences; the known ones are shown in Arabic too. */
@@ -112,6 +135,14 @@ const REASONS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/the movement does not record which plan version produced it/, () => "الحركة لا تسجّل إصدار الخطة الذي أنتجها"],
   [/The commission movement is zero/, () => "حركة العمولة صفرية؛ لا شيء يُرحّل"],
   [/Posted provisionally/, () => "رُحّل مؤقتاً (قاعدة اختبار معزولة) — بانتظار الاعتماد"],
+  [/([\d.,]+) SAR on the payables category is not matched to posted supplier bills/, (m) => `${m[1]} ر.س على فئة الموردين غير مطابقة لفواتير مرحّلة`],
+  [/Budget categories not mapped to a ledger account: (.+)\./, (m) => `فئات ميزانية غير مربوطة بحساب: ${m[1]}`],
+  [/Customer receipts and settlements post only once receivables are in the ledger/, () => "متحصلات العملاء تُرحّل بعد إضافة الذمم المدينة (المرحلة 3)"],
+  [/Cash account (\S+) is not mapped to a ledger account/, (m) => `الحساب النقدي ${m[1]} غير مربوط بحساب أستاذ`],
+  [/Transfers post once, from the paying side/, () => "التحويل يُرحّل مرة واحدة من الطرف الدافع"],
+  [/Dated before bank posting starts \((\S+)\)/, (m) => `قبل بدء الترحيل البنكي (${m[1]})`],
+  [/The bank posting start date is not set/, () => "لم يُحدَّد تاريخ بدء الترحيل البنكي"],
+  [/has no VAT registration number, so input VAT cannot be claimed/, () => "المورد بلا رقم تسجيل ضريبي؛ لا تُسترد ضريبة المدخلات"],
 ];
 export function useExplain() {
   const { lang } = useL();
@@ -126,7 +157,9 @@ export function useExplain() {
  *  known phrases are shown in Arabic in the Arabic interface. */
 const AUTO_PHRASES: [string, string][] = [
   ["Commission accrual", "استحقاق عمولة"], ["Commission reversal", "عكس عمولة"], ["Commission adjustment", "تسوية عمولة"],
-  ["Commission payout", "صرف عمولة"], ["Reversal of entry", "عكس القيد"], ["Reversal", "عكس"],
+  ["Commission payout", "صرف عمولة"], ["Reversal of supplier bill", "عكس فاتورة المورد"], ["Supplier bill", "فاتورة مورد"],
+  ["Void of bank line", "إلغاء حركة بنكية"], ["Bank line", "حركة بنكية"], ["Transfer", "تحويل"], ["Supplier payment", "دفعة لمورد"],
+  ["Input VAT", "ضريبة المدخلات"], ["Reversal of entry", "عكس القيد"], ["Reversal", "عكس"],
 ];
 export function useAutoText() {
   const { lang } = useL();
@@ -137,7 +170,7 @@ export function useAutoText() {
     return out;
   };
 }
-export const SOURCE_LABEL: Record<string, [string, string]> = { manual: ["يدوي", "manual"], commissions: ["عمولات", "commissions"] };
+export const SOURCE_LABEL: Record<string, [string, string]> = { manual: ["يدوي", "manual"], commissions: ["عمولات", "commissions"], payables: ["موردين", "payables"], bank: ["بنك", "bank"] };
 
 /** A decimal string from the database → formatted amount with a correctly placed sign. */
 export function useAmount() {

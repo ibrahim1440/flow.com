@@ -175,7 +175,10 @@ export async function bankReconciliation(asOf: Date) {
     const book = dec(a.openingBalance).add(confirmed.reduce((s, t) => s.add(t.amount), ZERO));
     const ledger = a.glAccountId ? await ledgerBalance(a.glAccountId, asOf) : null;
     const inScope = confirmed.filter((t) => from && t.txnDate >= from);
-    const notPosted = inScope.filter((t) => evByTxn.get(t.id)?.status !== "TRANSLATED").map((t) => {
+    // The receiving leg of a transfer is in the ledger through the paying leg's journal.
+    const peers = await prisma.bankTransaction.findMany({ where: { id: { in: inScope.map((t) => t.id) }, classification: "INTERNAL_TRANSFER", amount: { gt: 0 } }, select: { id: true, transferPeerId: true } });
+    const postedViaPeer = new Set(peers.filter((p) => p.transferPeerId && evByTxn.get(p.transferPeerId)?.status === "TRANSLATED").map((p) => p.id));
+    const notPosted = inScope.filter((t) => evByTxn.get(t.id)?.status !== "TRANSLATED" && !postedViaPeer.has(t.id)).map((t) => {
       const e = evByTxn.get(t.id);
       return {
         id: t.id, date: t.txnDate, amount: dec(t.amount).toFixed(2), reference: t.bankReference, description: t.description, classification: t.classification,
@@ -207,7 +210,7 @@ export async function bankReconciliation(asOf: Date) {
 export async function bankMappings() {
   const [cash, cats, settings] = await Promise.all([
     prisma.cashAccount.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, nameAr: true, nameEn: true, type: true, active: true, glAccountId: true } }),
-    prisma.finCategory.findMany({ orderBy: [{ kind: "asc" }, { sortOrder: "asc" }, { code: "asc" }], select: { id: true, code: true, nameAr: true, nameEn: true, kind: true, active: true, glAccountId: true, glAccount: { select: { code: true, nameAr: true, nameEn: true, controlKind: true } } } }),
+    prisma.finCategory.findMany({ orderBy: [{ kind: "desc" }, { sortOrder: "asc" }, { code: "asc" }], select: { id: true, code: true, nameAr: true, nameEn: true, kind: true, active: true, glAccountId: true, glAccount: { select: { code: true, nameAr: true, nameEn: true, controlKind: true } } } }),
     prisma.accountingSettings.findUnique({ where: { id: "singleton" }, select: { bankPostingFrom: true, ledgerCutoverDate: true } }),
   ]);
   const gl = await prisma.account.findMany({ where: { id: { in: cash.map((c) => c.glAccountId).filter(Boolean) as string[] } }, select: { id: true, code: true, nameAr: true, nameEn: true } });
