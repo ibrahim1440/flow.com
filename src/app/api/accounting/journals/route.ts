@@ -1,84 +1,52 @@
-import { NextResponse } from "next/server";
+import type { Prisma, JournalEntryStatus, JournalEntryType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
-import { createManualJournalEntry, type ManualJournalLineInput } from "@/lib/accounting/journal-service";
-import { AccountingError } from "@/lib/accounting/errors";
+import { accountingRoute, body, query } from "@/lib/accounting/http";
+import { createManualJournalEntry } from "@/lib/accounting/journal-service";
+import { accountingDate } from "@/lib/accounting/dates";
+import { toMinor } from "@/lib/accounting/money";
+import { parseJournalBody } from "./parse";
 
-export async function GET() {
-  const { error } = await requireModule("accounting");
-  if (error) return error;
+const STATUSES = new Set(["DRAFT", "SUBMITTED", "APPROVED", "POSTED", "REVERSED"]);
+const TYPES = new Set(["MANUAL", "AUTO", "REVERSAL", "ADJUSTMENT", "OPENING", "CLOSING"]);
 
-  const journals = await prisma.journalEntry.findMany({
-    orderBy: { entryNo: "desc" },
-    take: 500,
-    include: { lines: true },
-  });
-  return NextResponse.json(journals);
-}
-
-function parseLines(raw: unknown): ManualJournalLineInput[] | null {
-  if (!Array.isArray(raw)) return null;
-  const lines: ManualJournalLineInput[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") return null;
-    const { accountId, debit, credit, description, taxCategoryId } = item as Record<string, unknown>;
-    if (typeof accountId !== "string" || !accountId) return null;
-    if (typeof debit !== "number" && typeof debit !== "string") return null;
-    if (typeof credit !== "number" && typeof credit !== "string") return null;
-    if (description !== undefined && typeof description !== "string") return null;
-    if (taxCategoryId !== undefined && typeof taxCategoryId !== "string") return null;
-    lines.push({ accountId, debit, credit, description, taxCategoryId });
+export const GET = accountingRoute(null, async ({ request }) => {
+  const q = query(request);
+  const where: Prisma.JournalEntryWhereInput = {};
+  const status = q.get("status");
+  if (status === "PENDING") where.status = { in: ["SUBMITTED", "APPROVED"] };
+  else if (status && STATUSES.has(status)) where.status = status as JournalEntryStatus;
+  const type = q.get("type");
+  if (type && TYPES.has(type)) where.type = type as JournalEntryType;
+  const source = q.get("source");
+  if (source) where.sourceModule = source;
+  if (q.get("from") || q.get("to")) where.entryDate = { ...(q.get("from") ? { gte: accountingDate(q.get("from")) } : {}), ...(q.get("to") ? { lte: accountingDate(q.get("to")) } : {}) };
+  const text = q.get("q")?.trim();
+  if (text) {
+    const n = Number(text.replace(/^#/, ""));
+    where.OR = [{ description: { contains: text, mode: "insensitive" } }, ...(Number.isInteger(n) && n > 0 ? [{ entryNo: n }] : [])];
   }
-  return lines;
-}
-
-export async function POST(request: Request) {
-  const { user, error } = await requireSub("accounting", "journal_create");
-  if (error) return error;
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const { entryDate, description, lines: rawLines } = (body ?? {}) as {
-    entryDate?: unknown;
-    description?: unknown;
-    lines?: unknown;
+  if (q.get("provisional") === "only") where.isProvisional = true;
+  const page = Math.max(Number(q.get("page")) || 1, 1);
+  const pageSize = Math.min(Math.max(Number(q.get("pageSize")) || 25, 10), 100);
+  const sort = q.get("sort") === "amount" ? { totalDebit: "desc" as const } : q.get("sort") === "oldest" ? { entryNo: "asc" as const } : { entryNo: "desc" as const };
+  const [rows, total] = await Promise.all([
+    prisma.journalEntry.findMany({ where, orderBy: sort, skip: (page - 1) * pageSize, take: pageSize, include: { _count: { select: { lines: true } } } }),
+    prisma.journalEntry.count({ where }),
+  ]);
+  const ids = [...new Set(rows.flatMap((r) => [r.createdBy, r.approvedBy, r.postedBy]).filter((x): x is string => !!x && !x.startsWith("system:")))];
+  const names = new Map((await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
+  const who = (id: string | null) => (id ? (id.startsWith("system:") ? "system" : names.get(id) ?? id) : null);
+  return {
+    total, page, pageSize,
+    rows: rows.map((r) => ({
+      id: r.id, entryNo: r.entryNo, entryDate: r.entryDate, type: r.type, status: r.status, description: r.description,
+      sourceModule: r.sourceModule, sourceDocumentId: r.sourceDocumentId, total: toMinor(r.totalDebit), lines: r._count.lines,
+      isProvisional: r.isProvisional, createdBy: who(r.createdBy), approvedBy: who(r.approvedBy), postedBy: who(r.postedBy),
+      rejectionReason: r.status === "DRAFT" ? r.rejectionReason : null, reversesEntryId: r.reversesEntryId,
+    })),
   };
+});
 
-  if (typeof entryDate !== "string") {
-    return NextResponse.json({ error: "entryDate is required (ISO date string)." }, { status: 400 });
-  }
-  const parsedDate = new Date(entryDate);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return NextResponse.json({ error: "entryDate must be a valid date." }, { status: 400 });
-  }
-  if (description !== undefined && typeof description !== "string") {
-    return NextResponse.json({ error: "description must be a string." }, { status: 400 });
-  }
-
-  const lines = parseLines(rawLines);
-  if (!lines) {
-    return NextResponse.json(
-      { error: "lines must be an array of { accountId, debit, credit, description?, taxCategoryId? }." },
-      { status: 400 },
-    );
-  }
-
-  try {
-    const entry = await createManualJournalEntry(
-      { entryDate: parsedDate, description, lines },
-      user.id,
-    );
-    return NextResponse.json(entry, { status: 201 });
-  } catch (err) {
-    if (err instanceof AccountingError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
-    }
-    return handlePrismaError(err);
-  }
-}
+export const POST = accountingRoute("journal_create", async ({ user, request }) => {
+  return createManualJournalEntry(parseJournalBody(await body(request)), user.id);
+}, 201);

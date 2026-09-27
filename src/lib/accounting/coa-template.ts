@@ -2,6 +2,8 @@
 // TEMPLATE for the accountant to review before go-live (docs/accounting/POLICIES.md), not a
 // statement of the company's approved chart. Codes named in the accounting spec (2410
 // customer advances, 5700 inventory variance, 6500 delivery, 6900 bank fees) are kept.
+// VAT accounts accept manual journals until the invoicing subledger exists (POS / sales
+// summaries are journalised by hand today); switch allowManualPosting off when it does.
 import type { AccountControlKind, AccountType } from "@/generated/prisma/client";
 
 export type TemplateAccount = {
@@ -17,7 +19,7 @@ export const COA_TEMPLATE: TemplateAccount[] = [
   { code: "1130", en: "Trade receivables", ar: "ذمم مدينة تجارية", type: "ASSET", parent: "11", control: "RECEIVABLE", manual: false },
   { code: "1140", en: "Employee custody and advances", ar: "عهد وسلف الموظفين", type: "ASSET", parent: "11" },
   { code: "1150", en: "Prepaid expenses", ar: "مصروفات مدفوعة مقدماً", type: "ASSET", parent: "11" },
-  { code: "1160", en: "Input VAT", ar: "ضريبة القيمة المضافة على المدخلات", type: "ASSET", parent: "11", control: "TAX", manual: false },
+  { code: "1160", en: "Input VAT", ar: "ضريبة القيمة المضافة على المدخلات", type: "ASSET", parent: "11", control: "TAX", manual: true },
   { code: "117", en: "Inventory", ar: "المخزون", type: "ASSET", parent: "11", header: true },
   { code: "1171", en: "Inventory — raw materials", ar: "مخزون مواد خام", type: "ASSET", parent: "117", control: "INVENTORY", manual: false },
   { code: "1172", en: "Inventory — packaging and consumables", ar: "مخزون مواد تغليف ومستهلكات", type: "ASSET", parent: "117", control: "INVENTORY", manual: false },
@@ -37,7 +39,7 @@ export const COA_TEMPLATE: TemplateAccount[] = [
   { code: "2140", en: "Commissions payable", ar: "عمولات مستحقة الدفع", type: "LIABILITY", parent: "21", control: "COMMISSION_PAYABLE", manual: false },
   { code: "2150", en: "Salaries payable", ar: "رواتب مستحقة", type: "LIABILITY", parent: "21" },
   { code: "2160", en: "GOSI payable", ar: "التأمينات الاجتماعية المستحقة", type: "LIABILITY", parent: "21" },
-  { code: "2170", en: "Output VAT", ar: "ضريبة القيمة المضافة على المخرجات", type: "LIABILITY", parent: "21", control: "TAX", manual: false },
+  { code: "2170", en: "Output VAT", ar: "ضريبة القيمة المضافة على المخرجات", type: "LIABILITY", parent: "21", control: "TAX", manual: true },
   { code: "2180", en: "Zakat payable", ar: "الزكاة المستحقة", type: "LIABILITY", parent: "21" },
   { code: "2190", en: "Payments clearing", ar: "حساب وسيط للمدفوعات", type: "LIABILITY", parent: "21", control: "CLEARING", manual: false },
   { code: "2410", en: "Customer advances", ar: "دفعات مقدمة من العملاء", type: "LIABILITY", parent: "21", control: "CUSTOMER_ADVANCES", manual: false },
