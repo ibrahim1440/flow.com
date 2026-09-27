@@ -47,7 +47,10 @@ test("statement for the year: hand-worked sections, opening entry treated as ope
   const cf = await cashFlowStatement({ from: D("01-01"), to: D("12-31") });
   assert.equal(cf.netProfit, "14000.00");
   assert.equal(cf.operating.total, "17600.00", "14,000 + 5,000 + 1,000 − 2,400");
-  assert.deepEqual(cf.operating.lines.map((l) => [l.code, l.amount]), [["1150", "-2400.00"], ["1290", "1000.00"], ["2130", "5000.00"]]);
+  assert.deepEqual(cf.operating.adjustments.map((l) => [l.kind, l.code, l.amount]),
+    [["NON_CASH_PL", "6600", "1000.00"], ["WORKING_CAPITAL", "1150", "-2400.00"], ["WORKING_CAPITAL", "2130", "5000.00"]],
+    "depreciation added back; prepaid rent and accrued rent as working capital");
+  assert.equal(cf.operating.indirectTotal, cf.operating.total, "indirect method equals the cash allocated to operating");
   assert.equal(cf.investing.total, "-30000.00");
   assert.equal(cf.financing.total, "50000.00", "3900 opening equity is not a financing flow");
   assert.equal(cf.excluded.total, "0.00");
@@ -75,7 +78,7 @@ test("classification: explicit change, default fallback listed, EXCLUDED breaks 
   await updateAccount(acc["2130"], { cashFlowClass: null }, prep);
   let cf = await cashFlowStatement({ from: D("01-01"), to: D("12-31") });
   assert.deepEqual(cf.defaultedAccounts, ["2130"]);
-  assert.equal(cf.operating.lines.find((l) => l.code === "2130")?.defaulted, true);
+  assert.equal(cf.operating.adjustments.find((l) => l.code === "2130")?.defaulted, true);
   assert.equal(cf.reconciled, true);
   await updateAccount(acc["1150"], { cashFlowClass: "EXCLUDED" }, prep);
   cf = await cashFlowStatement({ from: D("01-01"), to: D("12-31") });

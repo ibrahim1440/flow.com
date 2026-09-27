@@ -11,7 +11,9 @@ export function defaultCashFlowClass(a: { code: string; type: string; control?: 
   if (a.control === "CASH") return "CASH";
   if (a.code === "3200" || a.code === "3900") return "EXCLUDED";
   if (a.type === "EQUITY") return "FINANCING";
-  if (a.code.startsWith("12") && a.code !== "1290") return "INVESTING";
+  // Fixed assets and their accumulated depreciation; payables for fixed assets.
+  if (a.code.startsWith("12") || a.code === "2195") return "INVESTING";
+  if (a.code === "2220") return "FINANCING";
   return "OPERATING";
 }
 

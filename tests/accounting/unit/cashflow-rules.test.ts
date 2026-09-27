@@ -20,7 +20,9 @@ test("specific defaults", () => {
   assert.equal(c("1120", "ASSET", "CASH"), "CASH");
   assert.equal(c("1130", "ASSET", "RECEIVABLE"), "OPERATING");
   assert.equal(c("1210", "ASSET"), "INVESTING");
-  assert.equal(c("1290", "ASSET"), "OPERATING", "depreciation is added back through operating");
+  assert.equal(c("1290", "ASSET"), "INVESTING", "accumulated depreciation belongs with the fixed assets; depreciation is added back as a non-cash item");
+  assert.equal(c("2195", "LIABILITY"), "INVESTING", "payables for fixed assets: paying them is an investing outflow");
+  assert.equal(c("2220", "LIABILITY"), "FINANCING");
   assert.equal(c("2110", "LIABILITY", "PAYABLE"), "OPERATING");
   assert.equal(c("3100", "EQUITY"), "FINANCING");
   assert.equal(c("3200", "EQUITY"), "EXCLUDED");

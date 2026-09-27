@@ -20,7 +20,10 @@ type GL = { account: { code: string; nameEn: string; nameAr: string | null; debi
 type Rec = { account: { code: string; nameEn: string; nameAr: string | null } | null; rows: { employeeId: string; name: string; ledgerBalance: number; subledgerPosted: number; difference: number; waitingAmount: number; waitingCount: number; beforeCutoverOrSkipped: number; withoutEventCount: number }[]; totals: { ledgerBalance: number; subledgerPosted: number; difference: number }; reconciled: boolean };
 type CFLine = { accountId: string; code: string; nameEn: string; nameAr: string | null; amount: string; defaulted: boolean };
 type CFPart = { lines: CFLine[]; total: string };
-type CF = { netProfit: string; operating: CFPart; investing: CFPart; financing: CFPart; excluded: CFPart; netChange: string; cashOpening: string; cashClosing: string; reconciled: boolean; defaultedAccounts: string[]; provisionalEntries: number };
+type CFAdj = CFLine & { kind: "NON_CASH_PL" | "WORKING_CAPITAL" | "ATTRIBUTED" };
+type CFNonCash = { entryId: string; entryNo: number; entryDate: string; description: string | null; amount: string; accounts: string[] };
+type CF = { netProfit: string; operating: { adjustments: CFAdj[]; total: string; indirectTotal: string }; investing: CFPart; financing: CFPart; excluded: CFPart; nonCash: CFNonCash[];
+  netChange: string; cashOpening: string; cashClosing: string; reconciled: boolean; checks: { indirectEqualsDirect: boolean; sectionsEqualCashChange: boolean; excludedIsZero: boolean }; defaultedAccounts: string[]; provisionalEntries: number };
 type Acc = { id: string; code: string; nameEn: string; nameAr: string | null; allowPosting: boolean };
 
 export default function ReportsPage() {
@@ -138,7 +141,10 @@ export default function ReportsPage() {
           <tbody>
             <tr className="font-extrabold"><Td>{L("الأنشطة التشغيلية", "Operating activities")}</Td><Td>{""}</Td></tr>
             <tr><Td><span className="ps-4">{L("صافي الربح (الخسارة) للفترة", "Net profit (loss) for the period")}</span></Td><Td num>{signed(cf.data.netProfit)}</Td></tr>
-            {cfLines(cf.data.operating.lines)}
+            {([["NON_CASH_PL", L("بنود غير نقدية مرتبطة بأنشطة استثمارية أو تمويلية", "Non-cash items from investing or financing transactions")], ["WORKING_CAPITAL", L("التغير في رأس المال العامل", "Changes in working capital")], ["ATTRIBUTED", L("مدفوعات فواتير أصول ثابتة (ضمن الاستثمارية)", "Supplier-bill payments for fixed assets (shown in investing)")]] as const).map(([k, label]) => {
+              const ls = cf.data!.operating.adjustments.filter((a) => a.kind === k);
+              return ls.length ? [<tr key={k}><Td><span className="ps-4 text-[12px] font-bold text-muted-foreground">{label}</span></Td><Td>{""}</Td></tr>, ...cfLines(ls)] : [];
+            })}
             <tr className="bg-[#fafafa] font-extrabold"><Td>{L("صافي النقد من الأنشطة التشغيلية", "Net cash from operating activities")}</Td><Td num>{signed(cf.data.operating.total)}</Td></tr>
             <tr className="font-extrabold"><Td>{L("الأنشطة الاستثمارية", "Investing activities")}</Td><Td>{""}</Td></tr>
             {cfLines(cf.data.investing.lines)}
@@ -152,9 +158,15 @@ export default function ReportsPage() {
             <tr><Td><span className="ps-4">{L("النقد آخر المدة", "Cash at end of period")}</span></Td><Td num>{signed(cf.data.cashClosing)}</Td></tr>
           </tbody>
         </Table>
+        <CardTitle title={L("معاملات استثمارية وتمويلية غير نقدية", "Non-cash investing and financing transactions")} sub={L("لا تظهر في الأقسام أعلاه لأنها لم تحرّك النقد", "Not in the sections above because no cash moved")} />
+        {cf.data.nonCash.length === 0 ? <p className="text-[13px] text-muted-foreground">{L("لا توجد في هذه الفترة.", "None in this period.")}</p> :
+          <Table>
+            <thead><tr><Th>{L("القيد", "Entry")}</Th><Th>{L("التاريخ", "Date")}</Th><Th>{L("البيان", "Description")}</Th><Th>{L("الحسابات", "Accounts")}</Th><Th num>{L("المبلغ (ر.س)", "Amount (SAR)")}</Th></tr></thead>
+            <tbody>{cf.data.nonCash.map((n) => <tr key={n.entryId}><Td>#{n.entryNo}</Td><Td>{day(n.entryDate)}</Td><Td>{auto(n.description ?? "")}</Td><Td>{n.accounts.join(" · ")}</Td><Td num>{signed(n.amount)}</Td></tr>)}</tbody>
+          </Table>}
         <div className="flex flex-wrap items-center gap-2">
           {cf.data.reconciled ? <Badge tone="ok">{L("مطابقة ✓", "Reconciled ✓")}</Badge> : <Badge tone="bad">{L("لا تطابق التغير في النقد", "Does not match the change in cash")}</Badge>}
-          <span className="text-[12px] text-muted-foreground">{L("التشغيلية + الاستثمارية + التمويلية = التغير في الحسابات النقدية", "Operating + investing + financing = change in the cash accounts")}</span>
+          <span className="text-[12px] text-muted-foreground">{L("الطريقة المباشرة = غير المباشرة للأنشطة التشغيلية؛ الأقسام = التغير في الحسابات النقدية", "Operating: indirect = direct; sections = change in the cash accounts")}</span>
           {cf.data.defaultedAccounts.length > 0 && <span className="text-[12px] text-amber-800">{L(`* حسابات بتصنيف افتراضي: ${cf.data.defaultedAccounts.join("، ")}`, `* Default-classified accounts: ${cf.data.defaultedAccounts.join(", ")}`)}</span>}
         </div>
         <Notice tone="warn">{L("تصنيف الحسابات افتراضي من قالب الدليل (نقدي / تشغيلي / استثماري / تمويلي / مستبعد) وبانتظار اعتماد المحاسب — قرار في حزمة القرارات. يمكن تغييره لكل حساب من دليل الحسابات.", "Account classification is the chart template's default (cash / operating / investing / financing / excluded), awaiting the accountant's approval — an item in the decision pack. It can be changed per account in the chart of accounts.")}</Notice>

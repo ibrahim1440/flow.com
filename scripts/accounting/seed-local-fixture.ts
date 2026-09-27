@@ -148,6 +148,16 @@ async function main() {
     await journal(D(m, 12), `فاتورة الكهرباء والمياه — شهر ${m}`, [["6300", (3100 + m * 87.35).toFixed(2), "0", { cc: roast.id }], ["1120", "0", (3100 + m * 87.35).toFixed(2)]]);
   }
 
+  // Fixed assets (synthetic): a packing machine bought on credit and paid in two instalments, a
+  // delivery van financed by a bank loan, and quarterly depreciation — non-cash items the
+  // cash-flow statement must disclose rather than report as flows.
+  await journal(D(2, 8), "آلة تعبئة بالتقسيط من المورد — بيانات تجريبية", [["1210", "64000.00", "0"], ["2195", "0", "64000.00"]]);
+  await journal(D(3, 8), "القسط الأول لآلة التعبئة", [["2195", "24000.00", "0"], ["1120", "0", "24000.00"]]);
+  await journal(D(5, 8), "القسط الثاني لآلة التعبئة", [["2195", "40000.00", "0"], ["1120", "0", "40000.00"]]);
+  await journal(D(4, 15), "سيارة توصيل ممولة بقرض بنكي — بيانات تجريبية", [["1230", "118000.00", "0"], ["2220", "0", "118000.00"]]);
+  await journal(D(6, 15), "سداد قسط القرض", [["2220", "9800.00", "0"], ["1120", "0", "9800.00"]]);
+  for (const q of [3, 6]) await journal(D(q, 30), `إهلاك الربع ${q / 3}`, [["6600", "31250.00", "0"], ["1290", "0", "31250.00"]]);
+
   // A posted entry and its approved reversal.
   const wrong = await journal(D(3, 14), "صيانة آلة التحميص — قيدت بالخطأ على التسويق", [["6400", "4750.00", "0"], ["1120", "0", "4750.00"]]);
   const rv = await requestJournalReversal(wrong.id, prep, "الحساب الصحيح هو الصيانة وليس التسويق", D(3, 20));
