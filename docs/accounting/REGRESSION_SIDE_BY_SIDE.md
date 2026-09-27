@@ -294,3 +294,28 @@ All paths are relative to `/tmp/claude-0/-home-user-hiqbah-share2/3f8b64a2-dce4-
 - Every server this session started on :3010 was stopped by PID; nothing is listening on 3010. The :3040 server (PID 2355) was untouched and still healthy.
 - No tracked file in either repository was modified by this session and nothing was committed. The uncommitted changes in `/home/user/flow.com` came from someone else, as described in the caveat above.
 - `erp_e2e` **existed before this session** (no comment, 30 migrations, 5 employees, not in use by any connection). It was not created by this task, so it was not dropped. It now holds the state left by the last controlled run (after an authorized reset: operational tables empty; employees, including the suite's RSF_ operators, and the comment `hiqbah-finance-disposable` remain). Drop it manually if it is not wanted.
+
+## Reproducible certification (clean checkout), 2026-09-27
+
+`scripts/e2e/regression/local-certification.mjs <sha>` runs the whole backend suite against a
+disposable local database, from a clean `git worktree` of the given commit. It fixes the
+conditions of the 11 former baseline failures without loosening any check:
+
+| Suite | Condition | How it is set up |
+|---|---|---|
+| `harness-selftest` (2) | expects an unconfigured environment | the worktree has no `.env`; the script refuses to run if one exists |
+| `reset-safety` (8) | needs the reset boundary on the test server | `ERP_TRAINING_RESET_ENABLED`, `ERP_RESET_ALLOWED_HOST=127.0.0.1` and `ERP_RESET_ALLOWED_DATABASE=erp_e2e` are set on that server only. The guard code is untouched, and the script refuses a non-local `DATABASE_URL` |
+| `h2a-hardening` (1) | a global provenance invariant (no roast without a green bean) | fixed at the source: `prisma/seed.ts` maps each seeded bean name to its green bean (`BEAN_ALIASES`) and throws on an unknown name. The global assertion is unchanged, and the seeded database has 0 roasts without a bean |
+
+The script also:
+- generates the secrets for the run fresh (JWT, PIN lookup, seed PINs) and never prints them;
+- runs `prisma generate` and `migrate deploy`, then the seed, the build and the server, all from
+  the worktree.
+
+Results:
+- at `284e207`: 26 suites, 2,301 assertions, 0 failed;
+- at `cf3b43e`: 26 suites, 2,300 assertions, 0 failed
+  (`evidence/test-runs/cf3b43e-certification.log`).
+
+The one-assertion difference is the race-dependent branch in `completion-gate`
+(`TEST_RESULTS.md`).

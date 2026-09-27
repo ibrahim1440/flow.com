@@ -1,0 +1,24 @@
+ACC-01 overview            rtl/ar  no violations
+ACC-02 journals            rtl/ar  no violations
+ACC-03 editor              rtl/ar  no violations
+ACC-04 detail              rtl/ar  no violations
+ACC-05 accounts            rtl/ar  no violations
+ACC-06 periods             rtl/ar  no violations
+ACC-07 reports TB          rtl/ar  no violations
+ACC-08 income statement    rtl/ar  no violations
+ACC-08 balance sheet       rtl/ar  no violations
+ACC-09 automation          rtl/ar  no violations
+ACC-10 no permission       rtl/ar  no violations
+ACC-11 mobile detail       rtl/ar  no violations
+ACC-12 English detail      ltr/en  no violations
+ACC-12 English reports     ltr/en  no violations
+ACC-20 bills               rtl/ar  no violations
+ACC-21 bill editor         rtl/ar  no violations
+ACC-22 bill detail         rtl/ar  no violations
+ACC-22 bill detail EN      ltr/en  no violations
+ACC-23 aging               rtl/ar  no violations
+ACC-24 bank                rtl/ar  no violations
+ACC-25 bank reconciliation rtl/ar  no violations
+ACC-26 mobile bills        rtl/ar  no violations
+ACC-27 cash flow           rtl/ar  no violations
+serious/critical violations inside accounting content: 0
