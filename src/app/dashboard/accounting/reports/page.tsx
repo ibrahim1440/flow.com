@@ -129,27 +129,35 @@ export default function ReportsPage() {
 
       {view === "cf" && (cf.error ? <ErrorState error={cf.error} onRetry={cf.reload} /> : !cf.data ? <LoadingState /> : <>
         {provNote(cf.data.provisionalEntries)}
-        <Notice tone="warn">{L("تصنيف الحسابات في هذه القائمة افتراضي من قالب الدليل وبانتظار اعتماد المحاسب؛ يمكن تغييره لكل حساب من دليل الحسابات. القيود الافتتاحية تُعامل كأرصدة افتتاحية.", "Account classification here is the chart template's default, awaiting the accountant's approval; it can be changed per account in the chart of accounts. Opening entries count as opening balances.")}</Notice>
+        <div>
+          <h2 className="text-[16px] font-extrabold">{L(`قائمة التدفقات النقدية — ${from} – ${to}`, `Cash-flow statement — ${from} – ${to}`)}</h2>
+          <p className="text-[12px] text-muted-foreground">{L("الطريقة غير المباشرة من دفتر الأستاذ · القيود الافتتاحية أرصدة أول المدة", "Indirect method from the ledger · opening entries are opening balances")}</p>
+        </div>
         <Table>
           <thead><tr><Th>{L("البند", "Line")}</Th><Th num>{L("المبلغ (ر.س)", "Amount (SAR)")}</Th></tr></thead>
           <tbody>
-            <tr className="font-extrabold"><Td>{L("الأنشطة التشغيلية", "Operating activities")}</Td><Td num>{signed(cf.data.operating.total)}</Td></tr>
-            <tr><Td><span className="ps-4">{L("صافي الربح (الخسارة)", "Net profit (loss)")}</span></Td><Td num>{signed(cf.data.netProfit)}</Td></tr>
+            <tr className="font-extrabold"><Td>{L("الأنشطة التشغيلية", "Operating activities")}</Td><Td>{""}</Td></tr>
+            <tr><Td><span className="ps-4">{L("صافي الربح (الخسارة) للفترة", "Net profit (loss) for the period")}</span></Td><Td num>{signed(cf.data.netProfit)}</Td></tr>
             {cfLines(cf.data.operating.lines)}
-            <tr className="font-extrabold"><Td>{L("الأنشطة الاستثمارية", "Investing activities")}</Td><Td num>{signed(cf.data.investing.total)}</Td></tr>
+            <tr className="bg-[#fafafa] font-extrabold"><Td>{L("صافي النقد من الأنشطة التشغيلية", "Net cash from operating activities")}</Td><Td num>{signed(cf.data.operating.total)}</Td></tr>
+            <tr className="font-extrabold"><Td>{L("الأنشطة الاستثمارية", "Investing activities")}</Td><Td>{""}</Td></tr>
             {cfLines(cf.data.investing.lines)}
-            <tr className="font-extrabold"><Td>{L("الأنشطة التمويلية", "Financing activities")}</Td><Td num>{signed(cf.data.financing.total)}</Td></tr>
+            <tr className="bg-[#fafafa] font-extrabold"><Td>{L("صافي النقد من الأنشطة الاستثمارية", "Net cash from investing activities")}</Td><Td num>{signed(cf.data.investing.total)}</Td></tr>
+            <tr className="font-extrabold"><Td>{L("الأنشطة التمويلية", "Financing activities")}</Td><Td>{""}</Td></tr>
             {cfLines(cf.data.financing.lines)}
+            <tr className="bg-[#fafafa] font-extrabold"><Td>{L("صافي النقد من الأنشطة التمويلية", "Net cash from financing activities")}</Td><Td num>{signed(cf.data.financing.total)}</Td></tr>
             {cf.data.excluded.lines.length > 0 && <><tr className="font-extrabold"><Td>{L("حركات مستبعدة (تحتاج مراجعة)", "Excluded movements (review)")}</Td><Td num>{signed(cf.data.excluded.total)}</Td></tr>{cfLines(cf.data.excluded.lines)}</>}
             <tr className="bg-cream-dark font-extrabold"><Td>{L("صافي التغير في النقد", "Net change in cash")}</Td><Td num>{signed(cf.data.netChange)}</Td></tr>
-            <tr><Td>{L("النقد أول الفترة", "Cash at start of period")}</Td><Td num>{signed(cf.data.cashOpening)}</Td></tr>
-            <tr className="font-extrabold"><Td>{L("النقد آخر الفترة", "Cash at end of period")}</Td><Td num>{signed(cf.data.cashClosing)}</Td></tr>
+            <tr><Td><span className="ps-4">{L("النقد أول المدة", "Cash at start of period")}</span></Td><Td num>{signed(cf.data.cashOpening)}</Td></tr>
+            <tr><Td><span className="ps-4">{L("النقد آخر المدة", "Cash at end of period")}</span></Td><Td num>{signed(cf.data.cashClosing)}</Td></tr>
           </tbody>
         </Table>
         <div className="flex flex-wrap items-center gap-2">
-          {cf.data.reconciled ? <Badge tone="ok">{L("التشغيلية + الاستثمارية + التمويلية = التغير في النقد ✓", "Operating + investing + financing = change in cash ✓")}</Badge> : <Badge tone="bad">{L("لا تطابق التغير في النقد", "Does not match the change in cash")}</Badge>}
+          {cf.data.reconciled ? <Badge tone="ok">{L("مطابقة ✓", "Reconciled ✓")}</Badge> : <Badge tone="bad">{L("لا تطابق التغير في النقد", "Does not match the change in cash")}</Badge>}
+          <span className="text-[12px] text-muted-foreground">{L("التشغيلية + الاستثمارية + التمويلية = التغير في الحسابات النقدية", "Operating + investing + financing = change in the cash accounts")}</span>
           {cf.data.defaultedAccounts.length > 0 && <span className="text-[12px] text-amber-800">{L(`* حسابات بتصنيف افتراضي: ${cf.data.defaultedAccounts.join("، ")}`, `* Default-classified accounts: ${cf.data.defaultedAccounts.join(", ")}`)}</span>}
         </div>
+        <Notice tone="warn">{L("تصنيف الحسابات افتراضي من قالب الدليل (نقدي / تشغيلي / استثماري / تمويلي / مستبعد) وبانتظار اعتماد المحاسب — قرار في حزمة القرارات. يمكن تغييره لكل حساب من دليل الحسابات.", "Account classification is the chart template's default (cash / operating / investing / financing / excluded), awaiting the accountant's approval — an item in the decision pack. It can be changed per account in the chart of accounts.")}</Notice>
       </>)}
 
       {view === "gl" && <>
