@@ -97,22 +97,48 @@ SELECT indexname, indexdef
                      'CommissionLedgerEntry_idempotencyKey_key');
 
 -- Does the correction table exist at all? Entitlement derivation needs it.
+--
+-- **If this returns NULL, stop here and report.** Sections 5, 5b and 6 read that table by
+-- name, and unlike a missing column there is no way to read a missing TABLE safely — the
+-- statement will not parse. A NULL here also means the provenance migration
+-- (20260926190000) has not been applied, which changes the premise of the whole release,
+-- so it is a finding to discuss rather than something to work around.
 SELECT to_regclass('"CommissionLedgerCorrection"') AS correction_table;
 
 -- ═══ 3. IDEMPOTENCY PRE-FLIGHT — only meaningful once the column exists ═══════
 -- Guarded, so it returns a verdict rather than erroring on a schema without the column.
 -- Migration 2 creates a UNIQUE index on idempotencyKey alone; it fails if any value is
 -- duplicated. NULLs are distinct in Postgres, so keyless rows never conflict.
+-- ── Why these two queries read the column through JSON ──
+--
+-- A guard in a WHERE clause cannot save a query that NAMES a column the table does not
+-- have. Postgres resolves identifiers when it parses the statement, before any condition
+-- is evaluated, so `... WHERE "idempotencyKey" IS NOT NULL AND EXISTS (<column exists>)`
+-- still fails with 42703 on a pre-migration schema — the guard never runs. This section
+-- and section 4 did exactly that and would have errored on the real starting schema.
+--
+-- `to_jsonb(l.*) ->> 'idempotencyKey'` is a key lookup on a value, not an identifier, so
+-- it parses against any shape of row and simply yields NULL when the key is absent. The
+-- queries below therefore run correctly before migration 1, between the two migrations,
+-- and after both.
+--
+-- `to_regclass` + `pg_attribute` for the existence test rather than information_schema,
+-- because to_regclass resolves through search_path and so reports on the very table the
+-- queries will read.
 SELECT CASE
+  WHEN to_regclass('"CommissionLedgerEntry"') IS NULL
+    THEN 'NO TABLE — CommissionLedgerEntry does not exist. This is not the commission database.'
   WHEN NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name = 'CommissionLedgerEntry' AND column_name = 'idempotencyKey')
+    SELECT 1 FROM pg_attribute
+     WHERE attrelid = to_regclass('"CommissionLedgerEntry"')
+       AND attname = 'idempotencyKey' AND attnum > 0 AND NOT attisdropped)
     THEN 'NOT APPLICABLE — the column does not exist yet, so no value can be duplicated. '
          'Migration 1 adds it empty. Re-run this section between migration 1 and 2 if you '
          'apply them separately.'
   WHEN (SELECT count(*) FROM (
-          SELECT "idempotencyKey" FROM "CommissionLedgerEntry"
-           WHERE "idempotencyKey" IS NOT NULL
+          SELECT to_jsonb(l.*) ->> 'idempotencyKey' AS k
+            FROM "CommissionLedgerEntry" l
+           WHERE to_jsonb(l.*) ->> 'idempotencyKey' IS NOT NULL
            GROUP BY 1 HAVING count(*) > 1) d) = 0
     THEN 'PASS — no duplicate keys. Migration 2 can create the unique index.'
   ELSE 'BLOCKED — duplicate idempotencyKey values exist. Migration 2 WILL FAIL. '
@@ -121,14 +147,13 @@ END AS idempotency_preflight;
 
 -- The duplicates themselves. Empty on a healthy database; every row here is a finding.
 -- Runs harmlessly when the column does not exist yet, returning nothing.
-SELECT "idempotencyKey", count(*) AS occurrences,
-       string_agg(DISTINCT "employeeId", ', ')       AS employees,
-       string_agg(DISTINCT type::text, ', ')          AS types,
-       min("createdAt") AS first_seen, max("createdAt") AS last_seen
-  FROM "CommissionLedgerEntry"
- WHERE "idempotencyKey" IS NOT NULL
-   AND EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'CommissionLedgerEntry' AND column_name = 'idempotencyKey')
+SELECT to_jsonb(l.*) ->> 'idempotencyKey'   AS idempotency_key,
+       count(*)                             AS occurrences,
+       string_agg(DISTINCT l."employeeId", ', ') AS employees,
+       string_agg(DISTINCT l.type::text, ', ')   AS types,
+       min(l."createdAt") AS first_seen, max(l."createdAt") AS last_seen
+  FROM "CommissionLedgerEntry" l
+ WHERE to_jsonb(l.*) ->> 'idempotencyKey' IS NOT NULL
  GROUP BY 1 HAVING count(*) > 1
  ORDER BY occurrences DESC;
 
@@ -158,12 +183,12 @@ SELECT "idempotencyKey", count(*) AS occurrences,
 -- The actor list and the timing below are what there is to go on; anything they cannot
 -- account for should be chased before deploying, not after.
 SELECT
-  count(*)                                                       AS payout_rows_total,
-  count(*) FILTER (WHERE "idempotencyKey" IS NULL)               AS payouts_without_key,
-  count(DISTINCT "actorId")                                      AS distinct_payout_actors,
-  min("createdAt")                                               AS first_payout,
-  max("createdAt")                                               AS last_payout
-  FROM "CommissionLedgerEntry" WHERE type = 'PAYOUT';
+  count(*)                                                                 AS payout_rows_total,
+  count(*) FILTER (WHERE to_jsonb(l.*) ->> 'idempotencyKey' IS NULL)       AS payouts_without_key,
+  count(DISTINCT l."actorId")                                              AS distinct_payout_actors,
+  min(l."createdAt")                                                       AS first_payout,
+  max(l."createdAt")                                                       AS last_payout
+  FROM "CommissionLedgerEntry" l WHERE l.type = 'PAYOUT';
 
 -- Who holds the privilege. A payout can only arrive from one of these identities, so this
 -- is the list to walk when asking "could anything other than the dialog be posting?".
@@ -193,7 +218,7 @@ SELECT l.id, l."employeeId", l.amount::text, l."actorId", l."createdAt"
 -- unattributed +10.00 beside an unattributed -10.00 sums to zero while two movements stay
 -- unexplained, and netting them is exactly the reading that under-reports exposure.
 WITH mv AS (
-  SELECT l.id, l."employeeId", l."periodStart", l.type::text AS t, l.amount, l."accrualId",
+  SELECT l.id, l."employeeId", l."periodStart", l.type::text AS t, l.amount, to_jsonb(l.*) ->> 'accrualId' AS accrual_id,
          COALESCE((SELECT SUM(x.amount) FROM "CommissionLedgerCorrection" x
                     WHERE x."entryId" = l.id), 0) AS allocated_out
     FROM "CommissionLedgerEntry" l
@@ -202,23 +227,23 @@ acc AS (
   SELECT a."employeeId", a."periodStart",
          count(*) FILTER (WHERE NOT EXISTS (
            SELECT 1 FROM "CommissionLedgerEntry" m
-            WHERE m."accrualId" = a.id AND m.type = 'ACCRUAL')) AS non_derived_accruals
+            WHERE to_jsonb(m.*) ->> 'accrualId' = a.id AND m.type = 'ACCRUAL')) AS non_derived_accruals
     FROM "CommissionAccrual" a GROUP BY 1, 2
 )
 SELECT
   m."employeeId",
   to_char(m."periodStart" + interval '3 hours', 'YYYY-MM')                                        AS riyadh_month,
   count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL'))                                           AS movements,
-  count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL') AND m."accrualId" IS NULL)                 AS unplaced_movements,
+  count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL') AND m.accrual_id IS NULL)                 AS unplaced_movements,
   COALESCE(SUM(m.amount) FILTER (
-    WHERE m.t IN ('ACCRUAL','REVERSAL') AND m."accrualId" IS NULL AND m.amount > 0), 0)::text     AS gap_positive,
+    WHERE m.t IN ('ACCRUAL','REVERSAL') AND m.accrual_id IS NULL AND m.amount > 0), 0)::text     AS gap_positive,
   COALESCE(-SUM(m.amount) FILTER (
-    WHERE m.t IN ('ACCRUAL','REVERSAL') AND m."accrualId" IS NULL AND m.amount < 0), 0)::text     AS gap_negative,
+    WHERE m.t IN ('ACCRUAL','REVERSAL') AND m.accrual_id IS NULL AND m.amount < 0), 0)::text     AS gap_negative,
   COALESCE(SUM(GREATEST(0, -m.amount - m.allocated_out)) FILTER (WHERE m.t = 'REVERSAL'), 0)::text AS unallocated_reversal,
   COALESCE(MAX(a.non_derived_accruals), 0)                                                        AS non_derived_accruals,
   count(*) FILTER (WHERE m.t = 'PAYOUT')                                                          AS payouts,
   COALESCE(SUM(m.amount) FILTER (WHERE m.t = 'PAYOUT'), 0)::text                                  AS paid_total,
-  (count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL') AND m."accrualId" IS NULL) > 0
+  (count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL') AND m.accrual_id IS NULL) > 0
    OR COALESCE(SUM(GREATEST(0, -m.amount - m.allocated_out)) FILTER (WHERE m.t='REVERSAL'), 0) > 0
    OR COALESCE(MAX(a.non_derived_accruals), 0) > 0)                                               AS would_block
 FROM mv m
@@ -246,14 +271,14 @@ ORDER BY would_block DESC, (SUM(m.amount) FILTER (WHERE m.t = 'PAYOUT')) DESC NU
 -- and the count is not a check at all.
 SELECT l.type::text, l."employeeId",
        to_char(l."periodStart" + interval '3 hours', 'YYYY-MM') AS riyadh_month,
-       l.amount::text, l."accrualId" IS NOT NULL AS placed, l."actorId", l."createdAt"
+       l.amount::text, (to_jsonb(l.*) ->> 'accrualId') IS NOT NULL AS placed, l."actorId", l."createdAt"
   FROM "CommissionLedgerEntry" l
  WHERE l."createdAt" >= TIMESTAMPTZ '2026-01-01 00:00:00+00'  -- <-- replace with the pre-deploy audit timestamp
  ORDER BY l."createdAt";
 
 -- ═══ 6. THE ONE-LINE VERDICT ══════════════════════════════════════════════════
 WITH mv AS (
-  SELECT l."employeeId", l."periodStart", l.type::text AS t, l.amount, l."accrualId",
+  SELECT l."employeeId", l."periodStart", l.type::text AS t, l.amount, to_jsonb(l.*) ->> 'accrualId' AS accrual_id,
          COALESCE((SELECT SUM(x.amount) FROM "CommissionLedgerCorrection" x
                     WHERE x."entryId" = l.id), 0) AS allocated_out
     FROM "CommissionLedgerEntry" l
@@ -262,12 +287,12 @@ acc AS (
   SELECT a."employeeId", a."periodStart",
          count(*) FILTER (WHERE NOT EXISTS (
            SELECT 1 FROM "CommissionLedgerEntry" m
-            WHERE m."accrualId" = a.id AND m.type = 'ACCRUAL')) AS nd
+            WHERE to_jsonb(m.*) ->> 'accrualId' = a.id AND m.type = 'ACCRUAL')) AS nd
     FROM "CommissionAccrual" a GROUP BY 1, 2
 ),
 per AS (
   SELECT m."employeeId", m."periodStart",
-         (count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL') AND m."accrualId" IS NULL) > 0
+         (count(*) FILTER (WHERE m.t IN ('ACCRUAL','REVERSAL') AND m.accrual_id IS NULL) > 0
           OR COALESCE(SUM(GREATEST(0, -m.amount - m.allocated_out)) FILTER (WHERE m.t='REVERSAL'),0) > 0
           OR COALESCE(MAX(a.nd), 0) > 0) AS blocked,
          COALESCE(SUM(m.amount) FILTER (WHERE m.t = 'PAYOUT'), 0) AS paid
