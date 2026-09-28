@@ -20,6 +20,9 @@
 | 14 | AP aging "as of" a past date used today's matches; overpaid suppliers were dropped | matches read without dates | matches counted from their date; overpaid balances listed | `bank-corrections.test.ts` supplier case |
 | 15 | Sales invoice list counted paid invoices past due as "overdue", and showed an invoice as paid while its receipt had not posted (the aging disagreed) | count by due date only; all active allocations counted | overdue = unpaid past due; "open" counts receipts once their bank line has posted, with the awaiting part shown | found in Stage 3 visual review; list/aging agree in the captures |
 | 16 | Two bank lines claiming one sales collection at the same moment: the loser got a generic "record already exists" message | race reached the unique index | the collection row is locked before the check | `receivables-workflow.test.mjs` (concurrent claim, run 3×) |
+| 17 | Cash-flow attribution of a past month changed when a payment was later voided or replaced: the investing/operating split was read from the bank line's **current** active bill matches, which a void deactivates | attribution from live match rows | each AP/AR control line records its open item at posting (immutable; mirrors copy it); attribution reads the bill from the posted line | `cashflow-history.test.ts` (3: asset bill paid in January and voided in February; partial payments; void and replace) — red before the fix, `evidence/test-runs/cashflow-history-before-fix.txt` |
+| 18 | AR/AP aging and customer/supplier statements for a past date used documents' **current** status (and audit timestamps), so a later reversal, void or reallocation rewrote earlier periods and the subledger no longer agreed with the GL at that cutoff | reports read document tables | aging and statements read the posted ledger lines by entry date and open item; credit-note reallocation now posts a net-zero reclass (`ar.credit.allocated` / `released`) | `subledger-history.test.ts` (2: receivables and payables, GL agreement at each cutoff before and after later reversals) — red before the fix, `evidence/test-runs/subledger-history-before-fix.txt` |
+| 19 | GRNI explanation and gross margin for a past date used the supplier bill's current status and the invoice's reversal timestamp (same class as 18, found in the stage 4 audit) | status filter | bills and invoices count by the entry dates of their posted and reversal journals | `inventory.test.ts` "historical GRNI" — red on `fde4632`, `evidence/test-runs/grni-history-before-fix.txt`; February margin unchanged after a later reversal |
 
 ## Pre-existing (reproduced identically on `main` @ `fc64c05`)
 All three now have a reproducible passing setup (`scripts/e2e/regression/local-certification.mjs`,
@@ -31,13 +34,22 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
 
 ## Limitations (known, not defects)
 - Implemented (locally, synthetic data): the ledger core, commission posting, payables, bank-to-ledger
-  with posted-line corrections, the cash-flow statement, and sales invoices/receivables (stage 3).
-  **Not** implemented: inventory valuation and COGS (D-1), manufacturing costing, fixed-asset
-  register and depreciation runs (depreciation is by manual journal), year-end close, ZATCA
-  (see `REQUIREMENTS_MATRIX.md`). The accounting system as a whole is **not complete** and **not
-  ZATCA-compliant**.
-- Stage 3 limitations: `STAGE_3_DESIGN.md` §7 (aging of later-reversed invoices, single returns
-  account, no COGS, credit limit warns only, D-2 changes apply forward only).
+  with posted-line corrections, the cash-flow statement, sales invoices/receivables (stage 3), and
+  inventory valuation with material-only manufacturing costing and COGS (stage 4, D-1 configurable
+  and refused until decided). **Not** implemented: labour/overhead absorption, fixed-asset register
+  and depreciation runs (depreciation is by manual journal), year-end close, ZATCA (see
+  `REQUIREMENTS_MATRIX.md`). The accounting system as a whole is **not complete** and **not
+  ZATCA-compliant**. Stages 2 and 3 are **not accepted**; they await the owner's review.
+- Stage 3 limitations: `STAGE_3_DESIGN.md` §7 (single returns account, credit notes move no stock,
+  credit limit warns only, D-2 changes apply forward only). The historical-aging limitation is
+  resolved (defect 18).
+- Stage 4 limitations: `STAGE_4_DESIGN.md` §7 (materials-only production cost; price differences
+  and landed cost on consumed stock go to COGS; back-dating refused rather than revalued; no
+  supplier credit notes; no in-transit transfers; COGS only for SKU-linked invoice lines at the
+  sales location; operational records not updated; migrations not rehearsed on a production copy).
+- Open items on ledger lines start with the `20260930090000_accounting_open_items` migration. The
+  branch has no journals from before it, but a database that posted receivables/payables journals
+  under an earlier build of this branch would need them re-derived; production has none.
 - POS and payment-gateway settlements are journalised manually.
 - Bill and invoice attachments are not implemented.
 - Local tests use PostgreSQL 16; production is 17 (the rehearsal ran on 17).

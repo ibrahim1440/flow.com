@@ -104,6 +104,22 @@ expensed.
 - the bands per profile, or the rule to derive them
 - whether backdated receipts re-value issues already made (recommended: yes, within an open period only)
 
+**Implementation status (stage 4, local only — `STAGE_4_DESIGN.md`).** D-1 is built as settings
+that are refused until you set them, not as a decision taken for you:
+- `inventoryCostMethod` (weighted average or FIFO) and `inventoryPriceDifference` (capitalise on the
+  stock still held, or expense to 5700) are empty by default. Neither can change after the first
+  inventory document posts.
+- Loss bands are entered per process and approved by someone other than their author; an approved
+  band never changes (retire it and approve a new one).
+- With either setting empty, the `inventory.costing` policy unapproved, or a draft band, **posting
+  is refused with the reason**. Only an isolated test database may post provisionally; such
+  journals are marked provisional.
+- Back-dating: until you decide, the implementation takes the conservative path and **refuses** a
+  document dated before a posted movement of the same item and location. Revaluing earlier issues
+  is not implemented.
+- COGS is taken when the sales invoice posts, on the invoice date (§4: this assumes invoicing
+  follows delivery).
+
 ## 4. Revenue and COGS timing
 
 **Recommendation** (IFRS 15 transfer of control, as adopted by SOCPA). Revenue and COGS are
@@ -254,3 +270,8 @@ activation until replaced by your decisions:
   posting, using "VAT at receipt" (the recommendation in §5) as the fallback. Such journals are
   marked provisional and cannot occur outside that test mode.
 - Credit notes debit a single "sales returns and allowances" account (4900) for their net.
+- Stage 4: the loss bands used by tests and the local fixture (ROAST-SYN 18%, PACK-SYN 1%, BAKE-SYN
+  5%, and a draft DARK-SYN 20%) and the milk yield of 1 kg per litre are **synthetic**. In the
+  fixture D-1 stays undecided and `inventory.costing` is prepared but not approved, so its
+  documents post provisionally in the disposable database only. The integration tests set weighted
+  average / capitalise (and FIFO in one test) inside their own disposable database.

@@ -31,9 +31,15 @@ that branch — blocked, see `RELEASE_PROPOSAL.md`).
 **Later migrations not yet rehearsed on a production copy** (applied and tested only on the local
 disposable PostgreSQL 16 databases): `20260928120000_accounting_payables_bank`,
 `20260928130000_accounting_cash_flow_class`, `20260929090000_accounting_bank_corrections`,
-`20260929120000_accounting_receivables`. The receivables migration adds columns to the existing
-`Customer` table (nullable or defaulted) and triggers on new tables only; it must still be rehearsed
-on a fresh copy of production before any release package is proposed.
+`20260929120000_accounting_receivables`, `20260930090000_accounting_open_items`,
+`20260930120000_accounting_inventory`, `20260930130000_accounting_inventory_sales_location`.
+The receivables migration adds columns to the existing `Customer` table (nullable or defaulted).
+The open-items migration adds nullable columns and a check to the new `JournalEntryLine` table and
+a flag to `ArAllocation`. The inventory migrations create new tables and add nullable settings
+columns. None of them changes an existing operational table's data; the inventory tables only
+reference operational records by id (`GreenBean`, `CoffeeProduct`, `MaterialItem`, `ProductSKU`,
+`RoastingBatch`, `PurchaseRecord`). All of them must still be rehearsed on a fresh copy of production
+before any release package is proposed.
 
 ## Cutover (proposal — dates and figures are the business's decision, see POLICIES D-4)
 1. Accountant approves the chart (template adapted), creates the fiscal year, maps roles.

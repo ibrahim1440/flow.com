@@ -71,10 +71,12 @@ differences: `FIGMA_PARITY.md`.
 
 ## 7. Known limitations
 
-- Aging "as of" a past date counts invoices that are POSTED **now**; an invoice reversed later is not
-  reconstructed for dates before its reversal.
+- ~~Aging "as of" a past date counts invoices that are POSTED **now**~~ — **resolved 2026-09-28**
+  (defect 18 in `DEFECTS_AND_LIMITATIONS.md`): aging and statements are read from the posted
+  ledger by entry date, so a later reversal leaves earlier dates unchanged.
 - Credit notes post their whole net to one returns account (4900); no per-line revenue reversal.
-- No cost of sales on invoices until D-1 (stage 4); no stock movement from credit notes.
+- Cost of sales is taken by stage 4 when an invoice posts (only for lines naming a stocked
+  `ProductSKU`); credit notes do not move stock (a customer return document is entered).
 - The credit limit is shown as a warning only; it does not block.
 - Changing the D-2 setting affects receipts assigned afterwards; earlier advances keep their VAT.
 - The customer dropdown's "open receivables" figure counts every active allocation (including

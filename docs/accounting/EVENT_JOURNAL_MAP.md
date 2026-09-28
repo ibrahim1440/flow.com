@@ -29,10 +29,27 @@ payout (negative balance = employee owes).
 | `AdvanceApplication` POSTED | `ar.advance.applied` | `receivables.advances` + D-2 | Dr CUSTOMER_ADVANCES (net part) · Dr OUTPUT_VAT (VAT carried) / Cr AR_CONTROL | CUSTOMER |
 | any of the three above, REVERSED | `ar.*.reversed` | — | mirror, dated on the reversal | CUSTOMER |
 
-Idempotency keys: `payables:<id>:<event>`, `bank:<id>:confirmed|voided`, `receivables:<id>:<event>`.
+| `ArAllocation` credit note → invoice (reallocation) | `ar.credit.allocated` | `receivables.recognition` | Dr AR_CONTROL (open item = credit note) / Cr AR_CONTROL (open item = invoice) — net zero | CUSTOMER |
+| same, released | `ar.credit.released` | — | mirror, dated on the release | CUSTOMER |
+
+Every AR_CONTROL and AP_CONTROL line carries the open item it opens or settles (`openItemType`,
+`openItemId`; set at posting, immutable, copied by mirrors). Receipts post one AR line per allocated
+invoice, AP payments one AP line per bill, and a credit note splits into the invoice it settles and
+its own remainder. Aging, statements and cash-flow attribution read these posted lines by entry
+date (`open-items.ts`), never a document's current status.
+
+Idempotency keys: `payables:<id>:<event>`, `bank:<id>:confirmed|voided`, `receivables:<id>:<event>`, `inventory:<id>:inv.document.posted`.
+
+## Stage 4 events (2026-09-28)
+
+| Source | Event | Gate | Journal |
+|---|---|---|---|
+| `InvDocument` POSTED (any type) | `inv.document.posted` | `inventory.costing` + D-1 settings + approved loss band | built only from the document's sealed cost moves; see `STAGE_4_DESIGN.md` §3 (receipt Dr inventory / Cr GRNI; production Dr output · Dr 5300 / Cr inputs; issue Dr 5100/5400/5500/5600/5700 / Cr inventory; bill match and landed cost to inventory for stock on hand, to COGS for stock consumed / GRNI; count to 5700; transfer: no journal, event SKIPPED) |
+| `SalesInvoice` INVOICE POSTED with stocked SKUs | (system `SALE_ISSUE` document) → `inv.document.posted` | as above | Dr 5100 / Cr finished goods, once per invoice |
+| `SalesInvoice` REVERSED after its cost of sales | (system `CUSTOMER_RETURN` document) → `inv.document.posted` | as above | Dr finished goods / Cr 5100 at the cost the goods left at, for the quantity not already returned |
 Sales collections and commissions keep their own paths: a sales collection never posts; the bank
 line does, once (`receivables.test.ts`, `receivables-workflow.test.mjs`).
 
-**Not yet mapped:** purchase orders/receipts as documents, inventory movements and valuation (COGS),
-production and costing, fixed assets and depreciation runs, payroll, year-end closing, POS/gateway
-settlements (manual journals).
+**Not yet mapped:** purchase orders as documents (goods receipts exist, stage 4), labour and
+overhead absorption, fixed assets and depreciation runs, payroll, year-end closing, POS/gateway
+settlements (manual journals), supplier credit notes.

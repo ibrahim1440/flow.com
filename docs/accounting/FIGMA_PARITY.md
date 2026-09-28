@@ -52,6 +52,29 @@ Side-by-side images: `evidence/side/ACC-3x-side.png` (Figma left, app right), ma
 | ACC-35 Credit note | [`407:1470`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-1470) | `/dashboard/accounting/receivables/new?creditFor=[id]` | ACC-35-app-1440.png | Complete | Lines start empty (Figma shows two filled lines). |
 | ACC-36 Mobile approval (390 px) | [`407:1785`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-1785) | `/dashboard/accounting/receivables?status=PENDING` at 390 px | ACC-36-app-390.png | Complete — layout difference accepted | App keeps the module header, tabs and filters above the cards; Figma shows only the cards. Only SUBMITTED documents get approve/reject; an APPROVED one shows its state. |
 
+### Page 20 — Inventory & costing (Stage 4), [`418:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=418-2)
+
+The frames use the hand-worked chain of `tests/accounting/integration/inventory.test.ts`, dated
+January–March. The local fixture replays the same chain in August–September, because it closes
+January–June and locks July. The **amounts agree** with the frames: valuation 5,041.41;
+1171 = 3,470.57; roasting 1,920.00 → 1,834.15 + 85.85; stock card closing 75 units / 798.21.
+**Dates and document numbers differ.** Figures are synthetic; the loss bands are test assumptions.
+Side by side: `evidence/side/ACC-40..47-side.png`.
+
+| Frame | Figma node (link) | Route | App evidence (`evidence/app/`) | Status | Documented differences |
+|---|---|---|---|---|---|
+| ACC-40 Valuation | [`418:3`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=418-3) | `/dashboard/accounting/inventory` | ACC-40-app-1440.png, ACC-40-en-app-1440.png | Complete | Tie-out line wraps to two rows; units shown as stored (`kg`, `piece`) rather than the frame's Arabic unit names; rows sorted by kind then code. The D-1 notice states "not decided" (fixture state) where the frame shows the synthetic weighted-average assumption. |
+| ACC-41 Documents | [`419:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=419-2) | `/dashboard/accounting/inventory/documents` | ACC-41-app-1440.png | Complete | The frame's "posted · awaiting supplier credit" and "posted · abnormal loss" status variants are shown as the plain posted/provisional badge; the GRNI page carries the awaiting-credit state. The fixture's documents all show "posted provisionally (test)" because D-1 is undecided. |
+| ACC-42 Receipt editor | [`419:577`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=419-577) | `/dashboard/accounting/inventory/documents/new` (`?type=`, `?edit=`, `?targetLineId=`, `?billLineId=`) | ACC-42-app-1440.png | Complete | App adds a D-1 notice and a Description field; the unit select shows the conversion ("pack100 (= 100 piece)"); the preview lists account codes without names for inventory accounts; the unit-conversion note of the frame is not shown. |
+| ACC-43 Production cost sheet | [`419:1149`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=419-1149) | `/dashboard/accounting/inventory/documents/[id]` | ACC-43-app-1440.png, ACC-43-submitted-app-1440.png | Complete | App adds the cost-moves card and the audit trail; lines table adds a base-quantity column. |
+| ACC-44 Stock card | [`420:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=420-2) | `/dashboard/accounting/inventory/stock-card` | ACC-44-app-1440.png | Complete | — |
+| ACC-45 GRNI / bill match / landed cost | [`420:557`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=420-557) | `/dashboard/accounting/inventory/grni` | ACC-45-app-1440.png | Complete — layout difference accepted | The frame's bill-match and landed-cost worked cards are on the document detail (ACC-43 layout) instead; this page lists bills without receipt with shortcuts to create them, drafts from operational records, operational agreement and gross margin. The fixture also has a Stage 2 packaging bill with no receipt, so GRNI differs from the frame's 3,033.00. |
+| ACC-46 Items, bands, D-1 | [`420:1130`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=420-1130) | `/dashboard/accounting/inventory/setup` | ACC-46-app-1440.png | Complete | Operational links show the linked record's id prefix, not its business code; after the first posting the D-1 selects are disabled with an explanation. |
+| ACC-47 Mobile approvals (390 px) | [`422:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=422-2) | `/dashboard/accounting/inventory/documents?status=PENDING` at 390 px | ACC-47-app-390.png | Partial | The cards show type, location, lines and value but not the frame's loss / cost / journal rows; the app keeps the module header, tabs and filters above the cards. The fixture has one pending document (the frame shows two). |
+
+Fourth audit (Stage 4, 2026-09-28): ACC-40..47 added to `a11y.mjs`: 0 serious or critical findings
+(same scope and caveats as above).
+
 Figma was synchronised to three implementation decisions: one page title for the module, no branch
 selector (the ledger is company-wide; branch is a line dimension), Arabic role labels.
 Evidence: `evidence/figma/ACC-*.png` (Figma exports), `evidence/app/ACC-*-app-*.png` (running app).
