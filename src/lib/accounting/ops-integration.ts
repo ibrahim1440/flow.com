@@ -6,6 +6,7 @@
 //   PURCHASE          PurchaseRecord.quantity (kg) at costPerUnit          → RECEIPT
 //   ROAST             RoastingBatch green kg in, roasted kg out           → PRODUCTION (ROASTING)
 //   ROAST_CANCEL      the batch's kg; restock or not                       → ADJUSTMENT / ISSUE
+//   QC_REJECT         roasted kg still on a batch QC rejected (terminal)    → ISSUE (QC waste)
 //   BLEND             kg taken from each source batch, blend kg out        → PRODUCTION (BLENDING)
 //   PACK              roasted grams drawn (packed + loss), materials drawn,
 //                     whole units per standard lot, content-share of a unit
@@ -36,7 +37,7 @@ import { deliveredLocation, systemDoc } from "./sales-costing";
 type Tx = Prisma.TransactionClient;
 type DV = string | number | Prisma.Decimal;
 const LEASE_MS = 2 * 60_000;
-export const OPS_KINDS = ["PURCHASE", "OPENING", "ROAST", "ROAST_CANCEL", "BLEND", "PACK", "DISPATCH", "ADJUST", "UNINTEGRATED"] as const;
+export const OPS_KINDS = ["PURCHASE", "OPENING", "ROAST", "ROAST_CANCEL", "QC_REJECT", "BLEND", "PACK", "DISPATCH", "ADJUST", "UNINTEGRATED"] as const;
 export type OpsKind = (typeof OPS_KINDS)[number];
 
 export type StockEvent = { kind: Exclude<OpsKind, "UNINTEGRATED">; sourceId: string; seq?: number; occurredOn?: Date; payload: Record<string, unknown>; userId?: string | null };
@@ -145,6 +146,12 @@ async function build(ev: { id: string; kind: string; sourceId: string; occurredO
       }
       return { input: { ...base, type: "ADJUSTMENT", locationId: loc.id, reason: `Roast ${p.batchNumber} cancelled, green coffee restocked`, description: `Cancelled roast ${p.batchNumber}: restock`,
         lines: [{ itemId: roasted.id, role: "INPUT", quantity: q4(num(p.roastedKg)).toFixed(4) }, { itemId: green.id, role: "OUTPUT", quantity: q4(num(p.greenKg)).toFixed(4), unitCost }] }, auto: true };
+    }
+    case "QC_REJECT": {
+      const loc = await opsLocation();
+      const roasted = await itemBy("coffeeProductId", (p.productId as string | null) ?? (await batchProduct(ev.sourceId)).productId, "The rejected batch's roasted product");
+      return { input: { ...base, type: "ISSUE", issueReason: "QC", locationId: loc.id, description: `QC rejected batch ${p.batchNumber}: roasted coffee written off`,
+        lines: [{ itemId: roasted.id, quantity: q4(num(p.kg)).toFixed(4) }] }, auto: true };
     }
     case "BLEND": {
       const loc = await opsLocation();
@@ -362,7 +369,8 @@ export async function opsReconciliation() {
     if (it.greenBeanId) ops = dec((await prisma.greenBean.findUnique({ where: { id: it.greenBeanId }, select: { quantityKg: true } }))?.quantityKg ?? 0);
     else if (it.materialItemId) ops = dec((await prisma.materialItem.findUnique({ where: { id: it.materialItemId }, select: { quantityOnHand: true } }))?.quantityOnHand ?? 0);
     else if (it.coffeeProductId) {
-      const bs = await prisma.roastingBatch.findMany({ where: { OR: [{ productId: it.coffeeProductId }, { productId: null, orderItem: { productId: it.coffeeProductId } }] }, select: { roastedAvailableKg: true } });
+      // A rejected batch's coffee is written off in the accounts; it still shows on the batch.
+      const bs = await prisma.roastingBatch.findMany({ where: { status: { not: "Rejected" }, OR: [{ productId: it.coffeeProductId }, { productId: null, orderItem: { productId: it.coffeeProductId } }] }, select: { roastedAvailableKg: true } });
       ops = bs.reduce((s, b) => s.add(dec(b.roastedAvailableKg ?? 0)), ZERO);
     } else {
       const lots = await prisma.finishedGoodsLot.findMany({ where: { productSkuId: it.productSkuId!, isUnitTracked: true }, select: { unitsAvailable: true, unitsReserved: true, status: true, actualContentGrams: true, nominalContentGrams: true } });
@@ -375,6 +383,23 @@ export async function opsReconciliation() {
       state: diff.abs().lt("0.001") ? "MATCHED" : waiting > 0 ? "EXPLAINED_BY_OPEN_EVENTS" : "EXCEPTION" });
   }
   return { location: loc ? { id: loc.id, code: loc.code } : null, rows, exceptions: rows.filter((r) => r.state === "EXCEPTION").length, openEvents: open.length };
+}
+
+/**
+ * QC rejected a batch (a terminal state): the roasted coffee still on it can no longer be packed or
+ * blended, so it is written off. Called inside the QC transaction, after the status change; one
+ * event per batch (a second finalisation finds the first).
+ */
+export async function recordQcRejections(tx: Tx, batchIds: string[], userId: string | null) {
+  const batches = await tx.roastingBatch.findMany({ where: { id: { in: batchIds }, status: "Rejected", isBlend: false }, select: { id: true, batchNumber: true, productId: true, roastedAvailableKg: true, orderItem: { select: { productId: true } } } });
+  const ids: string[] = [];
+  for (const b of batches) {
+    if (!(b.roastedAvailableKg > 0)) continue;
+    if (await tx.invOpsEvent.findUnique({ where: { kind_sourceId_seq: { kind: "QC_REJECT", sourceId: b.id, seq: 0 } } })) continue;
+    ids.push((await recordStockEvent(tx, { kind: "QC_REJECT", sourceId: b.id, userId,
+      payload: { batchId: b.id, batchNumber: b.batchNumber, productId: b.productId ?? b.orderItem?.productId ?? null, kg: b.roastedAvailableKg } })).id);
+  }
+  return ids;
 }
 
 /**

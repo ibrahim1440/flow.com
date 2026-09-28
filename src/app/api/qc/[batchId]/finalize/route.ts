@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordQcRejections, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
@@ -59,6 +60,7 @@ export async function POST(request: Request, { params }: Params) {
       );
     }
 
+    let opsIds: string[] = [];
     await prisma.$transaction(async (tx) => {
       // Conditional on the status this request was validated against. The check above
       // reads the batch outside the transaction, so two QC users finalising the same
@@ -81,6 +83,9 @@ export async function POST(request: Request, { params }: Params) {
         };
       }
 
+      // Accounting: a rejected batch's roasted coffee is written off (ops-integration.ts).
+      if (outcome === "Rejected") opsIds = await recordQcRejections(tx, [batchId], user.id);
+
       // A stock batch has no order item whose production status could change.
       if (batch.orderItemId) await recalcOrderItemStatus(batch.orderItemId, tx);
 
@@ -89,6 +94,7 @@ export async function POST(request: Request, { params }: Params) {
       }
     });
 
+    await integrateNow(opsIds);
     const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
     const rejectCount = batch.qcRecords.length - acceptCount;
     return NextResponse.json({ status: outcome, total: batch.qcRecords.length, acceptCount, rejectCount });

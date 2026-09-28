@@ -215,6 +215,16 @@ describe("stage 4b — operational stock events become inventory documents", () 
     const blIn = await prisma.invMove.findFirstOrThrow({ where: { documentId: bl.documentId!, kind: "IN" } });
     assert.deepEqual([blIn.itemId === blendItem.id, blIn.qty.toFixed(4), blIn.value.toFixed(2)], [true, "5.0000", "176.47"]);
 
+    // QC rejects a batch (terminal): the roasted coffee left on it is written off as QC waste,
+    // 2 kg at the average 35.2941 → 70.59 (Dr 5500). A second finalisation adds nothing.
+    const rej = await prisma.roastingBatch.create({ data: { batchNumber: "R-REJ", greenBeanQuantity: 3, roastedBeanQuantity: 2.5, roastedAvailableKg: 2, productId: O.product, status: "Rejected" } });
+    const qcIds = await prisma.$transaction((tx) => Ops.recordQcRejections(tx, [rej.id, s1.id], w.appr));
+    assert.equal(qcIds.length, 1, "only the rejected batch");
+    assert.deepEqual(await prisma.$transaction((tx) => Ops.recordQcRejections(tx, [rej.id], w.appr)), [], "once per batch");
+    const q = await Ops.processOpsEvent(qcIds[0]);
+    assert.equal(q.status, "POSTED", q.reason ?? "");
+    assert.deepEqual(await journal(q.documentId!), ["1173:0.00:70.59", "5500:70.59:0.00"]);
+
     const list = await Ops.listOpsEvents({ status: "IGNORED" });
     assert.equal(list.rows.length, 4, "the dismissed roast, the no-effect cancellation, the opening quantity and the kilogram lot");
   });

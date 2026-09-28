@@ -135,6 +135,35 @@ test("operations drive the inventory accounts: purchase → roast → QC → pac
   const ce = await eventOf("ROAST_CANCEL", r2.body.id);
   assert.equal(ce.status, "POSTED", ce.lastError ?? "");
 
+  // Blending screen: two stock roasts blended (3 + 2 kg) → one blend batch; no weight lost.
+  const rA = await ops("/api/roasting-batches", { method: "POST", json: { greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 6, roastedBeanQuantity: 5.1, wasteQuantity: 0.9 } });
+  const rB = await ops("/api/roasting-batches", { method: "POST", json: { greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 6, roastedBeanQuantity: 5.1, wasteQuantity: 0.9 } });
+  assert.equal(rA.status, 201); assert.equal(rB.status, 201);
+  const blend = await ops("/api/roasting-batches/blend", { method: "POST", json: { sources: [{ batchId: rA.body.id, quantityKg: 3 }, { batchId: rB.body.id, quantityKg: 2 }] } });
+  assert.equal(blend.status, 201, JSON.stringify(blend.body));
+  const be = await eventOf("BLEND", blend.body.id);
+  assert.equal(be.status, "POSTED", be.lastError ?? "");
+  const bl = await db.query(`select role::text, quantity::text q from "InvDocLine" where "documentId" = $1 order by "lineNo"`, [be.documentId]);
+  assert.deepEqual(bl.rows.map((r) => [r.role, r.q]), [["INPUT", "5.0000"], ["OUTPUT", "5.0000"]]);
+
+  // QC screen rejects a roast: its roasted coffee is written off as QC waste.
+  const rC = await ops("/api/roasting-batches", { method: "POST", json: { greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 4, roastedBeanQuantity: 3.4, wasteQuantity: 0.6 } });
+  assert.equal(rC.status, 201);
+  assert.equal((await ops("/api/qc-records", { method: "POST", json: { batchId: rC.body.id, decision: "Reject", remarks: "طعم محروق — عينة تجريبية", coffeeOrigin: "Ethiopia", processing: "Washed" } })).status, 201);
+  assert.equal((await ops(`/api/qc/${rC.body.id}/finalize`, { method: "POST", json: { outcome: "Rejected" } })).status, 200);
+  const qe = await eventOf("QC_REJECT", rC.body.id);
+  assert.equal(qe.status, "POSTED", qe.lastError ?? "");
+  const qj = await journal(qe.documentId);
+  assert.ok(qj.some((l) => l.startsWith("1173:0.00:")) && qj.some((l) => l.startsWith("5500:")), qj.join(" "));
+
+  // Materials screen: a counted shortage of bags.
+  const mat = await one(`select id, "quantityOnHand" from "MaterialItem" where code = 'ACC-BAG-250G'`);
+  const mres = await ops(`/api/materials/${mat.id}`, { method: "PATCH", json: { newActualQuantity: Number(mat.quantityOnHand) - 3, notes: "جرد أسبوعي — 3 أكياس تالفة" } });
+  assert.equal(mres.status, 200, JSON.stringify(mres.body));
+  const me = await one(`select * from "InvOpsEvent" where kind = 'ADJUST' and payload->>'materialItemId' = $1 order by "createdAt" desc limit 1`, [mat.id]);
+  assert.equal(me.status, "POSTED", me.lastError ?? "");
+  assert.deepEqual((await journal(me.documentId)).map((l) => l.split(":")[0]), ["1172", "5700"]);
+
   // The accountant's queue: the exceptions the fixture left are there, with reasons; the viewer can read, not act.
   const q = await viewer("/api/accounting/inventory/ops-events?status=BLOCKED,HELD,FAILED");
   assert.equal(q.status, 200);
