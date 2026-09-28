@@ -75,9 +75,20 @@ async function main() {
     // lines only, inside one transaction, and re-enabled before it commits.
     // Stage 4 cost subledger: accounting-owned tables whose guards are row triggers (TRUNCATE does
     // not fire them); then the synthetic operational records the fixture created (ACC- tags).
-    await prisma.$executeRawUnsafe(`TRUNCATE "InvMove", "InvLayer", "InvDocLine", "InvDocument", "InvLossBand", "InvUnit", "InvItem", "InvLocation" RESTART IDENTITY CASCADE`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "RoastingBatch" WHERE "batchNumber" LIKE 'ACC-%'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "PurchaseRecord" WHERE notes = 'fixture:accounting'`);
+    await prisma.$executeRawUnsafe(`TRUNCATE "InvMove", "InvLayer", "InvDocLine", "InvDocument", "InvLossBand", "InvUnit", "InvItem", "InvLocation", "InvCosting", "InvOpsEvent", "InvCostPool", "CustomerReturnLine", "CustomerReturn", "ApCreditAllocation" RESTART IDENTITY CASCADE`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "InventoryMovement" WHERE notes LIKE 'fixture:accounting%' OR "sourceDocId" IN (SELECT id FROM "RoastingBatch" WHERE "batchNumber" LIKE 'ACC-%')`);
+    // Operational rows the HTTP operational test made from the fixture's coffee (batches, lots, packing, deliveries).
+    const fxProduct = `SELECT id FROM "CoffeeProduct" WHERE "productNameEn" LIKE '%(fixture)'`;
+    const fxBatches = `SELECT id FROM "RoastingBatch" WHERE "productId" IN (${fxProduct}) OR "batchNumber" LIKE 'ACC-%'`;
+    const fxLots = `SELECT id FROM "FinishedGoodsLot" WHERE "productId" IN (${fxProduct})`;
+    await prisma.$executeRawUnsafe(`DELETE FROM "Delivery" WHERE "orderItemId" IN (SELECT i.id FROM "OrderItem" i JOIN "Order" o ON o.id = i."orderId" WHERE o.notes = 'fixture:accounting')`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "StockAllocation" WHERE "finishedGoodsLotId" IN (${fxLots})`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "PackagingSource" WHERE "roastingBatchId" IN (${fxBatches}) OR "finishedGoodsLotId" IN (${fxLots})`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "PackagingOperation" WHERE "batchId" IN (${fxBatches})`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "FinishedGoodsLot" WHERE id IN (${fxLots})`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "InventoryMovement" WHERE "sourceDocId" IN (${fxBatches}) OR "referenceEntityId" IN (SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE 'ACC-%') OR "referenceEntityId" IN (SELECT id FROM "MaterialItem" WHERE code LIKE 'ACC-%')`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "RoastingBatch" WHERE id IN (${fxBatches})`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "PurchaseRecord" WHERE notes LIKE 'fixture:accounting%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "ProductSKU" WHERE "skuCode" LIKE 'ACC-%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "CoffeeProduct" WHERE "productNameEn" LIKE '%(fixture)'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "GreenBean" WHERE "serialNumber" LIKE 'ACC-%'`);
@@ -132,6 +143,13 @@ async function main() {
   clerk.finance = { access: "edit", sub: { txn_enter: true, all_branches: true } } as never;
   await user("acc.finclerk", "ريم — المالية (حركات البنك)", clerk);
   await user("no.accounting", "موظف بلا صلاحية محاسبة", perms("none"));
+  // Warehouse: confirms customer returns arrived (with evidence); cannot prepare or approve them.
+  const warehouse = await user("acc.warehouse", "ماجد — المستودع", perms(["inv_return_receive"]));
+  // Operations staff (roasting, QC, packing, dispatch, purchasing) with no accounting access: their
+  // screens create the inventory documents without anyone re-entering quantities.
+  const opsPerms = buildDefaultPermissions("admin");
+  opsPerms.accounting = { access: "none" }; opsPerms.finance = { access: "none" };
+  await user("ops.roastery", "فيصل — التشغيل", opsPerms);
   const salesAdmin = await user("sales.plans", "مدير المبيعات", perms("none"));
   const rep1 = await user("rep.fahad", "فهد الدوسري", perms("none"));
   const rep2 = await user("rep.reem", "ريم الزهراني", perms("none"));
@@ -340,7 +358,7 @@ async function main() {
   const O1 = await order(7009, K1);
   await order(7012, K2);
   type SL = { d: string; q: string; p: string; disc?: string; code?: string };
-  const sdoc = async (customerId: string, issue: Date, lines: SL[], until: "DRAFT" | "SUBMITTED" | "APPROVED" | "POSTED" | "REJECTED", extra: { orderId?: string; kind?: "CREDIT_NOTE"; originalInvoiceId?: string; reason?: string; description?: string } = {}) => {
+  const sdoc = async (customerId: string, issue: Date, lines: SL[], until: "DRAFT" | "SUBMITTED" | "APPROVED" | "POSTED" | "REJECTED", extra: { orderId?: string; kind?: "CREDIT_NOTE"; originalInvoiceId?: string; reason?: string; description?: string; creditType?: "PRICE_ADJUSTMENT" | "RETURN_OF_GOODS" } = {}) => {
     const d = await createSalesDoc({ customerId, issueDate: issue.toISOString().slice(0, 10), ...extra, lines: lines.map((l) => ({ description: l.d, quantity: l.q, unitPrice: l.p, discountPercent: l.disc ?? "0", accountId: l.code ? A[l.code] : undefined, taxCategoryId: vat15.id })) }, prep);
     if (until === "DRAFT") return d.id;
     await submitSalesDoc(d.id, prep);
@@ -354,7 +372,7 @@ async function main() {
   const I1 = await sdoc(K1, D(9, 1), [{ d: "بن كولومبي محمص — 30 كغ", q: "30", p: "140" }], "POSTED", { orderId: O1, description: "توريد شهري للفندق" });
   await sdoc(K2, D(8, 28), [{ d: "خلطة إسبريسو البيت — 20 كغ", q: "20", p: "150" }, { d: "تدريب باريستا (جلسة)", q: "1", p: "200", code: "4200" }], "POSTED");
   const I3 = await sdoc(K3, D(9, 10), [{ d: "إثيوبي يرغاتشيفي محمص — 12 كغ", q: "12", p: "125", disc: "5" }], "POSTED");
-  await sdoc(K3, D(9, 14), [{ d: "إرجاع كيسين تالفين — 2 كغ", q: "2", p: "125", disc: "5" }], "POSTED", { kind: "CREDIT_NOTE", originalInvoiceId: I3, reason: "تلف في التغليف عند الاستلام" });
+  await sdoc(K3, D(9, 14), [{ d: "تعويض عن كيسين تالفين — 2 كغ", q: "2", p: "125", disc: "5" }], "POSTED", { kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: I3, reason: "تلف في التغليف عند الاستلام — تعويض دون إرجاع البضاعة" });
   await sdoc(K1, D(9, 20), [{ d: "بن برازيلي محمص — 15 كغ", q: "15", p: "110" }], "SUBMITTED");
   await sdoc(K3, D(9, 21), [{ d: "أكواب ورقية مطبوعة — 1,000", q: "1000", p: "0.9", code: "4200" }], "APPROVED");
   await sdoc(K2, D(9, 15), [{ d: "خلطة إسبريسو البيت — 10 كغ", q: "10", p: "165" }], "REJECTED");
@@ -392,6 +410,14 @@ async function main() {
   const cp = await prisma.coffeeProduct.create({ data: { productNameEn: "Ethiopia Yirgacheffe (fixture)", productNameAr: "إثيوبي يرغاتشيفي", countryEn: "Ethiopia" } });
   const sku = await prisma.productSKU.create({ data: { productId: cp.id, skuCode: "ACC-ETH-250", weightGrams: 250, price: 25 } });
   const bagMat = await prisma.materialItem.create({ data: { code: "ACC-BAG-250G", name: "250 g bag", nameAr: "كيس 250 غ", quantityOnHand: 700 } });
+  // Bill of materials of the 250 g SKU: 0.25 kg of the roast and one bag per unit (packing draws the bag).
+  await prisma.bomComponent.createMany({ data: [
+    { productSkuId: sku.id, type: "ROASTED_COFFEE", coffeeProductId: cp.id, quantityPerUnit: 0.25, unitOfMeasure: "KG" },
+    { productSkuId: sku.id, type: "MATERIAL", materialItemId: bagMat.id, quantityPerUnit: 1, unitOfMeasure: "PIECE" },
+  ] });
+  // An order line ready to ship (for the operational flow over HTTP: roast → QC → pack → dispatch → invoice).
+  const shipOrder = await prisma.order.create({ data: { orderNumber: 7020, customerId: K1, status: "Ready for Shipping", approvalStatus: "Yes", notes: "fixture:accounting" } });
+  await prisma.orderItem.create({ data: { orderId: shipOrder.id, beanTypeName: "إثيوبي يرغاتشيفي 250 غ", quantityKg: 2, quantityUnits: 8, productSkuId: sku.id, productId: cp.id } });
   const rst = await inv.createLocation({ code: "RST", name: "Roastery", nameAr: "المحمصة", isSalesDefault: true }, prep);
   const cafeLoc = await inv.createLocation({ code: "CAFE", name: "Café", nameAr: "المقهى" }, prep);
   const item = (code: string, nameAr: string, kind: string, baseUnit: string, extra: Record<string, unknown> = {}) => inv.createItem({ code, name: code, nameAr, kind, baseUnit, ...extra }, prep);
@@ -445,15 +471,29 @@ async function main() {
   await submitSalesDoc(sale.id, prep); await approveSalesDoc(sale.id, appr);
   const saleId = sale.id;
   await postSalesDoc(saleId, appr);
-  const saleIssue = await prisma.invDocument.findFirstOrThrow({ where: { type: "SALE_ISSUE", sourceId: saleId }, include: { lines: true } });
-  await idoc({ type: "CUSTOMER_RETURN", docDate: ymd(9, 12), locationId: rst.id, customerId: K1, description: "5 وحدات بتكلفة خروجها", lines: [{ itemId: IT.sku.id, quantity: "5", targetLineId: saleIssue.lines[0].id }] });
+  // A physical return of 5 units: recorded, received by the warehouse with its evidence, approved
+  // by a third person, posted at the cost the goods left at.
+  const CR = await import("../../src/lib/accounting/customer-returns");
+  const saleLine = (await prisma.salesInvoiceLine.findFirstOrThrow({ where: { invoiceId: saleId } })).id;
+  const ret = await CR.createCustomerReturn({ invoiceId: saleId, locationId: rst.id, reason: "خمس عبوات زائدة عن الطلب", lines: [{ invoiceLineId: saleLine, quantity: "5" }] }, prep);
+  await CR.receiveCustomerReturn(ret.id, { receivedOn: ymd(9, 12), evidenceRef: "GRN-RET-0001 (synthetic)" }, warehouse);
+  await CR.approveCustomerReturn(ret.id, appr);
+  await CR.postCustomerReturn(ret.id, appr);
+  // A second return, received and waiting for approval (exception-free work queue).
+  const ret2 = await CR.createCustomerReturn({ invoiceId: saleId, locationId: rst.id, reason: "عبوتان تالفتان عند الاستلام", lines: [{ invoiceLineId: saleLine, quantity: "2", condition: "DAMAGED" }] }, prep);
+  await CR.receiveCustomerReturn(ret2.id, { receivedOn: ymd(9, 24), evidenceRef: "PHOTO-0917 (synthetic)" }, warehouse);
   await idoc({ type: "TRANSFER", docDate: ymd(9, 15), locationId: rst.id, toLocationId: cafeLoc.id, description: "بالتكلفة نفسها — بلا قيد", lines: [{ itemId: IT.sku.id, quantity: "10" }] });
   await idoc({ type: "ISSUE", issueReason: "INTERNAL_USE", docDate: ymd(9, 16), locationId: cafeLoc.id, description: "حليب للمشروبات", lines: [{ itemId: IT.milk.id, quantity: "30" }] });
   await idoc({ type: "ISSUE", issueReason: "SPOILAGE", docDate: ymd(9, 17), locationId: cafeLoc.id, description: "حليب منتهي الصلاحية", lines: [{ itemId: IT.milk.id, quantity: "2" }] });
   await idoc({ type: "PRODUCTION", docDate: ymd(9, 18), locationId: cafeLoc.id, lossBandId: LB.bake, description: "60 كرواسون — نطاق الخبز 5% (تجريبي)", lines: [
     { role: "INPUT", itemId: IT.flour.id, quantity: "4" }, { role: "INPUT", itemId: IT.butter.id, quantity: "1" }, { role: "INPUT", itemId: IT.milk.id, quantity: "1" }, { role: "OUTPUT", itemId: IT.croissant.id, quantity: "60" }] });
   await idoc({ type: "COUNT", docDate: ymd(9, 20), locationId: rst.id, reason: "جرد نهاية الربع", description: "جرد نهاية الربع — بن أخضر 89.5 كغ", lines: [{ itemId: IT.green.id, countedQty: "89.5" }] });
-  await idoc({ type: "SUPPLIER_RETURN", docDate: ymd(9, 22), locationId: rst.id, supplierId: S1, reason: "أكياس معيبة", description: "100 كيس معيب — محمصة الوادي", lines: [{ itemId: IT.bag.id, quantity: "100", targetLineId: R1.lineIds[1] }] });
+  const V1 = await idoc({ type: "SUPPLIER_RETURN", docDate: ymd(9, 22), locationId: rst.id, supplierId: S1, reason: "أكياس معيبة", description: "100 كيس معيب — محمصة الوادي", lines: [{ itemId: IT.bag.id, quantity: "100", targetLineId: R1.lineIds[1] }] });
+  // The supplier's credit note for the returned bags settles the return (GRNI cleared).
+  const greenBill = (await prisma.supplierBillLine.findUniqueOrThrow({ where: { id: greenLine } })).billId;
+  const cnb = await createBill({ kind: "CREDIT_NOTE", originalBillId: greenBill, reason: "إشعار دائن عن 100 كيس معيب", supplierId: S1, supplierInvoiceNo: "CN-G-1", billDate: ymd(9, 25),
+    lines: [{ kind: "STOCK_RETURN", description: "إرجاع 100 كيس معيب", quantity: "100", unitPrice: "0.65", taxCategoryId: vat15.id, invDocumentId: V1.id }] } as never, prep);
+  await submitBill(cnb.id, prep); await approveBill(cnb.id, appr); await postBill(cnb.id, appr);
   await idoc({ type: "ISSUE", issueReason: "CALIBRATION", docDate: ymd(9, 23), locationId: rst.id, description: "بن محمص 1 كغ لمعايرة المحمصة", lines: [{ itemId: IT.roasted.id, quantity: "1" }] });
   // Operational records waiting to become documents: a roasting batch (draft, submitted) and a purchase (draft).
   const rb = await prisma.roastingBatch.create({ data: { batchNumber: "ACC-R-2026-118", greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 12, roastedBeanQuantity: 10.2, wasteQuantity: 0, date: D(9, 27) } });
@@ -462,6 +502,25 @@ async function main() {
   const pr = await prisma.purchaseRecord.create({ data: { supplierId: S1, type: "GREEN_BEAN", itemId: gb.id, quantity: 60, costPerUnit: 31.5, totalCost: 1890, purchaseDate: D(9, 27), notes: "fixture:accounting" } });
   await inv.receiptDraftFromPurchase(pr.id, { locationId: rst.id, docDate: ymd(9, 27) }, prep);
   await prisma.roastingBatch.create({ data: { batchNumber: "ACC-R-2026-121", greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 15, roastedBeanQuantity: 12.6, wasteQuantity: 0, date: D(9, 28) } });
+  // Conversion cost pools — SYNTHETIC TEST ASSUMPTIONS (codes end -SYN), not company rates: an
+  // approved roasting overhead pool absorbed per kg of roasted output, and a labour pool in draft.
+  const CC = await import("../../src/lib/accounting/conversion-costs");
+  const acct = async (code: string) => (await prisma.account.findUniqueOrThrow({ where: { code } })).id;
+  const oh = await CC.createCostPool({ code: "ROAST-OH-SYN", name: "Roasting overhead (synthetic)", nameAr: "تكاليف تحميص غير مباشرة (تجريبي)", kind: "PRODUCTION_OVERHEAD", process: "ROASTING", basis: "PER_KG_OUTPUT", budgetAmount: "6000", normalCapacity: "12000", expenseAccountId: await acct("6700") }, prep);
+  await CC.approveCostPool(oh.id, appr);
+  await CC.createCostPool({ code: "ROAST-LAB-SYN", name: "Roasting labour (synthetic)", nameAr: "أجور تحميص مباشرة (تجريبي)", kind: "DIRECT_LABOUR", process: "ROASTING", basis: "PER_BATCH", budgetAmount: "9000", normalCapacity: "300", expenseAccountId: await acct("6100") }, prep);
+  // Operational events as the operational routes record them. The inventory.operations policy is
+  // left unapproved, so each prepared document waits for an accountant (HELD); a stock movement
+  // written outside the integration is an exception (UNINTEGRATED).
+  const OPS = await import("../../src/lib/accounting/ops-integration");
+  const opsBuy = await prisma.$transaction(async (tx) => {
+    const p = await tx.purchaseRecord.create({ data: { supplierId: S1, type: "GREEN_BEAN", itemId: gb.id, quantity: 20, costPerUnit: 32, totalCost: 640, purchaseDate: D(9, 26), notes: "fixture:accounting" } });
+    await tx.inventoryMovement.create({ data: { type: "IN", category: "RAW_MATERIAL", referenceEntityId: gb.id, quantityChanged: 20, previousQuantity: 89.5, newQuantity: 109.5, sourceDocType: "PURCHASE", sourceDocId: p.id, notes: "fixture:accounting" } });
+    return OPS.recordStockEvent(tx, { kind: "PURCHASE", sourceId: p.id, occurredOn: D(9, 26), payload: { purchaseId: p.id, greenBeanId: gb.id, quantity: 20, costPerUnit: 32, supplierId: S1 } });
+  });
+  await OPS.processOpsEvent(opsBuy.id);
+  await prisma.inventoryMovement.create({ data: { type: "ADJUSTMENT", category: "PACKAGING_MATERIAL", referenceEntityId: bagMat.id, quantityChanged: -12, previousQuantity: 700, newQuantity: 688, sourceDocType: "MANUAL_ADJUSTMENT", notes: "fixture:accounting — written by a script outside the integration" } });
+  await prisma.materialItem.update({ where: { id: bagMat.id }, data: { quantityOnHand: 688 } });
   if (provisionalBefore === undefined) delete process.env.ACCOUNTING_PROVISIONAL_POSTING; else process.env.ACCOUNTING_PROVISIONAL_POSTING = provisionalBefore;
   await processPendingEvents();
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);

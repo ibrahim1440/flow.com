@@ -174,7 +174,7 @@ describe("stage 4b — operational stock events become inventory documents", () 
     assert.equal(await prisma.invOpsEvent.count({ where: { kind: "UNINTEGRATED" } }), 1);
   });
 
-  test("roast cancellation, opening quantities and dispatch of an unintegrated kilogram lot", async () => {
+  test("roast cancellation, opening quantities, a blend, and dispatch of an unintegrated kilogram lot", async () => {
     const w = await world();
     const O = await ops(w);
     await approveOpsPolicy(w);
@@ -200,6 +200,21 @@ describe("stage 4b — operational stock events become inventory documents", () 
     const k = await go({ kind: "DISPATCH", sourceId: "del-kg", payload: { mode: "KG", deliveryId: "del-kg", orderItemId: "oi-9", lotId: "lot-kg", kg: 5 } });
     assert.equal(k.status, "BLOCKED"); assert.match(k.reason ?? "", /kilogram lot/);
     await Ops.ignoreOpsEvent(k.id, w.appr, "Legacy lot, cost already written off in 2025 migration");
+    // A blend: roasted coffee taken from two source batches (products resolved from the batches), the
+    // blend made; no weight lost, so no band is needed. The restock above emptied the roasted coffee:
+    // roast 20 kg → 17 kg (green at 30.00 → 600.00, 35.2941/kg), then blend 3 + 2 kg = 5 kg → 176.47.
+    await go({ kind: "ROAST", sourceId: "rb-3", payload: { batchId: "rb-3", batchNumber: "R-003", greenBeanId: O.bean, productId: O.product, greenKg: 20, roastedKg: 17, wasteKg: 3 } });
+    const blendProduct = await prisma.coffeeProduct.create({ data: { productNameEn: "House blend (synthetic)", countryEn: "Blend" } as never });
+    const blendItem = await prisma.invItem.create({ data: { code: "BLEND-SYN", name: "House blend (synthetic)", kind: "ROASTED_COFFEE", baseUnit: "kg", coffeeProductId: blendProduct.id, createdBy: w.prep } });
+    const s1 = await prisma.roastingBatch.create({ data: { batchNumber: "R-S1", greenBeanQuantity: 10, roastedBeanQuantity: 8.5, productId: O.product } });
+    const s2 = await prisma.roastingBatch.create({ data: { batchNumber: "R-S2", greenBeanQuantity: 10, roastedBeanQuantity: 8.5, productId: O.product } });
+    const bl = await go({ kind: "BLEND", sourceId: "rb-blend", payload: { batchId: "rb-blend", batchNumber: "B-001", productId: blendProduct.id, totalKg: 5, sources: [{ batchId: s1.id, kg: 3 }, { batchId: s2.id, kg: 2 }] } });
+    assert.equal(bl.status, "POSTED", bl.reason ?? "");
+    const blLines = await prisma.invDocLine.findMany({ where: { documentId: bl.documentId! }, orderBy: { lineNo: "asc" } });
+    assert.deepEqual(blLines.map((l) => [l.role, l.itemId === blendItem.id ? "BLEND" : "RST", l.quantity.toFixed(4)]), [["INPUT", "RST", "5.0000"], ["OUTPUT", "BLEND", "5.0000"]], "one input per source product, one output");
+    const blIn = await prisma.invMove.findFirstOrThrow({ where: { documentId: bl.documentId!, kind: "IN" } });
+    assert.deepEqual([blIn.itemId === blendItem.id, blIn.qty.toFixed(4), blIn.value.toFixed(2)], [true, "5.0000", "176.47"]);
+
     const list = await Ops.listOpsEvents({ status: "IGNORED" });
     assert.equal(list.rows.length, 4, "the dismissed roast, the no-effect cancellation, the opening quantity and the kilogram lot");
   });

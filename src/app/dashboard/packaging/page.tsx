@@ -6,6 +6,7 @@ import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
+import { AccountingStatusChip, useAccountingStatus } from "@/components/AccountingStatusChip";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { createRequestKeyHolder } from "@/lib/request-key";
@@ -151,6 +152,7 @@ export default function PackagingPage() {
   const lang = user?.preferredLanguage ?? "ar";
 
   const [batches, setBatches] = useState<Batch[]>([]);
+  const accounting = useAccountingStatus(batches.map((b) => b.id));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -470,6 +472,7 @@ export default function PackagingPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
+                      <AccountingStatusChip entries={accounting[batch.id]} />
                       {canEditDate && (
                         <button
                           onClick={() => setEditDateBatch(batch)}

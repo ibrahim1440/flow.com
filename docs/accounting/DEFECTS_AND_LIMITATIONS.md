@@ -23,6 +23,13 @@
 | 17 | Cash-flow attribution of a past month changed when a payment was later voided or replaced: the investing/operating split was read from the bank line's **current** active bill matches, which a void deactivates | attribution from live match rows | each AP/AR control line records its open item at posting (immutable; mirrors copy it); attribution reads the bill from the posted line | `cashflow-history.test.ts` (3: asset bill paid in January and voided in February; partial payments; void and replace) — red before the fix, `evidence/test-runs/cashflow-history-before-fix.txt` |
 | 18 | AR/AP aging and customer/supplier statements for a past date used documents' **current** status (and audit timestamps), so a later reversal, void or reallocation rewrote earlier periods and the subledger no longer agreed with the GL at that cutoff | reports read document tables | aging and statements read the posted ledger lines by entry date and open item; credit-note reallocation now posts a net-zero reclass (`ar.credit.allocated` / `released`) | `subledger-history.test.ts` (2: receivables and payables, GL agreement at each cutoff before and after later reversals) — red before the fix, `evidence/test-runs/subledger-history-before-fix.txt` |
 | 19 | GRNI explanation and gross margin for a past date used the supplier bill's current status and the invoice's reversal timestamp (same class as 18, found in the stage 4 audit) | status filter | bills and invoices count by the entry dates of their posted and reversal journals | `inventory.test.ts` "historical GRNI" — red on `fde4632`, `evidence/test-runs/grni-history-before-fix.txt`; February margin unchanged after a later reversal |
+| 20 | An invoice line for a product with no inventory item was skipped silently; the invoice showed no cost of sales and the margin looked complete | lines without a mapping were ignored | explicit GOODS / NON_STOCK classification; unmapped goods lines BLOCK costing with the reason; the margin marks the invoice incomplete | `stage4-gaps.test.ts` (failing first) |
+| 21 | Not enough stock at posting: the cost of sales was lost with no record | costing was attempted once, inline at posting; a failure left no durable record to retry | durable `InvCosting` (DB trigger), retries with back-off, exception queue, late booking with the original date kept | `stage4-gaps.test.ts`, `stage4b-workflows.test.ts` B |
+| 22 | Reversing an invoice restored stock automatically, as if the goods had come back | `returnForReversedInvoice` | reversal moves the cost to "delivered, not invoiced"; goods come back only through a received, approved customer return | `stage4-gaps.test.ts` (failing first), `stage4b-workflows.test.ts` A |
+| 23 | Gross margin omitted credit notes and could not be tied to the ledger | per-invoice COGS only | all receivables revenue, costing status per row, reconciliation to revenue, 4900 and 5100 with every difference explained | `stage4-gaps.test.ts` |
+| 24 | A landed cost or price difference on green coffee already roasted went to COGS | consumed share expensed | traced through production, transfers, sales and waste | `stage4-gaps.test.ts`, chain test |
+| 25 | A cost layer changed twice in one transaction failed the deferred layer check (found while re-deriving the chain test) | the check compared the row version of each change, not the current row | the check reads the current row | chain test (`evidence/test-runs/stage4b-layer-check-before-fix.txt`) |
+| 26 | Operational stock changes (purchase, roast, pack, dispatch, counts) never reached the accounts except through manual drafts | no integration | operational events in the same transaction, automatic documents under an approved policy, UNINTEGRATED detection, exception queue, reconciliation | `ops-integration.test.ts` (3), `ops-integration.test.mjs` (HTTP) |
 
 ## Pre-existing (reproduced identically on `main` @ `fc64c05`)
 All three now have a reproducible passing setup (`scripts/e2e/regression/local-certification.mjs`,
@@ -35,18 +42,20 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
 ## Limitations (known, not defects)
 - Implemented (locally, synthetic data): the ledger core, commission posting, payables, bank-to-ledger
   with posted-line corrections, the cash-flow statement, sales invoices/receivables (stage 3), and
-  inventory valuation with material-only manufacturing costing and COGS (stage 4, D-1 configurable
-  and refused until decided). **Not** implemented: labour/overhead absorption, fixed-asset register
+  inventory valuation, manufacturing costing with approved conversion pools, durable COGS and the
+  operational integration (stages 4 and 4b, D-1 configurable and refused until decided). **Not**
+  implemented: fixed-asset register
   and depreciation runs (depreciation is by manual journal), year-end close, ZATCA (see
   `REQUIREMENTS_MATRIX.md`). The accounting system as a whole is **not complete** and **not
   ZATCA-compliant**. Stages 2 and 3 are **not accepted**; they await the owner's review.
 - Stage 3 limitations: `STAGE_3_DESIGN.md` §7 (single returns account, credit notes move no stock,
   credit limit warns only, D-2 changes apply forward only). The historical-aging limitation is
   resolved (defect 18).
-- Stage 4 limitations: `STAGE_4_DESIGN.md` §7 (materials-only production cost; price differences
-  and landed cost on consumed stock go to COGS; back-dating refused rather than revalued; no
-  supplier credit notes; no in-transit transfers; COGS only for SKU-linked invoice lines at the
-  sales location; operational records not updated; migrations not rehearsed on a production copy).
+- Stage 4 limitations: `STAGE_4_DESIGN.md` §7, as revised by stage 4b (`STAGE_4B_DESIGN.md` §10):
+  labour/overhead absorption, tracing of later cost changes, supplier credit notes, invoice units and
+  fulfilment location are now implemented; still open are one accounting location for operational
+  stock, kilogram lots from the old packing path, QC-rejected batches, re-dating after a roast's
+  date is edited, no in-transit transfers, and migrations not rehearsed on a production copy.
 - Open items on ledger lines start with the `20260930090000_accounting_open_items` migration. The
   branch has no journals from before it, but a database that posted receivables/payables journals
   under an earlier build of this branch would need them re-derived; production has none.

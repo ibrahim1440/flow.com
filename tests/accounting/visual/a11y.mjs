@@ -75,6 +75,11 @@ const PAGES = [
   ["ACC-45 GRNI and matching", "/dashboard/accounting/inventory/grni", "acc.preparer"],
   ["ACC-46 inventory setup", "/dashboard/accounting/inventory/setup"],
   ["ACC-47 mobile inventory approvals", "/dashboard/accounting/inventory/documents?status=PENDING", undefined, undefined, 390],
+  ["ACC-48 exceptions queue", "/dashboard/accounting/inventory/exceptions"],
+  ["ACC-48 exceptions 390", "/dashboard/accounting/inventory/exceptions", undefined, undefined, 390],
+  ["ACC-49 customer returns", "/dashboard/accounting/inventory/returns"],
+  ["ACC-50 gross margin", "/dashboard/accounting/inventory/margin"],
+  ["ACC-51 inventory setup + pools", "/dashboard/accounting/inventory/setup"],
   ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 

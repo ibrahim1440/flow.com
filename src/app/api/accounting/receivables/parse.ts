@@ -12,6 +12,8 @@ export function parseSalesBody(b: Record<string, unknown>): SalesDocInput & { ki
       description: s(l.description, `Line ${i + 1} description`) ?? null, quantity: l.quantity as string, unitPrice: l.unitPrice as string,
       discountPercent: (typeof l.discountPercent === "string" || typeof l.discountPercent === "number") ? l.discountPercent : undefined,
       taxCategoryId: s(l.taxCategoryId, `Line ${i + 1} tax category`) ?? null, costCenterId: s(l.costCenterId, `Line ${i + 1} cost centre`) ?? null,
+      stockTreatment: l.stockTreatment === "GOODS" || l.stockTreatment === "NON_STOCK" ? l.stockTreatment : null,
+      invItemId: s(l.invItemId, `Line ${i + 1} inventory item`) ?? null, unit: s(l.unit, `Line ${i + 1} unit`) ?? null,
     };
   });
   return {
@@ -19,5 +21,8 @@ export function parseSalesBody(b: Record<string, unknown>): SalesDocInput & { ki
     customerId: s(b.customerId, "customerId") ?? "", issueDate: s(b.issueDate, "issueDate") ?? "", supplyDate: s(b.supplyDate, "supplyDate") ?? null,
     dueDate: s(b.dueDate, "dueDate") ?? null, orderId: s(b.orderId, "orderId") ?? null, branchId: s(b.branchId, "branchId") ?? null,
     description: s(b.description, "description") ?? null, reason: s(b.reason, "reason") ?? null, lines,
+    fulfilmentLocationId: s(b.fulfilmentLocationId, "fulfilmentLocationId") ?? null,
+    creditType: b.creditType === "RETURN_OF_GOODS" || b.creditType === "PRICE_ADJUSTMENT" ? b.creditType : null,
+    customerReturnId: s(b.customerReturnId, "customerReturnId") ?? null, replacesInvoiceId: s(b.replacesInvoiceId, "replacesInvoiceId") ?? null,
   };
 }

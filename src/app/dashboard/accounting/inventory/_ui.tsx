@@ -7,6 +7,7 @@ export const DOC_TYPE: Record<string, [string, string]> = {
   RECEIPT: ["استلام من مورد", "Goods receipt"], SUPPLIER_RETURN: ["مرتجع لمورد", "Return to supplier"], ISSUE: ["صرف", "Issue"], TRANSFER: ["تحويل", "Transfer"],
   PRODUCTION: ["إنتاج", "Production"], SALE_ISSUE: ["تكلفة المبيعات", "Cost of sales"], CUSTOMER_RETURN: ["مرتجع من عميل", "Customer return"],
   LANDED_COST: ["تكلفة إضافية", "Landed cost"], BILL_MATCH: ["مطابقة فاتورة مورد", "Bill match"], COUNT: ["جرد", "Stock count"],
+  SUPPLIER_CREDIT: ["إشعار دائن من مورد", "Supplier credit"], SALE_REVERSAL: ["عكس تكلفة فاتورة", "Invoice reversal: cost back to delivered, not invoiced"], ADJUSTMENT: ["تسوية كمية", "Stock adjustment"],
 };
 export const ISSUE_REASON: Record<string, [string, string]> = {
   INTERNAL_USE: ["استهلاك داخلي (المقهى)", "Internal use (café)"], CALIBRATION: ["معايرة", "Calibration"], QC: ["اختبار جودة", "QC testing"], TRAINING: ["تدريب", "Training"], SPOILAGE: ["تلف", "Spoilage"],
@@ -43,4 +44,29 @@ export const qty = (s: string | null | undefined) => (s == null ? "—" : `\u200
 export const AUDIT_ACTION: Record<string, [string, string]> = {
   "inventory.document.create": ["إنشاء", "Create"], "inventory.document.update": ["تعديل", "Edit"], "inventory.document.submit": ["تقديم", "Submit"], "inventory.document.approve": ["اعتماد", "Approve"],
   "inventory.document.reject": ["رفض", "Reject"], "inventory.document.post": ["ترحيل", "Post"], "inventory.sale_issue.create": ["إنشاء آلي من الفاتورة", "Created from the invoice"], "inventory.customer_return.create": ["إنشاء آلي من عكس الفاتورة", "Created from the invoice reversal"],
+  "inventory.ops_event.retry": ["إعادة محاولة حدث تشغيلي", "Operational event retried"], "inventory.ops_event.ignore": ["استبعاد حدث تشغيلي", "Operational event dismissed"],
+  "inventory.ops_event.link": ["ربط حدث تشغيلي بمستند", "Operational event linked to a document"], "inventory.costing.retry": ["إعادة محاولة تكلفة المبيعات", "Cost of sales retried"],
 };
+
+/** Accounting state of an operational stock event (the exception queue). */
+export const OPS_STATUS: Record<string, [string, string, Tone]> = {
+  PENDING: ["بانتظار المعالجة", "Pending", "warn"], PROCESSING: ["قيد المعالجة", "Processing", "brand"], POSTED: ["مرحّل", "Posted", "ok"],
+  HELD: ["معلّق", "Held", "warn"], BLOCKED: ["محجوب", "Blocked", "bad"], FAILED: ["فشل", "Failed", "bad"], IGNORED: ["مستبعد", "Dismissed", "info"],
+};
+export function OpsStatus({ status }: { status: string }) {
+  const { L } = useL();
+  const s = OPS_STATUS[status] ?? [status, status, "info" as Tone];
+  return <Badge tone={s[2]}>{L(s[0], s[1])}</Badge>;
+}
+
+/** Cost of sales state of a posted sales invoice. */
+export const COSTING_STATUS: Record<string, [string, string, Tone]> = {
+  PENDING: ["بانتظار التكلفة", "Pending", "warn"], AWAITING_POLICY: ["بانتظار اعتماد السياسة", "Awaiting policy", "warn"], AWAITING_DISPATCH: ["بانتظار التسليم", "Awaiting dispatch", "warn"],
+  COSTED: ["مكلفة", "Costed", "ok"], NOT_REQUIRED: ["لا تحتاج تكلفة", "Not required", "info"], BLOCKED: ["محجوبة", "Blocked", "bad"], FAILED: ["فشلت", "Failed", "bad"],
+  CANCELLED: ["ملغاة", "Cancelled", "info"], UNCOSTED: ["معكوسة · التكلفة إلى «مسلَّم لم يُفوتر»", "Reversed · cost back to delivered, not invoiced", "info"],
+};
+export function CostingStatus({ status }: { status: string }) {
+  const { L } = useL();
+  const s = COSTING_STATUS[status] ?? [status, status, "info" as Tone];
+  return <Badge tone={s[2]}>{L(s[0], s[1])}</Badge>;
+}

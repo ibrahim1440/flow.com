@@ -11,7 +11,7 @@ export type Sub =
   | "policy_prepare" | "policy_approve" | "events_process" | "unlock_period"
   | "ap_bill_create" | "ap_bill_approve" | "ap_bill_post" | "bank_posting_manage" | "bank_correction_request" | "bank_correction_approve"
   | "ar_invoice_create" | "ar_invoice_approve" | "ar_invoice_post" | "ar_receipt_assign"
-  | "inv_doc_create" | "inv_doc_approve" | "inv_doc_post" | "inv_master_manage";
+  | "inv_doc_create" | "inv_doc_approve" | "inv_doc_post" | "inv_master_manage" | "inv_return_receive";
 
 /** Whether the signed-in user holds an accounting duty. Display only — the server decides. */
 export function useCan() {

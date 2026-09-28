@@ -2,7 +2,8 @@
 
 // Figma: ACC-45. Goods received not invoiced (2120) as of a date, explained line by line; supplier
 // bill lines waiting for a receipt; drafts from operational records (roasting batches, purchases);
-// accounting vs operational quantities; and gross margin per invoice (revenue against cost of sales).
+// accounting vs operational quantities. Gross margin per invoice has its own page (…/inventory/margin),
+// reconciled to the ledger.
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -19,7 +20,6 @@ type Grni = {
 };
 type Sources = { roastingBatches: { id: string; batchNumber: string; date: string; greenBeanQuantity: string; roastedBeanQuantity: string; status: string }[]; purchases: { id: string; date: string; supplier: string; type: string; quantity: string; costPerUnit: string }[] };
 type Agreement = { itemId: string; code: string; name: string; baseUnit: string; accounting: string; operational: string | null; source: string; difference: string | null }[];
-type Margin = { rows: { invoiceId: string; invoiceNo: number; customer: string; date: string; revenue: string; cogs: string; margin: string; marginPercent: string | null }[]; totals: { revenue: string; cogs: string; margin: string } };
 type Loc = { id: string; code: string; name: string; nameAr: string | null; isActive: boolean };
 
 export default function GrniPage() {
@@ -29,11 +29,9 @@ export default function GrniPage() {
   const router = useRouter();
   const { can } = useCan();
   const [asOf, setAsOf] = useState(riyadhToday);
-  const [from, setFrom] = useState(() => `${riyadhToday().slice(0, 4)}-01-01`);
   const g = useApi<Grni>(`/api/accounting/inventory/reports/grni?asOf=${asOf}`);
   const src = useApi<Sources>(can("inv_doc_create") ? "/api/accounting/inventory/pickers?what=sources" : null);
   const agr = useApi<Agreement>("/api/accounting/inventory/reports/operational");
-  const mg = useApi<Margin>(`/api/accounting/inventory/reports/gross-margin?from=${from}&to=${asOf}`);
   const locs = useApi<Loc[]>("/api/accounting/inventory/locations");
   const [loc, setLoc] = useState("");
   const [busy, setBusy] = useState(""); const [err, setErr] = useState<string | null>(null);
@@ -134,19 +132,11 @@ export default function GrniPage() {
           )}
         </Card>
         <Card>
-          <CardTitle title={L("مجمل الربح لكل فاتورة", "Gross margin per invoice")} sub={L("الإيراد من قيد الفاتورة المرحّل وتكلفة المبيعات من حركات التكلفة، بتواريخ القيد", "Revenue from the invoice's posted journal and cost of sales from cost moves, by their ledger dates")} />
-          <Field label={L("من", "From")}><input type="date" className={`${INPUT} max-w-[180px]`} value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
-          {mg.error ? <ErrorState error={mg.error} onRetry={mg.reload} /> : !mg.data ? <LoadingState /> : mg.data.rows.length === 0 ? <EmptyState title={L("لا مبيعات مكلفة في الفترة", "No costed sales in the period")} /> : (
-            <Table>
-              <thead><tr><Th>{L("الفاتورة", "Invoice")}</Th><Th>{L("العميل", "Customer")}</Th><Th num>{L("الإيراد", "Revenue")}</Th><Th num>{L("التكلفة", "Cost")}</Th><Th num>{L("الربح", "Margin")}</Th><Th num>%</Th></tr></thead>
-              <tbody>
-                {mg.data.rows.map((r) => (
-                  <tr key={r.invoiceId}><Td><Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/receivables/${r.invoiceId}`}>INV-{r.invoiceNo}</Link></Td><Td>{r.customer}</Td><Td num>{amt(r.revenue)}</Td><Td num>{amt(r.cogs)}</Td><Td num>{amt(r.margin)}</Td><Td num>{r.marginPercent ?? "—"}</Td></tr>
-                ))}
-                <tr className="bg-cream-dark font-extrabold"><Td>{L("المجموع", "Total")}</Td><Td /><Td num>{amt(mg.data.totals.revenue)}</Td><Td num>{amt(mg.data.totals.cogs)}</Td><Td num>{amt(mg.data.totals.margin)}</Td><Td num /></tr>
-              </tbody>
-            </Table>
-          )}
+          <CardTitle title={L("مجمل الربح لكل فاتورة", "Gross margin per invoice")} sub={L("انتقل إلى صفحته المستقلة: كل مستند مبيعات، حالة تكلفته، والمطابقة مع حسابات الإيراد والمرتجعات وتكلفة المبيعات", "Moved to its own page: every sales document, its cost status, and the reconciliation to the revenue, returns and cost-of-sales accounts")} />
+          <div className="flex gap-2 flex-wrap">
+            <Link href="/dashboard/accounting/inventory/margin"><Button kind="primary">{L("مجمل الربح والمطابقة", "Gross margin & reconciliation")}</Button></Link>
+            <Link href="/dashboard/accounting/inventory/returns"><Button>{L("مرتجعات العملاء", "Customer returns")}</Button></Link>
+          </div>
         </Card>
       </div>
     </div>

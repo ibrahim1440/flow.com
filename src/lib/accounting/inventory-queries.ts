@@ -15,6 +15,7 @@ export async function listInvDocs(q: URLSearchParams) {
   if (type && TYPES.has(type)) where.type = type as InvDocType;
   if (type === "RETURNS") where.type = { in: ["SUPPLIER_RETURN", "CUSTOMER_RETURN"] };
   if (type === "ISSUES") where.type = { in: ["ISSUE", "TRANSFER"] };
+  if (q.get("supplierId")) where.supplierId = q.get("supplierId")!;
   const st = q.get("status");
   if (st === "PENDING") where.status = { in: ["SUBMITTED", "APPROVED"] };
   else if (st && ["DRAFT", "SUBMITTED", "APPROVED", "POSTED"].includes(st)) where.status = st as InvDocStatus;
@@ -25,14 +26,20 @@ export async function listInvDocs(q: URLSearchParams) {
   }
   const page = Math.max(Number(q.get("page")) || 1, 1), pageSize = Math.min(Math.max(Number(q.get("pageSize")) || 25, 10), 100);
   const [rows, total, counts] = await Promise.all([
-    prisma.invDocument.findMany({ where, orderBy: { docNo: "desc" }, skip: (page - 1) * pageSize, take: pageSize, include: { lines: { include: { item: { select: { code: true, name: true, nameAr: true, baseUnit: true } } }, orderBy: { lineNo: "asc" } } } }),
+    prisma.invDocument.findMany({ where, orderBy: { docNo: "desc" }, skip: (page - 1) * pageSize, take: pageSize, include: { lines: { include: { item: { select: { code: true, name: true, nameAr: true, baseUnit: true, kind: true, yieldPerUnit: true } } }, orderBy: { lineNo: "asc" } } } }),
     prisma.invDocument.count({ where }),
     prisma.invDocument.groupBy({ by: ["status"], _count: { _all: true } }),
   ]);
   const values = new Map((await prisma.invMove.groupBy({ by: ["documentId"], where: { documentId: { in: rows.map((r) => r.id) }, kind: { in: ["IN", "REVALUE", "EXPENSED"] } }, _sum: { value: true } })).map((v) => [v.documentId, dec(v._sum.value)]));
   const outs = new Map((await prisma.invMove.groupBy({ by: ["documentId"], where: { documentId: { in: rows.map((r) => r.id) }, kind: "OUT" }, _sum: { value: true } })).map((v) => [v.documentId, dec(v._sum.value).neg()]));
   const locations = new Map((await prisma.invLocation.findMany()).map((l) => [l.id, l]));
-  const events = new Map((await prisma.accountingEvent.findMany({ where: { idempotencyKey: { in: rows.map((r) => `inventory:${r.id}:inv.document.posted`) } }, select: { sourceDocumentId: true, status: true, errorMessage: true } })).map((e) => [e.sourceDocumentId, e]));
+  const events = new Map((await prisma.accountingEvent.findMany({ where: { idempotencyKey: { in: rows.map((r) => `inventory:${r.id}:inv.document.posted`) } }, select: { sourceDocumentId: true, status: true, errorMessage: true, journalEntryId: true } })).map((e) => [e.sourceDocumentId, e]));
+  // Figma ACC-47 (approval cards): the loss of a production document and the journal rows that
+  // posting will produce (expected accounts; amounts only where known before costing) or produced.
+  const journals = new Map((await prisma.journalEntry.findMany({ where: { id: { in: [...events.values()].map((e) => e.journalEntryId).filter(Boolean) as string[] } }, select: { id: true, entryNo: true, lines: { select: { debit: true, credit: true, account: { select: { code: true, nameAr: true, nameEn: true } } }, orderBy: { lineNo: "asc" } } } })).map((j) => [j.id, j]));
+  const bands = new Map((await prisma.invLossBand.findMany({ where: { id: { in: rows.map((r) => r.lossBandId).filter(Boolean) as string[] } } })).map((b) => [b.id, b]));
+  const roleAccounts = new Map((await prisma.accountMapping.findMany({ include: { account: { select: { code: true, nameAr: true, nameEn: true } } } })).map((m) => [m.role, m.account]));
+  const acct = (role: string) => { const a = roleAccounts.get(role); return { role, code: a?.code ?? null, name: a ? a.nameAr ?? a.nameEn : null, nameEn: a?.nameEn ?? null }; };
   return {
     total, page, pageSize, counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
     rows: rows.map((r) => ({
@@ -42,8 +49,67 @@ export async function listInvDocs(q: URLSearchParams) {
       // Value: what entered stock (receipts, outputs, returns, revaluations) or else what left it.
       value: r.status === "POSTED" ? ((values.get(r.id) ?? ZERO).isZero() ? (outs.get(r.id) ?? ZERO) : values.get(r.id)!).toFixed(2) : r.type === "RECEIPT" ? r.lines.reduce((s, l) => s.add(dec(l.baseQty).mul(dec(l.unitCost)).toDecimalPlaces(2)), ZERO).toFixed(2) : r.amount ? dec(r.amount).toFixed(2) : null,
       ledger: events.get(r.id) ? { status: events.get(r.id)!.status, reason: events.get(r.id)!.errorMessage } : null,
+      supplierId: r.supplierId, lossBandId: r.lossBandId,
+      production: r.type === "PRODUCTION" ? productionSummary(r, r.lossBandId ? bands.get(r.lossBandId) ?? null : null, r.status === "POSTED" ? { in: outs.get(r.id) ?? null, out: values.get(r.id) ?? null } : null) : null,
+      journal: (() => {
+        const je = events.get(r.id)?.journalEntryId ? journals.get(events.get(r.id)!.journalEntryId!) : undefined;
+        return je ? { entryNo: je.entryNo, lines: je.lines.map((l) => ({ code: l.account.code, name: l.account.nameAr ?? l.account.nameEn, nameEn: l.account.nameEn, debit: dec(l.debit).toFixed(2), credit: dec(l.credit).toFixed(2) })) } : null;
+      })(),
+      expected: r.status === "POSTED" ? null : expectedJournal(r, acct),
     })),
   };
+}
+
+type ListDoc = { type: InvDocType; issueReason: string | null; amount: Prisma.Decimal | null; lossBandPercent: Prisma.Decimal | null;
+  lines: { role: string; baseQty: Prisma.Decimal; unitCost: Prisma.Decimal | null; item: { kind: keyof typeof KIND_ROLE; yieldPerUnit: Prisma.Decimal } }[] };
+
+/** Production loss from the document's lines: yield in vs out, against the loss band. */
+function productionSummary(d: ListDoc, band: { code: string; name: string; nameAr: string | null; maxLossPercent: Prisma.Decimal; status: string } | null, posted: { in: Prisma.Decimal | null; out: Prisma.Decimal | null } | null) {
+  const yieldOf = (l: ListDoc["lines"][number]) => dec(l.baseQty).mul(dec(l.item.yieldPerUnit));
+  const yieldIn = d.lines.filter((l) => l.role === "INPUT" && YIELDING.has(l.item.kind)).reduce((s, l) => s.add(yieldOf(l)), ZERO);
+  const yieldOut = d.lines.filter((l) => l.role === "OUTPUT").reduce((s, l) => s.add(yieldOf(l)), ZERO);
+  const pct = d.lossBandPercent ? dec(d.lossBandPercent) : band ? dec(band.maxLossPercent) : null;
+  const lossPercent = yieldIn.gt(0) ? yieldIn.sub(yieldOut).mul(100).div(yieldIn).toDecimalPlaces(2) : null;
+  const expected = pct !== null && yieldIn.gt(0) ? yieldIn.mul(new Prisma.Decimal(100).sub(pct)).div(100).toDecimalPlaces(4) : null;
+  const abnormalQty = expected && yieldOut.lt(expected) ? expected.sub(yieldOut) : ZERO;
+  return {
+    yieldIn: yieldIn.toFixed(4), yieldOut: yieldOut.toFixed(4), lossQty: yieldIn.sub(yieldOut).toFixed(4), lossPercent: lossPercent?.toFixed(2) ?? null,
+    band: band ? { code: band.code, name: band.nameAr ?? band.name, nameEn: band.name, status: band.status } : null, bandPercent: pct?.toFixed(2) ?? null,
+    expectedYield: expected?.toFixed(4) ?? null, abnormalQty: abnormalQty.toFixed(4),
+    abnormalPercent: yieldIn.gt(0) ? abnormalQty.mul(100).div(yieldIn).toDecimalPlaces(2).toFixed(2) : null,
+    // Values exist only once the document has posted (moves are costed at posting).
+    inputValue: posted?.in ? posted.in.toFixed(2) : null, outputValue: posted?.out ? posted.out.toFixed(2) : null,
+    abnormalValue: posted?.in && posted.out ? posted.in.sub(posted.out).toFixed(2) : null,
+  };
+}
+
+/**
+ * Accounts a document will post to (same rule as translators/inventory.ts), before posting. The
+ * amount is given only where it is known without costing (receipt values, landed-cost amount);
+ * otherwise it is null ("value on posting"). EITHER: the side depends on the counted difference.
+ */
+function expectedJournal(d: ListDoc, acct: (role: string) => { role: string; code: string | null; name: string | null; nameEn: string | null }) {
+  const invRoles = (lines: ListDoc["lines"]) => [...new Set(lines.map((l) => KIND_ROLE[l.item.kind]))];
+  type Side = "DEBIT" | "CREDIT" | "EITHER";
+  const row = (side: Side, role: string, amount: Prisma.Decimal | null = null) => ({ side, ...acct(role), amount: amount ? amount.toFixed(2) : null });
+  switch (d.type) {
+    case "RECEIPT": {
+      const by = new Map<string, Prisma.Decimal>();
+      for (const l of d.lines) by.set(KIND_ROLE[l.item.kind], (by.get(KIND_ROLE[l.item.kind]) ?? ZERO).add(dec(l.baseQty).mul(dec(l.unitCost)).toDecimalPlaces(2)));
+      const tot = [...by.values()].reduce((s, v) => s.add(v), ZERO);
+      return [...[...by].map(([role, v]) => row("DEBIT", role, v)), row("CREDIT", "GRNI", tot)];
+    }
+    case "SUPPLIER_RETURN": return [row("DEBIT", "GRNI"), ...invRoles(d.lines).map((r) => row("CREDIT", r))];
+    case "ISSUE": return d.issueReason ? [row("DEBIT", ISSUE_ROLE[d.issueReason as keyof typeof ISSUE_ROLE]), ...invRoles(d.lines).map((r) => row("CREDIT", r))] : [];
+    case "TRANSFER": return [];
+    case "PRODUCTION": return [...invRoles(d.lines.filter((l) => l.role === "OUTPUT")).map((r) => row("DEBIT", r)), row("DEBIT", "ABNORMAL_LOSS"), ...invRoles(d.lines.filter((l) => l.role === "INPUT")).map((r) => row("CREDIT", r))];
+    case "SALE_ISSUE": return [row("DEBIT", "COGS"), ...invRoles(d.lines).map((r) => row("CREDIT", r))];
+    case "CUSTOMER_RETURN": return [...invRoles(d.lines).map((r) => row("DEBIT", r)), row("CREDIT", "COGS")];
+    case "LANDED_COST": return [...invRoles(d.lines).map((r) => row("DEBIT", r)), row("CREDIT", "GRNI", d.amount ? dec(d.amount) : null)];
+    case "COUNT": case "ADJUSTMENT": return [...invRoles(d.lines).map((r) => row("EITHER", r)), row("EITHER", "INVENTORY_VARIANCE")];
+    case "BILL_MATCH": case "SUPPLIER_CREDIT": return [...invRoles(d.lines).map((r) => row("EITHER", r)), row("EITHER", "GRNI")];
+    default: return [];
+  }
 }
 
 export async function invDocDetail(id: string) {

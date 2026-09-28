@@ -2,11 +2,12 @@
 
 // Figma: ACC-46. Decision D-1 settings (costing method, supplier price-difference treatment),
 // normal-loss bands (approved by someone other than their author, never changed once approved),
-// items with their units and operational links, and locations.
+// items with their units and operational links, locations, and conversion-cost pools (direct labour
+// and production overhead absorbed at budget ÷ normal capacity) with their absorption report.
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { api, ApiError, Badge, Button, Card, CardTitle, Dialog, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
-import { useCan } from "../../_components/kit";
+import { riyadhToday, useAmount, useCan } from "../../_components/kit";
 import { KIND, KindBadge } from "../_ui";
 
 type Masters = {
@@ -16,16 +17,32 @@ type Masters = {
   bands: { id: string; code: string; name: string; nameAr: string | null; process: string; maxLossPercent: string; status: string; createdBy: string; createdByName: string; approvedByName: string | null }[];
 };
 const PROCESS: Record<string, [string, string]> = { ROASTING: ["تحميص", "Roasting"], PACKING: ["تعبئة", "Packing"], BAKING: ["خبز", "Baking"], OTHER: ["أخرى", "Other"] };
+const POOL_PROCESS: Record<string, [string, string]> = { ROASTING: ["تحميص", "Roasting"], BLENDING: ["خلط", "Blending"], PACKING: ["تعبئة", "Packing"], BAKING: ["خبز", "Baking"], OTHER: ["أخرى", "Other"] };
+const POOL_KIND: Record<string, [string, string]> = { DIRECT_LABOUR: ["عمالة مباشرة", "Direct labour"], PRODUCTION_OVERHEAD: ["تكاليف إنتاج غير مباشرة", "Production overhead"] };
+const BASIS: Record<string, [string, string]> = {
+  PER_KG_INPUT: ["لكل كغ مدخل", "per kg input"], PER_KG_OUTPUT: ["لكل كغ ناتج", "per kg output"], PER_UNIT_OUTPUT: ["لكل وحدة ناتجة", "per unit output"],
+  PER_BATCH: ["لكل دفعة", "per batch"], PER_LABOUR_HOUR: ["لكل ساعة عمل", "per labour hour"], PER_MACHINE_HOUR: ["لكل ساعة آلة", "per machine hour"],
+};
+type Pool = { id: string; code: string; name: string; nameAr: string | null; kind: string; process: string; basis: string; budgetAmount: string; normalCapacity: string; rate: string; status: string;
+  createdBy: string; createdByName: string; approvedByName: string | null; expenseAccount: { code: string; nameAr: string | null; nameEn: string } | null };
+type Absorption = { pools: { id: string; code: string; name: string; kind: string; process: string; basis: string; rate: string; status: string; expenseAccount: { code: string; nameAr: string | null; nameEn: string } | null; actual: string; absorbed: string; unabsorbed: string; overAbsorbed: boolean }[] };
+type Acc = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; allowPosting: boolean; isActive: boolean };
 const LINK: Record<string, string> = { greenBeanId: "GreenBean", coffeeProductId: "CoffeeProduct", materialItemId: "MaterialItem", productSkuId: "ProductSKU" };
 
 export default function InventorySetupPage() {
   const { L } = useL();
   const { can, user } = useCan();
+  const amt = useAmount();
   const { data: m, error, reload } = useApi<Masters>("/api/accounting/inventory/items");
+  const pools = useApi<Pool[]>("/api/accounting/inventory/cost-pools");
+  const [absFrom, setAbsFrom] = useState(() => `${riyadhToday().slice(0, 4)}-01-01`);
+  const [absTo, setAbsTo] = useState(riyadhToday);
+  const abs = useApi<Absorption>(`/api/accounting/inventory/reports/absorption?from=${absFrom}&to=${absTo}`);
+  const accs = useApi<Acc[]>(can("inv_master_manage") ? "/api/accounting/coa" : null);
   const [method, setMethod] = useState<string | undefined>();
   const [diff, setDiff] = useState<string | undefined>();
   const [busy, setBusy] = useState(""); const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
-  const [dlg, setDlg] = useState<"" | "band" | "item" | "location" | "unit">("");
+  const [dlg, setDlg] = useState<"" | "band" | "item" | "location" | "unit" | "pool">("");
   const [f, setF] = useState<Record<string, string>>({});
   const set = (k: string) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   if (error) return <ErrorState error={error} onRetry={reload} />;
@@ -33,7 +50,7 @@ export default function InventorySetupPage() {
   const cm = method ?? m.settings.costMethod ?? "", pd = diff ?? m.settings.priceDifference ?? "";
   const run = async (key: string, fn: () => Promise<unknown>, done?: string) => {
     setBusy(key); setMsg(null);
-    try { await fn(); setDlg(""); setF({}); setMethod(undefined); setDiff(undefined); reload(); if (done) setMsg({ tone: "ok", text: done }); }
+    try { await fn(); setDlg(""); setF({}); setMethod(undefined); setDiff(undefined); reload(); pools.reload(); abs.reload(); if (done) setMsg({ tone: "ok", text: done }); }
     catch (e) { setMsg({ tone: "bad", text: e instanceof ApiError ? e.message : String(e) }); }
     setBusy("");
   };
@@ -102,6 +119,76 @@ export default function InventorySetupPage() {
         </Table>
         <p className="text-xs text-brown">{L("المواقع: ", "Locations: ")}{m.locations.map((l) => `${l.code} · ${L(l.nameAr ?? l.name, l.name)}${l.isSalesDefault ? L(" (موقع المبيعات)", " (sales location)") : ""}`).join("، ")}</p>
       </Card>
+
+      <Card>
+        <CardTitle title={L("مجمّعات تكاليف التحويل", "Conversion-cost pools")} sub={L("العمالة المباشرة وتكاليف الإنتاج غير المباشرة لكل عملية، تُحمَّل على الإنتاج بمعدل معتمد", "Direct labour and production overhead per process, absorbed into production at an approved rate")}
+          right={can("inv_master_manage") ? <Button kind="primary" icon={Plus} onClick={() => open("pool", { kind: "DIRECT_LABOUR", process: "ROASTING", basis: "PER_KG_OUTPUT" })}>{L("مجمّع", "Pool")}</Button> : undefined} />
+        <Notice tone="info">{L("المعدل = الموازنة ÷ الطاقة العادية (معيار المحاسبة الدولي 2): فترة إنتاج منخفض تحمّل أقل، ويبقى غير المحمَّل مصروفاً في الفترة. يُعتمد المجمّع من غير مُعدّه ولا يتغير بعد الاعتماد. لا يُعد أي معدل سياسة للشركة قبل اعتماده؛ المعدلات في الاختبارات تجريبية (رموزها تنتهي بـ ‎-SYN).",
+          "Rate = budget ÷ normal capacity (IAS 2 normal capacity): a low-output period absorbs less and the unabsorbed cost stays in the period's expense. A pool is approved by someone other than its author and never changes once approved. No rate is company policy until approved; rates used in tests are synthetic (codes end in -SYN).")}</Notice>
+        {pools.error ? <ErrorState error={pools.error} onRetry={pools.reload} /> : !pools.data ? <LoadingState /> : pools.data.length === 0 ? <p className="text-[13px] text-brown">{L("لا مجمّعات بعد: لا تُحمَّل تكاليف تحويل على الإنتاج.", "No pools yet: no conversion cost is absorbed into production.")}</p> : (
+          <Table>
+            <thead><tr><Th>{L("الرمز", "Code")}</Th><Th>{L("الاسم", "Name")}</Th><Th>{L("النوع", "Kind")}</Th><Th>{L("العملية", "Process")}</Th><Th num>{L("الموازنة", "Budget")}</Th><Th num>{L("الطاقة العادية", "Normal capacity")}</Th><Th num>{L("المعدل", "Rate")}</Th><Th>{L("حساب المصروف", "Expense account")}</Th><Th>{L("الحالة", "Status")}</Th><Th /></tr></thead>
+            <tbody>{pools.data.map((p) => (
+              <tr key={p.id} className={p.status === "RETIRED" ? "opacity-60" : ""}>
+                <Td><span dir="ltr">{p.code}</span>{p.code.endsWith("-SYN") && <span className="ms-1"><Badge tone="warn">{L("تجريبي", "Synthetic")}</Badge></span>}</Td>
+                <Td>{L(p.nameAr ?? p.name, p.name)}</Td><Td>{L(POOL_KIND[p.kind]?.[0] ?? p.kind, POOL_KIND[p.kind]?.[1] ?? p.kind)}</Td><Td>{L(POOL_PROCESS[p.process]?.[0] ?? p.process, POOL_PROCESS[p.process]?.[1] ?? p.process)}</Td>
+                <Td num>{amt(p.budgetAmount)}</Td><Td num>{Number(p.normalCapacity).toLocaleString("en-US")}</Td>
+                <Td num>{Number(p.rate).toLocaleString("en-US", { maximumFractionDigits: 4 })} <span className="text-[11px] text-brown">{L(BASIS[p.basis]?.[0] ?? p.basis, BASIS[p.basis]?.[1] ?? p.basis)}</span></Td>
+                <Td>{p.expenseAccount ? `${p.expenseAccount.code} · ${L(p.expenseAccount.nameAr ?? p.expenseAccount.nameEn, p.expenseAccount.nameEn)}` : "—"}</Td>
+                <Td>{p.status === "APPROVED" ? <Badge tone="ok">{L(`معتمد · ${p.approvedByName}`, `Approved · ${p.approvedByName}`)}</Badge> : p.status === "DRAFT" ? <Badge tone="warn">{L(`مسودة (${p.createdByName}) – بانتظار الاعتماد`, `Draft (${p.createdByName}) – awaiting approval`)}</Badge> : <Badge tone="info">{L("مسحوب", "Retired")}</Badge>}</Td>
+                <Td>
+                  {p.status === "DRAFT" && can("inv_doc_approve") && p.createdBy !== user?.id && <button className="font-bold text-orange hover:underline" disabled={!!busy} onClick={() => run(p.id, () => api(`/api/accounting/inventory/cost-pools/${p.id}/approve`, { method: "POST", json: {} }))}>{L("اعتماد", "Approve")}</button>}
+                  {p.status === "APPROVED" && can("inv_doc_approve") && <button className="font-bold text-red-700 hover:underline" disabled={!!busy} onClick={() => { if (confirm(L("سحب المجمّع؟ لا يمكن إعادته.", "Retire the pool? This cannot be undone."))) run(p.id, () => api(`/api/accounting/inventory/cost-pools/${p.id}/retire`, { method: "POST", json: {} })); }}>{L("سحب", "Retire")}</button>}
+                </Td>
+              </tr>
+            ))}</tbody>
+          </Table>
+        )}
+      </Card>
+
+      <Card>
+        <CardTitle title={L("تقرير التحميل", "Absorption report")} sub={L("لكل مجمّع: التكلفة الفعلية في حساب المصروف مقابل ما حُمِّل على الإنتاج المرحّل في الفترة", "Per pool: actual cost booked on its expense account against what posted productions absorbed in the period")} />
+        <div className="flex items-end gap-3 flex-wrap">
+          <Field label={L("من", "From")}><input type="date" className={`${INPUT} max-w-[180px]`} value={absFrom} onChange={(e) => setAbsFrom(e.target.value)} /></Field>
+          <Field label={L("إلى", "To")}><input type="date" className={`${INPUT} max-w-[180px]`} value={absTo} onChange={(e) => setAbsTo(e.target.value)} /></Field>
+        </div>
+        {abs.error ? <ErrorState error={abs.error} onRetry={abs.reload} /> : !abs.data ? <LoadingState /> : abs.data.pools.length === 0 ? <p className="text-[13px] text-brown">{L("لا مجمّعات معتمدة.", "No approved pools.")}</p> : (<>
+          <Table>
+            <thead><tr><Th>{L("المجمّع", "Pool")}</Th><Th>{L("العملية", "Process")}</Th><Th num>{L("المعدل", "Rate")}</Th><Th>{L("حساب المصروف", "Expense account")}</Th><Th num>{L("الفعلي", "Actual")}</Th><Th num>{L("المحمَّل", "Absorbed")}</Th><Th num>{L("غير المحمَّل", "Unabsorbed")}</Th><Th /></tr></thead>
+            <tbody>{abs.data.pools.map((p) => (
+              <tr key={p.id} className={p.overAbsorbed ? "bg-red-50" : ""}>
+                <Td><span dir="ltr">{p.code}</span> · {p.name}<span className="block text-[11px] text-brown">{L(POOL_KIND[p.kind]?.[0] ?? p.kind, POOL_KIND[p.kind]?.[1] ?? p.kind)}{p.status === "RETIRED" ? L(" · مسحوب", " · retired") : ""}</span></Td>
+                <Td>{L(POOL_PROCESS[p.process]?.[0] ?? p.process, POOL_PROCESS[p.process]?.[1] ?? p.process)}</Td>
+                <Td num>{Number(p.rate).toLocaleString("en-US", { maximumFractionDigits: 4 })} <span className="text-[11px] text-brown">{L(BASIS[p.basis]?.[0] ?? p.basis, BASIS[p.basis]?.[1] ?? p.basis)}</span></Td>
+                <Td>{p.expenseAccount ? `${p.expenseAccount.code} · ${L(p.expenseAccount.nameAr ?? p.expenseAccount.nameEn, p.expenseAccount.nameEn)}` : "—"}</Td>
+                <Td num>{amt(p.actual)}</Td><Td num>{amt(p.absorbed)}</Td><Td num className={p.overAbsorbed ? "text-red-700 font-bold" : ""}>{amt(p.unabsorbed)}</Td>
+                <Td>{p.overAbsorbed ? <Badge tone="bad">{L("تحميل زائد", "Over-absorbed")}</Badge> : Number(p.unabsorbed) > 0 ? <Badge tone="info">{L("مصروف الفترة", "Period expense")}</Badge> : null}</Td>
+              </tr>
+            ))}</tbody>
+          </Table>
+          {abs.data.pools.some((p) => p.overAbsorbed) && <Notice tone="bad">{L("مجمّع حمّل أكثر مما أُنفق فعلاً: قد يحمل المخزون أكثر من تكلفته (معيار المحاسبة الدولي 2). راجع المعدل والطاقة العادية؛ قرار التسوية للمحاسب.", "A pool absorbed more than was actually spent: inventory could carry more than cost (IAS 2). Review the rate and normal capacity; the accountant decides the adjustment.")}</Notice>}
+          <p className="text-xs text-brown">{L("التحميل يُقيَّد دائناً على حساب مقابل (عمالة / تكاليف محمَّلة) وتبقى التكاليف الفعلية في حساباتها، فلا يُحتسب شيء مرتين: الفعلي ناقص المحمَّل تتحمله الفترة، والمحمَّل يبقى في المخزون حتى البيع.", "Absorption credits a contra account (labour / overhead absorbed) and actual costs stay where they are booked, so nothing counts twice: actual less absorbed is borne by the period; the absorbed part sits in inventory until sold.")}</p>
+        </>)}
+      </Card>
+
+      <Dialog open={dlg === "pool"} onClose={() => setDlg("")} title={L("مجمّع تكاليف تحويل جديد", "New conversion-cost pool")} sub={L("يُحفظ مسودة ويعتمده شخص آخر؛ المعدل = الموازنة ÷ الطاقة العادية", "Saved as a draft; someone else approves it. Rate = budget ÷ normal capacity")}>
+        {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+        <Field label={L("الرمز", "Code")}><input className={INPUT} value={f.code ?? ""} onChange={set("code")} /></Field>
+        <Field label={L("الاسم", "Name")}><input className={INPUT} value={f.name ?? ""} onChange={set("name")} /></Field>
+        <Field label={L("النوع", "Kind")}><select className={INPUT} value={f.kind} onChange={set("kind")}>{Object.entries(POOL_KIND).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}</select></Field>
+        <Field label={L("العملية", "Process")}><select className={INPUT} value={f.process} onChange={set("process")}>{Object.entries(POOL_PROCESS).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}</select></Field>
+        <Field label={L("أساس التحميل", "Allocation basis")}><select className={INPUT} value={f.basis} onChange={set("basis")}>{Object.entries(BASIS).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}</select></Field>
+        <Field label={L("موازنة المجمّع للفترة (ر.س)", "Budgeted pool for the period (SAR)")}><input className={INPUT} inputMode="decimal" value={f.budgetAmount ?? ""} onChange={set("budgetAmount")} /></Field>
+        <Field label={L("الطاقة العادية بوحدة الأساس", "Normal capacity in the basis unit")} hint={L("الطاقة المتوقعة في الظروف العادية، لا الفعلية", "Expected output under normal conditions, not actual")}><input className={INPUT} inputMode="decimal" value={f.normalCapacity ?? ""} onChange={set("normalCapacity")} /></Field>
+        {Number(f.budgetAmount) >= 0 && Number(f.normalCapacity) > 0 && <p className="text-xs text-brown">{L(`المعدل المقترح: ${(Number(f.budgetAmount) / Number(f.normalCapacity)).toFixed(4)} ${BASIS[f.basis]?.[0] ?? ""}`, `Proposed rate: ${(Number(f.budgetAmount) / Number(f.normalCapacity)).toFixed(4)} ${BASIS[f.basis]?.[1] ?? ""}`)}</p>}
+        <Field label={L("حساب المصروف الفعلي", "Expense account of the actual costs")}>
+          <select className={INPUT} value={f.expenseAccountId ?? ""} onChange={set("expenseAccountId")}>
+            <option value="">{accs.data ? L("— اختر —", "— choose —") : L("جارٍ التحميل…", "Loading…")}</option>
+            {(accs.data ?? []).filter((a) => a.type === "EXPENSE" && a.allowPosting && a.isActive).map((a) => <option key={a.id} value={a.id}>{a.code} · {L(a.nameAr ?? a.nameEn, a.nameEn)}</option>)}
+          </select>
+        </Field>
+        <Button kind="primary" busy={busy === "pool"} onClick={() => run("pool", () => api("/api/accounting/inventory/cost-pools", { method: "POST", json: { ...f, nameAr: f.name } }))}>{L("حفظ كمسودة", "Save as draft")}</Button>
+      </Dialog>
 
       <Dialog open={dlg === "band"} onClose={() => setDlg("")} title={L("نطاق فاقد جديد", "New loss band")} sub={L("يُحفظ مسودة ويعتمده شخص آخر", "Saved as a draft; someone else approves it")}>
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}

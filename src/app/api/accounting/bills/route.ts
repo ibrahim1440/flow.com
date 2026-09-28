@@ -40,7 +40,7 @@ export const GET = accountingRoute(null, async ({ request }) => {
     rows: rows.map((r) => {
       const remaining = r.status === "POSTED" ? dec(r.totalGross).sub(paid.get(r.obligationId ?? "") ?? ZERO) : null;
       return {
-        id: r.id, billNo: r.billNo, supplier: r.supplier.name, supplierHasVat: !!r.supplier.vatNumber, supplierInvoiceNo: r.supplierInvoiceNo,
+        id: r.id, billNo: r.billNo, kind: r.kind, supplier: r.supplier.name, supplierHasVat: !!r.supplier.vatNumber, supplierInvoiceNo: r.supplierInvoiceNo,
         billDate: r.billDate, dueDate: r.dueDate, status: r.status, totalNet: r.totalNet, totalVat: r.totalVat, totalGross: r.totalGross,
         remaining: remaining?.toFixed(2) ?? null, rejectedReason: r.rejectedReason,
         overdueDays: r.status === "POSTED" && remaining?.gt(0) && agingBucket(r.dueDate, today) !== "current" ? Math.floor((today.getTime() - r.dueDate.getTime()) / 86_400_000) : 0,

@@ -7,12 +7,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Plus } from "lucide-react";
-import { api, ApiError, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
+import { api, ApiError, Badge, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
 import { Pager, useAmount, useAutoText, useCan, useDay } from "../../_components/kit";
 import { DocTypeLabel, InvStatus, qty } from "../_ui";
 
 type Row = { id: string; docNo: number; type: string; status: string; docDate: string; issueReason: string | null; description: string | null; rejectedReason: string | null; provisional: boolean;
-  location: string; toLocation: string | null; createdBy: string; lines: { item: string; name: string; qty: string; unit: string; role: string }[]; value: string | null; ledger: { status: string; reason: string | null } | null };
+  location: string; toLocation: string | null; createdBy: string; lines: { item: string; name: string; qty: string; unit: string; role: string }[]; value: string | null; ledger: { status: string; reason: string | null } | null;
+  // ACC-47 card summary (list query): production loss, and the journal posting will produce (expected) or produced.
+  production?: { yieldIn: string; yieldOut: string; lossQty: string; lossPercent: string | null; band: { code: string; name: string; nameEn: string; status: string } | null; bandPercent: string | null;
+    expectedYield: string | null; abnormalQty: string; abnormalPercent: string | null; inputValue: string | null; outputValue: string | null; abnormalValue: string | null } | null;
+  journal?: { entryNo: number; lines: { code: string; name: string; nameEn: string; debit: string; credit: string }[] } | null;
+  expected?: { side: "DEBIT" | "CREDIT" | "EITHER"; role: string; code: string | null; name: string | null; nameEn: string | null; amount: string | null }[] | null };
 type List = { rows: Row[]; total: number; page: number; pageSize: number; counts: Record<string, number> };
 type TypeSeg = "ALL" | "RECEIPT" | "PRODUCTION" | "ISSUES" | "SALE_ISSUE" | "RETURNS" | "COUNT";
 type StatusSeg = "ALL" | "DRAFT" | "PENDING" | "POSTED";
@@ -83,7 +88,9 @@ export default function InventoryDocumentsPage() {
   );
 }
 
-/** Figma ACC-47: approval cards below 768 px. */
+/** Figma ACC-47: approval cards below 768 px — per card the loss (production), the cost and the
+ *  journal rows posting will produce. Before posting the rows are the expected accounts; amounts
+ *  are shown only where known without costing, otherwise "value on posting". */
 function MobileApprovals({ rows, onDone, summary }: { rows: Row[]; onDone: () => void; summary: (r: Row) => string }) {
   const { L } = useL();
   const day = useDay();
@@ -113,8 +120,13 @@ function MobileApprovals({ rows, onDone, summary }: { rows: Row[]; onDone: () =>
           </div>
           <p className="font-bold text-charcoal"><DocTypeLabel type={r.type} reason={r.issueReason} /> · {r.location}</p>
           <p className="text-[15px] font-extrabold text-charcoal">{summary(r)}</p>
-          {r.value && <p className="text-2xl font-extrabold text-charcoal tabular-nums">{amt(r.value)} {L("ر.س", "SAR")}</p>}
           <p className="text-xs text-brown">{day(r.docDate)}{r.description ? ` · ${auto(r.description)}` : ""}</p>
+          {r.production && <LossBlock p={r.production} />}
+          <div className="flex items-baseline justify-between gap-2 border-t border-border-light pt-2">
+            <span className="text-xs font-bold text-brown">{L("التكلفة (قيمة المستند)", "Cost (document value)")}</span>
+            {r.value ? <span className="text-2xl font-extrabold text-charcoal tabular-nums">{amt(r.value)} <span className="text-xs">{L("ر.س", "SAR")}</span></span> : <span className="text-[13px] font-bold text-brown">{L("تُحدَّد عند الترحيل", "Value on posting")}</span>}
+          </div>
+          <JournalRows r={r} />
           {can("inv_doc_approve") && (rejecting === r.id ? (
             <div className="flex flex-col gap-2">
               <Field label={L("سبب الرفض", "Reason")} hint={L("5 أحرف على الأقل", "At least 5 characters")}><input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
@@ -129,6 +141,68 @@ function MobileApprovals({ rows, onDone, summary }: { rows: Row[]; onDone: () =>
         </article>
       ))}
       <p className="text-[11px] text-brown">{L("الأزرار بحجم لمس 44 بكسل على الأقل. الرفض يطلب سبباً. من أعدّ المستند لا يستطيع اعتماده.", "Buttons are at least 44 px. Rejection asks for a reason. The preparer cannot approve.")}</p>
+    </div>
+  );
+}
+
+function LossBlock({ p }: { p: NonNullable<Row["production"]> }) {
+  const { L } = useL();
+  const amt = useAmount();
+  const abnormal = Number(p.abnormalQty) > 0;
+  const pctText = (v: string | null) => (v === null ? "—" : `\u200E${Number(v).toFixed(2)}%`);
+  return (
+    <div className="rounded-xl bg-cream p-3 flex flex-col gap-1.5 text-[13px]" data-testid="acc47-loss">
+      <p className="text-xs font-bold text-brown">{L("الفاقد (مردود الداخل مقابل الخارج)", "Loss (input yield vs output)")}</p>
+      <div className="flex items-center justify-between gap-2 tabular-nums"><span>{L("مردود الداخل", "Input yield")}</span><b>{qty(p.yieldIn)}</b></div>
+      <div className="flex items-center justify-between gap-2 tabular-nums"><span>{L("الخارج", "Output")}</span><b>{qty(p.yieldOut)}</b></div>
+      <div className="flex items-center justify-between gap-2 tabular-nums"><span>{L("نسبة الفاقد", "Loss")}</span><b>{qty(p.lossQty)} · {pctText(p.lossPercent)}</b></div>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span>{L("نطاق الفاقد المعتمد", "Loss band")}</span>
+        {p.band ? <span className="tabular-nums"><b>{p.band.code}</b> · {L("حتى", "up to")} {pctText(p.bandPercent)}{p.band.status !== "APPROVED" ? <Badge tone="warn">{L("غير معتمد", "not approved")}</Badge> : null}</span> : <Badge tone="warn">{L("بلا نطاق — كل الفاقد غير طبيعي", "No band — all loss abnormal")}</Badge>}
+      </div>
+      {abnormal
+        ? <div className="flex items-center justify-between gap-2 tabular-nums text-red-700"><span className="font-bold">{L("فاقد غير طبيعي (يتجاوز النطاق)", "Abnormal loss (beyond the band)")}</span><b>{qty(p.abnormalQty)} · {pctText(p.abnormalPercent)}{p.abnormalValue ? ` · ${amt(p.abnormalValue)}` : ""}</b></div>
+        : <p className="text-[12px] text-green-700 font-bold">{L("الفاقد ضمن النطاق — لا فاقد غير طبيعي", "Loss within the band — no abnormal loss")}</p>}
+    </div>
+  );
+}
+
+function JournalRows({ r }: { r: Row }) {
+  const { L } = useL();
+  const amt = useAmount();
+  const name = (x: { code: string | null; name: string | null; nameEn: string | null; role: string }) => (x.code ? `${x.code} · ${L(x.name ?? x.nameEn ?? "", x.nameEn ?? x.name ?? "")}` : L(`غير مربوط (${x.role})`, `Not mapped (${x.role})`));
+  if (r.journal) return (
+    <div className="flex flex-col gap-1" data-testid="acc47-journal">
+      <p className="text-xs font-bold text-brown">{L(`القيد المرحّل #${r.journal.entryNo}`, `Posted journal #${r.journal.entryNo}`)}</p>
+      <JournalGrid rows={r.journal.lines.map((l) => ({ account: `${l.code} · ${L(l.name, l.nameEn)}`, debit: Number(l.debit) ? amt(l.debit) : "", credit: Number(l.credit) ? amt(l.credit) : "" }))} />
+    </div>
+  );
+  const rows = (r.expected ?? []).filter((x) => !(x.role === "ABNORMAL_LOSS" && r.production && Number(r.production.abnormalQty) <= 0));
+  if (r.type === "TRANSFER") return <p className="text-[12px] text-brown">{L("تحويل بين مواقع: لا أثر محاسبي (الحسابات حسب نوع الصنف).", "Transfer between locations: no ledger effect (accounts follow the item kind).")}</p>;
+  if (!rows.length) return null;
+  const onPosting = L("عند الترحيل", "on posting");
+  return (
+    <div className="flex flex-col gap-1" data-testid="acc47-journal">
+      <p className="text-xs font-bold text-brown">{L("القيد المتوقع عند الترحيل (الحسابات؛ المبالغ من التكلفة)", "Expected journal on posting (accounts; amounts from costing)")}</p>
+      <JournalGrid rows={rows.map((x) => ({
+        account: name(x),
+        debit: x.side === "DEBIT" ? (x.amount ? amt(x.amount) : onPosting) : x.side === "EITHER" ? L("مدين/دائن", "Dr/Cr") : "",
+        credit: x.side === "CREDIT" ? (x.amount ? amt(x.amount) : onPosting) : x.side === "EITHER" ? L("حسب الفرق", "by difference") : "",
+      }))} />
+    </div>
+  );
+}
+
+function JournalGrid({ rows }: { rows: { account: string; debit: string; credit: string }[] }) {
+  const { L } = useL();
+  return (
+    <div className="rounded-lg border border-border-light overflow-hidden text-[12px]">
+      <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 bg-cream-dark px-2 py-1.5 font-bold text-gray-600"><span>{L("الحساب", "Account")}</span><span className="w-[84px] text-end">{L("مدين", "Debit")}</span><span className="w-[84px] text-end">{L("دائن", "Credit")}</span></div>
+      {rows.map((x, i) => (
+        <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-x-2 px-2 py-1.5 border-t border-border-light items-center">
+          <span className="min-w-0 break-words">{x.account}</span><span className="w-[84px] text-end tabular-nums">{x.debit}</span><span className="w-[84px] text-end tabular-nums">{x.credit}</span>
+        </div>
+      ))}
     </div>
   );
 }

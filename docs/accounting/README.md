@@ -4,13 +4,16 @@
 
 | | |
 |---|---|
-| Repository | `ibrahim1440/flow.com` — **not** `ibrahim1440/hiqbah_share2`, which is a sanitised public export that contains none of this work |
-| Branch | `feature/accounting-ledger-core`, based on `main` @ `fc64c05` |
+| Repository | [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) — **not** `hiqbah_share2`, a sanitised public export that contains none of this work |
+| Branch | `feature/accounting-ledger-core`, based on `main` @ `fc64c05` — on GitHub it will be [https://github.com/ibrahim1440/flow.com/tree/feature/accounting-ledger-core](https://github.com/ibrahim1440/flow.com/tree/feature/accounting-ledger-core) once pushed |
 | Where it is | **not pushed** (GitHub App not installed on `flow.com`): it exists in the working clone and in the incremental git bundle described in `RECOVERY_BUNDLE.md` |
 | Tested commit | the SHA named at the top of `TEST_RESULTS.md`; later commits change documentation only |
 
-Links in these documents are relative paths inside this branch. A GitHub link to `hiqbah_share2`
-does not identify this implementation.
+Links between these documents are relative paths inside this branch. On GitHub a file is at
+`https://github.com/ibrahim1440/flow.com/blob/feature/accounting-ledger-core/<path>` — for example
+[docs/accounting/README.md](https://github.com/ibrahim1440/flow.com/blob/feature/accounting-ledger-core/docs/accounting/README.md) —
+and these links resolve **only after the branch is pushed**; today it is unpushed. A link through
+`hiqbah_share2` does not identify this implementation.
 
 ## Status
 
@@ -18,8 +21,12 @@ Implemented and tested **locally on synthetic data**:
 - stage 1: ledger core, commissions;
 - stage 2: payables, bank-to-ledger, posted-line corrections, transaction-aware cash-flow statement;
 - stage 3: sales invoices, credit notes, customer receipts and advances, AR aging and statements;
-- stage 4: inventory valuation, materials-only manufacturing costing, COGS; D-1 is configurable
-  and posting is refused until it is decided.
+- stage 4: inventory valuation, manufacturing costing, COGS; D-1 is configurable and posting is
+  refused until it is decided;
+- stage 4b (`STAGE_4B_DESIGN.md`, evidence in `STAGE_4B_EVIDENCE.md`): operational stock events
+  become inventory documents, durable cost of sales with an exception queue, customer returns
+  separate from invoice corrections, gross margin reconciled to the ledger, labour and overhead
+  absorption, later cost changes traced through production, supplier credit notes.
 
 Stages 2 and 3 are **not accepted**; they await the owner's review. The historical-reporting defects
 raised in that review (17–19 in `DEFECTS_AND_LIMITATIONS.md`) are fixed and covered by regression
@@ -48,6 +55,8 @@ been deployed or run against production.
 | [STAGE_2_DESIGN.md](STAGE_2_DESIGN.md) | Payables, bank-to-ledger, posted-line corrections |
 | [STAGE_3_DESIGN.md](STAGE_3_DESIGN.md) | Sales invoices, receivables, advances, receipts, AR reports; status and limitations |
 | [STAGE_4_DESIGN.md](STAGE_4_DESIGN.md) | Inventory valuation, production costing and loss, COGS, D-1 settings; limitations |
+| [STAGE_4B_DESIGN.md](STAGE_4B_DESIGN.md) | Stage 4b: operational integration, durable cost of sales, returns vs corrections, margin reconciliation, conversion cost, tracing, supplier credits |
+| [STAGE_4B_EVIDENCE.md](STAGE_4B_EVIDENCE.md) | Stage 4b requirement → evidence matrix in five categories |
 | [DECISION_PACK.md](DECISION_PACK.md) | Decisions the accountant must take (D-1 costing, D-2 advances VAT, cash-flow classes, cutover) |
 | [RECOVERY_BUNDLE.md](RECOVERY_BUNDLE.md) | How to restore the unpushed branch from the incremental bundle (needs `fc64c05`) |
 | [RELEASE_PROPOSAL.md](RELEASE_PROPOSAL.md) | What would be released, gates, approvals needed, recovery plan |

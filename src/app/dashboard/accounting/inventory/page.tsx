@@ -36,6 +36,9 @@ export default function InventoryValuationPage() {
           <Link href="/dashboard/accounting/inventory/setup"><Button>{L("الأصناف وقرار D-1", "Items & decision D-1")}</Button></Link>
           <Link href="/dashboard/accounting/inventory/grni"><Button>{L("المطابقة والاستلام", "Matching & receipts")}</Button></Link>
           <Link href="/dashboard/accounting/inventory/documents"><Button>{L("المستندات", "Documents")}</Button></Link>
+          <Link href="/dashboard/accounting/inventory/exceptions"><Button>{L("الاستثناءات والربط التشغيلي", "Exceptions & operations link")}</Button></Link>
+          <Link href="/dashboard/accounting/inventory/returns"><Button>{L("مرتجعات العملاء", "Customer returns")}</Button></Link>
+          <Link href="/dashboard/accounting/inventory/margin"><Button>{L("هامش الربح", "Gross margin")}</Button></Link>
           {can("inv_doc_create") && <Link href="/dashboard/accounting/inventory/documents/new"><Button kind="primary" icon={Plus}>{L("مستند مخزون", "Inventory document")}</Button></Link>}
         </>} />
       <div className="flex items-end gap-3 flex-wrap">

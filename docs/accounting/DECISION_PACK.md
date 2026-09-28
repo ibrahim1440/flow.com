@@ -117,8 +117,8 @@ that are refused until you set them, not as a decision taken for you:
 - Back-dating: until you decide, the implementation takes the conservative path and **refuses** a
   document dated before a posted movement of the same item and location. Revaluing earlier issues
   is not implemented.
-- COGS is taken when the sales invoice posts, on the invoice date (§4: this assumes invoicing
-  follows delivery).
+- Cost of sales timing is a setting (`salesCostTiming`), undecided by default: while undecided,
+  posted invoices wait (AWAITING_POLICY) instead of being costed on an assumed date (§4).
 
 ## 4. Revenue and COGS timing
 
@@ -139,6 +139,39 @@ Issuing an invoice or collecting cash does not by itself recognise revenue (deci
 - The September invoice posts Dr 1130 / Cr *contract liability* (an account to add in §1) plus Cr 2170
   for the VAT. On delivery, the contract liability is released to 4100.
 - The simpler, recommended workflow is to configure invoicing to follow delivery.
+
+**What the system needs from you (stage 4b).** The sales-cost timing setting. Implemented today:
+`WITH_REVENUE` (cost of sales dated with the invoice, taken from the goods already dispatched for an
+order line, held meanwhile at cost in "goods delivered, not invoiced", 1176). Choose it only if
+invoicing follows delivery as recommended above; the contract-liability route for invoices issued
+before delivery is not implemented. Until you choose, invoices post their revenue and their cost of
+sales waits, visibly.
+
+## 4a. Operational stock events (stage 4b)
+
+Operational screens (purchases, roasting, blending, packing, dispatch, counts) now create inventory
+documents automatically from the quantities they record. You decide:
+
+1. **Approve the `inventory.operations` policy** — or not. Approved: documents within tolerance
+   (items linked, cost known, loss within the approved band) are approved under the policy and
+   posted automatically; everything else waits for an accountant. Not approved: every operational
+   document is prepared and waits for an accountant's approval.
+2. **Loss bands per process** (§3): roasting, packing, blending (and baking). The system needs one
+   approved band per process to post automatically; loss above it is always held.
+3. **Opening quantities** entered on operational records (a new green coffee or material created
+   with stock) carry no cost. They are held until you define the opening-balance procedure (§6):
+   which account the counter-entry uses and who approves the cost.
+
+## 4b. Direct labour and production overhead (stage 4b)
+
+For each process, a pool per kind (direct labour, production overhead) with its basis (kg in, kg
+out, units out, batch, labour hours, machine hours), budget and **normal capacity** (IAS 2.13: fixed
+overhead is absorbed on normal capacity; unabsorbed overhead is expensed in the period; in a period
+of abnormally high production the rate is reduced so inventory is not measured above cost). The
+rate is budget ÷ normal capacity. Absorption credits 6190 / 6790 and debits production, so the
+actual costs stay in their expense accounts and are not counted twice. You provide: which costs
+belong to each pool, the bases, budgets and normal capacities, and how often the rates are
+reviewed. None is set; the pools in tests and the fixture end in `-SYN` and are synthetic.
 
 ## 5. Advance payments and VAT
 
@@ -275,3 +308,8 @@ activation until replaced by your decisions:
   fixture D-1 stays undecided and `inventory.costing` is prepared but not approved, so its
   documents post provisionally in the disposable database only. The integration tests set weighted
   average / capitalise (and FIFO in one test) inside their own disposable database.
+- Stage 4b: tests set the sales-cost timing to `WITH_REVENUE` (one test leaves it undecided) and
+  approve `inventory.operations` inside their own disposable database; the fixture leaves both
+  undecided, approves one synthetic roasting overhead pool (ROAST-OH-SYN, 0.50 per kg out) and leaves
+  a synthetic labour pool (ROAST-LAB-SYN) in draft. The HTTP operational test approves
+  `inventory.operations` in the local fixture database as a test step.

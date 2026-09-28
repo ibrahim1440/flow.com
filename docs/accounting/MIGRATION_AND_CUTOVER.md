@@ -41,6 +41,21 @@ reference operational records by id (`GreenBean`, `CoffeeProduct`, `MaterialItem
 `RoastingBatch`, `PurchaseRecord`). All of them must still be rehearsed on a fresh copy of production
 before any release package is proposed.
 
+`20261001090000_accounting_stage4b` (stage 4b, also local only) differs in one important way: it
+adds a **deferred constraint trigger on the existing operational table `InventoryMovement`**
+(`InventoryMovement_integration_check`). It never blocks or changes an operational write; it inserts
+an `UNINTEGRATED` row into the new `InvOpsEvent` table when a transaction writes a stock movement
+without recording an integration event. Every operational route in this branch records one, so on
+production the trigger fires only for writers outside this code (scripts, manual SQL). It also adds
+enum values (`InvDocType` SUPPLIER_CREDIT, SALE_REVERSAL, ADJUSTMENT; `BillLineKind` STOCK_RETURN,
+STOCK_PRICE_ADJUSTMENT), nullable columns on `SalesInvoice`, `SalesInvoiceLine`, `SupplierBill`,
+`SupplierBillLine` and the stage 4 tables, and new tables (`InvCosting`, `InvOpsEvent`,
+`InvCostPool`, `CustomerReturn`, `CustomerReturnLine`, `ApCreditAllocation`). Rehearsal must
+include: applying it to a production copy with live-sized `InventoryMovement`, then exercising a
+purchase, a roast, a pack and a dispatch through the routes to confirm the operational timings are
+unchanged and no UNINTEGRATED rows appear. Historical operational stock is **not** back-filled into
+the accounts: opening balances are a cutover decision (DECISION_PACK §6).
+
 ## Cutover (proposal — dates and figures are the business's decision, see POLICIES D-4)
 1. Accountant approves the chart (template adapted), creates the fiscal year, maps roles.
 2. Choose cutover date C. Import the Qoyod trial balance at C−1 as one OPENING entry (four-eyes)

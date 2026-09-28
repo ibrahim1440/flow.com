@@ -38,8 +38,20 @@ export const GET = accountingRoute(null, async ({ params }) => {
     { account: role.AR_CONTROL ?? null, debit: "", credit: dec(d.totalGross).toFixed(2), party: who },
   ];
   const adv = await advanceBalance(prisma, d.customerId);
+  // Stage 4b: cost of sales state, the inventory documents it made, customer returns, links.
+  const [costing, invDocuments, customerReturns, fulfilmentLocation, replacesInvoice, replacedBy] = await Promise.all([
+    d.kind === "INVOICE" ? prisma.invCosting.findUnique({ where: { invoiceId: d.id }, select: { status: true, lastError: true, attempts: true, nextAttemptAt: true, updatedAt: true, costedAt: true, cost: true, late: true, detail: true } }) : null,
+    prisma.invDocument.findMany({ where: { salesInvoiceId: d.id }, orderBy: { docNo: "asc" }, select: { id: true, docNo: true, type: true, status: true, docDate: true } }),
+    prisma.customerReturn.findMany({ where: d.kind === "INVOICE" ? { invoiceId: d.id } : { id: d.customerReturnId ?? "" }, orderBy: { returnNo: "asc" }, select: { id: true, returnNo: true, status: true, reason: true, receivedOn: true, documentId: true } }),
+    d.fulfilmentLocationId ? prisma.invLocation.findUnique({ where: { id: d.fulfilmentLocationId }, select: { id: true, code: true, name: true, nameAr: true } }) : null,
+    d.replacesInvoiceId ? prisma.salesInvoice.findUnique({ where: { id: d.replacesInvoiceId }, select: { id: true, invoiceNo: true, status: true } }) : null,
+    d.kind === "INVOICE" ? prisma.salesInvoice.findFirst({ where: { replacesInvoiceId: d.id, status: { not: "REVERSED" } }, select: { id: true, invoiceNo: true, status: true } }) : null,
+  ]);
+  const invItems = new Map((await prisma.invItem.findMany({ where: { OR: [{ id: { in: d.lines.map((l) => l.invItemId).filter(Boolean) as string[] } }, { productSkuId: { in: d.lines.map((l) => l.productSkuId).filter(Boolean) as string[] } }] }, select: { id: true, code: true, name: true, nameAr: true, baseUnit: true, productSkuId: true } })).flatMap((i) => [[i.id, i], ...(i.productSkuId ? [[`sku:${i.productSkuId}`, i]] : [])] as [string, typeof i][]));
   return {
     ...d, names, events, journals, audit, preview, order,
+    costing: costing ? { ...costing, cost: costing.cost.toFixed(2) } : null, invDocuments, customerReturns, fulfilmentLocation, replacesInvoice, replacedBy,
+    lineItems: Object.fromEntries(d.lines.map((l) => { const i = (l.invItemId && invItems.get(l.invItemId)) || (l.productSkuId && invItems.get(`sku:${l.productSkuId}`)) || null; return [l.id, i ? { code: i.code, name: i.nameAr ?? i.name, baseUnit: i.baseUnit } : null]; })),
     // open: owed as the ledger sees it (posted receipts only); allocatable: what may still be
     // allocated (every active allocation reserves); awaitingReceipt: the difference.
     ...(d.kind === "INVOICE" && d.status === "POSTED" ? await (async () => {

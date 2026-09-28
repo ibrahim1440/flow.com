@@ -45,11 +45,25 @@ Idempotency keys: `payables:<id>:<event>`, `bank:<id>:confirmed|voided`, `receiv
 | Source | Event | Gate | Journal |
 |---|---|---|---|
 | `InvDocument` POSTED (any type) | `inv.document.posted` | `inventory.costing` + D-1 settings + approved loss band | built only from the document's sealed cost moves; see `STAGE_4_DESIGN.md` §3 (receipt Dr inventory / Cr GRNI; production Dr output · Dr 5300 / Cr inputs; issue Dr 5100/5400/5500/5600/5700 / Cr inventory; bill match and landed cost to inventory for stock on hand, to COGS for stock consumed / GRNI; count to 5700; transfer: no journal, event SKIPPED) |
-| `SalesInvoice` INVOICE POSTED with stocked SKUs | (system `SALE_ISSUE` document) → `inv.document.posted` | as above | Dr 5100 / Cr finished goods, once per invoice |
-| `SalesInvoice` REVERSED after its cost of sales | (system `CUSTOMER_RETURN` document) → `inv.document.posted` | as above | Dr finished goods / Cr 5100 at the cost the goods left at, for the quantity not already returned |
+| `SalesInvoice` INVOICE POSTED | DB trigger creates `InvCosting` → processor → one `SALE_ISSUE` per goods line (`sourceType SALES_COSTING`) → `inv.document.posted` | as above + `salesCostTiming` | Dr 5100 / Cr finished goods (or Cr 1176 for an order line's dispatched goods) |
+| `SalesInvoice` REVERSED after its cost of sales | `InvCosting` re-opened → one `SALE_REVERSAL` per line → `inv.document.posted` | as above | Dr 1176 / Cr 5100 — **no goods come back** (stage 4b) |
+
+## Stage 4b events
+
+| Source | Event | Gate | Journal |
+|---|---|---|---|
+| Operational stock write (purchase, roast, cancel, blend, pack, dispatch, count, opening) | `InvOpsEvent` in the same transaction → one inventory document (`sourceType OPS`) → `inv.document.posted` | `inventory.operations` (auto-approval within tolerance; otherwise an accountant approves) + the stage 4 gates | by document type: RECEIPT, PRODUCTION, ADJUSTMENT (Dr/Cr inventory vs 5700), ISSUE, TRANSFER to DLV (Dr 1176 / Cr 1174) |
+| `InventoryMovement` without an event in its transaction | `UNINTEGRATED` event (DB trigger), BLOCKED | — | none until an accountant posts a document and links it, or dismisses it with a reason |
+| `CustomerReturn` POSTED | one `CUSTOMER_RETURN` document (or TRANSFER DLV → stock if the invoice was reversed) + ISSUE for damaged units | four-eyes on the return + stage 4 gates | Dr finished goods / Cr 5100 (or Cr 1176) · damaged: Dr 5700 / Cr finished goods |
+| `SupplierBill` CREDIT_NOTE POSTED | `ap.credit_note.posted` | `payables.recognition` | Dr AP_CONTROL (open item SUPPLIER_CREDIT) / Cr line accounts (GRNI for stock lines) · Cr INPUT_VAT |
+| same, stock lines | one `SUPPLIER_CREDIT` document per line → `inv.document.posted` | stage 4 gates | return: Dr GRNI (the return's cost) / Cr variance for any difference; price reduction: Dr GRNI / Cr inventory on hand, 5100, 5300, issue accounts, 5700 as traced |
+| credit note REVERSED (no stock lines) | `ap.credit_note.reversed` | — | mirror |
+| `ApCreditAllocation` created / released | `ap.credit.allocated` / `ap.credit.released` | `payables.recognition` | Dr AP_CONTROL (open item bill) / Cr AP_CONTROL (open item credit note) — net zero; mirror on release |
+| PRODUCTION with an approved cost pool | ABSORBED moves inside `inv.document.posted` | pool approved by a second person | Dr output inventory / Cr 6190 (labour absorbed) or 6790 (overhead absorbed) |
+| LANDED_COST / BILL_MATCH / SUPPLIER_CREDIT on goods already used | traced moves inside `inv.document.posted` | stage 4 gates | on-hand share to the layer; consumed share followed to outputs, 5300, 5100 (sale named), issue accounts, GRNI or 5700 |
 Sales collections and commissions keep their own paths: a sales collection never posts; the bank
 line does, once (`receivables.test.ts`, `receivables-workflow.test.mjs`).
 
-**Not yet mapped:** purchase orders as documents (goods receipts exist, stage 4), labour and
-overhead absorption, fixed assets and depreciation runs, payroll, year-end closing, POS/gateway
-settlements (manual journals), supplier credit notes.
+**Not yet mapped:** purchase orders as documents (goods receipts exist, stage 4), fixed assets and
+depreciation runs, payroll, year-end closing, POS/gateway settlements (manual journals), contract
+liabilities for invoices issued before delivery.

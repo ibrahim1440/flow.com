@@ -332,11 +332,19 @@ export async function listOpsEvents(q: { status?: string | null; kind?: string |
   return { rows: rows.map((r) => ({ ...r, txid: r.txid?.toString() ?? null, document: r.documentId ? docs.get(r.documentId) ?? null : null })), counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])) };
 }
 
-/** The accounting state of one operational record (for the operational screens). */
+/**
+ * The accounting state of operational records (for the operational screens), keyed by record id:
+ * a batch's roast, cancellation and blend events, and its packing events (keyed by the batch).
+ */
 export async function opsStatusFor(sourceIds: string[]) {
-  const rows = await prisma.invOpsEvent.findMany({ where: { sourceId: { in: sourceIds } }, orderBy: { createdAt: "asc" } });
+  if (!sourceIds.length) return {};
+  const rows = await prisma.$queryRaw<{ key: string; kind: string; status: string; lastError: string | null; resolution: string | null }[]>`
+    SELECT CASE WHEN "kind" = 'PACK' THEN "payload"->>'batchId' ELSE "sourceId" END AS key, "kind", "status"::text AS status, "lastError", "resolution"
+      FROM "InvOpsEvent"
+     WHERE "sourceId" = ANY(${sourceIds}) OR ("kind" = 'PACK' AND "payload"->>'batchId' = ANY(${sourceIds}))
+     ORDER BY "createdAt"`;
   const out: Record<string, { kind: string; status: string; reason: string | null }[]> = {};
-  for (const r of rows) (out[r.sourceId] ??= []).push({ kind: r.kind, status: r.status, reason: r.lastError ?? r.resolution });
+  for (const r of rows) (out[r.key] ??= []).push({ kind: r.kind, status: r.status, reason: r.lastError ?? r.resolution });
   return out;
 }
 

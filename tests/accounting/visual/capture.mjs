@@ -113,6 +113,19 @@ const SHOTS = [
   { id: "ACC-45", route: "/dashboard/accounting/inventory/grni", user: "acc.preparer" },
   { id: "ACC-46", route: "/dashboard/accounting/inventory/setup" },
   { id: "ACC-47", route: "/dashboard/accounting/inventory/documents?status=PENDING", w: 390 },
+  // Stage 4b screens (no Figma frames yet — FIGMA_PARITY.md).
+  { id: "ACC-48", route: "/dashboard/accounting/inventory/exceptions" },
+  { id: "ACC-48-costing", route: "/dashboard/accounting/inventory/exceptions", act: async (p) => { await p.getByRole("radio", { name: /تكلفة المبيعات/ }).first().click().catch(() => p.getByText(/تكلفة المبيعات/).first().click()); } },
+  { id: "ACC-48-reconciliation", route: "/dashboard/accounting/inventory/exceptions", act: async (p) => { await p.getByRole("radio", { name: /المطابقة/ }).first().click().catch(() => p.getByText(/المطابقة/).first().click()); } },
+  { id: "ACC-48-390", route: "/dashboard/accounting/inventory/exceptions", w: 390 },
+  { id: "ACC-49", route: "/dashboard/accounting/inventory/returns" },
+  { id: "ACC-49-390", route: "/dashboard/accounting/inventory/returns", w: 390 },
+  { id: "ACC-50", route: "/dashboard/accounting/inventory/margin" },
+  { id: "ACC-51", route: "/dashboard/accounting/inventory/setup", act: async (p) => { await p.getByText(/مجمّعات|تكاليف التحويل|Conversion/).first().scrollIntoViewIfNeeded().catch(() => undefined); } },
+  { id: "ACC-32-costing", route: "/dashboard/accounting/receivables", act: firstSale("POSTED") },
+  { id: "OPS-purchases", route: "/dashboard/purchases", user: "ops.roastery" },
+  { id: "OPS-production", route: "/dashboard/production", user: "ops.roastery" },
+  { id: "OPS-dispatch", route: "/dashboard/dispatch", user: "ops.roastery" },
   { id: "ACC-27-en", route: "/dashboard/accounting/reports", user: "acc.approver.en", act: async (p) => { await p.getByRole("button", { name: "Cash flow" }).click(); } },
 ];
 

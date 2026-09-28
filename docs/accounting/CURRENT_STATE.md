@@ -1,7 +1,7 @@
 # Current-state assessment (discovery, 2026-09-27)
 
 ## Repositories
-- **`ibrahim1440/flow.com`** — the live BeanFlow source. `main` = `fc64c05` ("Merge pull request #2 …
+- **[`ibrahim1440/flow.com`](https://github.com/ibrahim1440/flow.com)** — the live BeanFlow source. `main` = `fc64c05` ("Merge pull request #2 …
   release/finance-sales-20260927"), confirmed as the branch head through the GitHub API before this
   branch was cut. 29 Prisma migrations; Next.js 16.2.4, React 19, Prisma 7.8, PostgreSQL.
 - `ibrahim1440/hiqbah_share2` — a sanitized public export; its `erp/` lags `flow.com` by 9 migrations

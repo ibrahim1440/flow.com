@@ -3,12 +3,15 @@
 // Figma: ACC-32 (desktop) and ACC-36 (390 px). Sales invoice / credit note detail: approval
 // timeline with the actions the signed-in user may take, lines, the journal it will post (or
 // posted), what is allocated to it (receipts, credit notes, advances), credit notes issued
-// against it, applying the customer's advance, and the audit trail.
+// against it, applying the customer's advance, and the audit trail. Stage 4b: cost-of-sales state
+// (InvCosting) with its reason and a retry, the inventory documents it made (SALE_ISSUE /
+// SALE_REVERSAL), customer returns of the invoice, and each line's stock treatment.
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, Badge, Button, Card, CardTitle, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
 import { BillStatus, EVENT_STATUS, docNo, useAmount, useCan, useDay, useExplain } from "../../_components/kit";
+import { CostingStatus, DocTypeLabel, InvStatus } from "../../inventory/_ui";
 
 type Acc = { code: string; nameAr: string | null; nameEn: string } | null;
 type Doc = {
@@ -18,14 +21,24 @@ type Doc = {
   customer: { name: string; nameAr: string | null; vatNumber: string | null };
   order: { id: string; orderNumber: number; status: string } | null; originalInvoice: { id: string; invoiceNo: number; totalGross: string } | null;
   creditNotes: { id: string; invoiceNo: number; status: string; totalGross: string; issueDate: string }[];
-  lines: { lineNo: number; description: string | null; quantity: string; unitPrice: string; discountPercent: string; net: string; vatRate: string; vat: string; gross: string; account: Acc }[];
+  lines: { id: string; stockTreatment: "GOODS" | "NON_STOCK" | null; unit: string | null; lineNo: number; description: string | null; quantity: string; unitPrice: string; discountPercent: string; net: string; vatRate: string; vat: string; gross: string; account: Acc }[];
   names: Record<string, string>; preview: { account: Acc; debit: string; credit: string; party: string | null }[];
   events: { id: string; eventType: string; status: string; errorMessage: string | null; journalEntryId: string | null }[];
   journals: { id: string; entryNo: number; status: string; isProvisional: boolean }[];
   audit: { action: string; userId: string | null; createdAt: string; reason: string | null }[];
   open: string | null; allocatable: string | null; awaitingReceipt: string | null; creditable: string | null; customerAdvance: string;
   allocations: { id: string; amount: string; allocatedOn: string; active: boolean; invoiceNo: number; source: { kind: string; label: string } }[];
+  creditType: "RETURN_OF_GOODS" | "PRICE_ADJUSTMENT" | null;
+  costing: { status: string; lastError: string | null; attempts: number; nextAttemptAt: string; updatedAt: string; costedAt: string | null; cost: string; late: boolean;
+    detail: { lineId: string; lineNo: number; treatment: string; status: string; reason?: string; qty?: string; cost?: string }[] | null } | null;
+  invDocuments: { id: string; docNo: number; type: string; status: string; docDate: string }[];
+  customerReturns: { id: string; returnNo: number; status: string; reason: string; receivedOn: string | null; documentId: string | null }[];
+  fulfilmentLocation: { code: string; name: string; nameAr: string | null } | null;
+  replacesInvoice: { id: string; invoiceNo: number; status: string } | null; replacedBy: { id: string; invoiceNo: number; status: string } | null;
+  lineItems: Record<string, { code: string; name: string; baseUnit: string } | null>;
 };
+const RETRYABLE = new Set(["PENDING", "AWAITING_POLICY", "AWAITING_DISPATCH", "BLOCKED", "FAILED"]);
+const RETURN_STATUS: Record<string, [string, string]> = { DRAFT: ["مسودة", "Draft"], RECEIVED: ["مستلَم · بانتظار الاعتماد", "Received · awaiting approval"], APPROVED: ["معتمد · للترحيل", "Approved · to post"], POSTED: ["مرحّل", "Posted"] };
 type Cust = { openInvoices: { id: string; invoiceNo: number; open: string }[] };
 
 export default function SalesDocPage() {
@@ -74,6 +87,18 @@ export default function SalesDocPage() {
   const reasonOk = reason.trim().length >= 5;
   const unapplied = credit_ ? Number(d.totalGross) - d.allocations.filter((a) => a.active).reduce((s, a) => s + Number(a.amount), 0) : 0;
   const customerName = d.customer.nameAr ?? d.customer.name;
+  const lineState = new Map((d.costing?.detail ?? []).map((x) => [x.lineId, x]));
+  const stockCell = (l: Doc["lines"][number]) => {
+    const it = d.lineItems?.[l.id];
+    const st = lineState.get(l.id);
+    return (
+      <div className="flex flex-col gap-0.5">
+        {l.stockTreatment === "GOODS" ? <Badge tone="brand">{L("بضاعة", "Goods")}</Badge> : l.stockTreatment === "NON_STOCK" ? <Badge tone="info">{L("غير مخزني", "Non-stock")}</Badge> : <Badge tone="warn">{it ? L("بضاعة (من المنتج)", "Goods (from product)") : L("غير مصنّف", "Unclassified")}</Badge>}
+        {it && <span className="text-[11px] text-brown">{it.code} · {it.name}{l.unit && l.unit !== it.baseUnit ? ` · ${l.unit}` : ""}</span>}
+        {st && st.status && <span className="text-[11px] text-brown">{st.status}{st.cost ? ` · ${amt(st.cost)}` : ""}{st.reason ? ` — ${st.reason}` : ""}</span>}
+      </div>
+    );
+  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[360px_1fr] items-start">
@@ -142,15 +167,22 @@ export default function SalesDocPage() {
             sub={credit_ ? L(`إشعار دائن مقابل INV-${d.originalInvoice?.invoiceNo} · ${day(d.issueDate)} · ${d.reason ?? ""}`, `Credit note against INV-${d.originalInvoice?.invoiceNo} · ${day(d.issueDate)} · ${d.reason ?? ""}`)
               : L(`${d.order ? `طلب ${d.order.orderNumber} · ` : ""}${day(d.issueDate)} · تستحق ${day(d.dueDate)}${d.customer.vatNumber ? ` · رقم ضريبي ${d.customer.vatNumber}` : " · فاتورة مبسطة"}`, `${d.order ? `Order ${d.order.orderNumber} · ` : ""}${day(d.issueDate)} · due ${day(d.dueDate)}${d.customer.vatNumber ? ` · VAT no. ${d.customer.vatNumber}` : " · simplified"}`)}
             right={<BillStatus sales creditNote={credit_} status={d.status} rejected={!!d.rejectedReason} remaining={d.open} gross={d.totalGross} />} />
+          <div className="flex gap-2 flex-wrap items-center text-[12px]">
+            {credit_ && (d.creditType === "RETURN_OF_GOODS" ? <Badge tone="brand">{L("عن بضاعة مرتجعة", "For returned goods")}</Badge> : d.creditType === "PRICE_ADJUSTMENT" ? <Badge tone="info">{L("تعديل سعر — بلا إرجاع بضاعة", "Price adjustment — no goods returned")}</Badge> : <Badge tone="warn">{L("نوع الإشعار غير محدد", "Credit type not set")}</Badge>)}
+            {credit_ && d.customerReturns.map((r) => <span key={r.id}>{L("مرتجع", "Return")} {r.documentId ? <Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/inventory/documents/${r.documentId}`}>R-{r.returnNo}</Link> : <span className="font-bold tabular-nums">R-{r.returnNo}</span>}</span>)}
+            {!credit_ && d.fulfilmentLocation && <span className="text-brown">{L("موقع الصرف:", "Ships from:")} <b className="text-charcoal">{d.fulfilmentLocation.code} · {L(d.fulfilmentLocation.nameAr ?? d.fulfilmentLocation.name, d.fulfilmentLocation.name)}</b></span>}
+            {d.replacesInvoice && <span className="text-brown">{L("تحلّ محل", "Replaces")} <Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/receivables/${d.replacesInvoice.id}`}>INV-{d.replacesInvoice.invoiceNo}</Link> {L("(معكوسة)", "(reversed)")}</span>}
+            {d.replacedBy && <span className="text-brown">{L("استُبدلت بالفاتورة", "Replaced by")} <Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/receivables/${d.replacedBy.id}`}>INV-{d.replacedBy.invoiceNo}</Link></span>}
+          </div>
           <div className="flex gap-6 flex-wrap">
             {[[L("الإجمالي", "Total"), `${amt(d.totalGross)} ${L("ر.س", "SAR")}`], [L("الضريبة", "VAT"), amt(d.totalVat)], [L("الصافي", "Net"), amt(d.totalNet)], ...(d.open !== null ? [[L("المتبقي", "Open"), amt(d.open)]] : []), ...(Number(d.awaitingReceipt) > 0 ? [[L("منه تحصيل بانتظار الترحيل", "of which receipt awaiting posting"), amt(d.awaitingReceipt)]] : [])].map(([l, v]) => (
               <div key={l}><p className="text-xs font-bold text-brown">{l}</p><p className="text-xl font-extrabold text-charcoal tabular-nums">{v}</p></div>
             ))}
           </div>
           <Table>
-            <thead><tr><Th>#</Th><Th>{L("الحساب", "Account")}</Th><Th>{L("الوصف", "Description")}</Th><Th num>{L("الصافي", "Net")}</Th><Th num>{L("الضريبة", "VAT")}</Th><Th num>{L("الإجمالي", "Total")}</Th></tr></thead>
+            <thead><tr><Th>#</Th><Th>{L("الحساب", "Account")}</Th>{!credit_ && <Th>{L("المخزون", "Stock")}</Th>}<Th>{L("الوصف", "Description")}</Th><Th num>{L("الصافي", "Net")}</Th><Th num>{L("الضريبة", "VAT")}</Th><Th num>{L("الإجمالي", "Total")}</Th></tr></thead>
             <tbody>{d.lines.map((l) => (
-              <tr key={l.lineNo}><Td>{l.lineNo}</Td><Td>{credit_ ? L("مردودات (تلقائي)", "Returns (automatic)") : acc(l.account)}</Td><Td>{l.description ?? "—"}<span className="block text-[11px] text-brown tabular-nums" dir="ltr">{Number(l.quantity)} × {Number(l.unitPrice)}{Number(l.discountPercent) ? ` − ${Number(l.discountPercent)}%` : ""}{Number(l.vatRate) ? ` · ${Number(l.vatRate)}%` : ""}</span></Td><Td num>{amt(l.net)}</Td><Td num>{amt(l.vat)}</Td><Td num>{amt(l.gross)}</Td></tr>
+              <tr key={l.lineNo}><Td>{l.lineNo}</Td><Td>{credit_ ? L("مردودات (تلقائي)", "Returns (automatic)") : acc(l.account)}</Td>{!credit_ && <Td>{stockCell(l)}</Td>}<Td>{l.description ?? "—"}<span className="block text-[11px] text-brown tabular-nums" dir="ltr">{Number(l.quantity)} × {Number(l.unitPrice)}{Number(l.discountPercent) ? ` − ${Number(l.discountPercent)}%` : ""}{Number(l.vatRate) ? ` · ${Number(l.vatRate)}%` : ""}</span></Td><Td num>{amt(l.net)}</Td><Td num>{amt(l.vat)}</Td><Td num>{amt(l.gross)}</Td></tr>
             ))}</tbody>
           </Table>
         </Card>
@@ -169,6 +201,46 @@ export default function SalesDocPage() {
           {d.order && <div className="flex items-center gap-2 flex-wrap text-[13px]"><Badge tone="brand">{L("الطلب", "Order")}</Badge><span>{L(`طلب ${d.order.orderNumber} · ${d.order.status} · لا يُفوتر الطلب مرتين`, `Order ${d.order.orderNumber} · ${d.order.status} · an order is invoiced once`)}</span></div>}
           {reversed.je && <Notice tone="info">{L(`عُكس المستند بالقيد #${reversed.je.entryNo}: ${d.reversalReason ?? ""}`, `Reversed by journal #${reversed.je.entryNo}: ${d.reversalReason ?? ""}`)}</Notice>}
         </Card>
+        {!credit_ && (d.costing || d.invDocuments.length > 0 || d.customerReturns.length > 0) && (
+          <Card>
+            <CardTitle title={L("تكلفة المبيعات", "Cost of sales")} sub={L("قيد مستقل تصدره تكلفة المخزون بعد ترحيل الفاتورة — لا يُلغي الفاتورة إن تعثّر، ويبقى ظاهراً بسببه حتى يُعالَج", "A separate entry made by inventory costing after the invoice posts — a failure never undoes the invoice and stays visible with its reason until resolved")}
+              right={d.costing ? <CostingStatus status={d.costing.status} /> : <Badge tone="info">{L("لا سجل تكلفة", "No costing record")}</Badge>} />
+            {d.costing && (
+              <>
+                {d.costing.lastError && <Notice tone={["BLOCKED", "FAILED"].includes(d.costing.status) ? "bad" : "warn"}>{explain(d.costing.lastError)}</Notice>}
+                <div className="flex gap-6 flex-wrap text-[13px]">
+                  {d.costing.status === "COSTED" && <div><p className="text-xs font-bold text-brown">{L("التكلفة", "Cost")}</p><p className="text-lg font-extrabold tabular-nums">{amt(d.costing.cost)}</p></div>}
+                  <div><p className="text-xs font-bold text-brown">{L("المحاولات", "Attempts")}</p><p className="font-bold tabular-nums">{d.costing.attempts}</p></div>
+                  <div><p className="text-xs font-bold text-brown">{L("آخر تحديث", "Last updated")}</p><p className="font-bold tabular-nums">{when(d.costing.updatedAt)}</p></div>
+                  {RETRYABLE.has(d.costing.status) && <div><p className="text-xs font-bold text-brown">{L("المحاولة التالية", "Next attempt")}</p><p className="font-bold tabular-nums">{when(d.costing.nextAttemptAt)}</p></div>}
+                  {d.costing.late && <Badge tone="warn">{L("سُجّلت متأخرة", "Booked late")}</Badge>}
+                </div>
+                {RETRYABLE.has(d.costing.status) && (can("events_process")
+                  ? <div><Button busy={busy === "costing"} disabled={!!busy} className="min-h-11" onClick={() => call("costing", `/api/accounting/inventory/costing/${d.id}/retry`)}>{L("إعادة محاولة التكلفة", "Retry costing")}</Button></div>
+                  : <p className="text-[11px] text-brown">{L("إعادة المحاولة لمن يملك صلاحية معالجة الأحداث المحاسبية.", "Retrying needs the accounting events duty.")}</p>)}
+              </>
+            )}
+            {d.invDocuments.length > 0 && (
+              <Table>
+                <thead><tr><Th>{L("مستند المخزون", "Inventory document")}</Th><Th>{L("النوع", "Type")}</Th><Th>{L("التاريخ", "Date")}</Th><Th>{L("الحالة", "Status")}</Th></tr></thead>
+                <tbody>{d.invDocuments.map((x) => <tr key={x.id}><Td><Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/inventory/documents/${x.id}`}>#{x.docNo}</Link></Td><Td><DocTypeLabel type={x.type} /></Td><Td className="whitespace-nowrap">{day(x.docDate)}</Td><Td><InvStatus status={x.status} /></Td></tr>)}</tbody>
+              </Table>
+            )}
+            {d.customerReturns.length > 0 && (
+              <div className="flex flex-col gap-1 text-[13px]">
+                <p className="font-bold">{L("مرتجعات العميل لهذه الفاتورة", "Customer returns of this invoice")}</p>
+                {d.customerReturns.map((r) => (
+                  <p key={r.id} className="flex gap-2 flex-wrap items-center">
+                    {r.documentId ? <Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/inventory/documents/${r.documentId}`}>R-{r.returnNo}</Link> : <span className="font-bold tabular-nums">R-{r.returnNo}</span>}
+                    <Badge tone={r.status === "POSTED" ? "ok" : "warn"}>{L(...(RETURN_STATUS[r.status] ?? [r.status, r.status]))}</Badge>
+                    <span className="text-brown">{r.receivedOn ? `${day(r.receivedOn)} · ` : ""}{r.reason}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-brown">{L("عكس الفاتورة يعيد تكلفتها إلى «مسلَّم لم يُفوتر» ولا يُعيد بضاعة للمخزون؛ البضاعة تعود فقط بمرتجع عميل مستلَم.", "Reversing the invoice moves its cost back to “delivered, not invoiced” and brings no goods back; goods return only through a received customer return.")}</p>
+          </Card>
+        )}
         {(d.allocations.length > 0 || d.creditNotes.length > 0) && (
           <Card>
             <CardTitle title={credit_ ? L("استخدام الإشعار", "Where the credit was used") : L("ما خُصِّص للفاتورة", "Allocated to this invoice")} sub={L("تحصيلات وإشعارات دائنة ودفعات مقدمة — لا تُحذف، تُلغى فقط", "Receipts, credit notes and advances — never deleted, only switched off")} />
