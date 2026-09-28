@@ -174,6 +174,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "ar_invoice_approve", label: "Approve or reject sales invoices and credit notes (not one's own)" },
     { key: "ar_invoice_post", label: "Post and reverse sales invoices and credit notes" },
     { key: "ar_receipt_assign", label: "Assign customer bank receipts, apply advances and credits" },
+    { key: "inv_doc_create", label: "Prepare inventory documents (receipts, issues, production, counts…)" },
+    { key: "inv_doc_approve", label: "Approve inventory documents and loss bands" },
+    { key: "inv_doc_post", label: "Post inventory documents" },
+    { key: "inv_master_manage", label: "Manage inventory items, units, locations and draft loss bands" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

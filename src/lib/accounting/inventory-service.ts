@@ -105,6 +105,8 @@ export async function createLossBand(b: Record<string, unknown>, userId: string)
 
 export async function approveLossBand(id: string, userId: string) {
   return ledgerTx(async (tx) => {
+    const cur = await tx.invLossBand.findUnique({ where: { id } });
+    if (cur && cur.createdBy === userId) throw new AccountingError("A loss band is approved by someone other than its author.", 403);
     const r = await tx.invLossBand.updateMany({ where: { id, status: "DRAFT" }, data: { status: "APPROVED", approvedBy: userId, approvedAt: new Date() } });
     if (r.count !== 1) throw new AccountingError("Only a draft loss band can be approved.", 409);
     const band = await tx.invLossBand.findUniqueOrThrow({ where: { id } });
