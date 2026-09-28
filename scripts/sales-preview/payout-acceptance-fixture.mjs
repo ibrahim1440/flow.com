@@ -24,6 +24,7 @@
 //
 //   ... payout-acceptance-fixture.mjs up                provision the people and their deals
 //   ... payout-acceptance-fixture.mjs add-clean <sfx>  one more clean person, purging nothing
+//   ... payout-acceptance-fixture.mjs seed-real <sfx> a real SalesCollection awaiting a decision
 //   ... payout-acceptance-fixture.mjs residue   make the second person's period underivable
 //   ... payout-acceptance-fixture.mjs report    what exists right now
 //   ... payout-acceptance-fixture.mjs disable   retire the identities, KEEP every financial row
@@ -87,6 +88,8 @@ async function purge() {
     `DELETE FROM "CommissionLedgerEntry" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CommissionAccrual" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CollectionEvent" WHERE "externalRef" LIKE '${P}%'`,
+    `DELETE FROM "CollectionEvidence" WHERE "uploadedById" LIKE '${P}%'`,
+    `DELETE FROM "SalesCollection" WHERE id LIKE '${P}%'`,
     `DELETE FROM "CommissionAssignment" WHERE "employeeId" LIKE '${P}%'`,
     `DELETE FROM "CommissionPlanVersion" WHERE "planId" LIKE '${P}%'`,
     `DELETE FROM "CommissionPlan" WHERE id LIKE '${P}%'`,
@@ -252,6 +255,53 @@ async function addClean(suffix) {
 }
 
 /**
+ * A real SalesCollection awaiting verification, for the workflow the sandbox does NOT cover.
+ *
+ * The sandbox endpoint exercises the accrual engine. It does not exercise the finance
+ * decision path — `/api/sales/collections/[id]/actions` — which is a different route with
+ * a different privilege (`collection_verify` / `collection_reverse`) against a different
+ * table. Reversing a sandbox event therefore says nothing about whether the real reversal
+ * workflow, or its authorisation, works on a candidate.
+ *
+ * So this seeds the one thing that cannot be created without a salesperson's session: a
+ * submitted collection awaiting a decision. Everything after that — approving it,
+ * reversing it, and being refused — happens through the application, which is the part
+ * under test. The row is left in PENDING_VERIFICATION and no event, accrual or movement is
+ * written here; the approval creates those.
+ */
+async function seedReal(suffix) {
+  if (!/^[a-z0-9]{1,12}$/.test(suffix ?? "")) {
+    console.error("REFUSE: seed-real needs a short lowercase suffix, e.g. `seed-real real1`");
+    process.exit(2);
+  }
+  const id = `${P}_clean_${suffix}`;
+  const opp = `${P}_opp_clean_${suffix}`;
+  const person = (await q(`SELECT 1 FROM "Employee" WHERE id=$1`, [id]))[0];
+  if (!person) {
+    console.error(`REFUSE: ${id} does not exist. Run \`add-clean ${suffix}\` first.`);
+    process.exit(2);
+  }
+  const col = `${P}_sc_${suffix}`;
+  if ((await q(`SELECT 1 FROM "SalesCollection" WHERE id=$1`, [col])).length) {
+    console.error(`REFUSE: ${col} already exists — do not overwrite a collection with history.`);
+    process.exit(2);
+  }
+  await c.query(
+    `INSERT INTO "SalesCollection"
+       (id,"opportunityId","customerId","idempotencyKey","referenceNumber","amountGross","amountTax",
+        "amountNet",currency,"paymentMethod","collectedAt",status,"submittedById","submittedAt",
+        note,"createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,$5,1150,150,1000,'SAR','BANK_TRANSFER',now(),
+             'PENDING_VERIFICATION'::"SalesCollectionStatus",$6,now(),
+             'HACC hosted acceptance — synthetic, awaiting a real finance decision',now(),now())`,
+    [col, opp, CUST, `${P}-sc-${suffix}`, `${P}-REF-${suffix.toUpperCase()}`, id]);
+  console.log(`${col} seeded, PENDING_VERIFICATION, submitted by ${id}. 1150.00 gross / 1000.00 net.`);
+  console.log("Decide it through the app:");
+  console.log(`  POST /api/sales/collections/${col}/actions  { action: "approve" }   (needs collection_verify)`);
+  console.log(`  POST /api/sales/collections/${col}/actions  { action: "reverse", reason: "..." }  (needs collection_reverse)`);
+}
+
+/**
  * Retire the identities and keep every financial record they were involved in.
  *
  * `active = false` is what the login and the permission checks read, so a disabled
@@ -273,12 +323,13 @@ const mode = process.argv[2] ?? "report";
 try {
   if (mode === "up") await up();
   else if (mode === "add-clean") await addClean(process.argv[3]);
+  else if (mode === "seed-real") await seedReal(process.argv[3]);
   else if (mode === "residue") await residue();
   else if (mode === "report") await report();
   else if (mode === "disable") await disable();
   else if (mode === "purge") { await purge(); console.log("HACC fixture purged, including its financial rows."); }
   else {
-    console.error(`unknown mode "${mode}" — expected up, add-clean, residue, report, disable or purge`);
+    console.error(`unknown mode "${mode}" — expected up, add-clean, seed-real, residue, report, disable or purge`);
     process.exitCode = 2;
   }
 } finally {
