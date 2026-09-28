@@ -148,6 +148,9 @@ const REASONS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/Transfers post once, from the paying side/, () => "التحويل يُرحّل مرة واحدة من الطرف الدافع"],
   [/Dated before bank posting starts \((\S+)\)/, (m) => `قبل بدء الترحيل البنكي (${m[1]})`],
   [/The bank posting start date is not set/, () => "لم يُحدَّد تاريخ بدء الترحيل البنكي"],
+  [/VAT on customer advances \(decision D-2\) is not set/, () => "لم يُقرَّر بعد إن كانت ضريبة الدفعات المقدمة تُستحق عند الاستلام (القرار D-2)"],
+  [/Assign this line to a customer/, () => "أسند الحركة إلى عميل في المحاسبة ← الذمم المدينة ← التحصيلات"],
+  [/has posted; correct it through Accounting/, () => "رُحّلت الحركة؛ صحّحها من المحاسبة ← البنك ← تصحيح حركات مرحّلة"],
   [/has no VAT registration number, so input VAT cannot be claimed/, () => "المورد بلا رقم تسجيل ضريبي؛ لا تُسترد ضريبة المدخلات"],
 ];
 export function useExplain() {

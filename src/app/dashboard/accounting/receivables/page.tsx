@@ -10,7 +10,7 @@ import { api, ApiError, Badge, Button, Card, EmptyState, ErrorState, Field, INPU
 import { BillStatus, Pager, docNo, useAmount, useCan, useDay } from "../_components/kit";
 
 type Row = { id: string; invoiceNo: number; kind: "INVOICE" | "CREDIT_NOTE"; customer: string; customerHasVat: boolean; orderNumber: number | null; originalInvoiceNo: number | null;
-  issueDate: string; dueDate: string; status: string; totalNet: string; totalVat: string; totalGross: string; open: string | null; rejectedReason: string | null; overdueDays: number };
+  issueDate: string; dueDate: string; status: string; totalNet: string; totalVat: string; totalGross: string; open: string | null; awaitingReceipt: string | null; rejectedReason: string | null; overdueDays: number };
 type List = { rows: Row[]; total: number; page: number; pageSize: number; counts: Record<string, number> };
 type Aging = { totals: Record<string, string>; subledger: string; ledger: string | null; difference: string | null; reconciled: boolean };
 type Seg = "ALL" | "DRAFT" | "PENDING" | "POSTED" | "OVERDUE";
@@ -86,7 +86,7 @@ export default function ReceivablesPage() {
                   <Td className="whitespace-nowrap">{day(r.issueDate)}</Td>
                   <Td className={`whitespace-nowrap ${r.overdueDays > 0 ? "text-red-700 font-bold" : ""}`}>{r.kind === "CREDIT_NOTE" ? "—" : day(r.dueDate)}</Td>
                   <Td num>{amt(r.totalNet)}</Td><Td num>{amt(r.totalVat)}</Td><Td num>{amt(r.totalGross)}</Td>
-                  <Td num className={r.overdueDays > 0 ? "text-red-700 font-bold" : ""}>{r.open === null ? "—" : amt(r.open)}</Td>
+                  <Td num className={r.overdueDays > 0 ? "text-red-700 font-bold" : ""}>{r.open === null ? "—" : amt(r.open)}{Number(r.awaitingReceipt) > 0 && <span className="block text-[11px] font-bold text-amber-700">{L(`منه ${amt(r.awaitingReceipt)} تحصيل بانتظار الترحيل`, `${amt(r.awaitingReceipt)} receipt awaiting posting`)}</span>}</Td>
                   <Td><span title={r.rejectedReason ?? undefined}><BillStatus sales creditNote={r.kind === "CREDIT_NOTE"} status={r.status} rejected={!!r.rejectedReason} remaining={r.open} gross={r.totalGross} overdueDays={r.overdueDays} /></span></Td>
                 </tr>
               ))}

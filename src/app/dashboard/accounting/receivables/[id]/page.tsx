@@ -23,7 +23,7 @@ type Doc = {
   events: { id: string; eventType: string; status: string; errorMessage: string | null; journalEntryId: string | null }[];
   journals: { id: string; entryNo: number; status: string; isProvisional: boolean }[];
   audit: { action: string; userId: string | null; createdAt: string; reason: string | null }[];
-  open: string | null; creditable: string | null; customerAdvance: string;
+  open: string | null; allocatable: string | null; awaitingReceipt: string | null; creditable: string | null; customerAdvance: string;
   allocations: { id: string; amount: string; allocatedOn: string; active: boolean; invoiceNo: number; source: { kind: string; label: string } }[];
 };
 type Cust = { openInvoices: { id: string; invoiceNo: number; open: string }[] };
@@ -109,11 +109,11 @@ export default function SalesDocPage() {
           </>)}
         {d.status === "APPROVED" && can("ar_invoice_post") && <Button kind="primary" busy={busy === "post"} disabled={!!busy} className="min-h-11" onClick={() => act("post")}>{credit_ ? L("ترحيل الإشعار", "Post the credit note") : L("ترحيل الفاتورة", "Post the invoice")}</Button>}
         {d.status === "POSTED" && !credit_ && can("ar_invoice_create") && Number(d.creditable) > 0 && <Link href={`/dashboard/accounting/receivables/new?creditFor=${d.id}`}><Button className="min-h-11 w-full">{L("إصدار إشعار دائن…", "Issue a credit note…")}</Button></Link>}
-        {d.status === "POSTED" && !credit_ && can("ar_receipt_assign") && Number(d.customerAdvance) > 0 && Number(d.open) > 0 && (
+        {d.status === "POSTED" && !credit_ && can("ar_receipt_assign") && Number(d.customerAdvance) > 0 && Number(d.allocatable) > 0 && (
           <div className="flex flex-col gap-2 border-t border-border-light pt-3">
             <p className="text-[13px] font-bold">{L(`للعميل دفعة مقدمة ${amt(d.customerAdvance)} — تطبيقها على الفاتورة`, `The customer has an advance of ${amt(d.customerAdvance)} — apply it to this invoice`)}</p>
-            <Field label={L("المبلغ", "Amount")}><input className={INPUT} dir="ltr" inputMode="decimal" placeholder={String(Math.min(Number(d.customerAdvance), Number(d.open)).toFixed(2))} value={advance} onChange={(e) => setAdvance(e.target.value)} /></Field>
-            <Button kind="primary" busy={busy === "advance"} disabled={!!busy} onClick={() => call("advance", "/api/accounting/receivables/advances", { invoiceId: d.id, amount: advance || Math.min(Number(d.customerAdvance), Number(d.open)).toFixed(2) })}>{L("تطبيق الدفعة المقدمة", "Apply the advance")}</Button>
+            <Field label={L("المبلغ", "Amount")}><input className={INPUT} dir="ltr" inputMode="decimal" placeholder={String(Math.min(Number(d.customerAdvance), Number(d.allocatable)).toFixed(2))} value={advance} onChange={(e) => setAdvance(e.target.value)} /></Field>
+            <Button kind="primary" busy={busy === "advance"} disabled={!!busy} onClick={() => call("advance", "/api/accounting/receivables/advances", { invoiceId: d.id, amount: advance || Math.min(Number(d.customerAdvance), Number(d.allocatable)).toFixed(2) })}>{L("تطبيق الدفعة المقدمة", "Apply the advance")}</Button>
           </div>
         )}
         {credit_ && d.status === "POSTED" && unapplied > 0.004 && can("ar_receipt_assign") && cust.data && (
@@ -143,7 +143,7 @@ export default function SalesDocPage() {
               : L(`${d.order ? `طلب ${d.order.orderNumber} · ` : ""}${day(d.issueDate)} · تستحق ${day(d.dueDate)}${d.customer.vatNumber ? ` · رقم ضريبي ${d.customer.vatNumber}` : " · فاتورة مبسطة"}`, `${d.order ? `Order ${d.order.orderNumber} · ` : ""}${day(d.issueDate)} · due ${day(d.dueDate)}${d.customer.vatNumber ? ` · VAT no. ${d.customer.vatNumber}` : " · simplified"}`)}
             right={<BillStatus sales creditNote={credit_} status={d.status} rejected={!!d.rejectedReason} remaining={d.open} gross={d.totalGross} />} />
           <div className="flex gap-6 flex-wrap">
-            {[[L("الإجمالي", "Total"), `${amt(d.totalGross)} ${L("ر.س", "SAR")}`], [L("الضريبة", "VAT"), amt(d.totalVat)], [L("الصافي", "Net"), amt(d.totalNet)], ...(d.open !== null ? [[L("المتبقي", "Open"), amt(d.open)]] : [])].map(([l, v]) => (
+            {[[L("الإجمالي", "Total"), `${amt(d.totalGross)} ${L("ر.س", "SAR")}`], [L("الضريبة", "VAT"), amt(d.totalVat)], [L("الصافي", "Net"), amt(d.totalNet)], ...(d.open !== null ? [[L("المتبقي", "Open"), amt(d.open)]] : []), ...(Number(d.awaitingReceipt) > 0 ? [[L("منه تحصيل بانتظار الترحيل", "of which receipt awaiting posting"), amt(d.awaitingReceipt)]] : [])].map(([l, v]) => (
               <div key={l}><p className="text-xs font-bold text-brown">{l}</p><p className="text-xl font-extrabold text-charcoal tabular-nums">{v}</p></div>
             ))}
           </div>

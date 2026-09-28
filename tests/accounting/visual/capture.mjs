@@ -20,6 +20,11 @@ const firstJournal = (status) => async (p) => {
   await p.goto(`${BASE}/dashboard/accounting/journals/${id}`);
 };
 
+const firstSale = (status, path = "") => async (p) => {
+  const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/receivables/invoices?status=${s}&kind=INVOICE`)).json()).rows.at(-1)?.id, status);
+  await p.goto(path ? `${BASE}/dashboard/accounting/receivables/new?creditFor=${id}` : `${BASE}/dashboard/accounting/receivables/${id}`);
+};
+const assignDep = async (p) => { await p.locator("tr", { hasText: "DEP-5530" }).getByRole("button", { name: "إسناد" }).click(); await p.getByText("مطاعم البيت الشامي").first().waitFor(); };
 const firstBill = (status) => async (p) => {
   const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/bills?status=${s}`)).json()).rows[0]?.id, status);
   await p.goto(`${BASE}/dashboard/accounting/payables/${id}`);
@@ -65,6 +70,16 @@ const SHOTS = [
   { id: "ACC-27-390", route: "/dashboard/accounting/reports", w: 390, act: async (p) => { await p.getByRole("button", { name: "التدفقات النقدية" }).click(); } },
   { id: "ACC-28", route: "/dashboard/accounting/bank?view=corrections" },
   { id: "ACC-28-request", route: "/dashboard/accounting/bank?view=corrections", user: "acc.preparer", act: async (p) => { await p.locator("tr", { hasText: "TRF-2291" }).getByRole("button", { name: "طلب تصحيح" }).click(); } },
+  { id: "ACC-30", route: "/dashboard/accounting/receivables" },
+  { id: "ACC-30-en", route: "/dashboard/accounting/receivables", user: "acc.approver.en" },
+  { id: "ACC-31", route: "/dashboard/accounting/receivables/new", user: "acc.preparer" },
+  { id: "ACC-32", route: "/dashboard/accounting/receivables", act: firstSale("POSTED") },
+  { id: "ACC-32-submitted", route: "/dashboard/accounting/receivables", act: firstSale("SUBMITTED") },
+  { id: "ACC-33", route: "/dashboard/accounting/receivables/receipts" },
+  { id: "ACC-33-assign", route: "/dashboard/accounting/receivables/receipts", user: "acc.preparer", act: assignDep },
+  { id: "ACC-34", route: "/dashboard/accounting/receivables/aging" },
+  { id: "ACC-35", route: "/dashboard/accounting/receivables", user: "acc.preparer", act: firstSale("POSTED", "credit") },
+  { id: "ACC-36", route: "/dashboard/accounting/receivables?status=PENDING", w: 390 },
   { id: "ACC-27-en", route: "/dashboard/accounting/reports", user: "acc.approver.en", act: async (p) => { await p.getByRole("button", { name: "Cash flow" }).click(); } },
 ];
 

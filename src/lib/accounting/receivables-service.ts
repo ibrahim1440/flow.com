@@ -266,6 +266,23 @@ export async function invoiceOpen(db: Db, invoiceId: string) {
   return dec(inv.totalGross).sub(dec(used._sum.amount));
 }
 
+/**
+ * What customers owe on invoices, as the ledger sees it: an allocation from a receipt counts only
+ * once its bank line has posted (as in the aging). `awaiting` is the part allocated from receipts
+ * whose bank line has not posted yet — reserved against over-allocation, but still owed.
+ */
+export async function invoiceBalances(db: Db, invoiceIds: string[]) {
+  const allocs = await db.arAllocation.findMany({ where: { invoiceId: { in: invoiceIds }, active: true }, select: { invoiceId: true, amount: true, receipt: { select: { bankTransactionId: true } } } });
+  const posted = await postedBankLines(db, allocs.flatMap((a) => (a.receipt ? [a.receipt.bankTransactionId] : [])));
+  const out = new Map<string, { settled: Prisma.Decimal; awaiting: Prisma.Decimal }>();
+  for (const a of allocs) {
+    const e = out.get(a.invoiceId) ?? { settled: ZERO, awaiting: ZERO };
+    if (a.receipt && !posted.has(a.receipt.bankTransactionId)) e.awaiting = e.awaiting.add(a.amount); else e.settled = e.settled.add(a.amount);
+    out.set(a.invoiceId, e);
+  }
+  return out;
+}
+
 /** Open posted invoices of a customer, oldest due first. */
 export async function openInvoices(db: Db, customerId: string) {
   const invs = await db.salesInvoice.findMany({ where: { customerId, kind: "INVOICE", status: "POSTED" }, orderBy: [{ dueDate: "asc" }, { invoiceNo: "asc" }] });
@@ -307,6 +324,8 @@ export async function assignReceipt(bankTransactionId: string, body: { customerI
     const salesCollectionId = typeof body.salesCollectionId === "string" && body.salesCollectionId ? body.salesCollectionId : linkedCollection;
     let customerId = typeof body.customerId === "string" ? body.customerId : "";
     if (salesCollectionId) {
+      // Serialise claims on the collection so a concurrent claim sees the first one committed.
+      await tx.$queryRaw`SELECT 1 FROM "SalesCollection" WHERE "id" = ${salesCollectionId} FOR UPDATE`;
       const c = await tx.salesCollection.findUnique({ where: { id: salesCollectionId } });
       if (!c) throw new AccountingError("Sales collection not found.", 404);
       if (c.status !== "APPROVED") throw new AccountingError("Only a finance-verified (approved) sales collection can name the customer.", 409);

@@ -16,6 +16,11 @@ const firstJournal = async (p) => {
   const id = await p.evaluate(async () => (await (await fetch(`/api/accounting/journals?status=SUBMITTED&sort=oldest`)).json()).rows.find((r) => r.type === "MANUAL")?.id);
   await p.goto(`${BASE}/dashboard/accounting/journals/${id}`);
 };
+const firstSale = (status, path = "") => async (p) => {
+  const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/receivables/invoices?status=${s}&kind=INVOICE`)).json()).rows.at(-1)?.id, status);
+  await p.goto(path ? `${BASE}/dashboard/accounting/receivables/new?creditFor=${id}` : `${BASE}/dashboard/accounting/receivables/${id}`);
+};
+const assignDep = async (p) => { await p.locator("tr", { hasText: "DEP-5530" }).getByRole("button", { name: "إسناد" }).click(); await p.getByText("مطاعم البيت الشامي").first().waitFor(); };
 const firstBill = (status) => async (p) => {
   const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/bills?status=${s}`)).json()).rows[0]?.id, status);
   await p.goto(`${BASE}/dashboard/accounting/payables/${id}`);
@@ -46,6 +51,14 @@ const PAGES = [
   ["ACC-26 mobile bills", "/dashboard/accounting/payables?status=PENDING", undefined, undefined, 390],
   ["ACC-28 bank corrections", "/dashboard/accounting/bank?view=corrections"],
   ["ACC-28 correction request", "/dashboard/accounting/bank?view=corrections", "acc.preparer", async (p) => { await p.locator("tr", { hasText: "TRF-2291" }).getByRole("button", { name: "طلب تصحيح" }).click(); }],
+  ["ACC-30 sales invoices", "/dashboard/accounting/receivables"],
+  ["ACC-31 sales invoice editor", "/dashboard/accounting/receivables/new", "acc.preparer"],
+  ["ACC-32 sales invoice detail", "/dashboard/accounting/receivables", undefined, firstSale("POSTED")],
+  ["ACC-33 customer receipts", "/dashboard/accounting/receivables/receipts"],
+  ["ACC-33 receipt assignment", "/dashboard/accounting/receivables/receipts", "acc.preparer", assignDep],
+  ["ACC-34 receivables aging", "/dashboard/accounting/receivables/aging"],
+  ["ACC-35 credit note", "/dashboard/accounting/receivables", "acc.preparer", firstSale("POSTED", "credit")],
+  ["ACC-36 mobile sales invoices", "/dashboard/accounting/receivables?status=PENDING", undefined, undefined, 390],
   ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 

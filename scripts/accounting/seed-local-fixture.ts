@@ -74,6 +74,14 @@ async function main() {
     // On this verified disposable database those guards are suspended for the fixture's own ACC-
     // lines only, inside one transaction, and re-enabled before it commits.
     const acc = `SELECT t.id FROM "BankTransaction" t JOIN "CashAccount" c ON c.id = t."cashAccountId" WHERE c.code LIKE 'ACC-%'`;
+    // Stage 3 documents are accounting-owned tables (guarded like bills): cleared first, since
+    // receipts reference the bank lines.
+    const arGuards: [string, string][] = [["AdvanceApplication", "AdvanceApplication_accounting_guard"], ["ArAllocation", "ArAllocation_accounting_guard"], ["CustomerReceipt", "CustomerReceipt_accounting_guard"], ["SalesInvoiceLine", "SalesInvoiceLine_accounting_guard"], ["SalesInvoice", "SalesInvoice_accounting_guard"]];
+    await prisma.$transaction([
+      ...arGuards.map(([t, g]) => prisma.$executeRawUnsafe(`ALTER TABLE "${t}" DISABLE TRIGGER "${g}"`)),
+      prisma.$executeRawUnsafe(`TRUNCATE "AdvanceApplication", "ArAllocation", "CustomerReceipt", "SalesInvoiceLine", "SalesInvoice" RESTART IDENTITY`),
+      ...arGuards.map(([t, g]) => prisma.$executeRawUnsafe(`ALTER TABLE "${t}" ENABLE TRIGGER "${g}"`)),
+    ]);
     const guards: [string, string][] = [["BankTransaction", "BankTransaction_no_delete"], ["BankTransaction", "BankTransaction_posted_guard"], ["BankTransactionSplit", "BankTransactionSplit_posted_guard"], ["BankTransactionMatch", "BankTransactionMatch_posted_guard"], ["BankCorrection", "BankCorrection_guard"]];
     await prisma.$transaction([
       ...guards.map(([t, g]) => prisma.$executeRawUnsafe(`ALTER TABLE "${t}" DISABLE TRIGGER "${g}"`)),
@@ -91,6 +99,12 @@ async function main() {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupplierBillLine" ENABLE TRIGGER "SupplierBillLine_accounting_guard"`);
     await prisma.$executeRawUnsafe(`DELETE FROM "FinObligation" WHERE description LIKE 'ACC-FIXTURE%' OR "sourceType" = 'SUPPLIER_BILL'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Supplier" WHERE contact = 'fixture:accounting'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "SalesCollection" WHERE "idempotencyKey" LIKE 'acc-fixture-%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "CollectionEvent" WHERE "externalRef" LIKE 'ACC-SC-%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Opportunity" WHERE title LIKE 'ACC-FIXTURE%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "PipelineStage" WHERE code = 'ACC-WON' AND NOT EXISTS (SELECT 1 FROM "Opportunity" o WHERE o."stageId" = "PipelineStage".id)`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Order" WHERE notes = 'fixture:accounting'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Customer" WHERE address = 'fixture:accounting'`);
     await prisma.$executeRawUnsafe(`UPDATE "FinCategory" SET "glAccountId" = NULL WHERE "glAccountId" IS NOT NULL`);
     await prisma.$executeRawUnsafe(`DELETE FROM "FinCategory" WHERE code LIKE 'ACC-%'`);
     await prisma.$executeRawUnsafe(`TRUNCATE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`);
@@ -268,12 +282,12 @@ async function main() {
   await prisma.cashAccount.update({ where: { id: till.id }, data: { openingBalance: await bal("1110"), openingBalanceDate: dayBefore } });
   await updateSettings({ bankPostingFrom: bankFrom }, appr);
   const ob = async (b: { obligationId: string | null }) => b.obligationId!;
-  const bankRow = async (o: { acct?: string; day: number; amount: string; cls: string; ref: string; desc: string; splits?: [string, string][]; match?: [string, string] }) => {
+  const bankRow = async (o: { acct?: string; day: number; amount: string; cls: string; ref: string; desc: string; splits?: [string, string][]; match?: [string, string, ("OBLIGATION" | "SALES_COLLECTION")?] }) => {
     const t = await prisma.bankTransaction.create({ data: {
       cashAccountId: o.acct ?? bankAcc.id, branchKey: "COMPANY", txnDate: D(9, o.day), amount: new Prisma.Decimal(o.amount), status: "CONFIRMED",
       classification: o.cls as never, reviewStatus: "NEEDS_REVIEW", bankReference: o.ref, description: o.desc, createdBy: prep,
       splits: o.splits ? { create: o.splits.map(([c, a]) => ({ finCategoryId: c, amount: new Prisma.Decimal(a) })) } : undefined,
-      matches: o.match ? { create: [{ targetType: "OBLIGATION", targetId: o.match[0], amount: new Prisma.Decimal(o.match[1]), createdBy: prep }] } : undefined,
+      matches: o.match ? { create: [{ targetType: o.match[2] ?? "OBLIGATION", targetId: o.match[0], amount: new Prisma.Decimal(o.match[1]), createdBy: prep }] } : undefined,
     } });
     return t.id;
   };
@@ -298,6 +312,60 @@ async function main() {
   const feeCorr = await requestBankCorrection(fee, { kind: "REPLACE", reason: "الرسوم الصحيحة 40.50 حسب كشف البنك", replacement: { txnDate: `${YEAR}-09-20`, amount: "-40.50", classification: "BANK_FEE", splits: [{ finCategoryId: C.FEES, amount: "-40.50" }] } }, prep);
   await approveBankCorrection(feeCorr.id, appr);
   await requestBankCorrection(pPack, { kind: "REPLACE", reason: "الدفعة الفعلية 2,100 وليست 2,000", replacement: { txnDate: `${YEAR}-09-18`, amount: "-2100.00", classification: "SUPPLIER_PAYMENT", splits: [{ finCategoryId: C.SUP, amount: "-2100.00" }], matches: [{ targetType: "OBLIGATION", targetId: await ob(bPack), amount: "2100.00" }] } }, prep);
+  await processPendingEvents();
+
+  // ─── Stage 3: sales invoices, credit notes, customer receipts (synthetic; tagged fixture:accounting) ───
+  // Recognition policy approved; the advances policy is prepared but not approved and decision D-2
+  // (VAT on advances) is left undecided, so a receipt with an advance waits — the real state until
+  // the accountant decides. Nothing here is a real customer, order or amount.
+  const rp = await draftPolicy("receivables.recognition", {}, prep); await approvePolicy(rp.id, appr);
+  await draftPolicy("receivables.advances", {}, prep);
+  const { createSalesDoc, submitSalesDoc, approveSalesDoc, rejectSalesDoc, postSalesDoc, assignReceipt } = await import("../../src/lib/accounting/receivables-service");
+  const cust = async (nameAr: string, name: string, vatNumber: string | null, terms: number, crNumber: string | null = null, creditLimit: string | null = null) =>
+    (await prisma.customer.create({ data: { nameAr, name, vatNumber, crNumber, paymentTermsDays: terms, creditLimit: creditLimit ? new Prisma.Decimal(creditLimit) : null, address: "fixture:accounting" } })).id;
+  const K1 = await cust("فندق الروضة", "Al-Rawda Hotel", "300445566700003", 30, "1010223344", "20000");
+  const K2 = await cust("مطاعم البيت الشامي", "Al-Bait Al-Shami Restaurants", "310556677800003", 15, "1010334455", "10000");
+  const K3 = await cust("مقاهي نجد المختصة", "Najd Specialty Cafés", "311667788900003", 30);
+  const K4 = await cust("عميل أفراد — نقدي", "Walk-in customer", null, 0);
+  const order = async (orderNumber: number, customerId: string) => (await prisma.order.create({ data: { orderNumber, customerId, status: "Completed", approvalStatus: "Yes", notes: "fixture:accounting" } })).id;
+  const O1 = await order(7009, K1);
+  await order(7012, K2);
+  type SL = { d: string; q: string; p: string; disc?: string; code?: string };
+  const sdoc = async (customerId: string, issue: Date, lines: SL[], until: "DRAFT" | "SUBMITTED" | "APPROVED" | "POSTED" | "REJECTED", extra: { orderId?: string; kind?: "CREDIT_NOTE"; originalInvoiceId?: string; reason?: string; description?: string } = {}) => {
+    const d = await createSalesDoc({ customerId, issueDate: issue.toISOString().slice(0, 10), ...extra, lines: lines.map((l) => ({ description: l.d, quantity: l.q, unitPrice: l.p, discountPercent: l.disc ?? "0", accountId: l.code ? A[l.code] : undefined, taxCategoryId: vat15.id })) }, prep);
+    if (until === "DRAFT") return d.id;
+    await submitSalesDoc(d.id, prep);
+    if (until === "SUBMITTED") return d.id;
+    if (until === "REJECTED") { await rejectSalesDoc(d.id, appr, "سعر الكيلو لا يطابق عرض السعر المعتمد"); return d.id; }
+    await approveSalesDoc(d.id, appr);
+    if (until === "APPROVED") return d.id;
+    await postSalesDoc(d.id, appr);
+    return d.id;
+  };
+  const I1 = await sdoc(K1, D(9, 1), [{ d: "بن كولومبي محمص — 30 كغ", q: "30", p: "140" }], "POSTED", { orderId: O1, description: "توريد شهري للفندق" });
+  await sdoc(K2, D(8, 28), [{ d: "خلطة إسبريسو البيت — 20 كغ", q: "20", p: "150" }, { d: "تدريب باريستا (جلسة)", q: "1", p: "200", code: "4200" }], "POSTED");
+  const I3 = await sdoc(K3, D(9, 10), [{ d: "إثيوبي يرغاتشيفي محمص — 12 كغ", q: "12", p: "125", disc: "5" }], "POSTED");
+  await sdoc(K3, D(9, 14), [{ d: "إرجاع كيسين تالفين — 2 كغ", q: "2", p: "125", disc: "5" }], "POSTED", { kind: "CREDIT_NOTE", originalInvoiceId: I3, reason: "تلف في التغليف عند الاستلام" });
+  await sdoc(K1, D(9, 20), [{ d: "بن برازيلي محمص — 15 كغ", q: "15", p: "110" }], "SUBMITTED");
+  await sdoc(K3, D(9, 21), [{ d: "أكواب ورقية مطبوعة — 1,000", q: "1000", p: "0.9", code: "4200" }], "APPROVED");
+  await sdoc(K2, D(9, 15), [{ d: "خلطة إسبريسو البيت — 10 كغ", q: "10", p: "165" }], "REJECTED");
+  await sdoc(K4, D(9, 22), [{ d: "بن مطحون — 2 كغ", q: "2", p: "95" }], "DRAFT");
+
+  // Customer bank lines: DEP-5510 (above) pays INV for order 7009 in full; a line linked in Finance
+  // to an approved sales collection (the collection names the customer and keeps its commission);
+  // a line nobody has assigned; and a receipt that leaves an advance (waits for D-2).
+  const stage = await prisma.pipelineStage.upsert({ where: { code: "ACC-WON" }, update: {}, create: { code: "ACC-WON", nameEn: "Won (fixture)", nameAr: "مكسوب (تجريبي)", position: 99 } });
+  const opp = await prisma.opportunity.create({ data: { title: "ACC-FIXTURE توريد مطاعم البيت الشامي", customerId: K2, stageId: stage.id, ownerId: rep1 } });
+  const ce = await prisma.collectionEvent.create({ data: { externalRef: "ACC-SC-0931", customerId: K2, opportunityId: opp.id, amountGross: new Prisma.Decimal("5000"), amountTax: new Prisma.Decimal("652.17"), collectedAt: new Date(`${YEAR}-09-26T09:00:00Z`) } });
+  const coll = await prisma.salesCollection.create({ data: { collectionEventId: ce.id, opportunityId: opp.id, customerId: K2, idempotencyKey: "acc-fixture-sc-0931", referenceNumber: "SC-0931", amountGross: new Prisma.Decimal("5000"), amountTax: new Prisma.Decimal("652.17"), amountNet: new Prisma.Decimal("4347.83"), collectedAt: new Date(`${YEAR}-09-26T09:00:00Z`), submittedById: rep1, status: "APPROVED", decidedById: appr, decidedAt: new Date() } });
+  const dep30 = await bankRow({ day: 26, amount: "5000.00", cls: "CUSTOMER_RECEIPT", ref: "DEP-5530", desc: "تحويل من مطاعم البيت الشامي", splits: [[C.SALES, "5000.00"]], match: [coll.id, "5000.00", "SALES_COLLECTION"] });
+  const dep21 = await bankRow({ day: 22, amount: "1150.00", cls: "CUSTOMER_RECEIPT", ref: "DEP-5521", desc: "إيداع شيك", splits: [[C.SALES, "1150.00"]] });
+  const dep40 = await bankRow({ day: 27, amount: "2300.00", cls: "CUSTOMER_RECEIPT", ref: "DEP-5540", desc: "تحويل مقاهي نجد المختصة", splits: [[C.SALES, "2300.00"]] });
+  await review([dep30, dep21, dep40]);
+  await assignReceipt(rcpt, { customerId: K1, allocations: [{ invoiceId: I1, amount: "4830.00" }] }, prep);
+  const open3 = await prisma.salesInvoice.findUniqueOrThrow({ where: { id: I3 } });
+  const cn3 = await prisma.arAllocation.aggregate({ where: { invoiceId: I3, active: true }, _sum: { amount: true } });
+  await assignReceipt(dep40, { customerId: K3, allocations: [{ invoiceId: I3, amount: new Prisma.Decimal(open3.totalGross).sub(cn3._sum.amount ?? 0).toFixed(2) }] }, prep);
   await processPendingEvents();
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);
 }

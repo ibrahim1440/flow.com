@@ -7,7 +7,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { api, ApiError, Badge, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
-import { useAmount, useCan, useDay } from "../../_components/kit";
+import { useAmount, useCan, useDay, useExplain } from "../../_components/kit";
 
 type Row = {
   id: string; txnDate: string; amount: string; classification: string; reviewStatus: string; bankReference: string | null; description: string | null; counterparty: string | null; cashAccount: string;
@@ -43,7 +43,7 @@ export default function ReceiptsPage() {
 
   if (error) return <Card><ErrorState error={error} onRetry={reload} /></Card>;
   if (!data) return <Card><LoadingState /></Card>;
-  const posted = data.rows.filter((r) => r.posting?.status === "PROCESSED").length;
+  const posted = data.rows.filter((r) => r.posting?.status === "TRANSLATED").length;
   const waiting = data.rows.filter((r) => !r.receipt && !r.beforeStart).length;
   const before = data.rows.filter((r) => r.beforeStart).length;
 
@@ -72,7 +72,7 @@ export default function ReceiptsPage() {
             <thead><tr><Th>{L("التاريخ", "Date")}</Th><Th>{L("الحساب", "Account")}</Th><Th>{L("المرجع", "Reference")}</Th><Th>{L("البيان", "Description")}</Th><Th num>{L("المبلغ", "Amount")}</Th><Th>{L("الحالة", "State")}</Th><Th /></tr></thead>
             <tbody>
               {data.rows.map((r) => {
-                const isPosted = r.posting?.status === "PROCESSED";
+                const isPosted = r.posting?.status === "TRANSLATED";
                 return (
                   <tr key={r.id} className={sel === r.id ? "bg-orange-light/40" : "hover:bg-cream/40"}>
                     <Td className="whitespace-nowrap">{day(r.txnDate)}</Td>
@@ -96,13 +96,14 @@ export default function ReceiptsPage() {
 
 function RowState({ r }: { r: Row }) {
   const { L } = useL();
+  const explain = useExplain();
   if (r.beforeStart) return <span className="text-slate-500">{L("قبل تاريخ بدء ترحيل البنك", "Before the bank posting start date")}</span>;
-  if (r.posting?.status === "PROCESSED" && r.receipt) {
+  if (r.posting?.status === "TRANSLATED" && r.receipt) {
     const inv = r.receipt.allocations.map((a) => `INV-${a.invoiceNo}`).join("، ");
     return <span className="text-green-700 font-bold">{L("مرحّل", "Posted")} · {r.receipt.customer}{inv ? ` · ${inv}` : ""}{Number(r.receipt.advanceAmount) !== 0 ? ` · ${L("دفعة مقدمة", "advance")}` : ""}</span>;
   }
   if (!r.receipt) return <span className="text-red-700 font-bold">{L("بانتظار الإسناد", "Awaiting assignment")}{r.collection ? ` — ${L("التحصيل", "collection")} ${r.collection.reference ?? ""} ${L("يقترح العميل", "suggests the customer")}` : ""}</span>;
-  return <span className="text-amber-700 font-bold" title={r.posting?.reason ?? undefined}>{L("مُسنَد", "Assigned")} · {r.receipt.customer} — {r.posting?.status === "BLOCKED" ? L("محجوب: ", "blocked: ") + (r.posting.reason ?? "") : L("بانتظار الترحيل", "waiting to post")}</span>;
+  return <span className="text-amber-700 font-bold" title={explain(r.posting?.reason) || undefined}>{L("مُسنَد", "Assigned")} · {r.receipt.customer} — {r.posting?.status === "BLOCKED" ? L("محجوب: ", "blocked: ") + explain(r.posting.reason) : L("بانتظار الترحيل", "waiting to post")}</span>;
 }
 
 /** Decision D-2: whether VAT is due on an advance when it is received. Undecided = provisional. */
@@ -166,7 +167,7 @@ function AssignPanel({ row, canAssign, onDone, onClose }: { row: Row; canAssign:
     try {
       const allocations = refund ? [] : invoices.filter((i) => alloc[i.id] && cents(alloc[i.id]) > 0).map((i) => ({ invoiceId: i.id, amount: alloc[i.id] }));
       const r = await api<{ receipt: { receiptNo: number }; ledger: { status?: string } | null }>(`/api/accounting/receivables/receipts/${row.id}`, { method: "PUT", json: { customerId, allocations, salesCollectionId: row.collection?.id } });
-      onDone(L(`أُسند التحصيل RC-${r.receipt.receiptNo}. ${r.ledger?.status === "PROCESSED" ? "رُحّل." : "بانتظار الترحيل."}`, `Receipt RC-${r.receipt.receiptNo} assigned. ${r.ledger?.status === "PROCESSED" ? "Posted." : "Waiting to post."}`));
+      onDone(L(`أُسند التحصيل RC-${r.receipt.receiptNo}. ${r.ledger?.status === "TRANSLATED" ? "رُحّل." : "بانتظار الترحيل."}`, `Receipt RC-${r.receipt.receiptNo} assigned. ${r.ledger?.status === "TRANSLATED" ? "Posted." : "Waiting to post."}`));
     } catch (e) { setErr(e instanceof ApiError ? e.message : String(e)); }
     setBusy(false);
   };

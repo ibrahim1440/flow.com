@@ -26,7 +26,7 @@ async function session(username) {
     return { status: res.status, body: await res.json().catch(() => null) };
   };
 }
-const posted = async () => (await db.query(`select t.id, t.amount::text, t."txnDate" from "BankTransaction" t join "AccountingEvent" e on e."idempotencyKey" = 'bank:' || t.id || ':confirmed' join "JournalEntry" j on j."originEventId" = e.id join "CashAccount" c on c.id = t."cashAccountId" where t.status <> 'VOID' and t.classification <> 'INTERNAL_TRANSFER' and c.code = 'ACC-BANK' and not exists (select 1 from "BankCorrection" b where b."transactionId" = t.id) order by t."txnDate" desc limit 1`)).rows[0];
+const posted = async () => (await db.query(`select t.id, t.amount::text, t."txnDate" from "BankTransaction" t join "AccountingEvent" e on e."idempotencyKey" = 'bank:' || t.id || ':confirmed' join "JournalEntry" j on j."originEventId" = e.id join "CashAccount" c on c.id = t."cashAccountId" where t.status <> 'VOID' and t.classification <> 'INTERNAL_TRANSFER' and t.amount < 0 and c.code = 'ACC-BANK' and not exists (select 1 from "BankCorrection" b where b."transactionId" = t.id) order by t."txnDate" desc limit 1`)).rows[0];
 
 test("Finance cannot change a posted line: review, void and match are refused with 409 and a pointer to Accounting", async () => {
   await (await session("acc.approver"))("/api/accounting/events/process", { method: "POST", json: {} });
