@@ -147,6 +147,14 @@ Totals: revenue 20,000, VAT 3,000, cash 23,000, each once.
 **Legacy collections without an invoice** are not classified as advances automatically. Each one is
 checked against delivery records and the existing Qoyod entries, then flagged for review.
 
+**Implemented as a setting (2026-09-28).** Accounting → Receivables → Customer receipts shows a
+"VAT on advances (D-2)" selector: *at receipt*, *not at receipt*, or *not decided yet* (the
+default). Changing it needs the settings permission and is audited. It applies to receipts assigned
+from then on; posted receipts keep the VAT they posted with. Advance postings also need the
+`receivables.advances` policy approved (four-eyes). Until both are in place, a receipt that leaves
+an advance does not post. When an advance is applied to an invoice, the VAT it carried is released
+in proportion (Dr 2410 + Dr 2170 / Cr 1130), so VAT is not counted twice.
+
 **Please decide.**
 - confirm the treatment
 - the prepayment invoice workflow (issued by BeanFlow or by Qoyod until cutover)
@@ -193,11 +201,33 @@ default and is marked with * on the statement.
 |---|---|---|
 | 1110, 1120 (cash control) | Cash | These are the cash balances the statement explains |
 | 1130–1180 (receivables, VAT, prepayments, inventory, advances) | Operating | Working capital |
-| 1210–1230 (fixed assets) | Investing | Purchase or sale of long-term assets |
-| 1290 Accumulated depreciation | Operating | Depreciation is added back through operating |
-| 21xx, 22xx liabilities | Operating | Working capital and provisions |
+| 1210–1230 (fixed assets), 1290 Accumulated depreciation | Investing | Purchase or sale of long-term assets. Depreciation itself is a non-cash expense added back in operating (not a flow on 1290) |
+| 2195 Payables for fixed assets | Investing | Paying for an asset bought on credit is an investing outflow when paid, not when bought |
+| 2220 Long-term loans | Financing | Loan drawdowns and repayments |
+| other 21xx, 22xx liabilities | Operating | Working capital and provisions |
 | 3100 Capital and other equity | Financing | Owner funding |
 | 3200 Retained earnings, 3900 Opening balance equity | Excluded | Moves only through closing or opening entries. A non-zero movement here is flagged for review |
+
+**How flows are found (changed 2026-09-28).** The statement no longer infers flows from account
+balance movements alone, which could report fictitious flows for non-cash transactions (an asset
+bought on credit, an asset financed directly by a loan) while still appearing reconciled. It now
+works entry by entry:
+- Only entries that touch a cash account produce cash flows. The cash in an entry is split across
+  the entry's other lines on the opposite side, in proportion to their amounts, and each part takes
+  the class of its account.
+- In an entry that also has investing (else financing) lines, profit-and-loss lines follow that
+  activity (for example, a disposal's gain or loss sits with its proceeds).
+- A bank payment matched to a supplier bill takes the class of the bill's lines (a bill for a fixed
+  asset → investing for the net, operating for its VAT).
+- Entries with no cash line are **non-cash transactions**. Those that acquire investing or
+  financing items against liabilities or equity are listed separately as a disclosure (for example,
+  "machine 64,000 bought by instalments", "van 118,000 financed by a bank loan").
+- Operating cash is computed twice (directly and by the indirect method). The statement shows
+  "reconciled" only when both agree, the sections add up to the change in cash and nothing falls in
+  an excluded account.
+
+Regression tests with independently worked amounts: `tests/accounting/integration/cashflow-transactions.test.ts`
+(6 cases; the failing output before the fix is kept in `evidence/test-runs/cashflow-regression-before-fix.txt`).
 
 Questions for you:
 1. Should any loans or owner current accounts be added as **financing** accounts?
@@ -217,4 +247,10 @@ activation until replaced by your decisions:
   the disposable databases.
 - Stock lines on supplier bills post to GRNI 2120 (pending D-1).
 - The cash-flow classes in §7 are template defaults.
-- Customer receipts on the bank stay blocked until the receivables stage and D-2.
+- `receivables.recognition` is approved in the fixture; `receivables.advances` is prepared but
+  **not** approved, and the D-2 setting (VAT on advances) is left **undecided**, so a receipt that
+  leaves an advance is held in the fixture (the real state until you decide).
+- Where a test needs the advance to post, it runs in the isolated test database with provisional
+  posting, using "VAT at receipt" (the recommendation in §5) as the fallback. Such journals are
+  marked provisional and cannot occur outside that test mode.
+- Credit notes debit a single "sales returns and allowances" account (4900) for their net.

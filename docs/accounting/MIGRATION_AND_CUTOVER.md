@@ -28,6 +28,13 @@ Target: Neon `dark-lab-61530722` / branch `rehearsal-accounting-ledger-core-2026
 Not rehearsed there: the new application build serving the copy as `erp_app` (needs a Preview on
 that branch — blocked, see `RELEASE_PROPOSAL.md`).
 
+**Later migrations not yet rehearsed on a production copy** (applied and tested only on the local
+disposable PostgreSQL 16 databases): `20260928120000_accounting_payables_bank`,
+`20260928130000_accounting_cash_flow_class`, `20260929090000_accounting_bank_corrections`,
+`20260929120000_accounting_receivables`. The receivables migration adds columns to the existing
+`Customer` table (nullable or defaulted) and triggers on new tables only; it must still be rehearsed
+on a fresh copy of production before any release package is proposed.
+
 ## Cutover (proposal — dates and figures are the business's decision, see POLICIES D-4)
 1. Accountant approves the chart (template adapted), creates the fiscal year, maps roles.
 2. Choose cutover date C. Import the Qoyod trial balance at C−1 as one OPENING entry (four-eyes)

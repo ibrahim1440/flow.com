@@ -111,10 +111,17 @@ REJECTED and REVERSED:
 
 ## 7. Implementation notes and known limitations
 
-- **Bank line edited after posting.** Only the confirmation and the void emit events. An amount
-  or split edited after the line has posted is not re-posted. The reconciliation report shows the
-  resulting difference as an itemised line. Recommended fix before activation: void and re-enter,
-  or add an edit event with reversal.
+- **Bank line changed after posting — resolved 2026-09-28.** A posted line (or a transfer whose
+  peer has posted) is frozen: amount, date, account, classification, splits, supplier/collection
+  matches and the transfer link cannot change. This is enforced in the Finance services (clear 409
+  with a pointer to Accounting) and by database triggers that also refuse the runtime role. A
+  change goes through **Accounting → Bank → Corrections**: a correction request (void, or void and
+  replace) with a reason, approved by someone else. Approval voids the line (a mirror journal dated on the
+  approval day, whose period must be open; the original's period may be locked), creates the
+  replacement as a new line linked to the original, and posts it on its own date. A transfer can
+  only be voided (both legs), not replaced; the request, the decision and both journals stay in the audit trail. Tests:
+  `bank-corrections.test.ts` (8, including concurrent approvals, retries, closed periods, transfers
+  and supplier allocations) and `bank-corrections.test.mjs` (3, runtime role).
 - **Stock lines on bills** debit GRNI 2120. This is a **provisional test assumption** until D-1
   (inventory valuation) is decided; GRNI is not cleared until stage 4.
 - **Fixture approvals.** The local fixture approves the `payables.recognition` and `bank.posting`

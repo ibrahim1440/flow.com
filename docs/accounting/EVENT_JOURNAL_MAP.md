@@ -15,6 +15,24 @@ role / locked period / unapproved policy or plan → BLOCKED with the reason, re
 commissions payable reconciles to the commission ledger per employee, including a return after
 payout (negative balance = employee owes).
 
-**Not yet mapped (no source documents exist yet):** sales invoices, receipts, customer advances,
-credit notes, purchase orders/receipts/bills/payments, inventory movements and valuation,
-production and costing, bank transactions from Finance, fixed assets, payroll, year-end closing.
+## Stage 2 and 3 events (2026-09-28)
+
+| Source | Event | Gate | Journal | Party |
+|---|---|---|---|---|
+| `SupplierBill` POSTED | `ap.bill.posted` | `payables.recognition` | Dr each line's account (net) · Dr INPUT_VAT / Cr AP_CONTROL (gross) | SUPPLIER |
+| `SupplierBill` REVERSED | `ap.bill.reversed` | — | mirror of the posted journal, dated on the reversal | SUPPLIER |
+| `BankTransaction` confirmed and reviewed | `bank.transaction.confirmed` | `bank.posting` (+ start date) | Dr/Cr the cash account's GL account against the budget splits' accounts; payables splits only to the extent matched to posted bills; transfers post once from the paying leg | SUPPLIER on AP lines |
+| same, classified customer receipt/refund | `bank.transaction.confirmed` | `bank.posting`; advances also `receivables.advances` + D-2 | Dr bank / Cr AR_CONTROL (allocated) · Cr CUSTOMER_ADVANCES (net) · Cr OUTPUT_VAT (advance VAT per D-2); waits until assigned to a customer | CUSTOMER |
+| `BankTransaction` VOID (unposted, or through an approved correction) | `bank.transaction.voided` | — | mirror of the posted journal, dated on the void | as original |
+| `SalesInvoice` INVOICE POSTED | `ar.invoice.posted` | `receivables.recognition` | Dr AR_CONTROL (gross) / Cr revenue per line (net) · Cr OUTPUT_VAT | CUSTOMER |
+| `SalesInvoice` CREDIT_NOTE POSTED | `ar.credit_note.posted` | `receivables.recognition` | Dr SALES_RETURNS (net) · Dr OUTPUT_VAT / Cr AR_CONTROL (gross) | CUSTOMER |
+| `AdvanceApplication` POSTED | `ar.advance.applied` | `receivables.advances` + D-2 | Dr CUSTOMER_ADVANCES (net part) · Dr OUTPUT_VAT (VAT carried) / Cr AR_CONTROL | CUSTOMER |
+| any of the three above, REVERSED | `ar.*.reversed` | — | mirror, dated on the reversal | CUSTOMER |
+
+Idempotency keys: `payables:<id>:<event>`, `bank:<id>:confirmed|voided`, `receivables:<id>:<event>`.
+Sales collections and commissions keep their own paths: a sales collection never posts; the bank
+line does, once (`receivables.test.ts`, `receivables-workflow.test.mjs`).
+
+**Not yet mapped:** purchase orders/receipts as documents, inventory movements and valuation (COGS),
+production and costing, fixed assets and depreciation runs, payroll, year-end closing, POS/gateway
+settlements (manual journals).

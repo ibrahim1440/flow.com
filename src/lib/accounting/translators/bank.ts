@@ -2,7 +2,9 @@
 // The cash side is the cash account's mapped GL account; the other side follows the Finance
 // module's budget splits (which always add up to the full line). A split whose category maps to
 // the payables control account posts only to the extent the line is matched to POSTED supplier
-// bills — those matches name the supplier. Receipts from customers wait for stage 3.
+// bills — those matches name the supplier. Customer receipts/refunds post once assigned to a
+// customer (CustomerReceipt): Cr AR_CONTROL for the allocated part, Cr CUSTOMER_ADVANCES + OUTPUT_VAT
+// (per decision D-2) for the rest, all tagged with the customer.
 import type { Prisma } from "@/generated/prisma/client";
 import { accountingDateOf } from "../dates";
 import { PostingBlocked } from "../errors";

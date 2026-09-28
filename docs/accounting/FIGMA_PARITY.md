@@ -35,6 +35,23 @@ captures use the synthetic local fixture, so the figures differ from the design'
 | ACC-26 Mobile bill approval (390 px) | [`398:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=398-2) | `/dashboard/accounting/payables?status=PENDING` at 390 px | ACC-26-app-390.png | Complete | The fixture has a different number of pending bills than the design. |
 | ACC-27 Cash-flow statement | [`399:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=399-2) | `/dashboard/accounting/reports` → Cash flow | ACC-27-app-1440.png, ACC-27-en-app-1440.png, ACC-27-390-app-390.png | Complete | The app shows the account code inside the line label instead of a separate Account column. It omits zero-movement placeholder rows (the design's "12xx" and "3100" rows at 0.00). At 390 px the report switcher scrolls sideways inside its own container. |
 
+| ACC-28 Bank corrections | [`413:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=413-2) (page 18) | `/dashboard/accounting/bank?view=corrections` | ACC-28-app-1440.png, ACC-28-request (capture) · side: `side/ACC-28-side.png` | Complete | Figma frames on page 18 predate the Receivables tab, so their tab row has one tab fewer. |
+
+### Page 19 — Receivables (Stage 3), [`407:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-2)
+
+All figures in these frames and in the app captures are synthetic. The frames were drawn first; the app captures use the local fixture, so numbers and document numbers differ (INV-2045 in Figma, INV-1 in the fixture).
+Side-by-side images: `evidence/side/ACC-3x-side.png` (Figma left, app right), made by `tests/accounting/visual/side-by-side.mjs`.
+
+| Frame | Figma node (link) | Route | App evidence (`evidence/app/`) | Status | Documented differences |
+|---|---|---|---|---|---|
+| ACC-30 Sales invoices & credit notes | [`407:3`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-3) | `/dashboard/accounting/receivables` | ACC-30-app-1440.png, ACC-30-en-app-1440.png | Complete | App adds "Customer receipts" and "Aging & statements" buttons beside "Sales invoice"; the "Open" column counts a receipt only once its bank line has posted and notes allocations still awaiting posting. |
+| ACC-31 Sales invoice editor | [`407:292`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-292) | `/dashboard/accounting/receivables/new` (`?order=`, `?edit=`) | ACC-31-app-1440.png | Complete | Quote price and "order will be marked sent" notes appear only when an order is chosen (the capture has none). |
+| ACC-32 Invoice detail & approval | [`407:607`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-607) | `/dashboard/accounting/receivables/[id]` | ACC-32-app-1440.png (posted), ACC-32-submitted-app-1440.png | Complete | App adds the allocations table, apply-advance and credit-note actions, and the audit trail below the journal. Rejection reason is entered after pressing "Reject". |
+| ACC-33 Customer receipts & assignment | [`407:890`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-890) | `/dashboard/accounting/receivables/receipts` | ACC-33-app-1440.png, ACC-33-assign-app-1440.png | Complete | Figma shows D-2 set to "at receipt"; the fixture leaves D-2 undecided (the real state), so the app shows "not decided yet" and the advance line is held. The collection row of the Figma allocation table is shown in the app as a "from collection" badge beside the customer. |
+| ACC-34 AR aging & customer statement | [`407:1195`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-1195) | `/dashboard/accounting/receivables/aging` | ACC-34-app-1440.png | Complete | App adds an "As of" date, a "Credits" column (unapplied credit notes and receipts) and, when advances exist, an advances card (2410 + VAT). The switcher scrolls to the statement card instead of hiding the aging. |
+| ACC-35 Credit note | [`407:1470`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-1470) | `/dashboard/accounting/receivables/new?creditFor=[id]` | ACC-35-app-1440.png | Complete | Lines start empty (Figma shows two filled lines). |
+| ACC-36 Mobile approval (390 px) | [`407:1785`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=407-1785) | `/dashboard/accounting/receivables?status=PENDING` at 390 px | ACC-36-app-390.png | Complete — layout difference accepted | App keeps the module header, tabs and filters above the cards; Figma shows only the cards. Only SUBMITTED documents get approve/reject; an APPROVED one shows its state. |
+
 Figma was synchronised to three implementation decisions: one page title for the module, no branch
 selector (the ledger is company-wide; branch is a line dimension), Arabic role labels.
 Evidence: `evidence/figma/ACC-*.png` (Figma exports), `evidence/app/ACC-*-app-*.png` (running app).
@@ -61,3 +78,6 @@ Second audit (Stage 2 and the cash-flow view, 2026-09-27): ACC-20..27 added to `
 result is 0 serious or critical findings across the 23 audited views. It is an automated
 WCAG 2.1 A/AA rule check of the accounting content and the shell around it. It is **not** a
 claim that the whole application is accessible, and no manual screen-reader test was done.
+
+Third audit (Stage 3, 2026-09-28): ACC-28 and ACC-30..36 added to `a11y.mjs`: 0 serious or critical
+findings over 33 views (same scope and caveats as above).
