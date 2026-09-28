@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -110,6 +111,7 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json({ error: explained.message }, { status: 400 });
 
   try {
+    let opsEventId: string | undefined;
     const result = await prisma.$transaction(async (tx) => {
       const item = await tx.materialItem.findUnique({
         where: { id },
@@ -138,12 +140,17 @@ export async function PATCH(request: Request, { params }: Params) {
             },
           });
           data.quantityOnHand = newActualQuantity;
+          opsEventId = (await recordStockEvent(tx, {
+            kind: "ADJUST", sourceId: `material:${id}:${Date.now()}`, userId: user.id,
+            payload: { materialItemId: id, quantityChanged, previousQuantity, newQuantity: newActualQuantity, reason: explained && explained.ok ? explained.reason : null },
+          })).id;
         }
       }
 
       return tx.materialItem.update({ where: { id }, data });
     });
 
+    await integrateNow([opsEventId]);
     return NextResponse.json(result);
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {

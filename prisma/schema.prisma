@@ -3667,6 +3667,7 @@ enum InvDocType {
   COUNT // physical count
   SUPPLIER_CREDIT // supplier credit note settling a return or reducing the price of received goods (traced)
   SALE_REVERSAL // invoice reversed: its cost of sales moves back to "delivered, not invoiced" (no goods come back)
+  ADJUSTMENT // stock corrected by a known quantity (operational adjustment): out at cost / in at average cost
 }
 
 enum InvDocStatus {

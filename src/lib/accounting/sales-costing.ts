@@ -234,3 +234,12 @@ export async function retryCosting(invoiceId: string, userId: string) {
 export async function costingOf(invoiceId: string) {
   return prisma.invCosting.findUnique({ where: { invoiceId } });
 }
+
+/** Costing records for the exception queue, with the invoice they belong to. */
+export async function listCosting(q: { status?: string | null } = {}) {
+  const statuses = q.status ? (q.status.split(",") as InvCostingStatus[]) : undefined;
+  const rows = await prisma.invCosting.findMany({ where: statuses ? { status: { in: statuses } } : {}, orderBy: { updatedAt: "desc" }, take: 300 });
+  const invs = new Map((await prisma.salesInvoice.findMany({ where: { id: { in: rows.map((r) => r.invoiceId) } }, select: { id: true, invoiceNo: true, status: true, issueDate: true, customer: { select: { name: true, nameAr: true } } } })).map((i) => [i.id, i]));
+  const counts = await prisma.invCosting.groupBy({ by: ["status"], _count: { _all: true } });
+  return { rows: rows.map((r) => ({ ...r, invoice: invs.get(r.invoiceId) ?? null })), counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])) };
+}

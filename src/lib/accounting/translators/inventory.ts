@@ -9,6 +9,7 @@
 //   SALE_ISSUE       Dr COGS                 / Cr finished goods
 //   CUSTOMER_RETURN  Dr finished goods       / Cr COGS
 //   COUNT            Dr/Cr inventory         / Cr/Dr INVENTORY_VARIANCE
+//   ADJUSTMENT       Dr/Cr inventory         / Cr/Dr INVENTORY_VARIANCE (operational correction by a known quantity)
 //   LANDED_COST      Dr inventory (on hand) · Dr COGS (already used) / Cr GRNI
 //   BILL_MATCH       the bill's price difference against GRNI: capitalised as landed cost, or all to INVENTORY_VARIANCE
 import type { Prisma } from "@/generated/prisma/client";
@@ -20,10 +21,10 @@ import type { Translation } from "./types";
 
 type Ev = { id: string; eventType: string; occurredAt: Date; payload: Prisma.JsonValue };
 
-const COUNTER: Record<string, string> = { RECEIPT: "GRNI", SUPPLIER_RETURN: "GRNI", SALE_ISSUE: "COGS", CUSTOMER_RETURN: "COGS", SALE_REVERSAL: "COGS", SUPPLIER_CREDIT: "GRNI", COUNT: "INVENTORY_VARIANCE", PRODUCTION: "ABNORMAL_LOSS", LANDED_COST: "GRNI", BILL_MATCH: "GRNI" };
+const COUNTER: Record<string, string> = { RECEIPT: "GRNI", SUPPLIER_RETURN: "GRNI", SALE_ISSUE: "COGS", CUSTOMER_RETURN: "COGS", SALE_REVERSAL: "COGS", SUPPLIER_CREDIT: "GRNI", COUNT: "INVENTORY_VARIANCE", ADJUSTMENT: "INVENTORY_VARIANCE", PRODUCTION: "ABNORMAL_LOSS", LANDED_COST: "GRNI", BILL_MATCH: "GRNI" };
 const TYPE_LABEL: Record<string, string> = {
   RECEIPT: "Goods receipt", SUPPLIER_RETURN: "Return to supplier", ISSUE: "Stock issue", TRANSFER: "Transfer", PRODUCTION: "Production",
-  SALE_ISSUE: "Cost of sales", CUSTOMER_RETURN: "Customer return", SALE_REVERSAL: "Invoice reversed: cost back to delivered, not invoiced", SUPPLIER_CREDIT: "Supplier credit", COUNT: "Stock count", LANDED_COST: "Landed cost", BILL_MATCH: "Supplier price difference",
+  SALE_ISSUE: "Cost of sales", CUSTOMER_RETURN: "Customer return", SALE_REVERSAL: "Invoice reversed: cost back to delivered, not invoiced", SUPPLIER_CREDIT: "Supplier credit", COUNT: "Stock count", ADJUSTMENT: "Stock adjustment", LANDED_COST: "Landed cost", BILL_MATCH: "Supplier price difference",
 };
 
 export async function translateInventory(tx: Prisma.TransactionClient, ev: Ev): Promise<Translation> {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -94,10 +95,17 @@ export async function POST(request: Request) {
         data: { quantityKg: { increment: quantity } },
       });
 
-      return { purchase, updatedBean };
+      // Accounting: the goods receipt, from the quantity and cost recorded here.
+      const ev = await recordStockEvent(tx, {
+        kind: "PURCHASE", sourceId: purchase.id, occurredOn: new Date(purchaseDate), userId: user.id,
+        payload: { purchaseId: purchase.id, greenBeanId: itemId, quantity, costPerUnit, supplierId },
+      });
+
+      return { purchase, updatedBean, eventId: ev.id };
     });
 
-    return NextResponse.json(result, { status: 201 });
+    await integrateNow([result.eventId]);
+    return NextResponse.json({ purchase: result.purchase, updatedBean: result.updatedBean }, { status: 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };

@@ -178,6 +178,7 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "inv_doc_approve", label: "Approve inventory documents and loss bands" },
     { key: "inv_doc_post", label: "Post inventory documents" },
     { key: "inv_master_manage", label: "Manage inventory items, units, locations and draft loss bands" },
+    { key: "inv_return_receive", label: "Confirm the warehouse receipt of customer returns (with evidence)" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

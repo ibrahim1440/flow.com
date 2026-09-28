@@ -167,7 +167,7 @@ export type InvDocInput = {
 };
 const PROCESSES = new Set(["ROASTING", "BLENDING", "PACKING", "BAKING", "OTHER"]);
 
-const TYPES = new Set<InvDocType>(["RECEIPT", "SUPPLIER_RETURN", "ISSUE", "TRANSFER", "PRODUCTION", "SALE_ISSUE", "CUSTOMER_RETURN", "LANDED_COST", "BILL_MATCH", "COUNT", "SUPPLIER_CREDIT", "SALE_REVERSAL"]);
+const TYPES = new Set<InvDocType>(["RECEIPT", "SUPPLIER_RETURN", "ISSUE", "TRANSFER", "PRODUCTION", "SALE_ISSUE", "CUSTOMER_RETURN", "LANDED_COST", "BILL_MATCH", "COUNT", "SUPPLIER_CREDIT", "SALE_REVERSAL", "ADJUSTMENT"]);
 const REASONS = new Set<InvIssueReason>(["INTERNAL_USE", "CALIBRATION", "QC", "TRAINING", "SPOILAGE"]);
 
 async function buildDoc(tx: Tx, input: InvDocInput) {
@@ -222,8 +222,9 @@ async function buildDoc(tx: Tx, input: InvDocInput) {
     const unit = text(l.unit, 20) ?? item.baseUnit;
     const factor = unit === item.baseUnit ? dec(1) : item.units.find((u) => u.unit === unit)?.factor;
     if (!factor) throw new AccountingError(`Line ${n}: ${item.code} has no conversion for "${unit}".`, 400);
-    const role = type === "PRODUCTION" ? (l.role === "OUTPUT" ? "OUTPUT" : l.role === "INPUT" ? "INPUT" : null) : "LINE";
-    if (!role) throw new AccountingError(`Line ${n}: a production line is an input or an output.`, 400);
+    // A production consumes inputs and makes outputs; an adjustment takes stock out (INPUT) or adds it (OUTPUT).
+    const role = type === "PRODUCTION" || type === "ADJUSTMENT" ? (l.role === "OUTPUT" ? "OUTPUT" : l.role === "INPUT" ? "INPUT" : null) : "LINE";
+    if (!role) throw new AccountingError(type === "ADJUSTMENT" ? `Line ${n}: an adjustment line takes stock out or adds it.` : `Line ${n}: a production line is an input or an output.`, 400);
     const quantity = type === "COUNT" || type === "LANDED_COST" || type === "BILL_MATCH" || type === "SUPPLIER_CREDIT" ? (l.quantity === undefined || l.quantity === "" ? dec(0) : qty4(l.quantity, `Line ${n} quantity`)) : qty4(l.quantity, `Line ${n} quantity`);
     if (quantity.lt(0) || (!["COUNT", "LANDED_COST", "BILL_MATCH", "SUPPLIER_CREDIT"].includes(type) && quantity.isZero())) throw new AccountingError(`Line ${n}: the quantity must be positive.`, 400);
     const unitCost = l.unitCost === undefined || l.unitCost === null || l.unitCost === "" ? null : qty4(l.unitCost, `Line ${n} unit cost`);
@@ -237,6 +238,7 @@ async function buildDoc(tx: Tx, input: InvDocInput) {
     return { lineNo: n, role: role as "LINE" | "INPUT" | "OUTPUT", itemId: item.id, quantity, unit, factor, baseQty: type === "COUNT" ? toBase(countedQty!, factor) : baseQty, unitCost, countedQty: countedQty ? toBase(countedQty, factor) : null, targetLineId, description: text(l.description, 300),
       salesInvoiceLineId: text(l.salesInvoiceLineId, 40), orderItemId: text(l.orderItemId, 40), lotId: text(l.lotId, 40) };
   });
+  if (type === "ADJUSTMENT" && !text(input.reason)) throw new AccountingError("A stock adjustment needs its reason.", 400);
   if (type === "PRODUCTION" && (!lines.some((l) => l.role === "INPUT") || !lines.some((l) => l.role === "OUTPUT"))) throw new AccountingError("A production has inputs and outputs.", 400);
   if (type === "BILL_MATCH" && lines.length !== 1) throw new AccountingError("A bill match joins one bill line to one receipt line.", 400);
   return {
@@ -576,6 +578,8 @@ export async function postInvDoc(id: string, userId: string, opts: { late?: bool
       ...(isLate ? { docDate: bookOn, originalDate: cur.docDate, lateReason: `Booked late: ${lateWhy.join("; ")}.` } : {}),
     } });
     if (posted.count !== 1) throw new AccountingError("The document has already posted.", 409);
+    // An operational event held for an accountant is complete once its document posts.
+    if (cur.sourceType === "OPS" && cur.sourceId) await tx.invOpsEvent.updateMany({ where: { id: cur.sourceId, status: { in: ["HELD", "FAILED", "BLOCKED"] } }, data: { status: "POSTED", documentId: id, lastError: null, leaseUntil: null } });
     const d = { ...cur, docDate: bookOn } as Doc;
 
     switch (d.type) {
@@ -620,6 +624,18 @@ export async function postInvDoc(id: string, userId: string, opts: { late?: bool
           // Back at the cost it left at; the last of it takes exactly what remains of the sold value.
           const value = dec(l.baseQty).add(already).equals(soldQty) ? soldValue.sub(alreadyValue) : m2(soldValue.mul(dec(l.baseQty)).div(soldQty));
           await receive(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), value);
+        }
+        break;
+      case "ADJUSTMENT":
+        // Stock corrected by a known quantity (an operational adjustment): out at the current cost,
+        // in at the line's cost when given (a cancelled roast restocks green at what it left at),
+        // otherwise at the average cost on hand; the difference is inventory variance.
+        for (const l of d.lines) {
+          if (l.role === "INPUT") { await issue(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), method); continue; }
+          const have = await onHand(tx, l.itemId, d.locationId);
+          const unit = l.unitCost ? dec(l.unitCost) : have.qty.gt(0) && have.value.gt(0) ? have.value.div(have.qty) : null;
+          if (!unit) throw new AccountingError(`Line ${l.lineNo}: ${l.item.code} has no stock to value the addition at; enter a cost per ${l.item.baseUnit}.`, 400);
+          await receive(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), m2(dec(l.baseQty).mul(unit)));
         }
         break;
       case "COUNT":
