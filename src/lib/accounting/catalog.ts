@@ -31,6 +31,9 @@ export const POSTING_ROLES: RoleDef[] = [
   { role: "WASTE_QC", en: "QC testing waste", ar: "هدر اختبارات الجودة", usedBy: "inventory" },
   { role: "WASTE_TRAINING", en: "Training waste", ar: "هدر التدريب", usedBy: "inventory" },
   { role: "INVENTORY_VARIANCE", en: "Inventory variance, spoilage and count differences", ar: "فروقات المخزون والتلف وفروق الجرد", usedBy: "inventory" },
+  { role: "GOODS_DELIVERED_NOT_INVOICED", en: "Goods delivered to customers, not yet invoiced (at cost)", ar: "بضاعة مسلّمة للعملاء لم تُفوتر بعد (بالتكلفة)", usedBy: "inventory" },
+  { role: "LABOUR_ABSORBED", en: "Direct labour absorbed into production (contra expense)", ar: "أجور مباشرة محمّلة على الإنتاج (حساب مقابل للمصروف)", usedBy: "inventory" },
+  { role: "OVERHEAD_ABSORBED", en: "Production overhead absorbed into production (contra expense)", ar: "تكاليف إنتاج غير مباشرة محمّلة على الإنتاج (حساب مقابل للمصروف)", usedBy: "inventory" },
 ];
 
 export const ROLE_SET = new Set(POSTING_ROLES.map((r) => r.role));
@@ -61,7 +64,7 @@ POLICIES.push(
     key: "payables.recognition",
     en: "Supplier bill recognition",
     ar: "إثبات فواتير الموردين",
-    governs: ["ap.bill.posted", "ap.bill.reversed"],
+    governs: ["ap.bill.posted", "ap.bill.reversed", "ap.credit_note.posted", "ap.credit_note.reversed", "ap.credit.allocated", "ap.credit.released"],
     defaultStatement:
       "تُثبت فاتورة المورد عند ترحيلها بعد اعتمادها من شخص غير مُعدّها، بتاريخ الفاتورة: مدين حساب المصروف أو الأصل لكل بند (وبنود البضاعة على حساب بضاعة مستلمة لم تصل فاتورتها حتى يُفعَّل تقييم المخزون)، ومدين ضريبة المدخلات بمبلغ الضريبة القابلة للاسترداد، ودائن الذمم الدائنة بإجمالي الفاتورة للمورد. " +
       "لا تُسترد ضريبة المدخلات إلا إذا كان للمورد رقم تسجيل ضريبي. يُعكس القيد بقيد مقابل ولا يُعدَّل، ولا يُعكس ما دامت عليه مدفوعات مطابقة. الدفع لا يُثبت من الفاتورة بل من سطر البنك المطابق.\n\n" +
@@ -127,19 +130,37 @@ POLICIES.push(
     governs: ["inv.document.posted"],
     defaultStatement:
       "يُقيَّم المخزون بطريقة التكلفة المختارة في إعداد «طريقة تكلفة المخزون» (قرار D-1)، لكل صنف وموقع. الاستلام من المورد: مدين المخزون بتكلفة الاستلام ودائن «بضاعة مستلمة لم تصل فاتورتها». " +
-      "الإنتاج (التحميص، التعبئة، الخبز): تُصرف المدخلات بتكلفتها وتُحمَّل على المخرجات؛ الفاقد داخل نطاق الفاقد المعتمد للعملية يُمتص في تكلفة المخرجات، وما يتجاوزه يُقيَّم بتكلفة وحدة المخرجات المتوقعة ويُحمَّل على «فاقد إنتاج غير طبيعي». " +
-      "البيع: تكلفة البضاعة المباعة بتاريخ فاتورة المبيعات المرحّلة. هدر المعايرة والجودة والتدريب يُحمَّل على حساباته، والتلف وفروق الجرد على «فروقات المخزون»، والاستهلاك الداخلي للمقهى على تكلفة المبيعات. " +
-      "التكاليف الإضافية (الشحن والجمارك) وفرق سعر فاتورة المورد عن الاستلام تُضاف للمخزون المتبقي من ذلك الاستلام، وما استُهلك منه يُحمَّل على تكلفة المبيعات (أو يُحمَّل كله على الفروقات حسب الإعداد). " +
-      "لا يُرحّل مستند بتاريخ يسبق حركة مرحّلة للصنف والموقع نفسيهما، ولا يُسمح برصيد سالب.\n\n" +
+      "الإنتاج (التحميص، الخلط، التعبئة، الخبز): تُصرف المدخلات بتكلفتها، وتُضاف تكاليف التحويل (الأجور المباشرة والتكاليف غير المباشرة) بمعدلات مجمّعات التكلفة المعتمدة المحسوبة على الطاقة العادية، وتُحمَّل على المخرجات؛ ما لم يُحمَّل من التكاليف الفعلية يبقى مصروفاً في الفترة. " +
+      "الفاقد داخل نطاق الفاقد المعتمد للعملية يُمتص في تكلفة المخرجات، وما يتجاوزه يُقيَّم بتكلفة وحدة المخرجات المتوقعة ويُحمَّل على «فاقد إنتاج غير طبيعي». " +
+      "التسليم للعميل ينقل تكلفة البضاعة إلى «بضاعة مسلّمة لم تُفوتر»، وتُثبت تكلفة المبيعات عند ترحيل الفاتورة التي تُثبت الإيراد (إعداد «توقيت تكلفة المبيعات»). عكس الفاتورة يعيد التكلفة إلى «بضاعة مسلّمة لم تُفوتر» ولا يعيد البضاعة إلى المخزون؛ الإرجاع الفعلي مستند منفصل يؤكده المستودع ويعتمده شخص آخر. " +
+      "التكاليف الإضافية وفروق سعر فاتورة المورد وإشعاراته الدائنة تُتتبَّع إلى مكان البضاعة: ما بقي في المخزون (خاماً أو تحت التشغيل أو تاماً) يُعاد تقييمه، وما بيع يُحمَّل على تكلفة المبيعات، وما هُدر على حساب الهدر. " +
+      "لا يُرحّل مستند بتاريخ يسبق حركة مرحّلة للصنف والموقع نفسيهما، ولا يُسمح برصيد سالب؛ المستند الآلي المتأخر يُقيَّد في يوم ترحيله مع حفظ تاريخ حدوثه وسببه.\n\n" +
       "Inventory is valued per item and location by the method chosen in the setting \"inventory costing method\" (decision D-1). " +
-      "A goods receipt debits inventory at the receipt cost and credits goods received not invoiced. Production (roasting, packing, " +
-      "baking) issues inputs at cost into the outputs; loss within the process's approved loss band is absorbed into the output cost, " +
-      "loss beyond it is valued at the cost per unit of expected output and charged to abnormal production loss. Cost of sales is " +
-      "recognised on the date of the posted sales invoice. Calibration, QC and training waste go to their accounts, spoilage and count " +
-      "differences to inventory variance, and café internal use to cost of sales. Landed costs (freight, customs) and a supplier bill's " +
-      "price difference from the receipt are added to what is still on hand from that receipt, the part already used going to cost of " +
-      "sales (or all to variance, per the setting). No document posts on a date before a posted movement of the same item and location, " +
-      "and stock never goes negative.",
+      "A goods receipt debits inventory at the receipt cost and credits goods received not invoiced. Production (roasting, blending, " +
+      "packing, baking) issues inputs at cost and adds conversion cost (direct labour and production overhead) at the rates of the " +
+      "approved cost pools, computed on normal capacity; actual cost not absorbed stays in the period's expense. Loss within the process's " +
+      "approved band is absorbed into the output cost; loss beyond it is valued at the cost per unit of expected output and charged to " +
+      "abnormal production loss. Dispatch moves the goods' cost to goods delivered not invoiced; cost of sales is recognised when the " +
+      "invoice that recognises the revenue posts (setting \"sales cost timing\"). Reversing an invoice returns the cost to goods delivered " +
+      "not invoiced and does not return goods to stock: a physical return is a separate document, confirmed by the warehouse and " +
+      "approved by someone else. Landed costs, supplier price differences and supplier credit notes are traced to where the goods are: " +
+      "what is still held (raw, in progress or finished) is revalued, what was sold goes to cost of sales, what was wasted to the waste " +
+      "account. No document posts on a date before a posted movement of the same item and location, and stock never goes negative; a " +
+      "late system document is booked on its posting day, keeping the day it happened and why.",
+  },
+  {
+    key: "inventory.operations",
+    en: "Automatic posting of operational stock events",
+    ar: "الترحيل الآلي لأحداث المخزون التشغيلية",
+    governs: [],
+    defaultStatement:
+      "أحداث المخزون التشغيلية (الشراء، التحميص، الخلط، التعبئة، التسليم، التسويات) تُنشئ مستند مخزون تلقائياً بكمياتها المسجلة في النظام التشغيلي. " +
+      "باعتماد هذه السياسة يُعتمد المستند ويُرحّل آلياً إذا كان ضمن الحدود: الفاقد لا يتجاوز النطاق المعتمد، والكميات والتكلفة معروفة، والأصناف مربوطة. " +
+      "ما عدا ذلك يبقى بانتظار اعتماد محاسب أو يظهر في قائمة الاستثناءات بسببه. لا يُعدّل المستند الآلي سجل التشغيل.\n\n" +
+      "Operational stock events (purchase, roast, blend, pack, dispatch, adjustments) create an inventory document automatically, with " +
+      "the quantities the operational system recorded. With this policy approved, the document is approved and posted automatically when " +
+      "it is within tolerance: loss within the approved band, quantities and cost known, items linked. Anything else waits for an " +
+      "accountant's approval or appears in the exception queue with its reason. The automatic document never changes the operational record.",
   },
 );
 

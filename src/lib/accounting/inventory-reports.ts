@@ -22,17 +22,19 @@ export async function inventoryValuation(asOf: Date, locationId?: string | null)
   const locations = new Map((await prisma.invLocation.findMany()).map((l) => [l.id, l]));
   const lines = rows.map((r) => {
     const it = items.get(r.itemId)!; const q = dec(r.qty), v = dec(r.value);
-    return { itemId: r.itemId, code: it.code, name: it.nameAr ?? it.name, kind: it.kind, baseUnit: it.baseUnit, locationId: r.locationId, location: locations.get(r.locationId)?.nameAr ?? locations.get(r.locationId)?.name ?? "",
+    const loc = locations.get(r.locationId);
+    // A location with its own account (goods delivered, not invoiced) overrides the item's account.
+    return { itemId: r.itemId, code: it.code, name: it.nameAr ?? it.name, kind: it.kind, baseUnit: it.baseUnit, locationId: r.locationId, location: loc?.nameAr ?? loc?.name ?? "", role: loc?.accountRole ?? KIND_ROLE[it.kind],
       qty: q.toFixed(4), value: v.toFixed(2), unitCost: q.isZero() ? null : v.div(q).toFixed(4) };
   }).filter((l) => !(dec(l.qty).isZero() && dec(l.value).isZero())).sort((a, b) => a.kind.localeCompare(b.kind) || a.code.localeCompare(b.code) || a.location.localeCompare(b.location));
 
   // Tie-out per inventory account (company-wide; not per location).
-  const roles = [...new Set(Object.values(KIND_ROLE))];
+  const roles = [...new Set([...Object.values(KIND_ROLE), ...[...locations.values()].map((l) => l.accountRole).filter((r): r is string => !!r)])];
   const acc = await roleAccounts(roles);
   const accounts = [];
   for (const role of roles) {
     const a = acc.get(role);
-    const sub = lines.filter((l) => KIND_ROLE[l.kind] === role).reduce((s, l) => s.add(l.value), ZERO);
+    const sub = lines.filter((l) => l.role === role).reduce((s, l) => s.add(l.value), ZERO);
     const ledger = a && !locationId ? await accountsBalance([a.id], asOf) : null;
     if (sub.isZero() && (!ledger || ledger.isZero())) continue;
     accounts.push({ role, account: a ? { code: a.code, name: a.nameAr ?? a.nameEn } : null, subledger: sub.toFixed(2), ledger: ledger?.toFixed(2) ?? null, difference: ledger ? ledger.sub(sub).toFixed(2) : null, reconciled: ledger ? ledger.equals(sub) : null });
@@ -73,36 +75,12 @@ export async function stockCard(itemId: string, from: Date, to: Date, locationId
   return { item: { id: item.id, code: item.code, name: item.nameAr ?? item.name, kind: item.kind, baseUnit: item.baseUnit, units: item.units.map((u) => ({ unit: u.unit, factor: dec(u.factor).toString() })) }, from, to, opening, rows, closing: { qty: q.toFixed(4), value: v.toFixed(2) } };
 }
 
-/** Cost of sales against revenue, per posted invoice in a period (sale issues less the returns against them). */
-export async function grossMargin(from: Date, to: Date) {
-  const sales = await prisma.invDocument.findMany({ where: { status: "POSTED", type: "SALE_ISSUE", sourceType: "SALES_INVOICE" }, select: { id: true, sourceId: true, lines: { select: { id: true } } } });
-  const invoiceOfLine = new Map(sales.flatMap((d) => d.lines.map((l) => [l.id, d.sourceId!] as const)));
-  const invoiceOfDoc = new Map(sales.map((d) => [d.id, d.sourceId!]));
-  const moves = await prisma.invMove.findMany({ where: { date: { gte: from, lte: to }, document: { status: "POSTED", type: { in: ["SALE_ISSUE", "CUSTOMER_RETURN"] } } }, include: { document: { select: { id: true, type: true } } } });
-  const retLines = new Map((await prisma.invDocLine.findMany({ where: { id: { in: moves.filter((m) => m.document.type === "CUSTOMER_RETURN").map((m) => m.lineId!).filter(Boolean) } }, select: { id: true, targetLineId: true } })).map((l) => [l.id, l.targetLineId]));
-  const byInv = new Map<string, Prisma.Decimal>();
-  for (const m of moves) {
-    const invId = m.document.type === "SALE_ISSUE" ? invoiceOfDoc.get(m.document.id) : invoiceOfLine.get(retLines.get(m.lineId ?? "") ?? "");
-    if (!invId) continue;   // a return not tied to an invoiced sale
-    byInv.set(invId, (byInv.get(invId) ?? ZERO).sub(dec(m.value)));
-  }
-  const invoices = new Map((await prisma.salesInvoice.findMany({ where: { id: { in: [...byInv.keys()] } }, include: { customer: { select: { name: true, nameAr: true } } } })).map((i) => [i.id, i]));
-  const posting = await postingDates(["ar.invoice.posted", "ar.invoice.reversed"], [...byInv.keys()]);
-  const rows = [...byInv.entries()].map(([id, cogs]) => {
-    const i = invoices.get(id)!;
-    // Revenue counts in the period of the invoice's posted journal; the reversal journal, if dated
-    // in the period, takes it back (the ledger dates, not the invoice's current status).
-    const dates = posting.get(id);
-    const within = (d: Date | undefined) => !!d && d >= from && d <= to;
-    const revenue = (within(dates?.get("ar.invoice.posted")) ? dec(i.totalNet) : ZERO).sub(within(dates?.get("ar.invoice.reversed")) ? dec(i.totalNet) : ZERO);
-    return { invoiceId: id, invoiceNo: i.invoiceNo, customer: i.customer.nameAr ?? i.customer.name, date: i.issueDate, status: i.status, revenue: revenue.toFixed(2), cogs: cogs.toFixed(2), margin: revenue.sub(cogs).toFixed(2),
-      marginPercent: revenue.isZero() ? null : revenue.sub(cogs).div(revenue).mul(100).toFixed(1) };
-  }).sort((a, b) => a.invoiceNo - b.invoiceNo);
-  const tot = (k: "revenue" | "cogs" | "margin") => rows.reduce((s, r) => s.add(r[k]), ZERO).toFixed(2);
-  return { from, to, rows, totals: { revenue: tot("revenue"), cogs: tot("cogs"), margin: tot("margin") } };
-}
+export { grossMargin } from "./margin-report";
 
-/** Goods received not invoiced: posted receipt lines without a bill match, and posted bill stock lines without a receipt match. */
+/**
+ * Goods received not invoiced: posted receipt lines without a bill match, and posted bill stock lines without a receipt match.
+ * Ledger (credit balance) = receipts − bills + landed costs without bill − returns awaiting credit + credits awaiting settlement.
+ */
 export async function grniStatus(asOf: Date) {
   const receipts = await prisma.invDocLine.findMany({ where: { document: { type: "RECEIPT", status: "POSTED", docDate: { lte: asOf } } }, include: { document: { select: { docNo: true, docDate: true, supplierId: true } }, item: { select: { code: true, name: true, nameAr: true } } } });
   const matches = await prisma.invDocLine.findMany({ where: { document: { type: "BILL_MATCH", status: "POSTED", docDate: { lte: asOf } } }, include: { document: { select: { billLineId: true } } } });
@@ -120,10 +98,25 @@ export async function grniStatus(asOf: Date) {
   const openBills = billLines.filter((b) => !matchedBill.has(b.id)).map((b) => ({ billLineId: b.id, billNo: b.bill.billNo, date: b.bill.billDate, supplier: b.bill.supplier.name, description: b.description, net: dec(b.net).toFixed(2) }));
   const acc = (await roleAccounts(["GRNI"])).get("GRNI");
   const ledger = acc ? (await accountsBalance([acc.id], asOf)).neg() : null;
+  // Supplier credit notes on this date (by their journal dates): a stock line credits GRNI; its
+  // inventory settlement (SUPPLIER_CREDIT) clears it. A return is settled once a credit note that
+  // names it has posted.
+  const cnLines = await prisma.supplierBillLine.findMany({ where: { kind: { in: ["STOCK_RETURN", "STOCK_PRICE_ADJUSTMENT"] }, bill: { kind: "CREDIT_NOTE", status: { in: ["POSTED", "REVERSED"] } } }, include: { bill: { select: { id: true, billNo: true, supplier: { select: { name: true } } } } } });
+  const cnDates = await postingDates(["ap.credit_note.posted", "ap.credit_note.reversed"], [...new Set(cnLines.map((l) => l.bill.id))]);
+  const liveCn = cnLines.filter((l) => { const d = cnDates.get(l.bill.id); const p = d?.get("ap.credit_note.posted"), r = d?.get("ap.credit_note.reversed"); return !!p && p <= asOf && !(r && r <= asOf); });
+  // Until its settlement posts, a credit note's line waits in "credits awaiting settlement" (its
+  // credit to GRNI) and the return it names stays in "returns" (the return's debit to GRNI).
+  const settlements = new Set((await prisma.invDocument.findMany({ where: { type: "SUPPLIER_CREDIT", status: "POSTED", docDate: { lte: asOf }, billLineId: { in: liveCn.map((l) => l.id) } }, select: { billLineId: true } })).map((d) => d.billLineId));
+  const settledReturn = new Set(liveCn.filter((l) => l.kind === "STOCK_RETURN" && settlements.has(l.id)).map((l) => l.invDocumentId!));
+  const creditsAwaitingSettlement = liveCn.filter((l) => !settlements.has(l.id)).map((l) => ({ billLineId: l.id, billNo: l.bill.billNo, supplier: l.bill.supplier.name, description: l.description, net: dec(l.net).toFixed(2) }));
   // Goods returned to suppliers (Dr GRNI) wait for the supplier's credit note.
-  const returns = await prisma.invDocument.findMany({ where: { type: "SUPPLIER_RETURN", status: "POSTED", docDate: { lte: asOf } }, include: { moves: true } });
+  const returns = await prisma.invDocument.findMany({ where: { type: "SUPPLIER_RETURN", status: "POSTED", docDate: { lte: asOf }, id: { notIn: [...settledReturn] } }, include: { moves: true } });
   const supplierReturns = returns.map((r) => ({ docId: r.id, docNo: r.docNo, date: r.docDate, supplier: suppliers.get(r.supplierId ?? "") ?? "", value: r.moves.reduce((s, m) => s.add(dec(m.value)), ZERO).neg().toFixed(2) }));
-  return { asOf, openReceipts, openBills, landedAwaitingBill, supplierReturns, returnsTotal: supplierReturns.reduce((s, r) => s.add(r.value), ZERO).toFixed(2), landedTotal: landedAwaitingBill.reduce((s, l) => s.add(l.amount), ZERO).toFixed(2), receiptsTotal: openReceipts.reduce((s, r) => s.add(r.value), ZERO).toFixed(2), billsTotal: openBills.reduce((s, b) => s.add(b.net), ZERO).toFixed(2), ledger: ledger?.toFixed(2) ?? null };
+  return { asOf, openReceipts, openBills, landedAwaitingBill, supplierReturns, creditsAwaitingSettlement,
+    returnsTotal: supplierReturns.reduce((s, r) => s.add(r.value), ZERO).toFixed(2), landedTotal: landedAwaitingBill.reduce((s, l) => s.add(l.amount), ZERO).toFixed(2),
+    receiptsTotal: openReceipts.reduce((s, r) => s.add(r.value), ZERO).toFixed(2), billsTotal: openBills.reduce((s, b) => s.add(b.net), ZERO).toFixed(2),
+    creditsTotal: creditsAwaitingSettlement.reduce((s, c) => s.add(c.net), ZERO).toFixed(2),
+    ledger: ledger?.toFixed(2) ?? null };
 }
 
 /** Accounting quantity per linked item vs the operational stock record (information only). */

@@ -20,10 +20,10 @@ import type { Translation } from "./types";
 
 type Ev = { id: string; eventType: string; occurredAt: Date; payload: Prisma.JsonValue };
 
-const COUNTER: Record<string, string> = { RECEIPT: "GRNI", SUPPLIER_RETURN: "GRNI", SALE_ISSUE: "COGS", CUSTOMER_RETURN: "COGS", COUNT: "INVENTORY_VARIANCE", PRODUCTION: "ABNORMAL_LOSS", LANDED_COST: "GRNI", BILL_MATCH: "GRNI" };
+const COUNTER: Record<string, string> = { RECEIPT: "GRNI", SUPPLIER_RETURN: "GRNI", SALE_ISSUE: "COGS", CUSTOMER_RETURN: "COGS", SALE_REVERSAL: "COGS", SUPPLIER_CREDIT: "GRNI", COUNT: "INVENTORY_VARIANCE", PRODUCTION: "ABNORMAL_LOSS", LANDED_COST: "GRNI", BILL_MATCH: "GRNI" };
 const TYPE_LABEL: Record<string, string> = {
   RECEIPT: "Goods receipt", SUPPLIER_RETURN: "Return to supplier", ISSUE: "Stock issue", TRANSFER: "Transfer", PRODUCTION: "Production",
-  SALE_ISSUE: "Cost of sales", CUSTOMER_RETURN: "Customer return", COUNT: "Stock count", LANDED_COST: "Landed cost", BILL_MATCH: "Supplier price difference",
+  SALE_ISSUE: "Cost of sales", CUSTOMER_RETURN: "Customer return", SALE_REVERSAL: "Invoice reversed: cost back to delivered, not invoiced", SUPPLIER_CREDIT: "Supplier credit", COUNT: "Stock count", LANDED_COST: "Landed cost", BILL_MATCH: "Supplier price difference",
 };
 
 export async function translateInventory(tx: Prisma.TransactionClient, ev: Ev): Promise<Translation> {
@@ -35,10 +35,17 @@ export async function translateInventory(tx: Prisma.TransactionClient, ev: Ev): 
 
   const byRole = new Map<string, Prisma.Decimal>();
   const add = (role: string, v: Prisma.Decimal) => byRole.set(role, (byRole.get(role) ?? ZERO).add(v));
+  // EXPENSED (a traced share of a cost change, to where the goods went) and ABSORBED (conversion
+  // cost credited to its absorbed account) carry their posting role; older EXPENSED moves without
+  // one keep their stage 4 meaning (cost of sales, or variance for an expensed price difference).
+  const locs = new Map((await tx.invLocation.findMany({ where: { accountRole: { not: null } } })).map((l) => [l.id, l.accountRole!]));
   let expensed = ZERO;
   for (const m of d.moves) {
-    if (m.kind === "EXPENSED") { expensed = expensed.add(dec(m.value)); continue; }
-    add(KIND_ROLE[m.item.kind], dec(m.value));
+    if (m.kind === "EXPENSED" || m.kind === "ABSORBED") {
+      if (m.role) add(m.role, dec(m.value)); else expensed = expensed.add(dec(m.value));
+      continue;
+    }
+    add(locs.get(m.locationId) ?? KIND_ROLE[m.item.kind], dec(m.value));
   }
   const lines: EngineLine[] = [];
   const push = (role: string, v: Prisma.Decimal, description: string) => {

@@ -8,7 +8,7 @@ export { prisma };
 
 const TABLES = [
   "InvMove", "InvLayer", "InvDocLine", "InvDocument", "InvLossBand", "InvUnit", "InvItem", "InvLocation",
-  "RoastingBatch", "CoffeeProduct", "GreenBean",
+  "RoastingBatch", "ProductSKU", "CoffeeProduct", "GreenBean", "InvCosting", "InvOpsEvent", "InvCostPool", "CustomerReturnLine", "CustomerReturn", "ApCreditAllocation",
   "AdvanceApplication", "ArAllocation", "CustomerReceipt", "SalesInvoiceLine", "SalesInvoice",
   "SalesCollection", "Opportunity", "PipelineStage", "Order", "Customer",
   "BankCorrection", "SupplierBillLine", "SupplierBill", "BankTransactionMatch", "BankTransactionSplit", "BankTransaction", "CashAccount",

@@ -14,7 +14,7 @@ export const YEAR = todayAccountingDate().getUTCFullYear();
 export const D = (md: string) => `${YEAR}-${md}`;
 export const dec = (s: string) => new Prisma.Decimal(s);
 
-export async function world(opts: { method?: "WEIGHTED_AVERAGE" | "FIFO" | null; approvePolicy?: boolean } = {}) {
+export async function world(opts: { method?: "WEIGHTED_AVERAGE" | "FIFO" | null; approvePolicy?: boolean; timing?: "WITH_REVENUE" | null } = {}) {
   const prep = await makeUser("Store accountant");
   const appr = await makeUser("Controller");
   await applyChartTemplate(prep);
@@ -22,7 +22,9 @@ export async function world(opts: { method?: "WEIGHTED_AVERAGE" | "FIFO" | null;
   await updateSettings({ ledgerCutoverDate: accountingDate(D("01-01")), setupComplete: true }, prep);
   for (const key of ["payables.recognition", "receivables.recognition", ...(opts.approvePolicy === false ? [] : ["inventory.costing"])]) { const p = await draftPolicy(key, {}, prep); await approvePolicy(p.id, appr); }
   const method = opts.method === undefined ? "WEIGHTED_AVERAGE" : opts.method;
-  if (method) await updateInventorySettings({ inventoryCostMethod: method, inventoryPriceDifference: "CAPITALISE" }, prep);
+  // SYNTHETIC TEST ASSUMPTIONS (not decisions): weighted average, capitalise price differences,
+  // cost of sales with the revenue (DECISION_PACK §3 and §4 recommendations).
+  if (method) await updateInventorySettings({ inventoryCostMethod: method, inventoryPriceDifference: "CAPITALISE", salesCostTiming: opts.timing === undefined ? "WITH_REVENUE" : opts.timing }, prep);
   const acc = Object.fromEntries((await prisma.account.findMany()).map((a) => [a.code, a.id]));
   const vat = (await prisma.taxCategory.create({ data: { code: "VAT15", nameEn: "Standard 15%", nameAr: "قياسية 15%", rate: dec("15.00"), isDefault: true } })).id;
   const rst = await createLocation({ code: "RST", name: "Roastery (synthetic)", isSalesDefault: true }, prep);

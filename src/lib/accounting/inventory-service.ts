@@ -23,8 +23,9 @@ import { ZERO, dec } from "./money";
 import { accountingDate, accountingDateOf, todayAccountingDate } from "./dates";
 import { provisionalPostingAllowed } from "./policy";
 import { processEvent, type ProcessOutcome } from "./event-processor";
-import { YIELDING } from "./inventory-rules";
-import { consume, costProduction, allocateAmount, onHandShare, toBase, m2, InsufficientStock, type Layer } from "./inventory-costing";
+import { YIELDING, ISSUE_ROLE } from "./inventory-rules";
+import { consume, costProduction, allocateAmount, toBase, m2, InsufficientStock, type Layer } from "./inventory-costing";
+import { absorptionFor, ABSORBED_ROLE } from "./conversion-costs";
 
 type Tx = Prisma.TransactionClient;
 export const INV_SYSTEM = "system:accounting-engine";
@@ -125,8 +126,12 @@ export async function retireLossBand(id: string, userId: string) {
 }
 
 /** D-1 settings. Neither changes once an inventory document has posted. */
-export async function updateInventorySettings(b: { inventoryCostMethod?: unknown; inventoryPriceDifference?: unknown }, userId: string) {
-  const data: { inventoryCostMethod?: InvCostMethod | null; inventoryPriceDifference?: "CAPITALISE" | "EXPENSE" | null } = {};
+export async function updateInventorySettings(b: { inventoryCostMethod?: unknown; inventoryPriceDifference?: unknown; salesCostTiming?: unknown }, userId: string) {
+  const data: { inventoryCostMethod?: InvCostMethod | null; inventoryPriceDifference?: "CAPITALISE" | "EXPENSE" | null; salesCostTiming?: string | null } = {};
+  if ("salesCostTiming" in b) {
+    if (b.salesCostTiming !== null && b.salesCostTiming !== "WITH_REVENUE") throw new AccountingError("The sales cost timing is WITH_REVENUE or null (undecided).", 400);
+    data.salesCostTiming = b.salesCostTiming as string | null;
+  }
   if ("inventoryCostMethod" in b) {
     if (b.inventoryCostMethod !== null && b.inventoryCostMethod !== "WEIGHTED_AVERAGE" && b.inventoryCostMethod !== "FIFO") throw new AccountingError("The costing method is WEIGHTED_AVERAGE, FIFO or null (undecided).", 400);
     data.inventoryCostMethod = b.inventoryCostMethod as InvCostMethod | null;
@@ -141,24 +146,28 @@ export async function updateInventorySettings(b: { inventoryCostMethod?: unknown
     const posted = await tx.invDocument.count({ where: { status: "POSTED" } });
     if (posted && data.inventoryCostMethod !== undefined && data.inventoryCostMethod !== before.inventoryCostMethod) throw new AccountingError("The costing method cannot change once inventory documents have posted.", 409);
     if (posted && data.inventoryPriceDifference !== undefined && before.inventoryPriceDifference && data.inventoryPriceDifference !== before.inventoryPriceDifference) throw new AccountingError("The price-difference treatment cannot change once inventory documents have posted.", 409);
+    if (data.salesCostTiming !== undefined && before.salesCostTiming && data.salesCostTiming !== before.salesCostTiming && await tx.invCosting.count({ where: { status: { in: ["COSTED", "UNCOSTED"] } } })) throw new AccountingError("The sales cost timing cannot change once invoices have been costed.", 409);
     const after = await tx.accountingSettings.update({ where: { id: "singleton" }, data: { ...data, updatedBy: userId } });
     await auditAccounting(tx, { action: "settings.inventory", entityType: "settings", entityId: "singleton", userId,
-      before: { inventoryCostMethod: before.inventoryCostMethod, inventoryPriceDifference: before.inventoryPriceDifference },
-      after: { inventoryCostMethod: after.inventoryCostMethod, inventoryPriceDifference: after.inventoryPriceDifference } });
+      before: { inventoryCostMethod: before.inventoryCostMethod, inventoryPriceDifference: before.inventoryPriceDifference, salesCostTiming: before.salesCostTiming },
+      after: { inventoryCostMethod: after.inventoryCostMethod, inventoryPriceDifference: after.inventoryPriceDifference, salesCostTiming: after.salesCostTiming } });
     return after;
   });
 }
 
 // ─── Documents ──────────────────────────────────────────────────────────────────
 
-export type InvLineInput = { itemId?: unknown; quantity?: unknown; unit?: unknown; unitCost?: unknown; countedQty?: unknown; role?: unknown; targetLineId?: unknown; description?: unknown };
+export type InvLineInput = { itemId?: unknown; quantity?: unknown; unit?: unknown; unitCost?: unknown; countedQty?: unknown; role?: unknown; targetLineId?: unknown; description?: unknown;
+  salesInvoiceLineId?: unknown; orderItemId?: unknown; lotId?: unknown };
 export type InvDocInput = {
   type?: unknown; docDate?: unknown; locationId?: unknown; toLocationId?: unknown; supplierId?: unknown; customerId?: unknown;
   description?: unknown; reason?: unknown; issueReason?: unknown; lossBandId?: unknown; amount?: unknown; allocationBasis?: unknown;
   billLineId?: unknown; sourceType?: unknown; sourceId?: unknown; requestKey?: unknown; lines?: unknown;
+  salesInvoiceId?: unknown; process?: unknown; labourHours?: unknown; machineHours?: unknown;
 };
+const PROCESSES = new Set(["ROASTING", "BLENDING", "PACKING", "BAKING", "OTHER"]);
 
-const TYPES = new Set<InvDocType>(["RECEIPT", "SUPPLIER_RETURN", "ISSUE", "TRANSFER", "PRODUCTION", "SALE_ISSUE", "CUSTOMER_RETURN", "LANDED_COST", "BILL_MATCH", "COUNT"]);
+const TYPES = new Set<InvDocType>(["RECEIPT", "SUPPLIER_RETURN", "ISSUE", "TRANSFER", "PRODUCTION", "SALE_ISSUE", "CUSTOMER_RETURN", "LANDED_COST", "BILL_MATCH", "COUNT", "SUPPLIER_CREDIT", "SALE_REVERSAL"]);
 const REASONS = new Set<InvIssueReason>(["INTERNAL_USE", "CALIBRATION", "QC", "TRAINING", "SPOILAGE"]);
 
 async function buildDoc(tx: Tx, input: InvDocInput) {
@@ -176,11 +185,15 @@ async function buildDoc(tx: Tx, input: InvDocInput) {
   const issueReason = type === "ISSUE" ? (input.issueReason as InvIssueReason) : null;
   if (type === "ISSUE" && !REASONS.has(issueReason!)) throw new AccountingError("An issue needs its reason (internal use, calibration, QC, training or spoilage).", 400);
   if ((type === "RECEIPT" || type === "SUPPLIER_RETURN") && !(input.supplierId && await tx.supplier.findUnique({ where: { id: String(input.supplierId) } }))) throw new AccountingError("Choose the supplier.", 400);
-  if (type === "CUSTOMER_RETURN" && !(input.customerId && await tx.customer.findUnique({ where: { id: String(input.customerId) } }))) throw new AccountingError("Choose the customer.", 400);
-  const billLineId = (type === "BILL_MATCH" || type === "LANDED_COST") && input.billLineId ? String(input.billLineId) : null;
-  if (type === "BILL_MATCH" && !billLineId) throw new AccountingError("Choose the supplier bill line.", 400);
+  if (type === "SALE_REVERSAL" && input.sourceType !== "SALES_COSTING") throw new AccountingError("A sale reversal is created by reversing a costed invoice.", 400);
+  if ((type === "CUSTOMER_RETURN" || type === "SALE_REVERSAL") && !(input.customerId && await tx.customer.findUnique({ where: { id: String(input.customerId) } }))) throw new AccountingError("Choose the customer.", 400);
+  const billLineId = (type === "BILL_MATCH" || type === "LANDED_COST" || type === "SUPPLIER_CREDIT") && input.billLineId ? String(input.billLineId) : null;
+  if ((type === "BILL_MATCH" || type === "SUPPLIER_CREDIT") && !billLineId) throw new AccountingError("Choose the supplier bill line.", 400);
   let billNet: Prisma.Decimal | null = null;
-  if (billLineId) {
+  if (billLineId && type === "SUPPLIER_CREDIT") {
+    const bl = await tx.supplierBillLine.findUnique({ where: { id: billLineId }, include: { bill: true } });
+    if (!bl || bl.bill.kind !== "CREDIT_NOTE" || bl.bill.status !== "POSTED" || !["STOCK_RETURN", "STOCK_PRICE_ADJUSTMENT"].includes(bl.kind)) throw new AccountingError("Choose a stock line of a posted supplier credit note.", 400);
+  } else if (billLineId) {
     const bl = await tx.supplierBillLine.findUnique({ where: { id: billLineId }, include: { bill: true } });
     if (!bl || bl.kind !== "STOCK_RECEIPT" || bl.bill.status !== "POSTED") throw new AccountingError("Choose a stock line of a posted supplier bill.", 400);
     billNet = dec(bl.net);
@@ -191,7 +204,13 @@ async function buildDoc(tx: Tx, input: InvDocInput) {
   const allocationBasis = type === "LANDED_COST" ? (input.allocationBasis === "QUANTITY" ? "QUANTITY" : "VALUE") : null;
   const lossBandId = type === "PRODUCTION" && input.lossBandId ? String(input.lossBandId) : null;
   if (lossBandId && !(await tx.invLossBand.findUnique({ where: { id: lossBandId } }))) throw new AccountingError("Loss band not found.", 400);
-  if (type === "SALE_ISSUE" && input.sourceType !== "SALES_INVOICE") throw new AccountingError("Cost of sales is created from a posted sales invoice.", 400);
+  if (type === "SALE_ISSUE" && input.sourceType !== "SALES_COSTING") throw new AccountingError("Cost of sales is created from a posted sales invoice.", 400);
+  if (type === "SUPPLIER_CREDIT" && input.sourceType !== "SUPPLIER_CREDIT") throw new AccountingError("A supplier credit document is created from a posted supplier credit note.", 400);
+  const process = type === "PRODUCTION" ? (PROCESSES.has(String(input.process ?? "")) ? String(input.process) : null) : null;
+  const hours = (v: unknown, what: string) => (v === undefined || v === null || v === "" ? null : qty4(v, what));
+  const labourHours = type === "PRODUCTION" ? hours(input.labourHours, "Labour hours") : null;
+  const machineHours = type === "PRODUCTION" ? hours(input.machineHours, "Machine hours") : null;
+  if ((labourHours && labourHours.lt(0)) || (machineHours && machineHours.lt(0))) throw new AccountingError("Hours cannot be negative.", 400);
   if (!Array.isArray(input.lines) || !input.lines.length) throw new AccountingError("A document needs at least one line.", 400);
   if (input.lines.length > 300) throw new AccountingError("A document may have at most 300 lines.", 400);
   const itemIds = [...new Set((input.lines as InvLineInput[]).map((l) => String(l.itemId ?? "")))];
@@ -205,17 +224,18 @@ async function buildDoc(tx: Tx, input: InvDocInput) {
     if (!factor) throw new AccountingError(`Line ${n}: ${item.code} has no conversion for "${unit}".`, 400);
     const role = type === "PRODUCTION" ? (l.role === "OUTPUT" ? "OUTPUT" : l.role === "INPUT" ? "INPUT" : null) : "LINE";
     if (!role) throw new AccountingError(`Line ${n}: a production line is an input or an output.`, 400);
-    const quantity = type === "COUNT" || type === "LANDED_COST" || type === "BILL_MATCH" ? (l.quantity === undefined || l.quantity === "" ? dec(0) : qty4(l.quantity, `Line ${n} quantity`)) : qty4(l.quantity, `Line ${n} quantity`);
-    if (quantity.lt(0) || (!["COUNT", "LANDED_COST", "BILL_MATCH"].includes(type) && quantity.isZero())) throw new AccountingError(`Line ${n}: the quantity must be positive.`, 400);
+    const quantity = type === "COUNT" || type === "LANDED_COST" || type === "BILL_MATCH" || type === "SUPPLIER_CREDIT" ? (l.quantity === undefined || l.quantity === "" ? dec(0) : qty4(l.quantity, `Line ${n} quantity`)) : qty4(l.quantity, `Line ${n} quantity`);
+    if (quantity.lt(0) || (!["COUNT", "LANDED_COST", "BILL_MATCH", "SUPPLIER_CREDIT"].includes(type) && quantity.isZero())) throw new AccountingError(`Line ${n}: the quantity must be positive.`, 400);
     const unitCost = l.unitCost === undefined || l.unitCost === null || l.unitCost === "" ? null : qty4(l.unitCost, `Line ${n} unit cost`);
     if (type === "RECEIPT" && (!unitCost || unitCost.lt(0))) throw new AccountingError(`Line ${n}: a receipt line needs its cost per ${item.baseUnit}.`, 400);
     const countedQty = type === "COUNT" ? qty4(l.countedQty, `Line ${n} counted quantity`) : null;
     if (countedQty && countedQty.lt(0)) throw new AccountingError(`Line ${n}: a count cannot be negative.`, 400);
     const targetLineId = text(l.targetLineId, 40);
     if (["LANDED_COST", "BILL_MATCH"].includes(type) && !targetLineId) throw new AccountingError(`Line ${n}: choose the receipt line.`, 400);
-    if (type === "CUSTOMER_RETURN" && !targetLineId) throw new AccountingError(`Line ${n}: choose the sale it returns from.`, 400);
+    if ((type === "CUSTOMER_RETURN" || type === "SALE_REVERSAL") && !targetLineId) throw new AccountingError(`Line ${n}: choose the sale it returns from.`, 400);
     const baseQty = toBase(quantity, factor);
-    return { lineNo: n, role: role as "LINE" | "INPUT" | "OUTPUT", itemId: item.id, quantity, unit, factor, baseQty: type === "COUNT" ? toBase(countedQty!, factor) : baseQty, unitCost, countedQty: countedQty ? toBase(countedQty, factor) : null, targetLineId, description: text(l.description, 300) };
+    return { lineNo: n, role: role as "LINE" | "INPUT" | "OUTPUT", itemId: item.id, quantity, unit, factor, baseQty: type === "COUNT" ? toBase(countedQty!, factor) : baseQty, unitCost, countedQty: countedQty ? toBase(countedQty, factor) : null, targetLineId, description: text(l.description, 300),
+      salesInvoiceLineId: text(l.salesInvoiceLineId, 40), orderItemId: text(l.orderItemId, 40), lotId: text(l.lotId, 40) };
   });
   if (type === "PRODUCTION" && (!lines.some((l) => l.role === "INPUT") || !lines.some((l) => l.role === "OUTPUT"))) throw new AccountingError("A production has inputs and outputs.", 400);
   if (type === "BILL_MATCH" && lines.length !== 1) throw new AccountingError("A bill match joins one bill line to one receipt line.", 400);
@@ -223,7 +243,8 @@ async function buildDoc(tx: Tx, input: InvDocInput) {
     header: {
       type, docDate, locationId, toLocationId, issueReason, amount, allocationBasis, lossBandId, billLineId,
       supplierId: text(input.supplierId, 40), customerId: text(input.customerId, 40), description: text(input.description), reason: text(input.reason),
-      sourceType: text(input.sourceType, 40), sourceId: text(input.sourceId, 40), requestKey: text(input.requestKey, 80),
+      sourceType: text(input.sourceType, 40), sourceId: text(input.sourceId, 120), requestKey: text(input.requestKey, 80),
+      salesInvoiceId: text(input.salesInvoiceId, 40), process, labourHours, machineHours,
     },
     lines,
   };
@@ -327,13 +348,19 @@ async function receive(tx: Tx, d: Doc, lineId: string | null, itemId: string, lo
 }
 
 /** Issue from layers (optionally preferring one layer first), writing OUT moves; returns the value issued. */
-async function issue(tx: Tx, d: Doc, lineId: string | null, itemId: string, locationId: string, qty: Prisma.Decimal, method: InvCostMethod, preferLayerId?: string | null) {
+async function issue(tx: Tx, d: Doc, lineId: string | null, itemId: string, locationId: string, qty: Prisma.Decimal, method: InvCostMethod, preferLayerId?: string | string[] | null, onlyPreferred = false) {
   let layers = await layersOf(tx, itemId, locationId);
   const takes: { layerId: string; qty: Prisma.Decimal; value: Prisma.Decimal }[] = [];
   let left = qty;
-  if (preferLayerId) {
-    const p = layers.find((l) => l.id === preferLayerId);
-    if (p) { const t = consume([p], Prisma.Decimal.min(left, p.qtyLeft), "FIFO"); takes.push(...t); left = left.sub(t[0].qty); layers = layers.map((l) => (l.id === p.id ? { ...l, qtyLeft: l.qtyLeft.sub(t[0].qty), valueLeft: l.valueLeft.sub(t[0].value) } : l)); }
+  const prefer = preferLayerId == null ? [] : Array.isArray(preferLayerId) ? preferLayerId : [preferLayerId];
+  // Goods that belong to one customer or order (delivered, not invoiced) are drawn only from their
+  // own layers; elsewhere named layers are drawn first and the method takes the rest.
+  if (onlyPreferred) layers = layers.filter((l) => prefer.includes(l.id));
+  for (const id of prefer) {
+    const p = layers.find((l) => l.id === id);
+    if (!p || left.isZero() || p.qtyLeft.isZero()) continue;
+    const t = consume([p], Prisma.Decimal.min(left, p.qtyLeft), "FIFO"); takes.push(...t); left = left.sub(t[0].qty);
+    layers = layers.map((l) => (l.id === p.id ? { ...l, qtyLeft: l.qtyLeft.sub(t[0].qty), valueLeft: l.valueLeft.sub(t[0].value) } : l));
   }
   if (left.gt(0)) {
     try { takes.push(...consume(layers, left, method)); }
@@ -355,17 +382,70 @@ async function issue(tx: Tx, d: Doc, lineId: string | null, itemId: string, loca
   return { value, takes };
 }
 
-/** Revalue what is left of a receipt layer; the part for stock already used is expensed. */
-async function revalue(tx: Tx, d: Doc, lineId: string, layerId: string, amount: Prisma.Decimal) {
+/**
+ * Trace a later cost change (landed cost, supplier price difference, supplier credit) on a layer to
+ * where its goods are now. The share of the layer still on hand revalues it; the share already
+ * drawn from it follows each draw: into the outputs of a production (and its abnormal loss),
+ * through a transfer to the destination layers, to cost of sales for a sale, to the issue's
+ * expense account for an issue, to inventory variance for a count shortage, and for goods returned
+ * to the supplier to `returnRole`. Recursion follows the goods through several steps. Every
+ * item-location it reaches must have no movement after this document's date (the same rule as any
+ * posting), so an adjustment never rewrites what an earlier date showed.
+ */
+async function trace(tx: Tx, d: Doc, lineId: string, layerId: string, amount: Prisma.Decimal, returnRole: string, depth = 0): Promise<void> {
+  if (amount.isZero()) return;
   const layer = await tx.invLayer.findUniqueOrThrow({ where: { id: layerId } });
-  let { onHand: keep, consumed } = onHandShare(amount, { qtyIn: dec(layer.qtyIn), qtyLeft: dec(layer.qtyLeft) });
-  if (dec(layer.qtyLeft).isZero()) { consumed = amount; keep = ZERO; }
-  if (keep.isNegative() && keep.abs().gt(dec(layer.valueLeft))) { consumed = consumed.add(keep.add(dec(layer.valueLeft))); keep = dec(layer.valueLeft).neg(); }   // cannot take a layer below zero
+  const last = await tx.invMove.findFirst({ where: { itemId: layer.itemId, locationId: layer.locationId, documentId: { not: d.id } }, orderBy: { date: "desc" }, select: { date: true, document: { select: { docNo: true } } } });
+  if (last && last.date > d.docDate) {
+    const item = await tx.invItem.findUnique({ where: { id: layer.itemId } });
+    throw new AccountingError(`${item?.code ?? "An item"} the adjustment reaches already has a posted movement on ${last.date.toISOString().slice(0, 10)} (document ${last.document.docNo}); date the adjustment on or after that day.`, 409);
+  }
+  const expensed = (role: string, v: Prisma.Decimal, traceDocumentId: string | null) => v.isZero() ? null
+    : tx.invMove.create({ data: { documentId: d.id, lineId, itemId: layer.itemId, locationId: layer.locationId, date: d.docDate, kind: "EXPENSED", qty: ZERO, value: v, role, traceDocumentId } });
+  const qIn = dec(layer.qtyIn), qLeft = dec(layer.qtyLeft);
+  let keep = qIn.isZero() ? ZERO : m2(amount.mul(qLeft).div(qIn));
+  if (keep.isNegative() && keep.abs().gt(dec(layer.valueLeft))) keep = dec(layer.valueLeft).neg();   // a layer never goes below zero
   if (!keep.isZero()) {
     await tx.invMove.create({ data: { documentId: d.id, lineId, itemId: layer.itemId, locationId: layer.locationId, date: d.docDate, kind: "REVALUE", qty: ZERO, value: keep, layerId } });
     await tx.invLayer.update({ where: { id: layerId }, data: { valueLeft: { increment: keep } } });
   }
-  if (!consumed.isZero()) await tx.invMove.create({ data: { documentId: d.id, lineId, itemId: layer.itemId, locationId: layer.locationId, date: d.docDate, kind: "EXPENSED", qty: ZERO, value: consumed } });
+  const rest = amount.sub(keep);
+  if (rest.isZero()) return;
+  const draws = await tx.invMove.findMany({ where: { layerId, kind: "OUT", documentId: { not: d.id } }, include: { document: true }, orderBy: { seq: "asc" } });
+  if (!draws.length || depth > 12) { await expensed("INVENTORY_VARIANCE", rest, null); return; }
+  for (const part of allocateAmount(rest, draws.map((o) => ({ key: o.id, weight: dec(o.qty).neg() })))) {
+    const o = draws.find((x) => x.id === part.key)!;
+    const src = o.document;
+    if (src.type === "PRODUCTION") {
+      const ms = await tx.invMove.findMany({ where: { documentId: src.id } });
+      const inputs = ms.filter((m) => m.kind === "OUT" || m.kind === "ABSORBED").reduce((t, m) => t.add(dec(m.value).neg()), ZERO);
+      const ins = ms.filter((m) => m.kind === "IN");
+      const outputs = ins.reduce((t, m) => t.add(dec(m.value)), ZERO);
+      const abnormal = inputs.sub(outputs);
+      const toLoss = inputs.isZero() ? ZERO : m2(part.amount.mul(abnormal).div(inputs));
+      await expensed("ABNORMAL_LOSS", toLoss, src.id);
+      const toOut = part.amount.sub(toLoss);
+      if (!toOut.isZero()) {
+        if (!ins.length) { await expensed("INVENTORY_VARIANCE", toOut, src.id); continue; }
+        for (const a of allocateAmount(toOut, ins.map((m) => ({ key: m.id, weight: dec(m.value).isZero() ? dec(m.qty) : dec(m.value) })))) {
+          const out = await tx.invLayer.findUniqueOrThrow({ where: { moveId: a.key } });
+          await trace(tx, d, lineId, out.id, a.amount, returnRole, depth + 1);
+        }
+      }
+    } else if (src.type === "TRANSFER") {
+      // The transfer received each draw as one layer at the destination, in the same order.
+      const outsOfLine = await tx.invMove.findMany({ where: { documentId: src.id, lineId: o.lineId, kind: "OUT" }, orderBy: { seq: "asc" } });
+      const insOfLine = await tx.invMove.findMany({ where: { documentId: src.id, lineId: o.lineId, kind: "IN" }, orderBy: { seq: "asc" } });
+      const k = outsOfLine.findIndex((x) => x.id === o.id);
+      const dest = insOfLine[k];
+      if (!dest) { await expensed("INVENTORY_VARIANCE", part.amount, src.id); continue; }
+      const destLayer = await tx.invLayer.findUniqueOrThrow({ where: { moveId: dest.id } });
+      await trace(tx, d, lineId, destLayer.id, part.amount, returnRole, depth + 1);
+    } else if (src.type === "SALE_ISSUE") await expensed("COGS", part.amount, src.id);
+    else if (src.type === "ISSUE") await expensed(ISSUE_ROLE[src.issueReason!], part.amount, src.id);
+    else if (src.type === "SUPPLIER_RETURN") await expensed(returnRole, part.amount, src.id);
+    else await expensed("INVENTORY_VARIANCE", part.amount, src.id);   // counts and anything else
+  }
 }
 
 /** The receipt layer a receipt line created. */
@@ -375,9 +455,58 @@ async function receiptLayer(tx: Tx, receiptLineId: string) {
   return { move: mv, layer: await tx.invLayer.findUniqueOrThrow({ where: { moveId: mv.id } }) };
 }
 
+/**
+ * Layers at a location that belong to a document line's customer or order: goods dispatched for
+ * the same order line, or cost moved back from a replaced invoice's sale. At the "delivered, not
+ * invoiced" location a line may draw only from these.
+ */
+async function ownLayers(tx: Tx, line: { orderItemId: string | null; salesInvoiceLineId: string | null; itemId: string }, locationId: string, replacedInvoiceId: string | null) {
+  const or: Prisma.InvDocLineWhereInput[] = [];
+  if (line.orderItemId) or.push({ orderItemId: line.orderItemId });
+  if (replacedInvoiceId) or.push({ document: { salesInvoiceId: replacedInvoiceId } });
+  if (line.salesInvoiceLineId) or.push({ salesInvoiceLineId: line.salesInvoiceLineId, document: { type: "SALE_REVERSAL" } });
+  if (!or.length) return [];
+  const docLines = await tx.invDocLine.findMany({ where: { itemId: line.itemId, document: { status: "POSTED" }, OR: or }, select: { id: true } });
+  const ins = await tx.invMove.findMany({ where: { lineId: { in: docLines.map((l) => l.id) }, kind: "IN", locationId, itemId: line.itemId }, select: { id: true } });
+  const layers = await tx.invLayer.findMany({ where: { moveId: { in: ins.map((m) => m.id) }, qtyLeft: { gt: 0 } }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] });
+  return layers.map((l) => l.id);
+}
+
+/** Item-locations a cost change on a layer can reach by following its goods (see trace). */
+async function reachable(tx: Tx, layerId: string, seen = new Set<string>(), depth = 0): Promise<Set<string>> {
+  if (depth > 12 || seen.has(layerId)) return new Set();
+  seen.add(layerId);
+  const out = new Set<string>();
+  const layer = await tx.invLayer.findUnique({ where: { id: layerId } });
+  if (!layer) return out;
+  out.add(`${layer.itemId}|${layer.locationId}`);
+  const draws = await tx.invMove.findMany({ where: { layerId, kind: "OUT" }, select: { documentId: true, lineId: true, document: { select: { type: true } } } });
+  for (const o of draws) {
+    if (o.document.type !== "PRODUCTION" && o.document.type !== "TRANSFER") continue;
+    const ins = await tx.invMove.findMany({ where: { documentId: o.documentId, kind: "IN", ...(o.document.type === "TRANSFER" ? { lineId: o.lineId } : {}) }, select: { id: true } });
+    for (const m of ins) {
+      const l = await tx.invLayer.findUnique({ where: { moveId: m.id }, select: { id: true } });
+      if (l) for (const p of await reachable(tx, l.id, seen, depth + 1)) out.add(p);
+    }
+  }
+  return out;
+}
+
+/** First day on or after `date` that lies in an open period (null: none open). */
+async function firstOpenDay(tx: Tx, date: Date) {
+  const p = await tx.fiscalPeriod.findFirst({ where: { endDate: { gte: date }, status: "OPEN" }, orderBy: { startDate: "asc" } });
+  return p ? (p.startDate > date ? p.startDate : date) : null;
+}
+
 export type InvPostOutcome = { document: Awaited<ReturnType<typeof getInvDoc>>; ledger: ProcessOutcome | null };
 
-export async function postInvDoc(id: string, userId: string): Promise<InvPostOutcome> {
+/**
+ * `late`: a system document (cost of sales, operational event) that cannot be dated when it
+ * happened, because later movements already posted for its item-locations or its period is
+ * closed, is booked on the first day it can be (and in an open period); originalDate keeps when
+ * it happened. Documents people enter are never re-dated: they are refused instead.
+ */
+export async function postInvDoc(id: string, userId: string, opts: { late?: boolean } = {}): Promise<InvPostOutcome> {
   await ledgerTx(async (tx) => {
     const cur = await tx.invDocument.findUnique({ where: { id }, include: { lines: { include: { item: true }, orderBy: { lineNo: "asc" } } } });
     if (!cur) throw new AccountingError("Document not found.", 404);
@@ -400,31 +529,54 @@ export async function postInvDoc(id: string, userId: string): Promise<InvPostOut
     const priceDifference = settings.inventoryPriceDifference ?? "CAPITALISE";
 
     const period = await tx.fiscalPeriod.findFirst({ where: { startDate: { lte: cur.docDate }, endDate: { gte: cur.docDate } } });
-    if (!period || period.status !== "OPEN") throw new AccountingError(`The period of ${cur.docDate.toISOString().slice(0, 10)} is not open.`, 409);
+    const late = opts.late && !!cur.sourceType;
+    const lateWhy: string[] = [];
+    let bookOn = cur.docDate;
+    if (!period || period.status !== "OPEN") {
+      if (!late) throw new AccountingError(`The period of ${cur.docDate.toISOString().slice(0, 10)} is not open.`, 409);
+      const open = await firstOpenDay(tx, cur.docDate);
+      if (!open) throw new AccountingError(`The period of ${cur.docDate.toISOString().slice(0, 10)} is not open, and no later period is open.`, 409);
+      bookOn = open; lateWhy.push(`the period of ${cur.docDate.toISOString().slice(0, 10)} is not open`);
+    }
 
     // Every item-location the document touches, locked in a fixed order.
-    const targets = cur.type === "LANDED_COST" || cur.type === "BILL_MATCH"
-      ? await Promise.all(cur.lines.map(async (l) => (await receiptLayer(tx, l.targetLineId!)).layer))
+    const targets = cur.type === "LANDED_COST" || cur.type === "BILL_MATCH" || (cur.type === "SUPPLIER_CREDIT" && cur.lines.some((l) => l.targetLineId))
+      ? await Promise.all(cur.lines.filter((l) => l.targetLineId).map(async (l) => (await receiptLayer(tx, l.targetLineId!)).layer))
       : [];
     const pairs = new Set<string>();
     for (const l of cur.lines) { pairs.add(`${l.itemId}|${cur.locationId}`); if (cur.toLocationId) pairs.add(`${l.itemId}|${cur.toLocationId}`); }
-    for (const t of targets) pairs.add(`${t.itemId}|${t.locationId}`);
+    for (const t of targets) for (const p of await reachable(tx, t.id)) pairs.add(p);
+    // Adjustments that follow goods downstream take the trace lock exclusively; every other posting
+    // takes it shared, so no posting moves stock while an adjustment is tracing through it.
+    if (["LANDED_COST", "BILL_MATCH", "SUPPLIER_CREDIT"].includes(cur.type)) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('inv:trace'))`;
+    else await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext('inv:trace'))`;
     for (const p of [...pairs].sort()) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"inv:" + p}))`;
     for (const p of pairs) {
       const [itemId, locationId] = p.split("|");
       const last = await tx.invMove.findFirst({ where: { itemId, locationId }, orderBy: { date: "desc" }, select: { date: true, document: { select: { docNo: true } } } });
+      if (last && last.date > bookOn && late) {
+        bookOn = last.date; lateWhy.push(`document ${last.document.docNo} already moved this stock on ${last.date.toISOString().slice(0, 10)}`);
+        continue;
+      }
       if (last && last.date > cur.docDate) {
         const item = cur.lines.find((l) => l.itemId === itemId)?.item;
         throw new AccountingError(`${item?.code ?? "An item"} already has a posted movement on ${last.date.toISOString().slice(0, 10)} (document ${last.document.docNo}); a document dated ${cur.docDate.toISOString().slice(0, 10)} would change costs already issued. Date it on or after that day.`, 409);
       }
     }
 
+    if (bookOn > cur.docDate) {
+      const open = await firstOpenDay(tx, bookOn);
+      if (!open) throw new AccountingError(`No open period on or after ${bookOn.toISOString().slice(0, 10)} to book this late document in.`, 409);
+      bookOn = open;
+    }
+    const isLate = bookOn.getTime() !== cur.docDate.getTime();
     const posted = await tx.invDocument.updateMany({ where: { id, status: "APPROVED" }, data: {
       status: "POSTED", postedBy: userId, postedAt: new Date(), costMethod: method, priceDifference: cur.type === "BILL_MATCH" ? priceDifference : null,
       lossBandPercent: bandPercent, provisional: pending.length > 0,
+      ...(isLate ? { docDate: bookOn, originalDate: cur.docDate, lateReason: `Booked late: ${lateWhy.join("; ")}.` } : {}),
     } });
     if (posted.count !== 1) throw new AccountingError("The document has already posted.", 409);
-    const d = cur as Doc;
+    const d = { ...cur, docDate: bookOn } as Doc;
 
     switch (d.type) {
       case "RECEIPT":
@@ -436,21 +588,32 @@ export async function postInvDoc(id: string, userId: string): Promise<InvPostOut
           await issue(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), method, prefer);
         }
         break;
-      case "ISSUE": case "SALE_ISSUE":
+      case "ISSUE":
         for (const l of d.lines) await issue(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), method);
         break;
+      case "SALE_ISSUE": {
+        const loc = await tx.invLocation.findUniqueOrThrow({ where: { id: d.locationId } });
+        const replaced = d.salesInvoiceId ? (await tx.salesInvoice.findUnique({ where: { id: d.salesInvoiceId }, select: { replacesInvoiceId: true } }))?.replacesInvoiceId ?? null : null;
+        for (const l of d.lines) {
+          const own = await ownLayers(tx, l, d.locationId, replaced);
+          await issue(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), method, own, loc.isDelivered);
+        }
+        break;
+      }
       case "TRANSFER":
         for (const l of d.lines) {
-          const out = await issue(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), method);
+          const from = await tx.invLocation.findUniqueOrThrow({ where: { id: d.locationId } });
+          const own = from.isDelivered ? await ownLayers(tx, l, d.locationId, null) : [];
+          const out = await issue(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), method, own, from.isDelivered);
           for (const t of out.takes) await receive(tx, d, l.id, l.itemId, d.toLocationId!, t.qty, t.value);   // same cost, at the destination
         }
         break;
-      case "CUSTOMER_RETURN":
+      case "CUSTOMER_RETURN": case "SALE_REVERSAL":
         for (const l of d.lines) {
           const sold = await tx.invMove.findMany({ where: { lineId: l.targetLineId!, kind: "OUT", document: { type: "SALE_ISSUE", status: "POSTED" } } });
           if (!sold.length) throw new AccountingError(`Line ${l.lineNo}: the sale it returns from is not posted.`, 409);
           const soldQty = sold.reduce((s, m) => s.add(dec(m.qty).neg()), ZERO), soldValue = sold.reduce((s, m) => s.add(dec(m.value).neg()), ZERO);
-          const prior = await tx.invDocLine.findMany({ where: { targetLineId: l.targetLineId!, document: { type: "CUSTOMER_RETURN", status: "POSTED" }, NOT: { documentId: d.id } }, select: { id: true } });
+          const prior = await tx.invDocLine.findMany({ where: { targetLineId: l.targetLineId!, document: { type: { in: ["CUSTOMER_RETURN", "SALE_REVERSAL"] }, status: "POSTED" }, NOT: { documentId: d.id } }, select: { id: true } });
           const earlier = await tx.invMove.findMany({ where: { kind: "IN", lineId: { in: prior.map((x) => x.id) } } });
           const already = earlier.reduce((s, m) => s.add(dec(m.qty)), ZERO), alreadyValue = earlier.reduce((s, m) => s.add(dec(m.value)), ZERO);
           if (dec(l.baseQty).add(already).gt(soldQty)) throw new AccountingError(`Line ${l.lineNo}: returns would exceed the ${soldQty.toFixed(4)} sold.`, 409);
@@ -479,18 +642,38 @@ export async function postInvDoc(id: string, userId: string): Promise<InvPostOut
         }
         const outs = d.lines.filter((x) => x.role === "OUTPUT").map((l) => ({ key: l.id, yieldQty: dec(l.baseQty).mul(dec(l.item.yieldPerUnit)) }));
         const yieldIn = ins.reduce((s, x) => s.add(x.yieldQty), ZERO), yieldOut = outs.reduce((s, x) => s.add(x.yieldQty), ZERO);
+        // Conversion cost from the process's approved cost pools (conversion-costs.ts).
+        const conv = await absorptionFor(tx, d, { yieldIn, yieldOut, unitsOut: d.lines.filter((x) => x.role === "OUTPUT").reduce((s, l) => s.add(dec(l.baseQty)), ZERO) });
+        const convInputs = conv.map((c) => ({ key: `pool:${c.pool.id}`, value: c.amount, yieldQty: ZERO, conversion: true }));
         if (yieldIn.gt(yieldOut) && bandPercent === null && !provisionalOk) throw new AccountingError("This production loses weight: choose the approved loss band of its process (decision D-1).", 409);
         let r;
-        try { r = costProduction(ins, outs, bandPercent); } catch (e) { throw new AccountingError((e as Error).message, 400); }
+        try { r = costProduction([...ins, ...convInputs], outs, bandPercent); } catch (e) { throw new AccountingError((e as Error).message, 400); }
         for (const o of r.outputs) {
           const l = d.lines.find((x) => x.id === o.key)!;
           await receive(tx, d, l.id, l.itemId, d.locationId, dec(l.baseQty), o.value);
         }
+        const firstOut = d.lines.find((x) => x.role === "OUTPUT")!;
+        for (const c of conv) await tx.invMove.create({ data: { documentId: d.id, lineId: null, itemId: firstOut.itemId, locationId: d.locationId, date: d.docDate, kind: "ABSORBED", qty: ZERO, value: c.amount.neg(), role: ABSORBED_ROLE[c.pool.kind], poolId: c.pool.id } });
         break;
       }
       case "LANDED_COST": {
         const w = await Promise.all(d.lines.map(async (l) => { const { move: mv } = await receiptLayer(tx, l.targetLineId!); return { key: l.id, weight: d.allocationBasis === "QUANTITY" ? dec(mv.qty) : dec(mv.value) }; }));
-        for (const a of allocateAmount(dec(d.amount), w)) { const l = d.lines.find((x) => x.id === a.key)!; await revalue(tx, d, l.id, (await receiptLayer(tx, l.targetLineId!)).layer.id, a.amount); }
+        for (const a of allocateAmount(dec(d.amount), w)) { const l = d.lines.find((x) => x.id === a.key)!; await trace(tx, d, l.id, (await receiptLayer(tx, l.targetLineId!)).layer.id, a.amount, "INVENTORY_VARIANCE"); }
+        break;
+      }
+      case "SUPPLIER_CREDIT": {
+        const l = d.lines[0];
+        const bl = await tx.supplierBillLine.findUniqueOrThrow({ where: { id: d.billLineId! } });
+        if (bl.kind === "STOCK_PRICE_ADJUSTMENT") {
+          const { layer } = await receiptLayer(tx, l.targetLineId!);
+          await trace(tx, d, l.id, layer.id, dec(bl.net).neg(), "INVENTORY_VARIANCE");
+        } else {
+          // The return debited GRNI at the cost the goods left at; the credit note credited GRNI
+          // with what the supplier credits. The difference clears to variance.
+          const ret = await tx.invMove.findMany({ where: { documentId: bl.invDocumentId!, kind: "OUT" } });
+          const residual = ret.reduce((t, m) => t.sub(dec(m.value)), ZERO).sub(dec(bl.net));
+          if (!residual.isZero()) await tx.invMove.create({ data: { documentId: d.id, lineId: l.id, itemId: l.itemId, locationId: d.locationId, date: d.docDate, kind: "EXPENSED", qty: ZERO, value: residual, role: "INVENTORY_VARIANCE", traceDocumentId: bl.invDocumentId } });
+        }
         break;
       }
       case "BILL_MATCH": {
@@ -499,8 +682,8 @@ export async function postInvDoc(id: string, userId: string): Promise<InvPostOut
         const { move: mv, layer } = await receiptLayer(tx, l.targetLineId!);
         const diff = dec(bl.net).sub(dec(mv.value));
         if (!diff.isZero()) {
-          if (priceDifference === "CAPITALISE") await revalue(tx, d, l.id, layer.id, diff);
-          else await tx.invMove.create({ data: { documentId: d.id, lineId: l.id, itemId: layer.itemId, locationId: layer.locationId, date: d.docDate, kind: "EXPENSED", qty: ZERO, value: diff } });
+          if (priceDifference === "CAPITALISE") await trace(tx, d, l.id, layer.id, diff, "GRNI");
+          else await tx.invMove.create({ data: { documentId: d.id, lineId: l.id, itemId: layer.itemId, locationId: layer.locationId, date: d.docDate, kind: "EXPENSED", qty: ZERO, value: diff, role: "INVENTORY_VARIANCE" } });
         }
         break;
       }
@@ -520,79 +703,8 @@ export async function getInvDoc(id: string) {
 
 // ─── Documents made from other records ─────────────────────────────────────────
 
-/**
- * Cost of sales for a posted sales invoice: its lines that name a product SKU linked to an
- * inventory item leave the sales location at cost, dated on the invoice. Made by the system and
- * approved by the invoice's approver (its four-eyes already happened); one per invoice (unique
- * source), so a retry finds the first. If it cannot post yet (D-1 undecided, not enough stock),
- * it stays APPROVED with the reason and can be posted later.
- */
-export async function saleIssueForInvoice(invoiceId: string): Promise<{ documentId: string | null; posted: boolean; reason?: string }> {
-  const inv = await prisma.salesInvoice.findUnique({ where: { id: invoiceId }, include: { lines: true } });
-  if (!inv || inv.kind !== "INVOICE" || inv.status !== "POSTED") return { documentId: null, posted: false, reason: "not a posted invoice" };
-  let doc = await prisma.invDocument.findUnique({ where: { sourceType_sourceId: { sourceType: "SALES_INVOICE", sourceId: invoiceId } } });
-  if (!doc) {
-    const skus = inv.lines.map((l) => l.productSkuId).filter(Boolean) as string[];
-    const items = new Map((await prisma.invItem.findMany({ where: { productSkuId: { in: skus } } })).map((i) => [i.productSkuId!, i]));
-    const lines = inv.lines.filter((l) => l.productSkuId && items.has(l.productSkuId)).map((l) => ({ itemId: items.get(l.productSkuId!)!.id, quantity: dec(l.quantity).toFixed(4), unit: items.get(l.productSkuId!)!.baseUnit, description: `INV-${inv.invoiceNo} #${l.lineNo}` }));
-    if (!lines.length) return { documentId: null, posted: false, reason: "no invoice line names a stocked product" };
-    const loc = await prisma.invLocation.findFirst({ where: { isSalesDefault: true, isActive: true } });
-    if (!loc) return { documentId: null, posted: false, reason: "no sales location is set" };
-    try {
-      doc = await ledgerTx(async (tx) => {
-        const { header, lines: ls } = await buildDoc(tx, { type: "SALE_ISSUE", docDate: inv.issueDate.toISOString().slice(0, 10), locationId: loc.id, customerId: inv.customerId, sourceType: "SALES_INVOICE", sourceId: inv.id, description: `Cost of sales · INV-${inv.invoiceNo}`, lines });
-        const created = await tx.invDocument.create({ data: { ...header, customerId: inv.customerId, createdBy: INV_SYSTEM, lines: { create: ls } } });
-        await tx.invDocument.update({ where: { id: created.id }, data: { status: "SUBMITTED", submittedBy: INV_SYSTEM, submittedAt: new Date() } });
-        const approved = await tx.invDocument.update({ where: { id: created.id }, data: { status: "APPROVED", approvedBy: inv.approvedBy ?? inv.postedBy ?? "unknown", approvedAt: new Date() } });
-        await auditAccounting(tx, { action: "inventory.sale_issue.create", entityType: "inv_document", entityId: created.id, userId: INV_SYSTEM, refs: { invoiceId } });
-        return approved;
-      });
-    } catch (e) {
-      const again = await prisma.invDocument.findUnique({ where: { sourceType_sourceId: { sourceType: "SALES_INVOICE", sourceId: invoiceId } } });
-      if (!again) throw e;
-      doc = again;   // created by a concurrent call
-    }
-  }
-  if (doc.status === "POSTED") return { documentId: doc.id, posted: true };
-  try { await postInvDoc(doc.id, INV_SYSTEM); return { documentId: doc.id, posted: true }; }
-  catch (e) { if (e instanceof AccountingError) return { documentId: doc.id, posted: false, reason: e.message }; throw e; }
-}
-
-/**
- * Invoice reversed after its cost of sales posted: the goods come back at the cost they left at,
- * dated on the reversal (a system customer return, one per invoice).
- */
-export async function returnForReversedInvoice(invoiceId: string): Promise<{ documentId: string | null; posted: boolean; reason?: string }> {
-  const inv = await prisma.salesInvoice.findUnique({ where: { id: invoiceId } });
-  const sale = await prisma.invDocument.findUnique({ where: { sourceType_sourceId: { sourceType: "SALES_INVOICE", sourceId: invoiceId } }, include: { lines: true } });
-  if (!inv || inv.status !== "REVERSED" || !sale || sale.status !== "POSTED") return { documentId: null, posted: false, reason: "no posted cost of sales to return" };
-  let doc = await prisma.invDocument.findUnique({ where: { sourceType_sourceId: { sourceType: "SALES_INVOICE_REVERSAL", sourceId: invoiceId } } });
-  if (!doc) {
-    try {
-      doc = await ledgerTx(async (tx) => {
-        const { header, lines } = await buildDoc(tx, { type: "CUSTOMER_RETURN", docDate: accountingDateOf(inv.reversedAt ?? new Date()).toISOString().slice(0, 10), locationId: sale.locationId, customerId: inv.customerId,
-          sourceType: "SALES_INVOICE_REVERSAL", sourceId: inv.id, description: `Reversal of invoice INV-${inv.invoiceNo}`,
-          lines: await (async () => {
-            // Only what is still out: the sale less customer returns already posted against it.
-            const back = await tx.invDocLine.findMany({ where: { targetLineId: { in: sale.lines.map((l) => l.id) }, document: { type: "CUSTOMER_RETURN", status: "POSTED" } } });
-            return sale.lines.map((l) => ({ itemId: l.itemId, quantity: dec(l.baseQty).sub(back.filter((b) => b.targetLineId === l.id).reduce((s, b) => s.add(dec(b.baseQty)), ZERO)).toFixed(4), targetLineId: l.id }))
-              .filter((l) => new Prisma.Decimal(l.quantity).gt(0));
-          })() });
-        const created = await tx.invDocument.create({ data: { ...header, createdBy: INV_SYSTEM, lines: { create: lines } } });
-        await auditAccounting(tx, { action: "inventory.customer_return.create", entityType: "inv_document", entityId: created.id, userId: INV_SYSTEM, refs: { invoiceId } });
-        await tx.invDocument.update({ where: { id: created.id }, data: { status: "SUBMITTED", submittedBy: INV_SYSTEM, submittedAt: new Date() } });
-        return tx.invDocument.update({ where: { id: created.id }, data: { status: "APPROVED", approvedBy: inv.reversedBy ?? "unknown", approvedAt: new Date() } });
-      });
-    } catch (e) {
-      const again = await prisma.invDocument.findUnique({ where: { sourceType_sourceId: { sourceType: "SALES_INVOICE_REVERSAL", sourceId: invoiceId } } });
-      if (!again) throw e;
-      doc = again;
-    }
-  }
-  if (doc.status === "POSTED") return { documentId: doc.id, posted: true };
-  try { await postInvDoc(doc.id, INV_SYSTEM); return { documentId: doc.id, posted: true }; }
-  catch (e) { if (e instanceof AccountingError) return { documentId: doc.id, posted: false, reason: e.message }; throw e; }
-}
+// Cost of sales for invoices: sales-costing.ts (durable, retried, never silently incomplete).
+// Physical customer returns: customer-returns.ts (warehouse evidence, four-eyes).
 
 /** Draft production from a roasting batch: its green coffee in, its roasted coffee out. */
 export async function productionDraftFromRoastingBatch(batchId: string, b: { locationId?: unknown; lossBandId?: unknown; docDate?: unknown }, userId: string) {

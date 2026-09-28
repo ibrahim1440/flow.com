@@ -87,7 +87,7 @@ describe("period-end subledgers are reproducible and agree with the ledger", { s
     const B = await doc("03-05", "2000");
     const r1 = await w.bankLine("03-10", "1150.00", "CUSTOMER_RECEIPT", w.salesCat);
     await assignReceipt(r1, { customerId: customer, allocations: [{ invoiceId: A, amount: "1150.00" }] }, w.prep);
-    const CN = await doc("03-15", "500", { kind: "CREDIT_NOTE", originalInvoiceId: B, reason: "مرتجع جزئي" });
+    const CN = await doc("03-15", "500", { kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: B, reason: "مرتجع جزئي" });
     const r2 = await w.bankLine("03-20", "1000.00", "CUSTOMER_RECEIPT", w.salesCat);
     await assignReceipt(r2, { customerId: customer, allocations: [{ invoiceId: B, amount: "1000.00" }] }, w.prep);
     await processPendingEvents();

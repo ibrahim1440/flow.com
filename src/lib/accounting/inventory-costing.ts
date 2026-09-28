@@ -96,7 +96,7 @@ export function toBase(qty: D, factor: D): D {
   return q4(qty.mul(factor));
 }
 
-export type ProductionInput = { key: string; value: D; yieldQty: D };   // yieldQty: kg (or the yield unit) that can become output; 0 for components (bags, labels)
+export type ProductionInput = { key: string; value: D; yieldQty: D; conversion?: boolean };   // conversion: labour/overhead absorbed — no weight, but part of the cost of processing the yielding inputs   // yieldQty: kg (or the yield unit) that can become output; 0 for components (bags, labels)
 export type ProductionOutput = { key: string; yieldQty: D };
 export type ProductionResult = {
   inputValue: D; yieldIn: D; expectedYield: D | null; actualYield: D;
@@ -118,7 +118,7 @@ export function costProduction(inputs: ProductionInput[], outputs: ProductionOut
   if (outputs.some((o) => o.yieldQty.lte(0))) throw new Error("Every output needs a positive quantity.");
   const inputValue = inputs.reduce((s, i) => s.add(i.value), Z);
   const yieldIn = inputs.reduce((s, i) => s.add(i.yieldQty), Z);
-  const yieldValue = inputs.filter((i) => i.yieldQty.gt(0)).reduce((s, i) => s.add(i.value), Z);
+  const yieldValue = inputs.filter((i) => i.yieldQty.gt(0) || i.conversion).reduce((s, i) => s.add(i.value), Z);
   const actualYield = outputs.reduce((s, o) => s.add(o.yieldQty), Z);
   if (yieldIn.gt(0) && actualYield.gt(yieldIn)) throw new Error("Output weighs more than the inputs it is made from.");
   let expectedYield: D | null = null, abnormalQty = Z, abnormalValue = Z;

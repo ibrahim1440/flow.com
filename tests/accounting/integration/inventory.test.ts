@@ -12,35 +12,39 @@
 //            = 1,920 × 2.2 / 49.2 = 85.85 (5300); roasted 1,834.15 (1173)      [DECISION_PACK §3 example]
 //            green left: R1 60 kg / 1,800 · R2 30 kg / 1,080
 //   L1 01-25 freight 480 (from the freight bill line) by value 3,000 : 1,800 = 300 : 180
-//            R1 60/100 on hand → 180 to stock, 120 to COGS · R2 30/50 → 108 / 72
-//   M1 01-28 bill 3,100 for R1 green (receipt 3,000) → +100; 60/100 on hand → 60 stock, 40 COGS
-//            green 90 kg, 3,228.00 (R1 2,040 · R2 1,188)
+//            R1 60/100 on hand → 180 to stock, 120 used in P1 · R2 30/50 → 108 / 72 used in P1
+//            the 192 used in P1 follows P1: roasted 192 × 44.8/46.9… = 192 × (1 − 2.2/49.2) = 183.41, abnormal 8.59
+//            → Dr 1171 288.00, 1173 183.41, 5300 8.59 / Cr GRNI 480.00 (nothing is expensed to COGS)
+//   M1 01-28 bill 3,100 for R1 green (receipt 3,000) → +100; 60 stock · 40 via P1 → roasted 38.21, abnormal 1.79
+//            green 90 kg, 3,228.00 · roasted 47 kg, 1,834.15 + 183.41 + 38.21 = 2,055.77 · 5300 96.23 · 5100 0
 //   R3 02-01 café: milk 3 × carton12 = 36 l @ 5.50 = 198 · flour 25 kg @ 4 = 100 · butter 5 kg @ 40 = 200
-//   P2 02-05 pack: roasted 45.4 kg = 1,834.15 × 45.4/47 = 1,771.71 · 180 bags 117.00 · 180 labels 27.00
-//            → 180 × 250 g; band 1%: expected 44.946 kg ≤ 45 kg made → no abnormal; SKU 1,915.71
-//   S1 02-10 invoice 100 units → COGS 1,915.71 × 100/180 = 1,064.28
-//   C1 02-12 customer return 5 units → 1,064.28 × 5/100 = 53.21
-//   T1 02-15 transfer 10 units roastery → café (no journal): 904.64 × 10/85 = 106.43 moves
+//   P2 02-05 pack: roasted 45.4 kg = 2,055.77 × 45.4/47 = 1,985.79 · 180 bags 117.00 · 180 labels 27.00
+//            → 180 × 250 g; band 1%: expected 44.946 kg ≤ 45 kg made → no abnormal; SKU 2,129.79
+//   S1 02-10 invoice 100 units, costed with the revenue (synthetic timing) → 2,129.79 × 100/180 = 1,183.22
+//   C1 02-12 customer return 5 units (recorded, received with evidence, approved by a third person)
+//            → 1,183.22 × 5/100 = 59.16 back to stock
+//   T1 02-15 transfer 10 units roastery → café (no journal): (2,129.79 − 1,183.22 + 59.16 = 1,005.73) × 10/85 = 118.32
 //   I1 02-20 café milk use 30 l → 165.00 COGS · I2 02-21 spoilage 2 l → 11.00 (5700)
 //   P3 02-22 bakery: flour 4 kg 16.00 + butter 1 kg 40.00 + milk 1 l 5.50 = 61.50, yield in 6 kg
 //            → 60 croissants × 0.08 kg = 4.8 kg; band 5%: expected 5.7, abnormal 0.9 = 61.50 × 0.9/5.7 = 9.71
+//   Feb 28   1171 3,488.50 · 1172 656.00 · 1173 69.98 · 1174 1,057.52 · 5100 1,289.06 · 5300 105.94
 //   K1 03-01 count green 89.5 kg (book 90) → shortage 0.5 = 3,228 × 0.5/90 = 17.93 (5700)
 //   V1 03-05 return 100 bags (R1 layer 820 pc, 533.00) = 65.00 → Dr GRNI
-//   W1 03-06 calibration 1 kg roasted (1.6 kg, 62.44) = 39.03 (5400)
-//   today: invoice reversed → 95 units back at the rest of the sale's cost 1,064.28 − 53.21 = 1,011.07
+//   W1 03-06 calibration 1 kg roasted (1.6 kg, 69.98) = 43.74 (5400) → 1173 26.24
+//   Mar 31   3,470.57 + 591.00 + 26.24 + 1,057.52 = 5,145.33
+//   today: invoice reversed (a correction, not a return) → the 95 units still with the customer
+//          stay out of stock; their cost 1,124.06 moves from COGS to goods delivered, not invoiced (1176)
 import { test, describe, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { Prisma } from "../../../src/generated/prisma/client";
 import { prisma, reset, makeUser, rejects } from "./support";
-import { applyChartTemplate, updateSettings } from "../../../src/lib/accounting/setup-service";
-import { createFiscalYear } from "../../../src/lib/accounting/fiscal-period-service";
-import { draftPolicy, approvePolicy } from "../../../src/lib/accounting/policy-service";
 import { processPendingEvents } from "../../../src/lib/accounting/event-processor";
 import { createBill, submitBill, approveBill, postBill, reverseBill } from "../../../src/lib/accounting/payables-service";
 import { createSalesDoc, submitSalesDoc, approveSalesDoc, postSalesDoc, reverseSalesDoc } from "../../../src/lib/accounting/receivables-service";
-import { createItem, createLocation, createLossBand, approveLossBand, updateInventorySettings, createInvDoc, submitInvDoc, approveInvDoc, postInvDoc, saleIssueForInvoice, productionDraftFromRoastingBatch, receiptDraftFromPurchase, type InvDocInput } from "../../../src/lib/accounting/inventory-service";
+import { createLossBand, approveLossBand, updateInventorySettings, createInvDoc, submitInvDoc, approveInvDoc, postInvDoc, productionDraftFromRoastingBatch, receiptDraftFromPurchase, type InvDocInput } from "../../../src/lib/accounting/inventory-service";
 import { inventoryValuation, grossMargin, grniStatus, stockCard } from "../../../src/lib/accounting/inventory-reports";
 import { accountingDate, todayAccountingDate } from "../../../src/lib/accounting/dates";
+import { processCosting } from "../../../src/lib/accounting/sales-costing";
+import * as CR from "../../../src/lib/accounting/customer-returns";
 
 import { YEAR, D, dec, world, journal, gl, type W } from "./inventory-world";
 void YEAR;
@@ -72,13 +76,14 @@ describe("stage 4 — purchasing to production to sale", () => {
     const freightLine = await bill(w.S.freight, "F-1", "01-22", "شحن من الميناء", "1", "480");
     const L1 = await w.doc({ type: "LANDED_COST", docDate: D("01-25"), locationId: w.rst, billLineId: freightLine, allocationBasis: "VALUE",
       lines: [{ itemId: I.green.id, targetLineId: R1.lineIds[0] }, { itemId: I.green.id, targetLineId: R2.lineIds[0] }] });
-    assert.deepEqual(await journal(L1.document.id), ["1171:288.00:0.00", "2120:0.00:480.00", "5100:192.00:0.00"]);
+    assert.deepEqual(await journal(L1.document.id), ["1171:288.00:0.00", "1173:183.41:0.00", "2120:0.00:480.00", "5300:8.59:0.00"]);
     const M1 = await w.doc({ type: "BILL_MATCH", docDate: D("01-28"), locationId: w.rst, billLineId: greenBillLine, lines: [{ itemId: I.green.id, targetLineId: R1.lineIds[0] }] });
-    assert.deepEqual(await journal(M1.document.id), ["1171:60.00:0.00", "2120:0.00:100.00", "5100:40.00:0.00"]);
+    assert.deepEqual(await journal(M1.document.id), ["1171:60.00:0.00", "1173:38.21:0.00", "2120:0.00:100.00", "5300:1.79:0.00"]);
     await processPendingEvents();
 
     const jan = await inventoryValuation(accountingDate(D("01-31")));
-    assert.equal(inv(w, jan, "GRN-ETH"), "3228.00"); assert.equal(inv(w, jan, "RST-ETH"), "1834.15");
+    assert.equal(inv(w, jan, "GRN-ETH"), "3228.00"); assert.equal(inv(w, jan, "RST-ETH"), "2055.77");
+    assert.equal(await gl(w, "5300", D("01-31")), "96.23", "85.85 + 8.59 + 1.79"); assert.equal(await gl(w, "5100", D("01-31")), "0.00", "price differences follow the goods, not expense");
     assert.equal(jan.reconciled, true, JSON.stringify(jan.accounts));
     assert.equal(await gl(w, "2120", D("01-31")), "-2600.00", "GRNI = R2 green 1,800 + bags 650 + labels 150 not yet billed");
 
@@ -89,22 +94,27 @@ describe("stage 4 — purchasing to production to sale", () => {
     const P2 = await w.doc({ type: "PRODUCTION", docDate: D("02-05"), locationId: w.rst, lossBandId: w.bands.pack, lines: [
       { role: "INPUT", itemId: I.roasted.id, quantity: "45.4" }, { role: "INPUT", itemId: I.bag.id, quantity: "180" }, { role: "INPUT", itemId: I.label.id, quantity: "180" },
       { role: "OUTPUT", itemId: I.sku.id, quantity: "180" }] });
-    assert.deepEqual(await journal(P2.document.id), ["1172:0.00:144.00", "1173:0.00:1771.71", "1174:1915.71:0.00"]);
+    assert.deepEqual(await journal(P2.document.id), ["1172:0.00:144.00", "1173:0.00:1985.79", "1174:2129.79:0.00"]);
     const s1 = await createSalesDoc({ customerId: w.customer, issueDate: D("02-10"), lines: [{ productSkuId: "sku-eth-250", description: "إثيوبي 250 غ", quantity: "100", unitPrice: "25", taxCategoryId: w.vat }] }, w.prep);
     await submitSalesDoc(s1.id, w.prep); await approveSalesDoc(s1.id, w.appr);
     const posted = await postSalesDoc(s1.id, w.appr);
-    assert.equal(posted.cogs?.posted, true, posted.cogs?.reason);
-    assert.deepEqual(await journal(posted.cogs!.documentId!), ["1174:0.00:1064.28", "5100:1064.28:0.00"]);
-    assert.deepEqual(await saleIssueForInvoice(s1.id), { documentId: posted.cogs!.documentId, posted: true }, "a retry finds the posted cost of sales");
+    assert.equal(posted.costing?.status, "COSTED", posted.costing?.reason ?? "");
+    const issue = await prisma.invDocument.findFirstOrThrow({ where: { type: "SALE_ISSUE", salesInvoiceId: s1.id } });
+    assert.deepEqual(await journal(issue.id), ["1174:0.00:1183.22", "5100:1183.22:0.00"]);
+    assert.equal((await processCosting(s1.id, { force: true })).status, "COSTED", "a retry finds the posted cost of sales");
     assert.equal(await prisma.invDocument.count({ where: { type: "SALE_ISSUE" } }), 1);
-    const saleLine = (await prisma.invDocLine.findFirstOrThrow({ where: { documentId: posted.cogs!.documentId! } })).id;
-    const C1 = await w.doc({ type: "CUSTOMER_RETURN", docDate: D("02-12"), locationId: w.rst, customerId: w.customer, lines: [{ itemId: I.sku.id, quantity: "5", targetLineId: saleLine }] });
-    assert.deepEqual(await journal(C1.document.id), ["1174:53.21:0.00", "5100:0.00:53.21"]);
+    // C1: a physical return — recorded, received by the warehouse with evidence, approved by a third person.
+    const invLine = (await prisma.salesInvoiceLine.findFirstOrThrow({ where: { invoiceId: s1.id } })).id;
+    const ret = await CR.createCustomerReturn({ invoiceId: s1.id, locationId: w.rst, reason: "خمس عبوات زائدة عن الطلب", lines: [{ invoiceLineId: invLine, quantity: "5" }] }, w.prep);
+    await CR.receiveCustomerReturn(ret.id, { receivedOn: D("02-12"), evidenceRef: "GRN-RET-0001" }, w.appr);
+    await CR.approveCustomerReturn(ret.id, await makeUser("Warehouse lead"));
+    const C1 = await CR.postCustomerReturn(ret.id, w.appr);
+    assert.deepEqual(await journal(C1.documentId!), ["1174:59.16:0.00", "5100:0.00:59.16"]);
     const T1 = await w.doc({ type: "TRANSFER", docDate: D("02-15"), locationId: w.rst, toLocationId: w.cafe, lines: [{ itemId: I.sku.id, quantity: "10" }] });
     assert.deepEqual(await journal(T1.document.id), [], "a transfer has no ledger effect");
     const tot = (k: string) => T1.document.moves.filter((m) => m.kind === k).reduce((s, m) => [s[0].add(m.qty), s[1].add(m.value)], [dec("0"), dec("0")]).map((x) => x.toFixed(x === undefined ? 2 : 4));
-    assert.deepEqual([tot("OUT")[0], T1.document.moves.filter((m) => m.kind === "OUT").reduce((s, m) => s.add(m.value), dec("0")).toFixed(2)], ["-10.0000", "-106.43"], "leaves the roastery at 106.43");
-    assert.deepEqual([tot("IN")[0], T1.document.moves.filter((m) => m.kind === "IN").reduce((s, m) => s.add(m.value), dec("0")).toFixed(2)], ["10.0000", "106.43"], "arrives at the café at the same cost (one layer per source layer)");
+    assert.deepEqual([tot("OUT")[0], T1.document.moves.filter((m) => m.kind === "OUT").reduce((s, m) => s.add(m.value), dec("0")).toFixed(2)], ["-10.0000", "-118.32"], "leaves the roastery at 118.32");
+    assert.deepEqual([tot("IN")[0], T1.document.moves.filter((m) => m.kind === "IN").reduce((s, m) => s.add(m.value), dec("0")).toFixed(2)], ["10.0000", "118.32"], "arrives at the café at the same cost (one layer per source layer)");
     // Café: milk used in drinks, milk spoiled, croissants baked
     const I1 = await w.doc({ type: "ISSUE", issueReason: "INTERNAL_USE", docDate: D("02-20"), locationId: w.cafe, lines: [{ itemId: I.milk.id, quantity: "30" }] });
     assert.deepEqual(await journal(I1.document.id), ["1171:0.00:165.00", "5100:165.00:0.00"]);
@@ -117,9 +127,9 @@ describe("stage 4 — purchasing to production to sale", () => {
 
     const feb = await inventoryValuation(accountingDate(D("02-28")));
     assert.equal(feb.reconciled, true, JSON.stringify(feb.accounts));
-    for (const [code, v] of [["1171", "3488.50"], ["1172", "656.00"], ["1173", "62.44"], ["1174", "956.43"]]) assert.equal(await gl(w, code, D("02-28")), v, code);
-    assert.equal(await gl(w, "5100", D("02-28")), "1408.07", "192 + 40 + 1,064.28 − 53.21 + 165");
-    assert.equal(await gl(w, "5300", D("02-28")), "95.56");
+    for (const [code, v] of [["1171", "3488.50"], ["1172", "656.00"], ["1173", "69.98"], ["1174", "1057.52"]]) assert.equal(await gl(w, code, D("02-28")), v, code);
+    assert.equal(await gl(w, "5100", D("02-28")), "1289.06", "1,183.22 − 59.16 + 165");
+    assert.equal(await gl(w, "5300", D("02-28")), "105.94");
 
     // March: count, return to supplier, calibration waste
     const K1 = await w.doc({ type: "COUNT", docDate: D("03-01"), locationId: w.rst, reason: "جرد نهاية الربع", lines: [{ itemId: I.green.id, countedQty: "89.5" }] });
@@ -127,31 +137,36 @@ describe("stage 4 — purchasing to production to sale", () => {
     const V1 = await w.doc({ type: "SUPPLIER_RETURN", docDate: D("03-05"), locationId: w.rst, supplierId: w.S.green, reason: "أكياس معيبة", lines: [{ itemId: I.bag.id, quantity: "100", targetLineId: R1.lineIds[1] }] });
     assert.deepEqual(await journal(V1.document.id), ["1172:0.00:65.00", "2120:65.00:0.00"]);
     const W1 = await w.doc({ type: "ISSUE", issueReason: "CALIBRATION", docDate: D("03-06"), locationId: w.rst, lines: [{ itemId: I.roasted.id, quantity: "1" }] });
-    assert.deepEqual(await journal(W1.document.id), ["1173:0.00:39.03", "5400:39.03:0.00"]);
+    assert.deepEqual(await journal(W1.document.id), ["1173:0.00:43.74", "5400:43.74:0.00"]);
 
     const mar = await inventoryValuation(accountingDate(D("03-31")));
     assert.equal(mar.reconciled, true);
-    assert.equal(mar.total, "5041.41", "3,470.57 + 591.00 + 23.41 + 956.43");
-    for (const [code, v] of [["1171", "3470.57"], ["1172", "591.00"], ["1173", "23.41"], ["1174", "956.43"]]) assert.equal(await gl(w, code, D("03-31")), v, code);
+    assert.equal(mar.total, "5145.33", "3,470.57 + 591.00 + 26.24 + 1,057.52");
+    for (const [code, v] of [["1171", "3470.57"], ["1172", "591.00"], ["1173", "26.24"], ["1174", "1057.52"]]) assert.equal(await gl(w, code, D("03-31")), v, code);
     const g = await grniStatus(accountingDate(D("03-31")));
     assert.equal(g.receiptsTotal, "3098.00", "R2 green, bags, labels, milk, flour, butter"); assert.equal(g.returnsTotal, "65.00"); assert.equal(g.billsTotal, "0.00"); assert.equal(g.landedTotal, "0.00");
     assert.equal(g.ledger, "3033.00", "GRNI = open receipts − goods returned awaiting the supplier's credit");
     const margin = await grossMargin(accountingDate(D("02-01")), accountingDate(D("02-28")));
-    assert.deepEqual([margin.totals.revenue, margin.totals.cogs, margin.totals.margin], ["2500.00", "1011.07", "1488.93"]);
+    assert.deepEqual([margin.totals.revenue, margin.totals.cogs, margin.totals.margin], ["2500.00", "1124.06", "1375.94"]);
+    assert.equal(margin.complete, true); assert.equal(margin.reconciliation.cogs.difference, "0.00", JSON.stringify(margin.reconciliation));
     const card = await stockCard(I.sku.id, accountingDate(D("01-01")), accountingDate(D("03-31")), w.rst);
-    assert.equal(card.closing.qty, "75.0000"); assert.equal(card.closing.value, "798.21", "904.64 − 106.43");
+    assert.equal(card.closing.qty, "75.0000"); assert.equal(card.closing.value, "887.41", "1,005.73 − 118.32");
 
     // Later: the invoice is reversed; the 95 units still out come back at the rest of their cost.
     const rev = await reverseSalesDoc(s1.id, w.appr, "الفاتورة صدرت بالخطأ");
-    assert.equal(rev.cogs?.posted, true, rev.cogs?.reason);
-    assert.deepEqual(await journal(rev.cogs!.documentId!), ["1174:1011.07:0.00", "5100:0.00:1011.07"]);
+    assert.equal(rev.costing?.status, "UNCOSTED", rev.costing?.reason ?? "");
+    const unc = await prisma.invDocument.findFirstOrThrow({ where: { type: "SALE_REVERSAL", salesInvoiceId: s1.id } });
+    assert.deepEqual(await journal(unc.id), ["1176:1124.06:0.00", "5100:0.00:1124.06"], "a correction does not bring goods back: their cost waits in delivered, not invoiced");
     const febAgain = await grossMargin(accountingDate(D("02-01")), accountingDate(D("02-28")));
-    assert.deepEqual([febAgain.totals.revenue, febAgain.totals.cogs, febAgain.totals.margin], ["2500.00", "1011.07", "1488.93"], "February's margin is unchanged by the later reversal");
+    assert.deepEqual([febAgain.totals.revenue, febAgain.totals.cogs, febAgain.totals.margin], ["2500.00", "1124.06", "1375.94"], "February's margin is unchanged by the later reversal");
     const marAgain = await inventoryValuation(accountingDate(D("03-31")));
     assert.deepEqual(marAgain.lines, mar.lines, "March is unchanged by the later reversal");
     const today = await inventoryValuation(todayAccountingDate());
     assert.equal(today.reconciled, true);
-    assert.equal(inv(w, today, "SKU-ETH-250"), (dec("798.21").add("1011.07").add("106.43")).toFixed(2), "roastery 798.21 + returned 1,011.07 + café 106.43");
+    assert.equal(inv(w, today, "SKU-ETH-250"), (dec("887.41").add("1124.06").add("118.32")).toFixed(2), "roastery 887.41 + delivered, not invoiced 1,124.06 + café 118.32");
+    const rst = await inventoryValuation(todayAccountingDate(), w.rst);
+    assert.equal(inv(w, rst, "SKU-ETH-250"), "887.41", "the reversal restored no stock at the roastery");
+    assert.equal(await gl(w, "1176", todayAccountingDate().toISOString().slice(0, 10)), "1124.06");
   });
 });
 
@@ -164,7 +179,7 @@ describe("stage 4 — historical GRNI", () => {
     await processPendingEvents();
     const explain = async (asOf: string) => {
       const g = await grniStatus(accountingDate(asOf));
-      const explained = dec(g.receiptsTotal).sub(g.billsTotal).add(g.landedTotal).sub(g.returnsTotal);
+      const explained = dec(g.receiptsTotal).sub(g.billsTotal).add(g.landedTotal).sub(g.returnsTotal).add(g.creditsTotal);
       assert.equal(explained.neg().toFixed(2), await gl(w, "2120", asOf), `explanation = ledger at ${asOf}`);
       assert.equal(g.ledger, explained.toFixed(2));
       return [g.receiptsTotal, g.billsTotal, g.ledger];

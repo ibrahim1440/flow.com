@@ -22,7 +22,7 @@ export type EngineLine = {
   /** The subledger document this control-account line opens or settles (immutable once posted). */
   openItem?: OpenItem | null;
 };
-export type OpenItem = { type: "SUPPLIER_BILL" | "SALES_INVOICE" | "CREDIT_NOTE"; id: string };
+export type OpenItem = { type: "SUPPLIER_BILL" | "SALES_INVOICE" | "CREDIT_NOTE" | "SUPPLIER_CREDIT"; id: string };
 
 const PARTY_CONTROLS = new Set(["RECEIVABLE", "PAYABLE", "COMMISSION_PAYABLE", "CUSTOMER_ADVANCES"]);
 

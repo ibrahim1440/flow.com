@@ -61,9 +61,13 @@ export async function apAging(asOf: Date) {
   // apart from the buckets but part of the subledger, so the tie-out still holds.
   const overpaid: { billId: string; billNo: number; supplier: string; amount: string }[] = [];
   let overpaidTotal = ZERO;
+  // Supplier credit notes not yet applied to a bill (debit balances; part of the subledger).
+  const credits: { creditNoteId: string; billNo: number; supplier: string; amount: string }[] = [];
+  const creditNos = new Map((await prisma.supplierBill.findMany({ where: { id: { in: items.filter((i) => i.type === "SUPPLIER_CREDIT" && i.id).map((i) => i.id!) } }, select: { id: true, billNo: true } })).map((b) => [b.id, b.billNo]));
   for (const it of items) {
     const remaining = it.balance.neg();                 // payables are credit-normal
     if (remaining.isZero() || !it.partyId) continue;
+    if (it.type === "SUPPLIER_CREDIT" && it.id) { credits.push({ creditNoteId: it.id, billNo: creditNos.get(it.id) ?? 0, supplier: suppliers.get(it.partyId) ?? "", amount: remaining.toFixed(2) }); overpaidTotal = overpaidTotal.add(remaining); continue; }
     const b = it.type === "SUPPLIER_BILL" && it.id ? bills.get(it.id) : undefined;
     const name = suppliers.get(it.partyId) ?? "";
     if (!b || remaining.isNegative()) { overpaid.push({ billId: b?.id ?? "", billNo: b?.billNo ?? 0, supplier: name, amount: remaining.toFixed(2) }); overpaidTotal = overpaidTotal.add(remaining); continue; }
@@ -91,7 +95,7 @@ export async function apAging(asOf: Date) {
   const postedTxn = await postedBankLines(prisma, unposted.map((m) => m.transactionId));
   const notInLedger = unposted.filter((m) => !postedTxn.has(m.transactionId)).reduce((s, m) => s.add(m.amount), ZERO);
   return {
-    asOf, rows, open, overpaid, overpaidTotal: overpaidTotal.toFixed(2),
+    asOf, rows, open, overpaid, credits, overpaidTotal: overpaidTotal.toFixed(2),
     totals: Object.fromEntries(AGING_BUCKETS.map((k) => [k, tot[k].toFixed(2)])) as Record<Bucket, string>,
     subledger: subledger.toFixed(2),
     ledger: ledger?.toFixed(2) ?? null,
@@ -108,13 +112,13 @@ export async function supplierStatement(supplierId: string, from: Date, to: Date
   if (from > to) throw new AccountingError("The start date is after the end date.", 400);
   const ap = await apAccountId();
   const { opening, moves } = await partyMoves(ap ? [ap] : [], supplierId, from, to);
-  const bills = new Map((await prisma.supplierBill.findMany({ where: { id: { in: moves.filter((m) => m.sourceModule === "payables").map((m) => m.sourceDocumentId!) } }, select: { id: true, billNo: true, supplierInvoiceNo: true } })).map((b) => [b.id, b]));
+  const bills = new Map((await prisma.supplierBill.findMany({ where: { id: { in: moves.filter((m) => m.sourceModule === "payables").map((m) => m.sourceDocumentId!) } }, select: { id: true, billNo: true, supplierInvoiceNo: true, kind: true } })).map((b) => [b.id, b]));
   const txns = new Map((await prisma.bankTransaction.findMany({ where: { id: { in: moves.filter((m) => m.sourceModule === "bank").map((m) => m.sourceDocumentId!) } }, select: { id: true, bankReference: true } })).map((t) => [t.id, t]));
   let bal = opening.neg();
   const lines = moves.filter((m) => !m.net.isZero()).map((m) => {
     const reversal = !!m.eventType && /\.(reversed|voided)$/.test(m.eventType);
     const b = m.sourceDocumentId ? bills.get(m.sourceDocumentId) : undefined;
-    const kind = m.sourceModule === "bank" ? "payment" : reversal ? "reversal" : "bill";
+    const kind = m.sourceModule === "bank" ? "payment" : reversal ? "reversal" : m.eventType?.startsWith("ap.credit.") ? "credit_applied" : b?.kind === "CREDIT_NOTE" ? "credit_note" : "bill";
     const ref = b ? `ف-${b.billNo}` : txns.get(m.sourceDocumentId ?? "")?.bankReference ?? `#${m.entryNo}`;
     bal = bal.sub(m.net);
     return { date: m.date, kind, ref, refId: m.sourceDocumentId ?? m.entryId, text: m.description ?? "", debit: (m.net.isPositive() ? m.net : ZERO).toFixed(2), credit: (m.net.isNegative() ? m.net.neg() : ZERO).toFixed(2), balance: bal.toFixed(2) };

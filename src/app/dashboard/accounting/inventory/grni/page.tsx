@@ -15,7 +15,7 @@ type Grni = {
   openBills: { billLineId: string; billNo: number; date: string; supplier: string; description: string | null; net: string }[];
   landedAwaitingBill: { docId: string; docNo: number; date: string; description: string | null; amount: string }[];
   supplierReturns: { docId: string; docNo: number; date: string; supplier: string; value: string }[];
-  receiptsTotal: string; billsTotal: string; landedTotal: string; returnsTotal: string; ledger: string | null;
+  receiptsTotal: string; billsTotal: string; landedTotal: string; returnsTotal: string; creditsTotal: string; ledger: string | null;
 };
 type Sources = { roastingBatches: { id: string; batchNumber: string; date: string; greenBeanQuantity: string; roastedBeanQuantity: string; status: string }[]; purchases: { id: string; date: string; supplier: string; type: string; quantity: string; costPerUnit: string }[] };
 type Agreement = { itemId: string; code: string; name: string; baseUnit: string; accounting: string; operational: string | null; source: string; difference: string | null }[];
@@ -38,7 +38,7 @@ export default function GrniPage() {
   const [loc, setLoc] = useState("");
   const [busy, setBusy] = useState(""); const [err, setErr] = useState<string | null>(null);
   const d = g.data;
-  const explained = d ? Number(d.receiptsTotal) - Number(d.billsTotal) + Number(d.landedTotal) - Number(d.returnsTotal) : 0;
+  const explained = d ? Number(d.receiptsTotal) - Number(d.billsTotal) + Number(d.landedTotal) - Number(d.returnsTotal) + Number(d.creditsTotal) : 0;
   const ok = d && d.ledger !== null && Math.abs(explained - Number(d.ledger)) < 0.005;
   const draft = async (path: string, id: string) => {
     setBusy(id); setErr(null);
@@ -51,8 +51,8 @@ export default function GrniPage() {
     <div className="flex flex-col gap-4">
       <Card>
         <CardTitle title={L(`بضاعة مستلمة لم تصل فاتورتها (2120) — كما في ${asOf.split("-").reverse().join("/")}`, `Goods received not invoiced (2120) — as of ${asOf}`)}
-          sub={d ? L(`رصيد الأستاذ ${amt(d.ledger)} = استلامات لم تُطابق ${amt(d.receiptsTotal)} − فواتير بلا استلام ${amt(d.billsTotal)} + تكاليف إضافية بلا فاتورة ${amt(d.landedTotal)} − مرتجعات بانتظار إشعار المورد ${amt(d.returnsTotal)}`,
-            `Ledger ${amt(d.ledger)} = unmatched receipts ${amt(d.receiptsTotal)} − bills without receipt ${amt(d.billsTotal)} + landed costs without bill ${amt(d.landedTotal)} − returns awaiting supplier credit ${amt(d.returnsTotal)}`) : undefined}
+          sub={d ? L(`رصيد الأستاذ ${amt(d.ledger)} = استلامات لم تُطابق ${amt(d.receiptsTotal)} − فواتير بلا استلام ${amt(d.billsTotal)} + تكاليف إضافية بلا فاتورة ${amt(d.landedTotal)} − مرتجعات بانتظار إشعار المورد ${amt(d.returnsTotal)} + إشعارات دائنة بانتظار التسوية ${amt(d.creditsTotal)}`,
+            `Ledger ${amt(d.ledger)} = unmatched receipts ${amt(d.receiptsTotal)} − bills without receipt ${amt(d.billsTotal)} + landed costs without bill ${amt(d.landedTotal)} − returns awaiting supplier credit ${amt(d.returnsTotal)} + credit notes awaiting settlement ${amt(d.creditsTotal)}`) : undefined}
           right={d ? <Badge tone={ok ? "ok" : "bad"}>{ok ? L("✓ مفسَّر بالكامل", "✓ Fully explained") : L(`فرق ${amt((explained - Number(d.ledger ?? 0)).toFixed(2))}`, `Difference ${amt((explained - Number(d.ledger ?? 0)).toFixed(2))}`)}</Badge> : undefined} />
         <Field label={L("كما في", "As of")}><input type="date" className={`${INPUT} max-w-[180px]`} value={asOf} onChange={(e) => setAsOf(e.target.value)} /></Field>
         {g.error ? <ErrorState error={g.error} onRetry={g.reload} /> : !d ? <LoadingState /> : (d.openReceipts.length + d.supplierReturns.length + d.landedAwaitingBill.length === 0 ? <EmptyState title={L("لا استلامات مفتوحة", "No open receipts")} /> : (

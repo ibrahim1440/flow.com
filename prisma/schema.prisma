@@ -1261,6 +1261,11 @@ model AccountingSettings {
   inventoryCostMethod      InvCostMethod?
   /// Decision D-1: supplier bill price differing from the goods receipt. Null = undecided.
   inventoryPriceDifference InvPriceDifference?
+  /// Revenue and cost-of-sales timing (DECISION_PACK §4). Null = undecided: cost of sales waits
+  /// (except provisionally in an isolated test database). WITH_REVENUE: goods leave stock when
+  /// dispatched (into "delivered, not invoiced"); cost of sales is recognised when the invoice
+  /// that recognises the revenue posts, matched to those goods.
+  salesCostTiming          String?
 
   // Posting is blocked everywhere except setup routes while this is false. Must not
   // default to true — there is no setup wizard in S0, so setup is never complete by default.
@@ -3292,6 +3297,15 @@ enum BillLineKind {
   EXPENSE
   /// Goods received: posts to the GRNI posting role until stage 4 values receipts.
   STOCK_RECEIPT
+  /// Credit note: goods returned to the supplier (settles a posted supplier return).
+  STOCK_RETURN
+  /// Credit note: price reduction on goods received (traced through production and sales).
+  STOCK_PRICE_ADJUSTMENT
+}
+
+enum SupplierDocKind {
+  BILL
+  CREDIT_NOTE
 }
 
 model SupplierBill {
@@ -3329,6 +3343,11 @@ model SupplierBill {
   reversedAt           DateTime?
   reversalReason       String?
 
+  /// BILL, or a CREDIT_NOTE from the supplier (credits the bill named by originalBillId).
+  kind           SupplierDocKind @default(BILL)
+  originalBillId String?
+  reason         String?
+
   lines SupplierBillLine[]
 
   @@unique([supplierId, supplierInvoiceNo])
@@ -3353,6 +3372,10 @@ model SupplierBillLine {
   vat           Decimal      @default(0) @db.Decimal(18, 2)
   gross         Decimal      @db.Decimal(18, 2)
   costCenterId  String?
+  /// Credit note STOCK_RETURN: the posted supplier-return inventory document it settles.
+  invDocumentId String?
+  /// Credit note STOCK_PRICE_ADJUSTMENT: the posted receipt line whose price it reduces.
+  invDocLineId  String?
 
   @@unique([billId, lineNo])
 }
@@ -3428,42 +3451,50 @@ enum SalesInvoiceStatus {
 /// Sales invoice or credit note (stage 3). Four-eyes; immutable once posted (DB trigger); a
 /// posted document is corrected by reversal (invoice) or by a credit note.
 model SalesInvoice {
-  id                String             @id @default(cuid())
-  invoiceNo         Int                @unique @default(autoincrement())
-  kind              SalesDocKind       @default(INVOICE)
-  customerId        String
-  customer          Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  orderId           String?
+  id                   String             @id @default(cuid())
+  invoiceNo            Int                @unique @default(autoincrement())
+  kind                 SalesDocKind       @default(INVOICE)
+  customerId           String
+  customer             Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  orderId              String?
   /// Credit note: the invoice it credits.
-  originalInvoiceId String?
-  originalInvoice   SalesInvoice?      @relation("CreditNoteOf", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
-  creditNotes       SalesInvoice[]     @relation("CreditNoteOf")
-  issueDate         DateTime           @db.Date
-  supplyDate        DateTime?          @db.Date
-  dueDate           DateTime           @db.Date
-  branchId          String?
-  description       String?
-  reason            String?
-  currency          String             @default("SAR")
-  status            SalesInvoiceStatus @default(DRAFT)
-  totalNet          Decimal            @default(0) @db.Decimal(18, 2)
-  totalVat          Decimal            @default(0) @db.Decimal(18, 2)
-  totalGross        Decimal            @default(0) @db.Decimal(18, 2)
-  createdBy         String
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  submittedBy       String?
-  submittedAt       DateTime?
-  approvedBy        String?
-  approvedAt        DateTime?
-  postedBy          String?
-  postedAt          DateTime?
-  rejectedBy        String?
-  rejectedAt        DateTime?
-  rejectedReason    String?
-  reversedBy        String?
-  reversedAt        DateTime?
-  reversalReason    String?
+  originalInvoiceId    String?
+  originalInvoice      SalesInvoice?      @relation("CreditNoteOf", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  creditNotes          SalesInvoice[]     @relation("CreditNoteOf")
+  issueDate            DateTime           @db.Date
+  supplyDate           DateTime?          @db.Date
+  dueDate              DateTime           @db.Date
+  branchId             String?
+  description          String?
+  reason               String?
+  currency             String             @default("SAR")
+  status               SalesInvoiceStatus @default(DRAFT)
+  totalNet             Decimal            @default(0) @db.Decimal(18, 2)
+  totalVat             Decimal            @default(0) @db.Decimal(18, 2)
+  totalGross           Decimal            @default(0) @db.Decimal(18, 2)
+  createdBy            String
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  submittedBy          String?
+  submittedAt          DateTime?
+  approvedBy           String?
+  approvedAt           DateTime?
+  postedBy             String?
+  postedAt             DateTime?
+  rejectedBy           String?
+  rejectedAt           DateTime?
+  rejectedReason       String?
+  reversedBy           String?
+  reversedAt           DateTime?
+  reversalReason       String?
+  /// Goods lines leave stock from this location (default: the sales location).
+  fulfilmentLocationId String?
+  /// Credit note: what it credits (a physical return, or a price adjustment with no goods).
+  creditType           SalesCreditType?
+  /// Credit note of type RETURN_OF_GOODS: the posted customer return it credits.
+  customerReturnId     String?
+  /// A corrected invoice issued after reversing this one's predecessor (no stock movement).
+  replacesInvoiceId    String?
 
   lines        SalesInvoiceLine[]
   allocations  ArAllocation[]       @relation("AllocatedTo")
@@ -3476,26 +3507,45 @@ model SalesInvoice {
 }
 
 model SalesInvoiceLine {
-  id              String       @id @default(cuid())
+  id              String          @id @default(cuid())
   invoiceId       String
-  invoice         SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice         SalesInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   lineNo          Int
   productSkuId    String?
   orderItemId     String?
   accountId       String
-  account         Account      @relation("SalesInvoiceLineAccount", fields: [accountId], references: [id], onDelete: Restrict)
+  account         Account         @relation("SalesInvoiceLineAccount", fields: [accountId], references: [id], onDelete: Restrict)
   description     String?
-  quantity        Decimal      @db.Decimal(18, 4)
-  unitPrice       Decimal      @db.Decimal(18, 4)
-  discountPercent Decimal      @default(0) @db.Decimal(5, 2)
-  net             Decimal      @db.Decimal(18, 2)
+  quantity        Decimal         @db.Decimal(18, 4)
+  unitPrice       Decimal         @db.Decimal(18, 4)
+  discountPercent Decimal         @default(0) @db.Decimal(5, 2)
+  net             Decimal         @db.Decimal(18, 2)
   taxCategoryId   String?
-  vatRate         Decimal      @default(0) @db.Decimal(5, 2)
-  vat             Decimal      @default(0) @db.Decimal(18, 2)
-  gross           Decimal      @db.Decimal(18, 2)
+  vatRate         Decimal         @default(0) @db.Decimal(5, 2)
+  vat             Decimal         @default(0) @db.Decimal(18, 2)
+  gross           Decimal         @db.Decimal(18, 2)
   costCenterId    String?
+  /// GOODS lines must be costed (they name an inventory item directly or through productSkuId);
+  /// NON_STOCK lines (services, fees) are declared explicitly. Null on documents drafted before
+  /// stage 4b: treated as GOODS when a product is named, otherwise as unclassified (an exception).
+  stockTreatment  SalesLineStock?
+  invItemId       String?
+  /// Unit of the quantity, when it is not the item's base unit (converted by the item's units).
+  unit            String?
 
   @@unique([invoiceId, lineNo])
+}
+
+enum SalesLineStock {
+  GOODS
+  NON_STOCK
+}
+
+enum SalesCreditType {
+  /// Goods came back: requires a posted, warehouse-confirmed customer return.
+  RETURN_OF_GOODS
+  /// Price reduction, discount or refund with no goods returned: no stock movement.
+  PRICE_ADJUSTMENT
 }
 
 /// Assignment of a customer bank receipt (or refund) to a customer: the only source of cash
@@ -3615,6 +3665,8 @@ enum InvDocType {
   LANDED_COST // freight, customs… added to received stock
   BILL_MATCH // supplier bill line matched to a receipt line; posts the price difference
   COUNT // physical count
+  SUPPLIER_CREDIT // supplier credit note settling a return or reducing the price of received goods (traced)
+  SALE_REVERSAL // invoice reversed: its cost of sales moves back to "delivered, not invoiced" (no goods come back)
 }
 
 enum InvDocStatus {
@@ -3692,6 +3744,11 @@ model InvLocation {
   isActive       Boolean  @default(true)
   /// The location cost of sales is taken from for posted sales invoices (at most one).
   isSalesDefault Boolean  @default(false)
+  /// Posting role that replaces the item's inventory account at this location (GDNI for the
+  /// "delivered, not invoiced" location, which holds the cost of goods dispatched until invoiced).
+  accountRole    String?
+  /// The single location holding goods dispatched to customers and not yet recognised as sold.
+  isDelivered    Boolean  @default(false)
   createdAt      DateTime @default(now())
 }
 
@@ -3753,6 +3810,16 @@ model InvDocument {
   movesSealed     Boolean             @default(false)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
+  /// PRODUCTION: ROASTING, PACKING, BAKING, BLENDING or OTHER (selects loss band and cost pools).
+  process         String?
+  labourHours     Decimal?            @db.Decimal(10, 2)
+  machineHours    Decimal?            @db.Decimal(10, 2)
+  /// Set when a system document (costing, operations) could not be dated when it happened because
+  /// later movements already posted: docDate is when it was booked, originalDate when it happened.
+  originalDate    DateTime?           @db.Date
+  lateReason      String?
+  /// Sales costing documents: the invoice they cost.
+  salesInvoiceId  String?
   lines           InvDocLine[]
   moves           InvMove[]
 
@@ -3762,24 +3829,28 @@ model InvDocument {
 }
 
 model InvDocLine {
-  id           String      @id @default(cuid())
-  documentId   String
-  document     InvDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  lineNo       Int
-  role         InvLineRole @default(LINE)
-  itemId       String
-  item         InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  quantity     Decimal     @db.Decimal(18, 4)
-  unit         String
-  factor       Decimal     @db.Decimal(18, 6)
-  baseQty      Decimal     @db.Decimal(18, 4)
+  id                 String      @id @default(cuid())
+  documentId         String
+  document           InvDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  lineNo             Int
+  role               InvLineRole @default(LINE)
+  itemId             String
+  item               InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  quantity           Decimal     @db.Decimal(18, 4)
+  unit               String
+  factor             Decimal     @db.Decimal(18, 6)
+  baseQty            Decimal     @db.Decimal(18, 4)
   /// RECEIPT (and a count surplus): cost per base unit.
-  unitCost     Decimal?    @db.Decimal(18, 4)
+  unitCost           Decimal?    @db.Decimal(18, 4)
   /// COUNT: quantity counted (base units).
-  countedQty   Decimal?    @db.Decimal(18, 4)
+  countedQty         Decimal?    @db.Decimal(18, 4)
   /// SUPPLIER_RETURN / LANDED_COST / BILL_MATCH: the receipt line; CUSTOMER_RETURN: the sale-issue line.
-  targetLineId String?
-  description  String?
+  targetLineId       String?
+  description        String?
+  /// Links to the business record the line comes from (sales costing, dispatch, returns).
+  salesInvoiceLineId String?
+  orderItemId        String?
+  lotId              String?
 
   @@unique([documentId, lineNo])
   @@index([targetLineId])
@@ -3806,22 +3877,205 @@ model InvLayer {
 /// Immutable cost movement: signed quantity and value of an item at a location, from one posted
 /// document. The valuation on any date is the sum of moves dated on or before it.
 model InvMove {
-  id         String      @id @default(cuid())
-  seq        Int         @unique @default(autoincrement())
-  documentId String
-  document   InvDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
-  lineId     String?
-  itemId     String
-  item       InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  locationId String
-  date       DateTime    @db.Date
+  id              String      @id @default(cuid())
+  seq             Int         @unique @default(autoincrement())
+  documentId      String
+  document        InvDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  lineId          String?
+  itemId          String
+  item            InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  locationId      String
+  date            DateTime    @db.Date
   /// IN, OUT, REVALUE (value only), EXPENSED (value of a revaluation on stock already used; no stock effect)
-  kind       String
-  qty        Decimal     @db.Decimal(18, 4)
-  value      Decimal     @db.Decimal(18, 2)
-  layerId    String?
-  createdAt  DateTime    @default(now())
+  kind            String
+  qty             Decimal     @db.Decimal(18, 4)
+  value           Decimal     @db.Decimal(18, 2)
+  layerId         String?
+  /// EXPENSED / ABSORBED: the posting role the value goes to (COGS, a waste account, GRNI, the
+  /// labour or overhead absorbed account…); traceDocumentId: the document whose consumption the
+  /// traced share belongs to (a sale, an issue); poolId: the cost pool of an ABSORBED move.
+  role            String?
+  traceDocumentId String?
+  poolId          String?
+  createdAt       DateTime    @default(now())
 
   @@index([itemId, locationId, date])
   @@index([documentId])
+}
+
+// ─── Stage 4b: costing status, operational integration, conversion cost, returns ──────────
+
+enum InvCostingStatus {
+  PENDING
+  AWAITING_POLICY
+  AWAITING_DISPATCH
+  COSTED
+  NOT_REQUIRED
+  BLOCKED
+  FAILED
+  CANCELLED
+  UNCOSTED
+}
+
+/// Cost of sales state of one posted sales invoice. Created by the database when the invoice
+/// posts (so it survives a crash between posting and costing), driven by the costing processor
+/// (retries with back-off and a lease), and visible in the exception queue until COSTED.
+model InvCosting {
+  id            String           @id @default(cuid())
+  invoiceId     String           @unique
+  status        InvCostingStatus @default(PENDING)
+  attempts      Int              @default(0)
+  lastError     String?
+  nextAttemptAt DateTime         @default(now())
+  leaseUntil    DateTime?
+  costedAt      DateTime?
+  cost          Decimal          @default(0) @db.Decimal(18, 2)
+  late          Boolean          @default(false)
+  /// Per-line state: [{ lineId, treatment, status, reason, qty, cost }].
+  detail        Json?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([status, nextAttemptAt])
+}
+
+enum InvOpsStatus {
+  PENDING
+  PROCESSING
+  POSTED
+  HELD
+  BLOCKED
+  FAILED
+  IGNORED
+}
+
+/// One operational stock event (purchase, roast, blend, pack, dispatch, adjustment…), written by
+/// the operational service in the same transaction as its stock change, with the authoritative
+/// quantities. The processor turns it into one inventory document (sourceType OPS, sourceId = id).
+/// A database trigger adds an UNINTEGRATED event for any InventoryMovement written by a
+/// transaction that recorded none, so an unknown stock writer is an exception, not a silent gap.
+model InvOpsEvent {
+  id            String       @id @default(cuid())
+  kind          String
+  sourceId      String
+  seq           Int          @default(0)
+  occurredOn    DateTime     @db.Date
+  payload       Json
+  userId        String?
+  txid          BigInt?
+  status        InvOpsStatus @default(PENDING)
+  attempts      Int          @default(0)
+  lastError     String?
+  nextAttemptAt DateTime     @default(now())
+  leaseUntil    DateTime?
+  documentId    String?
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  resolution    String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([kind, sourceId, seq])
+  @@index([status, nextAttemptAt])
+  @@index([txid])
+}
+
+enum InvCostPoolKind {
+  DIRECT_LABOUR
+  PRODUCTION_OVERHEAD
+}
+
+enum InvCostBasis {
+  PER_KG_INPUT
+  PER_KG_OUTPUT
+  PER_UNIT_OUTPUT
+  PER_BATCH
+  PER_LABOUR_HOUR
+  PER_MACHINE_HOUR
+}
+
+/// Conversion cost pool (direct labour or production overhead) of a process. The rate is the
+/// budgeted pool over normal capacity, so under-absorption stays in the period's expense. Approved
+/// by someone other than its author; never changed once approved (retire it and approve another).
+model InvCostPool {
+  id               String            @id @default(cuid())
+  code             String            @unique
+  name             String
+  nameAr           String?
+  kind             InvCostPoolKind
+  process          String
+  basis            InvCostBasis
+  budgetAmount     Decimal           @db.Decimal(18, 2)
+  normalCapacity   Decimal           @db.Decimal(18, 4)
+  rate             Decimal           @db.Decimal(18, 4)
+  /// Where the pool's actual costs are booked (for the absorption report).
+  expenseAccountId String
+  status           InvLossBandStatus @default(DRAFT)
+  createdBy        String
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+enum CustomerReturnStatus {
+  DRAFT
+  RECEIVED
+  APPROVED
+  POSTED
+}
+
+/// Goods physically returned by a customer: recorded, received and evidenced by the warehouse,
+/// approved by someone else, then posted (stock back at the cost it left at). An invoice reversal
+/// or a credit note does not move stock by itself.
+model CustomerReturn {
+  id          String               @id @default(cuid())
+  returnNo    Int                  @unique @default(autoincrement())
+  customerId  String
+  invoiceId   String
+  locationId  String
+  status      CustomerReturnStatus @default(DRAFT)
+  reason      String
+  createdBy   String
+  createdAt   DateTime             @default(now())
+  receivedBy  String?
+  receivedAt  DateTime?
+  receivedOn  DateTime?            @db.Date
+  evidenceRef String?
+  approvedBy  String?
+  approvedAt  DateTime?
+  postedBy    String?
+  postedAt    DateTime?
+  documentId  String?
+  updatedAt   DateTime             @updatedAt
+  lines       CustomerReturnLine[]
+}
+
+model CustomerReturnLine {
+  id            String         @id @default(cuid())
+  returnId      String
+  return        CustomerReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  invoiceLineId String
+  itemId        String
+  quantity      Decimal        @db.Decimal(18, 4)
+  condition     String         @default("RESALABLE")
+
+  @@unique([returnId, invoiceLineId, condition])
+}
+
+/// A supplier credit note's balance applied to one of the supplier's bills: a net-zero move
+/// between the two AP open items (posted as ap.credit.allocated; released → mirrored).
+model ApCreditAllocation {
+  id           String    @id @default(cuid())
+  creditNoteId String
+  billId       String
+  amount       Decimal   @db.Decimal(18, 2)
+  allocatedOn  DateTime  @db.Date
+  active       Boolean   @default(true)
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  removedAt    DateTime?
+
+  @@index([creditNoteId])
+  @@index([billId])
 }

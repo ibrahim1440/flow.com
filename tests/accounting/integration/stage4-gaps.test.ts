@@ -25,7 +25,7 @@ async function sale(w: W, date: string, lines: Line[], extra: Record<string, unk
 }
 /** 100 finished units at 10.00 in the sales location. */
 const stock = (w: W, md = "01-05", qty = "100") => w.doc({ type: "RECEIPT", docDate: D(md), locationId: w.rst, supplierId: w.S.green, lines: [{ itemId: w.I.sku.id, quantity: qty, unitCost: "10" }] });
-const feb = (w: W) => grossMargin(accountingDate(D("02-01")), accountingDate(D("02-28")));
+const feb = () => grossMargin(accountingDate(D("02-01")), accountingDate(D("02-28")));
 void dec;
 
 describe("stage 4 gaps — cost of sales is never silently incomplete", () => {
@@ -33,10 +33,11 @@ describe("stage 4 gaps — cost of sales is never silently incomplete", () => {
     const w = await world();
     await stock(w);
     const inv = await sale(w, "02-10", [{ productSkuId: "sku-with-no-item", description: "بن غير مربوط", quantity: "3", unitPrice: "20" }]);
-    const row = (await feb(w)).rows.find((r) => r.invoiceId === inv);
+    const row = (await feb()).rows.find((r) => r.invoiceId === inv);
     assert.ok(row, "the invoice appears in the margin report");
     assert.notEqual((row as { costStatus?: string }).costStatus, "COSTED");
-    const status = (await prisma.salesInvoice.findUniqueOrThrow({ where: { id: inv } }) as unknown as { costingStatus?: string }).costingStatus;
+    // The costing state lives in its own record (a posted invoice row is immutable).
+    const status = (await prisma.invCosting.findUnique({ where: { invoiceId: inv } }))?.status;
     assert.equal(status, "BLOCKED", "missing mapping blocks costing visibly");
   });
 
@@ -44,7 +45,7 @@ describe("stage 4 gaps — cost of sales is never silently incomplete", () => {
     const w = await world();
     await stock(w, "01-05", "5");
     const inv = await sale(w, "02-10", [{ productSkuId: "sku-eth-250", description: "إثيوبي 250 غ", quantity: "8", unitPrice: "25" }]);
-    const m = await feb(w);
+    const m = await feb();
     const row = m.rows.find((r) => r.invoiceId === inv) as { costStatus?: string } | undefined;
     assert.ok(row, "the invoice appears");
     assert.notEqual(row.costStatus, "COSTED");
@@ -56,7 +57,7 @@ describe("stage 4 gaps — cost of sales is never silently incomplete", () => {
     await stock(w);
     const inv = await sale(w, "02-10", [{ description: "تدريب باريستا", quantity: "1", unitPrice: "300", stockTreatment: "NON_STOCK", accountCode: "4200" }]);
     const cn = await sale(w, "02-15", [{ description: "خصم على التدريب", quantity: "1", unitPrice: "50", stockTreatment: "NON_STOCK", accountCode: "4200" }], { kind: "CREDIT_NOTE", originalInvoiceId: inv, reason: "خصم لاحق دون إرجاع بضاعة", creditType: "PRICE_ADJUSTMENT" });
-    const m = await feb(w);
+    const m = await feb();
     const r1 = m.rows.find((r) => r.invoiceId === inv) as { costStatus?: string; revenue: string } | undefined;
     assert.ok(r1, "a service invoice is in the report"); assert.equal(r1.costStatus, "NOT_REQUIRED");
     assert.ok(m.rows.find((r) => r.invoiceId === cn), "the credit note is in the report");
@@ -67,7 +68,7 @@ describe("stage 4 gaps — cost of sales is never silently incomplete", () => {
     const w = await world();
     await stock(w);
     await sale(w, "02-10", [{ productSkuId: "sku-eth-250", description: "إثيوبي 250 غ", quantity: "10", unitPrice: "25" }]);
-    const m = await feb(w) as unknown as { reconciliation?: { cogs: { report: string; ledger: string; difference: string } ; revenue: { report: string; ledger: string } } };
+    const m = await feb() as unknown as { reconciliation?: { cogs: { report: string; ledger: string; difference: string } ; revenue: { report: string; ledger: string } } };
     assert.ok(m.reconciliation, "a reconciliation block");
     assert.equal(m.reconciliation.cogs.ledger, await gl(w, "5100", D("02-28")));
     assert.equal(m.reconciliation.cogs.report, "100.00");

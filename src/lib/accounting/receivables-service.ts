@@ -15,7 +15,7 @@ import { processEvent, type ProcessOutcome } from "./event-processor";
 import { isKsaVatNumber } from "./bill-rules";
 import { computeSalesLine, vatInside } from "./sales-rules";
 import { postedBankLines } from "./bank-posted";
-import { saleIssueForInvoice, returnForReversedInvoice } from "./inventory-service";
+import { processCosting } from "./sales-costing";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -40,10 +40,13 @@ const money2 = (raw: unknown, field: string) => {
 export type SalesLineInput = {
   accountId?: string | null; productSkuId?: string | null; orderItemId?: string | null; description?: string | null;
   quantity: string | number; unitPrice: string | number; discountPercent?: string | number; taxCategoryId?: string | null; costCenterId?: string | null;
+  /** GOODS (costed from stock) or NON_STOCK (services, fees). A line naming a product is goods. */
+  stockTreatment?: "GOODS" | "NON_STOCK" | null; invItemId?: string | null; unit?: string | null;
 };
 export type SalesDocInput = {
   customerId: string; issueDate: string; supplyDate?: string | null; dueDate?: string | null; orderId?: string | null;
   branchId?: string | null; description?: string | null; reason?: string | null; lines: SalesLineInput[];
+  fulfilmentLocationId?: string | null; creditType?: "RETURN_OF_GOODS" | "PRICE_ADJUSTMENT" | null; customerReturnId?: string | null; replacesInvoiceId?: string | null;
 };
 
 async function buildLines(tx: Tx, raw: SalesLineInput[]) {
@@ -70,7 +73,13 @@ async function buildLines(tx: Tx, raw: SalesLineInput[]) {
     }
     const { net, vat, gross } = computeSalesLine(quantity, unitPrice, discountPercent, rate);
     const description = typeof l.description === "string" ? l.description.trim().slice(0, 300) || null : null;
-    return { lineNo: n, accountId: a.id, productSkuId: l.productSkuId || null, orderItemId: l.orderItemId || null, description, quantity, unitPrice, discountPercent, net, taxCategoryId, vatRate: rate, vat, gross, costCenterId: l.costCenterId || null };
+    if (l.stockTreatment && l.stockTreatment !== "GOODS" && l.stockTreatment !== "NON_STOCK") throw new AccountingError(`Line ${n}: a line is goods or non-stock.`, 400);
+    const named = !!(l.productSkuId || l.invItemId);
+    if (l.stockTreatment === "NON_STOCK" && named) throw new AccountingError(`Line ${n}: a line that names a product is goods, not non-stock.`, 400);
+    const stockTreatment = l.stockTreatment ?? (named ? "GOODS" : null);
+    const unit = typeof l.unit === "string" && l.unit.trim() ? l.unit.trim().slice(0, 20) : null;
+    return { lineNo: n, accountId: a.id, productSkuId: l.productSkuId || null, orderItemId: l.orderItemId || null, description, quantity, unitPrice, discountPercent, net, taxCategoryId, vatRate: rate, vat, gross, costCenterId: l.costCenterId || null,
+      stockTreatment, invItemId: l.invItemId || null, unit };
   });
 }
 
@@ -89,10 +98,16 @@ async function header(tx: Tx, input: SalesDocInput, invoiceFor?: { selfId?: stri
       if (live) throw new AccountingError(`This order already has an invoice that is not reversed (INV-${live.invoiceNo}).`, 409);
     }
   }
+  let fulfilmentLocationId: string | null = null;
+  if (input.fulfilmentLocationId) {
+    const loc = await tx.invLocation.findUnique({ where: { id: input.fulfilmentLocationId } });
+    if (!loc || !loc.isActive || loc.isDelivered) throw new AccountingError("Choose an active stock location to fulfil from.", 400);
+    fulfilmentLocationId = loc.id;
+  }
   return {
     customer, data: {
       customerId: customer.id, issueDate, dueDate, supplyDate: input.supplyDate ? accountingDate(input.supplyDate) : null,
-      orderId: input.orderId || null, branchId: input.branchId || null, description: input.description?.trim().slice(0, 500) || null,
+      orderId: input.orderId || null, branchId: input.branchId || null, description: input.description?.trim().slice(0, 500) || null, fulfilmentLocationId,
     },
   };
 }
@@ -127,10 +142,39 @@ export async function createSalesDoc(input: SalesDocInput & { kind?: "INVOICE" |
       originalInvoiceId = inv.id;
       data.orderId = inv.orderId;
     }
-    const doc = await tx.salesInvoice.create({ data: { ...data, kind, originalInvoiceId, reason, ...totals(lines), createdBy: userId, lines: { create: lines } }, include: { lines: true } });
+    const extra = kind === "CREDIT_NOTE" ? await creditTerms(tx, input, originalInvoiceId!) : await reissueTerms(tx, input, data.customerId);
+    const doc = await tx.salesInvoice.create({ data: { ...data, ...extra, kind, originalInvoiceId, reason, ...totals(lines), createdBy: userId, lines: { create: lines } }, include: { lines: true } });
     await auditAccounting(tx, { action: `${kind === "INVOICE" ? "invoice" : "credit_note"}.create`, entityType: "sales_document", entityId: doc.id, userId, after: { no: doc.invoiceNo, gross: doc.totalGross } });
     return doc;
   }).catch(uniqueOrder);
+}
+
+/**
+ * What a credit note credits (stage 4b): RETURN_OF_GOODS names a posted, warehouse-confirmed
+ * customer return of the same invoice that no other live credit note credits; PRICE_ADJUSTMENT
+ * (discount, price correction, refund without goods) moves no stock.
+ */
+async function creditTerms(tx: Tx, input: SalesDocInput, invoiceId: string, selfId?: string) {
+  const creditType = input.creditType;
+  if (creditType !== "RETURN_OF_GOODS" && creditType !== "PRICE_ADJUSTMENT") throw new AccountingError("Say what the credit note is for: returned goods, or a price adjustment with no goods returned.", 400);
+  if (creditType === "PRICE_ADJUSTMENT") return { creditType, customerReturnId: null };
+  const r = input.customerReturnId ? await tx.customerReturn.findUnique({ where: { id: input.customerReturnId } }) : null;
+  if (!r || r.invoiceId !== invoiceId) throw new AccountingError("A credit note for returned goods names the customer return of this invoice.", 400);
+  if (r.status !== "POSTED") throw new AccountingError("The goods must be received, approved and posted as a customer return before they are credited.", 409);
+  const other = await tx.salesInvoice.findFirst({ where: { customerReturnId: r.id, status: { in: ["DRAFT", "SUBMITTED", "APPROVED", "POSTED"] }, ...(selfId ? { id: { not: selfId } } : {}) } });
+  if (other) throw new AccountingError(`Customer return R-${r.returnNo} is already credited by CN-${other.invoiceNo}.`, 409);
+  return { creditType, customerReturnId: r.id };
+}
+
+/** An invoice that corrects a reversed one (same customer; no stock moves: it takes over the goods). */
+async function reissueTerms(tx: Tx, input: SalesDocInput, customerId: string, selfId?: string) {
+  if (!input.replacesInvoiceId) return { replacesInvoiceId: null };
+  const old = await tx.salesInvoice.findUnique({ where: { id: input.replacesInvoiceId } });
+  if (!old || old.kind !== "INVOICE" || old.status !== "REVERSED") throw new AccountingError("A corrected invoice replaces a reversed invoice.", 400);
+  if (old.customerId !== customerId) throw new AccountingError("A corrected invoice keeps the customer of the invoice it replaces; for another customer, return the goods first.", 400);
+  const other = await tx.salesInvoice.findFirst({ where: { replacesInvoiceId: old.id, status: { not: "REVERSED" }, ...(selfId ? { id: { not: selfId } } : {}) } });
+  if (other) throw new AccountingError(`INV-${old.invoiceNo} is already replaced by INV-${other.invoiceNo}.`, 409);
+  return { replacesInvoiceId: old.id };
 }
 
 function uniqueOrder(e: unknown): never {
@@ -150,8 +194,9 @@ export async function updateDraftSalesDoc(id: string, input: SalesDocInput, user
       const { remaining } = await creditable(tx, d.originalInvoiceId!, d.id);
       if (totals(lines).totalGross.gt(remaining)) throw new AccountingError(`The credit note exceeds what is left to credit on the invoice (${remaining.toFixed(2)}).`, 400);
     }
+    const extra = d.kind === "CREDIT_NOTE" ? await creditTerms(tx, input, d.originalInvoiceId!, d.id) : await reissueTerms(tx, input, data.customerId, d.id);
     await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
-    const doc = await tx.salesInvoice.update({ where: { id }, data: { ...data, ...totals(lines), ...(d.kind === "CREDIT_NOTE" && input.reason ? { reason: String(input.reason).trim().slice(0, 300) } : {}), lines: { create: lines } }, include: { lines: true } });
+    const doc = await tx.salesInvoice.update({ where: { id }, data: { ...data, ...extra, ...totals(lines), ...(d.kind === "CREDIT_NOTE" && input.reason ? { reason: String(input.reason).trim().slice(0, 300) } : {}), lines: { create: lines } }, include: { lines: true } });
     await auditAccounting(tx, { action: "sales_document.update", entityType: "sales_document", entityId: id, userId, before: { gross: d.totalGross }, after: { gross: doc.totalGross } });
     return doc;
   }).catch(uniqueOrder);
@@ -206,7 +251,7 @@ export async function rejectSalesDoc(id: string, userId: string, reason: string)
   });
 }
 
-export type SalesPostOutcome = { document: Awaited<ReturnType<typeof transition>>; ledger: ProcessOutcome | null; cogs?: { documentId: string | null; posted: boolean; reason?: string } };
+export type SalesPostOutcome = { document: Awaited<ReturnType<typeof transition>>; ledger: ProcessOutcome | null; costing?: { status: string; reason: string | null } };
 
 export async function postSalesDoc(id: string, userId: string): Promise<SalesPostOutcome> {
   const document = await ledgerTx(async (tx) => {
@@ -229,9 +274,10 @@ export async function postSalesDoc(id: string, userId: string): Promise<SalesPos
     return posted;
   });
   const ledger = await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.posted" : "ar.invoice.posted");
-  // Cost of sales for stocked products, on the invoice date (stage 4; waits for D-1 like any inventory document).
-  const cogs = document.kind === "INVOICE" ? await saleIssueForInvoice(document.id) : undefined;
-  return { document, ledger, cogs };
+  // Cost of sales (stage 4b): the database created the costing record with the posting; try it now.
+  // A failure here never undoes the invoice: it stays visible with its reason and is retried.
+  const costing = document.kind === "INVOICE" ? await runCosting(document.id) : undefined;
+  return { document, ledger, costing };
 }
 
 export async function reverseSalesDoc(id: string, userId: string, reason: string): Promise<SalesPostOutcome> {
@@ -254,12 +300,18 @@ export async function reverseSalesDoc(id: string, userId: string, reason: string
     return reversed;
   });
   const ledger = await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.reversed" : "ar.invoice.reversed");
-  const cogs = document.kind === "INVOICE" ? await returnForReversedInvoice(document.id) : undefined;
+  // The cost moves back to "delivered, not invoiced"; goods come back only through a customer return.
+  const costing = document.kind === "INVOICE" ? await runCosting(document.id) : undefined;
   if (document.kind === "CREDIT_NOTE") {
     const released = await prisma.accountingEvent.findMany({ where: { eventType: "ar.credit.released", status: "PENDING", partyKey: `CUSTOMER:${document.customerId}` }, orderBy: { createdAt: "asc" }, select: { id: true } });
     for (const e of released) await processEvent(e.id);
   }
-  return { document, ledger, cogs };
+  return { document, ledger, costing };
+}
+
+async function runCosting(invoiceId: string) {
+  try { const c = await processCosting(invoiceId); return { status: c.status, reason: c.lastError }; }
+  catch (e) { return { status: "FAILED", reason: (e as Error).message }; }
 }
 
 async function processDocEvent(docId: string, et: string): Promise<ProcessOutcome | null> {

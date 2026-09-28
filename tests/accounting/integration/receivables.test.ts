@@ -104,15 +104,15 @@ describe("stage 3 — sales invoices and credit notes", () => {
   test("credit notes: against a posted invoice of the same customer, never beyond it; auto-settle the invoice; reversal blocked while allocated", async () => {
     const w = await world();
     const inv = await postedDoc(w, [{ description: "بن", quantity: "1", unitPrice: "1000", taxCategoryId: w.vat15 }]);
-    await rejects(createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv, customerId: w.customer, issueDate: D(3, 5), reason: "مرتجع", lines: [{ description: "x", quantity: "1", unitPrice: "1001", taxCategoryId: w.vat15 }] }, w.prep), /exceeds/);
-    await rejects(createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv, customerId: w.other, issueDate: D(3, 5), reason: "مرتجع", lines: [{ description: "x", quantity: "1", unitPrice: "10" }] }, w.prep), /invoice's customer/);
-    const cn = await createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv, customerId: w.customer, issueDate: D(3, 5), reason: "مرتجع كيس تالف", lines: [{ description: "مرتجع", quantity: "1", unitPrice: "200", taxCategoryId: w.vat15 }] }, w.prep);
+    await rejects(createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv, customerId: w.customer, issueDate: D(3, 5), reason: "مرتجع", lines: [{ description: "x", quantity: "1", unitPrice: "1001", taxCategoryId: w.vat15 }] }, w.prep), /exceeds/);
+    await rejects(createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv, customerId: w.other, issueDate: D(3, 5), reason: "مرتجع", lines: [{ description: "x", quantity: "1", unitPrice: "10" }] }, w.prep), /invoice's customer/);
+    const cn = await createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv, customerId: w.customer, issueDate: D(3, 5), reason: "مرتجع كيس تالف", lines: [{ description: "مرتجع", quantity: "1", unitPrice: "200", taxCategoryId: w.vat15 }] }, w.prep);
     await submitSalesDoc(cn.id, w.prep); await approveSalesDoc(cn.id, w.appr); await postSalesDoc(cn.id, w.appr);
     assert.deepEqual(await journal(`receivables:${cn.id}:ar.credit_note.posted`), ["1130:0.00:230.00:P", "2170:30.00:0.00", "4900:200.00:0.00"].sort());
     assert.equal((await invoiceOpen(prisma, inv)).toFixed(2), "920.00", "1,150 − 230");
     await rejects(reverseSalesDoc(inv, w.appr, "خطأ في الفاتورة"), /allocated/);
     // a direct over-credit is refused by the database at posting
-    const cn2 = await createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv, customerId: w.customer, issueDate: D(3, 6), reason: "خصم إضافي", lines: [{ description: "خصم", quantity: "1", unitPrice: "800", taxCategoryId: w.vat15 }] }, w.prep);
+    const cn2 = await createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv, customerId: w.customer, issueDate: D(3, 6), reason: "خصم إضافي", lines: [{ description: "خصم", quantity: "1", unitPrice: "800", taxCategoryId: w.vat15 }] }, w.prep);
     await submitSalesDoc(cn2.id, w.prep); await approveSalesDoc(cn2.id, w.appr);
     await rejects(prisma.salesInvoice.update({ where: { id: cn2.id }, data: { totalGross: dec("921") } }), /cannot be edited/);
     await postSalesDoc(cn2.id, w.appr);   // 920 of 920 creditable: allowed, exactly
@@ -150,11 +150,11 @@ describe("stage 3 — receipts, advances, statements", () => {
     assert.deepEqual(await journal(`receivables:${ap.application.id}:ar.advance.applied`), ["1130:0.00:459.00:P", "2170:59.87:0.00:P", "2410:399.13:0.00:P"].sort());
     await rejects(applyAdvance({ invoiceId: inv2, amount: "1.00", appliedOn: D(3, 15) }, w.prep), /advance is 0.00/);
 
-    const cn = await createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv2, customerId: w.customer, issueDate: D(3, 20), reason: "مرتجع", lines: [{ description: "مرتجع", quantity: "1", unitPrice: "200", taxCategoryId: w.vat15 }] }, w.prep);
+    const cn = await createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv2, customerId: w.customer, issueDate: D(3, 20), reason: "مرتجع", lines: [{ description: "مرتجع", quantity: "1", unitPrice: "200", taxCategoryId: w.vat15 }] }, w.prep);
     await submitSalesDoc(cn.id, w.prep); await approveSalesDoc(cn.id, w.appr); await postSalesDoc(cn.id, w.appr);   // 230, settles inv2 → open 461
 
     // A credit on a fully paid invoice stays as the customer's credit, then is refunded.
-    const cnPaid = await createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv1, customerId: w.customer, issueDate: D(3, 22), reason: "تعويض تأخير", lines: [{ description: "تعويض", quantity: "1", unitPrice: "100", taxCategoryId: w.vat15 }] }, w.prep);
+    const cnPaid = await createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv1, customerId: w.customer, issueDate: D(3, 22), reason: "تعويض تأخير", lines: [{ description: "تعويض", quantity: "1", unitPrice: "100", taxCategoryId: w.vat15 }] }, w.prep);
     await submitSalesDoc(cnPaid.id, w.prep); await approveSalesDoc(cnPaid.id, w.appr); await postSalesDoc(cnPaid.id, w.appr);   // 115 unapplied
     const t2 = await bankLine(w, D(3, 25), "-115.00", "CUSTOMER_REFUND");
     const a2 = await assignReceipt(t2, { customerId: w.customer }, w.prep);
@@ -272,7 +272,7 @@ describe("stage 3 — credits", () => {
     const inv1 = await postedDoc(w, [{ description: "بن", quantity: "1", unitPrice: "100", taxCategoryId: w.vat15 }]);   // 115
     const t = await bankLine(w, D(3, 3), "115.00");
     await assignReceipt(t, { customerId: w.customer, allocations: [{ invoiceId: inv1, amount: "115.00" }] }, w.prep);
-    const cn = await createSalesDoc({ kind: "CREDIT_NOTE", originalInvoiceId: inv1, customerId: w.customer, issueDate: D(3, 5), reason: "خصم لاحق", lines: [{ description: "خصم", quantity: "1", unitPrice: "40", taxCategoryId: w.vat15 }] }, w.prep);
+    const cn = await createSalesDoc({ kind: "CREDIT_NOTE", creditType: "PRICE_ADJUSTMENT", originalInvoiceId: inv1, customerId: w.customer, issueDate: D(3, 5), reason: "خصم لاحق", lines: [{ description: "خصم", quantity: "1", unitPrice: "40", taxCategoryId: w.vat15 }] }, w.prep);
     await submitSalesDoc(cn.id, w.prep); await approveSalesDoc(cn.id, w.appr); await postSalesDoc(cn.id, w.appr);   // 46 unapplied
     const inv2 = await postedDoc(w, [{ description: "بن", quantity: "1", unitPrice: "200", taxCategoryId: w.vat15 }], { issueDate: D(3, 6) });   // 230
     const before = await prisma.journalEntry.count();
