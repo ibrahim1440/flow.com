@@ -15,6 +15,11 @@ export const POSTING_ROLES: RoleDef[] = [
   { role: "INPUT_VAT", en: "Input VAT", ar: "ضريبة القيمة المضافة على المدخلات", usedBy: "payables" },
   { role: "SUPPLIER_ADVANCES", en: "Supplier advances", ar: "دفعات مقدمة للموردين", usedBy: "bank" },
   { role: "BANK_FEES", en: "Bank fees", ar: "رسوم بنكية", usedBy: "bank" },
+  { role: "AR_CONTROL", en: "Trade receivables (control)", ar: "ذمم مدينة تجارية (حساب مراقبة)", usedBy: "receivables" },
+  { role: "CUSTOMER_ADVANCES", en: "Customer advances (control)", ar: "دفعات مقدمة من العملاء (حساب مراقبة)", usedBy: "receivables" },
+  { role: "OUTPUT_VAT", en: "Output VAT", ar: "ضريبة القيمة المضافة على المخرجات", usedBy: "receivables" },
+  { role: "SALES_REVENUE", en: "Sales revenue (default for invoice lines)", ar: "إيرادات المبيعات (الافتراضي لبنود الفواتير)", usedBy: "receivables" },
+  { role: "SALES_RETURNS", en: "Sales returns and allowances (credit notes)", ar: "مردودات وخصومات المبيعات (إشعارات دائنة)", usedBy: "receivables" },
 ];
 
 export const ROLE_SET = new Set(POSTING_ROLES.map((r) => r.role));
@@ -69,6 +74,40 @@ POLICIES.push(
       "the payables control account posts only to the extent it is matched to posted supplier bills. A transfer between " +
       "company accounts posts once. Customer receipts and POS/gateway settlements do not post until the receivables stage " +
       "exists. Voiding a posted transaction posts its mirror.",
+  },
+);
+
+POLICIES.push(
+  {
+    key: "receivables.recognition",
+    en: "Sales invoices, credit notes and receivables",
+    ar: "فواتير المبيعات والإشعارات الدائنة والذمم المدينة",
+    governs: ["ar.invoice.posted", "ar.invoice.reversed", "ar.credit_note.posted", "ar.credit_note.reversed"],
+    defaultStatement:
+      "تُثبت فاتورة المبيعات عند ترحيلها بعد اعتمادها من شخص غير مُعدّها، بتاريخ إصدارها (قرار توقيت الإيراد D-4: عند انتقال السيطرة — التسليم أو الأداء): مدين الذمم المدينة بإجمالي الفاتورة للعميل، ودائن حساب الإيراد لكل بند بصافيه، ودائن ضريبة المخرجات. " +
+      "الإشعار الدائن يُصدر مقابل فاتورة مرحّلة ولا يتجاوز رصيدها: مدين المردودات والخصومات ومدين ضريبة المخرجات ودائن الذمم المدينة. الفاتورة المرحّلة لا تُعدّل؛ تُعكس بقيد مقابل ما لم يُخصص لها تحصيل أو إشعار. " +
+      "التحصيل لا يُثبت من الفاتورة بل من سطر البنك المسند للعميل. تكلفة المبيعات تنتظر تقييم المخزون (D-1).\n\n" +
+      "A sales invoice is recognised when posted, after approval by someone other than its preparer, on its issue date " +
+      "(decision D-4, revenue timing: at transfer of control — delivery or performance): receivables are debited with the " +
+      "invoice total for the customer, each line's revenue account is credited with its net amount, and output VAT is " +
+      "credited. A credit note is issued against a posted invoice and never exceeds it: sales returns and allowances and " +
+      "output VAT are debited and receivables credited. A posted invoice is never edited; it is reversed by a mirror entry " +
+      "unless receipts or credits are allocated to it. Collection is recognised from the bank line assigned to the customer, " +
+      "not from the invoice. Cost of sales waits for inventory valuation (D-1).",
+  },
+  {
+    key: "receivables.advances",
+    en: "Customer advances and VAT on advances",
+    ar: "الدفعات المقدمة من العملاء وضريبتها",
+    governs: ["ar.advance.applied", "ar.advance.reversed"],
+    defaultStatement:
+      "ما يزيد من تحصيل العميل عن الفواتير المرحّلة المفتوحة له عند إسناد التحصيل يُثبت دفعةً مقدمة (التزام) للعميل. " +
+      "قرار D-2 (إعداد «ضريبة الدفعات المقدمة»): عند اختيار «عند الاستلام» تُحتسب ضريبة المخرجات على الدفعة المقدمة يوم استلامها وتُصدر فاتورة ضريبية للدفعة، وتُعكس تلك الضريبة عند تطبيق الدفعة على الفاتورة النهائية التي تحمل ضريبتها كاملة. " +
+      "تطبيق الدفعة على فاتورة ينقل المبلغ من الدفعات المقدمة إلى الذمم المدينة.\n\n" +
+      "The part of a customer receipt above the customer's open posted invoices at assignment is recognised as a customer " +
+      "advance (a liability). Decision D-2 (setting \"VAT on advances\"): when set to at receipt, output VAT is charged on the " +
+      "advance when received, with a prepayment tax invoice, and reversed when the advance is applied to the final invoice, " +
+      "which carries the full VAT. Applying an advance to an invoice moves the amount from customer advances to receivables.",
   },
 );
 

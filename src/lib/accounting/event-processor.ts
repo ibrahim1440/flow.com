@@ -14,6 +14,7 @@ import { resolvePostingMode } from "./policy";
 import { translateCommission } from "./translators/commissions";
 import { translateSupplierBill } from "./translators/payables";
 import { translateBank } from "./translators/bank";
+import { translateReceivables } from "./translators/receivables";
 import type { Translation } from "./translators/types";
 
 type Tx = Prisma.TransactionClient;
@@ -28,6 +29,12 @@ const TRANSLATORS: Record<string, (tx: Tx, ev: EventRow) => Promise<Translation>
   "ap.bill.reversed": translateSupplierBill,
   "bank.transaction.confirmed": translateBank,
   "bank.transaction.voided": translateBank,
+  "ar.invoice.posted": translateReceivables,
+  "ar.invoice.reversed": translateReceivables,
+  "ar.credit_note.posted": translateReceivables,
+  "ar.credit_note.reversed": translateReceivables,
+  "ar.advance.applied": translateReceivables,
+  "ar.advance.reversed": translateReceivables,
 };
 
 export type ProcessOutcome = { eventId: string; status: AccountingEventStatus | "BUSY"; journalEntryId?: string; message?: string; provisional?: boolean };

@@ -15,6 +15,7 @@ import { recomputeObligationStatus } from "./obligations";
 import { reversePaymentsForTxn, reverseReceiptAllocations, runAllocation } from "./allocation";
 import { receiptUnallocated } from "./ledger";
 import { POSTED_BANK_LINE_MESSAGE, postedBankLines } from "@/lib/accounting/bank-posted";
+import { releaseCustomerReceipt } from "@/lib/accounting/receivables-service";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
@@ -443,6 +444,7 @@ export async function reviewTransaction(actor: FinanceActor, scope: FinanceScope
         data: splits.map((s) => ({ transactionId: id, finCategoryId: s.finCategoryId, costCenterId: s.costCenterId, amount: fromMinor(s.amount), note: s.note })),
       });
     }
+    if (!["CUSTOMER_RECEIPT", "CUSTOMER_REFUND"].includes(classification)) await releaseCustomerReceipt(tx, id);   // no longer a customer line
     const after = await tx.bankTransaction.update({
       where: { id },
       data: {
@@ -513,6 +515,7 @@ export async function voidTransaction(actor: FinanceActor, scope: FinanceScope, 
       await tx.bankTransactionMatch.updateMany({ where: { transactionId: lineId, active: true }, data: { active: false, removedAt: new Date(), removedBy: actor.id } });
       await tx.bankTransaction.update({ where: { id: lineId }, data: { status: "VOID", voidedAt: new Date(), voidedBy: actor.id, voidReason: reason } });
       for (const m of matches.filter((x) => x.targetType === "OBLIGATION")) await recomputeObligationStatus(tx, m.targetId);
+      await releaseCustomerReceipt(tx, lineId);   // accounting: the customer assignment of an unposted line
       await audit(tx, { action: "bank_txn.voided", entityType: "BankTransaction", entityId: lineId, branchKey: line.branchKey, before: { status: line.status }, after: { status: "VOID" }, reason, refs: reversal ? { reversal } : undefined, userId: actor.id });
     }
     return { transaction: await tx.bankTransaction.findUniqueOrThrow({ where: { id } }), reversal };

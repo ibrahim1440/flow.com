@@ -9,12 +9,15 @@ import { PostingBlocked } from "../errors";
 import { dec, ZERO } from "../money";
 import type { EngineLine } from "../posting";
 import { journalOfEvent, mirrorOfJournal } from "./mirror";
+import { advanceDecisionsPending } from "./receivables";
 import type { Translation } from "./types";
 
 type Ev = { id: string; eventType: string; occurredAt: Date; payload: Prisma.JsonValue };
 
-/** Classifications whose counterpart is a customer balance — not in the ledger until stage 3. */
-export const WAITS_FOR_RECEIVABLES = new Set(["CUSTOMER_RECEIPT", "POS_SETTLEMENT", "GATEWAY_SETTLEMENT", "CUSTOMER_REFUND"]);
+/** Settlements of POS/gateway sales: no POS sales records exist, so the daily summary is journalised by hand. */
+export const WAITS_FOR_POS = new Set(["POS_SETTLEMENT", "GATEWAY_SETTLEMENT"]);
+/** Money from or back to a customer: posts only once the line is assigned to a customer (stage 3). */
+export const CUSTOMER_CLASSES = new Set(["CUSTOMER_RECEIPT", "CUSTOMER_REFUND"]);
 /** Control kinds a bank split may never hit directly. */
 const FORBIDDEN_CONTROLS = new Set(["RECEIVABLE", "CUSTOMER_ADVANCES", "COMMISSION_PAYABLE", "INVENTORY", "CASH"]);
 
@@ -93,8 +96,27 @@ export async function translateBank(tx: Prisma.TransactionClient, ev: Ev): Promi
   const settings = await tx.accountingSettings.findUnique({ where: { id: "singleton" } });
   if (!settings?.bankPostingFrom) throw new PostingBlocked("The bank posting start date is not set, so bank lines do not post yet.");
   if (t.txnDate < settings.bankPostingFrom) return { skip: `Dated before bank posting starts (${settings.bankPostingFrom.toISOString().slice(0, 10)}).` };
-  if (WAITS_FOR_RECEIVABLES.has(t.classification)) throw new PostingBlocked("Customer receipts and settlements post only once receivables are in the ledger (stage 3).");
+  if (WAITS_FOR_POS.has(t.classification)) throw new PostingBlocked("POS and gateway settlements do not post automatically: there are no POS sales records to match, so journalise the daily sales summary manually.");
   if (!t.cashAccount.glAccountId) throw new PostingBlocked(`Cash account ${t.cashAccount.code} is not mapped to a ledger account.`);
+
+  if (CUSTOMER_CLASSES.has(t.classification)) {
+    // Stage 3: receivables part to AR, the rest to customer advances (with VAT per D-2).
+    const r = await tx.customerReceipt.findUnique({ where: { bankTransactionId: t.id }, include: { customer: true } });
+    if (!r || r.voided) throw new PostingBlocked("Assign this line to a customer in Accounting → Receivables → Receipts.");
+    if (!dec(r.amount).equals(dec(t.amount))) throw new PostingBlocked(`The customer assignment (${dec(r.amount).toFixed(2)}) no longer matches the line (${dec(t.amount).toFixed(2)}); assign it again.`);
+    const party = { partyType: "CUSTOMER" as const, partyId: r.customerId };
+    const who = `${r.customer.nameAr ?? r.customer.name}`;
+    const signed = (role: string, v: Prisma.Decimal, description: string): EngineLine | null =>
+      v.isZero() ? null : v.isPositive() ? { role, credit: v, description, ...party } : { role, debit: v.abs(), description, ...party };
+    const amt = dec(t.amount);
+    const lines: EngineLine[] = [amt.isPositive()
+      ? { accountId: t.cashAccount.glAccountId, debit: amt, description: "Bank" }
+      : { accountId: t.cashAccount.glAccountId, credit: amt.abs(), description: "Bank" }];
+    const adv = dec(r.advanceAmount), advVat = dec(r.advanceVat);
+    for (const l of [signed("AR_CONTROL", dec(r.arAmount), `Receipt ${r.receiptNo} · ${who}`), signed("CUSTOMER_ADVANCES", adv.sub(advVat), `Advance · ${who}`), signed("OUTPUT_VAT", advVat, `VAT on advance · ${who}`)]) if (l) lines.push(l);
+    return { entryDate: accountingDateOf(t.txnDate), description: `Customer ${amt.isPositive() ? "receipt" : "refund"} ${label} · ${who}`, sourceModule: "bank", sourceDocumentId: t.id, lines,
+      alsoUnapproved: adv.isZero() ? [] : await advanceDecisionsPending(tx) };
+  }
 
   if (t.classification === "INTERNAL_TRANSFER") {
     if (!t.transferPeerId) throw new PostingBlocked("The transfer has no paired line.");

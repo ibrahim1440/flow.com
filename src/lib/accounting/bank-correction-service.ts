@@ -21,6 +21,7 @@ import { accountingDate, todayAccountingDate } from "./dates";
 import { dec, ZERO } from "./money";
 import { processEvent, type ProcessOutcome } from "./event-processor";
 import { postedBankLines } from "./bank-posted";
+import { releaseCustomerReceipt } from "./receivables-service";
 
 type Tx = Prisma.TransactionClient;
 type Replacement = {
@@ -136,6 +137,7 @@ async function voidLine(tx: Tx, lineId: string, actorId: string, reason: string)
   const matches = await tx.bankTransactionMatch.findMany({ where: { transactionId: lineId, active: true } });
   await tx.bankTransactionMatch.updateMany({ where: { transactionId: lineId, active: true }, data: { active: false, removedAt: new Date(), removedBy: actorId } });
   for (const m of matches.filter((x) => x.targetType === "OBLIGATION")) await recomputeObligationStatus(tx, m.targetId);
+  await releaseCustomerReceipt(tx, lineId);
   await auditAccounting(tx, { action: "bank.line.voided_by_correction", entityType: "BankTransaction", entityId: lineId, userId: actorId, before: { status: line.status }, after: { status: "VOID" }, reason, refs: { reversal } });
 }
 

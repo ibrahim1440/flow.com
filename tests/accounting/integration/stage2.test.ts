@@ -221,7 +221,7 @@ describe("stage 2 — bank to ledger", () => {
     assert.equal(ev?.status, "BLOCKED"); assert.match(ev!.errorMessage!, /500\.00 SAR on the payables category is not matched/);
   });
 
-  test("expense line posts to the category account; unmapped category, unmapped cash account and customer receipts are BLOCKED", async () => {
+  test("expense line posts to the category account; unmapped category, unmapped cash account and unassigned customer receipts are BLOCKED", async () => {
     const w = await world();
     const rent = await bankLine(w, { date: D(3, 5), amount: "-15000.00", cls: "RENT", splits: [{ cat: w.cats.RENT, amount: "-15000.00" }] });
     const unmapped = await bankLine(w, { date: D(3, 6), amount: "-50.00", cls: "OTHER_OPERATING_PAYMENT", splits: [{ cat: w.cats.OTHER, amount: "-50.00" }] });
@@ -230,7 +230,7 @@ describe("stage 2 — bank to ledger", () => {
     const e1 = await eventOf(`bank:${rent}:confirmed`);
     assert.deepEqual((await journalLines(e1!.journalEntryId!)).map((l) => `${l.code}:${l.dr}:${l.cr}`), ["1120:0.00:15000.00", "6200:15000.00:0.00"]);
     assert.match((await eventOf(`bank:${unmapped}:confirmed`))!.errorMessage!, /not mapped to a ledger account: UNMAPPED/);
-    assert.match((await eventOf(`bank:${receipt}:confirmed`))!.errorMessage!, /stage 3/);
+    assert.match((await eventOf(`bank:${receipt}:confirmed`))!.errorMessage!, /Assign this line to a customer/);
     const b2 = await prisma.cashAccount.create({ data: { code: "BANK2", nameEn: "Second bank", type: "BANK", openingBalance: dec("0"), openingBalanceDate: accountingDate(D(1, 1)) } });
     const t2 = await bankLine(w, { account: b2.id, date: D(3, 8), amount: "-15000.00", cls: "RENT", splits: [{ cat: w.cats.RENT, amount: "-15000.00" }] });
     await processPendingEvents();

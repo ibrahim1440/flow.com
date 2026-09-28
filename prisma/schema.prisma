@@ -63,12 +63,20 @@ model Customer {
   roastPreferences CustomerRoastPreference[]
 
   // Sales CRM (additive, relation fields only).
-  leadConversions  LeadConversion[]
-  opportunities    Opportunity[]
-  quotes           Quote[]
-  activities       Activity[]
-  collectionEvents CollectionEvent[]
-  salesCollections SalesCollection[]
+  leadConversions     LeadConversion[]
+  opportunities       Opportunity[]
+  quotes              Quote[]
+  activities          Activity[]
+  collectionEvents    CollectionEvent[]
+  salesCollections    SalesCollection[]
+  // Accounting receivables (stage 3, additive).
+  vatNumber           String?
+  crNumber            String?
+  paymentTermsDays    Int                  @default(30)
+  creditLimit         Decimal?             @db.Decimal(18, 2)
+  salesInvoices       SalesInvoice[]
+  customerReceipts    CustomerReceipt[]
+  advanceApplications AdvanceApplication[]
 }
 
 model GreenBean {
@@ -1240,6 +1248,12 @@ model AccountingSettings {
   /// journals may no longer touch a cash account's mapped GL account. Null = bank posting off.
   bankPostingFrom DateTime? @db.Date
 
+  /// Decision D-2: VAT on customer advances. AT_RECEIPT = output VAT when the advance is received
+  /// (a prepayment tax invoice), reversed when the advance is applied to the final invoice;
+  /// NOT_AT_RECEIPT = no VAT until the invoice. Null = undecided: receipts with an advance part
+  /// post only provisionally (isolated test database) and otherwise wait.
+  advanceVatTreatment AdvanceVatTreatment?
+
   // Posting is blocked everywhere except setup routes while this is false. Must not
   // default to true — there is no setup wizard in S0, so setup is never complete by default.
   setupComplete Boolean @default(false)
@@ -1276,6 +1290,7 @@ model Account {
   mappings          AccountMapping[]
   finCategories     FinCategory[]
   billLines         SupplierBillLine[]
+  salesInvoiceLines SalesInvoiceLine[] @relation("SalesInvoiceLineAccount")
 
   @@index([type])
   @@index([parentId])
@@ -2806,10 +2821,12 @@ model BankTransaction {
   createdBy             String?
   updatedAt             DateTime            @updatedAt
 
-  splits  BankTransactionSplit[]
-  matches BankTransactionMatch[]
+  splits                BankTransactionSplit[]
+  matches               BankTransactionMatch[]
   /// Accounting correction: the posted line this one replaces (reversal-and-replacement).
-  replacesTransactionId String?          @unique
+  replacesTransactionId String?                @unique
+  replacesTransaction   BankTransaction?       @relation("BankReplacement", fields: [replacesTransactionId], references: [id], onDelete: Restrict)
+  replacedBy            BankTransaction?       @relation("BankReplacement")
   corrections           BankCorrection[]
 
   @@unique([cashAccountId, sourceFingerprint])
@@ -3373,4 +3390,170 @@ model BankCorrection {
 
   @@index([transactionId])
   @@index([status])
+}
+
+enum AdvanceVatTreatment {
+  AT_RECEIPT
+  NOT_AT_RECEIPT
+}
+
+enum SalesDocKind {
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum SalesInvoiceStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+  REVERSED
+}
+
+/// Sales invoice or credit note (stage 3). Four-eyes; immutable once posted (DB trigger); a
+/// posted document is corrected by reversal (invoice) or by a credit note.
+model SalesInvoice {
+  id                String             @id @default(cuid())
+  invoiceNo         Int                @unique @default(autoincrement())
+  kind              SalesDocKind       @default(INVOICE)
+  customerId        String
+  customer          Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  orderId           String?
+  /// Credit note: the invoice it credits.
+  originalInvoiceId String?
+  originalInvoice   SalesInvoice?      @relation("CreditNoteOf", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  creditNotes       SalesInvoice[]     @relation("CreditNoteOf")
+  issueDate         DateTime           @db.Date
+  supplyDate        DateTime?          @db.Date
+  dueDate           DateTime           @db.Date
+  branchId          String?
+  description       String?
+  reason            String?
+  currency          String             @default("SAR")
+  status            SalesInvoiceStatus @default(DRAFT)
+  totalNet          Decimal            @default(0) @db.Decimal(18, 2)
+  totalVat          Decimal            @default(0) @db.Decimal(18, 2)
+  totalGross        Decimal            @default(0) @db.Decimal(18, 2)
+  createdBy         String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  submittedBy       String?
+  submittedAt       DateTime?
+  approvedBy        String?
+  approvedAt        DateTime?
+  postedBy          String?
+  postedAt          DateTime?
+  rejectedBy        String?
+  rejectedAt        DateTime?
+  rejectedReason    String?
+  reversedBy        String?
+  reversedAt        DateTime?
+  reversalReason    String?
+
+  lines        SalesInvoiceLine[]
+  allocations  ArAllocation[]       @relation("AllocatedTo")
+  creditUsed   ArAllocation[]       @relation("AllocatedFromCredit")
+  applications AdvanceApplication[]
+
+  @@index([status])
+  @@index([customerId, issueDate])
+  @@index([orderId])
+}
+
+model SalesInvoiceLine {
+  id              String       @id @default(cuid())
+  invoiceId       String
+  invoice         SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNo          Int
+  productSkuId    String?
+  orderItemId     String?
+  accountId       String
+  account         Account      @relation("SalesInvoiceLineAccount", fields: [accountId], references: [id], onDelete: Restrict)
+  description     String?
+  quantity        Decimal      @db.Decimal(18, 4)
+  unitPrice       Decimal      @db.Decimal(18, 4)
+  discountPercent Decimal      @default(0) @db.Decimal(5, 2)
+  net             Decimal      @db.Decimal(18, 2)
+  taxCategoryId   String?
+  vatRate         Decimal      @default(0) @db.Decimal(5, 2)
+  vat             Decimal      @default(0) @db.Decimal(18, 2)
+  gross           Decimal      @db.Decimal(18, 2)
+  costCenterId    String?
+
+  @@unique([invoiceId, lineNo])
+}
+
+/// Assignment of a customer bank receipt (or refund) to a customer: the only source of cash
+/// postings for customers (the bank line posts; this says how). Fixed once the line posts.
+model CustomerReceipt {
+  id                String         @id @default(cuid())
+  receiptNo         Int            @unique @default(autoincrement())
+  bankTransactionId String         @unique
+  customerId        String
+  customer          Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  salesCollectionId String?        @unique
+  /// Signed like the bank line: positive receipt, negative refund. amount = arAmount + advanceAmount.
+  amount            Decimal        @db.Decimal(18, 2)
+  arAmount          Decimal        @db.Decimal(18, 2)
+  advanceAmount     Decimal        @db.Decimal(18, 2)
+  /// VAT inside advanceAmount when advance VAT is charged at receipt (D-2).
+  advanceVat        Decimal        @default(0) @db.Decimal(18, 2)
+  voided            Boolean        @default(false)
+  createdBy         String
+  createdAt         DateTime       @default(now())
+  allocations       ArAllocation[]
+
+  @@index([customerId])
+}
+
+/// Subledger matching of a receivable to an invoice: from a receipt's AR part, a credit note or
+/// an advance application. Deactivated (never deleted) when its source is voided or reversed.
+model ArAllocation {
+  id            String              @id @default(cuid())
+  invoiceId     String
+  invoice       SalesInvoice        @relation("AllocatedTo", fields: [invoiceId], references: [id], onDelete: Restrict)
+  receiptId     String?
+  receipt       CustomerReceipt?    @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  creditNoteId  String?
+  creditNote    SalesInvoice?       @relation("AllocatedFromCredit", fields: [creditNoteId], references: [id], onDelete: Restrict)
+  applicationId String?             @unique
+  application   AdvanceApplication? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  amount        Decimal             @db.Decimal(18, 2)
+  allocatedOn   DateTime            @db.Date
+  active        Boolean             @default(true)
+  removedAt     DateTime?
+  createdBy     String
+  createdAt     DateTime            @default(now())
+
+  @@index([invoiceId])
+  @@index([receiptId])
+  @@index([creditNoteId])
+}
+
+enum AdvanceApplicationStatus {
+  POSTED
+  REVERSED
+}
+
+/// Applying a customer's advance to an invoice: moves the balance from customer advances (and the
+/// advance VAT, if charged at receipt) to receivables.
+model AdvanceApplication {
+  id             String                   @id @default(cuid())
+  applicationNo  Int                      @unique @default(autoincrement())
+  customerId     String
+  customer       Customer                 @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  invoiceId      String
+  invoice        SalesInvoice             @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount         Decimal                  @db.Decimal(18, 2)
+  vatPortion     Decimal                  @default(0) @db.Decimal(18, 2)
+  appliedOn      DateTime                 @db.Date
+  status         AdvanceApplicationStatus @default(POSTED)
+  createdBy      String
+  createdAt      DateTime                 @default(now())
+  reversedBy     String?
+  reversedAt     DateTime?
+  reversalReason String?
+  allocation     ArAllocation?
+
+  @@index([customerId])
 }
