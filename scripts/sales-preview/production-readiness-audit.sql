@@ -58,12 +58,26 @@ SELECT migration_name, finished_at, rolled_back_at, applied_steps_count
          '20260927180000_payout_idempotency_global')
  ORDER BY finished_at NULLS LAST;
 
--- How far along the database is overall, and whether anything failed.
+-- How far along the database is overall.
 SELECT count(*) AS applied_total,
-       count(*) FILTER (WHERE finished_at IS NULL)   AS unfinished,
-       count(*) FILTER (WHERE rolled_back_at IS NOT NULL) AS rolled_back,
-       max(migration_name)                            AS latest_by_name
+       count(*) FILTER (WHERE finished_at IS NULL)         AS unfinished,
+       count(*) FILTER (WHERE rolled_back_at IS NOT NULL)  AS rolled_back,
+       max(migration_name)                                  AS latest_by_name
   FROM _prisma_migrations;
+
+-- ═══ 1b. MIGRATION FAILURES — named, not counted ══════════════════════════════
+-- A count tells you something is wrong and nothing about what. Any row here is a finding
+-- for the release package in its own right.
+--
+-- **Do not repair migration history.** An unfinished or rolled-back row may be harmless
+-- residue or may mean a schema change landed partially; the two look identical from here
+-- and only whoever ran it can tell them apart. `prisma migrate resolve` would overwrite
+-- that evidence. Report the rows and stop.
+SELECT migration_name, started_at, finished_at, rolled_back_at,
+       applied_steps_count, left(COALESCE(logs, ''), 300) AS log_head
+  FROM _prisma_migrations
+ WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL
+ ORDER BY started_at;
 
 -- ═══ 2. SCHEMA SHAPE — what actually exists on CommissionLedgerEntry ══════════
 SELECT column_name, data_type, is_nullable
@@ -102,12 +116,47 @@ SELECT CASE
            GROUP BY 1 HAVING count(*) > 1) d) = 0
     THEN 'PASS — no duplicate keys. Migration 2 can create the unique index.'
   ELSE 'BLOCKED — duplicate idempotencyKey values exist. Migration 2 WILL FAIL. '
-       'List them before proceeding.'
+       'The next query names them.'
 END AS idempotency_preflight;
 
--- ═══ 4. CLIENT COMPATIBILITY — who records payouts, and how ═══════════════════
--- After this release a payout without an idempotencyKey is refused with 400. Anything
--- other than the in-app dialog that writes payouts must be updated first.
+-- The duplicates themselves. Empty on a healthy database; every row here is a finding.
+-- Runs harmlessly when the column does not exist yet, returning nothing.
+SELECT "idempotencyKey", count(*) AS occurrences,
+       string_agg(DISTINCT "employeeId", ', ')       AS employees,
+       string_agg(DISTINCT type::text, ', ')          AS types,
+       min("createdAt") AS first_seen, max("createdAt") AS last_seen
+  FROM "CommissionLedgerEntry"
+ WHERE "idempotencyKey" IS NOT NULL
+   AND EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'CommissionLedgerEntry' AND column_name = 'idempotencyKey')
+ GROUP BY 1 HAVING count(*) > 1
+ ORDER BY occurrences DESC;
+
+-- ═══ 4. CLIENT COMPATIBILITY ══════════════════════════════════════════════════
+--
+-- After this release a payout without an `idempotencyKey` is refused with 400. The
+-- question is therefore: what still writes payouts, and would it now be refused?
+--
+-- **A keyless historical payout is not evidence of an incompatible client.** Before
+-- migration 1 the column does not exist, so EVERY payout ever recorded is keyless —
+-- necessarily, and regardless of what wrote it. Counting those rows measures the age of
+-- the data, not the health of any caller. The figures below are context; they are not the
+-- compatibility answer.
+--
+-- The compatibility answer, as far as the repository can give it: the ONLY code that
+-- writes a PAYOUT row is the payout branch of
+-- src/app/api/commissions/review/actions/route.ts, reached from the payout dialog on
+-- /dashboard/commissions/review. That route sends the key. Verified by searching the
+-- source for PAYOUT writes at release 9de3e65 — one create(), one lookup, no others.
+--
+-- **The uncertainty the repository cannot resolve**, and which the operator must settle:
+--   • an integration, script or scheduled job outside this repository that writes payouts
+--     directly, by SQL or through the API;
+--   • a stale client bundle held by a browser that posts without the key — it would be
+--     refused with 400 and recorded nothing, which is safe but is a support call;
+--   • an API consumer authenticating as one of the identities listed below.
+-- The actor list and the timing below are what there is to go on; anything they cannot
+-- account for should be chased before deploying, not after.
 SELECT
   count(*)                                                       AS payout_rows_total,
   count(*) FILTER (WHERE "idempotencyKey" IS NULL)               AS payouts_without_key,
@@ -116,11 +165,25 @@ SELECT
   max("createdAt")                                               AS last_payout
   FROM "CommissionLedgerEntry" WHERE type = 'PAYOUT';
 
--- Who has the privilege at all. A payout can only arrive from one of these identities.
-SELECT id, name, active
-  FROM "Employee"
- WHERE (permissions::jsonb -> 'commissions' -> 'sub' ->> 'record_payout') = 'true'
- ORDER BY active DESC, id;
+-- Who holds the privilege. A payout can only arrive from one of these identities, so this
+-- is the list to walk when asking "could anything other than the dialog be posting?".
+SELECT e.id, e.name, e.active,
+       (SELECT count(*) FROM "CommissionLedgerEntry" l
+         WHERE l.type = 'PAYOUT' AND l."actorId" = e.id) AS payouts_recorded,
+       (SELECT max(l."createdAt") FROM "CommissionLedgerEntry" l
+         WHERE l.type = 'PAYOUT' AND l."actorId" = e.id) AS last_payout
+  FROM "Employee" e
+ WHERE (e.permissions::jsonb -> 'commissions' -> 'sub' ->> 'record_payout') = 'true'
+ ORDER BY e.active DESC, e.id;
+
+-- Any payout whose actor no longer exists or never had one. Worth a look: a row written
+-- by something other than a signed-in person would show up here.
+SELECT l.id, l."employeeId", l.amount::text, l."actorId", l."createdAt"
+  FROM "CommissionLedgerEntry" l
+ WHERE l.type = 'PAYOUT'
+   AND (l."actorId" IS NULL
+        OR NOT EXISTS (SELECT 1 FROM "Employee" e WHERE e.id = l."actorId"))
+ ORDER BY l."createdAt" DESC;
 
 -- ═══ 5. THE IMPACT ITSELF — every affected employee-period ════════════════════
 -- All of them. `paid_total` orders the attention, it does not limit the set: a blocked
@@ -163,6 +226,30 @@ LEFT JOIN acc a ON a."employeeId" = m."employeeId" AND a."periodStart" = m."peri
 GROUP BY m."employeeId", m."periodStart"
 ORDER BY would_block DESC, (SUM(m.amount) FILTER (WHERE m.t = 'PAYOUT')) DESC NULLS LAST,
          m."employeeId", m."periodStart";
+
+-- ═══ 5b. RECONCILING THE CUTOVER WINDOW ══════════════════════════════════════
+--
+-- Run AFTER deploying, with the timestamp of the pre-deployment audit substituted below.
+--
+-- The blocked set is not expected to be identical across a cutover. Approving a collection
+-- or reversing one writes movements, and those legitimately move a period in or out of the
+-- blocked set. Demanding an identical set would either forbid normal work during the
+-- window or produce a false alarm.
+--
+-- What must hold is weaker and more useful: **every difference is explained by a movement
+-- written inside the window.** This lists them, so each change can be pointed at its cause.
+-- A blocked-set change with nothing here to account for it is the real alarm.
+--
+-- Payout rows are the exception. If the freeze is installed for the cutover (recommended;
+-- see scripts/sales-preview/payout-freeze.sql) then the payout count MUST be unchanged,
+-- because nothing could have written one. If the freeze is not installed, payouts move too
+-- and the count is not a check at all.
+SELECT l.type::text, l."employeeId",
+       to_char(l."periodStart" + interval '3 hours', 'YYYY-MM') AS riyadh_month,
+       l.amount::text, l."accrualId" IS NOT NULL AS placed, l."actorId", l."createdAt"
+  FROM "CommissionLedgerEntry" l
+ WHERE l."createdAt" >= TIMESTAMPTZ '2026-01-01 00:00:00+00'  -- <-- replace with the pre-deploy audit timestamp
+ ORDER BY l."createdAt";
 
 -- ═══ 6. THE ONE-LINE VERDICT ══════════════════════════════════════════════════
 WITH mv AS (
