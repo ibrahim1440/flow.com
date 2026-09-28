@@ -40,7 +40,7 @@ export async function translateSupplierBill(tx: Prisma.TransactionClient, ev: Ev
     accountId: l.accountId, debit: l.net, description: l.description ?? label, branchId: bill.branchId, costCenterId: l.costCenterId,
   }));
   if (vat.gt(0)) lines.push({ role: "INPUT_VAT", debit: vat, description: "Input VAT", branchId: bill.branchId });
-  lines.push({ role: "AP_CONTROL", credit: bill.totalGross, description: label, branchId: bill.branchId, ...party });
+  lines.push({ role: "AP_CONTROL", credit: bill.totalGross, description: label, branchId: bill.branchId, ...party, openItem: { type: "SUPPLIER_BILL", id: bill.id } });
   return {
     entryDate: accountingDateOf(bill.billDate),
     description: `Supplier bill ${label}`,

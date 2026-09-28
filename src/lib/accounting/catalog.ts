@@ -82,7 +82,7 @@ POLICIES.push(
     key: "receivables.recognition",
     en: "Sales invoices, credit notes and receivables",
     ar: "فواتير المبيعات والإشعارات الدائنة والذمم المدينة",
-    governs: ["ar.invoice.posted", "ar.invoice.reversed", "ar.credit_note.posted", "ar.credit_note.reversed"],
+    governs: ["ar.invoice.posted", "ar.invoice.reversed", "ar.credit_note.posted", "ar.credit_note.reversed", "ar.credit.allocated", "ar.credit.released"],
     defaultStatement:
       "تُثبت فاتورة المبيعات عند ترحيلها بعد اعتمادها من شخص غير مُعدّها، بتاريخ إصدارها (قرار توقيت الإيراد D-4: عند انتقال السيطرة — التسليم أو الأداء): مدين الذمم المدينة بإجمالي الفاتورة للعميل، ودائن حساب الإيراد لكل بند بصافيه، ودائن ضريبة المخرجات. " +
       "الإشعار الدائن يُصدر مقابل فاتورة مرحّلة ولا يتجاوز رصيدها: مدين المردودات والخصومات ومدين ضريبة المخرجات ودائن الذمم المدينة. الفاتورة المرحّلة لا تُعدّل؛ تُعكس بقيد مقابل ما لم يُخصص لها تحصيل أو إشعار. " +

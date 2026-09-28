@@ -1,5 +1,6 @@
 // Mirror of an engine-posted journal: every debit becomes a credit and vice versa, same
-// accounts, parties and dimensions. Used when the source document is reversed or voided, so
+// accounts, parties, dimensions and open items (so a reversal undoes exactly what the original
+// settled, and a voided supplier payment reverses its original cash-flow attribution). Used when the source document is reversed or voided, so
 // the reversal is exact whatever mapping changes happened in between.
 import type { Prisma } from "@/generated/prisma/client";
 import type { EngineLine } from "../posting";
@@ -15,6 +16,7 @@ export async function mirrorOfJournal(tx: Prisma.TransactionClient, journalEntry
     partyId: l.partyId ?? undefined,
     branchId: l.branchId,
     costCenterId: l.costCenterId,
+    openItem: l.openItemType && l.openItemId ? { type: l.openItemType as NonNullable<EngineLine["openItem"]>["type"], id: l.openItemId } : null,
   }));
 }
 

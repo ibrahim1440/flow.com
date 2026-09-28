@@ -125,6 +125,10 @@ export const EVENT_LABEL: Record<string, [string, string]> = {
   "commission.adjustment": ["تسوية عمولة", "Commission adjustment"], "commission.payout": ["صرف عمولة", "Commission payout"],
   "ap.bill.posted": ["ترحيل فاتورة مورد", "Supplier bill posted"], "ap.bill.reversed": ["عكس فاتورة مورد", "Supplier bill reversed"],
   "bank.transaction.confirmed": ["حركة بنكية", "Bank line"], "bank.transaction.voided": ["إلغاء حركة بنكية", "Bank line voided"],
+  "ar.invoice.posted": ["ترحيل فاتورة مبيعات", "Sales invoice posted"], "ar.invoice.reversed": ["عكس فاتورة مبيعات", "Sales invoice reversed"],
+  "ar.credit_note.posted": ["ترحيل إشعار دائن", "Credit note posted"], "ar.credit_note.reversed": ["عكس إشعار دائن", "Credit note reversed"],
+  "ar.advance.applied": ["تطبيق دفعة مقدمة", "Advance applied"], "ar.advance.reversed": ["عكس تطبيق دفعة مقدمة", "Advance application reversed"],
+  "ar.credit.allocated": ["تخصيص رصيد دائن لفاتورة", "Credit applied to an invoice"], "ar.credit.released": ["إلغاء تخصيص رصيد دائن", "Credit application released"],
 };
 
 /** The posting engine's reasons are English sentences; the known ones are shown in Arabic too. */

@@ -267,7 +267,7 @@ describe("stage 3 — receipts, advances, statements", () => {
 });
 
 describe("stage 3 — credits", () => {
-  test("an unapplied credit is used on another invoice of the same customer, with no ledger effect", async () => {
+  test("an unapplied credit is used on another invoice of the same customer: a net-zero move between open items", async () => {
     const w = await world();
     const inv1 = await postedDoc(w, [{ description: "بن", quantity: "1", unitPrice: "100", taxCategoryId: w.vat15 }]);   // 115
     const t = await bankLine(w, D(3, 3), "115.00");
@@ -276,8 +276,12 @@ describe("stage 3 — credits", () => {
     await submitSalesDoc(cn.id, w.prep); await approveSalesDoc(cn.id, w.appr); await postSalesDoc(cn.id, w.appr);   // 46 unapplied
     const inv2 = await postedDoc(w, [{ description: "بن", quantity: "1", unitPrice: "200", taxCategoryId: w.vat15 }], { issueDate: D(3, 6) });   // 230
     const before = await prisma.journalEntry.count();
-    await allocateCredit({ creditNoteId: cn.id, invoiceId: inv2, amount: "46.00" }, w.prep);
-    assert.equal(await prisma.journalEntry.count(), before);
+    const r = await allocateCredit({ creditNoteId: cn.id, invoiceId: inv2, amount: "46.00" }, w.prep);
+    assert.equal(r.ledger?.status, "TRANSLATED", r.ledger?.message ?? "");
+    assert.equal(await prisma.journalEntry.count(), before + 1, "one reclassification entry");
+    const moved = await prisma.journalEntryLine.findMany({ where: { journalEntryId: r.ledger!.journalEntryId }, include: { account: true }, orderBy: { lineNo: "asc" } });
+    assert.deepEqual(moved.map((l) => [l.account.code, l.debit.toFixed(2), l.credit.toFixed(2), l.openItemType, l.openItemId]),
+      [["1130", "46.00", "0.00", "CREDIT_NOTE", cn.id], ["1130", "0.00", "46.00", "SALES_INVOICE", inv2]], "receivables balance unchanged; the credit moves from the note to the invoice");
     await rejects(allocateCredit({ creditNoteId: cn.id, invoiceId: inv2, amount: "0.01" }, w.prep), /left/);
     assert.equal((await invoiceOpen(prisma, inv2)).toFixed(2), "184.00");
     const aging = await arAging(accountingDate(D(3, 31)));

@@ -10,7 +10,8 @@
 //      fee withheld from a loan. Their cash share is shown in that section, and the indirect
 //      method removes them from profit.
 //   3. A payment of a supplier bill is attributed to investing in proportion to the bill's
-//      fixed-asset lines (net of VAT) — `attribution` on the payables line (see cashflow.ts).
+//      fixed-asset lines (net of VAT) — `attribution` on the payables line. The bill is the open
+//      item recorded on the posted line (see cashflow.ts), so later corrections cannot change it.
 //   4. The part of an entry not settled in cash (its "residual") that acquires investing or
 //      financing items against liabilities or equity is disclosed as a non-cash transaction.
 // Operating cash is computed twice — directly (sum of allocated cash) and by the indirect method
@@ -26,7 +27,7 @@ export type Section = "OPERATING" | "INVESTING" | "FINANCING" | "EXCLUDED";
 export type CfAccount = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; cls: CashFlowClass | null; defaulted: boolean };
 export type CfLine = {
   accountId: string; debit: D; credit: D;
-  /** Payables line of a bank payment matched to supplier bills: share of its cash that is investing, by bill-line account. */
+  /** Payables line settling a supplier bill: share of its cash that is investing, by bill-line account. */
   attribution?: { accountId: string; share: D }[];
 };
 export type CfEntry = { id: string; entryNo: number; entryDate: Date; description: string | null; lines: CfLine[] };

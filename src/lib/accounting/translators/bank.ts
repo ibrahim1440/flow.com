@@ -24,7 +24,7 @@ export const CUSTOMER_CLASSES = new Set(["CUSTOMER_RECEIPT", "CUSTOMER_REFUND"])
 const FORBIDDEN_CONTROLS = new Set(["RECEIVABLE", "CUSTOMER_ADVANCES", "COMMISSION_PAYABLE", "INVENTORY", "CASH"]);
 
 export type SplitIn = { amount: Prisma.Decimal; accountId: string | null; accountCode?: string; controlKind?: string; categoryCode: string; costCenterId: string | null };
-export type BillMatch = { amount: Prisma.Decimal; supplierId: string };
+export type BillMatch = { amount: Prisma.Decimal; supplierId: string; billId: string };
 
 /** Pure composition of the journal lines, or the reason it cannot post. */
 export function composeBankLines(input: { amount: Prisma.Decimal; cashAccountId: string; splits: SplitIn[]; billMatches: BillMatch[]; branchId?: string | null }):
@@ -56,12 +56,16 @@ export function composeBankLines(input: { amount: Prisma.Decimal; cashAccountId:
     if (matched.gt(payableTotal)) {
       return { blocked: `Matches to posted bills (${matched.toFixed(2)}) exceed the payables split (${payableTotal.toFixed(2)}).` };
     }
-    // One AP debit per supplier, from the matches.
-    const bySupplier = new Map<string, Prisma.Decimal>();
-    for (const m of input.billMatches) bySupplier.set(m.supplierId, (bySupplier.get(m.supplierId) ?? ZERO).add(m.amount));
+    // One AP debit per bill paid, tagged with the bill: the posted line itself records what was
+    // paid (aging and cash-flow attribution read it; a later unmatch or void cannot rewrite it).
+    const byBill = new Map<string, { supplierId: string; amount: Prisma.Decimal }>();
+    for (const m of input.billMatches) {
+      const e = byBill.get(m.billId) ?? { supplierId: m.supplierId, amount: ZERO };
+      e.amount = e.amount.add(m.amount); byBill.set(m.billId, e);
+    }
     const apAccount = payable[0].accountId!;
-    for (const [supplierId, amt] of bySupplier) {
-      lines.push({ accountId: apAccount, debit: amt, description: "Supplier payment", partyType: "SUPPLIER", partyId: supplierId, branchId: input.branchId });
+    for (const [billId, e] of byBill) {
+      lines.push({ accountId: apAccount, debit: e.amount, description: "Supplier payment", partyType: "SUPPLIER", partyId: e.supplierId, branchId: input.branchId, openItem: { type: "SUPPLIER_BILL", id: billId } });
     }
   }
   for (const s of input.splits.filter((x) => x.controlKind !== "PAYABLE")) {
@@ -115,7 +119,15 @@ export async function translateBank(tx: Prisma.TransactionClient, ev: Ev): Promi
       ? { accountId: t.cashAccount.glAccountId, debit: amt, description: "Bank" }
       : { accountId: t.cashAccount.glAccountId, credit: amt.abs(), description: "Bank" }];
     const adv = dec(r.advanceAmount), advVat = dec(r.advanceVat);
-    for (const l of [signed("AR_CONTROL", dec(r.arAmount), `Receipt ${r.receiptNo} · ${who}`), signed("CUSTOMER_ADVANCES", adv.sub(advVat), `Advance · ${who}`), signed("OUTPUT_VAT", advVat, `VAT on advance · ${who}`)]) if (l) lines.push(l);
+    // The receivables part credits each invoice it was allocated to (open item on the line); a
+    // refund's receivables part draws on the customer's credit on account (no open item).
+    const allocs = await tx.arAllocation.findMany({ where: { receiptId: r.id, active: true }, orderBy: { createdAt: "asc" } });
+    const allocated = allocs.reduce((s, a) => s.add(a.amount), ZERO);
+    const ar = dec(r.arAmount);
+    if (ar.isPositive() && !allocated.equals(ar)) throw new PostingBlocked(`The receipt's allocations (${allocated.toFixed(2)}) differ from its receivables part (${ar.toFixed(2)}); assign it again.`);
+    if (ar.isPositive()) for (const a of allocs) lines.push({ role: "AR_CONTROL", credit: dec(a.amount), description: `Receipt ${r.receiptNo} · ${who}`, ...party, openItem: { type: "SALES_INVOICE", id: a.invoiceId } });
+    else { const l = signed("AR_CONTROL", ar, `Refund ${r.receiptNo} · ${who}`); if (l) lines.push(l); }
+    for (const l of [signed("CUSTOMER_ADVANCES", adv.sub(advVat), `Advance · ${who}`), signed("OUTPUT_VAT", advVat, `VAT on advance · ${who}`)]) if (l) lines.push(l);
     return { entryDate: accountingDateOf(t.txnDate), description: `Customer ${amt.isPositive() ? "receipt" : "refund"} ${label} · ${who}`, sourceModule: "bank", sourceDocumentId: t.id, lines,
       alsoUnapproved: adv.isZero() ? [] : await advanceDecisionsPending(tx) };
   }
@@ -141,9 +153,10 @@ export async function translateBank(tx: Prisma.TransactionClient, ev: Ev): Promi
   });
   // Matches to obligations that belong to POSTED supplier bills name the supplier.
   const obIds = t.matches.filter((m) => m.targetType === "OBLIGATION").map((m) => m.targetId);
-  const bills = obIds.length ? await tx.supplierBill.findMany({ where: { obligationId: { in: obIds }, status: "POSTED" }, select: { obligationId: true, supplierId: true } }) : [];
-  const billByOb = new Map(bills.map((b) => [b.obligationId!, b.supplierId]));
-  const billMatches: BillMatch[] = t.matches.filter((m) => m.targetType === "OBLIGATION" && billByOb.has(m.targetId)).map((m) => ({ amount: dec(m.amount), supplierId: billByOb.get(m.targetId)! }));
+  const bills = obIds.length ? await tx.supplierBill.findMany({ where: { obligationId: { in: obIds }, status: "POSTED" }, select: { id: true, obligationId: true, supplierId: true } }) : [];
+  const billByOb = new Map(bills.map((b) => [b.obligationId!, b]));
+  const billMatches: BillMatch[] = t.matches.filter((m) => m.targetType === "OBLIGATION" && billByOb.has(m.targetId))
+    .map((m) => ({ amount: dec(m.amount), supplierId: billByOb.get(m.targetId)!.supplierId, billId: billByOb.get(m.targetId)!.id }));
 
   const r = composeBankLines({ amount: dec(t.amount), cashAccountId: t.cashAccount.glAccountId, splits, billMatches });
   if ("blocked" in r) throw new PostingBlocked(r.blocked);

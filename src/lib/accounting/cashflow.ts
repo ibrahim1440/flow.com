@@ -23,18 +23,20 @@ export async function cashFlowStatement(opts: { from: Date; to: Date; includePro
   const entries = await prisma.journalEntry.findMany({
     where: { status: { in: [...POSTED] }, type: { notIn: ["OPENING", "CLOSING"] }, entryDate: { gte: opts.from, lte: opts.to }, ...(inc ? {} : { isProvisional: false }) },
     select: { id: true, entryNo: true, entryDate: true, description: true, sourceModule: true, sourceDocumentId: true,
-      lines: { select: { accountId: true, debit: true, credit: true, partyType: true } } },
+      lines: { select: { accountId: true, debit: true, credit: true, openItemType: true, openItemId: true } } },
     orderBy: { entryNo: "asc" },
   });
 
-  // Bank payments of supplier bills: the investing share of each bill (fixed-asset lines, net).
-  const bankIds = entries.filter((e) => e.sourceModule === "bank" && e.sourceDocumentId).map((e) => e.sourceDocumentId!);
-  const attribution = await billAttribution(bankIds, accounts);
+  // Payments of supplier bills: the investing share of the bill each payables line settles. The
+  // bill is recorded on the posted line itself (open item, fixed at posting and copied by a void),
+  // and a posted bill's lines never change — so this does not depend on today's bank matches.
+  const billIds = [...new Set(entries.flatMap((e) => e.lines.filter((l) => l.openItemType === "SUPPLIER_BILL").map((l) => l.openItemId!)))];
+  const attribution = await billAttribution(billIds, accounts);
   const cfEntries: CfEntry[] = entries.map((e) => ({
     id: e.id, entryNo: e.entryNo, entryDate: e.entryDate, description: e.description,
     lines: e.lines.map((l) => ({
       accountId: l.accountId, debit: l.debit, credit: l.credit,
-      attribution: e.sourceModule === "bank" && l.partyType === "SUPPLIER" && accounts.get(l.accountId)?.cls === "OPERATING" ? attribution.get(e.sourceDocumentId!) : undefined,
+      attribution: l.openItemType === "SUPPLIER_BILL" && accounts.get(l.accountId)?.cls === "OPERATING" ? attribution.get(l.openItemId!) : undefined,
     })),
   }));
   const cf = buildCashFlow(cfEntries, accounts);
@@ -61,30 +63,19 @@ export async function cashFlowStatement(opts: { from: Date; to: Date; includePro
   };
 }
 
-/** bank transaction id → [{ accountId, share }]: the share of the payment that pays fixed-asset lines. */
-async function billAttribution(bankIds: string[], accounts: Map<string, CfAccount>) {
+/** bill id → [{ accountId, share }]: the share of a payment of that bill that pays fixed-asset lines (net). */
+async function billAttribution(billIds: string[], accounts: Map<string, CfAccount>) {
   const out = new Map<string, { accountId: string; share: Prisma.Decimal }[]>();
-  if (!bankIds.length) return out;
-  const matches = await prisma.bankTransactionMatch.findMany({ where: { transactionId: { in: bankIds }, targetType: "OBLIGATION", active: true }, select: { transactionId: true, targetId: true, amount: true } });
-  if (!matches.length) return out;
-  const bills = await prisma.supplierBill.findMany({ where: { obligationId: { in: matches.map((m) => m.targetId) } }, select: { obligationId: true, totalGross: true, lines: { select: { accountId: true, net: true } } } });
-  const byOb = new Map(bills.map((b) => [b.obligationId!, b]));
-  const byTxn = new Map<string, typeof matches>();
-  for (const m of matches) if (byOb.has(m.targetId)) byTxn.set(m.transactionId, [...(byTxn.get(m.transactionId) ?? []), m]);
-  for (const [txn, ms] of byTxn) {
-    const matched = ms.reduce((s, m) => s.add(m.amount), ZERO);
-    if (matched.isZero()) continue;
+  if (!billIds.length) return out;
+  const bills = await prisma.supplierBill.findMany({ where: { id: { in: billIds } }, select: { id: true, totalGross: true, lines: { select: { accountId: true, net: true } } } });
+  for (const b of bills) {
+    if (new Prisma.Decimal(b.totalGross).isZero()) continue;
     const share = new Map<string, Prisma.Decimal>();
-    for (const m of ms) {
-      const b = byOb.get(m.targetId)!;
-      if (new Prisma.Decimal(b.totalGross).isZero()) continue;
-      const w = new Prisma.Decimal(m.amount).div(matched);             // this bill's part of the payment
-      for (const l of b.lines) {
-        if (accounts.get(l.accountId)?.cls !== "INVESTING") continue;
-        share.set(l.accountId, (share.get(l.accountId) ?? ZERO).add(w.mul(l.net).div(b.totalGross)));
-      }
+    for (const l of b.lines) {
+      if (accounts.get(l.accountId)?.cls !== "INVESTING") continue;
+      share.set(l.accountId, (share.get(l.accountId) ?? ZERO).add(new Prisma.Decimal(l.net).div(b.totalGross)));
     }
-    if (share.size) out.set(txn, [...share].map(([accountId, s]) => ({ accountId, share: s })));
+    if (share.size) out.set(b.id, [...share].map(([accountId, s]) => ({ accountId, share: s })));
   }
   return out;
 }

@@ -238,7 +238,7 @@ export async function reverseSalesDoc(id: string, userId: string, reason: string
     if (!d) throw new AccountingError("Document not found.", 404);
     if (d.status !== "POSTED") throw new AccountingError("Only a posted document can be reversed.", 409);
     if (d.kind === "CREDIT_NOTE") {
-      // A credit note's own allocations are released with it.
+      // A credit note's own allocations are released with it (re-applications post their mirror).
       await tx.arAllocation.updateMany({ where: { creditNoteId: d.id, active: true }, data: { active: false, removedAt: new Date() } });
     } else {
       const alloc = await tx.arAllocation.count({ where: { invoiceId: d.id, active: true } });
@@ -249,7 +249,12 @@ export async function reverseSalesDoc(id: string, userId: string, reason: string
     await auditAccounting(tx, { action: "sales_document.reverse", entityType: "sales_document", entityId: id, userId, reason: why });
     return reversed;
   });
-  return { document, ledger: await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.reversed" : "ar.invoice.reversed") };
+  const ledger = await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.reversed" : "ar.invoice.reversed");
+  if (document.kind === "CREDIT_NOTE") {
+    const released = await prisma.accountingEvent.findMany({ where: { eventType: "ar.credit.released", status: "PENDING", partyKey: `CUSTOMER:${document.customerId}` }, orderBy: { createdAt: "asc" }, select: { id: true } });
+    for (const e of released) await processEvent(e.id);
+  }
+  return { document, ledger };
 }
 
 async function processDocEvent(docId: string, et: string): Promise<ProcessOutcome | null> {
@@ -429,11 +434,18 @@ export async function reverseAdvanceApplication(id: string, userId: string, reas
   return { application: a, ledger: ev ? await processEvent(ev.id) : null };
 }
 
-/** Use a credit note's unapplied balance against another open invoice of the same customer (no ledger effect). */
+/**
+ * Use a credit note's unapplied balance against another open invoice of the same customer. It
+ * posts a reclassification inside the receivables account (credit note → invoice, net zero), so
+ * the ledger alone shows which invoice is open on any date.
+ */
 export async function allocateCredit(body: { creditNoteId?: unknown; invoiceId?: unknown; amount?: unknown }, userId: string) {
-  return ledgerTx(async (tx) => {
+  const alloc = await ledgerTx(async (tx) => {
     const cn = await tx.salesInvoice.findUnique({ where: { id: String(body.creditNoteId ?? "") } });
     if (!cn || cn.kind !== "CREDIT_NOTE" || cn.status !== "POSTED") throw new AccountingError("Choose a posted credit note.", 400);
+    await tx.$queryRaw`SELECT 1 FROM "SalesInvoice" WHERE "id" = ${cn.id} FOR UPDATE`;
+    const cnEvent = await tx.accountingEvent.findUnique({ where: { idempotencyKey: `receivables:${cn.id}:ar.credit_note.posted` }, select: { status: true } });
+    if (cnEvent?.status !== "TRANSLATED") throw new AccountingError("The credit note is not in the ledger yet; its credit can be applied once its journal has posted.", 409);
     const amount = money2(body.amount, "Amount");
     const used = await tx.arAllocation.aggregate({ where: { creditNoteId: cn.id, active: true }, _sum: { amount: true } });
     const left = dec(cn.totalGross).sub(dec(used._sum.amount));
@@ -441,10 +453,12 @@ export async function allocateCredit(body: { creditNoteId?: unknown; invoiceId?:
     const invoiceId = String(body.invoiceId ?? "");
     const open = await invoiceOpen(tx, invoiceId).catch(() => { throw new AccountingError("Invoice not found.", 404); });
     if (amount.gt(open)) throw new AccountingError(`The invoice is owed ${open.toFixed(2)}.`, 409);
-    const a = await tx.arAllocation.create({ data: { invoiceId, creditNoteId: cn.id, amount, allocatedOn: todayAccountingDate(), createdBy: userId } });
+    const a = await tx.arAllocation.create({ data: { invoiceId, creditNoteId: cn.id, amount, allocatedOn: todayAccountingDate(), isReallocation: true, createdBy: userId } });
     await auditAccounting(tx, { action: "credit.allocate", entityType: "sales_document", entityId: cn.id, userId, after: a });
     return a;
   });
+  const ev = await prisma.accountingEvent.findUnique({ where: { idempotencyKey: `receivables:${alloc.id}:ar.credit.allocated` }, select: { id: true } });
+  return { ...alloc, ledger: ev ? await processEvent(ev.id) : null };
 }
 
 // ─── Order → invoice draft ─────────────────────────────────────────────────────

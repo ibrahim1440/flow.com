@@ -87,6 +87,9 @@ describe("cash flow — history is stable when a later correction is approved", 
     assert.deepEqual(sections(await cashFlowStatement(monthRange(MONTH))), { operating: "6000.00", investing: "40000.00", financing: "0.00", netChange: "46000.00", reconciled: true },
       "the void reverses the original classification in the month it is dated");
     assert.deepEqual(sections(await cashFlowStatement({ from: D("01-01"), to: D("12-31") })), { operating: "0.00", investing: "0.00", financing: "0.00", netChange: "0.00", reconciled: true });
+    // The bill a payment settled is recorded on the posted line and cannot be rewritten.
+    const tagged = await prisma.journalEntryLine.findFirstOrThrow({ where: { openItemType: "SUPPLIER_BILL", debit: { gt: 0 } } });
+    await assert.rejects(prisma.$executeRaw`UPDATE "JournalEntryLine" SET "openItemId" = 'other' WHERE "id" = ${tagged.id}`, /cannot be changed/);
   });
 
   test("two partial payments; the second is voided later", async () => {

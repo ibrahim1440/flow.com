@@ -19,7 +19,10 @@ export type EngineLine = {
   partyId?: string;
   branchId?: string | null;
   costCenterId?: string | null;
+  /** The subledger document this control-account line opens or settles (immutable once posted). */
+  openItem?: OpenItem | null;
 };
+export type OpenItem = { type: "SUPPLIER_BILL" | "SALES_INVOICE" | "CREDIT_NOTE"; id: string };
 
 const PARTY_CONTROLS = new Set(["RECEIVABLE", "PAYABLE", "COMMISSION_PAYABLE", "CUSTOMER_ADVANCES"]);
 
@@ -114,6 +117,8 @@ export async function createEngineEntry(
           partyId: l.partyId,
           branchId: l.branchId ?? null,
           costCenterId: l.costCenterId ?? null,
+          openItemType: l.openItem?.type ?? null,
+          openItemId: l.openItem?.id ?? null,
         })),
       },
     },

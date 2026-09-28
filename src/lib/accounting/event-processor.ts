@@ -35,6 +35,8 @@ const TRANSLATORS: Record<string, (tx: Tx, ev: EventRow) => Promise<Translation>
   "ar.credit_note.reversed": translateReceivables,
   "ar.advance.applied": translateReceivables,
   "ar.advance.reversed": translateReceivables,
+  "ar.credit.allocated": translateReceivables,
+  "ar.credit.released": translateReceivables,
 };
 
 export type ProcessOutcome = { eventId: string; status: AccountingEventStatus | "BUSY"; journalEntryId?: string; message?: string; provisional?: boolean };

@@ -1431,9 +1431,16 @@ model JournalEntryLine {
   partyType String?
   partyId   String?
 
+  /// Open item this control-account line opens or settles (SUPPLIER_BILL | SALES_INVOICE |
+  /// CREDIT_NOTE, with that document's id). Written at posting; immutable like the line; copied
+  /// by reversals. Aging, statements and cash-flow attribution read it (migration open_items).
+  openItemType String?
+  openItemId   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([accountId, openItemId])
   @@index([journalEntryId])
   @@index([accountId])
   @@index([partyType, partyId])
@@ -3509,21 +3516,23 @@ model CustomerReceipt {
 /// Subledger matching of a receivable to an invoice: from a receipt's AR part, a credit note or
 /// an advance application. Deactivated (never deleted) when its source is voided or reversed.
 model ArAllocation {
-  id            String              @id @default(cuid())
-  invoiceId     String
-  invoice       SalesInvoice        @relation("AllocatedTo", fields: [invoiceId], references: [id], onDelete: Restrict)
-  receiptId     String?
-  receipt       CustomerReceipt?    @relation(fields: [receiptId], references: [id], onDelete: Restrict)
-  creditNoteId  String?
-  creditNote    SalesInvoice?       @relation("AllocatedFromCredit", fields: [creditNoteId], references: [id], onDelete: Restrict)
-  applicationId String?             @unique
-  application   AdvanceApplication? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
-  amount        Decimal             @db.Decimal(18, 2)
-  allocatedOn   DateTime            @db.Date
-  active        Boolean             @default(true)
-  removedAt     DateTime?
-  createdBy     String
-  createdAt     DateTime            @default(now())
+  id             String              @id @default(cuid())
+  invoiceId      String
+  invoice        SalesInvoice        @relation("AllocatedTo", fields: [invoiceId], references: [id], onDelete: Restrict)
+  receiptId      String?
+  receipt        CustomerReceipt?    @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  creditNoteId   String?
+  creditNote     SalesInvoice?       @relation("AllocatedFromCredit", fields: [creditNoteId], references: [id], onDelete: Restrict)
+  applicationId  String?             @unique
+  application    AdvanceApplication? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  amount         Decimal             @db.Decimal(18, 2)
+  allocatedOn    DateTime            @db.Date
+  active         Boolean             @default(true)
+  removedAt      DateTime?
+  /// A credit note's unapplied balance re-applied to another invoice (posts a reclassification).
+  isReallocation Boolean             @default(false)
+  createdBy      String
+  createdAt      DateTime            @default(now())
 
   @@index([invoiceId])
   @@index([receiptId])
