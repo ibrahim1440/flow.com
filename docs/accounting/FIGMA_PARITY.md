@@ -70,10 +70,27 @@ Side by side: `evidence/side/ACC-40..47-side.png`.
 | ACC-44 Stock card | [`420:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=420-2) | `/dashboard/accounting/inventory/stock-card` | ACC-44-app-1440.png | Complete | — |
 | ACC-45 GRNI / bill match / landed cost | [`420:557`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=420-557) | `/dashboard/accounting/inventory/grni` | ACC-45-app-1440.png | Complete — layout difference accepted | The frame's bill-match and landed-cost worked cards are on the document detail (ACC-43 layout) instead; this page lists bills without receipt with shortcuts to create them, drafts from operational records, operational agreement and gross margin. The fixture also has a Stage 2 packaging bill with no receipt, so GRNI differs from the frame's 3,033.00. |
 | ACC-46 Items, bands, D-1 | [`420:1130`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=420-1130) | `/dashboard/accounting/inventory/setup` | ACC-46-app-1440.png | Complete | Operational links show the linked record's id prefix, not its business code; after the first posting the D-1 selects are disabled with an explanation. |
-| ACC-47 Mobile approvals (390 px) | [`422:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=422-2) | `/dashboard/accounting/inventory/documents?status=PENDING` at 390 px | ACC-47-app-390.png | Partial | The cards show type, location, lines and value but not the frame's loss / cost / journal rows; the app keeps the module header, tabs and filters above the cards. The fixture has one pending document (the frame shows two). |
+| ACC-47 Mobile approvals (390 px) | [`422:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=422-2) | `/dashboard/accounting/inventory/documents?status=PENDING` at 390 px | ACC-47-app-390.png | Complete (stage 4b) | The cards now show the frame's loss block (input yield, output, loss %, band, abnormal part), the cost, and the journal rows: posted rows once posted, otherwise the expected accounts labelled "on posting", with no amount shown before it is known. The app keeps the module header, tabs and filters above the cards |
+
+### Page 21 — Accounting · Stage 4b (added 2026-09-28)
+
+The frames were drawn **after** the screens were built (the reverse of the earlier stages'
+Figma-first order), from the implemented layout, with synthetic data. They are a record of the
+design for review, not a design the code was derived from.
+
+| Frame | Figma node (link) | Route | App evidence | Status | Documented differences |
+|---|---|---|---|---|---|
+| ACC-48 Exceptions and the operations link | [`425:3`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=425-3) | `/dashboard/accounting/inventory/exceptions` | ACC-48-*.png | Frame after code | The frame shows the operational-events table and the reconciliation together; the app shows one tab at a time (operational events, cost of sales, reconciliation) |
+| ACC-49 Customer returns | [`426:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=426-2) | `/dashboard/accounting/inventory/returns` | ACC-49-*.png | Frame after code | The record-a-return form and the receive dialog are not drawn |
+| ACC-50 Gross margin with reconciliation | [`426:423`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=426-423) | `/dashboard/accounting/inventory/margin` | ACC-50-app-1440.png | Frame after code | Figures illustrative (synthetic), not the fixture's |
+| ACC-51 Conversion-cost pools and absorption | [`426:916`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=426-916) | `/dashboard/accounting/inventory/setup` (pools section) | ACC-51-app-1440.png | Frame after code | The new-pool dialog is not drawn |
+
+Not drawn: the invoice editor's stock-treatment, unit, fulfilment-location and credit-type fields,
+the invoice costing card, the supplier credit-note editor and allocation, and the accounting-status
+chip on the operational screens. They are captured from the app (`ACC-32-costing`, `OPS-*`) only.
 
 Fourth audit (Stage 4, 2026-09-28): ACC-40..47 added to `a11y.mjs`: 0 serious or critical findings
-(same scope and caveats as above).
+(same scope and caveats as above). Fifth audit (stage 4b): ACC-48..51 (and ACC-48 at 390 px) added: 0 serious or critical findings.
 
 Figma was synchronised to three implementation decisions: one page title for the module, no branch
 selector (the ledger is company-wide; branch is a line dimension), Arabic role labels.
