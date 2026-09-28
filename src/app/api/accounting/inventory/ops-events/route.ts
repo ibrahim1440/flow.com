@@ -1,4 +1,4 @@
-import { accountingRoute, body, query } from "@/lib/accounting/http";
+import { accountingRoute, query } from "@/lib/accounting/http";
 import { listOpsEvents, processPendingOpsEvents } from "@/lib/accounting/ops-integration";
 
 // Operational stock events and their accounting state (the exception queue).

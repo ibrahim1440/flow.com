@@ -20,7 +20,7 @@ import { AccountingError } from "./errors";
 import { ledgerTx } from "./journal-service";
 import { auditAccounting } from "./audit";
 import { ZERO, dec } from "./money";
-import { accountingDate, accountingDateOf, todayAccountingDate } from "./dates";
+import { accountingDate, todayAccountingDate } from "./dates";
 import { provisionalPostingAllowed } from "./policy";
 import { processEvent, type ProcessOutcome } from "./event-processor";
 import { YIELDING, ISSUE_ROLE } from "./inventory-rules";
