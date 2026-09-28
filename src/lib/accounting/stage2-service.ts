@@ -7,7 +7,8 @@ import { AccountingError } from "./errors";
 import { ledgerTx } from "./journal-service";
 import { auditAccounting } from "./audit";
 import { ZERO, dec } from "./money";
-import { accountingDateOf } from "./dates";
+import { postedBankLines } from "./bank-posted";
+import { openItemBalances, partyMoves, unpostedEvents } from "./open-items";
 
 const POSTED = ["POSTED", "REVERSED"] as const;
 const DAY = 86_400_000;
@@ -29,32 +30,6 @@ async function apAccountId() {
   return m?.accountId ?? null;
 }
 
-/** Payments matched to each bill's obligation up to a date (void bank lines excluded). */
-/**
- * Matches that paid an obligation as of a date: the line is dated on or before it, and neither
- * the match nor the line had been undone by then (a void or unmatch AFTER the date still counted
- * on it — the reversal journal is dated the day of the void, so the ledger agrees).
- */
-function matchedAsOf(obligationIds: string[], asOf: Date): Prisma.BankTransactionMatchWhereInput {
-  const after = new Date(asOf.getTime() + 21 * 3600 * 1000);   // start of the next day in Riyadh (UTC+3)
-  return {
-    targetType: "OBLIGATION", targetId: { in: obligationIds },
-    OR: [{ active: true }, { removedAt: { gte: after } }],
-    transaction: { txnDate: { lte: asOf }, OR: [{ status: { not: "VOID" } }, { voidedAt: { gte: after } }] },
-  };
-}
-
-async function paidByObligation(obligationIds: string[], asOf: Date) {
-  if (!obligationIds.length) return new Map<string, Prisma.Decimal>();
-  const rows = await prisma.bankTransactionMatch.findMany({
-    where: matchedAsOf(obligationIds, asOf),
-    select: { targetId: true, amount: true },
-  });
-  const m = new Map<string, Prisma.Decimal>();
-  for (const r of rows) m.set(r.targetId, (m.get(r.targetId) ?? ZERO).add(r.amount));
-  return m;
-}
-
 export const AGING_BUCKETS = ["current", "d1_30", "d31_60", "d61_90", "d90p"] as const;
 export type Bucket = (typeof AGING_BUCKETS)[number];
 export function agingBucket(dueDate: Date, asOf: Date): Bucket {
@@ -66,56 +41,55 @@ export function agingBucket(dueDate: Date, asOf: Date): Bucket {
   return "d90p";
 }
 
+/**
+ * AP aging from the posted ledger: each payables line names the bill it opens or settles
+ * (open-items.ts), so the open amount of a bill on a date is the sum of its lines dated on or
+ * before it. A bill reversed or a payment voided later still counts for earlier dates, and the
+ * subledger equals the payables account at every cutoff.
+ */
 export async function apAging(asOf: Date) {
-  const bills = await prisma.supplierBill.findMany({
-    where: { status: "POSTED", billDate: { lte: asOf } },
-    include: { supplier: { select: { id: true, name: true, vatNumber: true } } },
-    orderBy: [{ dueDate: "asc" }, { billNo: "asc" }],
-  });
-  const paid = await paidByObligation(bills.map((b) => b.obligationId!).filter(Boolean), asOf);
+  const ap = await apAccountId();
+  const items = ap ? await openItemBalances(ap, asOf) : [];
+  const billIds = items.filter((i) => i.type === "SUPPLIER_BILL" && i.id).map((i) => i.id!);
+  const bills = new Map((await prisma.supplierBill.findMany({ where: { id: { in: billIds } }, select: { id: true, billNo: true, dueDate: true, supplierId: true } })).map((b) => [b.id, b]));
+  const suppliers = new Map((await prisma.supplier.findMany({ where: { id: { in: [...new Set(items.map((i) => i.partyId!).filter(Boolean))] } }, select: { id: true, name: true } })).map((x) => [x.id, x.name]));
   type Row = { supplierId: string; supplier: string; buckets: Record<Bucket, string>; total: string; bills: number };
-  const bySupplier = new Map<string, { supplier: string; b: Record<Bucket, Prisma.Decimal>; n: number }>();
+  const bySupplier = new Map<string, { b: Record<Bucket, Prisma.Decimal>; n: number }>();
   const tot: Record<Bucket, Prisma.Decimal> = { current: ZERO, d1_30: ZERO, d31_60: ZERO, d61_90: ZERO, d90p: ZERO };
   const open: { billId: string; billNo: number; supplier: string; dueDate: Date; remaining: string; bucket: Bucket }[] = [];
-  // Bills paid more than their total (e.g. a backdated corrected payment while the voided original's
-  // reversal is dated later) are supplier debit balances: kept apart from the aging buckets but part
-  // of the subledger, so the tie-out to the payables account still holds.
+  // Bills paid more than their total and payables with no bill are supplier debit balances: kept
+  // apart from the buckets but part of the subledger, so the tie-out still holds.
   const overpaid: { billId: string; billNo: number; supplier: string; amount: string }[] = [];
   let overpaidTotal = ZERO;
-  for (const b of bills) {
-    const remaining = dec(b.totalGross).sub(paid.get(b.obligationId ?? "") ?? ZERO);
-    if (remaining.isNegative()) { overpaid.push({ billId: b.id, billNo: b.billNo, supplier: b.supplier.name, amount: remaining.toFixed(2) }); overpaidTotal = overpaidTotal.add(remaining); }
-    if (remaining.lte(0)) continue;
+  for (const it of items) {
+    const remaining = it.balance.neg();                 // payables are credit-normal
+    if (remaining.isZero() || !it.partyId) continue;
+    const b = it.type === "SUPPLIER_BILL" && it.id ? bills.get(it.id) : undefined;
+    const name = suppliers.get(it.partyId) ?? "";
+    if (!b || remaining.isNegative()) { overpaid.push({ billId: b?.id ?? "", billNo: b?.billNo ?? 0, supplier: name, amount: remaining.toFixed(2) }); overpaidTotal = overpaidTotal.add(remaining); continue; }
     const k = agingBucket(b.dueDate, asOf);
-    const e = bySupplier.get(b.supplierId) ?? { supplier: b.supplier.name, b: { current: ZERO, d1_30: ZERO, d31_60: ZERO, d61_90: ZERO, d90p: ZERO }, n: 0 };
+    const e = bySupplier.get(it.partyId) ?? { b: { current: ZERO, d1_30: ZERO, d31_60: ZERO, d61_90: ZERO, d90p: ZERO }, n: 0 };
     e.b[k] = e.b[k].add(remaining); e.n++; tot[k] = tot[k].add(remaining);
-    bySupplier.set(b.supplierId, e);
-    open.push({ billId: b.id, billNo: b.billNo, supplier: b.supplier.name, dueDate: b.dueDate, remaining: remaining.toFixed(2), bucket: k });
+    bySupplier.set(it.partyId, e);
+    open.push({ billId: b.id, billNo: b.billNo, supplier: name, dueDate: b.dueDate, remaining: remaining.toFixed(2), bucket: k });
   }
   const rows: Row[] = [...bySupplier.entries()].map(([supplierId, e]) => ({
-    supplierId, supplier: e.supplier, bills: e.n,
+    supplierId, supplier: suppliers.get(supplierId) ?? "", bills: e.n,
     buckets: Object.fromEntries(AGING_BUCKETS.map((k) => [k, e.b[k].toFixed(2)])) as Record<Bucket, string>,
     total: AGING_BUCKETS.reduce((s, k) => s.add(e.b[k]), ZERO).toFixed(2),
   })).sort((a, b) => a.supplier.localeCompare(b.supplier, "ar"));
   const subledger = AGING_BUCKETS.reduce((s, k) => s.add(tot[k]), ZERO).add(overpaidTotal);
-
-  // Tie-out to the payables control account. The ledger is credit-normal, so its balance is
-  // −(debit − credit). Differences are explained, never hidden.
-  const ap = await apAccountId();
   const ledger = ap ? (await ledgerBalance(ap, asOf)).neg() : null;
-  const pendingBills = await prisma.accountingEvent.count({ where: { eventType: "ap.bill.posted", status: { in: ["PENDING", "BLOCKED", "FAILED"] } } });
-  const unpostedPayments = await prisma.bankTransactionMatch.aggregate({
-    where: matchedAsOf(bills.map((b) => b.obligationId!).filter(Boolean), asOf),
-    _sum: { amount: true },
-  });
-  const postedBankEvents = await prisma.accountingEvent.findMany({ where: { eventType: "bank.transaction.confirmed", status: "TRANSLATED" }, select: { sourceDocumentId: true } });
-  const postedTxn = new Set(postedBankEvents.map((e) => e.sourceDocumentId));
-  const matches = await prisma.bankTransactionMatch.findMany({
-    where: matchedAsOf(bills.map((b) => b.obligationId!).filter(Boolean), asOf),
+  const difference = ledger === null ? null : ledger.sub(subledger);
+
+  // Not yet in the ledger (explanations only; they do not enter the figures above).
+  const pendingBills = await unpostedEvents(["ap.bill.posted", "ap.bill.reversed"]);
+  const unposted = await prisma.bankTransactionMatch.findMany({
+    where: { targetType: "OBLIGATION", active: true, transaction: { status: "CONFIRMED", txnDate: { lte: asOf } } },
     select: { transactionId: true, amount: true },
   });
-  const paymentsNotInLedger = matches.filter((m) => !postedTxn.has(m.transactionId)).reduce((s, m) => s.add(m.amount), ZERO);
-  const difference = ledger === null ? null : ledger.sub(subledger);
+  const postedTxn = await postedBankLines(prisma, unposted.map((m) => m.transactionId));
+  const notInLedger = unposted.filter((m) => !postedTxn.has(m.transactionId)).reduce((s, m) => s.add(m.amount), ZERO);
   return {
     asOf, rows, open, overpaid, overpaidTotal: overpaidTotal.toFixed(2),
     totals: Object.fromEntries(AGING_BUCKETS.map((k) => [k, tot[k].toFixed(2)])) as Record<Bucket, string>,
@@ -123,59 +97,32 @@ export async function apAging(asOf: Date) {
     ledger: ledger?.toFixed(2) ?? null,
     difference: difference?.toFixed(2) ?? null,
     reconciled: difference !== null && difference.isZero(),
-    explanation: {
-      paymentsMatchedNotYetPostedFromBank: paymentsNotInLedger.toFixed(2),
-      billsPostedWithoutJournal: pendingBills,
-      matchedTotal: dec(unpostedPayments._sum.amount).toFixed(2),
-    },
+    explanation: { paymentsMatchedNotYetPostedFromBank: notInLedger.toFixed(2), billsPostedWithoutJournal: pendingBills },
   };
 }
 
+/** Supplier statement: the supplier's posted lines on the payables account (credit-normal balance). */
 export async function supplierStatement(supplierId: string, from: Date, to: Date) {
   const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
   if (!supplier) throw new AccountingError("Supplier not found.", 404);
-  const bills = await prisma.supplierBill.findMany({ where: { supplierId, status: { in: ["POSTED", "REVERSED"] }, billDate: { lte: to } }, orderBy: { billDate: "asc" } });
-  const obIds = bills.map((b) => b.obligationId!).filter(Boolean);
-  const matches = obIds.length ? await prisma.bankTransactionMatch.findMany({
-    where: { targetType: "OBLIGATION", targetId: { in: obIds }, transaction: { txnDate: { lte: to } } },
-    include: { transaction: { select: { txnDate: true, bankReference: true, id: true, status: true, voidedAt: true, voidReason: true } } },
-  }) : [];
-  type Mv = { date: Date; kind: "bill" | "reversal" | "payment"; ref: string; refId: string; text: string; debit: Prisma.Decimal; credit: Prisma.Decimal };
-  const moves: Mv[] = [];
-  const billNo = new Map(bills.map((b) => [b.obligationId, b.billNo]));
-  for (const b of bills) {
-    moves.push({ date: b.billDate, kind: "bill", ref: `ف-${b.billNo}`, refId: b.id, text: `فاتورة ${b.supplierInvoiceNo}${b.description ? ` — ${b.description}` : ""}`, debit: ZERO, credit: dec(b.totalGross) });
-    if (b.status === "REVERSED" && b.reversedAt) {
-      const d = new Date(Date.UTC(b.reversedAt.getUTCFullYear(), b.reversedAt.getUTCMonth(), b.reversedAt.getUTCDate()));
-      moves.push({ date: d, kind: "reversal", ref: `ف-${b.billNo}`, refId: b.id, text: `عكس الفاتورة — ${b.reversalReason ?? ""}`, debit: dec(b.totalGross), credit: ZERO });
-    }
-  }
-  for (const m of matches) {
-    // A match undone (line voided or unmatched) shows as the payment and, on the day it was
-    // undone, its reversal — the same dates the ledger carries.
-    const undoneAt = m.transaction.status === "VOID" && m.transaction.voidedAt ? m.transaction.voidedAt : !m.active ? m.removedAt : null;
-    const undoneDay = undoneAt ? accountingDateOf(undoneAt) : null;
-    if (!m.active && !undoneDay) continue;
-    const ref = m.transaction.bankReference ?? m.transaction.id.slice(-6);
-    moves.push({ date: m.transaction.txnDate, kind: "payment", ref, refId: m.transaction.id, text: `دفعة مطابقة للفاتورة ف-${billNo.get(m.targetId) ?? "?"}`, debit: dec(m.amount), credit: ZERO });
-    if (undoneDay && undoneDay <= to) moves.push({ date: undoneDay, kind: "reversal", ref, refId: m.transaction.id, text: `إلغاء الدفعة — ${m.transaction.voidReason ?? "إلغاء المطابقة"}`, debit: ZERO, credit: dec(m.amount) });
-  }
-  moves.sort((a, b) => a.date.getTime() - b.date.getTime() || (a.kind === "bill" ? -1 : 1));
-  let opening = ZERO;
-  const lines: { date: Date; kind: string; ref: string; refId: string; text: string; debit: string; credit: string; balance: string }[] = [];
-  let bal = ZERO;
-  for (const m of moves) {
-    if (m.date < from) { opening = opening.add(m.credit).sub(m.debit); continue; }
-    if (!lines.length) bal = opening;
-    bal = bal.add(m.credit).sub(m.debit);
-    lines.push({ date: m.date, kind: m.kind, ref: m.ref, refId: m.refId, text: m.text, debit: m.debit.toFixed(2), credit: m.credit.toFixed(2), balance: bal.toFixed(2) });
-  }
-  const closing = lines.length ? bal : opening;
+  if (from > to) throw new AccountingError("The start date is after the end date.", 400);
   const ap = await apAccountId();
+  const { opening, moves } = await partyMoves(ap ? [ap] : [], supplierId, from, to);
+  const bills = new Map((await prisma.supplierBill.findMany({ where: { id: { in: moves.filter((m) => m.sourceModule === "payables").map((m) => m.sourceDocumentId!) } }, select: { id: true, billNo: true, supplierInvoiceNo: true } })).map((b) => [b.id, b]));
+  const txns = new Map((await prisma.bankTransaction.findMany({ where: { id: { in: moves.filter((m) => m.sourceModule === "bank").map((m) => m.sourceDocumentId!) } }, select: { id: true, bankReference: true } })).map((t) => [t.id, t]));
+  let bal = opening.neg();
+  const lines = moves.filter((m) => !m.net.isZero()).map((m) => {
+    const reversal = !!m.eventType && /\.(reversed|voided)$/.test(m.eventType);
+    const b = m.sourceDocumentId ? bills.get(m.sourceDocumentId) : undefined;
+    const kind = m.sourceModule === "bank" ? "payment" : reversal ? "reversal" : "bill";
+    const ref = b ? `ف-${b.billNo}` : txns.get(m.sourceDocumentId ?? "")?.bankReference ?? `#${m.entryNo}`;
+    bal = bal.sub(m.net);
+    return { date: m.date, kind, ref, refId: m.sourceDocumentId ?? m.entryId, text: m.description ?? "", debit: (m.net.isPositive() ? m.net : ZERO).toFixed(2), credit: (m.net.isNegative() ? m.net.neg() : ZERO).toFixed(2), balance: bal.toFixed(2) };
+  });
   const ledger = ap ? (await ledgerBalance(ap, to, { partyType: "SUPPLIER", partyId: supplierId })).neg() : null;
   return {
     supplier: { id: supplier.id, name: supplier.name, vatNumber: supplier.vatNumber, crNumber: supplier.crNumber, paymentTermsDays: supplier.paymentTermsDays },
-    from, to, opening: opening.toFixed(2), lines, closing: closing.toFixed(2),
+    from, to, opening: opening.neg().toFixed(2), lines, closing: bal.toFixed(2),
     totals: { debit: lines.reduce((s, l) => s.add(l.debit), ZERO).toFixed(2), credit: lines.reduce((s, l) => s.add(l.credit), ZERO).toFixed(2) },
     ledgerBalance: ledger?.toFixed(2) ?? null,
   };

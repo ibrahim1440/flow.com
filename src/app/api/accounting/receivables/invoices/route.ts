@@ -2,9 +2,10 @@ import type { Prisma, SalesInvoiceStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { accountingRoute, body, query } from "@/lib/accounting/http";
 import { createSalesDoc, invoiceBalances } from "@/lib/accounting/receivables-service";
+import { invoicesOwedNow } from "@/lib/accounting/receivables-reports";
 import { agingBucket } from "@/lib/accounting/stage2-service";
 import { todayAccountingDate } from "@/lib/accounting/dates";
-import { dec, ZERO } from "@/lib/accounting/money";
+import { ZERO } from "@/lib/accounting/money";
 import { parseSalesBody } from "../parse";
 
 const STATUSES = new Set(["DRAFT", "SUBMITTED", "APPROVED", "POSTED", "REVERSED"]);
@@ -12,8 +13,8 @@ const STATUSES = new Set(["DRAFT", "SUBMITTED", "APPROVED", "POSTED", "REVERSED"
 /** Posted invoices past their due date that are still (partly) unpaid — paid ones are not overdue. */
 async function overdueIds(today: Date) {
   const due = await prisma.salesInvoice.findMany({ where: { status: "POSTED", kind: "INVOICE", dueDate: { lt: today } }, select: { id: true, totalGross: true } });
-  const bal = await invoiceBalances(prisma, due.map((d) => d.id));
-  return due.filter((d) => dec(d.totalGross).gt(bal.get(d.id)?.settled ?? ZERO)).map((d) => d.id);
+  const owed = await invoicesOwedNow(due);
+  return due.filter((d) => owed.get(d.id)!.open.gt(0)).map((d) => d.id);
 }
 
 export const GET = accountingRoute(null, async ({ request }) => {
@@ -41,12 +42,13 @@ export const GET = accountingRoute(null, async ({ request }) => {
   ]);
   const orders = new Map((await prisma.order.findMany({ where: { id: { in: rows.map((r) => r.orderId).filter(Boolean) as string[] } }, select: { id: true, orderNumber: true } })).map((o) => [o.id, o.orderNumber]));
   const bal = await invoiceBalances(prisma, rows.map((r) => r.id));
+  const owed = await invoicesOwedNow(rows.filter((r) => r.status === "POSTED" && r.kind === "INVOICE"));
   return {
     total, page, pageSize,
     counts: { ...Object.fromEntries(counts.map((c) => [c.status, c._count._all])), OVERDUE: overdue.length },
     rows: rows.map((r) => {
       const b = bal.get(r.id);
-      const open = r.status === "POSTED" && r.kind === "INVOICE" ? dec(r.totalGross).sub(b?.settled ?? ZERO) : null;
+      const open = owed.get(r.id)?.open ?? null;
       return {
         id: r.id, invoiceNo: r.invoiceNo, kind: r.kind, customer: r.customer.nameAr ?? r.customer.name, customerHasVat: !!r.customer.vatNumber,
         orderNumber: r.orderId ? orders.get(r.orderId) ?? null : null, originalInvoiceNo: r.originalInvoice?.invoiceNo ?? null,

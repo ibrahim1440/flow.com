@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { accountingRoute, body } from "@/lib/accounting/http";
 import { AccountingError } from "@/lib/accounting/errors";
+import { invoicesOwedNow } from "@/lib/accounting/receivables-reports";
 import { deleteDraftSalesDoc, updateDraftSalesDoc, invoiceOpen, invoiceBalances, advanceBalance } from "@/lib/accounting/receivables-service";
 import { dec } from "@/lib/accounting/money";
 import { parseSalesBody } from "../../parse";
@@ -43,7 +44,8 @@ export const GET = accountingRoute(null, async ({ params }) => {
     // allocated (every active allocation reserves); awaitingReceipt: the difference.
     ...(d.kind === "INVOICE" && d.status === "POSTED" ? await (async () => {
       const b = (await invoiceBalances(prisma, [d.id])).get(d.id);
-      return { open: dec(d.totalGross).sub(b?.settled ?? 0).toFixed(2), allocatable: (await invoiceOpen(prisma, d.id)).toFixed(2), awaitingReceipt: (b?.awaiting ?? dec(0)).toFixed(2) };
+      const owed = (await invoicesOwedNow([d])).get(d.id)!;
+      return { open: owed.open.toFixed(2), inLedger: owed.inLedger, allocatable: (await invoiceOpen(prisma, d.id)).toFixed(2), awaitingReceipt: (b?.awaiting ?? dec(0)).toFixed(2) };
     })() : { open: null, allocatable: null, awaitingReceipt: null }),
     creditable: d.kind === "INVOICE" ? dec(d.totalGross).sub(dec(credited?._sum.totalGross)).toFixed(2) : null,
     customerAdvance: adv.amount.toFixed(2),
