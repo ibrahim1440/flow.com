@@ -19,3 +19,13 @@ export function lineMinor(q: string, p: string, rate: string): { net: number; va
   const vat = divHalfUp(net * rs, B(10_000)); // rate is a percentage at scale 1e2
   return { net: Number(net), vat: Number(vat), gross: Number(net + vat) };
 }
+
+/** Sales line (sales-rules computeSalesLine): amount, discount %, net, VAT on the net — in halalas. */
+export function salesLineMinor(q: string, p: string, discount: string, rate: string): { net: number; vat: number; gross: number } | null {
+  const qs = scaled(q, 4), ps = scaled(p, 4), ds = scaled(discount || "0", 2), rs = scaled(rate || "0", 2);
+  if (qs === null || ps === null || ds === null || rs === null || ds > B(10_000)) return null;
+  const before = divHalfUp(qs * ps, B(1_000_000));
+  const net = before - divHalfUp(before * ds, B(10_000));
+  const vat = divHalfUp(net * rs, B(10_000));
+  return { net: Number(net), vat: Number(vat), gross: Number(net + vat) };
+}

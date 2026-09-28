@@ -170,6 +170,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "bank_posting_manage", label: "Map cash accounts and budget categories to the ledger; set the bank posting start date" },
     { key: "bank_correction_request", label: "Request the correction (void or replacement) of a posted bank line" },
     { key: "bank_correction_approve", label: "Approve or reject corrections of posted bank lines (not one's own)" },
+    { key: "ar_invoice_create", label: "Prepare and submit sales invoices and credit notes; edit customer tax data" },
+    { key: "ar_invoice_approve", label: "Approve or reject sales invoices and credit notes (not one's own)" },
+    { key: "ar_invoice_post", label: "Post and reverse sales invoices and credit notes" },
+    { key: "ar_receipt_assign", label: "Assign customer bank receipts, apply advances and credits" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

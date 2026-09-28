@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, ArrowLeftRight, PieChart, CalendarRange, FileBarChart, CalendarClock, CheckCircle2, ReceiptText, Landmark } from "lucide-react";
+import { LayoutDashboard, ArrowLeftRight, PieChart, CalendarRange, FileBarChart, CalendarClock, CheckCircle2, ReceiptText, Landmark, FileText } from "lucide-react";
 import { FinanceContext, api, useL } from "../finance/_components/ui";
 import "../finance/finance.css";
 
@@ -14,11 +14,12 @@ const TABS = [
   { href: "/dashboard/accounting/periods", ar: "الفترات والإقفال", en: "Periods & closing", icon: CalendarRange },
   { href: "/dashboard/accounting/reports", ar: "التقارير المالية", en: "Financial reports", icon: FileBarChart },
   { href: "/dashboard/accounting/payables", ar: "الذمم الدائنة", en: "Payables", icon: ReceiptText, badge: "bills" as const },
+  { href: "/dashboard/accounting/receivables", ar: "الذمم المدينة", en: "Receivables", icon: FileText, badge: "sales" as const },
   { href: "/dashboard/accounting/bank", ar: "البنك", en: "Bank", icon: Landmark, badge: "bank" as const },
   { href: "/dashboard/accounting/automation", ar: "الترحيل الآلي والسياسات", en: "Automatic posting & policies", icon: CalendarClock, badge: "events" as const },
 ];
 
-type Overview = { journals: { pendingApproval: number; approvedUnposted: number }; events: { blocked: number; failed: number; pending: number }; payables?: { pendingApproval: number }; bank?: { blocked: number } };
+type Overview = { journals: { pendingApproval: number; approvedUnposted: number }; events: { blocked: number; failed: number; pending: number }; payables?: { pendingApproval: number }; receivables?: { pendingApproval: number }; bank?: { blocked: number } };
 
 export default function AccountingLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -28,7 +29,7 @@ export default function AccountingLayout({ children }: { children: ReactNode }) 
   useEffect(() => { api<Overview>("/api/accounting/overview").then(setOv).catch(() => setOv(null)); }, [version, pathname]);
   const active = [...TABS].sort((a, b) => b.href.length - a.href.length).find((t) => pathname === t.href || pathname.startsWith(t.href + "/"));
   const pending = ov?.journals.pendingApproval ?? 0;
-  const badges = { journals: pending, events: (ov?.events.blocked ?? 0) + (ov?.events.failed ?? 0), bills: ov?.payables?.pendingApproval ?? 0, bank: ov?.bank?.blocked ?? 0 };
+  const badges = { journals: pending, events: (ov?.events.blocked ?? 0) + (ov?.events.failed ?? 0), bills: ov?.payables?.pendingApproval ?? 0, sales: ov?.receivables?.pendingApproval ?? 0, bank: ov?.bank?.blocked ?? 0 };
 
   return (
     <FinanceContext value={{ branch: "", setBranch: () => {}, version, refresh: () => setVersion((v) => v + 1) }}>

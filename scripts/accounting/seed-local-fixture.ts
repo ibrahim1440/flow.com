@@ -98,8 +98,8 @@ async function main() {
   }
   if (await prisma.account.count()) { console.log("Accounting fixture already present (use --reset)."); return; }
 
-  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request"];
-  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve"];
+  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign"];
+  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post"];
   const prep = await user("acc.preparer", "سارة القحطاني", perms(PREP));
   const appr = await user("acc.approver", "خالد العتيبي", perms(APPR));
   await user("acc.approver.en", "Khalid Al-Otaibi (EN)", perms(APPR), "en");

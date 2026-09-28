@@ -9,7 +9,8 @@ export type Sub =
   | "settings_manage" | "coa_manage" | "tax_category_manage" | "period_lock" | "period_close" | "journal_create"
   | "journal_submit" | "journal_approve" | "journal_post" | "journal_reverse" | "export_view" | "mapping_manage"
   | "policy_prepare" | "policy_approve" | "events_process" | "unlock_period"
-  | "ap_bill_create" | "ap_bill_approve" | "ap_bill_post" | "bank_posting_manage" | "bank_correction_request" | "bank_correction_approve";
+  | "ap_bill_create" | "ap_bill_approve" | "ap_bill_post" | "bank_posting_manage" | "bank_correction_request" | "bank_correction_approve"
+  | "ar_invoice_create" | "ar_invoice_approve" | "ar_invoice_post" | "ar_receipt_assign";
 
 /** Whether the signed-in user holds an accounting duty. Display only — the server decides. */
 export function useCan() {
@@ -72,18 +73,23 @@ export const ROLE_LABELS: Record<string, [string, string]> = {
 };
 
 /** Supplier bill status; a posted bill shows whether it is paid, part-paid or overdue. */
-export function BillStatus({ status, rejected, remaining, gross, overdueDays }: { status: string; rejected?: boolean; remaining?: string | null; gross?: string; overdueDays?: number }) {
+export function BillStatus({ status, rejected, remaining, gross, overdueDays, sales, creditNote }: { status: string; rejected?: boolean; remaining?: string | null; gross?: string; overdueDays?: number; sales?: boolean; creditNote?: boolean }) {
   const { L } = useL();
+  if (creditNote && status !== "POSTED") { const s = STATUS[status] ?? { ar: status, en: status, tone: "info" as Tone }; return <Badge tone={s.tone}>{L(`إشعار دائن · ${s.ar}`, `Credit note · ${s.en}`)}</Badge>; }
+  if (creditNote) return <Badge tone="info">{L("إشعار دائن · مرحّل", "Credit note · posted")}</Badge>;
   if (status === "DRAFT" && rejected) return <Badge tone="bad">{L("مسودة · مرفوضة", "Draft · rejected")}</Badge>;
   if (status === "POSTED" && remaining !== undefined && remaining !== null) {
     const rem = Number(remaining);
-    if (rem <= 0) return <Badge tone="ok">{L("مسدّدة", "Paid")}</Badge>;
+    if (rem <= 0) return <Badge tone="ok">{sales ? L("محصّلة", "Collected") : L("مسدّدة", "Paid")}</Badge>;
     if (overdueDays && overdueDays > 0) return <Badge tone="bad">{L(`متأخرة ${overdueDays} يوماً`, `${overdueDays} days overdue`)}</Badge>;
-    if (gross && rem < Number(gross)) return <Badge tone="brand">{L("مرحّلة · مدفوعة جزئياً", "Posted · part-paid")}</Badge>;
+    if (gross && rem < Number(gross)) return <Badge tone="brand">{sales ? L("مرحّلة · محصّلة جزئياً", "Posted · part-collected") : L("مرحّلة · مدفوعة جزئياً", "Posted · part-paid")}</Badge>;
   }
   const s = STATUS[status] ?? { ar: status, en: status, tone: "info" as Tone };
   return <Badge tone={s.tone}>{L(s.ar, s.en)}</Badge>;
 }
+
+/** Display number of a sales document: INV-… or CN-…. */
+export const docNo = (r: { kind: string; invoiceNo: number }) => `${r.kind === "CREDIT_NOTE" ? "CN" : "INV"}-${r.invoiceNo}`;
 
 /** Today as a Riyadh calendar day, "YYYY-MM-DD". Call outside render (initialisers/handlers). */
 export function riyadhToday(): string { return new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10); }

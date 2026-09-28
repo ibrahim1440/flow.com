@@ -59,7 +59,7 @@ export async function setMapping(role: string, accountId: string, userId: string
   });
 }
 
-export async function updateSettings(patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean; bankPostingFrom?: Date | null }, userId: string) {
+export async function updateSettings(patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean; bankPostingFrom?: Date | null; advanceVatTreatment?: "AT_RECEIPT" | "NOT_AT_RECEIPT" | null }, userId: string) {
   return ledgerTx(async (tx) => {
     const before = await getSettings(tx);
     if (patch.ledgerCutoverDate !== undefined && before.ledgerCutoverDate && patch.ledgerCutoverDate?.getTime() !== before.ledgerCutoverDate.getTime()) {
@@ -80,12 +80,12 @@ export async function updateSettings(patch: { ledgerCutoverDate?: Date | null; s
     }
     const after = await tx.accountingSettings.update({
       where: { id: "singleton" },
-      data: { ...(patch.ledgerCutoverDate !== undefined ? { ledgerCutoverDate: patch.ledgerCutoverDate } : {}), ...(patch.setupComplete !== undefined ? { setupComplete: patch.setupComplete } : {}), ...(patch.bankPostingFrom !== undefined ? { bankPostingFrom: patch.bankPostingFrom } : {}), updatedBy: userId },
+      data: { ...(patch.ledgerCutoverDate !== undefined ? { ledgerCutoverDate: patch.ledgerCutoverDate } : {}), ...(patch.setupComplete !== undefined ? { setupComplete: patch.setupComplete } : {}), ...(patch.bankPostingFrom !== undefined ? { bankPostingFrom: patch.bankPostingFrom } : {}), ...(patch.advanceVatTreatment !== undefined ? { advanceVatTreatment: patch.advanceVatTreatment } : {}), updatedBy: userId },
     });
     await auditAccounting(tx, {
       action: "settings.update", entityType: "settings", entityId: "singleton", userId,
-      before: { ledgerCutoverDate: before.ledgerCutoverDate, setupComplete: before.setupComplete, bankPostingFrom: before.bankPostingFrom },
-      after: { ledgerCutoverDate: after.ledgerCutoverDate, setupComplete: after.setupComplete, bankPostingFrom: after.bankPostingFrom },
+      before: { ledgerCutoverDate: before.ledgerCutoverDate, setupComplete: before.setupComplete, bankPostingFrom: before.bankPostingFrom, advanceVatTreatment: before.advanceVatTreatment },
+      after: { ledgerCutoverDate: after.ledgerCutoverDate, setupComplete: after.setupComplete, bankPostingFrom: after.bankPostingFrom, advanceVatTreatment: after.advanceVatTreatment },
     });
     return after;
   });
