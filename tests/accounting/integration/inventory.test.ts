@@ -38,7 +38,7 @@ import { draftPolicy, approvePolicy } from "../../../src/lib/accounting/policy-s
 import { processPendingEvents } from "../../../src/lib/accounting/event-processor";
 import { createBill, submitBill, approveBill, postBill } from "../../../src/lib/accounting/payables-service";
 import { createSalesDoc, submitSalesDoc, approveSalesDoc, postSalesDoc, reverseSalesDoc } from "../../../src/lib/accounting/receivables-service";
-import { createItem, createLocation, createLossBand, approveLossBand, updateInventorySettings, createInvDoc, submitInvDoc, approveInvDoc, postInvDoc, saleIssueForInvoice, type InvDocInput } from "../../../src/lib/accounting/inventory-service";
+import { createItem, createLocation, createLossBand, approveLossBand, updateInventorySettings, createInvDoc, submitInvDoc, approveInvDoc, postInvDoc, saleIssueForInvoice, productionDraftFromRoastingBatch, receiptDraftFromPurchase, type InvDocInput } from "../../../src/lib/accounting/inventory-service";
 import { inventoryValuation, grossMargin, grniStatus, stockCard } from "../../../src/lib/accounting/inventory-reports";
 import { accountingDate, todayAccountingDate } from "../../../src/lib/accounting/dates";
 
@@ -204,5 +204,103 @@ describe("stage 4 — purchasing to production to sale", () => {
     const today = await inventoryValuation(todayAccountingDate());
     assert.equal(today.reconciled, true);
     assert.equal(inv(w, today, "SKU-ETH-250"), (dec("798.21").add("1011.07").add("106.43")).toFixed(2), "roastery 798.21 + returned 1,011.07 + café 106.43");
+  });
+});
+
+describe("stage 4 — controls", () => {
+  const receipt = (w: W, md: string, qty: string, cost: string) => w.doc({ type: "RECEIPT", docDate: D(md), locationId: w.rst, supplierId: w.S.green, lines: [{ itemId: w.I.green.id, quantity: qty, unitCost: cost }] });
+  const approved = async (w: W, input: InvDocInput) => { const d = await createInvDoc(input, w.prep); await submitInvDoc(d.id, w.prep); await approveInvDoc(d.id, w.appr); return d.id; };
+
+  test("FIFO: the oldest layer first, each at its own cost", async () => {
+    const w = await world({ method: "FIFO" });
+    await receipt(w, "01-10", "100", "30"); await receipt(w, "01-12", "50", "36");
+    const x = await w.doc({ type: "ISSUE", issueReason: "QC", docDate: D("01-15"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "120" }] });
+    assert.deepEqual(await journal(x.document.id), ["1171:0.00:3720.00", "5500:3720.00:0.00"], "100 × 30 + 20 × 36");
+  });
+
+  test("D-1 undecided: posting is refused; in an isolated test database it posts provisionally, journal included", async () => {
+    const w = await world({ method: null });
+    const id = await approved(w, { type: "RECEIPT", docDate: D("01-10"), locationId: w.rst, supplierId: w.S.green, lines: [{ itemId: w.I.green.id, quantity: "10", unitCost: "30" }] });
+    await rejects(postInvDoc(id, w.appr), /Waiting for decision D-1: the inventory costing method/);
+    assert.equal((await prisma.invDocument.findUniqueOrThrow({ where: { id } })).status, "APPROVED", "nothing half-posted");
+    process.env.ACCOUNTING_PROVISIONAL_POSTING = "isolated-test";
+    const r = await postInvDoc(id, w.appr);
+    assert.equal(r.document.provisional, true); assert.equal(r.document.costMethod, "WEIGHTED_AVERAGE");
+    const entry = await prisma.journalEntry.findUniqueOrThrow({ where: { id: r.ledger!.journalEntryId! } });
+    assert.equal(entry.isProvisional, true);
+  });
+
+  test("a production that loses weight needs an approved loss band; a draft band is not enough", async () => {
+    const w = await world();
+    await receipt(w, "01-10", "100", "30");
+    const noBand = await approved(w, { type: "PRODUCTION", docDate: D("01-20"), locationId: w.rst, lines: [{ role: "INPUT", itemId: w.I.green.id, quantity: "10" }, { role: "OUTPUT", itemId: w.I.roasted.id, quantity: "8" }] });
+    await rejects(postInvDoc(noBand, w.appr), /choose the approved loss band/);
+    const draft = await createLossBand({ code: "ROAST-DRAFT", name: "draft", process: "ROASTING", maxLossPercent: "20" }, w.prep);
+    await rejects(approveLossBand(draft.id, w.prep).then(() => prisma.invLossBand.update({ where: { id: draft.id }, data: { status: "APPROVED", approvedBy: w.prep } })), /someone other than its author/);
+    const withDraft = await approved(w, { type: "PRODUCTION", docDate: D("01-20"), locationId: w.rst, lossBandId: draft.id, lines: [{ role: "INPUT", itemId: w.I.green.id, quantity: "10" }, { role: "OUTPUT", itemId: w.I.roasted.id, quantity: "8" }] });
+    await rejects(postInvDoc(withDraft, w.appr), /loss band ROAST-DRAFT is not approved/);
+    await rejects(prisma.invLossBand.update({ where: { id: w.bands.roast }, data: { maxLossPercent: dec("25") } }), /cannot change/);
+  });
+
+  test("no negative stock, no back-dating over posted movements, no second posting", async () => {
+    const w = await world();
+    await receipt(w, "01-10", "100", "30");
+    const tooMuch = await approved(w, { type: "ISSUE", issueReason: "TRAINING", docDate: D("01-15"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "100.0001" }] });
+    await rejects(postInvDoc(tooMuch, w.appr), /Stock cannot go negative/);
+    await receipt(w, "01-20", "10", "40");
+    const back = await approved(w, { type: "ISSUE", issueReason: "TRAINING", docDate: D("01-15"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "1" }] });
+    await rejects(postInvDoc(back, w.appr), /already has a posted movement on .*-01-20/);
+    const x = await approved(w, { type: "ISSUE", issueReason: "TRAINING", docDate: D("01-21"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "1" }] });
+    const [a, b] = await Promise.allSettled([postInvDoc(x, w.appr), postInvDoc(x, w.appr)]);
+    assert.deepEqual([a.status, b.status].sort(), ["fulfilled", "rejected"], "two clicks: one posting");
+    const moved = await prisma.invMove.aggregate({ where: { documentId: x }, _sum: { qty: true } });
+    assert.equal(moved._sum.qty?.toFixed(4), "-1.0000", "the issue happened once (from both layers, in proportion)");
+    assert.equal(await prisma.journalEntry.count({ where: { sourceModule: "inventory", sourceDocumentId: x } }), 1);
+  });
+
+  test("two issues racing for the same stock: one posts, the other finds too little", async () => {
+    const w = await world();
+    await receipt(w, "01-10", "100", "30");
+    const a = await approved(w, { type: "ISSUE", issueReason: "QC", docDate: D("01-15"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "70" }] });
+    const b = await approved(w, { type: "ISSUE", issueReason: "QC", docDate: D("01-15"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "70" }] });
+    const r = await Promise.allSettled([postInvDoc(a, w.appr), postInvDoc(b, w.appr)]);
+    assert.deepEqual(r.map((x) => x.status).sort(), ["fulfilled", "rejected"]);
+    assert.match(String((r.find((x) => x.status === "rejected") as PromiseRejectedResult).reason), /Not enough GRN-ETH/);
+    const left = await prisma.invLayer.aggregate({ _sum: { qtyLeft: true, valueLeft: true } });
+    assert.deepEqual([left._sum.qtyLeft?.toFixed(4), left._sum.valueLeft?.toFixed(2)], ["30.0000", "900.00"]);
+  });
+
+  test("the database refuses tampering: posted documents, moves, layers, own approval", async () => {
+    const w = await world();
+    const r = await receipt(w, "01-10", "100", "30");
+    const id = r.document.id;
+    await rejects(prisma.invDocument.update({ where: { id }, data: { docDate: accountingDate(D("01-11")) } }), /posted inventory document cannot be changed/);
+    await rejects(prisma.invDocLine.update({ where: { id: r.lineIds[0] }, data: { unitCost: dec("1") } }), /cannot change/);
+    await rejects(prisma.invMove.deleteMany({ where: { documentId: id } }), /cannot be changed or deleted/);
+    await rejects(prisma.invMove.create({ data: { documentId: id, itemId: w.I.green.id, locationId: w.rst, date: accountingDate(D("01-10")), kind: "IN", qty: dec("1"), value: dec("1") } }), /only while their document posts/);
+    const layer = await prisma.invLayer.findFirstOrThrow({ where: { itemId: w.I.green.id } });
+    await rejects(prisma.invLayer.update({ where: { id: layer.id }, data: { qtyLeft: dec("150") } }), /quantity only goes down|qtyLeft/);
+    await rejects(prisma.invLayer.update({ where: { id: layer.id }, data: { valueLeft: dec("10") } }), /does not equal its moves/);
+    const own = await createInvDoc({ type: "ISSUE", issueReason: "QC", docDate: D("01-15"), locationId: w.rst, lines: [{ itemId: w.I.green.id, quantity: "1" }] }, w.prep);
+    await submitInvDoc(own.id, w.prep);
+    await rejects(approveInvDoc(own.id, w.prep), /someone other than/);
+    await rejects(prisma.invDocument.update({ where: { id: own.id }, data: { status: "APPROVED", approvedBy: w.prep, approvedAt: new Date() } }), /someone other than/);
+    await rejects(updateInventorySettings({ inventoryCostMethod: "FIFO" }, w.prep), /cannot change once inventory documents have posted/);
+  });
+
+  test("drafts from operational records: a roasting batch and a green-coffee purchase, once each", async () => {
+    const w = await world();
+    const gb = await prisma.greenBean.create({ data: { serialNumber: `ACC-T-${Date.now()}`, beanType: "Yirgacheffe", country: "Ethiopia", quantityKg: 0 } });
+    const cp = await prisma.coffeeProduct.create({ data: { productNameEn: "Ethiopia Yirgacheffe", countryEn: "Ethiopia" } });
+    await prisma.invItem.update({ where: { id: w.I.green.id }, data: { greenBeanId: gb.id } });
+    await prisma.invItem.update({ where: { id: w.I.roasted.id }, data: { coffeeProductId: cp.id } });
+    const pr = await prisma.purchaseRecord.create({ data: { supplierId: w.S.green, type: "GREEN_BEAN", itemId: gb.id, quantity: 60, costPerUnit: 31.5, totalCost: 1890, purchaseDate: new Date(`${D("01-05")}T09:00:00Z`) } });
+    const rd = await receiptDraftFromPurchase(pr.id, { locationId: w.rst }, w.prep);
+    assert.deepEqual([rd.type, rd.status, rd.lines[0].baseQty.toFixed(4), rd.lines[0].unitCost?.toFixed(4)], ["RECEIPT", "DRAFT", "60.0000", "31.5000"]);
+    await rejects(receiptDraftFromPurchase(pr.id, { locationId: w.rst }, w.prep), /already exists for that source/);
+    const rb = await prisma.roastingBatch.create({ data: { batchNumber: "R-TEST-1", greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 12, roastedBeanQuantity: 10.2, wasteQuantity: 0 } });
+    const pd = await productionDraftFromRoastingBatch(rb.id, { locationId: w.rst, lossBandId: w.bands.roast }, w.prep);
+    assert.deepEqual(pd.lines.map((l) => [l.role, l.baseQty.toFixed(4)]), [["INPUT", "12.0000"], ["OUTPUT", "10.2000"]]);
+    await rejects(productionDraftFromRoastingBatch(rb.id, { locationId: w.rst }, w.prep), /already exists/);
   });
 });
