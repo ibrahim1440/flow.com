@@ -42,8 +42,10 @@ Run: 2026-09-28 04:10–04:19 UTC.
 ## Test changes since `cf3b43e` (why they are not weakening)
 
 - **Cash flow:** `cashflow-transactions.test.ts` was committed first (`548fa42`) and failed against the
-  old implementation (output kept); the fix followed in `2fa3578`. `cashflow.test.ts` expectations
-  changed only where the old figures included the fictitious flows.
+  old implementation (output kept); the fix followed in `2fa3578`. In `cashflow.test.ts` every
+  total is unchanged; the line assertions follow the new result shape (depreciation is reported as
+  a non-cash add-back of expense 6600 instead of a movement on 1290), and one assertion was added
+  (indirect operating total = direct).
 - **`stage2.test.ts`:** a customer receipt now waits for assignment ("Assign this line to a
   customer") instead of "waits for stage 3"; the transfer-void case goes through the correction
   workflow because a direct void of a posted line is now refused.
