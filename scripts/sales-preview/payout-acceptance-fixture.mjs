@@ -22,7 +22,8 @@
 //
 // Usage, always through the preview guard so it cannot reach another database:
 //
-//   ... payout-acceptance-fixture.mjs up        provision the people and their deals
+//   ... payout-acceptance-fixture.mjs up                provision the people and their deals
+//   ... payout-acceptance-fixture.mjs add-clean <sfx>  one more clean person, purging nothing
 //   ... payout-acceptance-fixture.mjs residue   make the second person's period underivable
 //   ... payout-acceptance-fixture.mjs report    what exists right now
 //   ... payout-acceptance-fixture.mjs disable   retire the identities, KEEP every financial row
@@ -212,6 +213,45 @@ async function report() {
 }
 
 /**
+ * One more clean person on the same plan, added WITHOUT purging anything.
+ *
+ * A re-acceptance on a later candidate needs a period nobody has spent yet, and the
+ * obvious shortcut — reset the fixture — would destroy the evidence from the previous
+ * run. So this adds rather than resets. The suffix goes in the id and the deal, so which
+ * candidate a person was made for stays readable afterwards.
+ */
+async function addClean(suffix) {
+  if (!/^[a-z0-9]{1,12}$/.test(suffix ?? "")) {
+    console.error("REFUSE: add-clean needs a short lowercase suffix, e.g. `add-clean ed201dd`");
+    process.exit(2);
+  }
+  const id = `${P}_clean_${suffix}`;
+  const opp = `${P}_opp_clean_${suffix}`;
+  if ((await q(`SELECT 1 FROM "Employee" WHERE id=$1`, [id])).length) {
+    console.error(`REFUSE: ${id} already exists. Pick another suffix rather than reusing a spent period.`);
+    process.exit(2);
+  }
+  const stage = (await q(`SELECT id FROM "PipelineStage" ORDER BY "position" LIMIT 1`))[0];
+  await c.query(
+    `INSERT INTO "Employee" (id,name,pin,"pinLookup",role,permissions,"defaultRoute",active,"preferredLanguage","createdAt","updatedAt")
+     VALUES ($1,$2,$3,NULL,'custom',$4,'/dashboard',true,'en',now(),now())`,
+    [id, `${P} Clean Rep ${suffix} (hosted acceptance)`,
+     bcrypt.hashSync(crypto.randomBytes(32).toString("base64"), 10),
+     JSON.stringify({ dashboard: { access: "edit" }, commissions: { access: "view", sub: { view_own: true } } })]);
+  await c.query(
+    `INSERT INTO "CommissionAssignment" (id,"employeeId","planId","planVersionId","effectiveFrom","createdAt")
+     VALUES ($1,$2,$3,$4,$5,now())`,
+    [`${P}_asg_${id}`, id, PLAN, PV, new Date("2026-01-01T00:00:00Z")]);
+  await c.query(
+    `INSERT INTO "Opportunity" (id,title,"customerId","stageId",outcome,amount,currency,probability,"ownerId","createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,'OPEN',1150,'SAR',50,$5,now(),now())`,
+    [opp, `${P} Acceptance deal — ${id}`, CUST, stage.id, id]);
+  console.log(`${id} provisioned (no usable credentials). Record its collection through the app:`);
+  console.log(`  POST /api/commissions/sandbox-collections  { externalRef: "${P}-${id}-1", opportunityId: "${opp}", amountGross: 1150, amountTax: 150 }`);
+  console.log("  net 1000.00 at 1% = 10.00 of commission, worked from the plan.");
+}
+
+/**
  * Retire the identities and keep every financial record they were involved in.
  *
  * `active = false` is what the login and the permission checks read, so a disabled
@@ -232,12 +272,13 @@ async function disable() {
 const mode = process.argv[2] ?? "report";
 try {
   if (mode === "up") await up();
+  else if (mode === "add-clean") await addClean(process.argv[3]);
   else if (mode === "residue") await residue();
   else if (mode === "report") await report();
   else if (mode === "disable") await disable();
   else if (mode === "purge") { await purge(); console.log("HACC fixture purged, including its financial rows."); }
   else {
-    console.error(`unknown mode "${mode}" — expected up, residue, report, disable or purge`);
+    console.error(`unknown mode "${mode}" — expected up, add-clean, residue, report, disable or purge`);
     process.exitCode = 2;
   }
 } finally {
