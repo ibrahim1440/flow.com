@@ -158,6 +158,23 @@ const REASONS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/Assign this line to a customer/, () => "أسند الحركة إلى عميل في المحاسبة ← الذمم المدينة ← التحصيلات"],
   [/has posted; correct it through Accounting/, () => "رُحّلت الحركة؛ صحّحها من المحاسبة ← البنك ← تصحيح حركات مرحّلة"],
   [/has no VAT registration number, so input VAT cannot be claimed/, () => "المورد بلا رقم تسجيل ضريبي؛ لا تُسترد ضريبة المدخلات"],
+  // Stage 4b: operational events and cost of sales.
+  [/written without an accounting integration record/, () => "حركة مخزون سُجّلت دون سجل ربط محاسبي؛ راجعها ثم رحّل مستنداً واربطه، أو استبعدها مع السبب"],
+  [/inventory\.operations policy is not approved/, () => "سياسة الترحيل الآلي لأحداث المخزون غير معتمدة: يعتمد محاسب كل مستند تشغيلي"],
+  [/^An accountant approves this document/, () => "يعتمد محاسب هذا المستند"],
+  [/Loss ([\d.]+)% is above the approved band (\S+) \(([\d.]+)%\)/, (m) => `الفاقد ${m[1]}% يتجاوز النطاق المعتمد ${m[2]} (${m[3]}%): يعتمد محاسب الفاقد غير الطبيعي`],
+  [/No single approved loss band for (\w+)/, (m) => `لا يوجد نطاق فاقد معتمد واحد لعملية ${m[1]}؛ يختار المحاسب النطاق على المستند`],
+  [/is not linked to an inventory item/, () => "غير مربوط بصنف مخزون؛ اربطه في إعداد المخزون ثم أعد المحاولة"],
+  [/was entered without a cost/, () => "كمية افتتاحية بلا تكلفة: تُسجَّل بإجراء الأرصدة الافتتاحية (قرار ترحيل) ثم يُربط مستندها هنا، أو تُستبعد مع السبب"],
+  [/kilogram lot \(the old packing path/, () => "تسليم دفعة بالكيلو من مسار التعبئة القديم؛ تكلفتها ليست في حسابات المخزون — رحّلها يدوياً أو استبعدها مع السبب"],
+  [/No stock location is marked as the sales default/, () => "لا يوجد موقع مخزون افتراضي للمبيعات؛ حدّده في إعداد المخزون"],
+  [/Not enough (\S+)/, (m) => `الكمية غير كافية من ${m[1]} في الحسابات بعد؛ ستُعاد المحاولة تلقائياً`],
+  [/waits for an accountant/, () => "المستند بانتظار اعتماد محاسب"],
+  [/previous attempt stopped before finishing/, () => "توقفت المحاولة السابقة قبل اكتمالها؛ أُعيدت"],
+  [/Waiting for decision D-1/, () => "بانتظار القرار D-1 (طريقة تكلفة المخزون)"],
+  [/sales cost timing|salesCostTiming/i, () => "توقيت تكلفة المبيعات لم يُقرَّر بعد"],
+  [/neither marked as goods nor as non-stock/, () => "بند غير مصنّف: لا هو بضاعة ولا خدمة؛ صنّفه"],
+  [/has no inventory item; link the product/, () => "المنتج غير مربوط بصنف مخزون؛ اربطه"],
 ];
 export function useExplain() {
   const { lang } = useL();

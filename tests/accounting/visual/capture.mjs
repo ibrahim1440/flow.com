@@ -124,7 +124,8 @@ const SHOTS = [
   { id: "ACC-51", route: "/dashboard/accounting/inventory/setup", act: async (p) => { await p.getByText(/مجمّعات|تكاليف التحويل|Conversion/).first().scrollIntoViewIfNeeded().catch(() => undefined); } },
   { id: "ACC-32-costing", route: "/dashboard/accounting/receivables", act: firstSale("POSTED") },
   { id: "OPS-purchases", route: "/dashboard/purchases", user: "ops.roastery" },
-  { id: "OPS-production", route: "/dashboard/production", user: "ops.roastery" },
+  { id: "OPS-production", route: "/dashboard/production", user: "ops.roastery", act: async (p) => { await p.getByText(/جميع الدفعات/).first().click(); } },
+  { id: "OPS-packaging", route: "/dashboard/packaging", user: "ops.roastery" },
   { id: "OPS-dispatch", route: "/dashboard/dispatch", user: "ops.roastery" },
   { id: "ACC-27-en", route: "/dashboard/accounting/reports", user: "acc.approver.en", act: async (p) => { await p.getByRole("button", { name: "Cash flow" }).click(); } },
 ];

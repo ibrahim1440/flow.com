@@ -61,7 +61,7 @@ export function OpsStatus({ status }: { status: string }) {
 
 /** Cost of sales state of a posted sales invoice. */
 export const COSTING_STATUS: Record<string, [string, string, Tone]> = {
-  PENDING: ["بانتظار التكلفة", "Pending", "warn"], AWAITING_POLICY: ["بانتظار اعتماد السياسة", "Awaiting policy", "warn"], AWAITING_DISPATCH: ["بانتظار التسليم", "Awaiting dispatch", "warn"],
+  PENDING: ["بانتظار التكلفة", "Pending", "warn"], AWAITING_POLICY: ["بانتظار قرار التوقيت أو السياسة", "Awaiting decision or policy", "warn"], AWAITING_DISPATCH: ["بانتظار التسليم", "Awaiting dispatch", "warn"],
   COSTED: ["مكلفة", "Costed", "ok"], NOT_REQUIRED: ["لا تحتاج تكلفة", "Not required", "info"], BLOCKED: ["محجوبة", "Blocked", "bad"], FAILED: ["فشلت", "Failed", "bad"],
   CANCELLED: ["ملغاة", "Cancelled", "info"], UNCOSTED: ["معكوسة · التكلفة إلى «مسلَّم لم يُفوتر»", "Reversed · cost back to delivered, not invoiced", "info"],
 };

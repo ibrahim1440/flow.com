@@ -7,7 +7,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, useApi, useL, type Tone } from "../../../finance/_components/ui";
-import { riyadhToday, useAmount, useDay } from "../../_components/kit";
+import { riyadhToday, useAmount, useDay, useExplain } from "../../_components/kit";
 
 type Row = {
   invoiceId: string; kind: "INVOICE" | "CREDIT_NOTE"; no: number; customer: string; date: string; status: string; creditType: string | null;
@@ -29,7 +29,7 @@ const COST: Record<string, [string, string, Tone]> = {
   COSTED: ["مكلفة", "Costed", "ok"], NOT_REQUIRED: ["لا تحتاج تكلفة", "No cost needed", "info"], CANCELLED: ["ملغاة", "Cancelled", "info"],
   UNCOSTED: ["بلا تكلفة (غير مخزنية)", "No cost (not stock)", "info"],
   BOOKED_LATER: ["التكلفة قُيّدت لاحقاً", "Cost booked later", "warn"], PENDING: ["التكلفة بانتظار الاحتساب", "Cost pending", "warn"],
-  AWAITING_POLICY: ["بانتظار قرار D-1", "Awaiting decision D-1", "warn"], AWAITING_DISPATCH: ["بانتظار التسليم", "Awaiting dispatch", "warn"],
+  AWAITING_POLICY: ["بانتظار قرار توقيت التكلفة", "Awaiting the cost-timing decision", "warn"], AWAITING_DISPATCH: ["بانتظار التسليم", "Awaiting dispatch", "warn"],
   BLOCKED: ["التكلفة محجوبة", "Cost blocked", "bad"], FAILED: ["فشل احتساب التكلفة", "Costing failed", "bad"], UNCLASSIFIED: ["إشعار غير مصنّف", "Unclassified credit", "bad"],
 };
 
@@ -55,6 +55,7 @@ const sumOf = (rows: Row[]) => (rows.reduce((s, r) => s + Math.round(Number(r.re
 
 export default function GrossMarginPage() {
   const { L } = useL();
+  const explain = useExplain();
   const amt = useAmount();
   const day = useDay();
   const [to, setTo] = useState(riyadhToday);
@@ -81,7 +82,7 @@ export default function GrossMarginPage() {
             <Notice tone="warn">
               <p className="font-bold">{L(`التقرير غير مكتمل: ${d.totals.pendingDocuments} مستند لم تكتمل تكلفته (إيراده ${amt(d.totals.pendingRevenue)} ر.س). لا يُعرض له ربح، ولا تُعامل تكلفته كصفر.`, `The report is incomplete: ${d.totals.pendingDocuments} documents have unfinished costing (revenue SAR ${amt(d.totals.pendingRevenue)}). No margin is shown for them, and their cost is not treated as zero.`)}</p>
               <ul className="mt-1 list-disc ps-5">{pending.map((r) => (
-                <li key={r.invoiceId}>{r.kind === "CREDIT_NOTE" ? "CN" : "INV"}-{r.no} · {r.customer} — {L(COST[r.costStatus]?.[0] ?? r.costStatus, COST[r.costStatus]?.[1] ?? r.costStatus)}{r.costReason ? <span dir="ltr"> · {r.costReason}</span> : null}</li>
+                <li key={r.invoiceId}>{r.kind === "CREDIT_NOTE" ? "CN" : "INV"}-{r.no} · {r.customer} — {L(COST[r.costStatus]?.[0] ?? r.costStatus, COST[r.costStatus]?.[1] ?? r.costStatus)}{r.costReason ? <span> · {explain(r.costReason)}</span> : null}</li>
               ))}</ul>
             </Notice>
           )}
@@ -106,7 +107,7 @@ export default function GrossMarginPage() {
                       <Td num>{r.marginPercent === null ? "—" : `${r.marginPercent}%`}</Td>
                       <Td><span title={r.costReason ?? undefined}><Badge tone={c[2]}>{L(c[0], c[1])}</Badge></span>
                         {r.late && r.costStatus !== "BOOKED_LATER" && <span className="block text-[11px] text-brown">{L("تكلفة متأخرة", "Late costing")}</span>}
-                        {r.costReason && <span className="block text-[11px] text-brown max-w-[260px]" dir="ltr">{r.costReason}</span>}</Td>
+                        {r.costReason && <span className="block text-[11px] text-brown max-w-[260px]">{explain(r.costReason)}</span>}</Td>
                     </tr>
                   );
                 })}

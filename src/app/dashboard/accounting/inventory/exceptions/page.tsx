@@ -151,7 +151,7 @@ function OpsTab({ q, all, setAll }: { q: Q<OpsList>; all: boolean; setAll: (v: b
                   <Td num>{r.attempts}</Td>
                   <Td>{r.document ? <Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/inventory/documents/${r.document.id}`}>#{r.document.docNo}</Link> : "—"}</Td>
                   <Td>
-                    <span className="flex gap-2 whitespace-nowrap">
+                    <span className="flex flex-col items-stretch gap-1.5 min-w-[120px]">
                       {canRetry && <Button busy={busy === r.id + "retry"} onClick={() => act(r.id, "retry")}>{L("إعادة المحاولة", "Retry")}</Button>}
                       {canLink && <Button kind="ghost" onClick={() => toggle(r.id, "link")}>{L("ربط مستند…", "Link document…")}</Button>}
                       {canIgnore && <Button kind="danger" onClick={() => toggle(r.id, "ignore")}>{L("استبعاد…", "Dismiss…")}</Button>}
