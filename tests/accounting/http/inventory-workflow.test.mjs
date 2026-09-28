@@ -86,9 +86,11 @@ test("cost of sales is not entered by hand; a draft is edited or deleted only by
 
 test("a roasting batch becomes a production; the loss is within the approved band; reports tie to the ledger", async () => {
   const appr = await session("acc.approver");
-  const pending = await one(`select id from "InvDocument" where "sourceType" = 'ROASTING_BATCH' and status = 'SUBMITTED'`);
+  // SUBMITTED on a fresh fixture; APPROVED if the production-configuration suite ran first (it
+  // approves the document and shows that posting is refused there while D-1 is undecided).
+  const pending = await one(`select id, status from "InvDocument" where "sourceType" = 'ROASTING_BATCH' and status in ('SUBMITTED', 'APPROVED')`);
   assert.ok(pending, "the fixture leaves a production waiting for approval");
-  assert.equal((await appr(`/api/accounting/inventory/documents/${pending.id}/approve`, { method: "POST", json: {} })).status, 200);
+  if (pending.status === "SUBMITTED") assert.equal((await appr(`/api/accounting/inventory/documents/${pending.id}/approve`, { method: "POST", json: {} })).status, 200);
   const posted = await appr(`/api/accounting/inventory/documents/${pending.id}/post`, { method: "POST", json: {} });
   assert.equal(posted.status, 200, JSON.stringify(posted.body));
   const d = (await appr(`/api/accounting/inventory/documents/${pending.id}`)).body;
