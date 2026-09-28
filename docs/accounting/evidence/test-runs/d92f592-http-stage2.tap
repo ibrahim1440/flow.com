@@ -1,0 +1,34 @@
+TAP version 13
+# Subtest: permissions: no module → 403; viewer reads but cannot write; preparer cannot approve, post or map
+ok 1 - permissions: no module → 403; viewer reads but cannot write; preparer cannot approve, post or map
+  ---
+  duration_ms: 490.817503
+  type: 'test'
+  ...
+# Subtest: bill lifecycle over HTTP: create → submit → four-eyes approve → post → payment from the bank → settled and tied out
+ok 2 - bill lifecycle over HTTP: create → submit → four-eyes approve → post → payment from the bank → settled and tied out
+  ---
+  duration_ms: 648.274261
+  type: 'test'
+  ...
+# Subtest: runtime role cannot bypass the bill rules directly in SQL
+ok 3 - runtime role cannot bypass the bill rules directly in SQL
+  ---
+  duration_ms: 5.64237
+  type: 'test'
+  ...
+# Subtest: bank mapping and reconciliation over HTTP; manual journals on the mapped bank account are refused after the start date
+ok 4 - bank mapping and reconciliation over HTTP; manual journals on the mapped bank account are refused after the start date
+  ---
+  duration_ms: 339.581061
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1597.592718

@@ -1,70 +1,65 @@
 # Test results
 
-**Tested commit: `cf3b43e8d75483e4520950c95c52c9e9339ba594`** on branch `feature/accounting-ledger-core`.
+**Tested commit: `d92f5921de01f8efc59b62958d8bb84ca6da4724`** on branch `feature/accounting-ledger-core`.
 The run started from a clean working tree (`git status --porcelain` was empty).
-Baseline: `origin/main` @ `fc64c05`, still the latest remote main.
+Baseline: `origin/main` @ `fc64c05`.
 
-Commits after `cf3b43e` change only `docs/accounting/`. To check this:
-`git diff --name-only cf3b43e HEAD` must list nothing outside `docs/`.
+Commits after `d92f592` change only `docs/accounting/`. To check this:
+`git diff --name-only d92f592 HEAD` must list nothing outside `docs/`.
 
-Run: 2026-09-27 20:12–20:19 UTC.
+Run: 2026-09-28 04:10–04:19 UTC.
 - **Environment:** container Linux, Node 22.22.2, PostgreSQL 16.13 on a local disposable server
   (127.0.0.1:54329); Chromium via Playwright.
-- **Production differs:** it runs PostgreSQL 17 on Neon.
+- **Production differs:** it runs PostgreSQL 17 on Neon. Nothing here ran against Neon or Vercel.
 - **Data:** all synthetic.
-- **Stored evidence (URLs masked, no secrets):**
-  - `evidence/test-runs/cf3b43e-summary.txt`
-  - `evidence/test-runs/cf3b43e-certification.log`
-  - `evidence/test-runs/cf3b43e-*.tap`
+- **Stored evidence (URLs masked; scanned for credential URLs and the fixture password: none):**
+  - `evidence/test-runs/d92f592-summary.txt`
+  - `evidence/test-runs/d92f592-certification.log`
+  - `evidence/test-runs/d92f592-*.tap`
+  - `evidence/test-runs/cashflow-regression-before-fix.txt` (the new cash-flow tests failing
+    against the old implementation, before the fix)
 
-| Kind | Command | Result @ `cf3b43e` | What it proves / does not |
+| Kind | Command | Result @ `d92f592` | What it proves / does not |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit -p .` | clean | |
 | Lint | `npx eslint src/lib/accounting src/app/api/accounting src/app/dashboard/accounting src/app/dashboard/finance/_components tests/accounting scripts/accounting` | clean | |
 | Production build | `npm run build` | exit 0 | |
-| Accounting unit | `env -i PATH=… HOME=… npm run test:accounting:unit` | **16/16** | money/rounding, Riyadh dates, template integrity, policy coverage, preview identity guard including the mock Neon API, URL classifier, bill line maths = server maths (5,000 cases), cash-flow template classes |
-| Accounting DB integration | `env -i … npm run test:accounting:db` (owner role, `erp_finance_integration`) | **41/41** | ledger core (25), Stage 2 bills and bank-to-ledger (13), cash-flow statement (3, hand-worked figures) |
-| Accounting scripts | `env -i … npm run test:accounting:scripts` | **4/4** | credential-rotation verifier: PASS only on authentication rejection from a reachable endpoint; refuses secrets passed as arguments |
+| Accounting unit | `env -i PATH=… HOME=… npm run test:accounting:unit` | **23/23** | money/rounding, Riyadh dates, template integrity, policy coverage, preview identity guard, URL classifier, bill and sales line maths = server maths (5,000 cases each), cash-flow engine and template classes |
+| Accounting DB integration | `env -i … npm run test:accounting:db` (owner role, `erp_finance_integration`) | **65/65** | ledger core (25), Stage 2 (13), cash flow (3 + 6 transaction regression cases), bank corrections (8), receivables (10) |
+| Accounting scripts | `env -i … npm run test:accounting:scripts` | **4/4** | credential-rotation verifier |
 | HTTP, production configuration | server as `accounting_app` **without** `ACCOUNTING_PROVISIONAL_POSTING`, fresh fixture, `runtime-no-switch.test.mjs` | **1/1** | an unapproved plan version stays BLOCKED and produces no journal |
 | HTTP authorisation | server as `accounting_app`, `authz.test.mjs` | **5/5** | 401/403/409/400 cases; four-eyes |
-| HTTP runtime workflow | `runtime-workflow.test.mjs` | **7/7** | journal and reversal workflow, periods, commission accrual exactly once, reports, audit; direct-SQL bypasses refused for the runtime role |
-| HTTP Stage 2 | `stage2-workflow.test.mjs` | **4/4** | bill permissions; create → submit → four-eyes approve → post → bank payment → settled; aging tied to 2110; statement tied; paid bill cannot be reversed; the runtime role cannot bypass bill rules in SQL; bank mapping; reconciliation fully itemised; manual journal on a mapped bank account refused |
-| Finance regression | `test:finance:unit`, `test:finance:db` | **52/52, 40/40** | Finance behaviour is unchanged. This includes the shared kit and the Stage 2 changes to `Supplier`, `FinCategory` and `BankTransaction` |
-| Sales regression | `run-sales.mjs commission-engine quotes-domain`; `sales-commissions-db.mjs` on a fresh local `sales_preview` (migrated at this commit, run as a DML-only `sales_preview_app`) | **161 pure (48 + 113); DB 23/23** | commission and quote behaviour are unchanged. `sales-security` and `sales-workflow` (running-app suites) were not run |
-| Backend regression certification | `node scripts/e2e/regression/local-certification.mjs cf3b43e…` (clean git worktree, fresh `erp_e2e`, reset boundary set for that local target only) | **26 suites, 2,300 assertions, 0 failed** | the 11 former baseline failures pass because their conditions are set up correctly, not because any check was loosened (`REGRESSION_SIDE_BY_SIDE.md`) |
-| Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 23 views; AR/EN; 1440/390) | **0 serious/critical** | automated rules only, on the accounting screens and the shell around them. Not a claim of complete application accessibility; no manual screen-reader test |
-| Browser capture | `capture.mjs` (29 screens) | 0 page errors, 0 horizontal page overflow | rendering evidence; Figma comparison in `FIGMA_PARITY.md` |
+| HTTP runtime workflow | `runtime-workflow.test.mjs` | **7/7** | journals, reversals, periods, commissions exactly once, reports, audit; SQL bypasses refused |
+| HTTP Stage 2 | `stage2-workflow.test.mjs` | **4/4** | bill workflow, bank posting, aging/statement tie-outs, SQL bypass refused |
+| HTTP bank corrections | `bank-corrections.test.mjs` | **3/3** | Finance cannot change a posted line (409 from every path); four-eyes void/replace; retry refused; runtime role cannot bypass the guards |
+| HTTP receivables (new) | `receivables-workflow.test.mjs` | **3/3** | invoice duties and four-eyes; concurrent post → one journal; receipt named by an approved sales collection → one bank journal, commission journals unchanged, the collection never posts; concurrent claims on one collection → one wins with a clear 409; aging ties to 1130; SQL bypasses refused |
+| Finance regression | `test:finance:unit`, `test:finance:db` | **52/52, 40/40** | Finance behaviour unchanged, including the posted-line checks added to Finance services |
+| Sales regression | `run-sales.mjs commission-engine quotes-domain`; `sales-commissions-db.mjs` on a fresh local `sales_preview` (DML-only role) | **161 pure (48 + 113); DB 23/23** | commission and quote behaviour unchanged. `sales-security` and `sales-workflow` (running-app suites) were not run |
+| Backend regression certification | `node scripts/e2e/regression/local-certification.mjs d92f592…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | see the assertion-count note below |
+| Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 33 views; AR/EN; 1440/390) | **0 serious/critical** | automated rules only; no manual screen-reader test |
+| Browser capture | `capture.mjs` (41 screens, on a freshly reseeded fixture) | 0 page errors, 0 horizontal page overflow | rendering evidence; Figma comparison in `FIGMA_PARITY.md` and `evidence/side/` |
 
-## Test changes in `cf3b43e` (why they are not weakening)
+## Test changes since `cf3b43e` (why they are not weakening)
 
-A full run at `22a685c` failed three HTTP tests.
+- **Cash flow:** `cashflow-transactions.test.ts` was committed first (`548fa42`) and failed against the
+  old implementation (output kept); the fix followed in `2fa3578`. `cashflow.test.ts` expectations
+  changed only where the old figures included the fictitious flows.
+- **`stage2.test.ts`:** a customer receipt now waits for assignment ("Assign this line to a
+  customer") instead of "waits for stage 3"; the transfer-void case goes through the correction
+  workflow because a direct void of a posted line is now refused.
+- **`bank-corrections.test.mjs`:** selects a posted *payment* line, because the fixture now also has
+  posted customer receipts (a positive line cannot be replaced by a payment; that refusal is correct).
+- **Runner:** reseeds the fixture after the HTTP suites so captures and the audit start from a known state.
 
-- **`authz` and `runtime-workflow`.** These Stage 1 tests posted manual journals against cash
-  accounts dated after the fixture's bank-posting start date (15 Sep). Stage 2 deliberately
-  refuses that, so the 409 was correct behaviour.
-  - The Stage 1 tests now post to non-cash accounts (2130, 1140).
-  - The refusal itself is asserted in `stage2-workflow` test 4 and in `stage2.test.ts`.
-- **`runtime-no-switch`.** It ran after a server *with* the isolated-test switch had already
-  posted the fixture's unapproved-plan events. It then found a TRANSLATED event where it
-  expected BLOCKED.
-  - The test now selects only unprocessed events and fails with a clear message if there are none.
-  - The runner now reseeds and runs this suite first.
-  - The production-configuration assertion is unchanged.
+## Certification assertion count
 
-## Certification assertion count (2,301 earlier, 2,300 now)
+`completion-gate` adds one assertion only when a deliberately raced "complete order" request loses
+and receives 409. At `d92f592` the log records `complete=409`, hence 2,301 (2,300 at `cf3b43e`,
+where it was 200).
 
-`completion-gate` adds one assertion only when a deliberately raced "complete order" request
-loses and receives 409. The race outcome is recorded in the log:
-- at `284e207`: `complete=409`, so 70 assertions;
-- at `22a685c` and `cf3b43e`: `complete=200`, so 69 assertions.
+## Earlier SHAs
 
-Every other suite has the same count.
-
-## Earlier SHAs (explanation requested)
-
-- `56011a6` was the code tested in the first delivery; `07d71c5` and `c5336b8` after it were
-  documentation-only.
-- All earlier results are superseded by this table.
+`cf3b43e` (first Stage 2 delivery) and earlier results are superseded by this table.
 
 ## Not run here
 
@@ -72,7 +67,8 @@ Every other suite has the same count.
 |---|---|---|
 | Runtime on the Neon preview database | **blocked** | no TCP 5432 from this environment; `console.neon.tech` not allow-listed (`NETWORK_ACCESS.md`) |
 | Vercel Preview | **blocked** | Vercel team scope 403 |
-| ZATCA sandbox | not run | not implemented yet |
+| ZATCA sandbox | not run | not implemented yet (stage 6) |
+| Migrations after the ledger core on a production copy | not run | needs Neon access or approval to use the connector on a fresh rehearsal branch (`MIGRATION_AND_CUTOVER.md`) |
 | `sales-security`, `sales-workflow` | not run | need the Sales running-app preview |
 
 Not claimed: "zero bugs"; regulatory compliance; production readiness.
