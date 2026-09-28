@@ -15,6 +15,7 @@ import { processEvent, type ProcessOutcome } from "./event-processor";
 import { isKsaVatNumber } from "./bill-rules";
 import { computeSalesLine, vatInside } from "./sales-rules";
 import { postedBankLines } from "./bank-posted";
+import { saleIssueForInvoice, returnForReversedInvoice } from "./inventory-service";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -205,7 +206,7 @@ export async function rejectSalesDoc(id: string, userId: string, reason: string)
   });
 }
 
-export type SalesPostOutcome = { document: Awaited<ReturnType<typeof transition>>; ledger: ProcessOutcome | null };
+export type SalesPostOutcome = { document: Awaited<ReturnType<typeof transition>>; ledger: ProcessOutcome | null; cogs?: { documentId: string | null; posted: boolean; reason?: string } };
 
 export async function postSalesDoc(id: string, userId: string): Promise<SalesPostOutcome> {
   const document = await ledgerTx(async (tx) => {
@@ -227,7 +228,10 @@ export async function postSalesDoc(id: string, userId: string): Promise<SalesPos
     await auditAccounting(tx, { action: "sales_document.post", entityType: "sales_document", entityId: id, userId });
     return posted;
   });
-  return { document, ledger: await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.posted" : "ar.invoice.posted") };
+  const ledger = await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.posted" : "ar.invoice.posted");
+  // Cost of sales for stocked products, on the invoice date (stage 4; waits for D-1 like any inventory document).
+  const cogs = document.kind === "INVOICE" ? await saleIssueForInvoice(document.id) : undefined;
+  return { document, ledger, cogs };
 }
 
 export async function reverseSalesDoc(id: string, userId: string, reason: string): Promise<SalesPostOutcome> {
@@ -250,11 +254,12 @@ export async function reverseSalesDoc(id: string, userId: string, reason: string
     return reversed;
   });
   const ledger = await processDocEvent(document.id, document.kind === "CREDIT_NOTE" ? "ar.credit_note.reversed" : "ar.invoice.reversed");
+  const cogs = document.kind === "INVOICE" ? await returnForReversedInvoice(document.id) : undefined;
   if (document.kind === "CREDIT_NOTE") {
     const released = await prisma.accountingEvent.findMany({ where: { eventType: "ar.credit.released", status: "PENDING", partyKey: `CUSTOMER:${document.customerId}` }, orderBy: { createdAt: "asc" }, select: { id: true } });
     for (const e of released) await processEvent(e.id);
   }
-  return { document, ledger };
+  return { document, ledger, cogs };
 }
 
 async function processDocEvent(docId: string, et: string): Promise<ProcessOutcome | null> {

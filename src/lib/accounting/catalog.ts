@@ -20,6 +20,17 @@ export const POSTING_ROLES: RoleDef[] = [
   { role: "OUTPUT_VAT", en: "Output VAT", ar: "ضريبة القيمة المضافة على المخرجات", usedBy: "receivables" },
   { role: "SALES_REVENUE", en: "Sales revenue (default for invoice lines)", ar: "إيرادات المبيعات (الافتراضي لبنود الفواتير)", usedBy: "receivables" },
   { role: "SALES_RETURNS", en: "Sales returns and allowances (credit notes)", ar: "مردودات وخصومات المبيعات (إشعارات دائنة)", usedBy: "receivables" },
+  { role: "INVENTORY_RAW", en: "Inventory — raw materials (green coffee, milk, bakery ingredients)", ar: "مخزون المواد الخام (بن أخضر، حليب، مكونات المخبز)", usedBy: "inventory" },
+  { role: "INVENTORY_PACKAGING", en: "Inventory — packaging and consumables", ar: "مخزون مواد التغليف والمستهلكات", usedBy: "inventory" },
+  { role: "INVENTORY_WIP", en: "Inventory — work in progress (roasted coffee not yet packed)", ar: "مخزون تحت التشغيل (بن محمص لم يُعبأ)", usedBy: "inventory" },
+  { role: "INVENTORY_FINISHED", en: "Inventory — finished goods", ar: "مخزون البضاعة التامة الصنع", usedBy: "inventory" },
+  { role: "INVENTORY_RESALE", en: "Inventory — goods for resale", ar: "مخزون البضاعة بغرض البيع", usedBy: "inventory" },
+  { role: "COGS", en: "Cost of goods sold (and café internal use)", ar: "تكلفة البضاعة المباعة (والاستهلاك الداخلي للمقهى)", usedBy: "inventory" },
+  { role: "ABNORMAL_LOSS", en: "Abnormal production loss (beyond the approved band)", ar: "فاقد إنتاج غير طبيعي (يتجاوز النطاق المعتمد)", usedBy: "inventory" },
+  { role: "WASTE_CALIBRATION", en: "Calibration waste", ar: "هدر المعايرة", usedBy: "inventory" },
+  { role: "WASTE_QC", en: "QC testing waste", ar: "هدر اختبارات الجودة", usedBy: "inventory" },
+  { role: "WASTE_TRAINING", en: "Training waste", ar: "هدر التدريب", usedBy: "inventory" },
+  { role: "INVENTORY_VARIANCE", en: "Inventory variance, spoilage and count differences", ar: "فروقات المخزون والتلف وفروق الجرد", usedBy: "inventory" },
 ];
 
 export const ROLE_SET = new Set(POSTING_ROLES.map((r) => r.role));
@@ -108,6 +119,27 @@ POLICIES.push(
       "advance (a liability). Decision D-2 (setting \"VAT on advances\"): when set to at receipt, output VAT is charged on the " +
       "advance when received, with a prepayment tax invoice, and reversed when the advance is applied to the final invoice, " +
       "which carries the full VAT. Applying an advance to an invoice moves the amount from customer advances to receivables.",
+  },
+  {
+    key: "inventory.costing",
+    en: "Inventory valuation and production costing (D-1)",
+    ar: "تقييم المخزون وتكاليف الإنتاج (D-1)",
+    governs: ["inv.document.posted"],
+    defaultStatement:
+      "يُقيَّم المخزون بطريقة التكلفة المختارة في إعداد «طريقة تكلفة المخزون» (قرار D-1)، لكل صنف وموقع. الاستلام من المورد: مدين المخزون بتكلفة الاستلام ودائن «بضاعة مستلمة لم تصل فاتورتها». " +
+      "الإنتاج (التحميص، التعبئة، الخبز): تُصرف المدخلات بتكلفتها وتُحمَّل على المخرجات؛ الفاقد داخل نطاق الفاقد المعتمد للعملية يُمتص في تكلفة المخرجات، وما يتجاوزه يُقيَّم بتكلفة وحدة المخرجات المتوقعة ويُحمَّل على «فاقد إنتاج غير طبيعي». " +
+      "البيع: تكلفة البضاعة المباعة بتاريخ فاتورة المبيعات المرحّلة. هدر المعايرة والجودة والتدريب يُحمَّل على حساباته، والتلف وفروق الجرد على «فروقات المخزون»، والاستهلاك الداخلي للمقهى على تكلفة المبيعات. " +
+      "التكاليف الإضافية (الشحن والجمارك) وفرق سعر فاتورة المورد عن الاستلام تُضاف للمخزون المتبقي من ذلك الاستلام، وما استُهلك منه يُحمَّل على تكلفة المبيعات (أو يُحمَّل كله على الفروقات حسب الإعداد). " +
+      "لا يُرحّل مستند بتاريخ يسبق حركة مرحّلة للصنف والموقع نفسيهما، ولا يُسمح برصيد سالب.\n\n" +
+      "Inventory is valued per item and location by the method chosen in the setting \"inventory costing method\" (decision D-1). " +
+      "A goods receipt debits inventory at the receipt cost and credits goods received not invoiced. Production (roasting, packing, " +
+      "baking) issues inputs at cost into the outputs; loss within the process's approved loss band is absorbed into the output cost, " +
+      "loss beyond it is valued at the cost per unit of expected output and charged to abnormal production loss. Cost of sales is " +
+      "recognised on the date of the posted sales invoice. Calibration, QC and training waste go to their accounts, spoilage and count " +
+      "differences to inventory variance, and café internal use to cost of sales. Landed costs (freight, customs) and a supplier bill's " +
+      "price difference from the receipt are added to what is still on hand from that receipt, the part already used going to cost of " +
+      "sales (or all to variance, per the setting). No document posts on a date before a posted movement of the same item and location, " +
+      "and stock never goes negative.",
   },
 );
 

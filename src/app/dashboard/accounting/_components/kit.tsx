@@ -129,6 +129,7 @@ export const EVENT_LABEL: Record<string, [string, string]> = {
   "ar.credit_note.posted": ["ترحيل إشعار دائن", "Credit note posted"], "ar.credit_note.reversed": ["عكس إشعار دائن", "Credit note reversed"],
   "ar.advance.applied": ["تطبيق دفعة مقدمة", "Advance applied"], "ar.advance.reversed": ["عكس تطبيق دفعة مقدمة", "Advance application reversed"],
   "ar.credit.allocated": ["تخصيص رصيد دائن لفاتورة", "Credit applied to an invoice"], "ar.credit.released": ["إلغاء تخصيص رصيد دائن", "Credit application released"],
+  "inv.document.posted": ["ترحيل مستند مخزون", "Inventory document posted"],
 };
 
 /** The posting engine's reasons are English sentences; the known ones are shown in Arabic too. */

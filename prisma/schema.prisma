@@ -1254,6 +1254,14 @@ model AccountingSettings {
   /// post only provisionally (isolated test database) and otherwise wait.
   advanceVatTreatment AdvanceVatTreatment?
 
+  /// Decision D-1 (stage 4): inventory costing method. Null = undecided: inventory documents post
+  /// only provisionally in an isolated test database (weighted average, the recommendation) and
+  /// otherwise wait. Cannot change once a document has posted. (The older costingMethod /
+  /// cogsPolicy strings above are unused placeholders, not decisions.)
+  inventoryCostMethod      InvCostMethod?
+  /// Decision D-1: supplier bill price differing from the goods receipt. Null = undecided.
+  inventoryPriceDifference InvPriceDifference?
+
   // Posting is blocked everywhere except setup routes while this is false. Must not
   // default to true — there is no setup wizard in S0, so setup is never complete by default.
   setupComplete Boolean @default(false)
@@ -3565,4 +3573,255 @@ model AdvanceApplication {
   allocation     ArAllocation?
 
   @@index([customerId])
+}
+
+// ─── Accounting: inventory valuation and manufacturing costing (stage 4) ────────────────────────
+// A cost subledger owned by accounting, in Decimal, beside the operational quantity records
+// (GreenBean.quantityKg, MaterialItem.quantityOnHand, FinishedGoodsLot…), which it links to but
+// never writes. Documents move stock between cost layers; every posted document writes immutable
+// cost moves and one journal (event inv.document.posted). Decision D-1 (method, loss bands,
+// price differences) is configurable and approval-gated: nothing posts until it is decided.
+
+enum InvItemKind {
+  GREEN_COFFEE
+  ROASTED_COFFEE // roasted, not yet packed (work in progress)
+  PACKAGING // bags, labels, cartons, cups
+  MILK
+  BAKERY_INGREDIENT
+  FINISHED_GOOD // packed coffee, baked goods
+  RESALE_GOOD
+  CONSUMABLE
+}
+
+enum InvCostMethod {
+  WEIGHTED_AVERAGE
+  FIFO
+}
+
+/// How a supplier bill's price differing from the goods receipt is treated (part of D-1).
+enum InvPriceDifference {
+  CAPITALISE // into the stock still on hand from that receipt; the part already used goes to cost of sales
+  EXPENSE // entirely to inventory variance
+}
+
+enum InvDocType {
+  RECEIPT // goods received from a supplier: Dr inventory / Cr goods received not invoiced
+  SUPPLIER_RETURN
+  ISSUE // waste, internal use (café consumption), spoilage
+  TRANSFER
+  PRODUCTION // roasting, packing, baking: inputs consumed, outputs made, loss per band
+  SALE_ISSUE // cost of sales for a posted sales invoice
+  CUSTOMER_RETURN
+  LANDED_COST // freight, customs… added to received stock
+  BILL_MATCH // supplier bill line matched to a receipt line; posts the price difference
+  COUNT // physical count
+}
+
+enum InvDocStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+}
+
+enum InvLineRole {
+  LINE
+  INPUT
+  OUTPUT
+}
+
+enum InvIssueReason {
+  INTERNAL_USE // e.g. milk used in café drinks → cost of sales
+  CALIBRATION
+  QC
+  TRAINING
+  SPOILAGE
+}
+
+enum InvLossBandStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+model InvItem {
+  id              String       @id @default(cuid())
+  code            String       @unique
+  name            String
+  nameAr          String?
+  kind            InvItemKind
+  /// Base unit every quantity is kept in (kg, l, piece, unit…).
+  baseUnit        String
+  /// Weight or volume of one base unit in the unit production yields are measured in (kg for
+  /// coffee; e.g. 0.08 for a croissant). Used for production loss; 1 for kg items.
+  yieldPerUnit    Decimal      @default(1) @db.Decimal(18, 6)
+  // Links to the operational masters (optional, one accounting item each).
+  greenBeanId     String?      @unique
+  coffeeProductId String?      @unique
+  materialItemId  String?      @unique
+  productSkuId    String?      @unique
+  isActive        Boolean      @default(true)
+  createdBy       String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  units           InvUnit[]
+  lines           InvDocLine[]
+  layers          InvLayer[]
+  moves           InvMove[]
+
+  @@index([kind, isActive])
+}
+
+/// Conversion of a purchase or handling unit into the item's base unit (sack of 60 kg, carton of 12 l).
+model InvUnit {
+  id     String  @id @default(cuid())
+  itemId String
+  item   InvItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  unit   String
+  /// Base units in one of this unit.
+  factor Decimal @db.Decimal(18, 6)
+
+  @@unique([itemId, unit])
+}
+
+model InvLocation {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           String
+  nameAr         String?
+  isActive       Boolean  @default(true)
+  /// The location cost of sales is taken from for posted sales invoices (at most one).
+  isSalesDefault Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+/// Normal-loss band for a production process (D-1). Approved by someone other than its author;
+/// the percentage is copied onto each production document when it posts.
+model InvLossBand {
+  id             String            @id @default(cuid())
+  code           String            @unique
+  name           String
+  nameAr         String?
+  process        String // ROASTING, PACKING, BAKING, OTHER
+  maxLossPercent Decimal           @db.Decimal(5, 2)
+  status         InvLossBandStatus @default(DRAFT)
+  createdBy      String
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+model InvDocument {
+  id              String              @id @default(cuid())
+  docNo           Int                 @unique @default(autoincrement())
+  type            InvDocType
+  status          InvDocStatus        @default(DRAFT)
+  docDate         DateTime            @db.Date
+  locationId      String
+  toLocationId    String?
+  supplierId      String?
+  customerId      String?
+  description     String?
+  reason          String?
+  issueReason     InvIssueReason?
+  lossBandId      String?
+  /// Snapshots taken when the document posts (history does not follow later setting changes).
+  lossBandPercent Decimal?            @db.Decimal(5, 2)
+  costMethod      InvCostMethod?
+  priceDifference InvPriceDifference?
+  provisional     Boolean             @default(false)
+  /// LANDED_COST: amount to spread, by VALUE or QUANTITY; BILL_MATCH: the bill line.
+  amount          Decimal?            @db.Decimal(18, 2)
+  allocationBasis String?
+  billLineId      String?             @unique
+  /// The operational or accounting record this document was made from (unique per source).
+  sourceType      String?
+  sourceId        String?
+  requestKey      String?             @unique
+  createdBy       String
+  submittedBy     String?
+  submittedAt     DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  postedBy        String?
+  postedAt        DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectedReason  String?
+  /// Set once the cost moves of a posted document are complete; no move can be added after.
+  movesSealed     Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  lines           InvDocLine[]
+  moves           InvMove[]
+
+  @@unique([sourceType, sourceId])
+  @@index([status, docDate])
+  @@index([type, status])
+}
+
+model InvDocLine {
+  id           String      @id @default(cuid())
+  documentId   String
+  document     InvDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  lineNo       Int
+  role         InvLineRole @default(LINE)
+  itemId       String
+  item         InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  quantity     Decimal     @db.Decimal(18, 4)
+  unit         String
+  factor       Decimal     @db.Decimal(18, 6)
+  baseQty      Decimal     @db.Decimal(18, 4)
+  /// RECEIPT (and a count surplus): cost per base unit.
+  unitCost     Decimal?    @db.Decimal(18, 4)
+  /// COUNT: quantity counted (base units).
+  countedQty   Decimal?    @db.Decimal(18, 4)
+  /// SUPPLIER_RETURN / LANDED_COST / BILL_MATCH: the receipt line; CUSTOMER_RETURN: the sale-issue line.
+  targetLineId String?
+  description  String?
+
+  @@unique([documentId, lineNo])
+  @@index([targetLineId])
+}
+
+/// A quantity of an item at a location received at one cost. Issues draw layers down (FIFO or in
+/// proportion for weighted average); landed costs and price differences revalue what is left.
+model InvLayer {
+  id         String   @id @default(cuid())
+  itemId     String
+  item       InvItem  @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  locationId String
+  moveId     String   @unique
+  date       DateTime @db.Date
+  qtyIn      Decimal  @db.Decimal(18, 4)
+  valueIn    Decimal  @db.Decimal(18, 2)
+  qtyLeft    Decimal  @db.Decimal(18, 4)
+  valueLeft  Decimal  @db.Decimal(18, 2)
+  createdAt  DateTime @default(now())
+
+  @@index([itemId, locationId, date])
+}
+
+/// Immutable cost movement: signed quantity and value of an item at a location, from one posted
+/// document. The valuation on any date is the sum of moves dated on or before it.
+model InvMove {
+  id         String      @id @default(cuid())
+  seq        Int         @unique @default(autoincrement())
+  documentId String
+  document   InvDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  lineId     String?
+  itemId     String
+  item       InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  locationId String
+  date       DateTime    @db.Date
+  /// IN, OUT, REVALUE (value only), EXPENSED (value of a revaluation on stock already used; no stock effect)
+  kind       String
+  qty        Decimal     @db.Decimal(18, 4)
+  value      Decimal     @db.Decimal(18, 2)
+  layerId    String?
+  createdAt  DateTime    @default(now())
+
+  @@index([itemId, locationId, date])
+  @@index([documentId])
 }
