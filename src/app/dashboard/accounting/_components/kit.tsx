@@ -171,6 +171,9 @@ export function useExplain() {
 /** Automatic entries are stored with English descriptions (the ledger's canonical text); the
  *  known phrases are shown in Arabic in the Arabic interface. */
 const AUTO_PHRASES: [string, string][] = [
+  ["Reversal of invoice", "عكس الفاتورة"], ["Cost of sales", "تكلفة المبيعات"], ["Roasting batch", "دفعة تحميص"], ["Purchase record", "سجل شراء"],
+  ["Goods receipt", "استلام من مورد"], ["Return to supplier", "مرتجع لمورد"], ["Stock issue", "صرف مخزون"], ["Customer return", "مرتجع من عميل"], ["Stock count", "جرد"],
+  ["Landed cost", "تكلفة إضافية"], ["Supplier price difference", "فرق سعر المورد"], ["Production", "إنتاج"],
   ["Commission accrual", "استحقاق عمولة"], ["Commission reversal", "عكس عمولة"], ["Commission adjustment", "تسوية عمولة"],
   ["Commission payout", "صرف عمولة"], ["Reversal of supplier bill", "عكس فاتورة المورد"], ["Supplier bill", "فاتورة مورد"],
   ["Void of bank line", "إلغاء حركة بنكية"], ["Bank line", "حركة بنكية"], ["Transfer", "تحويل"], ["Supplier payment", "دفعة لمورد"],

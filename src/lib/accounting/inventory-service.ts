@@ -534,7 +534,7 @@ export async function saleIssueForInvoice(invoiceId: string): Promise<{ document
   if (!doc) {
     const skus = inv.lines.map((l) => l.productSkuId).filter(Boolean) as string[];
     const items = new Map((await prisma.invItem.findMany({ where: { productSkuId: { in: skus } } })).map((i) => [i.productSkuId!, i]));
-    const lines = inv.lines.filter((l) => l.productSkuId && items.has(l.productSkuId)).map((l) => ({ itemId: items.get(l.productSkuId!)!.id, quantity: dec(l.quantity).toFixed(4), unit: items.get(l.productSkuId!)!.baseUnit, description: `INV-${inv.invoiceNo} line ${l.lineNo}` }));
+    const lines = inv.lines.filter((l) => l.productSkuId && items.has(l.productSkuId)).map((l) => ({ itemId: items.get(l.productSkuId!)!.id, quantity: dec(l.quantity).toFixed(4), unit: items.get(l.productSkuId!)!.baseUnit, description: `INV-${inv.invoiceNo} #${l.lineNo}` }));
     if (!lines.length) return { documentId: null, posted: false, reason: "no invoice line names a stocked product" };
     const loc = await prisma.invLocation.findFirst({ where: { isSalesDefault: true, isActive: true } });
     if (!loc) return { documentId: null, posted: false, reason: "no sales location is set" };
@@ -571,7 +571,7 @@ export async function returnForReversedInvoice(invoiceId: string): Promise<{ doc
     try {
       doc = await ledgerTx(async (tx) => {
         const { header, lines } = await buildDoc(tx, { type: "CUSTOMER_RETURN", docDate: accountingDateOf(inv.reversedAt ?? new Date()).toISOString().slice(0, 10), locationId: sale.locationId, customerId: inv.customerId,
-          sourceType: "SALES_INVOICE_REVERSAL", sourceId: inv.id, description: `Invoice INV-${inv.invoiceNo} reversed`,
+          sourceType: "SALES_INVOICE_REVERSAL", sourceId: inv.id, description: `Reversal of invoice INV-${inv.invoiceNo}`,
           lines: await (async () => {
             // Only what is still out: the sale less customer returns already posted against it.
             const back = await tx.invDocLine.findMany({ where: { targetLineId: { in: sale.lines.map((l) => l.id) }, document: { type: "CUSTOMER_RETURN", status: "POSTED" } } });
@@ -579,6 +579,7 @@ export async function returnForReversedInvoice(invoiceId: string): Promise<{ doc
               .filter((l) => new Prisma.Decimal(l.quantity).gt(0));
           })() });
         const created = await tx.invDocument.create({ data: { ...header, createdBy: INV_SYSTEM, lines: { create: lines } } });
+        await auditAccounting(tx, { action: "inventory.customer_return.create", entityType: "inv_document", entityId: created.id, userId: INV_SYSTEM, refs: { invoiceId } });
         await tx.invDocument.update({ where: { id: created.id }, data: { status: "SUBMITTED", submittedBy: INV_SYSTEM, submittedAt: new Date() } });
         return tx.invDocument.update({ where: { id: created.id }, data: { status: "APPROVED", approvedBy: inv.reversedBy ?? "unknown", approvedAt: new Date() } });
       });
@@ -604,7 +605,7 @@ export async function productionDraftFromRoastingBatch(batchId: string, b: { loc
   if (!green || !roasted) throw new AccountingError("Link the green coffee and the roasted product to inventory items first.", 400);
   return createInvDoc({
     type: "PRODUCTION", docDate: b.docDate ?? batch.date.toISOString().slice(0, 10), locationId: b.locationId, lossBandId: b.lossBandId,
-    sourceType: "ROASTING_BATCH", sourceId: batch.id, description: `Roast ${batch.batchNumber}`,
+    sourceType: "ROASTING_BATCH", sourceId: batch.id, description: `Roasting batch ${batch.batchNumber} · ${batch.greenBeanQuantity} kg → ${batch.roastedBeanQuantity} kg`,
     lines: [
       { role: "INPUT", itemId: green.id, quantity: new Prisma.Decimal(batch.greenBeanQuantity).toDecimalPlaces(4).toFixed(4) },
       { role: "OUTPUT", itemId: roasted.id, quantity: new Prisma.Decimal(batch.roastedBeanQuantity).toDecimalPlaces(4).toFixed(4) },
@@ -620,7 +621,7 @@ export async function receiptDraftFromPurchase(purchaseId: string, b: { location
   if (!item) throw new AccountingError("Link the purchased item to an inventory item first.", 400);
   return createInvDoc({
     type: "RECEIPT", docDate: b.docDate ?? p.purchaseDate.toISOString().slice(0, 10), locationId: b.locationId, supplierId: p.supplierId,
-    sourceType: "PURCHASE_RECORD", sourceId: p.id, description: `Purchase ${p.id.slice(-6)}`,
+    sourceType: "PURCHASE_RECORD", sourceId: p.id, description: `Purchase record ${p.purchaseDate.toISOString().slice(0, 10)} · ${p.quantity} × ${p.costPerUnit}`,
     lines: [{ itemId: item.id, quantity: new Prisma.Decimal(p.quantity).toDecimalPlaces(4).toFixed(4), unitCost: new Prisma.Decimal(p.costPerUnit).toDecimalPlaces(4).toFixed(4) }],
   }, userId);
 }

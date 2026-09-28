@@ -73,6 +73,15 @@ async function main() {
     // Bank lines are append-only and, once posted, immutable (Finance and accounting triggers).
     // On this verified disposable database those guards are suspended for the fixture's own ACC-
     // lines only, inside one transaction, and re-enabled before it commits.
+    // Stage 4 cost subledger: accounting-owned tables whose guards are row triggers (TRUNCATE does
+    // not fire them); then the synthetic operational records the fixture created (ACC- tags).
+    await prisma.$executeRawUnsafe(`TRUNCATE "InvMove", "InvLayer", "InvDocLine", "InvDocument", "InvLossBand", "InvUnit", "InvItem", "InvLocation" RESTART IDENTITY CASCADE`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "RoastingBatch" WHERE "batchNumber" LIKE 'ACC-%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "PurchaseRecord" WHERE notes = 'fixture:accounting'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "ProductSKU" WHERE "skuCode" LIKE 'ACC-%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "CoffeeProduct" WHERE "productNameEn" LIKE '%(fixture)'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "GreenBean" WHERE "serialNumber" LIKE 'ACC-%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "MaterialItem" WHERE code LIKE 'ACC-%'`);
     const acc = `SELECT t.id FROM "BankTransaction" t JOIN "CashAccount" c ON c.id = t."cashAccountId" WHERE c.code LIKE 'ACC-%'`;
     // Stage 3 documents are accounting-owned tables (guarded like bills): cleared first, since
     // receipts reference the bank lines.
@@ -112,8 +121,8 @@ async function main() {
   }
   if (await prisma.account.count()) { console.log("Accounting fixture already present (use --reset)."); return; }
 
-  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign"];
-  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post"];
+  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign", "inv_doc_create", "inv_master_manage"];
+  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post", "inv_doc_approve", "inv_doc_post"];
   const prep = await user("acc.preparer", "سارة القحطاني", perms(PREP));
   const appr = await user("acc.approver", "خالد العتيبي", perms(APPR));
   await user("acc.approver.en", "Khalid Al-Otaibi (EN)", perms(APPR), "en");
@@ -366,6 +375,94 @@ async function main() {
   const open3 = await prisma.salesInvoice.findUniqueOrThrow({ where: { id: I3 } });
   const cn3 = await prisma.arAllocation.aggregate({ where: { invoiceId: I3, active: true }, _sum: { amount: true } });
   await assignReceipt(dep40, { customerId: K3, allocations: [{ invoiceId: I3, amount: new Prisma.Decimal(open3.totalGross).sub(cn3._sum.amount ?? 0).toFixed(2) }] }, prep);
+  await processPendingEvents();
+
+  // ─── Stage 4: inventory and manufacturing costing (synthetic; the chain worked by hand in
+  // tests/accounting/integration/inventory.test.ts, January–March, replayed
+  // in August–September because the fixture closes January–June and locks July) ───
+  // Decision D-1 is left UNDECIDED and the inventory.costing policy is prepared but not approved:
+  // on this verified disposable database the documents post provisionally (weighted average
+  // fallback, journals marked provisional), exactly as the product behaves before the accountant
+  // decides. The loss bands (18% / 1% / 5%) are SYNTHETIC TEST ASSUMPTIONS, not company policy.
+  await draftPolicy("inventory.costing", {}, prep);
+  const inv = await import("../../src/lib/accounting/inventory-service");
+  const provisionalBefore = process.env.ACCOUNTING_PROVISIONAL_POSTING;
+  if (!previewMode) process.env.ACCOUNTING_PROVISIONAL_POSTING = "isolated-test";
+  const gb = await prisma.greenBean.create({ data: { serialNumber: "ACC-ETH-YRG-0412", beanType: "Yirgacheffe", beanTypeAr: "يرغاتشيفي", country: "Ethiopia", countryAr: "إثيوبيا", quantityKg: 89.5 } });
+  const cp = await prisma.coffeeProduct.create({ data: { productNameEn: "Ethiopia Yirgacheffe (fixture)", productNameAr: "إثيوبي يرغاتشيفي", countryEn: "Ethiopia" } });
+  const sku = await prisma.productSKU.create({ data: { productId: cp.id, skuCode: "ACC-ETH-250", weightGrams: 250, price: 25 } });
+  const bagMat = await prisma.materialItem.create({ data: { code: "ACC-BAG-250G", name: "250 g bag", nameAr: "كيس 250 غ", quantityOnHand: 700 } });
+  const rst = await inv.createLocation({ code: "RST", name: "Roastery", nameAr: "المحمصة", isSalesDefault: true }, prep);
+  const cafeLoc = await inv.createLocation({ code: "CAFE", name: "Café", nameAr: "المقهى" }, prep);
+  const item = (code: string, nameAr: string, kind: string, baseUnit: string, extra: Record<string, unknown> = {}) => inv.createItem({ code, name: code, nameAr, kind, baseUnit, ...extra }, prep);
+  const IT = {
+    green: await item("GRN-ETH", "بن إثيوبي أخضر", "GREEN_COFFEE", "kg", { greenBeanId: gb.id }),
+    roasted: await item("RST-ETH", "بن إثيوبي محمص", "ROASTED_COFFEE", "kg", { coffeeProductId: cp.id }),
+    bag: await item("BAG-250", "كيس 250 غ", "PACKAGING", "piece", { units: [{ unit: "pack100", factor: "100" }], materialItemId: bagMat.id }),
+    label: await item("LBL-ETH", "ملصق", "PACKAGING", "piece"),
+    sku: await item("SKU-ETH-250", "إثيوبي 250 غ", "FINISHED_GOOD", "unit", { yieldPerUnit: "0.25", productSkuId: sku.id }),
+    milk: await item("MILK", "حليب طازج", "MILK", "l", { units: [{ unit: "carton12", factor: "12" }] }),
+    flour: await item("FLOUR", "دقيق", "BAKERY_INGREDIENT", "kg"),
+    butter: await item("BUTTER", "زبدة", "BAKERY_INGREDIENT", "kg"),
+    croissant: await item("CROISSANT", "كرواسون", "FINISHED_GOOD", "piece", { yieldPerUnit: "0.08" }),
+  };
+  const lband = async (code: string, nameAr: string, process: string, pct: string, approve = true) => {
+    const b = await inv.createLossBand({ code, name: `${code} (synthetic test band)`, nameAr, process, maxLossPercent: pct }, prep);
+    return approve ? (await inv.approveLossBand(b.id, appr)).id : b.id;
+  };
+  const LB = { roast: await lband("ROAST-SYN", "نطاق تحميص تجريبي للاختبار", "ROASTING", "18"), pack: await lband("PACK-SYN", "نطاق تعبئة تجريبي للاختبار", "PACKING", "1"), bake: await lband("BAKE-SYN", "نطاق خبز تجريبي للاختبار", "BAKING", "5") };
+  await lband("DARK-SYN", "نطاق تحميص داكن تجريبي", "ROASTING", "20", false);
+  const freight = await sup("شركة الشحن السريع", "300112233400003", 30);
+  const idoc = async (input: Parameters<typeof inv.createInvDoc>[0], until: "DRAFT" | "SUBMITTED" | "POSTED" = "POSTED") => {
+    const d = await inv.createInvDoc(input, prep);
+    if (until === "DRAFT") return { id: d.id, lineIds: [] as string[] };
+    await inv.submitInvDoc(d.id, prep);
+    if (until === "SUBMITTED") return { id: d.id, lineIds: [] as string[] };
+    await inv.approveInvDoc(d.id, appr);
+    const r = await inv.postInvDoc(d.id, appr);
+    return { id: d.id, lineIds: r.document.lines.map((l) => l.id) };
+  };
+  const ymd = (m: number, d: number) => D(m, d).toISOString().slice(0, 10);
+  const R1 = await idoc({ type: "RECEIPT", docDate: ymd(8, 10), locationId: rst.id, supplierId: S1, description: "بن أخضر وتغليف — محمصة الوادي", lines: [
+    { itemId: IT.green.id, quantity: "100", unitCost: "30" }, { itemId: IT.bag.id, quantity: "10", unit: "pack100", unitCost: "0.65" }, { itemId: IT.label.id, quantity: "1000", unitCost: "0.15" }] });
+  const R2 = await idoc({ type: "RECEIPT", docDate: ymd(8, 12), locationId: rst.id, supplierId: S1, description: "بن أخضر — الشحنة الثانية", lines: [{ itemId: IT.green.id, quantity: "50", unitCost: "36" }] });
+  await idoc({ type: "PRODUCTION", docDate: ymd(8, 20), locationId: rst.id, lossBandId: LB.roast, description: "تحميص إثيوبي — دفعة R-2026-014", lines: [{ role: "INPUT", itemId: IT.green.id, quantity: "60" }, { role: "OUTPUT", itemId: IT.roasted.id, quantity: "47" }] });
+  const sbill = async (supplierId: string, no: string, date: Date, d: string, q: string, p: string) => {
+    const b = await createBill({ supplierId, supplierInvoiceNo: no, billDate: date.toISOString().slice(0, 10), lines: [{ kind: "STOCK_RECEIPT", description: d, quantity: q, unitPrice: p, taxCategoryId: vat15.id }] }, prep);
+    await submitBill(b.id, prep); await approveBill(b.id, appr); await postBill(b.id, appr);
+    return (await prisma.supplierBillLine.findFirstOrThrow({ where: { billId: b.id } })).id;
+  };
+  const greenLine = await sbill(S1, "G-1", D(8, 22), "بن إثيوبي 100 كغ", "100", "31");
+  const freightLine = await sbill(freight, "F-1", D(8, 22), "شحن من الميناء", "1", "480");
+  await idoc({ type: "LANDED_COST", docDate: ymd(8, 25), locationId: rst.id, billLineId: freightLine, allocationBasis: "VALUE", description: "شحن من الميناء", lines: [{ itemId: IT.green.id, targetLineId: R1.lineIds[0] }, { itemId: IT.green.id, targetLineId: R2.lineIds[0] }] });
+  await idoc({ type: "BILL_MATCH", docDate: ymd(8, 28), locationId: rst.id, billLineId: greenLine, lines: [{ itemId: IT.green.id, targetLineId: R1.lineIds[0] }] });
+  await idoc({ type: "RECEIPT", docDate: ymd(9, 1), locationId: cafeLoc.id, supplierId: S3, description: "حليب ودقيق وزبدة للمقهى", lines: [
+    { itemId: IT.milk.id, quantity: "3", unit: "carton12", unitCost: "5.50" }, { itemId: IT.flour.id, quantity: "25", unitCost: "4" }, { itemId: IT.butter.id, quantity: "5", unitCost: "40" }] });
+  await idoc({ type: "PRODUCTION", docDate: ymd(9, 5), locationId: rst.id, lossBandId: LB.pack, description: "180 × 250 غ من 45.4 كغ محمص", lines: [
+    { role: "INPUT", itemId: IT.roasted.id, quantity: "45.4" }, { role: "INPUT", itemId: IT.bag.id, quantity: "180" }, { role: "INPUT", itemId: IT.label.id, quantity: "180" }, { role: "OUTPUT", itemId: IT.sku.id, quantity: "180" }] });
+  // The sale: posting the invoice issues its cost of sales (one system document per invoice).
+  const sale = await createSalesDoc({ customerId: K1, issueDate: ymd(9, 10), description: "توريد إثيوبي 250 غ", lines: [{ productSkuId: sku.id, description: "إثيوبي 250 غ", quantity: "100", unitPrice: "25", taxCategoryId: vat15.id }] }, prep);
+  await submitSalesDoc(sale.id, prep); await approveSalesDoc(sale.id, appr);
+  const saleId = sale.id;
+  await postSalesDoc(saleId, appr);
+  const saleIssue = await prisma.invDocument.findFirstOrThrow({ where: { type: "SALE_ISSUE", sourceId: saleId }, include: { lines: true } });
+  await idoc({ type: "CUSTOMER_RETURN", docDate: ymd(9, 12), locationId: rst.id, customerId: K1, description: "5 وحدات بتكلفة خروجها", lines: [{ itemId: IT.sku.id, quantity: "5", targetLineId: saleIssue.lines[0].id }] });
+  await idoc({ type: "TRANSFER", docDate: ymd(9, 15), locationId: rst.id, toLocationId: cafeLoc.id, description: "بالتكلفة نفسها — بلا قيد", lines: [{ itemId: IT.sku.id, quantity: "10" }] });
+  await idoc({ type: "ISSUE", issueReason: "INTERNAL_USE", docDate: ymd(9, 16), locationId: cafeLoc.id, description: "حليب للمشروبات", lines: [{ itemId: IT.milk.id, quantity: "30" }] });
+  await idoc({ type: "ISSUE", issueReason: "SPOILAGE", docDate: ymd(9, 17), locationId: cafeLoc.id, description: "حليب منتهي الصلاحية", lines: [{ itemId: IT.milk.id, quantity: "2" }] });
+  await idoc({ type: "PRODUCTION", docDate: ymd(9, 18), locationId: cafeLoc.id, lossBandId: LB.bake, description: "60 كرواسون — نطاق الخبز 5% (تجريبي)", lines: [
+    { role: "INPUT", itemId: IT.flour.id, quantity: "4" }, { role: "INPUT", itemId: IT.butter.id, quantity: "1" }, { role: "INPUT", itemId: IT.milk.id, quantity: "1" }, { role: "OUTPUT", itemId: IT.croissant.id, quantity: "60" }] });
+  await idoc({ type: "COUNT", docDate: ymd(9, 20), locationId: rst.id, reason: "جرد نهاية الربع", description: "جرد نهاية الربع — بن أخضر 89.5 كغ", lines: [{ itemId: IT.green.id, countedQty: "89.5" }] });
+  await idoc({ type: "SUPPLIER_RETURN", docDate: ymd(9, 22), locationId: rst.id, supplierId: S1, reason: "أكياس معيبة", description: "100 كيس معيب — محمصة الوادي", lines: [{ itemId: IT.bag.id, quantity: "100", targetLineId: R1.lineIds[1] }] });
+  await idoc({ type: "ISSUE", issueReason: "CALIBRATION", docDate: ymd(9, 23), locationId: rst.id, description: "بن محمص 1 كغ لمعايرة المحمصة", lines: [{ itemId: IT.roasted.id, quantity: "1" }] });
+  // Operational records waiting to become documents: a roasting batch (draft, submitted) and a purchase (draft).
+  const rb = await prisma.roastingBatch.create({ data: { batchNumber: "ACC-R-2026-118", greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 12, roastedBeanQuantity: 10.2, wasteQuantity: 0, date: D(9, 27) } });
+  const pd = await inv.productionDraftFromRoastingBatch(rb.id, { locationId: rst.id, lossBandId: LB.roast, docDate: ymd(9, 27) }, prep);
+  await inv.submitInvDoc(pd.id, prep);
+  const pr = await prisma.purchaseRecord.create({ data: { supplierId: S1, type: "GREEN_BEAN", itemId: gb.id, quantity: 60, costPerUnit: 31.5, totalCost: 1890, purchaseDate: D(9, 27), notes: "fixture:accounting" } });
+  await inv.receiptDraftFromPurchase(pr.id, { locationId: rst.id, docDate: ymd(9, 27) }, prep);
+  await prisma.roastingBatch.create({ data: { batchNumber: "ACC-R-2026-121", greenBeanId: gb.id, productId: cp.id, greenBeanQuantity: 15, roastedBeanQuantity: 12.6, wasteQuantity: 0, date: D(9, 28) } });
+  if (provisionalBefore === undefined) delete process.env.ACCOUNTING_PROVISIONAL_POSTING; else process.env.ACCOUNTING_PROVISIONAL_POSTING = provisionalBefore;
   await processPendingEvents();
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);
 }

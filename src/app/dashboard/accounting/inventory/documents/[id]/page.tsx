@@ -7,8 +7,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { api, ApiError, Badge, Button, Card, CardTitle, ErrorState, Field, INPUT, LoadingState, Notice, Table, Td, Th, useApi, useL } from "../../../../finance/_components/ui";
-import { EVENT_STATUS, useAmount, useCan, useDay, useExplain } from "../../../_components/kit";
-import { DocTypeLabel, InvStatus, qty } from "../../_ui";
+import { EVENT_STATUS, useAmount, useAutoText, useCan, useDay, useExplain } from "../../../_components/kit";
+import { AUDIT_ACTION, DocTypeLabel, InvStatus, qty } from "../../_ui";
 
 type Loc = { code: string; name: string; nameAr: string | null } | null;
 type Doc = {
@@ -38,6 +38,7 @@ export default function InventoryDocumentPage() {
   const amt = useAmount();
   const day = useDay();
   const explain = useExplain();
+  const auto = useAutoText();
   const { can, user } = useCan();
   const { data: d, error, reload } = useApi<Doc>(`/api/accounting/inventory/documents/${id}`);
   const [reason, setReason] = useState("");
@@ -122,7 +123,7 @@ export default function InventoryDocumentPage() {
         <Card>
           <CardTitle title={<><DocTypeLabel type={d.type} reason={d.issueReason} />{` #${d.docNo} · ${day(d.docDate)}`}</>} sub={sub}
             right={<InvStatus status={d.status} rejected={!!d.rejectedReason} ledger={d.ledger} provisional={d.provisional} />} />
-          {d.description && <p className="text-[13px] text-charcoal">{d.description}</p>}
+          {d.description && <p className="text-[13px] text-charcoal">{auto(d.description)}</p>}
           {p && posted && (
             <div className="flex gap-6 flex-wrap">
               {[[L("قيمة المدخلات", "Input value"), amt(p.inputValue)], [L("قيمة المخرجات", "Output value"), amt(p.outputValue)],
@@ -204,7 +205,7 @@ export default function InventoryDocumentPage() {
           <CardTitle title={L("سجل التدقيق", "Audit trail")} sub={L("لا يمكن تعديله أو حذفه", "Cannot be edited or deleted")} />
           <Table>
             <thead><tr><Th>{L("الوقت", "Time")}</Th><Th>{L("الإجراء", "Action")}</Th><Th>{L("المستخدم", "User")}</Th><Th>{L("السبب", "Reason")}</Th></tr></thead>
-            <tbody>{d.audit.map((a, i) => <tr key={i}><Td className="whitespace-nowrap">{when(a.at)}</Td><Td>{a.action.replace(/^inventory\./, "")}</Td><Td>{a.by ?? "—"}</Td><Td>{a.reason ?? "—"}</Td></tr>)}</tbody>
+            <tbody>{d.audit.map((a, i) => <tr key={i}><Td className="whitespace-nowrap">{when(a.at)}</Td><Td>{AUDIT_ACTION[a.action] ? L(AUDIT_ACTION[a.action][0], AUDIT_ACTION[a.action][1]) : a.action}</Td><Td>{a.by ?? "—"}</Td><Td>{a.reason ?? "—"}</Td></tr>)}</tbody>
           </Table>
         </Card>
       </div>

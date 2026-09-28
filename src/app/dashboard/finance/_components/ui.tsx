@@ -152,7 +152,7 @@ export function Field({ label, error, children, hint }: { label?: string; error?
 
 export function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { value: T; label: string }[] }) {
   return (
-    <div className="inline-flex p-[3px] gap-0.5 rounded-[10px] bg-cream-dark">
+    <div className="inline-flex flex-wrap max-w-full p-[3px] gap-0.5 rounded-[10px] bg-cream-dark">
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)}
           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${value === o.value ? "bg-white text-charcoal shadow-sm" : "text-gray-600 hover:text-charcoal"}`}>

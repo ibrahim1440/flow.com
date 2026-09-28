@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Plus } from "lucide-react";
 import { api, ApiError, Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Segmented, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
-import { Pager, useAmount, useCan, useDay } from "../../_components/kit";
+import { Pager, useAmount, useAutoText, useCan, useDay } from "../../_components/kit";
 import { DocTypeLabel, InvStatus, qty } from "../_ui";
 
 type Row = { id: string; docNo: number; type: string; status: string; docDate: string; issueReason: string | null; description: string | null; rejectedReason: string | null; provisional: boolean;
@@ -21,6 +21,7 @@ export default function InventoryDocumentsPage() {
   const { L } = useL();
   const day = useDay();
   const amt = useAmount();
+  const auto = useAutoText();
   const { can } = useCan();
   const sp = useSearchParams();
   const [type, setTypeRaw] = useState<TypeSeg>("ALL");
@@ -66,7 +67,7 @@ export default function InventoryDocumentsPage() {
                     <Td><DocTypeLabel type={r.type} reason={r.issueReason} /></Td>
                     <Td className="whitespace-nowrap">{day(r.docDate)}</Td>
                     <Td>{r.location}{r.toLocation ? ` → ${r.toLocation}` : ""}</Td>
-                    <Td>{r.description ? `${r.description} · ` : ""}{summary(r)}</Td>
+                    <Td>{r.description ? `${auto(r.description)} · ` : ""}{summary(r)}</Td>
                     <Td num>{r.value === null ? "—" : amt(r.value)}</Td>
                     <Td><span title={r.rejectedReason ?? r.ledger?.reason ?? undefined}><InvStatus status={r.status} rejected={!!r.rejectedReason} ledger={r.ledger} provisional={r.provisional} /></span></Td>
                   </tr>
@@ -87,6 +88,7 @@ function MobileApprovals({ rows, onDone, summary }: { rows: Row[]; onDone: () =>
   const { L } = useL();
   const day = useDay();
   const amt = useAmount();
+  const auto = useAutoText();
   const { can } = useCan();
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [reason, setReason] = useState("");
@@ -112,7 +114,7 @@ function MobileApprovals({ rows, onDone, summary }: { rows: Row[]; onDone: () =>
           <p className="font-bold text-charcoal"><DocTypeLabel type={r.type} reason={r.issueReason} /> · {r.location}</p>
           <p className="text-[15px] font-extrabold text-charcoal">{summary(r)}</p>
           {r.value && <p className="text-2xl font-extrabold text-charcoal tabular-nums">{amt(r.value)} {L("ر.س", "SAR")}</p>}
-          <p className="text-xs text-brown">{day(r.docDate)}{r.description ? ` · ${r.description}` : ""}</p>
+          <p className="text-xs text-brown">{day(r.docDate)}{r.description ? ` · ${auto(r.description)}` : ""}</p>
           {can("inv_doc_approve") && (rejecting === r.id ? (
             <div className="flex flex-col gap-2">
               <Field label={L("سبب الرفض", "Reason")} hint={L("5 أحرف على الأقل", "At least 5 characters")}><input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>

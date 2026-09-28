@@ -60,7 +60,9 @@ export default function InventorySetupPage() {
           </Field>
           {can("settings_manage") && <Button busy={busy === "settings"} disabled={method === undefined && diff === undefined} onClick={() => run("settings", () => api("/api/accounting/inventory/settings", { method: "PATCH", json: { ...(method !== undefined ? { inventoryCostMethod: method || null } : {}), ...(diff !== undefined ? { inventoryPriceDifference: diff || null } : {}) } }), L("حُفظت الإعدادات.", "Settings saved."))}>{L("حفظ", "Save")}</Button>}
         </div>
-        <Notice tone="info">{m.settings.locked ? L("رُحّلت مستندات مخزون: طريقة التكلفة لا تتغيّر بعد الآن.", "Inventory documents have posted: the costing method can no longer change.") : L("لا يتغيّر أي منهما بعد ترحيل أول مستند مخزون. القيم المستخدمة في الاختبارات والشاشات التجريبية افتراضات اختبار وليست سياسة معتمدة.", "Neither changes after the first inventory document posts. Values used in tests and synthetic screens are test assumptions, not an approved policy.")}</Notice>
+        <Notice tone="info">{m.settings.locked ? (m.settings.costMethod
+          ? L("رُحّلت مستندات مخزون: طريقة التكلفة لا تتغيّر بعد الآن.", "Inventory documents have posted: the costing method can no longer change.")
+          : L("القرار لم يُحسم، ومع ذلك رُحّلت مستندات مؤقتاً في قاعدة الاختبار المعزولة بالمتوسط المرجح كقيمة احتياطية؛ لذلك لا يُضبط هنا. في قاعدة حقيقية لا يُرحّل شيء قبل الحسم.", "Undecided, yet documents posted provisionally in this isolated test database with the weighted-average fallback, so it cannot be set here. In a real database nothing posts before the decision.")) : L("لا يتغيّر أي منهما بعد ترحيل أول مستند مخزون. القيم المستخدمة في الاختبارات والشاشات التجريبية افتراضات اختبار وليست سياسة معتمدة.", "Neither changes after the first inventory document posts. Values used in tests and synthetic screens are test assumptions, not an approved policy.")}</Notice>
       </Card>
 
       <Card>

@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
 import { Button, Card, CardTitle, EmptyState, ErrorState, Field, INPUT, LoadingState, Table, Td, Th, useApi, useL } from "../../../finance/_components/ui";
-import { riyadhToday, useAmount, useDay } from "../../_components/kit";
+import { riyadhToday, useAmount, useAutoText, useDay } from "../../_components/kit";
 import { DocTypeLabel, KIND, qty } from "../_ui";
 
 type Masters = { items: { id: string; code: string; name: string; kind: string; baseUnit: string }[]; locations: { id: string; code: string; name: string; nameAr: string | null }[] };
@@ -21,6 +21,7 @@ export default function StockCardPage() {
   const { L } = useL();
   const amt = useAmount();
   const day = useDay();
+  const auto = useAutoText();
   const sp = useSearchParams();
   const to0 = sp.get("to") ?? riyadhToday();
   const [itemId, setItemId] = useState(sp.get("itemId") ?? "");
@@ -74,7 +75,7 @@ export default function StockCardPage() {
                 <Td className="whitespace-nowrap">{day(r.date)}</Td>
                 <Td><Link className="font-bold text-orange hover:underline tabular-nums" href={`/dashboard/accounting/inventory/documents/${r.docId}`}>#{r.docNo}</Link></Td>
                 <Td><DocTypeLabel type={r.type} reason={r.issueReason} /></Td>
-                <Td>{r.text ?? "—"}{locationId ? "" : <span className="text-[11px] text-brown"> · {r.location}</span>}</Td>
+                <Td>{r.text ? auto(r.text) : "—"}{locationId ? "" : <span className="text-[11px] text-brown"> · {r.location}</span>}</Td>
                 <Td num className={neg(r.qty) ? "text-red-700" : ""}>{paren(r.qty, qty)}</Td>
                 <Td num className={neg(r.value) ? "text-red-700" : ""}>{paren(r.value, amt)}</Td>
                 <Td num>{qty(r.unitCost)}</Td><Td num>{qty(r.balanceQty)}</Td><Td num>{amt(r.balanceValue)}</Td>

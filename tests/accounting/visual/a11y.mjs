@@ -16,6 +16,14 @@ const firstJournal = async (p) => {
   const id = await p.evaluate(async () => (await (await fetch(`/api/accounting/journals?status=SUBMITTED&sort=oldest`)).json()).rows.find((r) => r.type === "MANUAL")?.id);
   await p.goto(`${BASE}/dashboard/accounting/journals/${id}`);
 };
+const invDoc = (type, status = "POSTED") => async (p) => {
+  const id = await p.evaluate(async ([t, s]) => (await (await fetch(`/api/accounting/inventory/documents?status=${s}&type=${t}`)).json()).rows.at(-1)?.id, [type, status]);
+  await p.goto(`${BASE}/dashboard/accounting/inventory/documents/${id}`);
+};
+const stockCard = async (p) => {
+  const m = await p.evaluate(async () => { const r = await (await fetch("/api/accounting/inventory/items")).json(); return { item: r.items.find((i) => i.code === "SKU-ETH-250").id, loc: r.locations.find((l) => l.code === "RST").id }; });
+  await p.goto(`${BASE}/dashboard/accounting/inventory/stock-card?itemId=${m.item}&locationId=${m.loc}`);
+};
 const firstSale = (status, path = "") => async (p) => {
   const id = await p.evaluate(async (s) => (await (await fetch(`/api/accounting/receivables/invoices?status=${s}&kind=INVOICE`)).json()).rows.at(-1)?.id, status);
   await p.goto(path ? `${BASE}/dashboard/accounting/receivables/new?creditFor=${id}` : `${BASE}/dashboard/accounting/receivables/${id}`);
@@ -59,6 +67,14 @@ const PAGES = [
   ["ACC-34 receivables aging", "/dashboard/accounting/receivables/aging"],
   ["ACC-35 credit note", "/dashboard/accounting/receivables", "acc.preparer", firstSale("POSTED", "credit")],
   ["ACC-36 mobile sales invoices", "/dashboard/accounting/receivables?status=PENDING", undefined, undefined, 390],
+  ["ACC-40 inventory valuation", "/dashboard/accounting/inventory"],
+  ["ACC-41 inventory documents", "/dashboard/accounting/inventory/documents"],
+  ["ACC-42 inventory document editor", "/dashboard/accounting/inventory/documents/new?type=RECEIPT", "acc.preparer"],
+  ["ACC-43 inventory document detail", "/dashboard/accounting/inventory", undefined, invDoc("PRODUCTION")],
+  ["ACC-44 stock card", "/dashboard/accounting/inventory", undefined, stockCard],
+  ["ACC-45 GRNI and matching", "/dashboard/accounting/inventory/grni", "acc.preparer"],
+  ["ACC-46 inventory setup", "/dashboard/accounting/inventory/setup"],
+  ["ACC-47 mobile inventory approvals", "/dashboard/accounting/inventory/documents?status=PENDING", undefined, undefined, 390],
   ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 

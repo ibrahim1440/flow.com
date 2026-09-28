@@ -37,4 +37,10 @@ export function InvStatus({ status, rejected, ledger, provisional }: { status: s
   return <Badge tone="ok">{provisional ? L("مرحّل مؤقتاً (اختبار)", "Posted provisionally (test)") : L("مرحّل", "Posted")}</Badge>;
 }
 
-export const qty = (s: string | null | undefined) => (s == null ? "—" : Number(s).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
+/** Quantity to 4 places; a left-to-right mark keeps a minus sign on the left inside RTL text. */
+export const qty = (s: string | null | undefined) => (s == null ? "—" : `\u200E${Number(s).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`);
+
+export const AUDIT_ACTION: Record<string, [string, string]> = {
+  "inventory.document.create": ["إنشاء", "Create"], "inventory.document.update": ["تعديل", "Edit"], "inventory.document.submit": ["تقديم", "Submit"], "inventory.document.approve": ["اعتماد", "Approve"],
+  "inventory.document.reject": ["رفض", "Reject"], "inventory.document.post": ["ترحيل", "Post"], "inventory.sale_issue.create": ["إنشاء آلي من الفاتورة", "Created from the invoice"], "inventory.customer_return.create": ["إنشاء آلي من عكس الفاتورة", "Created from the invoice reversal"],
+};

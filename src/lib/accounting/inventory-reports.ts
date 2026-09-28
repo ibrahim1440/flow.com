@@ -22,7 +22,7 @@ export async function inventoryValuation(asOf: Date, locationId?: string | null)
   const locations = new Map((await prisma.invLocation.findMany()).map((l) => [l.id, l]));
   const lines = rows.map((r) => {
     const it = items.get(r.itemId)!; const q = dec(r.qty), v = dec(r.value);
-    return { itemId: r.itemId, code: it.code, name: it.nameAr ?? it.name, kind: it.kind, baseUnit: it.baseUnit, locationId: r.locationId, location: locations.get(r.locationId)?.code ?? "",
+    return { itemId: r.itemId, code: it.code, name: it.nameAr ?? it.name, kind: it.kind, baseUnit: it.baseUnit, locationId: r.locationId, location: locations.get(r.locationId)?.nameAr ?? locations.get(r.locationId)?.name ?? "",
       qty: q.toFixed(4), value: v.toFixed(2), unitCost: q.isZero() ? null : v.div(q).toFixed(4) };
   }).filter((l) => !(dec(l.qty).isZero() && dec(l.value).isZero())).sort((a, b) => a.kind.localeCompare(b.kind) || a.code.localeCompare(b.code) || a.location.localeCompare(b.location));
 
@@ -57,10 +57,18 @@ export async function stockCard(itemId: string, from: Date, to: Date, locationId
   const locations = new Map((await prisma.invLocation.findMany()).map((l) => [l.id, l.code]));
   let q = dec(before._sum.qty), v = dec(before._sum.value);
   const opening = { qty: q.toFixed(4), value: v.toFixed(2) };
-  const rows = moves.map((m) => {
-    q = q.add(m.qty); v = v.add(m.value);
+  // One row per document line and direction: a weighted-average or FIFO issue drawn from several
+  // cost layers writes one move per layer, shown here as a single row.
+  const groups: { m: (typeof moves)[number]; qty: Prisma.Decimal; value: Prisma.Decimal }[] = [];
+  for (const m of moves) {
+    const last = groups.at(-1);
+    if (last && last.m.documentId === m.documentId && last.m.lineId === m.lineId && last.m.kind === m.kind && last.m.locationId === m.locationId) { last.qty = last.qty.add(m.qty); last.value = last.value.add(m.value); }
+    else groups.push({ m, qty: dec(m.qty), value: dec(m.value) });
+  }
+  const rows = groups.map(({ m, qty, value }) => {
+    q = q.add(qty); v = v.add(value);
     return { date: m.date, docId: m.document.id, docNo: m.document.docNo, type: m.document.type, issueReason: m.document.issueReason, text: m.document.description, location: locations.get(m.locationId) ?? "",
-      kind: m.kind, qty: dec(m.qty).toFixed(4), value: dec(m.value).toFixed(2), unitCost: dec(m.qty).isZero() ? null : dec(m.value).div(m.qty).abs().toFixed(4), balanceQty: q.toFixed(4), balanceValue: v.toFixed(2) };
+      kind: m.kind, qty: qty.toFixed(4), value: value.toFixed(2), unitCost: qty.isZero() ? null : value.div(qty).abs().toFixed(4), balanceQty: q.toFixed(4), balanceValue: v.toFixed(2) };
   });
   return { item: { id: item.id, code: item.code, name: item.nameAr ?? item.name, kind: item.kind, baseUnit: item.baseUnit, units: item.units.map((u) => ({ unit: u.unit, factor: dec(u.factor).toString() })) }, from, to, opening, rows, closing: { qty: q.toFixed(4), value: v.toFixed(2) } };
 }

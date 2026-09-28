@@ -30,6 +30,29 @@ const firstBill = (status) => async (p) => {
   await p.goto(`${BASE}/dashboard/accounting/payables/${id}`);
 };
 
+const invDoc = (type, status = "POSTED") => async (p) => {
+  const id = await p.evaluate(async ([t, s]) => (await (await fetch(`/api/accounting/inventory/documents?status=${s}&type=${t}`)).json()).rows.at(-1)?.id, [type, status]);
+  await p.goto(`${BASE}/dashboard/accounting/inventory/documents/${id}`);
+};
+const stockCard = async (p) => {
+  const m = await p.evaluate(async () => { const r = await (await fetch("/api/accounting/inventory/items")).json(); return { item: r.items.find((i) => i.code === "SKU-ETH-250").id, loc: r.locations.find((l) => l.code === "RST").id }; });
+  await p.goto(`${BASE}/dashboard/accounting/inventory/stock-card?itemId=${m.item}&locationId=${m.loc}`);
+};
+
+const fillReceipt = async (p) => {
+  const pick = async (loc, text) => { const o = loc.locator("option", { hasText: text }).first(); await o.waitFor({ state: "attached" }); await loc.selectOption(await o.getAttribute("value")); };
+  await pick(p.getByLabel(/^المورد/), "محمصة الوادي");
+  await pick(p.getByLabel(/^الموقع/), "المحمصة");
+  for (let i = 0; i < 2; i++) await p.getByRole("button", { name: "+ بند" }).click();
+  const rows = [["GRN-ETH", "100", null, "30"], ["BAG-250", "10", "pack100", "0.65"], ["LBL-ETH", "1000", null, "0.15"]];
+  for (const [i, [item, q, unit, cost]] of rows.entries()) {
+    await pick(p.getByLabel(`صنف البند ${i + 1}`), item);
+    await p.getByLabel(`كمية البند ${i + 1}`).fill(q);
+    if (unit) await pick(p.getByLabel(`وحدة البند ${i + 1}`), unit);
+    await p.getByLabel(`تكلفة البند ${i + 1}`).fill(cost);
+  }
+};
+
 const SHOTS = [
   { id: "ACC-01", route: "/dashboard/accounting" },
   { id: "ACC-02", route: "/dashboard/accounting/journals" },
@@ -80,6 +103,16 @@ const SHOTS = [
   { id: "ACC-34", route: "/dashboard/accounting/receivables/aging" },
   { id: "ACC-35", route: "/dashboard/accounting/receivables", user: "acc.preparer", act: firstSale("POSTED", "credit") },
   { id: "ACC-36", route: "/dashboard/accounting/receivables?status=PENDING", w: 390 },
+  { id: "ACC-40", route: "/dashboard/accounting/inventory" },
+  { id: "ACC-40-en", route: "/dashboard/accounting/inventory", user: "acc.approver.en" },
+  { id: "ACC-41", route: "/dashboard/accounting/inventory/documents" },
+  { id: "ACC-42", route: "/dashboard/accounting/inventory/documents/new?type=RECEIPT", user: "acc.preparer", act: fillReceipt },
+  { id: "ACC-43", route: "/dashboard/accounting/inventory", act: invDoc("PRODUCTION") },
+  { id: "ACC-43-submitted", route: "/dashboard/accounting/inventory", act: invDoc("PRODUCTION", "PENDING") },
+  { id: "ACC-44", route: "/dashboard/accounting/inventory", act: stockCard },
+  { id: "ACC-45", route: "/dashboard/accounting/inventory/grni", user: "acc.preparer" },
+  { id: "ACC-46", route: "/dashboard/accounting/inventory/setup" },
+  { id: "ACC-47", route: "/dashboard/accounting/inventory/documents?status=PENDING", w: 390 },
   { id: "ACC-27-en", route: "/dashboard/accounting/reports", user: "acc.approver.en", act: async (p) => { await p.getByRole("button", { name: "Cash flow" }).click(); } },
 ];
 
