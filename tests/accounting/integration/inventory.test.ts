@@ -36,7 +36,7 @@ import { applyChartTemplate, updateSettings } from "../../../src/lib/accounting/
 import { createFiscalYear } from "../../../src/lib/accounting/fiscal-period-service";
 import { draftPolicy, approvePolicy } from "../../../src/lib/accounting/policy-service";
 import { processPendingEvents } from "../../../src/lib/accounting/event-processor";
-import { createBill, submitBill, approveBill, postBill } from "../../../src/lib/accounting/payables-service";
+import { createBill, submitBill, approveBill, postBill, reverseBill } from "../../../src/lib/accounting/payables-service";
 import { createSalesDoc, submitSalesDoc, approveSalesDoc, postSalesDoc, reverseSalesDoc } from "../../../src/lib/accounting/receivables-service";
 import { createItem, createLocation, createLossBand, approveLossBand, updateInventorySettings, createInvDoc, submitInvDoc, approveInvDoc, postInvDoc, saleIssueForInvoice, productionDraftFromRoastingBatch, receiptDraftFromPurchase, type InvDocInput } from "../../../src/lib/accounting/inventory-service";
 import { inventoryValuation, grossMargin, grniStatus, stockCard } from "../../../src/lib/accounting/inventory-reports";
@@ -199,11 +199,37 @@ describe("stage 4 — purchasing to production to sale", () => {
     const rev = await reverseSalesDoc(s1.id, w.appr, "الفاتورة صدرت بالخطأ");
     assert.equal(rev.cogs?.posted, true, rev.cogs?.reason);
     assert.deepEqual(await journal(rev.cogs!.documentId!), ["1174:1011.07:0.00", "5100:0.00:1011.07"]);
+    const febAgain = await grossMargin(accountingDate(D("02-01")), accountingDate(D("02-28")));
+    assert.deepEqual([febAgain.totals.revenue, febAgain.totals.cogs, febAgain.totals.margin], ["2500.00", "1011.07", "1488.93"], "February's margin is unchanged by the later reversal");
     const marAgain = await inventoryValuation(accountingDate(D("03-31")));
     assert.deepEqual(marAgain.lines, mar.lines, "March is unchanged by the later reversal");
     const today = await inventoryValuation(todayAccountingDate());
     assert.equal(today.reconciled, true);
     assert.equal(inv(w, today, "SKU-ETH-250"), (dec("798.21").add("1011.07").add("106.43")).toFixed(2), "roastery 798.21 + returned 1,011.07 + café 106.43");
+  });
+});
+
+describe("stage 4 — historical GRNI", () => {
+  test("a bill reversed later still explains GRNI at earlier dates; the explanation agrees with the ledger at every cutoff", async () => {
+    const w = await world();
+    await w.doc({ type: "RECEIPT", docDate: D("01-10"), locationId: w.rst, supplierId: w.S.green, lines: [{ itemId: w.I.green.id, quantity: "100", unitCost: "30" }] });
+    const b = await createBill({ supplierId: w.S.dairy, supplierInvoiceNo: "D-9", billDate: D("01-20"), lines: [{ kind: "STOCK_RECEIPT", description: "حليب لم يُستلم بعد", quantity: "1", unitPrice: "200", taxCategoryId: w.vat }] }, w.prep);
+    await submitBill(b.id, w.prep); await approveBill(b.id, w.appr); await postBill(b.id, w.appr);
+    await processPendingEvents();
+    const explain = async (asOf: string) => {
+      const g = await grniStatus(accountingDate(asOf));
+      const explained = dec(g.receiptsTotal).sub(g.billsTotal).add(g.landedTotal).sub(g.returnsTotal);
+      assert.equal(explained.neg().toFixed(2), await gl(w, "2120", asOf), `explanation = ledger at ${asOf}`);
+      assert.equal(g.ledger, explained.toFixed(2));
+      return [g.receiptsTotal, g.billsTotal, g.ledger];
+    };
+    assert.deepEqual(await explain(D("01-31")), ["3000.00", "200.00", "2800.00"]);
+    // Later (today) the bill is reversed.
+    await reverseBill(b.id, w.appr, "أُصدرت الفاتورة بالخطأ");
+    await processPendingEvents();
+    assert.deepEqual(await explain(D("01-31")), ["3000.00", "200.00", "2800.00"], "January is unchanged by the later reversal");
+    const today = todayAccountingDate().toISOString().slice(0, 10);
+    assert.deepEqual(await explain(today), ["3000.00", "0.00", "3000.00"]);
   });
 });
 

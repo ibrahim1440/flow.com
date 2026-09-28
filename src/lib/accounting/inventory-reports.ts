@@ -7,7 +7,7 @@ import { prisma } from "@/lib/db";
 import { AccountingError } from "./errors";
 import { ZERO, dec } from "./money";
 import { KIND_ROLE } from "./inventory-rules";
-import { accountsBalance } from "./open-items";
+import { accountsBalance, postingDates } from "./open-items";
 
 async function roleAccounts(roles: string[]) {
   return new Map((await prisma.accountMapping.findMany({ where: { role: { in: roles } }, include: { account: { select: { id: true, code: true, nameAr: true, nameEn: true } } } })).map((m) => [m.role, m.account]));
@@ -79,12 +79,14 @@ export async function grossMargin(from: Date, to: Date) {
     byInv.set(invId, (byInv.get(invId) ?? ZERO).sub(dec(m.value)));
   }
   const invoices = new Map((await prisma.salesInvoice.findMany({ where: { id: { in: [...byInv.keys()] } }, include: { customer: { select: { name: true, nameAr: true } } } })).map((i) => [i.id, i]));
+  const posting = await postingDates(["ar.invoice.posted", "ar.invoice.reversed"], [...byInv.keys()]);
   const rows = [...byInv.entries()].map(([id, cogs]) => {
     const i = invoices.get(id)!;
-    // Revenue counts in the period of the invoice date; a reversal in the period takes it back.
-    const inPeriod = i.issueDate >= from && i.issueDate <= to;
-    const reversedInPeriod = i.status === "REVERSED" && i.reversedAt && i.reversedAt >= from && i.reversedAt <= new Date(to.getTime() + 86_400_000);
-    const revenue = (inPeriod ? dec(i.totalNet) : ZERO).sub(reversedInPeriod ? dec(i.totalNet) : ZERO);
+    // Revenue counts in the period of the invoice's posted journal; the reversal journal, if dated
+    // in the period, takes it back (the ledger dates, not the invoice's current status).
+    const dates = posting.get(id);
+    const within = (d: Date | undefined) => !!d && d >= from && d <= to;
+    const revenue = (within(dates?.get("ar.invoice.posted")) ? dec(i.totalNet) : ZERO).sub(within(dates?.get("ar.invoice.reversed")) ? dec(i.totalNet) : ZERO);
     return { invoiceId: id, invoiceNo: i.invoiceNo, customer: i.customer.nameAr ?? i.customer.name, date: i.issueDate, status: i.status, revenue: revenue.toFixed(2), cogs: cogs.toFixed(2), margin: revenue.sub(cogs).toFixed(2),
       marginPercent: revenue.isZero() ? null : revenue.sub(cogs).div(revenue).mul(100).toFixed(1) };
   }).sort((a, b) => a.invoiceNo - b.invoiceNo);
@@ -101,7 +103,10 @@ export async function grniStatus(asOf: Date) {
   const matchedBill = new Set([...matches.map((m) => m.document.billLineId), ...landed.map((l) => l.billLineId)].filter(Boolean));
   const landedAwaitingBill = landed.filter((l) => !l.billLineId).map((l) => ({ docId: l.id, docNo: l.docNo, date: l.docDate, description: l.description, amount: dec(l.amount).toFixed(2) }));
   const receiptValue = new Map((await prisma.invMove.findMany({ where: { kind: "IN", lineId: { in: receipts.map((r) => r.id) } } })).map((m) => [m.lineId!, dec(m.value)]));
-  const billLines = await prisma.supplierBillLine.findMany({ where: { kind: "STOCK_RECEIPT", bill: { status: "POSTED", billDate: { lte: asOf } } }, include: { bill: { select: { billNo: true, billDate: true, supplier: { select: { name: true } } } } } });
+  // Bills open on `asOf`: their posted journal is dated on or before it and any reversal journal after it.
+  const candidates = await prisma.supplierBillLine.findMany({ where: { kind: "STOCK_RECEIPT", bill: { status: { in: ["POSTED", "REVERSED"] } } }, include: { bill: { select: { id: true, billNo: true, billDate: true, supplier: { select: { name: true } } } } } });
+  const billDates = await postingDates(["ap.bill.posted", "ap.bill.reversed"], [...new Set(candidates.map((c) => c.bill.id))]);
+  const billLines = candidates.filter((c) => { const d = billDates.get(c.bill.id); const p = d?.get("ap.bill.posted"), r = d?.get("ap.bill.reversed"); return !!p && p <= asOf && !(r && r <= asOf); });
   const suppliers = new Map((await prisma.supplier.findMany()).map((s) => [s.id, s.name]));
   const openReceipts = receipts.filter((r) => !matchedReceipt.has(r.id)).map((r) => ({ lineId: r.id, docNo: r.document.docNo, date: r.document.docDate, supplier: suppliers.get(r.document.supplierId ?? "") ?? "", item: r.item.nameAr ?? r.item.name, qty: dec(r.baseQty).toFixed(4), value: (receiptValue.get(r.id) ?? ZERO).toFixed(2) }));
   const openBills = billLines.filter((b) => !matchedBill.has(b.id)).map((b) => ({ billLineId: b.id, billNo: b.bill.billNo, date: b.bill.billDate, supplier: b.bill.supplier.name, description: b.description, net: dec(b.net).toFixed(2) }));

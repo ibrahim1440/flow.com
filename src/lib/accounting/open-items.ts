@@ -57,3 +57,16 @@ export async function partyMoves(accountIds: string[], partyId: string, from: Da
 export async function unpostedEvents(eventTypes: string[]) {
   return prisma.accountingEvent.count({ where: { eventType: { in: eventTypes }, status: { in: ["PENDING", "BLOCKED", "FAILED"] } } });
 }
+
+/** Entry date of the posted journal each event produced, per source document: `Map<docId, Map<eventType, entryDate>>`. */
+export async function postingDates(eventTypes: string[], sourceDocumentIds: string[]) {
+  const out = new Map<string, Map<string, Date>>();
+  if (!sourceDocumentIds.length) return out;
+  const rows = await prisma.$queryRaw<{ doc: string; eventType: string; date: Date }[]>`
+    SELECT ev."sourceDocumentId" AS doc, ev."eventType", e."entryDate" AS date
+      FROM "AccountingEvent" ev JOIN "JournalEntry" e ON e."id" = ev."journalEntryId"
+     WHERE ev."eventType" IN (${Prisma.join(eventTypes)}) AND ev."sourceDocumentId" IN (${Prisma.join(sourceDocumentIds)})
+       AND e."status" IN ('POSTED', 'REVERSED')`;
+  for (const r of rows) { const m = out.get(r.doc) ?? new Map<string, Date>(); m.set(r.eventType, r.date); out.set(r.doc, m); }
+  return out;
+}
