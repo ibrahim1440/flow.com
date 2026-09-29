@@ -121,8 +121,25 @@ try {
   assert.deepEqual([sub.outcome, sub.environment], ["NOT_SENT", "LOCAL_ONLY"]);
   await P.getByRole("button", { name: "إعادة التحقق محلياً" }).click();
   await P.getByText("أعيد التحقق محلياً: كل القواعد متحققة.").waitFor({ timeout: 10000 });
+  await P.getByText("غير مطابق للمعيار — تحقق محلي فقط:").waitFor();
+  await P.getByText("لم يُتحقق منه بأداة الهيئة (SDK) أو منصة فاتورة").waitFor();
   await shot(P, "ACC-70-detail");
-  ok("e-invoice detail: submission on a LOCAL_ONLY profile recorded as not sent (nothing left the system); local re-validation passes");
+  ok("e-invoice detail: submission on a LOCAL_ONLY profile recorded as not sent (nothing left the system); local re-validation passes; the screen states it is not standards-compliant (not SDK-validated)");
+
+  // 4b. A simplified invoice: QR tag 6 is 32 bytes, 7 and 8 DER, no tag 9; the screen lists the missing ZATCA certificate and tag 9.
+  const simp = await one(`select e.qr, s."invoiceNo" no, s.kind, s."debitNoteOfId" dn from "EInvoice" e join "SalesInvoice" s on s.id = e."salesInvoiceId" where e.subtype = '0200000' order by e.icv limit 1`);
+  assert.ok(simp, "the fixture has a simplified e-invoice");
+  const tlv = {}; const qb = Buffer.from(simp.qr, "base64");
+  for (let i = 0; i < qb.length;) { tlv[qb[i]] = qb.subarray(i + 2, i + 2 + qb[i + 1]); i += 2 + qb[i + 1]; }
+  assert.deepEqual([tlv[6]?.length, tlv[7]?.length, Buffer.from(tlv[7].toString(), "base64")[0], tlv[8]?.length, tlv[9]], [44, 96, 0x30, 88, undefined]);
+  await go(P, "/dashboard/accounting/tax");
+  await P.getByTestId(`einv-${simp.kind === "CREDIT_NOTE" ? "CN" : simp.dn ? "DN" : "INV"}-${simp.no}`).getByRole("button", { name: "التفاصيل" }).click();
+  await P.getByText(/الوسم 9 في QR .* غير موجود/).waitFor({ timeout: 10000 });
+  await P.getByText(/مختوم بمفتاح اختبار محلي وليس بشهادة CSID/).waitFor();
+  await P.getByText("صيغة الوسمين 6 و7 في QR غير مؤكدة حتى يُشغَّل SDK الهيئة").waitFor();
+  await P.getByText("غير مطابق للمعيار — تحقق محلي فقط:").scrollIntoViewIfNeeded();
+  await shot(P, "ACC-70-simplified-gaps");
+  ok(`simplified INV-${simp.no}: QR in the default layout (tag 6 = 44-byte base64 hash text, tag 7 = 96-byte base64 text of a DER signature, tag 8 = 88-byte DER key), no tag 9; the detail lists the missing ZATCA certificate, the unconfirmed QR layout and tag 9`);
 
   // 5. VAT return.
   await go(P, "/dashboard/accounting/tax/vat-return");

@@ -12,7 +12,7 @@ type Rule = { id: string; ok: boolean; en: string; ar: string; detail?: string }
 type Row = { salesInvoiceId: string; customerId: string; nationalAddress: Record<string, string> | null; doc: string; kind: string; debitNote: boolean; status: string; customer: string; gross: string; issueDate: string; reversedAfterIssue: boolean;
   einvoice: { id: string; icv: number; typeCode: string; subtype: string; valid: boolean; failed: number; lastSubmission: { outcome: string; attempt: number; environment: string } | null } | null;
   job: { status: string; attempts: number; errors: Rule[] | { message: string }[] | null } | null };
-type Detail = { id: string; doc: string; customer: string; uuid: string; icv: number; typeCode: string; subtype: string; invoiceHash: string; previousHash: string; qr: string | null; signer: string; validation: Rule[]; issueDay: string; gross: string; vat: string;
+type Detail = { id: string; doc: string; customer: string; uuid: string; icv: number; typeCode: string; subtype: string; invoiceHash: string; previousHash: string; qr: string | null; signer: string; validation: Rule[]; standardsGaps: { id: string; en: string; ar: string }[]; issueDay: string; gross: string; vat: string;
   submissions: { attempt: number; environment: string; endpoint: string | null; outcome: string; httpStatus: number | null; response: unknown; nextAttemptAt: string | null; createdAt: string }[] };
 
 export default function EInvoicesPage() {
@@ -82,6 +82,8 @@ export default function EInvoicesPage() {
             <thead><tr><Th>{L("القاعدة (محلية)", "Rule (local)")}</Th><Th>{L("الوصف", "Description")}</Th><Th>{L("النتيجة", "Result")}</Th></tr></thead>
             <tbody>{shownRules.map((x) => <tr key={x.id} className="border-t border-border"><Td><code dir="ltr">{x.id}</code></Td><Td>{L(x.ar, x.en)}{x.detail && !x.ok && <span className="block text-[11px] text-red-700">{x.detail}</span>}</Td><Td>{x.ok ? <Badge tone="ok">✓</Badge> : <Badge tone="bad">✗</Badge>}</Td></tr>)}</tbody>
           </Table>
+          <Notice tone="bad"><strong>{L("غير مطابق للمعيار — تحقق محلي فقط:", "Not standards-compliant — local validation only:")}</strong>
+            <ul className="list-disc ps-5 mt-1">{(d.standardsGaps ?? []).map((g) => <li key={g.id}>{L(g.ar, g.en)}</li>)}</ul></Notice>
           <Notice tone="warn">{L("رموز القواعد محلية؛ ربطها برموز BR-KSA الرسمية ينتظر قراءة قاموس البيانات الرسمي والتحقق بأداة الهيئة (SDK).", "Rule codes are local; mapping them to the official BR-KSA codes awaits the official data dictionary and validation with ZATCA's SDK.")}</Notice>
           <h3 className="font-extrabold text-[14px]">{L("محاولات الإرسال", "Submission attempts")}</h3>
           <Table>

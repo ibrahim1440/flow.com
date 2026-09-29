@@ -133,6 +133,9 @@ function topParent(accounts: Map<string, AccountRow>, a: AccountRow): AccountRow
   return cur;
 }
 
+// Heading for accounts that sit directly under a root group (no second level to name the section).
+const TYPE_HEADING: Record<string, [string, string]> = { ASSET: ["Assets", "الأصول"], LIABILITY: ["Liabilities", "الالتزامات"], EQUITY: ["Equity", "حقوق الملكية"], REVENUE: ["Revenue", "الإيرادات"], EXPENSE: ["Expenses", "المصروفات"] };
+
 function sections(accounts: Map<string, AccountRow>, nets: Map<string, Prisma.Decimal>, types: string[], flip: boolean): Section[] {
   const groups = new Map<string, Section>();
   for (const [accountId, net] of nets) {
@@ -140,7 +143,7 @@ function sections(accounts: Map<string, AccountRow>, nets: Map<string, Prisma.De
     if (!a || !types.includes(a.type) || net.isZero()) continue;
     const g = topParent(accounts, a);
     const key = g.id === a.id ? `type:${a.type}` : g.id;
-    if (!groups.has(key)) groups.set(key, { key, en: g.id === a.id ? a.type : g.nameEn, ar: g.id === a.id ? a.type : g.nameAr ?? g.nameEn, lines: [], total: 0 });
+    if (!groups.has(key)) groups.set(key, { key, en: g.id === a.id ? TYPE_HEADING[a.type]?.[0] ?? a.type : g.nameEn, ar: g.id === a.id ? TYPE_HEADING[a.type]?.[1] ?? a.type : g.nameAr ?? g.nameEn, lines: [], total: 0 });
     const amount = toMinor(flip ? net.neg() : net);
     const s = groups.get(key)!;
     s.lines.push({ accountId, code: a.code, nameEn: a.nameEn, nameAr: a.nameAr, amount });

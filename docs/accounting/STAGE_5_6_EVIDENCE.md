@@ -24,10 +24,10 @@ cloud / network access.
 | 5.10 | Retry tests | V | event re-processing posts once (capitalisation, run, close) — `fixed-assets.test.ts`, `year-end.test.ts` |
 | 5.11 | Concurrency tests | V | two runs for one period at once → one; two approvals of a run → one post (HTTP); two approvals of a close → one — `fixed-assets.test.ts`, `fixed-assets.test.mjs`, `year-end.test.ts` |
 | 5.12 | Closed-period tests | V | run refused for a locked period; nothing else posts into a closed year; a CLOSING entry never posts into an open period; the close is final once period 12 is CLOSED — `fixed-assets.test.ts`, `year-end.test.ts` |
-| 5.13 | Year-end close exercised in the browser | X | the fixture has only the current year, so the browser shows the unmet conditions only; the full close is exercised in the DB tests |
+| 5.13 | Year-end close exercised in the browser | V | `year-end-forms.mjs` via `scripts/accounting/local-year-end-browser.sh`: isolated disposable database `erp_finance_yearend` with a synthetic prior year and next year, server as the runtime role; conditions all met in the page; prepared by the preparer (their approval refused: no button, 403); approved and posted by a second person; closing entry, retained earnings, statements and next-year opening balances equal hand-calculated amounts (net income 80,000.00); screens `ACC-65-ye-*` |
 | 6.1 | Verify requirements against official ZATCA documentation | C (partial) | titles, versions, dates and URLs confirmed by search on zatca.gov.sa; the documents themselves are blocked by the egress policy — `STAGE_6_DESIGN.md` §1 |
 | 6.2 | E-invoice document (standard, simplified, credit, debit) | V (local) | `einvoice.test.ts`, `tax-forms.mjs`; structure unverified against the standard |
-| 6.3 | Document validation | V (local rules) / C (SDK) | 20+ `LOCAL-*` checks — `einvoice-pure.test.ts`, `einvoice.test.ts`; SDK validation not run (download blocked) |
+| 6.3 | Document validation | V (local rules) / C (SDK) | 20+ `LOCAL-*` checks — `einvoice-pure.test.ts`, `einvoice.test.ts`; **official SDK validation blocked**: download refused (403), evidence `evidence/zatca/access-attempts-2026-09-29.txt` |
 | 6.4 | Calculations | V | line and document arithmetic, per-category VAT, totals — `einvoice-pure.test.ts`; VAT return boxes — `einvoice.test.ts` |
 | 6.5 | Credit/debit-note references | V | billing reference and reason required; debit notes as invoices raising a posted invoice (same customer, no goods) — `einvoice.test.ts`, `tax-forms.mjs` step 3 |
 | 6.6 | Chain (ICV, previous hash), concurrency, immutability | V | gapless under six concurrent postings; DB refuses change, delete and out-of-chain inserts — `einvoice.test.ts`, `tax.test.mjs` |
@@ -35,7 +35,10 @@ cloud / network access.
 | 6.8 | Audit evidence | V | immutable e-invoices, append-only attempts (trigger), audit entries per generation and attempt — `einvoice.test.ts`, `tax.test.mjs` |
 | 6.9 | Separation of local validation from sandbox clearance/reporting | V | LOCAL_ONLY records "not sent"; production path refused (unit, DB, HTTP); screens carry the banner |
 | 6.10 | Sandbox clearance / reporting | C | not done: needs network access to gw-fatoora.zatca.gov.sa, developer-portal onboarding and a test CSID |
-| 6.11 | Signature / cryptographic stamp | X | local test key (secp256k1), not XAdES, not a CSID; tag 9 absent |
+| 6.11 | Signature / cryptographic stamp | X | local test key on secp256k1 (enforced), DER, over the hash bytes; not XAdES, not a CSID; tag 9 absent and shown on screen as a gap |
+| 6.14 | QR tags 6–9 checked independently of the implementation | V (local, both layouts) | `einvoice-qr-independent.test.ts`: TLV bytes written by hand, SPKI built from the SEC 2 constants, DER parsed by hand, ECDSA verified by a BigInt verifier in the test, FIPS 180-2 hash vector; rules catch the other layout and a mismatched stamp |
+| 6.15 | QR tag 6–7 layout as ZATCA requires | X / C | default = base64 text (every sample of a third-party SDK copy, not run, provenance unverified); 32-byte alternative kept; **unresolved until the official SDK runs** — `ZATCA_REQUIREMENTS.md` §3 |
+| 6.16 | Standards gaps visible to users | V | e-invoice detail lists the gaps (not SDK-validated; local key; QR layout unconfirmed; tag 9 absent) — `tax-forms.mjs` steps 4–4b |
 | 6.12 | VAT reporting | V (local) / D (box mapping) | boxes and reconciliation with unexplained remainder — `einvoice.test.ts`, `tax-forms.mjs` step 5; items not modelled listed on the page |
 | 6.13 | No invoices to customers or ZATCA production | V | nothing sends to customers; the production path is refused by code and not selectable (DB check) |
 | 7.1 | Figma first for new work, compared with the screens | V | pages 22 (ACC-60..65) and 23 (ACC-70..72) drawn before the code; comparison and differences in `FIGMA_PARITY.md` |

@@ -104,6 +104,8 @@ describe("profile and generation", () => {
     assert.equal(e.subtype, "0200000");
     const q = readQr(e.qr!);
     assert.deepEqual([q[1].toString(), q[2].toString(), q[4].toString(), q[5].toString(), q[6].toString()], [PROFILE.sellerName, PROFILE.vatNumber, "115.00", "15.00", e.invoiceHash]);
+    assert.deepEqual([q[6].length, q[7].length, q[8].length], [44, 96, 88], "default layout SDK_SAMPLE_TEXT: 6 and 7 as base64 text, 8 raw DER key");
+    assert.equal(q[7].toString(), e.signature, "tag 7: the base64 text of the DER signature");
     assert.ok(verifyLocally(e.invoiceHash, e.signature!, e.publicKey!));
     assert.equal(q[9], undefined, "no tag 9: there is no ZATCA certificate");
     const inv = await posted(w, w.b2b, [line(w, "1000")]);

@@ -385,6 +385,8 @@ async function main() {
   await sdoc(K3, D(9, 21), [{ d: "أكواب ورقية مطبوعة — 1,000", q: "1000", p: "0.9", code: "4200" }], "APPROVED");
   await sdoc(K2, D(9, 15), [{ d: "خلطة إسبريسو البيت — 10 كغ", q: "10", p: "165" }], "REJECTED");
   await sdoc(K4, D(9, 22), [{ d: "بن مطحون — 2 كغ", q: "2", p: "95" }], "DRAFT");
+  // A posted cash sale to a walk-in customer (no VAT number) → a SIMPLIFIED e-invoice, stamped with the local test key only.
+  await sdoc(K4, D(9, 23), [{ d: "بن محمص للأفراد — 1 كغ", q: "1", p: "100" }], "POSTED");
 
   // Customer bank lines: DEP-5510 (above) pays INV for order 7009 in full; a line linked in Finance
   // to an approved sales collection (the collection names the customer and keeps its commission);

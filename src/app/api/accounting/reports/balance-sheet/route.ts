@@ -1,8 +1,11 @@
 import { accountingRoute, query } from "@/lib/accounting/http";
 import { balanceSheet } from "@/lib/accounting/reports";
-import { range } from "../params";
+import { accountingDate, todayAccountingDate } from "@/lib/accounting/dates";
 
+// A balance sheet is as of one date: only `to` counts. (The report page also sends `from`, which for
+// an as-of date before 1 January of the current year used to make the shared range check refuse it.)
 export const GET = accountingRoute(null, ({ request }) => {
-  const r = range(query(request));
-  return balanceSheet({ asOf: r.to, includeProvisional: r.includeProvisional });
+  const q = query(request);
+  const asOf = q.get("to") ? accountingDate(q.get("to")) : todayAccountingDate();
+  return balanceSheet({ asOf, includeProvisional: q.get("provisional") !== "exclude" });
 });

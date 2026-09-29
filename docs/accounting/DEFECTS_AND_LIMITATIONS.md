@@ -34,6 +34,11 @@
 | 29 | The disposal form closed when the server refused the submission, so the reason was lost and the user had to start again (found by the stage 5 browser test) | the handler closed the form whether or not the request succeeded | the form stays open and shows the refusal | `fa-forms.mjs` step 3 (refusal then success) |
 | 30 | English text in the Arabic stage 5–6 screens (catch-up note, reconciliation references, account names in the closing entry, the "not sent" reason) | server strings rendered as-is | structured fields localised in the UI | found comparing with Figma pages 22–23; captures |
 | 31 | The VAT reconciliation listed differences by source without saying how much remained unexplained | only the difference was computed | an "unexplained" remainder is computed and shown | `einvoice.test.ts` VAT case, `tax-forms.mjs` |
+| 32 | The seed for the isolated year-end scenario printed its result but never exited (a database handle kept the process alive), so the browser run hung | the script relied on `$disconnect()` alone | explicit exit after disconnect | `local-year-end-browser.sh` completes |
+| 33 | The balance-sheet step of the year-end browser test sometimes timed out: the date was filled before the report view had settled | no wait on the report request | the test waits for the balance-sheet response for that exact date | `year-end-forms.mjs` step 6, repeated runs |
+| 34 | QR tags 6–7 layout was an unrecorded choice, and the local signature was over the hash's base64 text | not surfaced | the layout is an explicit constant with both readings tested independently; the default follows the only byte-level artefact available (SDK samples, unofficial); the signature is over the 32 hash bytes; the curve is enforced; standards gaps shown on screen. **The layout ZATCA requires remains unresolved** | `einvoice-qr-independent.test.ts`, `ZATCA_REQUIREMENTS.md` §3 |
+| 35 | The balance-sheet screen could not show any date before 1 January of the current year: the page sends the income-statement start date too, and the shared range check refused "start after end" (found by the year-end browser test) | the balance-sheet route reused the date-range parser | the route reads only the as-of date | `year-end-forms.mjs` steps 5–6 (the page's exact query, and the screen at the prior year end) |
+| 36 | The balance sheet showed the raw type "EQUITY" (in English, in the Arabic screen) as the heading for accounts sitting directly under a root group (pre-existing; seen in the year-end browser capture) | the account type code was used as the heading | localised type headings | `year-end-forms.mjs` step 6 |
 | 26 | Operational stock changes (purchase, roast, pack, dispatch, counts) never reached the accounts except through manual drafts | no integration | operational events in the same transaction, automatic documents under an approved policy, UNINTEGRATED detection, exception queue, reconciliation | `ops-integration.test.ts` (3), `ops-integration.test.mjs` (HTTP) |
 
 ## Pre-existing (reproduced identically on `main` @ `fc64c05`)
@@ -54,10 +59,14 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
   ZATCA's SDK or sent to its sandbox. Stages 2 and 3 are **not accepted**; they await the owner's review.
 - Stage 5 limitations: one cost per asset (no later additions or revaluations), no impairment, no
   partial disposals, depreciation by month (no daily proration), no asset transfers between branches;
-  year-end close needs the next fiscal year to exist and every period locked; the fixture has no
-  prior year, so the close is exercised in the DB tests only.
+  year-end close needs the next fiscal year to exist and every period locked. The main fixture has no
+  prior year; the browser close runs on a separate synthetic scenario (`erp_finance_yearend`), with a
+  closing policy approved there for the test only (not a company decision).
 - Stage 6 limitations: `STAGE_6_DESIGN.md` §2 and §5 (XML, hash canonicalisation, XAdES, rule codes
-  and API paths unverified; local test key; no tag 9; VAT return items not modelled; zakat absent).
+  and API paths unverified; local test key; no tag 9; QR tag 6–7 layout unresolved; VAT return items
+  not modelled; zakat absent). **Official validation is blocked**: ZATCA's documents, SDK and sandbox
+  are refused by this environment's network policy (`ZATCA_REQUIREMENTS.md` §2). Local tests do not
+  substitute for it.
 - Stage 3 limitations: `STAGE_3_DESIGN.md` §7 (single returns account, credit notes move no stock,
   credit limit warns only, D-2 changes apply forward only). The historical-aging limitation is
   resolved (defect 18).

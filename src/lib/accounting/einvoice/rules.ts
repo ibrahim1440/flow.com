@@ -4,7 +4,7 @@
 // are known to require (titles and versions confirmed on zatca.gov.sa; contents not readable from
 // this environment). They are NOT the official BR-KSA rule codes, and passing them is NOT ZATCA
 // validation: only the official SDK or the Fatoora platform validates a document.
-import { hashOfStoredXml, readQr, verifyLocally, taxSubtotals, type EDoc } from "./ubl";
+import { hashOfStoredXml, readQr, qrStampValues, verifyLocally, taxSubtotals, QR_ENCODING, type EDoc } from "./ubl";
 
 export type RuleResult = { id: string; ok: boolean; en: string; ar: string; detail?: string };
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -74,11 +74,36 @@ export function validateDoc(d: EDoc, stored?: { xml: string; invoiceHash: string
   if (stored) {
     rule("LOCAL-HASH", hashOfStoredXml(stored.xml) === stored.invoiceHash, "Stored XML hashes to the stored document hash", "تجزئة XML المخزّن تساوي التجزئة المسجلة");
     if (simplified) {
-      rule("LOCAL-QR", !!stored.qr && (() => { const q = readQr(stored.qr!); return q[1]?.toString() === s.name && q[2]?.toString() === s.vatNumber && q[6]?.toString() === stored.invoiceHash; })(),
-        "QR present with seller name, VAT number and document hash", "رمز QR موجود باسم البائع ورقمه الضريبي وتجزئة المستند");
-      rule("LOCAL-SIGNATURE", !!stored.signature && !!stored.publicKey && verifyLocally(stored.invoiceHash, stored.signature, stored.publicKey),
-        "Local test signature verifies (NOT a ZATCA cryptographic stamp)", "التوقيع التجريبي المحلي صحيح (ليس ختم الهيئة)");
+      const q: Record<number, Buffer> = stored.qr ? readQr(stored.qr) : {};
+      rule("LOCAL-QR", !!stored.qr && q[1]?.toString("utf8") === s.name && q[2]?.toString("utf8") === s.vatNumber,
+        "QR present with seller name and VAT number", "رمز QR موجود باسم البائع ورقمه الضريبي");
+      const v = qrStampValues(q);
+      const hashLen = QR_ENCODING === "SDK_SAMPLE_TEXT" ? 44 : 32;
+      rule("LOCAL-QR-HASH", q[6]?.length === hashLen && !!v.hash && v.hash.length === 32 && v.hash.equals(Buffer.from(stored.invoiceHash, "base64")),
+        `QR tag 6 carries the document's SHA-256 hash (${QR_ENCODING}: ${hashLen} bytes)`, `الوسم 6 في QR يحمل تجزئة المستند (${hashLen} بايت)`, q[6] ? `${q[6].length} bytes` : "missing");
+      rule("LOCAL-QR-STAMP", !!stored.signature && !!stored.publicKey && !!v.signature && !!q[8] &&
+        v.signature.equals(Buffer.from(stored.signature, "base64")) && q[8].equals(Buffer.from(stored.publicKey, "base64")) && verifyLocally(stored.invoiceHash, stored.signature, stored.publicKey),
+        "QR tags 7 and 8 carry the DER signature and DER public key (secp256k1) and verify against the hash — LOCAL test key, NOT a ZATCA cryptographic stamp",
+        "الوسمان 7 و8 يحملان التوقيع والمفتاح العام (DER، secp256k1) ويتحققان مع التجزئة — مفتاح اختبار محلي وليس ختم الهيئة");
     }
   }
   return out;
+}
+
+export type StandardsGap = { id: string; en: string; ar: string };
+/**
+ * What stands between a locally valid document and a standards-compliant one. Always non-empty
+ * here: no document produced by this branch has been validated by ZATCA's SDK or Fatoora, and a
+ * simplified document has no ZATCA certificate (so no QR tag 9 and no CSID-based stamp).
+ */
+export function standardsGaps(subtype: string, qr?: string | null): StandardsGap[] {
+  const gaps: StandardsGap[] = [
+    { id: "NOT-SDK-VALIDATED", en: "Not validated by ZATCA's SDK or the Fatoora platform", ar: "لم يُتحقق منه بأداة الهيئة (SDK) أو منصة فاتورة" },
+  ];
+  if (subtype === "0200000") {
+    gaps.push({ id: "NO-ZATCA-CERTIFICATE", en: "Stamped with a local test key, not a ZATCA-issued CSID; not a XAdES signature", ar: "مختوم بمفتاح اختبار محلي وليس بشهادة CSID من الهيئة؛ وليس توقيع XAdES" });
+    gaps.push({ id: "QR-LAYOUT-UNCONFIRMED", en: `QR tags 6 and 7 use the ${QR_ENCODING} layout; which layout ZATCA requires is unconfirmed until its SDK runs`, ar: "صيغة الوسمين 6 و7 في QR غير مؤكدة حتى يُشغَّل SDK الهيئة" });
+    if (!qr || !readQr(qr)[9]) gaps.push({ id: "QR-TAG-9-ABSENT", en: "QR tag 9 (ZATCA technical CA signature of the stamp's public key) is absent — it needs a ZATCA certificate", ar: "الوسم 9 في QR (توقيع جهة التصديق التقنية للهيئة على المفتاح العام) غير موجود — يتطلب شهادة من الهيئة" });
+  }
+  return gaps;
 }

@@ -9,10 +9,11 @@
 //   - the hash is SHA-256 (base64) of our deterministic serialisation with the signature parts and
 //     the QR reference left out — byte equivalence with the standard's C14N 1.1 canonical form is
 //     UNVERIFIED;
-//   - the signature is ECDSA (secp256k1, SHA-256) with a LOCAL TEST KEY, carried in a simplified
-//     UBL extension — it is NOT a XAdES signature and NOT made with a ZATCA-issued CSID;
-//   - QR tags 1–8 are produced; tag 9 (the signature of the ZATCA certificate) cannot exist without
-//     a certificate and is omitted.
+//   - the signature is ECDSA on secp256k1 (the curve ZATCA's own SDK notes name) with SHA-256, made
+//     with a LOCAL TEST KEY and carried in a simplified UBL extension — it is NOT a XAdES signature
+//     and NOT made with a ZATCA-issued CSID;
+//   - QR tags 1–8 are produced (encodings in `qrTlv` below); tag 9 (ZATCA's technical CA signature
+//     over the stamp's public key) cannot exist without a ZATCA certificate and is never produced.
 // Only the official SDK / Fatoora validation can confirm conformance. Nothing here claims it.
 import { createHash, createPublicKey, sign as ecSign, verify as ecVerify, type KeyObject } from "node:crypto";
 
@@ -112,14 +113,32 @@ export function hashOfStoredXml(xml: string) {
   return createHash("sha256").update(stripped, "utf8").digest("base64");
 }
 
-/** QR: TLV (tag byte, length byte, UTF-8 or raw bytes), base64. Tags 1–5 always; 6–8 when signed. */
-export function qrTlv(fields: { sellerName: string; vatNumber: string; timestamp: string; total: string; vat: string; hash?: string; signature?: string; publicKey?: Buffer }) {
+/**
+ * QR: TLV (tag byte, length byte, value bytes), base64. Tags 1–5 are UTF-8 text. Tags 6–9 for
+ * signed documents — the byte layout of 6 and 7 is an OPEN question that only ZATCA's SDK can
+ * settle (ZATCA_REQUIREMENTS.md §3); the Security Features standard's text could not be opened here:
+ *   SDK_SAMPLE_TEXT (default) — the layout of every sample invoice shipped in a THIRD-PARTY copy of
+ *     ZATCA's Java SDK 238-R3.4.8 (provenance unverified, not executed): 6 = the base64 TEXT of the
+ *     32-byte SHA-256 hash (44 bytes); 7 = the base64 TEXT of the DER ECDSA signature (96 bytes);
+ *   RAW_BYTES — the reading that the standard means the values themselves: 6 = the 32 raw hash
+ *     bytes; 7 = the raw DER signature;
+ * and in both: 8 = the raw DER SubjectPublicKeyInfo (secp256k1, 88 bytes); 9 = ZATCA's technical CA
+ * signature of the stamp's public key (raw DER) — only with a ZATCA certificate, never produced here.
+ */
+export type QrEncoding = "SDK_SAMPLE_TEXT" | "RAW_BYTES";
+export const QR_ENCODING: QrEncoding = "SDK_SAMPLE_TEXT";
+
+export function qrTlv(fields: { sellerName: string; vatNumber: string; timestamp: string; total: string; vat: string; hash?: string; signature?: Buffer; publicKey?: Buffer; certificateSignature?: Buffer }, encoding: QrEncoding = QR_ENCODING) {
+  const hash = fields.hash ? Buffer.from(fields.hash, "base64") : null;
+  if (hash && hash.length !== 32) throw new Error("QR tag 6 must carry a 32-byte SHA-256 value.");
+  const text = encoding === "SDK_SAMPLE_TEXT";
   const parts: [number, Buffer][] = [
     [1, Buffer.from(fields.sellerName, "utf8")], [2, Buffer.from(fields.vatNumber, "utf8")], [3, Buffer.from(fields.timestamp, "utf8")],
     [4, Buffer.from(fields.total, "utf8")], [5, Buffer.from(fields.vat, "utf8")],
-    ...(fields.hash ? [[6, Buffer.from(fields.hash, "utf8")] as [number, Buffer]] : []),
-    ...(fields.signature ? [[7, Buffer.from(fields.signature, "utf8")] as [number, Buffer]] : []),
+    ...(hash ? [[6, text ? Buffer.from(hash.toString("base64"), "utf8") : hash] as [number, Buffer]] : []),
+    ...(fields.signature ? [[7, text ? Buffer.from(fields.signature.toString("base64"), "utf8") : fields.signature] as [number, Buffer]] : []),
     ...(fields.publicKey ? [[8, fields.publicKey] as [number, Buffer]] : []),
+    ...(fields.certificateSignature ? [[9, fields.certificateSignature] as [number, Buffer]] : []),
   ];
   const out: Buffer[] = [];
   for (const [tag, v] of parts) {
@@ -129,6 +148,12 @@ export function qrTlv(fields: { sellerName: string; vatNumber: string; timestamp
   return Buffer.concat(out).toString("base64");
 }
 
+/** The hash and signature bytes carried by QR tags 6 and 7 under an encoding. */
+export function qrStampValues(q: Record<number, Buffer>, encoding: QrEncoding = QR_ENCODING) {
+  const dec = (v?: Buffer) => (v ? (encoding === "SDK_SAMPLE_TEXT" ? Buffer.from(v.toString("utf8"), "base64") : v) : undefined);
+  return { hash: dec(q[6]), signature: dec(q[7]) };
+}
+
 export function readQr(b64: string) {
   const buf = Buffer.from(b64, "base64");
   const out: Record<number, Buffer> = {};
@@ -136,14 +161,19 @@ export function readQr(b64: string) {
   return out;
 }
 
-/** ECDSA (secp256k1, SHA-256) over the document hash with a LOCAL TEST key. */
+export const SIGNING_CURVE = "secp256k1";
+
+/** ECDSA (secp256k1, SHA-256, DER) over the 32 raw bytes of the document hash, with a LOCAL TEST key. */
 export function signLocally(hash: string, privateKey: KeyObject) {
-  const signature = ecSign("sha256", Buffer.from(hash, "utf8"), privateKey).toString("base64");
-  const publicKey = createPublicKey(privateKey).export({ type: "spki", format: "der" });
-  return { signature, publicKey: publicKey.toString("base64"), publicKeyDer: publicKey };
+  const curve = privateKey.asymmetricKeyDetails?.namedCurve;
+  if (privateKey.asymmetricKeyType !== "ec" || curve !== SIGNING_CURVE) throw new Error(`The signing key must be an EC key on ${SIGNING_CURVE} (got ${privateKey.asymmetricKeyType}/${curve ?? "?"}).`);
+  const signatureDer = ecSign("sha256", Buffer.from(hash, "base64"), { key: privateKey, dsaEncoding: "der" });
+  const publicKeyDer = createPublicKey(privateKey).export({ type: "spki", format: "der" });
+  return { signature: signatureDer.toString("base64"), signatureDer, publicKey: publicKeyDer.toString("base64"), publicKeyDer };
 }
 
 export function verifyLocally(hash: string, signature: string, publicKeyB64: string) {
   const key = createPublicKey({ key: Buffer.from(publicKeyB64, "base64"), format: "der", type: "spki" });
-  return ecVerify("sha256", Buffer.from(hash, "utf8"), key, Buffer.from(signature, "base64"));
+  if (key.asymmetricKeyDetails?.namedCurve !== SIGNING_CURVE) return false;
+  return ecVerify("sha256", Buffer.from(hash, "base64"), { key, dsaEncoding: "der" }, Buffer.from(signature, "base64"));
 }

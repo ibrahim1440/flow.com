@@ -3,7 +3,7 @@
 // document conforms to ZATCA's standards (only the official SDK / Fatoora can).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { buildXml, documentHash, hashOfStoredXml, qrTlv, readQr, signLocally, verifyLocally, INITIAL_PIH, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
 import { validateDoc } from "../../../src/lib/accounting/einvoice/rules";
 import { submissionTarget } from "../../../src/lib/accounting/einvoice/target";
@@ -40,12 +40,12 @@ test("hash: the stored XML with signature and QR hashes to the document hash; a 
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "secp256k1" });
   const h = documentHash(d);
   const s = signLocally(h, privateKey);
-  const qr = qrTlv({ sellerName: d.seller.name, vatNumber: d.seller.vatNumber, timestamp: "2026-09-29T10:15:00", total: "1357.00", vat: "177.00", hash: h, signature: s.signature, publicKey: s.publicKeyDer });
+  const qr = qrTlv({ sellerName: d.seller.name, vatNumber: d.seller.vatNumber, timestamp: "2026-09-29T10:15:00", total: "1357.00", vat: "177.00", hash: h, signature: s.signatureDer, publicKey: s.publicKeyDer });
   const xml = buildXml(d, { signature: { value: s.signature, publicKey: s.publicKey }, qr });
   assert.equal(hashOfStoredXml(xml), h);
   assert.notEqual(hashOfStoredXml(xml.replace("1357.00", "1357.01")), h);
   assert.ok(verifyLocally(h, s.signature, s.publicKey));
-  assert.ok(!verifyLocally(h.replace(/^./, "A"), s.signature, s.publicKey));
+  assert.ok(!verifyLocally(createHash("sha256").update("other").digest("base64"), s.signature, s.publicKey));
   assert.deepEqual(validateDoc(d, { xml, invoiceHash: h, qr, signature: s.signature, publicKey: s.publicKey }).filter((r) => !r.ok), []);
   assert.deepEqual(validateDoc(d, { xml: xml.replace("1357.00", "1357.01"), invoiceHash: h, qr, signature: s.signature, publicKey: s.publicKey }).filter((r) => !r.ok).map((r) => r.id), ["LOCAL-HASH"]);
   assert.match(xml, /<cbc:InvoiceTypeCode name="0200000">388<\/cbc:InvoiceTypeCode>/);

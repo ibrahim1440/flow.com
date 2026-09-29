@@ -19,7 +19,7 @@ import { auditAccounting } from "../audit";
 import { dateStr } from "../dates";
 import { riyadhDateString } from "@/lib/finance/dates";
 import { buildXml, documentHash, qrTlv, signLocally, INITIAL_PIH, type EDoc, type TaxCat, type Address } from "./ubl";
-import { validateDoc, type RuleResult } from "./rules";
+import { validateDoc, standardsGaps, type RuleResult } from "./rules";
 import { submissionTarget } from "./target";
 export { submissionTarget };
 
@@ -143,7 +143,7 @@ export async function generateEInvoice(salesInvoiceId: string, userId: string): 
     const simplified = doc.subtype === "0200000";
     const signed = simplified ? signLocally(hash, localKey()) : null;
     const qr = qrTlv({ sellerName: doc.seller.name, vatNumber: doc.seller.vatNumber, timestamp: `${doc.issueDate}T${doc.issueTime}`, total: doc.totals.taxInclusive, vat: doc.totals.tax,
-      ...(signed ? { hash, signature: signed.signature, publicKey: signed.publicKeyDer } : {}) });
+      ...(signed ? { hash, signature: signed.signatureDer, publicKey: signed.publicKeyDer } : {}) });
     const xml = buildXml(doc, { signature: signed ? { value: signed.signature, publicKey: signed.publicKey } : null, qr });
     const validation = validateDoc(doc, { xml, invoiceHash: hash, qr, signature: signed?.signature, publicKey: signed?.publicKey });
     const e = await tx.eInvoice.create({ data: {
@@ -263,5 +263,5 @@ export async function eInvoiceDetail(id: string) {
   const e = await prisma.eInvoice.findUnique({ where: { id }, include: { submissions: { orderBy: { attempt: "asc" } } } });
   if (!e) throw new AccountingError("E-invoice not found.", 404);
   const d = await prisma.salesInvoice.findUniqueOrThrow({ where: { id: e.salesInvoiceId }, include: { customer: true } });
-  return { ...e, doc: label(d), customer: d.customer.nameAr ?? d.customer.name, issueDay: riyadhDateString(e.issueAt), gross: d.totalGross.toFixed(2), vat: d.totalVat.toFixed(2) };
+  return { ...e, standardsGaps: standardsGaps(e.subtype, e.qr), doc: label(d), customer: d.customer.nameAr ?? d.customer.name, issueDay: riyadhDateString(e.issueAt), gross: d.totalGross.toFixed(2), vat: d.totalVat.toFixed(2) };
 }
