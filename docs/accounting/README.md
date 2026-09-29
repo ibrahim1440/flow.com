@@ -44,7 +44,7 @@ tests that failed before the fix.
   **local** validation, debit notes, a submission adapter that never reaches production, and the VAT
   return reconciled to the ledger. **Nothing has been sent to ZATCA**; this is not ZATCA-compliant.
   **Official validation is blocked** (ZATCA's documents, SDK and sandbox are refused by this
-  environment's network policy); the QR tag 6–7 layout is unresolved and tag 9 needs a ZATCA
+  environment's network policy); QR tags 6–8 follow the official documents as cited but are not SDK-validated, and tag 9 needs a ZATCA
   certificate (`ZATCA_REQUIREMENTS.md` §2–3).
 
 All local release gates run on one commit with `scripts/accounting/local-release-gates.sh`; results

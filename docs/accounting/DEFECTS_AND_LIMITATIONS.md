@@ -39,6 +39,7 @@
 | 34 | QR tags 6–7 layout was an unrecorded choice, and the local signature was over the hash's base64 text | not surfaced | the layout is an explicit constant with both readings tested independently; the default follows the only byte-level artefact available (SDK samples, unofficial); the signature is over the 32 hash bytes; the curve is enforced; standards gaps shown on screen. **The layout ZATCA requires remains unresolved** | `einvoice-qr-independent.test.ts`, `ZATCA_REQUIREMENTS.md` §3 |
 | 35 | The balance-sheet screen could not show any date before 1 January of the current year: the page sends the income-statement start date too, and the shared range check refused "start after end" (found by the year-end browser test) | the balance-sheet route reused the date-range parser | the route reads only the as-of date | `year-end-forms.mjs` steps 5–6 (the page's exact query, and the screen at the prior year end) |
 | 36 | The balance sheet showed the raw type "EQUITY" (in English, in the Arabic screen) as the heading for accounts sitting directly under a root group (pre-existing; seen in the year-end browser capture) | the account type code was used as the heading | localised type headings | `year-end-forms.mjs` step 6 |
+| 37 | QR tags 6–8 did not use the encodings the official documents specify (as cited by the owner): 44-byte Base64 hash, DER signature, 88-byte DER SPKI instead of the 32-byte hash, IEEE P1363 signature and 64-byte public key | the default followed third-party SDK samples | default `OFFICIAL_DOCS`; the sample layout kept only as an alternate | `einvoice-qr-independent.test.ts`, `einvoice.test.ts`, `tax-forms.mjs`; `ZATCA_REQUIREMENTS.md` §3 |
 | 26 | Operational stock changes (purchase, roast, pack, dispatch, counts) never reached the accounts except through manual drafts | no integration | operational events in the same transaction, automatic documents under an approved policy, UNINTEGRATED detection, exception queue, reconciliation | `ops-integration.test.ts` (3), `ops-integration.test.mjs` (HTTP) |
 
 ## Pre-existing (reproduced identically on `main` @ `fc64c05`)
@@ -63,7 +64,7 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
   prior year; the browser close runs on a separate synthetic scenario (`erp_finance_yearend`), with a
   closing policy approved there for the test only (not a company decision).
 - Stage 6 limitations: `STAGE_6_DESIGN.md` §2 and §5 (XML, hash canonicalisation, XAdES, rule codes
-  and API paths unverified; local test key; no tag 9; QR tag 6–7 layout unresolved; VAT return items
+  and API paths unverified; local test key; no tag 9; QR tags 6–8 follow the official documents as cited but are not SDK-validated; curve/profile to confirm; VAT return items
   not modelled; zakat absent). **Official validation is blocked**: ZATCA's documents, SDK and sandbox
   are refused by this environment's network policy (`ZATCA_REQUIREMENTS.md` §2). Local tests do not
   substitute for it.

@@ -131,15 +131,15 @@ try {
   assert.ok(simp, "the fixture has a simplified e-invoice");
   const tlv = {}; const qb = Buffer.from(simp.qr, "base64");
   for (let i = 0; i < qb.length;) { tlv[qb[i]] = qb.subarray(i + 2, i + 2 + qb[i + 1]); i += 2 + qb[i + 1]; }
-  assert.deepEqual([tlv[6]?.length, tlv[7]?.length, Buffer.from(tlv[7].toString(), "base64")[0], tlv[8]?.length, tlv[9]], [44, 96, 0x30, 88, undefined]);
+  assert.deepEqual([tlv[6]?.length, tlv[7]?.length, tlv[8]?.length, tlv[9]], [32, 64, 64, undefined]);
   await go(P, "/dashboard/accounting/tax");
   await P.getByTestId(`einv-${simp.kind === "CREDIT_NOTE" ? "CN" : simp.dn ? "DN" : "INV"}-${simp.no}`).getByRole("button", { name: "التفاصيل" }).click();
   await P.getByText(/الوسم 9 في QR .* غير موجود/).waitFor({ timeout: 10000 });
   await P.getByText(/مختوم بمفتاح اختبار محلي وليس بشهادة CSID/).waitFor();
-  await P.getByText("صيغة الوسمين 6 و7 في QR غير مؤكدة حتى يُشغَّل SDK الهيئة").waitFor();
+  await P.getByText(/ترميز الوسوم 6–8 في QR يتبع الوثائق الرسمية/).waitFor();
   await P.getByText("غير مطابق للمعيار — تحقق محلي فقط:").scrollIntoViewIfNeeded();
   await shot(P, "ACC-70-simplified-gaps");
-  ok(`simplified INV-${simp.no}: QR in the default layout (tag 6 = 44-byte base64 hash text, tag 7 = 96-byte base64 text of a DER signature, tag 8 = 88-byte DER key), no tag 9; the detail lists the missing ZATCA certificate, the unconfirmed QR layout and tag 9`);
+  ok(`simplified INV-${simp.no}: QR in the default OFFICIAL_DOCS layout (tag 6 = 32-byte hash, tag 7 = 64-byte P1363 signature, tag 8 = 64-byte public key), no tag 9; the detail lists the missing ZATCA certificate, the unconfirmed encodings and tag 9`);
 
   // 5. VAT return.
   await go(P, "/dashboard/accounting/tax/vat-return");

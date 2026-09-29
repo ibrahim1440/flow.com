@@ -3,15 +3,16 @@
 // secp256k1 domain parameters from SEC 2 v2 §2.4.1, a SubjectPublicKeyInfo assembled byte by byte
 // from those constants, and an ECDSA verifier written here in BigInt arithmetic (no node:crypto).
 //
-// The layouts they pin are the two readings in ubl.ts `qrTlv` (the default follows the sample
-// invoices in a third-party copy of ZATCA's SDK, provenance unverified); the standard's text could
-// not be opened here and ZATCA's SDK could not be run, so they do NOT show conformance
-// (ZATCA_REQUIREMENTS.md §3). Synthetic keys and documents only; the private keys
+// The layouts they pin are the two in ubl.ts `qrTlv`: the default OFFICIAL_DOCS follows the
+// encodings the official documents specify as cited in ZATCA_REQUIREMENTS.md §3 (tag 6 = 32-byte
+// SHA-256; tag 7 = IEEE P1363 r‖s; tag 8 = 64-byte public key); SDK_SAMPLE_TEXT is secondary
+// evidence only. These tests encode implementation assumptions: they do NOT show conformance, which
+// needs ZATCA's SDK (blocked here). Synthetic keys and documents only; the private keys
 // below (d = 1, d = 0x5EED…) are public test values and must never be used for anything else.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { buildXml, documentHash, qrTlv, readQr, qrStampValues, signLocally, INITIAL_PIH, QR_ENCODING, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
+import { buildXml, documentHash, qrTlv, readQr, verifyQrStamp, derToP1363, signLocally, INITIAL_PIH, QR_ENCODING, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
 import { validateDoc, standardsGaps } from "../../../src/lib/accounting/einvoice/rules";
 
 // ── secp256k1 (SEC 2 v2, §2.4.1), independent BigInt arithmetic ───────────────────────────────
@@ -85,35 +86,47 @@ test("QR bytes, both layouts: tags 1–8 equal TLV sequences written out by hand
   const { Q, key } = keyFromScalar(B("1"));
   const s = signLocally(ABC_B64, key);
   const fields = { sellerName: "شركة", vatNumber: "399999999900003", timestamp: "2026-09-29T10:15:00", total: "115.00", vat: "15.00", hash: ABC_B64, signature: s.signatureDer, publicKey: s.publicKeyDer };
-  const sigHex = s.signatureDer.toString("hex");
   const head =
     "01" + "08" + "d8b4d8b1d983d8a9" +                                  // "شركة": 4 letters, 8 UTF-8 bytes
     "02" + "0f" + Buffer.from("399999999900003").toString("hex") +
     "03" + "13" + Buffer.from("2026-09-29T10:15:00").toString("hex") +
     "04" + "06" + "3131352e3030" +                                      // "115.00"
     "05" + "05" + "31352e3030";                                         // "15.00"
-  const tail = "08" + "58" + spki(Q).toString("hex");                  // 88 bytes, raw DER in both layouts
+  // OFFICIAL_DOCS (default): 6 = 32 hash bytes; 7 = r‖s (IEEE P1363, 64 bytes) from the DER parsed by
+  // hand here; 8 = X‖Y (64 bytes) of d·G computed here in BigInt (for d = 1, the SEC 2 generator).
+  const { r, s: sv } = parseDerSig(s.signatureDer);
+  const officialQr = qrTlv(fields, "OFFICIAL_DOCS");
+  assert.equal(Buffer.from(officialQr, "base64").toString("hex"),
+    head + "06" + "20" + ABC + "07" + "40" + hex32(r) + hex32(sv) + "08" + "40" + hex32(Q.x) + hex32(Q.y));
+  const q = readQr(officialQr);
+  assert.deepEqual([q[6].length, q[7].length, q[8].length, q[9]], [32, 64, 64, undefined], "tag 9 is never produced without a ZATCA certificate");
+  // The QR's own content verifies under the independent BigInt verifier: tag 7 over tag 6 with the tag 8 point.
+  const Q8 = { x: B("0x" + q[8].subarray(0, 32).toString("hex")), y: B("0x" + q[8].subarray(32).toString("hex")) };
+  assert.ok(ecdsaVerify(q[6], { r: B("0x" + q[7].subarray(0, 32).toString("hex")), s: B("0x" + q[7].subarray(32).toString("hex")) }, Q8));
+  assert.ok(verifyQrStamp(q, "OFFICIAL_DOCS"));
+  // SDK_SAMPLE_TEXT (secondary): 6 = base64 text of the hash (44), 7 = base64 text of the DER signature (96), 8 = DER SPKI (88).
   const b64sig = Buffer.from(s.signatureDer.toString("base64"), "utf8");
-  // SDK_SAMPLE_TEXT: 6 = base64 text of the hash (44 bytes), 7 = base64 text of the DER signature (96 bytes).
   assert.equal(b64sig.length, 96);
   const textQr = qrTlv(fields, "SDK_SAMPLE_TEXT");
   assert.equal(Buffer.from(textQr, "base64").toString("hex"),
-    head + "06" + "2c" + Buffer.from(ABC_B64, "utf8").toString("hex") + "07" + "60" + b64sig.toString("hex") + tail);
-  // RAW_BYTES: 6 = the 32 hash bytes, 7 = the DER signature bytes.
-  const rawQr = qrTlv(fields, "RAW_BYTES");
-  assert.equal(Buffer.from(rawQr, "base64").toString("hex"),
-    head + "06" + "20" + ABC + "07" + (sigHex.length / 2).toString(16).padStart(2, "0") + sigHex + tail);
-  for (const [qr, enc] of [[textQr, "SDK_SAMPLE_TEXT"], [rawQr, "RAW_BYTES"]] as const) {
-    const q = readQr(qr);
-    assert.equal(qrStampValues(q, enc).hash!.toString("hex"), ABC);
-    assert.equal(qrStampValues(q, enc).signature!.toString("hex"), sigHex);
-    assert.equal(q[8].length, 88);
-    assert.equal(q[9], undefined, "tag 9 is never produced without a ZATCA certificate");
+    head + "06" + "2c" + Buffer.from(ABC_B64, "utf8").toString("hex") + "07" + "60" + b64sig.toString("hex") + "08" + "58" + spki(Q).toString("hex"));
+  assert.ok(verifyQrStamp(readQr(textQr), "SDK_SAMPLE_TEXT"));
+  assert.ok(!verifyQrStamp(readQr(textQr), "OFFICIAL_DOCS"), "a QR in one layout does not pass as the other");
+  assert.equal(qrTlv(fields), officialQr, "the default layout is OFFICIAL_DOCS");
+  assert.equal(QR_ENCODING, "OFFICIAL_DOCS");
+});
+
+test("P1363 conversion: hand-made DER with a 1-byte r and a 33-byte (sign-padded) s; and 200 real signatures", () => {
+  const sHex = "ff".repeat(32);
+  const der = Buffer.from("30" + "26" + "02" + "01" + "05" + "02" + "21" + "00" + sHex, "hex"); // r = 5, s = 2^256 − 1 (positive, so a leading 00)
+  assert.equal(derToP1363(der).toString("hex"), "00".repeat(31) + "05" + sHex);
+  assert.throws(() => derToP1363(Buffer.from("3006020105020105", "hex").subarray(0, 7)), /Not a DER/);
+  const { key } = keyFromScalar(B("0x5eed") * B("0x1000000000000000000000000000001"));
+  for (let k = 0; k < 200; k++) {
+    const s = signLocally(createHash("sha256").update(String(k)).digest("base64"), key);
+    const { r, s: sv } = parseDerSig(s.signatureDer);
+    assert.equal(readQr(qrTlv({ sellerName: "x", vatNumber: "1", timestamp: "t", total: "1", vat: "1", signature: s.signatureDer }))[7].toString("hex"), hex32(r) + hex32(sv));
   }
-  assert.equal(qrTlv(fields), textQr, "the default layout is SDK_SAMPLE_TEXT");
-  assert.equal(QR_ENCODING, "SDK_SAMPLE_TEXT");
-  // Observed in every sample of the third-party SDK copy (ZATCA_REQUIREMENTS.md §3): tag lengths 6=44, 7=96, 8=88.
-  assert.deepEqual([6, 7, 8].map((t) => readQr(textQr)[t].length), [44, 96, 88]);
 });
 
 test("signature: DER (not base64 text, not raw r‖s), over the 32 hash bytes, verified by the independent BigInt verifier", () => {
@@ -155,8 +168,8 @@ test("local rules catch the previous encoding and a mismatched stamp; standards 
   const stored = (q: string) => ({ xml: buildXml(d, { signature: { value: s.signature, publicKey: s.publicKey }, qr: q }), invoiceHash: h, qr: q, signature: s.signature, publicKey: s.publicKey });
   const bad = (q: string) => validateDoc(d, stored(q)).filter((r) => !r.ok).map((r) => r.id);
   assert.deepEqual(bad(qr), []);
-  // The other layout is caught by the rules under the configured one.
-  const otherLayout = qrTlv({ ...fields, hash: h, signature: s.signatureDer, publicKey: s.publicKeyDer }, "RAW_BYTES");
+  // The other layout (the SDK-sample text layout) is caught by the rules under the configured one.
+  const otherLayout = qrTlv({ ...fields, hash: h, signature: s.signatureDer, publicKey: s.publicKeyDer }, "SDK_SAMPLE_TEXT");
   assert.deepEqual(bad(otherLayout), ["LOCAL-QR-HASH", "LOCAL-QR-STAMP"]);
   const other = signLocally(h, keyFromScalar(B("2")).key);
   assert.deepEqual(bad(qrTlv({ ...fields, hash: h, signature: other.signatureDer, publicKey: spki(Q) })), ["LOCAL-QR-STAMP"]);

@@ -115,29 +115,55 @@ export function hashOfStoredXml(xml: string) {
 
 /**
  * QR: TLV (tag byte, length byte, value bytes), base64. Tags 1–5 are UTF-8 text. Tags 6–9 for
- * signed documents — the byte layout of 6 and 7 is an OPEN question that only ZATCA's SDK can
- * settle (ZATCA_REQUIREMENTS.md §3); the Security Features standard's text could not be opened here:
- *   SDK_SAMPLE_TEXT (default) — the layout of every sample invoice shipped in a THIRD-PARTY copy of
- *     ZATCA's Java SDK 238-R3.4.8 (provenance unverified, not executed): 6 = the base64 TEXT of the
- *     32-byte SHA-256 hash (44 bytes); 7 = the base64 TEXT of the DER ECDSA signature (96 bytes);
- *   RAW_BYTES — the reading that the standard means the values themselves: 6 = the 32 raw hash
- *     bytes; 7 = the raw DER signature;
- * and in both: 8 = the raw DER SubjectPublicKeyInfo (secp256k1, 88 bytes); 9 = ZATCA's technical CA
- * signature of the stamp's public key (raw DER) — only with a ZATCA certificate, never produced here.
+ * signed documents, in one of two layouts (ZATCA_REQUIREMENTS.md §3):
+ *   OFFICIAL_DOCS (default) — the encodings the official documents specify, as cited in the owner's
+ *     reading of them (Security Features Implementation Standards v1.2 §4.1; Developer Portal
+ *     Manual; not re-opened from this environment, which cannot reach zatca.gov.sa):
+ *       6 = the 32-byte SHA-256 value; 7 = the ECDSA signature in IEEE P1363 form (r‖s, 64 bytes for
+ *       a 256-bit curve); 8 = the 64-byte public key (the point's X‖Y);
+ *   SDK_SAMPLE_TEXT — the layout of the sample invoices in a THIRD-PARTY copy of ZATCA's SDK
+ *     (secondary evidence only; provenance unverified, not executed): 6 = base64 text of the hash,
+ *     7 = base64 text of the DER signature, 8 = DER SubjectPublicKeyInfo.
+ * 9 = ZATCA's technical CA signature of the stamp's public key — only with a ZATCA certificate;
+ * never produced here. Only ZATCA's SDK can confirm either layout.
  */
-export type QrEncoding = "SDK_SAMPLE_TEXT" | "RAW_BYTES";
-export const QR_ENCODING: QrEncoding = "SDK_SAMPLE_TEXT";
+export type QrEncoding = "OFFICIAL_DOCS" | "SDK_SAMPLE_TEXT";
+export const QR_ENCODING: QrEncoding = "OFFICIAL_DOCS";
 
+/** DER ECDSA-Sig-Value → IEEE P1363 r‖s, each left-padded to `size` bytes. */
+export function derToP1363(der: Buffer, size = 32) {
+  if (der[0] !== 0x30 || der[1] !== der.length - 2) throw new Error("Not a DER ECDSA signature.");
+  const out: Buffer[] = [];
+  let i = 2;
+  for (let k = 0; k < 2; k++) {
+    if (der[i] !== 0x02) throw new Error("Not a DER ECDSA signature.");
+    let v = der.subarray(i + 2, i + 2 + der[i + 1]);
+    i += 2 + der[i + 1];
+    while (v.length > size && v[0] === 0) v = v.subarray(1);
+    if (v.length > size) throw new Error("Signature integer longer than the curve size.");
+    out.push(Buffer.concat([Buffer.alloc(size - v.length), v]));
+  }
+  return Buffer.concat(out);
+}
+
+/** DER SubjectPublicKeyInfo (EC) → the raw point X‖Y (64 bytes for a 256-bit curve). */
+export function spkiToRawPoint(spki: Buffer) {
+  const jwk = createPublicKey({ key: spki, format: "der", type: "spki" }).export({ format: "jwk" });
+  if (!jwk.x || !jwk.y) throw new Error("Not an EC public key.");
+  return Buffer.concat([Buffer.from(jwk.x, "base64url"), Buffer.from(jwk.y, "base64url")]);
+}
+
+/** `signature` is the DER signature and `publicKey` the DER SPKI; each layout encodes them as described above. */
 export function qrTlv(fields: { sellerName: string; vatNumber: string; timestamp: string; total: string; vat: string; hash?: string; signature?: Buffer; publicKey?: Buffer; certificateSignature?: Buffer }, encoding: QrEncoding = QR_ENCODING) {
   const hash = fields.hash ? Buffer.from(fields.hash, "base64") : null;
   if (hash && hash.length !== 32) throw new Error("QR tag 6 must carry a 32-byte SHA-256 value.");
-  const text = encoding === "SDK_SAMPLE_TEXT";
+  const official = encoding === "OFFICIAL_DOCS";
   const parts: [number, Buffer][] = [
     [1, Buffer.from(fields.sellerName, "utf8")], [2, Buffer.from(fields.vatNumber, "utf8")], [3, Buffer.from(fields.timestamp, "utf8")],
     [4, Buffer.from(fields.total, "utf8")], [5, Buffer.from(fields.vat, "utf8")],
-    ...(hash ? [[6, text ? Buffer.from(hash.toString("base64"), "utf8") : hash] as [number, Buffer]] : []),
-    ...(fields.signature ? [[7, text ? Buffer.from(fields.signature.toString("base64"), "utf8") : fields.signature] as [number, Buffer]] : []),
-    ...(fields.publicKey ? [[8, fields.publicKey] as [number, Buffer]] : []),
+    ...(hash ? [[6, official ? hash : Buffer.from(hash.toString("base64"), "utf8")] as [number, Buffer]] : []),
+    ...(fields.signature ? [[7, official ? derToP1363(fields.signature) : Buffer.from(fields.signature.toString("base64"), "utf8")] as [number, Buffer]] : []),
+    ...(fields.publicKey ? [[8, official ? spkiToRawPoint(fields.publicKey) : fields.publicKey] as [number, Buffer]] : []),
     ...(fields.certificateSignature ? [[9, fields.certificateSignature] as [number, Buffer]] : []),
   ];
   const out: Buffer[] = [];
@@ -148,10 +174,17 @@ export function qrTlv(fields: { sellerName: string; vatNumber: string; timestamp
   return Buffer.concat(out).toString("base64");
 }
 
-/** The hash and signature bytes carried by QR tags 6 and 7 under an encoding. */
-export function qrStampValues(q: Record<number, Buffer>, encoding: QrEncoding = QR_ENCODING) {
-  const dec = (v?: Buffer) => (v ? (encoding === "SDK_SAMPLE_TEXT" ? Buffer.from(v.toString("utf8"), "base64") : v) : undefined);
-  return { hash: dec(q[6]), signature: dec(q[7]) };
+/** Verify a QR's own stamp: tag 7 over the tag 6 hash bytes with the tag 8 key (secp256k1), under a layout. */
+export function verifyQrStamp(q: Record<number, Buffer>, encoding: QrEncoding = QR_ENCODING) {
+  if (!q[6] || !q[7] || !q[8]) return false;
+  try {
+    if (encoding === "OFFICIAL_DOCS") {
+      if (q[6].length !== 32 || q[7].length !== 64 || q[8].length !== 64) return false;
+      const key = createPublicKey({ format: "jwk", key: { kty: "EC", crv: SIGNING_CURVE, x: q[8].subarray(0, 32).toString("base64url"), y: q[8].subarray(32).toString("base64url") } });
+      return ecVerify("sha256", q[6], { key, dsaEncoding: "ieee-p1363" }, q[7]);
+    }
+    return verifyLocally(q[6].toString("utf8"), q[7].toString("utf8"), q[8].toString("base64"));
+  } catch { return false; }
 }
 
 export function readQr(b64: string) {
