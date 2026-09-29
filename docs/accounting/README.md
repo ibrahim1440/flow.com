@@ -38,10 +38,17 @@ tests that failed before the fix.
 
 - stage 5 (`STAGE_5_DESIGN.md`): fixed-asset register, approval-gated depreciation policies and runs,
   disposal, reversals, register-to-ledger reconciliation, year-end close to retained earnings with the
-  next year's opening balances;
+  next year's opening balances (the close also runs in the browser on an isolated synthetic prior-year
+  database, `scripts/accounting/local-year-end-browser.sh`);
 - stage 6 (`STAGE_6_DESIGN.md`): e-invoice generation (UBL XML, hash chain, QR, local test signature),
   **local** validation, debit notes, a submission adapter that never reaches production, and the VAT
   return reconciled to the ledger. **Nothing has been sent to ZATCA**; this is not ZATCA-compliant.
+  **Official validation is blocked** (ZATCA's documents, SDK and sandbox are refused by this
+  environment's network policy); the QR tag 6–7 layout is unresolved and tag 9 needs a ZATCA
+  certificate (`ZATCA_REQUIREMENTS.md` §2–3).
+
+All local release gates run on one commit with `scripts/accounting/local-release-gates.sh`; results
+and raw outputs: `TEST_RESULTS.md`, `evidence/test-runs/`.
 
 Evidence for stages 5–6: `STAGE_5_6_EVIDENCE.md`.
 `REQUIREMENTS_MATRIX.md` says exactly what exists, what is partial and what is missing. Nothing has

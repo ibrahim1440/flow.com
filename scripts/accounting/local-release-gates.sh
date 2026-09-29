@@ -33,7 +33,9 @@ H="env BASE_URL=http://localhost:3040 FIN_PASSWORD=$FIN_FIXTURE_PASSWORD RUNTIME
 reseed() { timeout 900 npx tsx --env-file=.env scripts/accounting/seed-local-fixture.ts --reset 2>&1 | grep -E "Accounting fixture|Error|Message" >> $TMP/reseed.log; }
 PIDFILE=$TMP/server.pid
 serve() { # next start as the runtime role accounting_app (DML only); $1 = --no-switch to leave provisional posting off
-  [ -f $PIDFILE ] && kill "$(cat $PIDFILE)" 2>/dev/null && sleep 1
+  [ -f $PIDFILE ] && kill "$(cat $PIDFILE)" 2>/dev/null && sleep 2
+  # Never test against a server this run did not start (it could run other code or another configuration).
+  if curl -s -o /dev/null http://localhost:3040/login; then echo "port 3040 is already served by another process; stop it first" | tee -a $S; exit 1; fi
   ( export DATABASE_URL="$ACC_RUNTIME_DATABASE_URL"; unset DIRECT_URL
     if [ "${1:-}" = "--no-switch" ]; then unset ACCOUNTING_PROVISIONAL_POSTING; else export ACCOUNTING_PROVISIONAL_POSTING=isolated-test; fi
     nohup node node_modules/next/dist/bin/next start -p 3040 > $TMP/server.log 2>&1 & echo $! > $PIDFILE )
