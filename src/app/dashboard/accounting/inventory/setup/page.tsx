@@ -28,6 +28,9 @@ type Pool = { id: string; code: string; name: string; nameAr: string | null; kin
 type Absorption = { pools: { id: string; code: string; name: string; kind: string; process: string; basis: string; rate: string; status: string; expenseAccount: { code: string; nameAr: string | null; nameEn: string } | null; actual: string; absorbed: string; unabsorbed: string; overAbsorbed: boolean }[] };
 type Acc = { id: string; code: string; nameAr: string | null; nameEn: string; type: string; allowPosting: boolean; isActive: boolean };
 const LINK: Record<string, string> = { greenBeanId: "GreenBean", coffeeProductId: "CoffeeProduct", materialItemId: "MaterialItem", productSkuId: "ProductSKU" };
+/** The operational record kind an item of each kind is linked to (one accounting item per record). */
+const LINK_FOR: Record<string, string> = { GREEN_COFFEE: "greenBeanId", ROASTED_COFFEE: "coffeeProductId", PACKAGING: "materialItemId", CONSUMABLE: "materialItemId", FINISHED_GOOD: "productSkuId", RESALE_GOOD: "productSkuId" };
+const LINK_LABEL: Record<string, [string, string]> = { greenBeanId: ["البن الأخضر (التشغيل)", "Green coffee (operations)"], coffeeProductId: ["المنتج المحمّص", "Roasted product"], materialItemId: ["مادة التغليف", "Packaging material"], productSkuId: ["وحدة البيع (SKU)", "Sellable SKU"] };
 
 export default function InventorySetupPage() {
   const { L } = useL();
@@ -42,7 +45,8 @@ export default function InventorySetupPage() {
   const [method, setMethod] = useState<string | undefined>();
   const [diff, setDiff] = useState<string | undefined>();
   const [busy, setBusy] = useState(""); const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
-  const [dlg, setDlg] = useState<"" | "band" | "item" | "location" | "unit" | "pool">("");
+  const [dlg, setDlg] = useState<"" | "band" | "item" | "location" | "unit" | "pool" | "link">("");
+  const targets = useApi<Record<string, { id: string; label: string }[]>>(can("inv_master_manage") && (dlg === "item" || dlg === "link") ? "/api/accounting/inventory/pickers?what=link-targets" : null);
   const [f, setF] = useState<Record<string, string>>({});
   const set = (k: string) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   if (error) return <ErrorState error={error} onRetry={reload} />;
@@ -112,7 +116,8 @@ export default function InventorySetupPage() {
                 <Td>{i.code}</Td><Td>{L(i.name, i.nameEn)}</Td><Td><KindBadge kind={i.kind} /></Td><Td>{i.account ?? <Badge tone="bad">{L("غير مربوط", "Not mapped")}</Badge>}</Td><Td>{i.baseUnit}</Td>
                 <Td>{[...i.units.map((u) => `${u.unit} = ${Number(u.factor)} ${i.baseUnit}`), ...(Number(i.yieldPerUnit) !== 1 ? [L(`وزن العائد ${Number(i.yieldPerUnit)} كغ`, `yield ${Number(i.yieldPerUnit)} kg`)] : [])].join(" · ") || "—"}
                   {can("inv_master_manage") && <button className="ms-2 text-[12px] font-bold text-orange hover:underline" onClick={() => open("unit", { itemId: i.id })}>{L("+ وحدة", "+ unit")}</button>}</Td>
-                <Td><span dir="ltr" className="text-[12px]">{link ? `${LINK[link[0]]} · ${link[1]!.slice(0, 10)}` : "—"}</span></Td>
+                <Td><span dir="ltr" className="text-[12px]">{link ? `${LINK[link[0]]} · ${link[1]!.slice(0, 10)}` : "—"}</span>
+                  {!link && can("inv_master_manage") && LINK_FOR[i.kind] && <button className="ms-2 text-[12px] font-bold text-orange hover:underline" onClick={() => open("link", { itemId: i.id, field: LINK_FOR[i.kind] })}>{L("ربط…", "Link…")}</button>}</Td>
               </tr>
             );
           })}</tbody>
@@ -206,7 +211,26 @@ export default function InventorySetupPage() {
         <Field label={L("النوع", "Kind")}><select className={INPUT} value={f.kind} onChange={set("kind")}>{Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}</select></Field>
         <Field label={L("الوحدة الأساسية", "Base unit")}><input className={INPUT} value={f.baseUnit ?? ""} onChange={set("baseUnit")} placeholder="kg" /></Field>
         <Field label={L("وزن العائد لكل وحدة (كغ)", "Yield weight per unit (kg)")} hint={L("1 للأصناف بالكيلو", "1 for items kept in kg")}><input className={INPUT} inputMode="decimal" value={f.yieldPerUnit ?? ""} onChange={set("yieldPerUnit")} /></Field>
-        <Button kind="primary" busy={busy === "item"} onClick={() => run("item", () => api("/api/accounting/inventory/items", { method: "POST", json: { ...f, nameAr: f.name } }))}>{L("حفظ", "Save")}</Button>
+        {LINK_FOR[f.kind] && (
+          <Field label={L(`الربط بالتشغيل (اختياري): ${LINK_LABEL[LINK_FOR[f.kind]][0]}`, `Operational link (optional): ${LINK_LABEL[LINK_FOR[f.kind]][1]}`)} hint={L("تُرحَّل أحداث المخزون التشغيلية لهذا السجل إلى هذا الصنف", "Operational stock events for that record post to this item")}>
+            <select className={INPUT} value={f[LINK_FOR[f.kind]] ?? ""} onChange={set(LINK_FOR[f.kind])}>
+              <option value="">{L("— بلا ربط —", "— no link —")}</option>
+              {(targets.data?.[LINK_FOR[f.kind]] ?? []).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </Field>
+        )}
+        <Button kind="primary" busy={busy === "item"} onClick={() => run("item", () => api("/api/accounting/inventory/items", { method: "POST", json: { ...Object.fromEntries(Object.entries(f).filter(([k]) => !LINK_LABEL[k] || k === LINK_FOR[f.kind])), nameAr: f.name } }))}>{L("حفظ", "Save")}</Button>
+      </Dialog>
+
+      <Dialog open={dlg === "link"} onClose={() => setDlg("")} title={L("ربط الصنف بسجل تشغيلي", "Link the item to an operational record")} sub={L("مرة واحدة لكل صنف؛ بعدها أعد محاولة الأحداث المحجوبة من قائمة الاستثناءات", "Once per item; then retry the blocked events from the exception queue")}>
+        {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+        {f.field && <Field label={L(LINK_LABEL[f.field][0], LINK_LABEL[f.field][1])}>
+          <select className={INPUT} value={f.targetId ?? ""} onChange={set("targetId")}>
+            <option value="">{targets.data ? L("— اختر —", "— choose —") : L("جارٍ التحميل…", "Loading…")}</option>
+            {(targets.data?.[f.field] ?? []).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        </Field>}
+        <Button kind="primary" busy={busy === "link"} disabled={!f.targetId} onClick={() => run("link", () => api(`/api/accounting/inventory/items/${f.itemId}/link`, { method: "POST", json: { field: f.field, targetId: f.targetId } }))}>{L("ربط", "Link")}</Button>
       </Dialog>
 
       <Dialog open={dlg === "unit"} onClose={() => setDlg("")} title={L("تحويل وحدة", "Unit conversion")}>

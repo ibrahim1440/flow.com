@@ -68,6 +68,34 @@ export async function createItem(b: Record<string, unknown>, userId: string) {
   });
 }
 
+/** Kinds an operational record may be linked to (one accounting item per record). */
+const LINK_KINDS: Record<string, InvItemKind[]> = {
+  greenBeanId: ["GREEN_COFFEE"], coffeeProductId: ["ROASTED_COFFEE"], materialItemId: ["PACKAGING", "CONSUMABLE"], productSkuId: ["FINISHED_GOOD", "RESALE_GOOD"],
+};
+
+/**
+ * Link an existing, not yet linked item to an operational record, so operational stock events for
+ * that record can post (a BLOCKED "not linked" event is then retried from the exception queue).
+ */
+export async function linkItem(itemId: string, b: Record<string, unknown>, userId: string) {
+  const field = String(b.field ?? ""), targetId = text(b.targetId, 40);
+  if (!LINK_KINDS[field] || !targetId) throw new AccountingError("Choose the kind of operational record and the record.", 400);
+  return ledgerTx(async (tx) => {
+    const item = await tx.invItem.findUnique({ where: { id: itemId } });
+    if (!item) throw new AccountingError("Item not found.", 404);
+    if (item.greenBeanId || item.coffeeProductId || item.materialItemId || item.productSkuId) throw new AccountingError(`${item.code} is already linked to an operational record.`, 409);
+    if (!LINK_KINDS[field].includes(item.kind)) throw new AccountingError(`A ${item.kind.toLowerCase().replace(/_/g, " ")} item cannot be linked to that kind of record.`, 400);
+    const exists = field === "greenBeanId" ? await tx.greenBean.findUnique({ where: { id: targetId } }) : field === "coffeeProductId" ? await tx.coffeeProduct.findUnique({ where: { id: targetId } })
+      : field === "materialItemId" ? await tx.materialItem.findUnique({ where: { id: targetId } }) : await tx.productSKU.findUnique({ where: { id: targetId } });
+    if (!exists) throw new AccountingError("Operational record not found.", 404);
+    const taken = await tx.invItem.findFirst({ where: { [field]: targetId } as Prisma.InvItemWhereInput });
+    if (taken) throw new AccountingError(`That record is already linked to ${taken.code}.`, 409);
+    const updated = await tx.invItem.update({ where: { id: itemId }, data: { [field]: targetId } });
+    await auditAccounting(tx, { action: "inventory.item.link", entityType: "inv_item", entityId: itemId, userId, after: { [field]: targetId } });
+    return updated;
+  });
+}
+
 export async function setItemUnit(itemId: string, unit: string, factorIn: unknown, userId: string) {
   const factor = qty4(factorIn, "Factor");
   if (factor.lte(0)) throw new AccountingError("A conversion factor must be positive.", 400);

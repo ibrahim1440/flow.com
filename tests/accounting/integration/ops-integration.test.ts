@@ -228,4 +228,24 @@ describe("stage 4b — operational stock events become inventory documents", () 
     const list = await Ops.listOpsEvents({ status: "IGNORED" });
     assert.equal(list.rows.length, 4, "the dismissed roast, the no-effect cancellation, the opening quantity and the kilogram lot");
   });
+
+  test("an accountant links an unlinked item to its operational record; a blocked event then posts on retry", async () => {
+    const w = await world();
+    await approveOpsPolicy(w);
+    const { linkItem } = await import("../../../src/lib/accounting/inventory-service");
+    const p = await prisma.coffeeProduct.create({ data: { productNameEn: "Kenya AA (synthetic)", countryEn: "Kenya" } as never });
+    const bean = await prisma.greenBean.create({ data: { serialNumber: "GB-SYN-9", beanType: "Kenya (synthetic)", country: "Kenya", quantityKg: 0 } });
+    await prisma.invItem.update({ where: { id: w.I.green.id }, data: { greenBeanId: bean.id } });
+    const buy = await record({ kind: "PURCHASE", sourceId: "pur-k", payload: { purchaseId: "pur-k", greenBeanId: bean.id, quantity: 50, costPerUnit: 40, supplierId: w.S.green } });
+    assert.equal((await Ops.processOpsEvent(buy.id)).status, "POSTED");
+    const roast = await record({ kind: "ROAST", sourceId: "rb-k", payload: { batchId: "rb-k", batchNumber: "R-K", greenBeanId: bean.id, productId: p.id, greenKg: 10, roastedKg: 8.5, wasteKg: 1.5 } });
+    assert.equal((await Ops.processOpsEvent(roast.id)).status, "BLOCKED");
+    await rejects(linkItem(w.I.green.id, { field: "coffeeProductId", targetId: p.id }, w.prep), /already linked/);
+    await rejects(linkItem(w.I.bag.id, { field: "coffeeProductId", targetId: p.id }, w.prep), /cannot be linked to that kind/);
+    await linkItem(w.I.roasted.id, { field: "coffeeProductId", targetId: p.id }, w.prep);
+    const other = await prisma.invItem.create({ data: { code: "RST-KEN-2", name: "second", kind: "ROASTED_COFFEE", baseUnit: "kg", createdBy: w.prep } });
+    await rejects(linkItem(other.id, { field: "coffeeProductId", targetId: p.id }, w.prep), /already linked to RST-ETH/);
+    assert.equal((await Ops.retryOpsEvent(roast.id, w.appr)).status, "POSTED", "the blocked roast posts once the item is linked");
+    assert.equal(await prisma.finAuditLog.count({ where: { action: { contains: "inventory.item.link" } } }), 1, "the link is audited");
+  });
 });

@@ -150,6 +150,7 @@ async function main() {
   const opsPerms = buildDefaultPermissions("admin");
   opsPerms.accounting = { access: "none" }; opsPerms.finance = { access: "none" };
   await user("ops.roastery", "فيصل — التشغيل", opsPerms);
+  await user("ops.roastery.en", "Faisal — operations (EN)", opsPerms, "en");
   const salesAdmin = await user("sales.plans", "مدير المبيعات", perms("none"));
   const rep1 = await user("rep.fahad", "فهد الدوسري", perms("none"));
   const rep2 = await user("rep.reem", "ريم الزهراني", perms("none"));
@@ -415,6 +416,15 @@ async function main() {
     { productSkuId: sku.id, type: "ROASTED_COFFEE", coffeeProductId: cp.id, quantityPerUnit: 0.25, unitOfMeasure: "KG" },
     { productSkuId: sku.id, type: "MATERIAL", materialItemId: bagMat.id, quantityPerUnit: 1, unitOfMeasure: "PIECE" },
   ] });
+  // A 500 g SKU whose accounting item exists but is NOT linked yet: packing it blocks until an
+  // accountant links the item in inventory setup (browser test of recovery from a blocked posting).
+  const sku500 = await prisma.productSKU.create({ data: { productId: cp.id, skuCode: "ACC-ETH-500", weightGrams: 500, price: 48 } });
+  await prisma.bomComponent.createMany({ data: [
+    { productSkuId: sku500.id, type: "ROASTED_COFFEE", coffeeProductId: cp.id, quantityPerUnit: 0.5, unitOfMeasure: "KG" },
+    { productSkuId: sku500.id, type: "MATERIAL", materialItemId: bagMat.id, quantityPerUnit: 1, unitOfMeasure: "PIECE" },
+  ] });
+  const ship500 = await prisma.order.create({ data: { orderNumber: 7021, customerId: K1, status: "Ready for Shipping", approvalStatus: "Yes", notes: "fixture:accounting" } });
+  await prisma.orderItem.create({ data: { orderId: ship500.id, beanTypeName: "إثيوبي يرغاتشيفي 500 غ", quantityKg: 1, quantityUnits: 2, productSkuId: sku500.id, productId: cp.id } });
   // An order line ready to ship (for the operational flow over HTTP: roast → QC → pack → dispatch → invoice).
   const shipOrder = await prisma.order.create({ data: { orderNumber: 7020, customerId: K1, status: "Ready for Shipping", approvalStatus: "Yes", notes: "fixture:accounting" } });
   await prisma.orderItem.create({ data: { orderId: shipOrder.id, beanTypeName: "إثيوبي يرغاتشيفي 250 غ", quantityKg: 2, quantityUnits: 8, productSkuId: sku.id, productId: cp.id } });
@@ -431,6 +441,7 @@ async function main() {
     flour: await item("FLOUR", "دقيق", "BAKERY_INGREDIENT", "kg"),
     butter: await item("BUTTER", "زبدة", "BAKERY_INGREDIENT", "kg"),
     croissant: await item("CROISSANT", "كرواسون", "FINISHED_GOOD", "piece", { yieldPerUnit: "0.08" }),
+    sku500: await item("SKU-ETH-500", "إثيوبي 500 غ", "FINISHED_GOOD", "unit", { yieldPerUnit: "0.5" }),   // not linked (see above)
   };
   const lband = async (code: string, nameAr: string, process: string, pct: string, approve = true) => {
     const b = await inv.createLossBand({ code, name: `${code} (synthetic test band)`, nameAr, process, maxLossPercent: pct }, prep);

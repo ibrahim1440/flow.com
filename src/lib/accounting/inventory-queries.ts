@@ -231,3 +231,21 @@ export async function inventoryMasters() {
     bands: bands.map((b) => ({ ...b, maxLossPercent: dec(b.maxLossPercent).toFixed(2), createdByName: people.get(b.createdBy) ?? b.createdBy, approvedByName: b.approvedBy ? people.get(b.approvedBy) ?? b.approvedBy : null })),
   };
 }
+
+/** Operational records not yet linked to an inventory item, by kind (for the link pickers). */
+export async function linkTargets() {
+  const items = await prisma.invItem.findMany({ select: { greenBeanId: true, coffeeProductId: true, materialItemId: true, productSkuId: true } });
+  const used = new Set(items.flatMap((i) => [i.greenBeanId, i.coffeeProductId, i.materialItemId, i.productSkuId]).filter(Boolean) as string[]);
+  const [beans, products, materials, skus] = await Promise.all([
+    prisma.greenBean.findMany({ select: { id: true, serialNumber: true, beanType: true, beanTypeAr: true }, orderBy: { serialNumber: "asc" }, take: 500 }),
+    prisma.coffeeProduct.findMany({ select: { id: true, productNameEn: true, productNameAr: true }, orderBy: { productNameEn: "asc" }, take: 500 }),
+    prisma.materialItem.findMany({ select: { id: true, code: true, name: true, nameAr: true }, orderBy: { code: "asc" }, take: 500 }),
+    prisma.productSKU.findMany({ select: { id: true, skuCode: true, weightGrams: true }, orderBy: { skuCode: "asc" }, take: 500 }),
+  ]);
+  return {
+    greenBeanId: beans.filter((b) => !used.has(b.id)).map((b) => ({ id: b.id, label: `${b.serialNumber} · ${b.beanTypeAr ?? b.beanType}` })),
+    coffeeProductId: products.filter((p) => !used.has(p.id)).map((p) => ({ id: p.id, label: p.productNameAr ?? p.productNameEn })),
+    materialItemId: materials.filter((m) => !used.has(m.id)).map((m) => ({ id: m.id, label: `${m.code} · ${m.nameAr ?? m.name}` })),
+    productSkuId: skus.filter((k) => !used.has(k.id)).map((k) => ({ id: k.id, label: `${k.skuCode} · ${k.weightGrams} g` })),
+  };
+}
