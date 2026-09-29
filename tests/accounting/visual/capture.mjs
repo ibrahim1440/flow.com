@@ -123,6 +123,12 @@ const SHOTS = [
   { id: "ACC-50", route: "/dashboard/accounting/inventory/margin" },
   { id: "ACC-51", route: "/dashboard/accounting/inventory/setup", act: async (p) => { await p.getByText(/مجمّعات|تكاليف التحويل|Conversion/).first().scrollIntoViewIfNeeded().catch(() => undefined); } },
   { id: "ACC-32-costing", route: "/dashboard/accounting/receivables", act: firstSale("POSTED") },
+  { id: "ACC-52", route: "/dashboard/accounting/payables", user: "acc.preparer", act: async (p) => {
+    const id = await p.evaluate(async () => (await (await fetch("/api/accounting/bills?status=POSTED")).json()).rows.find((r) => r.kind !== "CREDIT_NOTE" && r.supplierInvoiceNo === "G-1")?.id);
+    await p.goto(`${BASE}/dashboard/accounting/payables/new?creditFor=${id}`); } },
+  { id: "ACC-53", route: "/dashboard/accounting/payables", act: async (p) => {
+    const id = await p.evaluate(async () => (await (await fetch("/api/accounting/bills?status=POSTED")).json()).rows.find((r) => r.kind === "CREDIT_NOTE")?.id);
+    await p.goto(`${BASE}/dashboard/accounting/payables/${id}`); } },
   { id: "OPS-purchases", route: "/dashboard/purchases", user: "ops.roastery" },
   { id: "OPS-production", route: "/dashboard/production", user: "ops.roastery", act: async (p) => { await p.getByText(/جميع الدفعات/).first().click(); } },
   { id: "OPS-packaging", route: "/dashboard/packaging", user: "ops.roastery" },

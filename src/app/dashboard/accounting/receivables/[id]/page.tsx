@@ -95,7 +95,7 @@ export default function SalesDocPage() {
       <div className="flex flex-col gap-0.5">
         {l.stockTreatment === "GOODS" ? <Badge tone="brand">{L("بضاعة", "Goods")}</Badge> : l.stockTreatment === "NON_STOCK" ? <Badge tone="info">{L("غير مخزني", "Non-stock")}</Badge> : <Badge tone="warn">{it ? L("بضاعة (من المنتج)", "Goods (from product)") : L("غير مصنّف", "Unclassified")}</Badge>}
         {it && <span className="text-[11px] text-brown">{it.code} · {it.name}{l.unit && l.unit !== it.baseUnit ? ` · ${l.unit}` : ""}</span>}
-        {st && st.status && <span className="text-[11px] text-brown">{st.status}{st.cost ? ` · ${amt(st.cost)}` : ""}{st.reason ? ` — ${st.reason}` : ""}</span>}
+        {st && st.status && <span className="text-[11px] text-brown"><CostingStatus status={st.status} />{st.cost ? ` · ${amt(st.cost)}` : ""}{st.reason ? ` — ${explain(st.reason)}` : ""}</span>}
       </div>
     );
   };
@@ -257,7 +257,7 @@ export default function SalesDocPage() {
           <CardTitle title={L("سجل التدقيق", "Audit trail")} sub={L("لا يمكن تعديله أو حذفه", "Cannot be edited or deleted")} />
           <Table>
             <thead><tr><Th>{L("الوقت", "Time")}</Th><Th>{L("الإجراء", "Action")}</Th><Th>{L("المستخدم", "User")}</Th><Th>{L("السبب", "Reason")}</Th></tr></thead>
-            <tbody>{d.audit.map((a, i) => <tr key={i}><Td className="whitespace-nowrap">{when(a.createdAt)}</Td><Td>{({ "invoice.create": L("إنشاء", "Create"), "credit_note.create": L("إنشاء", "Create"), "sales_document.update": L("تعديل", "Edit"), "sales_document.submit": L("تقديم", "Submit"), "sales_document.approve": L("اعتماد", "Approve"), "sales_document.reject": L("رفض", "Reject"), "sales_document.post": L("ترحيل", "Post"), "sales_document.reverse": L("عكس", "Reverse"), "credit.allocate": L("تخصيص رصيد", "Allocate credit") } as Record<string, string>)[a.action] ?? a.action}</Td><Td>{who(a.userId)}</Td><Td>{a.reason ?? "—"}</Td></tr>)}</tbody>
+            <tbody>{d.audit.map((a, i) => <tr key={i}><Td className="whitespace-nowrap">{when(a.createdAt)}</Td><Td>{({ "invoice.create": L("إنشاء", "Create"), "credit_note.create": L("إنشاء", "Create"), "sales_document.update": L("تعديل", "Edit"), "sales_document.submit": L("تقديم", "Submit"), "sales_document.approve": L("اعتماد", "Approve"), "sales_document.reject": L("رفض", "Reject"), "sales_document.post": L("ترحيل", "Post"), "sales_document.reverse": L("عكس", "Reverse"), "credit.allocate": L("تخصيص رصيد", "Allocate credit"), "inventory.costing.status": L("حالة تكلفة المبيعات", "Cost-of-sales status"), "inventory.costing.retry": L("إعادة محاولة التكلفة", "Costing retried") } as Record<string, string>)[a.action] ?? a.action}</Td><Td>{a.userId === "system:accounting-engine" ? L("النظام المحاسبي", "Accounting engine") : who(a.userId)}</Td><Td>{a.reason ?? "—"}</Td></tr>)}</tbody>
           </Table>
         </Card>
       </div>

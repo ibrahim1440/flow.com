@@ -88,7 +88,7 @@ async function main() {
     await prisma.$executeRawUnsafe(`DELETE FROM "FinishedGoodsLot" WHERE id IN (${fxLots})`);
     await prisma.$executeRawUnsafe(`DELETE FROM "InventoryMovement" WHERE "sourceDocId" IN (${fxBatches}) OR "referenceEntityId" IN (SELECT id FROM "GreenBean" WHERE "serialNumber" LIKE 'ACC-%') OR "referenceEntityId" IN (SELECT id FROM "MaterialItem" WHERE code LIKE 'ACC-%')`);
     await prisma.$executeRawUnsafe(`DELETE FROM "RoastingBatch" WHERE id IN (${fxBatches})`);
-    await prisma.$executeRawUnsafe(`DELETE FROM "PurchaseRecord" WHERE notes LIKE 'fixture:accounting%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM "PurchaseRecord" WHERE notes LIKE 'fixture:accounting%' OR "supplierId" IN (SELECT id FROM "Supplier" WHERE contact = 'fixture:accounting')`);
     await prisma.$executeRawUnsafe(`DELETE FROM "ProductSKU" WHERE "skuCode" LIKE 'ACC-%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "CoffeeProduct" WHERE "productNameEn" LIKE '%(fixture)'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "GreenBean" WHERE "serialNumber" LIKE 'ACC-%'`);
