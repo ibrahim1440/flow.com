@@ -1,7 +1,7 @@
 # Stage 4b — requirement → evidence
 
 Repository [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com),
-branch `feature/accounting-ledger-core` (**unpushed**). Test counts and the commit they ran on (`d49d8b6`) are in
+branch `feature/accounting-ledger-core` (**unpushed**). Test counts and the commit they ran on (`efa357a`) are in
 [`TEST_RESULTS.md`](TEST_RESULTS.md). These are local results on synthetic data, produced and
 reported by the implementer; they are not an independent certification, and nothing here is
 accepted.
@@ -18,18 +18,19 @@ Categories:
 | 1.1 | Explicit, idempotent integration: receipts (purchases) | V | `ops-integration.test.ts` (event → RECEIPT, one document per event); `ops-integration.test.mjs` through `POST /api/purchases` |
 | 1.2 | … roasting | V | both tests; HTTP through `POST /api/roasting-batches` incl. conversion-cost absorption |
 | 1.3 | … roast cancellation (restock / write-off / not yet in the accounts) | V | `ops-integration.test.ts` (restock at original cost; cancelled before posting → dismissed); HTTP `DELETE /api/roasting-batches/[id]?restock=true` |
-| 1.4 | … blending | V (event → document) / I (route) | `ops-integration.test.ts` test 3 (two source batches → blend at 176.47); `POST /api/roasting-batches/blend` is instrumented but not driven over HTTP |
+| 1.4 | … blending | V | `ops-integration.test.ts` test 3 (two source batches → blend at 176.47); HTTP through `POST /api/roasting-batches/blend` |
 | 1.5 | … packaging (standard, partial, top-up) | V | `ops-integration.test.ts` (standard + partial + top-up by hand); HTTP through `POST /api/roasting-batches/[id]/pack` (standard) |
 | 1.6 | … transfers between accounting locations | V (stage 4 documents) / X (operational) | the operational system has no locations; dispatch is the only operational transfer (to DLV) |
 | 1.7 | … dispatch | V | both tests; HTTP through `POST /api/deliveries`, then the invoice built from the order takes the dispatched cost |
 | 1.8 | … customer returns | V | `CustomerReturn` workflow (§3); the operational system has no return screen, so returns are recorded in accounting with warehouse evidence |
-| 1.9 | … counts / adjustments | V (green coffee) / I (materials) | `ops-integration.test.ts`; HTTP `POST /api/inventory/adjust`; `PATCH /api/materials/[id]` is instrumented but not driven by a test |
+| 1.9 | … counts / adjustments | V | `ops-integration.test.ts`; HTTP `POST /api/inventory/adjust` and `PATCH /api/materials/[id]` |
+| 1.9a | … QC rejection (terminal) | V | roasted coffee still on the batch written off as QC waste, once per batch: `ops-integration.test.ts` test 3; HTTP through `POST /api/qc/[batchId]/finalize` |
 | 1.10 | Authoritative quantity per workflow defined | V | `STAGE_4B_DESIGN.md` §1 table |
 | 1.11 | Approvals preserved | V | held document approved by someone else (`ops-integration.test.ts` test 1: the recorder cannot approve); loss above band held |
 | 1.12 | Pending / failed effects exposed | V | status endpoint asserted over HTTP; chips on the purchases, production, packaging and dispatch screens and the exception queue captured in the browser after the HTTP flow (`evidence/app/OPS-*.png`, `ACC-48-*.png`); the accessibility audit did not cover the operational screens |
 | 1.13 | Unknown stock writers detected | V | `ops-integration.test.ts` (UNINTEGRATED; writers with an event are not flagged) |
 | 1.14 | Reconciliation detects exceptions without re-entry | V | `ops-integration.test.ts` (MATCHED and EXCEPTION rows) |
-| 1.15 | Flow proven through the existing operational screens | V (their API routes and rendered state) / X (clicking through the screens) | `ops-integration.test.mjs` drives the routes the screens call, as an operations user; the screens are captured showing the result. No browser test clicks through the operational forms |
+| 1.15 | Flow proven through the existing operational screens | V (purchase and roast forms in the browser; every workflow through its route) / I (packing and dispatch forms clicked in a browser) | `ops-forms.mjs` fills the purchase and roast-to-stock forms as an operations user; `ops-integration.test.mjs` drives every operational route; screens captured showing the result |
 | 2.1 | Durable costing, retries, visible exception queue, explicit status | V | `stage4b-workflows.test.ts` B, `stage4-gaps.test.ts`; queue and invoice status captured (`ACC-48-costing`, `ACC-32-costing`) |
 | 2.2 | No silent skipping; non-stock lines explicit | V | `stage4-gaps.test.ts` |
 | 2.3 | Actual fulfilment location; unit conversion | V | `stage4b-workflows.test.ts` A (carton of 12 l at the café) |
@@ -55,6 +56,6 @@ Categories:
 | 6.4 | Regression tests written before fixes | V (stage 4 gaps, 4b workflows) / X (operational integration: written with the code) | `evidence/test-runs/*-before-fix.txt` |
 | 6.5 | Hand-worked multi-period examples | V | chain (Jan–Mar + today), A (Feb, Mar, today) |
 | 6.6 | Release gates | X | a release package is not proposed; migration rehearsal on a production copy is required first (MIGRATION_AND_CUTOVER) |
-| 7.1 | Figma frames for the new screens | V (ACC-48..51, drawn after the code) / X (invoice fields, supplier credit note editor, ops status chip) | FIGMA_PARITY page 21 |
+| 7.1 | Figma frames for the new screens | V (drawn after the code) | FIGMA_PARITY page 21: ACC-48..52, ACC-31b, ACC-32b, OPS-01 |
 | 7.2 | Preview deployment, Neon rehearsal | C | GitHub App not installed on flow.com (push 403); Vercel team scope; no Neon access from this sandbox |
 | 7.3 | Credential rotation | D (owner) | CREDENTIAL_INCIDENT.md; not performed, not claimed |

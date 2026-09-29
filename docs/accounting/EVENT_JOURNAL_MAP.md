@@ -53,6 +53,7 @@ Idempotency keys: `payables:<id>:<event>`, `bank:<id>:confirmed|voided`, `receiv
 | Source | Event | Gate | Journal |
 |---|---|---|---|
 | Operational stock write (purchase, roast, cancel, blend, pack, dispatch, count, opening) | `InvOpsEvent` in the same transaction → one inventory document (`sourceType OPS`) → `inv.document.posted` | `inventory.operations` (auto-approval within tolerance; otherwise an accountant approves) + the stage 4 gates | by document type: RECEIPT, PRODUCTION, ADJUSTMENT (Dr/Cr inventory vs 5700), ISSUE, TRANSFER to DLV (Dr 1176 / Cr 1174) |
+| QC rejection of a batch (terminal) | `QC_REJECT` event in the QC transaction → ISSUE | as operational events | Dr 5500 (QC waste) / Cr 1173 for the roasted kg still on the batch |
 | `InventoryMovement` without an event in its transaction | `UNINTEGRATED` event (DB trigger), BLOCKED | — | none until an accountant posts a document and links it, or dismisses it with a reason |
 | `CustomerReturn` POSTED | one `CUSTOMER_RETURN` document (or TRANSFER DLV → stock if the invoice was reversed) + ISSUE for damaged units | four-eyes on the return + stage 4 gates | Dr finished goods / Cr 5100 (or Cr 1176) · damaged: Dr 5700 / Cr finished goods |
 | `SupplierBill` CREDIT_NOTE POSTED | `ap.credit_note.posted` | `payables.recognition` | Dr AP_CONTROL (open item SUPPLIER_CREDIT) / Cr line accounts (GRNI for stock lines) · Cr INPUT_VAT |

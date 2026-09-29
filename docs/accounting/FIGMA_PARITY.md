@@ -85,9 +85,10 @@ design for review, not a design the code was derived from.
 | ACC-50 Gross margin with reconciliation | [`426:423`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=426-423) | `/dashboard/accounting/inventory/margin` | ACC-50-app-1440.png | Frame after code | Figures illustrative (synthetic), not the fixture's |
 | ACC-51 Conversion-cost pools and absorption | [`426:916`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=426-916) | `/dashboard/accounting/inventory/setup` (pools section) | ACC-51-app-1440.png | Frame after code | The new-pool dialog is not drawn |
 
-Not drawn: the invoice editor's stock-treatment, unit, fulfilment-location and credit-type fields,
-the invoice costing card, the supplier credit-note editor and allocation, and the accounting-status
-chip on the operational screens. They are captured from the app (`ACC-32-costing`, `OPS-*`) only.
+| ACC-31b Invoice editor: goods / non-stock, unit, fulfilment location, reissue, credit type | [`427:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=427-2) | `/dashboard/accounting/receivables/new` | ACC-31-app-1440.png | Frame after code | The frame shows three filled lines and the credit-note section together; the app shows the credit-note section only for a credit note |
+| ACC-32b Invoice cost-of-sales card and line costing | [`427:459`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=427-459) | `/dashboard/accounting/receivables/[id]` | ACC-32-costing-app-1440.png | Frame after code | Frame shows a blocked invoice; the fixture's captured invoice is awaiting the timing decision |
+| ACC-52 Supplier credit note: editor, settlement, application | [`427:862`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=427-862) | `/dashboard/accounting/payables/new?creditFor=…`, `/dashboard/accounting/payables/[id]` | ACC-52-app-1440.png, ACC-53-app-1440.png | Frame after code | Editor and posted state drawn in one frame; the app has them on two screens |
+| OPS-01 Production batches with the accounting-status chip | [`427:1326`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=427-1326) | `/dashboard/production` (also purchases, packaging, dispatch) | OPS-production-app-1440.png, OPS-form-*.png | Frame after code | Drawn inside the accounting shell for speed; the app uses the operations sidebar. Reasons show on hover in the app |
 
 Fourth audit (Stage 4, 2026-09-28): ACC-40..47 added to `a11y.mjs`: 0 serious or critical findings
 (same scope and caveats as above). Fifth audit (stage 4b): ACC-48..51 (and ACC-48 at 390 px) added: 0 serious or critical findings.

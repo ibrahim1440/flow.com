@@ -29,6 +29,8 @@
 | 23 | Gross margin omitted credit notes and could not be tied to the ledger | per-invoice COGS only | all receivables revenue, costing status per row, reconciliation to revenue, 4900 and 5100 with every difference explained | `stage4-gaps.test.ts` |
 | 24 | A landed cost or price difference on green coffee already roasted went to COGS | consumed share expensed | traced through production, transfers, sales and waste | `stage4-gaps.test.ts`, chain test |
 | 25 | A cost layer changed twice in one transaction failed the deferred layer check (found while re-deriving the chain test) | the check compared the row version of each change, not the current row | the check reads the current row | chain test (`evidence/test-runs/stage4b-layer-check-before-fix.txt`) |
+| 27 | The HTTP request parsers dropped the stage 4b invoice, credit-note and supplier credit-note fields, so those features were unreachable over HTTP (found by the UI work) | parsers whitelisted the stage 3 fields only | parsers pass the new fields; bill list carries `kind` | `ops-integration.test.mjs` (credit notes over HTTP; a credit note without a type is refused) |
+| 28 | A QC-rejected batch's roasted coffee stayed in the accounts | QC rejection writes no stock movement | QC rejection (terminal) writes the remaining roasted coffee off as QC waste, once per batch | `ops-integration.test.ts` test 3, `ops-integration.test.mjs` |
 | 26 | Operational stock changes (purchase, roast, pack, dispatch, counts) never reached the accounts except through manual drafts | no integration | operational events in the same transaction, automatic documents under an approved policy, UNINTEGRATED detection, exception queue, reconciliation | `ops-integration.test.ts` (3), `ops-integration.test.mjs` (HTTP) |
 
 ## Pre-existing (reproduced identically on `main` @ `fc64c05`)
@@ -54,8 +56,7 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
 - Stage 4 limitations: `STAGE_4_DESIGN.md` §7, as revised by stage 4b (`STAGE_4B_DESIGN.md` §10):
   labour/overhead absorption, tracing of later cost changes, supplier credit notes, invoice units and
   fulfilment location are now implemented; still open are one accounting location for operational
-  stock, kilogram lots from the old packing path, QC-rejected batches, re-dating after a roast's
-  date is edited, no in-transit transfers, and migrations not rehearsed on a production copy.
+  stock, kilogram lots from the old packing path, re-dating after a roast's date is edited, no in-transit transfers, and migrations not rehearsed on a production copy.
 - Open items on ledger lines start with the `20260930090000_accounting_open_items` migration. The
   branch has no journals from before it, but a database that posted receivables/payables journals
   under an earlier build of this branch would need them re-derived; production has none.

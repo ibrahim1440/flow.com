@@ -21,6 +21,7 @@ operational system itself treats as authoritative; the accounts never re-derive 
 | Purchases → `POST /api/purchases` | `PurchaseRecord.quantity` (kg) × `costPerUnit` | RECEIPT at the sales-default location, Dr inventory / Cr GRNI |
 | Roasting → `POST /api/roasting-batches` | batch `greenBeanQuantity` in, `roastedBeanQuantity` out | PRODUCTION (process ROASTING, approved band, approved conversion pools) |
 | Roasting → `DELETE /api/roasting-batches/[id]` | the batch's kg; `restock` flag | restock: ADJUSTMENT (roasted out, green back at the cost it left at); no restock: ISSUE (write-off); not yet in the accounts: the roast is dismissed |
+| QC → `POST /api/qc/[batchId]/finalize`, `POST /api/qc-records/bulk-finalize` (outcome Rejected, a terminal state) | roasted kg still on the batch | ISSUE (QC waste, 5500) — once per batch |
 | Blending → `POST /api/roasting-batches/blend` | kg taken from each source batch; blend kg out | PRODUCTION (BLENDING) |
 | Packing → `POST /api/roasting-batches/[id]/pack` (`commitPackaging`) | roasted grams drawn (packed + recorded loss), materials drawn (BOM), whole units per standard lot; a partial package as the share of a unit its grams hold; a top-up as the difference (a package that reaches weight becomes exactly one unit) | PRODUCTION (PACKING), outputs carry `lotId` |
 | Dispatch → `POST /api/deliveries` | whole SKU units (`consumeFinishedUnits`) | TRANSFER to "delivered, not invoiced" (DLV, account 1176), carrying `orderItemId` and `lotId` |
@@ -66,8 +67,11 @@ then cost of sales, then ledger events.
 
 Proof through the operational routes: `tests/accounting/http/ops-integration.test.mjs` logs in as an
 operations user with no accounting access and drives purchase → roast → QC → pack → dispatch →
-invoice (built from the order) → count → cancelled batch, then checks each document, journal and the
-invoice's cost of sales against the dispatched cost.
+invoice (built from the order) → credit notes → count → cancelled batch → blend → QC rejection →
+packaging-material count, then checks each document, journal and the invoice's cost of sales against
+the dispatched cost. Proof through the screens themselves: `tests/accounting/visual/ops-forms.mjs`
+fills the purchase form and the roast-to-stock form in the browser and checks the accounting chip
+and the posted documents.
 
 ## 2. Cost of sales is durable (review item 2)
 
@@ -177,10 +181,7 @@ together with the implementation, not before it.
   exception to resolve by hand.
 - **One accounting location** for operational stock (the sales-default location); the operational
   system has no locations.
-- A QC-rejected batch has no operational stock movement, so its roasted coffee stays in the accounts
-  until the batch is cancelled or written off.
 - Editing a roast's date after it posted does not re-date the posted document.
 - Partial packages are carried as fractions of a unit (4 decimals); top-ups telescope so a completed
   package is exactly one unit.
-- Figma frames for the new screens, browser captures and accessibility runs for them: see
-  FIGMA_PARITY.md and TEST_RESULTS.md for what was and was not done.
+- Figma frames for the new screens were drawn after the code (FIGMA_PARITY page 21).
