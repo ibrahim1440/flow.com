@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, ArrowLeftRight, PieChart, CalendarRange, FileBarChart, CalendarClock, CheckCircle2, ReceiptText, Landmark, FileText, Package, Building2 } from "lucide-react";
+import { LayoutDashboard, ArrowLeftRight, PieChart, CalendarRange, FileBarChart, CalendarClock, CheckCircle2, ReceiptText, Landmark, FileText, Package, Building2, BadgePercent } from "lucide-react";
 import { FinanceContext, api, useL } from "../finance/_components/ui";
 import "../finance/finance.css";
 
@@ -17,6 +17,7 @@ const TABS = [
   { href: "/dashboard/accounting/receivables", ar: "الذمم المدينة", en: "Receivables", icon: FileText, badge: "sales" as const },
   { href: "/dashboard/accounting/inventory", ar: "المخزون", en: "Inventory", icon: Package, badge: "inventory" as const },
   { href: "/dashboard/accounting/assets", ar: "الأصول الثابتة", en: "Fixed assets", icon: Building2 },
+  { href: "/dashboard/accounting/tax", ar: "الضريبة والفوترة الإلكترونية", en: "Tax & e-invoicing", icon: BadgePercent },
   { href: "/dashboard/accounting/bank", ar: "البنك", en: "Bank", icon: Landmark, badge: "bank" as const },
   { href: "/dashboard/accounting/automation", ar: "الترحيل الآلي والسياسات", en: "Automatic posting & policies", icon: CalendarClock, badge: "events" as const },
 ];

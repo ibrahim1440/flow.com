@@ -15,7 +15,7 @@ import { CostingStatus, DocTypeLabel, InvStatus } from "../../inventory/_ui";
 
 type Acc = { code: string; nameAr: string | null; nameEn: string } | null;
 type Doc = {
-  id: string; invoiceNo: number; kind: "INVOICE" | "CREDIT_NOTE"; status: string; customerId: string; issueDate: string; supplyDate: string | null; dueDate: string; description: string | null; reason: string | null;
+  id: string; invoiceNo: number; kind: "INVOICE" | "CREDIT_NOTE"; debitNoteOfId?: string | null; status: string; customerId: string; issueDate: string; supplyDate: string | null; dueDate: string; description: string | null; reason: string | null;
   totalNet: string; totalVat: string; totalGross: string; createdBy: string; createdAt: string; submittedBy: string | null; submittedAt: string | null;
   approvedBy: string | null; approvedAt: string | null; postedBy: string | null; postedAt: string | null; rejectedReason: string | null; rejectedBy: string | null; reversalReason: string | null;
   customer: { name: string; nameAr: string | null; vatNumber: string | null };
@@ -134,6 +134,7 @@ export default function SalesDocPage() {
           </>)}
         {d.status === "APPROVED" && can("ar_invoice_post") && <Button kind="primary" busy={busy === "post"} disabled={!!busy} className="min-h-11" onClick={() => act("post")}>{credit_ ? L("ترحيل الإشعار", "Post the credit note") : L("ترحيل الفاتورة", "Post the invoice")}</Button>}
         {d.status === "POSTED" && !credit_ && can("ar_invoice_create") && Number(d.creditable) > 0 && <Link href={`/dashboard/accounting/receivables/new?creditFor=${d.id}`}><Button className="min-h-11 w-full">{L("إصدار إشعار دائن…", "Issue a credit note…")}</Button></Link>}
+        {d.status === "POSTED" && !credit_ && !d.debitNoteOfId && can("ar_invoice_create") && <Link href={`/dashboard/accounting/receivables/new?debitFor=${d.id}`}><Button className="min-h-11 w-full">{L("إصدار إشعار مدين…", "Issue a debit note…")}</Button></Link>}
         {d.status === "POSTED" && !credit_ && can("ar_receipt_assign") && Number(d.customerAdvance) > 0 && Number(d.allocatable) > 0 && (
           <div className="flex flex-col gap-2 border-t border-border-light pt-3">
             <p className="text-[13px] font-bold">{L(`للعميل دفعة مقدمة ${amt(d.customerAdvance)} — تطبيقها على الفاتورة`, `The customer has an advance of ${amt(d.customerAdvance)} — apply it to this invoice`)}</p>

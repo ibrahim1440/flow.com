@@ -184,6 +184,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "fa_approve", label: "Approve capitalisation, depreciation runs, disposals, class policies and their reversals (not one's own)" },
     { key: "year_close_prepare", label: "Prepare the year-end close and request its reversal" },
     { key: "year_close_approve", label: "Approve and post the year-end close or its reversal (not one's own)" },
+    { key: "einv_profile_prepare", label: "Prepare the e-invoicing seller profile (local validation only)" },
+    { key: "einv_profile_approve", label: "Approve the e-invoicing seller profile (not one's own)" },
+    { key: "einv_generate", label: "Generate or retry e-invoices and re-run local validation" },
+    { key: "einv_submit", label: "Submit e-invoices to a configured test environment (never production)" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

@@ -56,7 +56,7 @@ async function user(username: string, name: string, p: Permissions, lang: "ar" |
   return e.id;
 }
 
-const TABLES = ["FaDepLine", "FaDepRun", "FaDisposal", "FaAssetSource", "FaAsset", "FaClassPolicy", "FaClass", "YearEndClose", "AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "JournalEntry", "FiscalPeriod", "AccountMapping", "AccountingPolicy", "Account", "AccountingSettings",
+const TABLES = ["EInvoiceSubmission", "EInvoice", "EInvoiceJob", "EInvoiceProfile", "FaDepLine", "FaDepRun", "FaDisposal", "FaAssetSource", "FaAsset", "FaClassPolicy", "FaClass", "YearEndClose", "AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "JournalEntry", "FiscalPeriod", "AccountMapping", "AccountingPolicy", "Account", "AccountingSettings",
   "CommissionLedgerCorrection", "CommissionLedgerEntry", "CommissionAccrual", "CommissionAssignment", "CommissionTier", "CommissionPlanVersion", "CommissionPlan"];
 
 async function main() {
@@ -132,8 +132,8 @@ async function main() {
   }
   if (await prisma.account.count()) { console.log("Accounting fixture already present (use --reset)."); return; }
 
-  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign", "inv_doc_create", "inv_master_manage", "fa_setup", "fa_prepare", "year_close_prepare"];
-  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post", "inv_doc_approve", "inv_doc_post", "fa_approve", "year_close_approve"];
+  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign", "inv_doc_create", "inv_master_manage", "fa_setup", "fa_prepare", "year_close_prepare", "einv_profile_prepare", "einv_generate", "einv_submit"];
+  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post", "inv_doc_approve", "inv_doc_post", "fa_approve", "year_close_approve", "einv_profile_approve"];
   const prep = await user("acc.preparer", "سارة القحطاني", perms(PREP));
   const appr = await user("acc.approver", "خالد العتيبي", perms(APPR));
   await user("acc.approver.en", "Khalid Al-Otaibi (EN)", perms(APPR), "en");
@@ -355,6 +355,13 @@ async function main() {
   const K2 = await cust("مطاعم البيت الشامي", "Al-Bait Al-Shami Restaurants", "310556677800003", 15, "1010334455", "10000");
   const K3 = await cust("مقاهي نجد المختصة", "Najd Specialty Cafés", "311667788900003", 30);
   const K4 = await cust("عميل أفراد — نقدي", "Walk-in customer", null, 0);
+  // Stage 6 (LOCAL e-invoice validation only; nothing is sent to ZATCA): a SYNTHETIC seller profile,
+  // approved by someone else, and a SYNTHETIC national address for one customer. K2 and K3 have no
+  // address, so their standard invoices fail local validation and wait (shown in the tax screens).
+  { const EI = await import("../../src/lib/accounting/einvoice/service");
+    const pf = await EI.draftProfile({ sellerName: "شركة حقبة التجريبية (بيانات تجريبية)", sellerNameEn: "Hiqbah synthetic seller", vatNumber: "399999999900003", crNumber: "1010000000", street: "شارع تجريبي", buildingNo: "1234", district: "حي تجريبي", city: "الرياض", postalCode: "12345", countryCode: "SA", egsSerial: "EGS-LOCAL-01", environment: "LOCAL_ONLY" }, prep);
+    await EI.approveProfile(pf.id, appr);
+    await prisma.customer.update({ where: { id: K1 }, data: { nationalAddress: { street: "طريق تجريبي", buildingNo: "4321", district: "حي تجريبي", city: "جدة", postalCode: "23456", countryCode: "SA" } } }); }
   const order = async (orderNumber: number, customerId: string) => (await prisma.order.create({ data: { orderNumber, customerId, status: "Completed", approvalStatus: "Yes", notes: "fixture:accounting" } })).id;
   const O1 = await order(7009, K1);
   await order(7012, K2);

@@ -12,6 +12,7 @@ import { ZERO, dec } from "./money";
 import { accountingDate, todayAccountingDate } from "./dates";
 import { resolveRoles } from "./posting";
 import { processEvent, type ProcessOutcome } from "./event-processor";
+import { generateAfterPosting, markDebitNote } from "./einvoice/service";
 import { isKsaVatNumber } from "./bill-rules";
 import { computeSalesLine, vatInside } from "./sales-rules";
 import { postedBankLines } from "./bank-posted";
@@ -124,7 +125,7 @@ async function creditable(db: Db, invoiceId: string, exceptId?: string) {
   return { inv, remaining: dec(inv.totalGross).sub(dec(used._sum.totalGross)) };
 }
 
-export async function createSalesDoc(input: SalesDocInput & { kind?: "INVOICE" | "CREDIT_NOTE"; originalInvoiceId?: string | null }, userId: string) {
+export async function createSalesDoc(input: SalesDocInput & { kind?: "INVOICE" | "CREDIT_NOTE"; originalInvoiceId?: string | null; debitNoteOfId?: string | null }, userId: string) {
   return ledgerTx(async (tx) => {
     const kind = input.kind === "CREDIT_NOTE" ? "CREDIT_NOTE" : "INVOICE";
     const { data } = await header(tx, input, kind === "INVOICE" ? {} : undefined);
@@ -144,7 +145,9 @@ export async function createSalesDoc(input: SalesDocInput & { kind?: "INVOICE" |
     }
     const extra = kind === "CREDIT_NOTE" ? await creditTerms(tx, input, originalInvoiceId!) : await reissueTerms(tx, input, data.customerId);
     const doc = await tx.salesInvoice.create({ data: { ...data, ...extra, kind, originalInvoiceId, reason, ...totals(lines), createdBy: userId, lines: { create: lines } }, include: { lines: true } });
-    await auditAccounting(tx, { action: `${kind === "INVOICE" ? "invoice" : "credit_note"}.create`, entityType: "sales_document", entityId: doc.id, userId, after: { no: doc.invoiceNo, gross: doc.totalGross } });
+    await auditAccounting(tx, { action: `${kind === "INVOICE" ? (input.debitNoteOfId ? "debit_note" : "invoice") : "credit_note"}.create`, entityType: "sales_document", entityId: doc.id, userId, after: { no: doc.invoiceNo, gross: doc.totalGross, debitNoteOf: input.debitNoteOfId ?? undefined } });
+    // A debit note (stage 6) is an invoice that raises a posted invoice's amount: same customer, a reason, no goods.
+    if (kind === "INVOICE" && input.debitNoteOfId) return { ...(await markDebitNote(tx, doc.id, input.debitNoteOfId, input.reason)), lines: doc.lines };
     return doc;
   }).catch(uniqueOrder);
 }
@@ -197,6 +200,7 @@ export async function updateDraftSalesDoc(id: string, input: SalesDocInput, user
     const extra = d.kind === "CREDIT_NOTE" ? await creditTerms(tx, input, d.originalInvoiceId!, d.id) : await reissueTerms(tx, input, data.customerId, d.id);
     await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
     const doc = await tx.salesInvoice.update({ where: { id }, data: { ...data, ...extra, ...totals(lines), ...(d.kind === "CREDIT_NOTE" && input.reason ? { reason: String(input.reason).trim().slice(0, 300) } : {}), lines: { create: lines } }, include: { lines: true } });
+    if (d.debitNoteOfId) await markDebitNote(tx, id, d.debitNoteOfId, input.reason ?? d.reason);
     await auditAccounting(tx, { action: "sales_document.update", entityType: "sales_document", entityId: id, userId, before: { gross: d.totalGross }, after: { gross: doc.totalGross } });
     return doc;
   }).catch(uniqueOrder);
@@ -251,7 +255,7 @@ export async function rejectSalesDoc(id: string, userId: string, reason: string)
   });
 }
 
-export type SalesPostOutcome = { document: Awaited<ReturnType<typeof transition>>; ledger: ProcessOutcome | null; costing?: { status: string; reason: string | null } };
+export type SalesPostOutcome = { document: Awaited<ReturnType<typeof transition>>; ledger: ProcessOutcome | null; costing?: { status: string; reason: string | null }; einvoice?: { status: string } };
 
 export async function postSalesDoc(id: string, userId: string): Promise<SalesPostOutcome> {
   const document = await ledgerTx(async (tx) => {
@@ -277,7 +281,9 @@ export async function postSalesDoc(id: string, userId: string): Promise<SalesPos
   // Cost of sales (stage 4b): the database created the costing record with the posting; try it now.
   // A failure here never undoes the invoice: it stays visible with its reason and is retried.
   const costing = document.kind === "INVOICE" ? await runCosting(document.id) : undefined;
-  return { document, ledger, costing };
+  // E-invoice (stage 6, local only): generated from the posted document; a problem never undoes the posting.
+  const einvoice = await generateAfterPosting(document.id, userId);
+  return { document, ledger, costing, einvoice };
 }
 
 export async function reverseSalesDoc(id: string, userId: string, reason: string): Promise<SalesPostOutcome> {

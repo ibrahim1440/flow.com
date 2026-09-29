@@ -72,6 +72,8 @@ model Customer {
   // Accounting receivables (stage 3, additive).
   vatNumber           String?
   crNumber            String?
+  /// Structured national address for e-invoicing: {street, buildingNo, district, city, postalCode, countryCode}.
+  nationalAddress     Json?
   paymentTermsDays    Int                  @default(30)
   creditLimit         Decimal?             @db.Decimal(18, 2)
   salesInvoices       SalesInvoice[]
@@ -1322,6 +1324,9 @@ model TaxCategory {
   requiresReason       Boolean         @default(false)
   requiresApproval     Boolean         @default(false)
   zatcaTaxCategoryCode String?
+  /// Exemption / zero-rating reason code and text carried on e-invoices for Z, E and O lines (stage 6).
+  zatcaExemptionCode   String?
+  zatcaExemptionReason String?
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   createdBy            String?
@@ -3495,6 +3500,10 @@ model SalesInvoice {
   customerReturnId     String?
   /// A corrected invoice issued after reversing this one's predecessor (no stock movement).
   replacesInvoiceId    String?
+  /// Debit note (stage 6): an INVOICE that raises the amount of the posted invoice it names.
+  debitNoteOfId        String?
+  debitNoteOf          SalesInvoice?      @relation("DebitNoteOf", fields: [debitNoteOfId], references: [id], onDelete: Restrict)
+  debitNotes           SalesInvoice[]     @relation("DebitNoteOf")
 
   lines        SalesInvoiceLine[]
   allocations  ArAllocation[]       @relation("AllocatedTo")
@@ -4317,4 +4326,97 @@ model YearEndClose {
   reversedAt          DateTime?
 
   @@index([year])
+}
+
+// ─── Accounting: e-invoicing, LOCAL validation only (stage 6) ────────────────────────────────
+// Nothing here sends a document to ZATCA. Generation, hashing, the QR code and the rules are
+// local; the signature uses a local test key, not a ZATCA-issued CSID. STAGE_6_DESIGN.md.
+
+enum EInvoiceProfileStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+/// Seller data and the e-invoice generation unit (EGS). Entered by one person, approved by another;
+/// an approved version never changes. Values in the local fixture are synthetic.
+model EInvoiceProfile {
+  id           String                @id @default(cuid())
+  version      Int                   @unique
+  status       EInvoiceProfileStatus @default(DRAFT)
+  sellerName   String
+  sellerNameEn String?
+  vatNumber    String
+  crNumber     String
+  street       String
+  buildingNo   String
+  district     String
+  city         String
+  postalCode   String
+  countryCode  String                @default("SA")
+  egsSerial    String
+  /// LOCAL_ONLY (nothing is sent) or SANDBOX (only to a configured non-production host). Production is not an option.
+  environment  String                @default("LOCAL_ONLY")
+  preparedBy   String
+  preparedAt   DateTime              @default(now())
+  approvedBy   String?
+  approvedAt   DateTime?
+}
+
+/// One per posted sales document: generation state and its retries. An invalid document does not
+/// consume the ICV chain; it waits here with its errors until fixed and retried.
+model EInvoiceJob {
+  id             String    @id @default(cuid())
+  salesInvoiceId String    @unique
+  status         String
+  errors         Json?
+  attempts       Int       @default(0)
+  lastAttemptAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+/// The generated e-invoice: immutable (trigger); chained per EGS by ICV and the previous hash.
+model EInvoice {
+  id             String               @id @default(cuid())
+  salesInvoiceId String               @unique
+  profileId      String
+  egsSerial      String
+  icv            Int
+  uuid           String               @unique
+  typeCode       String
+  subtype        String
+  issueAt        DateTime
+  xml            String
+  invoiceHash    String
+  previousHash   String
+  qr             String?
+  signature      String?
+  publicKey      String?
+  signer         String
+  validation     Json
+  createdAt      DateTime             @default(now())
+  createdBy      String
+  submissions    EInvoiceSubmission[]
+
+  @@unique([egsSerial, icv])
+}
+
+/// Append-only record of each submission attempt (or refusal to submit), with its outcome.
+model EInvoiceSubmission {
+  id            String    @id @default(cuid())
+  eInvoiceId    String
+  eInvoice      EInvoice  @relation(fields: [eInvoiceId], references: [id], onDelete: Restrict)
+  attempt       Int
+  environment   String
+  endpoint      String?
+  requestHash   String
+  outcome       String
+  httpStatus    Int?
+  response      Json?
+  nextAttemptAt DateTime?
+  createdAt     DateTime  @default(now())
+  createdBy     String
+
+  @@unique([eInvoiceId, attempt])
 }

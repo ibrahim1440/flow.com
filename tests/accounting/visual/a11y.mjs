@@ -86,6 +86,10 @@ const PAGES = [
   ["ACC-62 depreciation runs", "/dashboard/accounting/assets/runs"],
   ["ACC-64 classes and policies", "/dashboard/accounting/assets/setup"],
   ["ACC-65 year-end close", "/dashboard/accounting/periods/year-end"],
+  ["ACC-70 e-invoices", "/dashboard/accounting/tax"],
+  ["ACC-70 e-invoices 390", "/dashboard/accounting/tax", undefined, undefined, 390],
+  ["ACC-71 seller profile", "/dashboard/accounting/tax/profile"],
+  ["ACC-72 VAT return", "/dashboard/accounting/tax/vat-return"],
   ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 

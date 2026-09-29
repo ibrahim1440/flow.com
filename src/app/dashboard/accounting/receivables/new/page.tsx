@@ -35,12 +35,15 @@ export default function NewSalesDocPage() {
   const sp = useSearchParams();
   const editId = sp.get("edit");
   const creditFor = sp.get("creditFor");
+  // Stage 6: a debit note raises a posted invoice (an invoice naming it, with a reason; no goods).
+  const debitFor = sp.get("debitFor");
   const { can } = useCan();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [taxes, setTaxes] = useState<Tax[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [original, setOriginal] = useState<Original | null>(null);
+  const [debitOf, setDebitOf] = useState<Original | null>(null);
   const [kind, setKind] = useState<"INVOICE" | "CREDIT_NOTE">(creditFor ? "CREDIT_NOTE" : "INVOICE");
   const [h, setH] = useState(() => ({ customerId: "", orderId: "", issueDate: riyadhToday(), supplyDate: "", dueDate: "", description: "", reason: "",
     fulfilmentLocationId: "", replacesInvoiceId: "", creditType: "" as "" | "RETURN_OF_GOODS" | "PRICE_ADJUSTMENT", customerReturnId: "" }));
@@ -79,6 +82,9 @@ export default function NewSalesDocPage() {
       const fromOrder = sp.get("order");
       if (fromOrder && !editId && !creditFor) loadOrder(fromOrder);   // "invoice this order"
     }).catch(() => {});
+    if (debitFor) api<Original>(`/api/accounting/receivables/invoices/${debitFor}`).then((o) => {
+      setDebitOf(o); setH((x) => ({ ...x, customerId: o.customerId }));
+    }).catch((e) => setErr((e as Error).message));
     if (creditFor) api<Original>(`/api/accounting/receivables/invoices/${creditFor}`).then((o) => {
       setOriginal(o); setKind("CREDIT_NOTE");
       setH((x) => ({ ...x, customerId: o.customerId }));
@@ -95,7 +101,7 @@ export default function NewSalesDocPage() {
     }).catch((e) => setErr((e as Error).message));
     // Runs once per document; loadOrder and sp only feed state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId, creditFor]);
+  }, [editId, creditFor, debitFor]);
 
   useEffect(() => {
     if (kind !== "INVOICE" || !h.customerId) return;
@@ -137,7 +143,8 @@ export default function NewSalesDocPage() {
     : null);
   const creditLeft = original?.creditable ? Math.round(Number(original.creditable) * 100) : null;
   const headerErr = !h.customerId ? L("اختر العميل", "Choose the customer")
-    : kind === "CREDIT_NOTE" && h.reason.trim().length < 5 ? L("سبب الإشعار (5 أحرف على الأقل)", "Credit note reason (at least 5 characters)")
+    : (kind === "CREDIT_NOTE" || debitOf) && h.reason.trim().length < 5 ? L("سبب الإشعار (5 أحرف على الأقل)", "Note reason (at least 5 characters)")
+    : debitOf && lines.some((l) => l.stockTreatment !== "NON_STOCK") ? L("بنود الإشعار المدين غير مخزنية (سعر أو رسوم)", "Debit-note lines are non-stock (price or charge)")
     : kind === "CREDIT_NOTE" && creditLeft !== null && tot.gross > creditLeft ? L("الإشعار يتجاوز المتبقي للإشعار على الفاتورة", "The credit note exceeds what is left to credit")
     : kind === "CREDIT_NOTE" && !h.creditType ? L("حدّد ما يُشعَر عنه: بضاعة مرتجعة أم تعديل سعر", "Say what the credit note is for: returned goods or a price adjustment")
     : kind === "CREDIT_NOTE" && h.creditType === "RETURN_OF_GOODS" && !h.customerReturnId ? L("اختر مرتجع العميل المرحّل لهذه الفاتورة", "Choose the posted customer return of this invoice")
@@ -152,7 +159,7 @@ export default function NewSalesDocPage() {
     setBusy(submit ? "submit" : "draft");
     try {
       const inv = kind === "INVOICE";
-      const body = { kind, originalInvoiceId: original?.id ?? null, customerId: h.customerId, orderId: inv ? h.orderId || null : null, issueDate: h.issueDate, supplyDate: h.supplyDate || null, dueDate: inv ? h.dueDate || null : null, description: h.description || null, reason: kind === "CREDIT_NOTE" ? h.reason : null,
+      const body = { kind, originalInvoiceId: original?.id ?? null, customerId: h.customerId, orderId: inv ? h.orderId || null : null, issueDate: h.issueDate, supplyDate: h.supplyDate || null, dueDate: inv ? h.dueDate || null : null, description: h.description || null, reason: kind === "CREDIT_NOTE" || debitOf ? h.reason : null, debitNoteOfId: debitOf?.id ?? null,
         fulfilmentLocationId: inv ? h.fulfilmentLocationId || null : null, replacesInvoiceId: inv ? h.replacesInvoiceId || null : null,
         creditType: inv ? null : h.creditType || null, customerReturnId: !inv && h.creditType === "RETURN_OF_GOODS" ? h.customerReturnId || null : null,
         lines: lines.map((l) => ({ ...l, accountId: inv ? l.accountId || null : null, taxCategoryId: l.taxCategoryId || null,
@@ -168,11 +175,11 @@ export default function NewSalesDocPage() {
   const credit = kind === "CREDIT_NOTE";
   return (
     <Card>
-      <CardTitle title={credit ? L(`إشعار دائن جديد — مقابل INV-${original?.invoiceNo ?? "…"}`, `New credit note — against INV-${original?.invoiceNo ?? "…"}`) : editId ? L("تعديل فاتورة مبيعات (مسودة)", "Edit sales invoice (draft)") : L("فاتورة مبيعات جديدة", "New sales invoice")}
+      <CardTitle title={credit ? L(`إشعار دائن جديد — مقابل INV-${original?.invoiceNo ?? "…"}`, `New credit note — against INV-${original?.invoiceNo ?? "…"}`) : debitOf ? L(`إشعار مدين جديد — يرفع INV-${debitOf.invoiceNo}`, `New debit note — raising INV-${debitOf.invoiceNo}`) : editId ? L("تعديل فاتورة مبيعات (مسودة)", "Edit sales invoice (draft)") : L("فاتورة مبيعات جديدة", "New sales invoice")}
         sub={credit ? L("يُعتمد من شخص غير مُعدّه · لا يتجاوز ما بقي قابلاً للإشعار من الفاتورة", "Approved by someone other than its preparer · never more than is left to credit on the invoice") : L("تُعتمد من شخص غير مُعدّها · المبالغ بالريال السعودي بخانتين عشريتين", "Approved by someone other than its preparer · SAR, two decimals")} />
       <div className="flex gap-3 flex-wrap items-start">
         <Field label={L("العميل", "Customer")} error={touched && !h.customerId ? L("مطلوب", "Required") : null}>
-          <select className={`${INPUT} min-w-[240px]`} value={h.customerId} disabled={credit} onChange={(e) => setH({ ...h, customerId: e.target.value, orderId: "" })}>
+          <select className={`${INPUT} min-w-[240px]`} value={h.customerId} disabled={credit || !!debitOf} onChange={(e) => setH({ ...h, customerId: e.target.value, orderId: "" })}>
             <option value="">{L("اختر…", "Choose…")}</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           {customer && (vatOk(customer.vatNumber) ? <Badge tone="ok">✓ {L("رقم ضريبي", "VAT no.")} {customer.vatNumber}</Badge> : <Badge tone="info">{L("بلا رقم ضريبي — فاتورة مبسطة", "No VAT number — simplified invoice")}</Badge>)}
@@ -183,6 +190,10 @@ export default function NewSalesDocPage() {
           <Field label={L("السبب", "Reason")} hint={L("5 أحرف على الأقل", "At least 5 characters")} error={touched && h.reason.trim().length < 5 ? L("مطلوب", "Required") : null}><input className={`${INPUT} min-w-[240px]`} value={h.reason} onChange={(e) => setH({ ...h, reason: e.target.value })} /></Field>
           <Field label={L("الفاتورة الأصل", "Original invoice")}><input className={INPUT} readOnly dir="ltr" value={original ? `INV-${original.invoiceNo}` : ""} /></Field>
         </> : <>
+          {debitOf && <>
+            <Field label={L("الفاتورة الأصل", "Original invoice")}><input className={INPUT} readOnly dir="ltr" value={`INV-${debitOf.invoiceNo}`} /></Field>
+            <Field label={L("سبب الإشعار المدين", "Debit-note reason")} hint={L("5 أحرف على الأقل", "At least 5 characters")} error={touched && h.reason.trim().length < 5 ? L("مطلوب", "Required") : null}><input aria-label={L("سبب الإشعار المدين", "Debit-note reason")} className={`${INPUT} min-w-[240px]`} value={h.reason} onChange={(e) => setH({ ...h, reason: e.target.value })} /></Field>
+          </>}
           <Field label={L("تاريخ التوريد", "Supply date")} hint={L("التسليم — توقيت الإيراد (D-4)", "Delivery — revenue timing (D-4)")}><input type="date" className={INPUT} value={h.supplyDate} onChange={(e) => setH({ ...h, supplyDate: e.target.value })} /></Field>
           <Field label={L("تاريخ الإصدار", "Issue date")}><input type="date" className={INPUT} value={h.issueDate} onChange={(e) => setH({ ...h, issueDate: e.target.value })} /></Field>
           <Field label={L("الاستحقاق", "Due date")} hint={customer ? L(`${customer.paymentTermsDays} يوماً من شروط العميل`, `${customer.paymentTermsDays} days (customer terms)`) : undefined}>
