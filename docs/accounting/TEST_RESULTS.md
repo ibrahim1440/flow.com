@@ -1,20 +1,20 @@
 # Test results
 
-**Tested commit: `74d4b03dbb071998ce3a55e338385f9c5722d0db`** on branch `feature/accounting-ledger-core`
+**Tested commit: `d55db6386770ffe08d7b17760341cf065fc039c4`** on branch `feature/accounting-ledger-core`
 of [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) (unpushed; see
 `README.md` → "Which implementation this is"). One run of `scripts/accounting/local-release-gates.sh`
 from a clean working tree ran every step below on that one commit, including the isolated year-end
 browser scenario, the backend regression certification and all Sales suites. Baseline: `origin/main` @ `fc64c05`.
 
-Commits after `74d4b03` change only `docs/accounting/`. To check this:
-`git diff --name-only 74d4b03 HEAD` must list nothing outside `docs/`.
+Commits after `d55db63` change only `docs/accounting/`. To check this:
+`git diff --name-only d55db63 HEAD` must list nothing outside `docs/`.
 
 These are local results on synthetic data, produced and reported by the implementer. They are **not**
 an independent review, **not** accountant acceptance and **not** production readiness. The stage 6
 tests are local self-consistency and independent local checks; **they are not ZATCA validation**,
 which is blocked here (`ZATCA_REQUIREMENTS.md` §1–2).
 
-Run: 2026-09-29 12:59–13:16 UTC (`evidence/test-runs/74d4b03-summary.txt`).
+Run: 2026-09-29 17:19–17:35 UTC (`evidence/test-runs/d55db63-summary.txt`). The previous full run on `74d4b03` (12:59–13:16 UTC, all green) is superseded because the QR encodings changed.
 - **Environment:** container Linux, Node 22, PostgreSQL 16.13 on a local disposable server
   (127.0.0.1:54329); Chromium via Playwright. HTTP and browser steps run against `next start`
   connected as the restricted runtime role `accounting_app`; the year-end scenario runs its own
@@ -23,7 +23,7 @@ Run: 2026-09-29 12:59–13:16 UTC (`evidence/test-runs/74d4b03-summary.txt`).
 - **Production differs:** PostgreSQL 17 on Neon. Nothing here ran against Neon, Vercel or ZATCA.
 - **Data:** all synthetic.
 - **Stored evidence (URLs masked; scanned for the fixture password and the run's generated Sales
-  role password: none):** `evidence/test-runs/74d4b03-*.tap`, `74d4b03-summary.txt`; captures in
+  role password: none):** `evidence/test-runs/d55db63-*.tap`, `d55db63-summary.txt`; captures in
   `evidence/app/` (79 screens from `capture.mjs` plus the browser-form steps, including
   `ACC-65-ye-*` and `ACC-70-simplified-gaps`).
 
@@ -31,15 +31,15 @@ Run: 2026-09-29 12:59–13:16 UTC (`evidence/test-runs/74d4b03-summary.txt`).
 **not valid for its HTTP and browser steps on :3040**. A server started earlier by hand (older code,
 provisional switch on) was still listening, the runner's own server could not bind, and those suites
 tested the stale server: `http-no-switch` failed 0/2 and `tax-forms` failed for that reason. The
-runner now refuses to start when the port is already served (`74d4b03`); the rerun above is the result.
+runner now refuses to start when the port is already served (`74d4b03`); the rerun on `74d4b03` was all green and is itself superseded by the run on `d55db63` above.
 
-| Kind | Command | Result @ `74d4b03` | What it proves / does not |
+| Kind | Command | Result @ `d55db63` | What it proves / does not |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit -p .` | clean | |
 | Lint | accounting sources, tests, scripts | clean | |
 | Production build | `npm run build` | exit 0 | |
-| Accounting unit | `npm run test:accounting:unit` | **46/46** | +5 `einvoice-qr-independent.test.ts`: TLV bytes written by hand (both QR layouts), SPKI from the SEC 2 secp256k1 constants, DER parsed by hand, BigInt ECDSA verifier, FIPS 180-2 vector, other curves refused, rules catch the other layout — **independent of the implementation, not ZATCA validation** |
-| Accounting DB integration | `npm run test:accounting:db` | **110/110** | e-invoice case now checks the QR layout (44/96/88 bytes) and tag 7 = the stored signature |
+| Accounting unit | `npm run test:accounting:unit` | **47/47** | `einvoice-qr-independent.test.ts` (6): default layout OFFICIAL_DOCS — tag 6 = 32-byte hash, tag 7 = r‖s from DER parsed by hand, tag 8 = X‖Y of d·G from the SEC 2 constants, the QR's own tags verified by a BigInt ECDSA verifier; P1363 padding on hand-made DER; the SDK-sample layout as alternate; other curves refused; rules catch the other layout. These encode implementation assumptions — **not ZATCA validation** |
+| Accounting DB integration | `npm run test:accounting:db` | **110/110** | e-invoice case checks the QR layout (32/64/64 bytes), tag 7 = the stored signature as r‖s, and that the QR's own stamp verifies |
 | Accounting scripts | `npm run test:accounting:scripts` | **4/4** | credential-rotation verifier |
 | Finance regression | `test:finance:unit`, `test:finance:db` | **52/52, 40/40** | Finance behaviour unchanged |
 | HTTP, production configuration | server without `ACCOUNTING_PROVISIONAL_POSTING`, `runtime-no-switch.test.mjs` | **2/2** | |
@@ -47,12 +47,20 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 | Browser, operational forms | `ops-forms.mjs` | **2/2** | |
 | Browser, packing and dispatch | `ops-pack-dispatch.mjs` | **6/6** | |
 | Browser, fixed assets | `fa-forms.mjs` | **8/8** | incl. the blocked current-year close |
-| Browser, e-invoicing and VAT | `tax-forms.mjs` | **6/6** | +1: a simplified invoice's QR layout checked from the database and its standards gaps shown on screen (not SDK-validated, local key, QR layout unconfirmed, tag 9 absent) |
+| Browser, e-invoicing and VAT | `tax-forms.mjs` | **6/6** | +1: a simplified invoice's QR layout (32/64/64 bytes, no tag 9) checked from the database and its standards gaps shown on screen (not SDK-validated, local key, encodings unconfirmed and curve/profile to confirm, tag 9 absent) |
 | **Browser, year-end close** | `local-year-end-browser.sh` → `year-end-forms.mjs` (isolated `erp_finance_yearend`) | **5/5** | conditions met; prepared by the preparer (their approval refused: no button, HTTP 403); approved and posted by a second person; CLOSING entry 2025-12-31 in the locked period 12 = hand-calculated lines; retained earnings 80,000.00; income statement unchanged; opening 2026 = hand figures, P&L zero; balance-sheet screen at 2025-12-31 (found defects 35 and 36) |
 | Sales regression | pure 161 (48 + 113); DB 23/23; running app `sales-security` 34/34, `sales-workflow` 231/231 | all pass | |
-| Backend regression certification | `local-certification.mjs 74d4b03…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | see "Certification assertion count" |
+| Backend regression certification | `local-certification.mjs d55db63…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,300 assertions, 0 failed** | see "Certification assertion count" |
 | Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 56 views) | **0 serious/critical** | automated rules only |
 | Browser capture | `capture.mjs` (79 screens) | 0 page errors, 0 horizontal overflow | |
+
+## Test changes since `74d4b03`
+
+- QR default changed to the encodings the official documents specify as cited in
+  `ZATCA_REQUIREMENTS.md` §3 (defect 37). `einvoice-qr-independent.test.ts`, `einvoice.test.ts` and
+  `tax-forms.mjs` now expect 32/64/64-byte tags 6–8 and verify the QR's own stamp; the SDK-sample
+  layout is tested as the alternate. One deterministic P1363 padding test was added; a draft that
+  depended on random signatures (it could fail about 1 run in 5) was replaced before commit.
 
 ## Test changes since `da37cb0`
 
@@ -121,8 +129,8 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 ## Certification assertion count
 
 `completion-gate` adds one assertion only when a deliberately raced "complete order" request loses
-and receives 409. At `74d4b03` the count is 2,301 (the stored output does not print the race line;
-2,301 is the 409 outcome). At `da37cb0` the race ended `complete=200`, hence 2,300 (it was 2,301 at `efa357a`,
+and receives 409. At `d55db63` the count is 2,300 and at `74d4b03` it was 2,301 (the stored output
+does not print the race line; 2,301 is the 409 outcome). At `da37cb0` the race ended `complete=200`, hence 2,300 (it was 2,301 at `efa357a`,
 where it ended 409). At `7943ed3` the log records `complete=200`, hence 2,300. It was 2,301 at `d92f592`
 and at `d580432` (409), and 2,300 at `cf3b43e` (200). The race outcome varies from run to run;
 0 failed in every run.
