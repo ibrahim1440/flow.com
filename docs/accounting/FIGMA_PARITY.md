@@ -152,3 +152,13 @@ claim that the whole application is accessible, and no manual screen-reader test
 
 Third audit (Stage 3, 2026-09-28): ACC-28 and ACC-30..36 added to `a11y.mjs`: 0 serious or critical
 findings over 33 views (same scope and caveats as above).
+
+## Seventh audit (2026-09-29, commit `74d4b03`) — code-first additions, recorded honestly
+
+- **ACC-70 e-invoice detail, "Not standards-compliant — local validation only" notice** (lists the
+  standards gaps): added in code **without a Figma frame first**; frame ACC-70 on page 23 does not
+  show it yet. Capture: `evidence/app/ACC-70-simplified-gaps.png`.
+- **ACC-65 year-end close in the ready, prepared and posted states** on the isolated synthetic
+  prior year: the screen is the one designed on page 22 (ACC-65), exercised for the first time in
+  these states. Captures `ACC-65-ye-ready`, `-prepared`, `-posted-opening`, `-balance-sheet`. No layout
+  change was made; the balance-sheet heading fix (defect 36) is a text change.
