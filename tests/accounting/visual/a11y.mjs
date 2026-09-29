@@ -80,6 +80,12 @@ const PAGES = [
   ["ACC-49 customer returns", "/dashboard/accounting/inventory/returns"],
   ["ACC-50 gross margin", "/dashboard/accounting/inventory/margin"],
   ["ACC-51 inventory setup + pools", "/dashboard/accounting/inventory/setup"],
+  ["ACC-60 fixed-asset register", "/dashboard/accounting/assets"],
+  ["ACC-60 register 390", "/dashboard/accounting/assets", undefined, undefined, 390],
+  ["ACC-61 asset editor", "/dashboard/accounting/assets/new", "acc.preparer"],
+  ["ACC-62 depreciation runs", "/dashboard/accounting/assets/runs"],
+  ["ACC-64 classes and policies", "/dashboard/accounting/assets/setup"],
+  ["ACC-65 year-end close", "/dashboard/accounting/periods/year-end"],
   ["ACC-27 cash flow", "/dashboard/accounting/reports", undefined, tab("التدفقات النقدية")],
 ];
 

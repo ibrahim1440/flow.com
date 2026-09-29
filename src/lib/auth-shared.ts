@@ -179,6 +179,11 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "inv_doc_post", label: "Post inventory documents" },
     { key: "inv_master_manage", label: "Manage inventory items, units, locations and draft loss bands" },
     { key: "inv_return_receive", label: "Confirm the warehouse receipt of customer returns (with evidence)" },
+    { key: "fa_setup", label: "Manage fixed-asset classes and prepare their depreciation policy versions" },
+    { key: "fa_prepare", label: "Register fixed assets; prepare depreciation runs, disposals and reversal requests" },
+    { key: "fa_approve", label: "Approve capitalisation, depreciation runs, disposals, class policies and their reversals (not one's own)" },
+    { key: "year_close_prepare", label: "Prepare the year-end close and request its reversal" },
+    { key: "year_close_approve", label: "Approve and post the year-end close or its reversal (not one's own)" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

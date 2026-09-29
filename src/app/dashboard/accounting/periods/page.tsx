@@ -49,7 +49,10 @@ export default function PeriodsPage() {
       {years.map((y) => (
         <Card key={y}>
           <CardTitle title={L(`السنة المالية ${y}`, `Fiscal year ${y}`)} sub={L("فترات شهرية · لا تداخل بين الفترات · القفل يمنع الترحيل ويمكن فكّه بسبب · الإقفال نهائي", "Monthly periods · no overlap · locking stops posting and can be undone with a reason · closing is final")}
-            right={can("settings_manage") ? <Button icon={Plus} onClick={() => setYearForm({ year: String(y + 1), startMonth: String(new Date(data.filter((p) => p.year === y).sort((a, b) => a.periodNo - b.periodNo)[0].startDate).getUTCMonth() + 1) })}>{L("سنة مالية", "Fiscal year")}</Button> : undefined} />
+            right={<>
+              <a href={`/dashboard/accounting/periods/year-end`}><Button>{L("إقفال السنة", "Year-end close")}</Button></a>
+              {can("settings_manage") && <Button icon={Plus} onClick={() => setYearForm({ year: String(y + 1), startMonth: String(new Date(data.filter((p) => p.year === y).sort((a, b) => a.periodNo - b.periodNo)[0].startDate).getUTCMonth() + 1) })}>{L("سنة مالية", "Fiscal year")}</Button>}
+            </>} />
           <Table>
             <thead><tr><Th>{L("الفترة", "Period")}</Th><Th>{L("من – إلى", "From – to")}</Th><Th>{L("الحالة", "Status")}</Th><Th num>{L("قيود مرحّلة", "Posted")}</Th><Th num>{L("معلّقة", "Pending")}</Th><Th>{L("بواسطة", "By")}</Th><Th>{L("إجراء", "Action")}</Th></tr></thead>
             <tbody>

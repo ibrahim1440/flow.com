@@ -34,6 +34,8 @@ export const POSTING_ROLES: RoleDef[] = [
   { role: "GOODS_DELIVERED_NOT_INVOICED", en: "Goods delivered to customers, not yet invoiced (at cost)", ar: "بضاعة مسلّمة للعملاء لم تُفوتر بعد (بالتكلفة)", usedBy: "inventory" },
   { role: "LABOUR_ABSORBED", en: "Direct labour absorbed into production (contra expense)", ar: "أجور مباشرة محمّلة على الإنتاج (حساب مقابل للمصروف)", usedBy: "inventory" },
   { role: "OVERHEAD_ABSORBED", en: "Production overhead absorbed into production (contra expense)", ar: "تكاليف إنتاج غير مباشرة محمّلة على الإنتاج (حساب مقابل للمصروف)", usedBy: "inventory" },
+  { role: "FA_DISPOSAL_GAIN", en: "Gain on disposal of fixed assets", ar: "أرباح استبعاد الأصول الثابتة", usedBy: "fixed_assets" },
+  { role: "FA_DISPOSAL_LOSS", en: "Loss on disposal of fixed assets", ar: "خسائر استبعاد الأصول الثابتة", usedBy: "fixed_assets" },
 ];
 
 export const ROLE_SET = new Set(POSTING_ROLES.map((r) => r.role));
@@ -161,6 +163,36 @@ POLICIES.push(
       "the quantities the operational system recorded. With this policy approved, the document is approved and posted automatically when " +
       "it is within tolerance: loss within the approved band, quantities and cost known, items linked. Anything else waits for an " +
       "accountant's approval or appears in the exception queue with its reason. The automatic document never changes the operational record.",
+  },
+  {
+    key: "fixed_assets.depreciation",
+    en: "Fixed assets: capitalisation, depreciation and disposal",
+    ar: "الأصول الثابتة: الرسملة والإهلاك والاستبعاد",
+    governs: ["fa.asset.capitalised", "fa.asset.cancelled", "fa.depreciation.posted", "fa.depreciation.reversed", "fa.disposal.posted", "fa.disposal.reversed"],
+    defaultStatement:
+      "يُرسمل الأصل بتكلفته من مصادرها (بند فاتورة مورد مرحّلة أو حساب مقابل أو رصيد قائم في الأستاذ) عند اعتماده من شخص غير المُعِدّ، وفق فئته. " +
+      "يُهلك شهرياً بطريقة فئته المعتمدة وعمرها الإنتاجي وقيمتها المتبقية وقاعدة بدايتها؛ إعدادات كل فئة إصدار مستقل يعتمده شخص آخر ولا يتغير بعد اعتماده. " +
+      "قيد الإهلاك الشهري يُعدّ ويعتمده شخص آخر ويُرحَّل مرة واحدة في فترة مفتوحة. يُثبت الاستبعاد بإلغاء التكلفة ومجمّع الإهلاك حتى تاريخه وإثبات المتحصلات والربح أو الخسارة. " +
+      "لا يُعدَّل قيد مرحّل؛ يُعكس بطلب يعتمده شخص آخر.\n\n" +
+      "An asset is capitalised at the cost of its sources (a posted supplier-bill line, a counter account, or a balance already in the ledger) " +
+      "when someone other than its preparer approves it, under its class. It is depreciated monthly by its class's approved method, useful life, " +
+      "residual value and start convention; each class's settings are a separate version approved by someone else and never change once approved. " +
+      "A monthly run is prepared, approved by someone else and posted once, into an open period. A disposal removes the cost and the depreciation " +
+      "accumulated to its date and recognises the proceeds and the gain or loss. A posted entry is never edited; it is reversed on a request " +
+      "approved by someone else.",
+  },
+  {
+    key: "closing.year_end",
+    en: "Year-end close to retained earnings",
+    ar: "إقفال السنة في الأرباح المبقاة",
+    governs: ["gl.year.closed", "gl.year.reopened"],
+    defaultStatement:
+      "بعد قفل فترات السنة كلها وخلوّها من القيود والأحداث المعلّقة وترحيل الإهلاك، تُقفل إيرادات السنة ومصروفاتها (لكل حساب وفرع ومركز تكلفة) في حساب الأرباح المبقاة بقيد إقفال واحد بتاريخ آخر يوم في السنة، " +
+      "يعدّه محاسب ويعتمده شخص آخر بعد إعادة الحساب. أرصدة الميزانية تنتقل إلى السنة التالية كما هي. يُعكس الإقفال بطلب يعتمده شخص آخر ما دامت فترات السنة لم تُغلق نهائياً.\n\n" +
+      "Once every period of the year is locked, nothing is pending and depreciation has posted, the year's revenue and expense (per account, branch " +
+      "and cost centre) are closed to retained earnings in one closing entry dated the last day of the year, prepared by an accountant and approved " +
+      "by someone else after recomputation. Balance-sheet balances carry into the next year as they are. The close is reversed on a request " +
+      "approved by someone else while the year's periods are not yet closed.",
   },
 );
 

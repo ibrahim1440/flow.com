@@ -129,6 +129,21 @@ const SHOTS = [
   { id: "ACC-53", route: "/dashboard/accounting/payables", act: async (p) => {
     const id = await p.evaluate(async () => (await (await fetch("/api/accounting/bills?status=POSTED")).json()).rows.find((r) => r.kind === "CREDIT_NOTE")?.id);
     await p.goto(`${BASE}/dashboard/accounting/payables/${id}`); } },
+  { id: "ACC-60", route: "/dashboard/accounting/assets" },
+  { id: "ACC-60-390", route: "/dashboard/accounting/assets", w: 390 },
+  { id: "ACC-61", route: "/dashboard/accounting/assets", act: async (p) => {
+    const id = await p.evaluate(async () => (await (await fetch("/api/accounting/fixed-assets")).json()).find((a) => a.status === "SUBMITTED")?.id);
+    await p.goto(`${BASE}/dashboard/accounting/assets/${id}`); } },
+  { id: "ACC-61-editor", route: "/dashboard/accounting/assets/new", user: "acc.preparer" },
+  { id: "ACC-62", route: "/dashboard/accounting/assets/runs", act: async (p) => {
+    const id = await p.evaluate(async () => (await (await fetch("/api/accounting/fixed-assets/runs")).json())[0]?.id);
+    await p.goto(`${BASE}/dashboard/accounting/assets/runs?run=${id}`); } },
+  { id: "ACC-63", route: "/dashboard/accounting/assets", user: "acc.preparer", act: async (p) => {
+    const id = await p.evaluate(async () => (await (await fetch("/api/accounting/fixed-assets")).json()).find((a) => a.classCode === "VEH-SYN" && a.status === "CAPITALISED")?.id);
+    await p.goto(`${BASE}/dashboard/accounting/assets/${id}`); await p.waitForLoadState("networkidle");
+    await p.getByRole("button", { name: "استبعاد الأصل…" }).click(); } },
+  { id: "ACC-64", route: "/dashboard/accounting/assets/setup" },
+  { id: "ACC-65", route: "/dashboard/accounting/periods/year-end" },
   { id: "OPS-purchases", route: "/dashboard/purchases", user: "ops.roastery" },
   { id: "OPS-production", route: "/dashboard/production", user: "ops.roastery", act: async (p) => { await p.getByText(/جميع الدفعات/).first().click(); } },
   { id: "OPS-packaging", route: "/dashboard/packaging", user: "ops.roastery" },

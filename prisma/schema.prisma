@@ -4080,3 +4080,241 @@ model ApCreditAllocation {
   @@index([creditNoteId])
   @@index([billId])
 }
+
+// ─── Accounting: fixed assets, depreciation and year-end close (stage 5) ──────────────────────
+// Accounts are referenced by id (validated by the service), as in InvCostPool. Every approval is
+// by someone other than the preparer (service + database triggers). STAGE_5_DESIGN.md.
+
+enum FaMethod {
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+}
+
+enum FaStartConvention {
+  /// Depreciate from the month the asset is placed in service.
+  IN_SERVICE_MONTH
+  /// Depreciate from the month after.
+  NEXT_MONTH
+}
+
+enum FaDisposalConvention {
+  /// No depreciation in the month of disposal.
+  NONE
+  /// A full month of depreciation in the month of disposal.
+  FULL_MONTH
+}
+
+enum FaPolicyStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+enum FaAssetStatus {
+  DRAFT
+  SUBMITTED
+  CAPITALISED
+  DISPOSED
+  CANCELLED
+}
+
+enum FaSourceKind {
+  /// A posted supplier-bill line; its net amount is (part of) the cost.
+  BILL_LINE
+  /// An amount against a named counter account (Dr cost / Cr counter).
+  ACCOUNT
+  /// Already in the class's cost account (e.g. the opening trial balance); no journal.
+  IN_LEDGER
+}
+
+/// Depreciation runs, disposals and year-end closes share this lifecycle.
+enum FaDocStatus {
+  DRAFT
+  POSTED
+  REVERSAL_REQUESTED
+  REVERSED
+  CANCELLED
+}
+
+model FaClass {
+  id               String          @id @default(cuid())
+  code             String          @unique
+  name             String
+  nameAr           String?
+  costAccountId    String
+  accumAccountId   String
+  expenseAccountId String
+  isActive         Boolean         @default(true)
+  createdBy        String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  policies         FaClassPolicy[]
+  assets           FaAsset[]
+}
+
+/// Versioned depreciation settings of a class. An APPROVED version never changes (trigger);
+/// a change is a new version approved by someone other than its preparer.
+model FaClassPolicy {
+  id                      String               @id @default(cuid())
+  classId                 String
+  class                   FaClass              @relation(fields: [classId], references: [id], onDelete: Restrict)
+  version                 Int
+  status                  FaPolicyStatus       @default(DRAFT)
+  method                  FaMethod
+  usefulLifeMonths        Int
+  residualPercent         Decimal              @db.Decimal(5, 2)
+  decliningFactor         Decimal?             @db.Decimal(5, 2)
+  startConvention         FaStartConvention
+  disposalConvention      FaDisposalConvention
+  capitalisationThreshold Decimal              @default(0) @db.Decimal(18, 2)
+  note                    String?
+  preparedBy              String
+  preparedAt              DateTime             @default(now())
+  approvedBy              String?
+  approvedAt              DateTime?
+  assets                  FaAsset[]
+
+  @@unique([classId, version])
+}
+
+model FaAsset {
+  id                           String               @id @default(cuid())
+  assetNo                      Int                  @unique @default(autoincrement())
+  name                         String
+  classId                      String
+  class                        FaClass              @relation(fields: [classId], references: [id], onDelete: Restrict)
+  /// The approved class policy version the asset was capitalised under.
+  classPolicyId                String?
+  classPolicy                  FaClassPolicy?       @relation(fields: [classPolicyId], references: [id], onDelete: Restrict)
+  branchId                     String?
+  costCenterId                 String?
+  inServiceDate                DateTime             @db.Date
+  cost                         Decimal              @default(0) @db.Decimal(18, 2)
+  residualValue                Decimal              @default(0) @db.Decimal(18, 2)
+  method                       FaMethod
+  usefulLifeMonths             Int
+  decliningFactor              Decimal?             @db.Decimal(5, 2)
+  startConvention              FaStartConvention
+  disposalConvention           FaDisposalConvention
+  /// Why the asset departs from its class policy (shown to the approver).
+  deviationReason              String?
+  /// An asset brought in at cutover: depreciation already charged, and over how many months.
+  openingAccumulated           Decimal              @default(0) @db.Decimal(18, 2)
+  openingMonths                Int                  @default(0)
+  /// Counter account for the opening accumulated depreciation; null = already in the ledger.
+  openingAccumCounterAccountId String?
+  status                       FaAssetStatus        @default(DRAFT)
+  preparedBy                   String
+  submittedAt                  DateTime?
+  approvedBy                   String?
+  capitalisedAt                DateTime?            @db.Date
+  cancelledBy                  String?
+  cancelledAt                  DateTime?
+  cancelReason                 String?
+  createdAt                    DateTime             @default(now())
+  updatedAt                    DateTime             @updatedAt
+  sources                      FaAssetSource[]
+  depLines                     FaDepLine[]
+  disposals                    FaDisposal[]
+
+  @@index([status])
+}
+
+model FaAssetSource {
+  id               String       @id @default(cuid())
+  assetId          String
+  asset            FaAsset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  lineNo           Int
+  kind             FaSourceKind
+  billLineId       String?
+  counterAccountId String?
+  amount           Decimal      @db.Decimal(18, 2)
+  description      String?
+
+  @@unique([assetId, lineNo])
+  @@index([billLineId])
+}
+
+model FaDepRun {
+  id                  String      @id @default(cuid())
+  runNo               Int         @unique @default(autoincrement())
+  fiscalPeriodId      String
+  periodEnd           DateTime    @db.Date
+  status              FaDocStatus @default(DRAFT)
+  total               Decimal     @db.Decimal(18, 2)
+  preparedBy          String
+  preparedAt          DateTime    @default(now())
+  approvedBy          String?
+  postedAt            DateTime?
+  reversalRequestedBy String?
+  reversalReason      String?
+  reversedBy          String?
+  reversedAt          DateTime?
+  lines               FaDepLine[]
+
+  @@index([fiscalPeriodId])
+}
+
+model FaDepLine {
+  id               String   @id @default(cuid())
+  runId            String
+  run              FaDepRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  assetId          String
+  asset            FaAsset  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  amount           Decimal  @db.Decimal(18, 2)
+  /// Depreciable months this line covers (more than one = catch-up).
+  months           Int
+  accumulatedAfter Decimal  @db.Decimal(18, 2)
+  nbvAfter         Decimal  @db.Decimal(18, 2)
+  note             String?
+
+  @@unique([runId, assetId])
+  @@index([assetId])
+}
+
+model FaDisposal {
+  id                  String      @id @default(cuid())
+  assetId             String
+  asset               FaAsset     @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  disposalDate        DateTime    @db.Date
+  kind                String
+  proceeds            Decimal     @default(0) @db.Decimal(18, 2)
+  proceedsAccountId   String?
+  reason              String
+  status              FaDocStatus @default(DRAFT)
+  cost                Decimal?    @db.Decimal(18, 2)
+  accumulated         Decimal?    @db.Decimal(18, 2)
+  nbv                 Decimal?    @db.Decimal(18, 2)
+  gainLoss            Decimal?    @db.Decimal(18, 2)
+  preparedBy          String
+  preparedAt          DateTime    @default(now())
+  approvedBy          String?
+  postedAt            DateTime?
+  reversalRequestedBy String?
+  reversalReason      String?
+  reversedBy          String?
+  reversedAt          DateTime?
+
+  @@index([assetId])
+}
+
+model YearEndClose {
+  id                  String      @id @default(cuid())
+  year                Int
+  status              FaDocStatus @default(DRAFT)
+  yearStart           DateTime    @db.Date
+  yearEnd             DateTime    @db.Date
+  /// Lines of the closing entry as computed when prepared: [{accountId, branchId, costCenterId, net}].
+  snapshot            Json
+  netIncome           Decimal     @db.Decimal(18, 2)
+  preparedBy          String
+  preparedAt          DateTime    @default(now())
+  approvedBy          String?
+  postedAt            DateTime?
+  reversalRequestedBy String?
+  reversalReason      String?
+  reversedBy          String?
+  reversedAt          DateTime?
+
+  @@index([year])
+}

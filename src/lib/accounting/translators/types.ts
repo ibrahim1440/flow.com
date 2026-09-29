@@ -11,4 +11,6 @@ export type Translation =
       lines: EngineLine[];
       /** Anything besides the policy itself that must be approved before this posts. */
       alsoUnapproved: string[];
+      /** CLOSING for the year-end close and its reversal; AUTO otherwise. */
+      entryType?: "AUTO" | "CLOSING";
     };

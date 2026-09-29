@@ -56,7 +56,7 @@ async function user(username: string, name: string, p: Permissions, lang: "ar" |
   return e.id;
 }
 
-const TABLES = ["AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "JournalEntry", "FiscalPeriod", "AccountMapping", "AccountingPolicy", "Account", "AccountingSettings",
+const TABLES = ["FaDepLine", "FaDepRun", "FaDisposal", "FaAssetSource", "FaAsset", "FaClassPolicy", "FaClass", "YearEndClose", "AccountingEvent", "QoyodExportRecord", "JournalEntryLine", "JournalEntry", "FiscalPeriod", "AccountMapping", "AccountingPolicy", "Account", "AccountingSettings",
   "CommissionLedgerCorrection", "CommissionLedgerEntry", "CommissionAccrual", "CommissionAssignment", "CommissionTier", "CommissionPlanVersion", "CommissionPlan"];
 
 async function main() {
@@ -132,8 +132,8 @@ async function main() {
   }
   if (await prisma.account.count()) { console.log("Accounting fixture already present (use --reset)."); return; }
 
-  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign", "inv_doc_create", "inv_master_manage"];
-  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post", "inv_doc_approve", "inv_doc_post"];
+  const PREP = ["journal_create", "journal_submit", "policy_prepare", "coa_manage", "mapping_manage", "settings_manage", "events_process", "period_lock", "tax_category_manage", "export_view", "ap_bill_create", "bank_correction_request", "ar_invoice_create", "ar_receipt_assign", "inv_doc_create", "inv_master_manage", "fa_setup", "fa_prepare", "year_close_prepare"];
+  const APPR = ["journal_approve", "journal_post", "journal_reverse", "policy_approve", "period_lock", "period_close", "unlock_period", "events_process", "ap_bill_approve", "ap_bill_post", "bank_posting_manage", "bank_correction_approve", "ar_invoice_approve", "ar_invoice_post", "inv_doc_approve", "inv_doc_post", "fa_approve", "year_close_approve"];
   const prep = await user("acc.preparer", "سارة القحطاني", perms(PREP));
   const appr = await user("acc.approver", "خالد العتيبي", perms(APPR));
   await user("acc.approver.en", "Khalid Al-Otaibi (EN)", perms(APPR), "en");
@@ -532,6 +532,42 @@ async function main() {
   await OPS.processOpsEvent(opsBuy.id);
   await prisma.inventoryMovement.create({ data: { type: "ADJUSTMENT", category: "PACKAGING_MATERIAL", referenceEntityId: bagMat.id, quantityChanged: -12, previousQuantity: 700, newQuantity: 688, sourceDocType: "MANUAL_ADJUSTMENT", notes: "fixture:accounting — written by a script outside the integration" } });
   await prisma.materialItem.update({ where: { id: bagMat.id }, data: { quantityOnHand: 688 } });
+  // ─── Stage 5: fixed assets (SYNTHETIC classes, lives and rates — codes end -SYN; not company policy) ───
+  const FA = await import("../../src/lib/accounting/fixed-assets-service");
+  { const fp = await draftPolicy("fixed_assets.depreciation", {}, prep); await approvePolicy(fp.id, appr); }
+  const faClass = async (code: string, name: string, nameAr: string, cost: string, pol: Record<string, unknown>, approve = true) => {
+    const c = await FA.createClass({ code, name, nameAr, costAccountId: A[cost], accumAccountId: A["1290"], expenseAccountId: A["6600"] }, prep);
+    const v = await FA.draftClassPolicy(c.id, { ...pol, note: "SYNTHETIC TEST ASSUMPTION" }, prep);
+    if (approve) await FA.approveClassPolicy(v.id, appr);
+    return c.id;
+  };
+  const mach = await faClass("MACH-SYN", "Machinery (synthetic)", "آلات ومعدات (تجريبي)", "1210", { method: "STRAIGHT_LINE", usefulLifeMonths: 60, residualPercent: "0", startConvention: "IN_SERVICE_MONTH", disposalConvention: "NONE", capitalisationThreshold: "1000" });
+  const veh = await faClass("VEH-SYN", "Vehicles (synthetic)", "سيارات (تجريبي)", "1230", { method: "STRAIGHT_LINE", usefulLifeMonths: 60, residualPercent: "0", startConvention: "NEXT_MONTH", disposalConvention: "NONE", capitalisationThreshold: "1000" });
+  await faClass("FURN-SYN", "Furniture and fit-out (synthetic)", "أثاث وتجهيزات (تجريبي)", "1220", { method: "DECLINING_BALANCE", usefulLifeMonths: 84, residualPercent: "5", decliningFactor: "2", startConvention: "NEXT_MONTH", disposalConvention: "FULL_MONTH", capitalisationThreshold: "1000" }, false);
+  const eqSup = await sup("مؤسسة المعدات (تجريبي)", "310555666700003", 30);
+  const eqBill = await createBill({ supplierId: eqSup, supplierInvoiceNo: "EQ-12", billDate: ymd(8, 5), lines: [
+    { kind: "EXPENSE", accountId: A["1210"], description: "مطحنة تجارية", quantity: "1", unitPrice: "18500", taxCategoryId: vat15.id },
+    { kind: "EXPENSE", accountId: A["1210"], description: "قطع غيار", quantity: "1", unitPrice: "3600", taxCategoryId: vat15.id },
+  ] } as never, prep);
+  await submitBill(eqBill.id, prep); await approveBill(eqBill.id, appr); await postBill(eqBill.id, appr);
+  const eqLine = (await prisma.supplierBillLine.findFirstOrThrow({ where: { billId: eqBill.id, lineNo: 1 } })).id;
+  const asset = async (b: Record<string, unknown>, until: "DRAFT" | "SUBMITTED" | "CAPITALISED") => {
+    const a = await FA.saveAsset(b, prep);
+    if (until !== "DRAFT") await FA.submitAsset(a.id, prep);
+    if (until === "CAPITALISED") await FA.capitaliseAsset(a.id, appr);
+    return a.id;
+  };
+  await asset({ name: "محمصة 12 كغ (تجريبي)", classId: mach, inServiceDate: ymd(1, 1), usefulLifeMonths: 60, residualValue: "12000", deviationReason: "SYNTHETIC: residual value of the roaster", sources: [{ kind: "ACCOUNT", counterAccountId: A["2195"], amount: "120000", description: "فاتورة المحمصة (تجريبي)" }] }, "CAPITALISED");
+  await asset({ name: "مطحنة تجارية (تجريبي)", classId: mach, inServiceDate: ymd(8, 5), sources: [{ kind: "BILL_LINE", billLineId: eqLine }] }, "CAPITALISED");
+  await asset({ name: "سيارة توصيل (تجريبي)", classId: veh, inServiceDate: ymd(1, 15), sources: [{ kind: "ACCOUNT", counterAccountId: A["2195"], amount: "95000", description: "سيارة توصيل (تجريبي)" }] }, "CAPITALISED");
+  await asset({ name: "ماكينة إسبريسو (تجريبي)", classId: mach, inServiceDate: ymd(7, 1), usefulLifeMonths: 48, deviationReason: "SYNTHETIC: heavy café use", sources: [{ kind: "ACCOUNT", counterAccountId: A["2195"], amount: "42000", description: "تركيب وتشغيل (تجريبي)" }] }, "SUBMITTED");
+  // Monthly runs for past open months (a locked month is caught up by the next run, as the service does).
+  for (let mm = 1; mm < m; mm++) {
+    const per = await prisma.fiscalPeriod.findFirstOrThrow({ where: { year: YEAR, periodNo: mm } });
+    if (per.status !== "OPEN") continue;
+    const r = await FA.createRun(per.id, prep).catch(() => null);
+    if (r) await FA.approveRun(r.id, appr);
+  }
   if (provisionalBefore === undefined) delete process.env.ACCOUNTING_PROVISIONAL_POSTING; else process.env.ACCOUNTING_PROVISIONAL_POSTING = provisionalBefore;
   await processPendingEvents();
   console.log(`Accounting fixture: ${await prisma.journalEntry.count()} entries, ${await prisma.accountingEvent.count()} events.`);

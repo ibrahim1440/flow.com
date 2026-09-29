@@ -45,8 +45,11 @@ export async function createEngineEntry(
     originEventId: string;
     lines: EngineLine[];
     mode: PostingMode;
+    /** CLOSING: a year-end close (or its reversal), posted only into a LOCKED period. */
+    entryType?: "AUTO" | "CLOSING";
   },
 ) {
+  const entryType = input.entryType ?? "AUTO";
   const roleMap = await resolveRoles(tx, input.lines.filter((l) => l.role).map((l) => l.role!));
   const lines = input.lines
     .map((l) => ({ ...l, accountId: l.accountId ?? roleMap.get(l.role!)!, debit: round2(dec(l.debit)), credit: round2(dec(l.credit)) }))
@@ -83,8 +86,11 @@ export async function createEngineEntry(
   });
   const day = input.entryDate.toISOString().slice(0, 10);
   if (!period) throw new PostingBlocked(`No fiscal period covers ${day}.`);
-  if (period.status !== "OPEN") {
-    throw new PostingBlocked(`Fiscal period ${period.year}-${String(period.periodNo).padStart(2, "0")} is ${period.status}; ${day} cannot be posted.`);
+  const label = `${period.year}-${String(period.periodNo).padStart(2, "0")}`;
+  if (entryType === "CLOSING") {
+    if (period.status !== "LOCKED") throw new PostingBlocked(`A closing entry posts only into a locked period; fiscal period ${label} is ${period.status}.`);
+  } else if (period.status !== "OPEN") {
+    throw new PostingBlocked(`Fiscal period ${label} is ${period.status}; ${day} cannot be posted.`);
   }
 
   const now = new Date();
@@ -92,7 +98,7 @@ export async function createEngineEntry(
     data: {
       entryDate: input.entryDate,
       fiscalPeriodId: period.id,
-      type: "AUTO",
+      type: entryType,
       status: "APPROVED",
       sourceModule: input.sourceModule,
       sourceDocumentId: input.sourceDocumentId,

@@ -7,6 +7,7 @@ import { assertDisposableFinanceDb } from "../../../scripts/finance/local-db-gua
 export { prisma };
 
 const TABLES = [
+  "FaDepLine", "FaDepRun", "FaDisposal", "FaAssetSource", "FaAsset", "FaClassPolicy", "FaClass", "YearEndClose",
   "InvMove", "InvLayer", "InventoryMovement", "MaterialItem", "InvDocLine", "InvDocument", "InvLossBand", "InvUnit", "InvItem", "InvLocation",
   "RoastingBatch", "ProductSKU", "CoffeeProduct", "GreenBean", "InvCosting", "InvOpsEvent", "InvCostPool", "CustomerReturnLine", "CustomerReturn", "ApCreditAllocation",
   "AdvanceApplication", "ArAllocation", "CustomerReceipt", "SalesInvoiceLine", "SalesInvoice",

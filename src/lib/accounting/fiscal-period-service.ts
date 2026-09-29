@@ -77,6 +77,9 @@ export async function closeBlockers(id: string) {
   const blockers: { code: string; count: number; en: string; ar: string }[] = [];
   if (pendingEntries) blockers.push({ code: "PENDING_ENTRIES", count: pendingEntries, en: `${pendingEntries} journal entries are still draft, submitted or approved`, ar: `${pendingEntries} قيود ما زالت مسودة أو مقدمة أو معتمدة دون ترحيل` });
   if (waitingEvents) blockers.push({ code: "WAITING_EVENTS", count: waitingEvents, en: `${waitingEvents} operational events dated in this period are not posted`, ar: `${waitingEvents} أحداث تشغيلية في هذه الفترة لم تُرحّل بعد` });
+  const lastOfYear = !(await prisma.fiscalPeriod.count({ where: { year: p.year, startDate: { gt: p.startDate } } }));
+  const yearClose = lastOfYear ? await prisma.yearEndClose.findFirst({ where: { year: p.year, status: { in: ["DRAFT", "REVERSAL_REQUESTED"] } } }) : null;
+  if (yearClose) blockers.push({ code: "YEAR_END_PENDING", count: 1, en: `The ${p.year} year-end close is ${yearClose.status === "DRAFT" ? "prepared but not posted" : "waiting for a reopening decision"}`, ar: `إقفال سنة ${p.year} ${yearClose.status === "DRAFT" ? "معدّ ولم يُرحّل" : "بانتظار قرار إعادة الفتح"}` });
   if (earlierOpen) blockers.push({ code: "EARLIER_OPEN", count: earlierOpen, en: `${earlierOpen} earlier periods are not closed`, ar: `${earlierOpen} فترات سابقة لم تُقفل` });
   return { period: p, blockers };
 }

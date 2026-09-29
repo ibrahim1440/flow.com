@@ -16,6 +16,8 @@ import { translateSupplierBill } from "./translators/payables";
 import { translateBank } from "./translators/bank";
 import { translateReceivables } from "./translators/receivables";
 import { translateInventory } from "./translators/inventory";
+import { translateFixedAssets } from "./translators/fixed-assets";
+import { translateYearEnd } from "./translators/year-end";
 import type { Translation } from "./translators/types";
 
 type Tx = Prisma.TransactionClient;
@@ -43,6 +45,14 @@ const TRANSLATORS: Record<string, (tx: Tx, ev: EventRow) => Promise<Translation>
   "ar.credit.allocated": translateReceivables,
   "ar.credit.released": translateReceivables,
   "inv.document.posted": translateInventory,
+  "fa.asset.capitalised": translateFixedAssets,
+  "fa.asset.cancelled": translateFixedAssets,
+  "fa.depreciation.posted": translateFixedAssets,
+  "fa.depreciation.reversed": translateFixedAssets,
+  "fa.disposal.posted": translateFixedAssets,
+  "fa.disposal.reversed": translateFixedAssets,
+  "gl.year.closed": translateYearEnd,
+  "gl.year.reopened": translateYearEnd,
 };
 
 export type ProcessOutcome = { eventId: string; status: AccountingEventStatus | "BUSY"; journalEntryId?: string; message?: string; provisional?: boolean };
@@ -90,7 +100,7 @@ export async function processEvent(eventId: string): Promise<ProcessOutcome> {
       const mode = await resolvePostingMode(tx, policyKey, t.alsoUnapproved);
       const entry = await createEngineEntry(tx, {
         entryDate: t.entryDate, description: t.description, sourceModule: t.sourceModule,
-        sourceDocumentId: t.sourceDocumentId, originEventId: ev.id, lines: t.lines, mode,
+        sourceDocumentId: t.sourceDocumentId, originEventId: ev.id, lines: t.lines, mode, entryType: t.entryType,
       });
       const message = mode.provisional ? `Posted provisionally (isolated test database): ${mode.reasons.join("; ")}.` : null;
       await tx.accountingEvent.update({
