@@ -28,6 +28,10 @@ Implemented and tested **locally on synthetic data**:
   separate from invoice corrections, gross margin reconciled to the ledger, labour and overhead
   absorption, later cost changes traced through production, supplier credit notes.
 
+Four levels are kept apart throughout (`REQUIREMENTS_MATRIX.md`): local verification (done, per
+row), independent review (not done), accountant acceptance (not done) and production readiness (not
+ready; only the ledger-core migration was rehearsed on a production copy).
+
 Stages 2 and 3 are **not accepted**; they await the owner's review. The historical-reporting defects
 raised in that review (17–19 in `DEFECTS_AND_LIMITATIONS.md`) are fixed and covered by regression
 tests that failed before the fix.

@@ -56,7 +56,7 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
 - Stage 4 limitations: `STAGE_4_DESIGN.md` §7, as revised by stage 4b (`STAGE_4B_DESIGN.md` §10):
   labour/overhead absorption, tracing of later cost changes, supplier credit notes, invoice units and
   fulfilment location are now implemented; still open are one accounting location for operational
-  stock, kilogram lots from the old packing path, re-dating after a roast's date is edited, no in-transit transfers, and migrations not rehearsed on a production copy.
+  stock, kilogram lots from the old packing path, re-dating after a roast's date is edited, no in-transit transfers. Of the nine migrations on this branch only the ledger core was rehearsed on a production copy (`REQUIREMENTS_MATRIX.md` → "Migration rehearsal").
 - Open items on ledger lines start with the `20260930090000_accounting_open_items` migration. The
   branch has no journals from before it, but a database that posted receivables/payables journals
   under an earlier build of this branch would need them re-derived; production has none.

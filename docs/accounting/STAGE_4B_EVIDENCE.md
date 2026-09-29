@@ -30,7 +30,7 @@ Categories:
 | 1.12 | Pending / failed effects exposed | V | status endpoint asserted over HTTP; chips on the purchases, production, packaging and dispatch screens and the exception queue captured in the browser after the HTTP flow (`evidence/app/OPS-*.png`, `ACC-48-*.png`); the accessibility audit did not cover the operational screens |
 | 1.13 | Unknown stock writers detected | V | `ops-integration.test.ts` (UNINTEGRATED; writers with an event are not flagged) |
 | 1.14 | Reconciliation detects exceptions without re-entry | V | `ops-integration.test.ts` (MATCHED and EXCEPTION rows) |
-| 1.15 | Flow proven through the existing operational screens | V (purchase and roast forms in the browser; every workflow through its route) / I (packing and dispatch forms clicked in a browser) | `ops-forms.mjs` fills the purchase and roast-to-stock forms as an operations user; `ops-integration.test.mjs` drives every operational route; screens captured showing the result |
+| 1.15 | Flow proven through the existing operational screens | V | browser, as an operations user: `ops-forms.mjs` (purchase and roast-to-stock forms); `ops-pack-dispatch.mjs` (packing form: over-quantity refusal, a posted pack, a pack held for loss above the band then approved and posted by the accountant in the browser, a pack of an unlinked SKU blocked then recovered by linking the item in setup and retrying from the exception queue; dispatch form: over-quantity refusal, dispatches posted to 1176). Quantities, documents and journals checked in the database after each step. The over-quantity refusals are enforced by the forms (confirm disabled); the server-side refusals are covered by the regression certification (`unified-packaging.mjs` case I, `delivery.mjs` "more than ordered refused") |
 | 2.1 | Durable costing, retries, visible exception queue, explicit status | V | `stage4b-workflows.test.ts` B, `stage4-gaps.test.ts`; queue and invoice status captured (`ACC-48-costing`, `ACC-32-costing`) |
 | 2.2 | No silent skipping; non-stock lines explicit | V | `stage4-gaps.test.ts` |
 | 2.3 | Actual fulfilment location; unit conversion | V | `stage4b-workflows.test.ts` A (carton of 12 l at the café) |
@@ -55,7 +55,7 @@ Categories:
 | 6.3 | ACC-47 loss, cost and journal information | V | `evidence/app/ACC-47-app-390.png` (loss block, cost, expected journal rows), audited (0 serious/critical) |
 | 6.4 | Regression tests written before fixes | V (stage 4 gaps, 4b workflows) / X (operational integration: written with the code) | `evidence/test-runs/*-before-fix.txt` |
 | 6.5 | Hand-worked multi-period examples | V | chain (Jan–Mar + today), A (Feb, Mar, today) |
-| 6.6 | Release gates | X | a release package is not proposed; migration rehearsal on a production copy is required first (MIGRATION_AND_CUTOVER) |
+| 6.6 | Release gates | X | no release package is proposed; only the ledger-core migration was rehearsed on a production copy, the eight later ones (incl. stage 4b) are local only (`REQUIREMENTS_MATRIX.md` → "Migration rehearsal", `RELEASE_PROPOSAL.md`) |
 | 7.1 | Figma frames for the new screens | V (drawn after the code) | FIGMA_PARITY page 21: ACC-48..52, ACC-31b, ACC-32b, OPS-01 |
 | 7.2 | Preview deployment, Neon rehearsal | C | GitHub App not installed on flow.com (push 403); Vercel team scope; no Neon access from this sandbox |
 | 7.3 | Credential rotation | D (owner) | CREDENTIAL_INCIDENT.md; not performed, not claimed |
