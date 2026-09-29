@@ -175,6 +175,8 @@ const REASONS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/sales cost timing|salesCostTiming/i, () => "توقيت تكلفة المبيعات لم يُقرَّر بعد"],
   [/neither marked as goods nor as non-stock/, () => "بند غير مصنّف: لا هو بضاعة ولا خدمة؛ صنّفه"],
   [/has no inventory item; link the product/, () => "المنتج غير مربوط بصنف مخزون؛ اربطه"],
+  [/Nothing to post \(zero value\)/, () => "لا قيد: القيمة صفر (لا فرق يُرحَّل)"],
+  [/A transfer between locations has no ledger effect/, () => "التحويل بين المواقع بلا أثر على الحسابات (الحسابات نفسها)"],
 ];
 export function useExplain() {
   const { lang } = useL();
