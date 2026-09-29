@@ -523,15 +523,209 @@ qualifying bases as the input — never the engine's answer:
 ```
 cumulative base                9,647.83
 1% of it                       96.4783
-rounded to the riyal (½ up)    96.48        ← the money actually moved
+rounded to 0.01 SAR (half-up)    96.48        ← the money actually moved
 back-computed rate   100 × 96.48 / 9,647.83 = 1.00001762…
 rounded to 6 dp                1.000018     ← matches the recorded value
 ```
 
-The rounding gain is **0.0017 SAR**, and expressing that as a percentage of the base is
+The rounding gain is **0.0017 SAR** (monetary rounding is to 0.01 SAR, not to whole riyals), and expressing that as a percentage of the base is
 the whole of the difference. The rate equals the contractual rate exactly only when the
 cumulative base is a multiple of 100 — every other base leaves a sub-riyal remainder that
 has to go somewhere, and it goes into the derived rate rather than into the payment.
 
 `sales-collections` D13 now asserts this by recomputing the expected rate from the inputs
 and comparing, so the two can never quietly diverge.
+
+---
+
+## 12. Payout balances — the six figures, and what moves each
+
+**Earned is not payable.** The screen used to show one figure, `outstanding = accrued +
+adjustments − paid`, where `accrued` counted every accrual in the period including ones
+nobody had approved. The payout route separately refused to pay while an unapproved accrual
+existed, so the money could not actually leave — but the number a reviewer was asked to
+authorise against overstated what they could pay. Six figures now, and the payable one is
+computed from approved entitlement alone.
+
+| figure | definition |
+| --- | --- |
+| **earnedNet** | approved + unapproved entitlement + manual adjustments |
+| **unapprovedEntitlement** | net entitlement of every accrual not `APPROVED`/`PAID`. **Never payable** |
+| **approvedEntitlement** | net entitlement of `APPROVED` and `PAID` accruals. The only base a payout may draw on |
+| **adjustments** | period-level manual `ADJUSTMENT` entries, signed |
+| **completedPayouts** | `PAYOUT` entries. Positive. Payments already made elsewhere |
+| **signedBalance** | `approvedEntitlement + adjustments − completedPayouts`, **kept signed internally** |
+| **availableToPay** | the positive face of `signedBalance`, else 0.00 |
+| **recoveryBalance** | the negative face of `signedBalance`, else 0.00 |
+
+`availableToPay` and `recoveryBalance` are two views of one signed number, so they cannot
+disagree. A debt is shown as a recovery, never flattened to a zero.
+
+### What each input moves
+
+| input | earnedNet | approvedEntitlement | availableToPay | recoveryBalance |
+| --- | --- | --- | --- | --- |
+| a collection approved by Finance | **+** | unchanged until the period is approved | unchanged | unchanged |
+| approving the period | unchanged | **+** | **+** | **−** |
+| a reversal before payment | **−** | **−** once it reaches an approved accrual | **−** | **+** if it overshoots |
+| a manual `ADJUSTMENT` | **±** | unchanged | **±** | **∓** |
+| recording a completed payout | unchanged | unchanged | **−** | **+** |
+
+A manual adjustment is a decision about the **period**, made by a person with a reason, so
+it is period-level and counts towards payability at once. An engine correction is a
+consequence of a **collection**, so it reaches a specific accrual through an allocation and
+changes entitlement rather than sitting beside it. That is the whole difference between the
+two, and it is why they are separate quantities.
+
+**Unapproved earnings never cancel a debt.** `availableToPay` is computed from approved
+entitlement only, so somebody who owes 8.00 after a reversed payment does not have it
+silently written off by 10.00 of new, unsigned-off commission. The recovery stays 8.00 and
+nothing is payable until it is resolved.
+
+### Partial payouts
+
+Payouts are **period-level**. There is no allocation of a payout to individual accruals and
+none is invented here, so `PAID` on an accrual means one thing only:
+
+> the period's approved entitlement has been settled in full.
+
+Paying 3.00 of an 8.00 balance leaves every row `APPROVED`, leaves 5.00 available, and marks
+nothing paid. This used to flip **every** approved row to `PAID` the moment any payout was
+written, so paying 1.00 of 3.00 left three rows claiming to be settled. The balance was
+still right; the rows were lying.
+
+### Execution protections
+
+Every operation that can move a balance takes `pg_advisory_xact_lock` on the same key,
+`commission-balance:<employee>:<period>`. Prisma runs transactions at Read Committed, so
+without a shared lock two of them can each read the same available balance, each find it
+sufficient, and each write. The writers, audited:
+
+| writer | where | takes the lock |
+| --- | --- | --- |
+| `accrueForCollection` → `postDelta` | an approval or a reversal of a collection | yes, per employee share |
+| `approvePeriod` | the `approve` action | yes |
+| `adjust` | the `adjust` action | yes |
+| the payout branch | the `payout` action | yes, plus a second lock on the key |
+
+`approvePeriod` and `adjust` did not, which left two windows. An approval landing between
+a payout's balance read and its write would let the payout spend entitlement it never saw;
+a negative adjustment racing a payout would have both read the same balance before either
+removed anything from it. Both take the lock inside the function rather than at the call
+site, so a future caller cannot forget.
+
+The tests prove the lock rather than infer it from timing: the suite holds
+`commission-balance:<employee>:<period>` on its own connection and then fires the request.
+A writer that takes the same key must wait, and one that does not will sail straight
+through — a direct observation rather than a guess from how long something took.
+
+### Idempotency, end to end
+
+A payout **requires** an `idempotencyKey`. It used to be optional, which made the whole
+protection opt-in — and the one caller that mattered, the payout dialog, never sent one. A
+retried payment therefore landed twice whenever the balance still covered it, which is not
+a rare case: it is exactly what a **partial** payment leaves behind, since the remainder is
+by definition enough for a duplicate to succeed.
+
+- **Required.** A payout with no key is refused with `400` before anything is read.
+- **Globally unique**, not per employee and period. A key identifies one payment; the same
+  key arriving for a different person or month is a client fault, and the narrower
+  constraint would have accepted it as a second payment. Enforced by a unique index —
+  Postgres treats NULLs as distinct, so every keyless movement is unaffected.
+- **Bound to its payload.** A replay is only a replay when the employee, period, amount and
+  reason all match. The same key with a different amount is refused with `409`: replaying
+  would silently discard a real payment and writing would defeat the key, so neither is
+  guessed at.
+- **Checked inside the lock**, and under a second advisory lock on the key itself, so two
+  simultaneous retries cannot both pass — one writes, the other replays. The two locks are
+  always taken in the same order, so no pair of transactions can deadlock on them.
+
+The dialog mints one key per intended payment and keeps it while the payload is unchanged,
+so pressing the button again after a timeout retries the **same** payment. Changing the
+amount or the reason mints a new one, because that is a different payment.
+
+### A shortfall is not a debt
+
+`signedBalance` is computed from the **derivable** parts of a period alone. On a period
+that still holds movements nothing can place, the parts left out are exactly the ones that
+would close the gap — so a negative result says *this is what is missing*, not *this person
+was overpaid*.
+
+The preview database showed the problem plainly: a rep's row read **recovery owed 3.00**
+while the nine movements the model could not place netted to exactly **+3.00**. Adopt them
+and the period closes at zero. Nothing was ever owed. The screen was asserting a debt
+against a real person on the strength of a hole in the data.
+
+So the two faces of the balance are only populated once the period is resolved:
+
+| | RESOLVED | UNRESOLVED |
+| --- | --- | --- |
+| `availableToPay` | the positive face | **0.00** — nothing is payable |
+| `recoveryBalance` | the negative face: a debt, established | **0.00** — no debt is established |
+| `unresolvedShortfall` | 0.00 | the negative face, named for what it is |
+| `provisionalBalance` | the signed figure | the signed figure, unchanged and still shown |
+
+The arithmetic is never hidden — `provisionalBalance` and `signedBalance` report it either
+way. What changes is what the figure is allowed to *claim*. The screen shows «الرصيد غير
+مُسوّى — تتطلب تسوية» / "balance unresolved — reconciliation required" and, beneath it, the
+shortfall labelled "not a debt". The payable column shows a dash rather than a number,
+because a number there reads as *this is what you may pay*.
+
+The block code says the same thing: `BALANCE_UNRESOLVED`, not `ENTITLEMENT_UNRESOLVED`.
+The distinction is between "we cannot tell what this comes to" and "this person owes
+money", and only the first is true.
+
+`RECOVERY_OUTSTANDING` is reachable only past the resolution gate, so wherever it appears
+the history behind it is complete and *owed back* is a finding rather than a gap.
+
+### Fail closed while entitlement is unresolved
+
+A payout is refused outright when the period's entitlement cannot be fully derived —
+checked **before** the amount, because an amount is only meaningful once the balance it is
+measured against is derivable. Two shapes:
+
+- a movement that belongs to no accrual, so nothing can say what it is worth now;
+- a negative movement nothing has been applied against, sitting beside positive linked
+  entitlement that looks perfectly payable.
+
+**Completeness is never inferred from a signed total.** An unattributed `+10.00` and an
+unattributed `-10.00` sum to exactly zero while two movements remain unexplained, and a
+zero there would have declared the period healthy and let it be paid. The gate reads
+`unattributedCount`, `unattributedPositive`, `unattributedNegative` and
+`unallocatedReversal` — counts and magnitudes, which cannot cancel.
+
+The refusal is inert. No allocation is invented to clear it, no record is altered, and the
+period stays exactly as it is until somebody reconciles it. `payoutBlock` names the reason
+— `ENTITLEMENT_UNRESOLVED`, `RECOVERY_OUTSTANDING` or `NOTHING_PAYABLE` — and the screen
+renders the same code, so the API and the UI cannot disagree about why nothing may be paid.
+
+### What this endpoint is, and is not
+
+`settlement: "RECORDED_AS_COMPLETED_EXTERNALLY"`. It records a payment **already made
+somewhere else**. It does not instruct, schedule or execute one: there is no payment
+integration, no bank connection and no payroll deduction anywhere in this system. A
+recovery balance is a figure to act on outside the system, not an automatic deduction.
+
+## 13. Which historical gaps matter, by movement type
+
+A provenance gap is only a gap where provenance is the right source. Classified:
+
+| movement | correct source | gap? |
+| --- | --- | --- |
+| `ACCRUAL` / `REVERSAL` from a collection | the collection event | **yes** if absent |
+| `PAYOUT` | the payout record itself — its actor, amount and reason | **no**. A payout has no collection behind it and requiring one would be wrong |
+| `ADJUSTMENT` | a person and a stated reason | **no**. It is independent by definition |
+| legacy `ACCRUAL`/`REVERSAL` with no event | unknowable | **ambiguous**, and left so |
+
+**Ambiguous history is not payable.** An accrual whose movements predate provenance cannot
+have its current value derived, so it is counted into `unattributed` and excluded from both
+approved and unapproved entitlement. It cannot reach `availableToPay` by any route. Making
+it payable needs a documented reconciliation that establishes its eligibility independently
+— not a guess, and not a default. New, fully-attributed entitlement stays distinguishable
+from unresolved history through `fullyAttributed` and the `unattributed` figure beside it.
+
+Being excluded from the totals is not enough on its own, though. An accrual left out of
+both approved and unapproved entitlement cannot be paid **directly**, but the period around
+it could still be, and its own figures would be missing from the balance the reviewer
+authorised against. So an unresolved accrual blocks payment for that employee and period
+entirely — see *Fail closed while entitlement is unresolved* above.

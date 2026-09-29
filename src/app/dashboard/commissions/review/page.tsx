@@ -43,6 +43,38 @@ type EmployeeRow = {
   expectedFromRows: string;
   reconciliationDifference: string;
   reconciled: boolean;
+  /** The entitlement model's own answer, and whether it agrees with the ledger. */
+  entitlementTotal: string;
+  entitlementReconciled: boolean;
+  /**
+   * The six balances. `outstanding` above is earned-less-paid and counts money nobody has
+   * approved yet, so it is NOT what may be paid — `balances.availableToPay` is.
+   */
+  balances: {
+    earnedNet: string;
+    unapprovedEntitlement: string;
+    approvedEntitlement: string;
+    adjustments: string;
+    completedPayouts: string;
+    signedBalance: string;
+    /** Whether the signed balance may be read as a statement about what is owed. */
+    balanceStatus: "RESOLVED" | "UNRESOLVED";
+    provisionalBalance: string;
+    availableToPay: string;
+    /** Only ever non-zero on a RESOLVED period. A debt, established from complete history. */
+    recoveryBalance: string;
+    /** The negative face of an UNRESOLVED balance. A gap in the record, not a debt. */
+    unresolvedShortfall: string;
+    unattributed: string;
+    unattributedPositive: string;
+    unattributedNegative: string;
+    unattributedCount: number;
+    nonDerivedCount: number;
+    unallocatedReversal: string;
+    fullyAttributed: boolean;
+    /** Why nothing may be paid, if anything. Same codes the API returns. */
+    payoutBlock: "BALANCE_UNRESOLVED" | "RECOVERY_OUTSTANDING" | "NOTHING_PAYABLE" | null;
+  };
   pendingCount: number;
   approvedCount: number;
 };
@@ -209,7 +241,7 @@ export default function CommissionReviewPage() {
         <Stat label={ar ? "التسويات" : "Adjustments"} value={data.totals.adjustments} money />
         <Stat label={ar ? "المدفوع" : "Paid"} value={data.totals.paid} money />
         <Stat
-          label={ar ? "المتبقّي" : "Outstanding"}
+          label={ar ? "المتبقّي (مستحق − مدفوع)" : "Outstanding (earned − paid)"}
           value={data.totals.outstanding}
           money
           tone="action"
@@ -230,7 +262,7 @@ export default function CommissionReviewPage() {
             { label: ar ? "مستحق" : "Accrued", w: "w-[140px]" },
             { label: ar ? "تسويات" : "Adjustments", w: "w-[130px]" },
             { label: ar ? "مدفوع" : "Paid", w: "w-[130px]" },
-            { label: ar ? "المتبقّي" : "Outstanding", w: "w-[160px]" },
+            { label: ar ? "المتاح للصرف" : "Available to pay", w: "w-[160px]" },
             { label: ar ? "الإجراءات" : "Actions", w: "w-[270px]" },
           ]}
         >
@@ -238,8 +270,18 @@ export default function CommissionReviewPage() {
             // The plan is not on the employee row; it is on that employee's accruals, which
             // is where the reviewer would look for it anyway.
             const pv = data.accruals.find((a) => a.employeeId === e.employeeId)?.planVersion;
+            // Availability, not earnings. `outstanding` includes accruals nobody has
+            // approved, so offering a payout against it invites a payment the server will
+            // refuse — or worse, one that spends a balance carrying a recovery.
+            //
+            // `payoutBlock` is the server's own answer and covers the case a positive
+            // figure hides: a period whose entitlement cannot be fully derived still shows
+            // an availableToPay, and that figure is not trustworthy until it reconciles.
             const canPay =
-              data.can.recordPayout && Number(e.outstanding) > 0 && e.pendingCount === 0;
+              data.can.recordPayout &&
+              e.balances.payoutBlock === null &&
+              Number(e.balances.availableToPay) > 0 &&
+              e.pendingCount === 0;
             return (
               <Tr key={e.employeeId} testId={`review-row-${e.employeeId}`}>
                 <Td>
@@ -289,7 +331,77 @@ export default function CommissionReviewPage() {
                 <Td><Money value={e.adjustments} /></Td>
                 <Td><Money value={e.paid} /></Td>
                 <Td>
-                  <Money value={e.outstanding} strong />
+                  {/* On an unresolved period the arithmetic result is shown as a dash, not
+                      as a figure. A number in this column reads as "this is what you may
+                      pay", and on a period the model cannot derive, nothing is. */}
+                  {e.balances.balanceStatus === "UNRESOLVED" ? (
+                    <span data-testid={`unresolved-amount-${e.employeeId}`} className="font-bold text-oo-text-muted">
+                      —
+                    </span>
+                  ) : (
+                    <Money value={e.balances.availableToPay} strong />
+                  )}
+                  {/* Earned is not payable. Both are shown, because a reviewer asked to
+                      authorise a payment needs the number they may actually pay, and a
+                      reviewer reading a statement needs the number that was earned. */}
+                  {e.balances.balanceStatus === "RESOLVED" && e.balances.availableToPay !== e.outstanding && (
+                    <span
+                      data-testid={`earned-${e.employeeId}`}
+                      className="block text-[12px] leading-[18px] text-oo-text-muted"
+                    >
+                      {ar ? "المستحق " : "earned "}
+                      <Money value={e.outstanding} />
+                      {Number(e.balances.unapprovedEntitlement) !== 0 && (
+                        <>
+                          {" · "}
+                          {ar ? "غير معتمد " : "unapproved "}
+                          <Money value={e.balances.unapprovedEntitlement} />
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {/* A debt is never shown as a zero — and never shown at all unless the
+                      history behind it is complete. `recoveryBalance` is zero on an
+                      unresolved period by construction, so this cannot misfire. */}
+                  {Number(e.balances.recoveryBalance) > 0 && (
+                    <span
+                      data-testid={`recovery-${e.employeeId}`}
+                      // The same sentence the dialog would show, from the same function, so
+                      // the chip and the refusal cannot drift apart.
+                      title={blockReason("RECOVERY_OUTSTANDING", e.balances, ar) ?? undefined}
+                      className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-rejected bg-oo-status-rejected-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-rejected"
+                    >
+                      {ar ? "مستردّ مستحق " : "recovery owed "}
+                      <Money value={e.balances.recoveryBalance} />
+                    </span>
+                  )}
+                  {/* An absent button explains nothing. When entitlement cannot be
+                      derived the figure above is not trustworthy, and the reviewer is
+                      told that rather than left to wonder where the action went. */}
+                  {e.balances.payoutBlock === "BALANCE_UNRESOLVED" && (
+                    <>
+                      <span
+                        data-testid={`unresolved-${e.employeeId}`}
+                        title={blockReason(e.balances.payoutBlock, e.balances, ar) ?? undefined}
+                        className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
+                      >
+                        <AlertTriangle size={12} aria-hidden />
+                        {ar ? "الرصيد غير مُسوّى — تتطلب تسوية" : "balance unresolved — reconciliation required"}
+                      </span>
+                      {/* The arithmetic, shown so nothing is hidden, and worded so nobody
+                          collects it. This is the figure that used to read "recovery owed". */}
+                      {Number(e.balances.unresolvedShortfall) > 0 && (
+                        <span
+                          data-testid={`shortfall-${e.employeeId}`}
+                          className="block text-[12px] leading-[18px] text-oo-text-muted"
+                        >
+                          {ar ? "نقص غير مُفسَّر " : "unexplained shortfall "}
+                          <Money value={e.balances.unresolvedShortfall} />
+                          {ar ? " — ليس دَيناً" : " — not a debt"}
+                        </span>
+                      )}
+                    </>
+                  )}
                   {/* Only the exception is worth a chip. A green "matches" on every row is
                       noise the reviewer learns to stop reading. */}
                   {!e.reconciled && (
@@ -359,15 +471,19 @@ export default function CommissionReviewPage() {
           {(ar
             ? [
                 "«اعتماد المستحق» يعتمد كل حركة حالتها «مستحق» في هذه الفترة لهذا الموظّف — لا اعتماد جزئي لحركة واحدة.",
-                "«صرف المعتمد» متاح بعد الاعتماد فقط، ويكتب قيد صرف. الحركات تصبح «مدفوع» ويبقى «مستحق» كما هو.",
+                "«صرف المعتمد» متاح بعد الاعتماد فقط، ويكتب قيد صرف لدفعة تمّت خارج النظام — لا يحرّك مالاً ولا يطلب تحويلاً.",
                 "«تسوية» تكتب قيد تسوية موجباً أو سالباً بسبب إلزامي — ولا تعدّل حركة استحقاق قائمة.",
-                "«المتبقّي» = مستحق + تسويات − مدفوع، محسوباً من قيود السجلّ. لا يُجمع المدفوع فوق المستحق.",
+                "«المتاح للصرف» = المعتمد + التسويات − المصروف. «المتبقّي» يشمل غير المعتمد، فهو ليس ما يمكن صرفه.",
+                "الحركات تصبح «مدفوع» عند سداد استحقاق الفترة المعتمد بالكامل فقط؛ الصرف الجزئي يبقيها «معتمد».",
+                "إذا تعذّر اشتقاق استحقاق الفترة، لا يُصرف شيء فيها حتى تُسوّى — والسجلّ يبقى كما هو.",
               ]
             : [
                 "“Approve accrued” approves every ACCRUED row for this employee in this period — there is no partial approval of one row.",
-                "“Pay approved” is available only after approval and writes a payout entry. The rows become PAID; what is accrued does not change.",
+                "“Pay approved” is available only after approval and records a payment already completed outside this system — it moves no money and requests no transfer.",
                 "“Adjust” writes a positive or negative adjustment entry with a mandatory reason — it never edits an existing accrual.",
-                "Outstanding = accrued + adjustments − paid, computed from the ledger. A payout is not added on top of what was accrued.",
+                "Available to pay = approved + adjustments − paid. Outstanding includes unapproved earnings, so it is not what may be paid.",
+                "Rows become PAID only when the period's approved entitlement is settled in full; a partial payout leaves them APPROVED.",
+                "If a period's entitlement cannot be derived, nothing in it is payable until it is reconciled — and the records are left exactly as they are.",
               ]
           ).map((rule, i) => (
             <li key={i} className="flex gap-2">
@@ -394,7 +510,7 @@ export default function CommissionReviewPage() {
                     [ar ? "العميل" : "Customer", "w-[160px]"],
                     [ar ? "الأساس المؤهّل" : "Qualifying base", "w-[150px]"],
                     [ar ? "الحصة" : "Share", "w-[90px]"],
-                    [ar ? "النسبة الفعّالة" : "Effective rate", "w-[130px]"],
+                    [ar ? "النسبة المشتقّة" : "Derived rate", "w-[130px]"],
                     [ar ? "المبلغ" : "Amount", "w-[140px]"],
                     [ar ? "الخطة" : "Plan", "w-[140px]"],
                     [ar ? "الحالة" : "Status", "w-[150px]"],
@@ -445,8 +561,8 @@ export default function CommissionReviewPage() {
           </div>
           <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
             {ar
-              ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة الفعلية هي ما يشرح سبب اختلاف المبلغ عن الأساس × النسبة الأساسية بعد تجاوز شريحة."
-              : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The effective rate is what explains why the amount is not simply base × base rate once a tier has been crossed."}
+              ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة المشتقّة هي المبلغ ÷ الأساس، تُحسب بعد تقريب المبلغ إلى 0.01 ر.س — تشرح الشريحة وتشرح التقريب، لكنها ليست النسبة التعاقدية للخطة. النسبة التعاقدية تُقرأ من إصدار الخطة بجانب الصف."
+              : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The DERIVED rate is amount ÷ base, computed after the amount is rounded to 0.01 SAR — it explains a tier, and it explains the rounding, but it is not the plan's contractual rate. Read the contractual rate from the plan version beside the row."}
           </p>
         </Card>
       )}
@@ -469,6 +585,97 @@ export default function CommissionReviewPage() {
   );
 }
 
+/**
+ * A fresh idempotency key for one intended payment.
+ *
+ * `crypto.randomUUID` needs a secure context and is missing in a few older mobile
+ * browsers, so there is a fallback — a payout must not become unrecordable because the
+ * browser lacks a UUID generator. The fallback is only ever compared for equality against
+ * itself, never used as a secret, so `Math.random` is adequate here.
+ */
+function newPayoutKey(): string {
+  const c = typeof crypto !== "undefined" ? crypto : undefined;
+  if (c && typeof c.randomUUID === "function") return `payout-${c.randomUUID()}`;
+  return `payout-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/**
+ * A short, stable discriminator for a payout's payload.
+ *
+ * Not a security primitive and not a checksum the server trusts — the server compares the
+ * stored amount and reason itself. This only has to change when the payload changes and
+ * stay identical when it does not, so that a retry of the same payment reproduces the same
+ * key. A digest rather than the raw payload because the key is capped at 200 characters
+ * and a reason is free text.
+ */
+function digest(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Why a payout is unavailable, in words, from the server's own code.
+ *
+ * One function for the row chip and the dialog both, because the two showing different
+ * reasons for the same state is exactly the confusion this screen is meant to remove.
+ * `NOTHING_PAYABLE` returns null: an empty balance is the ordinary case and needs no
+ * explanation beyond the figure already on the row.
+ */
+function blockReason(
+  code: EmployeeRow["balances"]["payoutBlock"],
+  b: EmployeeRow["balances"],
+  ar: boolean,
+): string | null {
+  if (code === "RECOVERY_OUTSTANDING") {
+    // Only reachable on a RESOLVED period, so this is a finding about complete history.
+    return ar
+      ? `صُرف ${b.recoveryBalance} أكثر ممّا يدعمه سجلّ هذه الفترة الكامل، ويجب استرداده. لا يُصرف شيء قبل تسويته.`
+      : `${b.recoveryBalance} has been paid beyond the entitlement this period's complete history ` +
+          "supports, and is owed back. Nothing is payable until the recovery is resolved.";
+  }
+  if (code === "BALANCE_UNRESOLVED") {
+    const bits = ar
+      ? [
+          b.unattributedCount > 0
+            ? `${b.unattributedCount} حركة لا تعود إلى أي استحقاق (+${b.unattributedPositive} و−${b.unattributedNegative})`
+            : null,
+          b.nonDerivedCount > 0 ? `${b.nonDerivedCount} استحقاق لا يمكن اشتقاق قيمته` : null,
+          Number(b.unallocatedReversal) > 0 ? `${b.unallocatedReversal} من العكس غير موزَّع` : null,
+        ]
+      : [
+          b.unattributedCount > 0
+            ? `${b.unattributedCount} movement${b.unattributedCount === 1 ? "" : "s"} belong to no accrual ` +
+              `(+${b.unattributedPositive} and −${b.unattributedNegative})`
+            : null,
+          b.nonDerivedCount > 0
+            ? `${b.nonDerivedCount} accrual${b.nonDerivedCount === 1 ? "" : "s"} carry no derivable entitlement`
+            : null,
+          Number(b.unallocatedReversal) > 0
+            ? `${b.unallocatedReversal} of reversal is unallocated`
+            : null,
+        ];
+    const detail = bits.filter(Boolean).join(ar ? "؛ " : "; ");
+    // The shortfall is named as a gap, never as a debt. The parts the model could not
+    // place are exactly the ones that would close it, so a minus sign here is missing
+    // history rather than money somebody owes.
+    const shortfall =
+      Number(b.unresolvedShortfall) > 0
+        ? ar
+          ? ` الجزء القابل للاشتقاق ينقص ${b.unresolvedShortfall} — وهذا نقص في السجلّ لا دَيْن على الموظّف.`
+          : ` The derivable part is short by ${b.unresolvedShortfall} — that is a gap in the record, not a debt owed by the employee.`
+        : "";
+    return ar
+      ? `رصيد هذه الفترة غير مُسوّى، فلا شيء فيها قابل للصرف ولا للاسترداد: ${detail}.${shortfall} تجب التسوية أولاً.`
+      : `This period's balance is unresolved, so nothing in it is payable or recoverable: ${detail}.${shortfall} ` +
+          "Reconcile the period first — the records are preserved exactly as they are.";
+  }
+  return null;
+}
+
 function ActionDialog({
   ar, kind, row, month, onClose, onDone,
 }: {
@@ -479,12 +686,36 @@ function ActionDialog({
   onClose: () => void;
   onDone: (m: string) => void;
 }) {
-  const [amount, setAmount] = useState(kind === "payout" ? row.outstanding : "");
+  // The payable figure, not the earned one. This used to open on `row.outstanding`, which
+  // counts accruals nobody has approved and ignores a recovery entirely — so the dialog
+  // pre-filled an amount the server was about to refuse, and labelled it "Outstanding".
+  const [amount, setAmount] = useState(kind === "payout" ? row.balances.availableToPay : "");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const isAdjust = kind === "adjust";
+  const blocked = isAdjust ? null : blockReason(row.balances.payoutBlock, row.balances, ar);
+
+  /**
+   * One key per intended payment.
+   *
+   * Regenerated when the payload changes, because a different amount or reason is a
+   * different payment and must not inherit the previous key. Held steady while the payload
+   * is unchanged, so pressing the button again after a timeout retries the SAME payment and
+   * the server recognises it rather than paying twice — which is the case a partial payment
+   * leaves wide open, since enough balance remains for the duplicate to succeed.
+   *
+   * Derived, not stored. One nonce is minted when the dialog opens and never changes; the
+   * key is that nonce plus a digest of the payload. Retrying the identical payload
+   * reproduces the identical key with nothing to keep in sync, and editing the amount
+   * changes it in the same render — an effect or a ref would mint the new key one render
+   * LATE, so a fast submit would send the previous payment's key with a new amount. The
+   * server refuses that, correctly, but the reviewer would be reading a refusal caused by
+   * the screen rather than by the books.
+   */
+  const [payoutNonce] = useState(newPayoutKey);
+  const payoutKey = `${payoutNonce}-${digest(`${amount}|${reason}`)}`;
 
   return (
     <Modal
@@ -499,14 +730,21 @@ function ActionDialog({
         <>
           <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
           <Button
-            disabled={busy || !amount || (isAdjust && reason.trim().length < 3)}
+            disabled={busy || !amount || !!blocked || (isAdjust && reason.trim().length < 3)}
             testId={`confirm-${kind}`}
             onClick={async () => {
               setBusy(true);
               setErr("");
               const res = await api("/api/commissions/review/actions", {
                 method: "POST",
-                body: { action: kind, employeeId: row.employeeId, month, amount, reason },
+                body: {
+                  action: kind,
+                  employeeId: row.employeeId,
+                  month,
+                  amount,
+                  reason,
+                  ...(isAdjust ? {} : { idempotencyKey: payoutKey }),
+                },
               });
               setBusy(false);
               if (res.ok) {
@@ -522,12 +760,57 @@ function ActionDialog({
       }
     >
       {err && <Alert kind="error">{err}</Alert>}
+      {blocked && (
+        <div data-testid="payout-blocked">
+          <Alert kind="error">{blocked}</Alert>
+        </div>
+      )}
 
       <dl className="bg-oo-bg-subtle rounded-xl p-3 text-sm space-y-1">
-        <div className="flex justify-between gap-3">
-          <dt className="text-xs font-bold text-oo-text-secondary">{ar ? "المتبقي" : "Outstanding"}</dt>
-          <dd><Money value={row.outstanding} /></dd>
-        </div>
+        {isAdjust ? (
+          <div className="flex justify-between gap-3">
+            <dt className="text-xs font-bold text-oo-text-secondary">{ar ? "المتبقي" : "Outstanding"}</dt>
+            <dd><Money value={row.outstanding} /></dd>
+          </div>
+        ) : (
+          <>
+            {/* The payable figure first and in bold: it is the only one this dialog acts on. */}
+            <div className="flex justify-between gap-3">
+              <dt className="text-xs font-bold text-oo-text-secondary">
+                {ar ? "المتاح للصرف" : "Available to pay"}
+              </dt>
+              <dd data-testid="dialog-available">
+                <Money value={row.balances.availableToPay} strong />
+              </dd>
+            </div>
+            {/* Earned, beside it and clearly not the same thing. */}
+            <div className="flex justify-between gap-3">
+              <dt className="text-xs text-oo-text-muted">{ar ? "المستحق" : "Earned"}</dt>
+              <dd className="text-oo-text-muted"><Money value={row.outstanding} /></dd>
+            </div>
+            {Number(row.balances.unapprovedEntitlement) !== 0 && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-xs text-oo-text-muted">
+                  {ar ? "غير معتمد (غير قابل للصرف)" : "Unapproved (not payable)"}
+                </dt>
+                <dd className="text-oo-text-muted">
+                  <Money value={row.balances.unapprovedEntitlement} />
+                </dd>
+              </div>
+            )}
+            {/* A debt is shown as a debt, never flattened into a zero. */}
+            {Number(row.balances.recoveryBalance) > 0 && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-xs font-bold text-oo-status-rejected">
+                  {ar ? "مستردّ مستحق" : "Recovery owed"}
+                </dt>
+                <dd data-testid="dialog-recovery" className="text-oo-status-rejected">
+                  <Money value={row.balances.recoveryBalance} />
+                </dd>
+              </div>
+            )}
+          </>
+        )}
       </dl>
 
       <Field
@@ -537,7 +820,9 @@ function ActionDialog({
         hint={
           isAdjust
             ? ar ? "موجب يزيد المستحق، سالب ينقصه." : "Positive increases what is owed; negative reduces it."
-            : ar ? "لا يمكن صرف أكثر من المتبقي." : "A payout cannot exceed what is outstanding."
+            : ar
+              ? "لا يمكن صرف أكثر من المتاح للصرف — وهو المعتمد فقط، بعد خصم ما صُرف."
+              : "A payout cannot exceed what is available to pay — approved entitlement only, less what has already been paid."
         }
       >
         <TextInput id="act-amount" value={amount} onChange={setAmount} inputMode="decimal" />

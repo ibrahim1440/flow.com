@@ -7,6 +7,7 @@ import {
   Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd,
 } from "@/lib/services/commissions/engine";
 import { periodStatement } from "@/lib/services/commissions/accrual";
+import { payoutBalances, accrualEntitlements, serialiseBalances } from "@/lib/services/commissions/entitlement";
 
 /**
  * GET /api/commissions/review — the team's commission for a Riyadh month, for approval.
@@ -116,6 +117,10 @@ export async function GET(request: Request) {
             corrects: { select: { amount: true } },
           },
         });
+        // Classified by what the movement IS. A payout's source is a payout record and an
+        // adjustment's source is a person with a reason, so neither is missing anything by
+        // having no collection behind it. Only a collection-derived movement can have a
+        // provenance gap, and only those are counted as one.
         const untraceable = movements.filter((m) => m.collectionEventId === null).length;
         const unallocatedReversal = roundMoney(
           movements
@@ -127,6 +132,17 @@ export async function GET(request: Request) {
             }, ZERO),
         );
 
+        const balances = await payoutBalances(prisma, employeeId, periodStart);
+        const entitlements = await accrualEntitlements(prisma, employeeId, periodStart);
+
+        // Reconciliation now compares the ledger against the ENTITLEMENT model rather than
+        // the stored projections, because the projections are what went wrong: a tiered
+        // reversal leaves the reversed row negative and the other row unchanged, and both
+        // are the wrong per-event contribution even though they still sum correctly.
+        const entitlementTotal = roundMoney(
+          entitlements.reduce((acc, e) => acc.plus(e.netEntitlement), ZERO)
+            .plus(balances.unattributed).minus(balances.unallocatedReversal),
+        );
         return {
           employeeId,
           name: accruals.find((a) => a.employeeId === employeeId)?.employee.name ?? employeeId,
@@ -144,6 +160,23 @@ export async function GET(request: Request) {
           // one time it is not zero is the one time somebody needs to know.
           reconciliationDifference: roundMoney(ledgerAccrued.minus(expectedFromRows)).toFixed(2),
           reconciled: ledgerAccrued.equals(expectedFromRows),
+          // The same question asked of the ENTITLEMENT model, which is the one payment
+          // eligibility now uses. Both are reported, so a disagreement between the stored
+          // projections and the derived entitlement is visible rather than silent.
+          entitlementTotal: entitlementTotal.toFixed(2),
+          entitlementReconciled: ledgerAccrued.equals(entitlementTotal),
+          // Per accrual: what was awarded, what has been linked against it, what is left.
+          accruals: entitlements.map((e) => ({
+            accrualId: e.accrualId,
+            collectionEventId: e.collectionEventId,
+            status: e.status,
+            originalAward: e.originalAward.toFixed(2),
+            adjustments: e.adjustments.negated().toFixed(2),
+            netEntitlement: e.netEntitlement.toFixed(2),
+            storedAmount: e.storedAmount.toFixed(2),
+            derived: e.derived,
+          })),
+          balances: serialiseBalances(balances),
           /** Movements in this period, and how many cannot be traced to their source. */
           movementCount: movements.length,
           movementsWithoutProvenance: untraceable,
