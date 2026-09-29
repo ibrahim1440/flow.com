@@ -36,8 +36,14 @@ Stages 2 and 3 are **not accepted**; they await the owner's review. The historic
 raised in that review (17–19 in `DEFECTS_AND_LIMITATIONS.md`) are fixed and covered by regression
 tests that failed before the fix.
 
-Stages 5–6 (fixed assets and year-end, ZATCA sandbox) are **not implemented**. This is not the
-complete accounting system the brief describes, and it is not ZATCA-compliant.
+- stage 5 (`STAGE_5_DESIGN.md`): fixed-asset register, approval-gated depreciation policies and runs,
+  disposal, reversals, register-to-ledger reconciliation, year-end close to retained earnings with the
+  next year's opening balances;
+- stage 6 (`STAGE_6_DESIGN.md`): e-invoice generation (UBL XML, hash chain, QR, local test signature),
+  **local** validation, debit notes, a submission adapter that never reaches production, and the VAT
+  return reconciled to the ledger. **Nothing has been sent to ZATCA**; this is not ZATCA-compliant.
+
+Evidence for stages 5–6: `STAGE_5_6_EVIDENCE.md`.
 `REQUIREMENTS_MATRIX.md` says exactly what exists, what is partial and what is missing. Nothing has
 been deployed or run against production.
 
@@ -52,7 +58,10 @@ been deployed or run against production.
 | [MIGRATION_AND_CUTOVER.md](MIGRATION_AND_CUTOVER.md) | Migration, rehearsal on a production copy, cutover, rollback/roll-forward |
 | [TEST_RESULTS.md](TEST_RESULTS.md) | Commands, environment, commit, results — and what each kind of test does and does not prove |
 | [FIGMA_PARITY.md](FIGMA_PARITY.md) | Figma file/frames, frame → route/component map, side-by-side status, deviations |
-| [ZATCA_REQUIREMENTS.md](ZATCA_REQUIREMENTS.md) | Saudi e-invoicing / VAT / zakat requirements matrix — **not implemented** |
+| [ZATCA_REQUIREMENTS.md](ZATCA_REQUIREMENTS.md) | Saudi e-invoicing / VAT / zakat requirements matrix — local only, not compliant |
+| [STAGE_5_DESIGN.md](STAGE_5_DESIGN.md) | Fixed assets, depreciation, disposal, year-end close |
+| [STAGE_6_DESIGN.md](STAGE_6_DESIGN.md) | E-invoicing (local validation only), official-document verification, VAT return |
+| [STAGE_5_6_EVIDENCE.md](STAGE_5_6_EVIDENCE.md) | Stages 5–6 requirement → evidence matrix |
 | [OPERATIONS_GUIDE.md](OPERATIONS_GUIDE.md) | Set-up and month-end procedure for the accountant |
 | [UAT_AR.md](UAT_AR.md) | قائمة اختبار القبول للمحاسب (بالعربية) |
 | [DEFECTS_AND_LIMITATIONS.md](DEFECTS_AND_LIMITATIONS.md) | Defects found and fixed, pre-existing failures, known limitations |

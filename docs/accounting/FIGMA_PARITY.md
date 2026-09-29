@@ -90,8 +90,38 @@ design for review, not a design the code was derived from.
 | ACC-52 Supplier credit note: editor, settlement, application | [`427:862`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=427-862) | `/dashboard/accounting/payables/new?creditFor=…`, `/dashboard/accounting/payables/[id]` | ACC-52-app-1440.png, ACC-53-app-1440.png | Frame after code | Editor and posted state drawn in one frame; the app has them on two screens |
 | OPS-01 Production batches with the accounting-status chip | [`427:1326`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=427-1326) | `/dashboard/production` (also purchases, packaging, dispatch) | OPS-production-app-1440.png, OPS-form-*.png | Frame after code | Drawn inside the accounting shell for speed; the app uses the operations sidebar. Reasons show on hover in the app |
 
+### Page 22 — Accounting · Stage 5 (fixed assets, depreciation, year-end), [`430:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=430-2) (added 2026-09-29)
+
+Designed **before** the code (Figma-first), from the Stage 5 design, with synthetic data; the screens
+were then built and compared with the frames (captures in `evidence/app/ACC-6*.png`).
+
+| Frame | Figma node (link) | Route | App evidence | Status | Documented differences |
+|---|---|---|---|---|---|
+| ACC-60 Register and reconciliation with the ledger | [`430:176`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=430-176) | `/dashboard/accounting/assets` | ACC-60-app-1440.png, ACC-60-390 | Figma first → built | App adds an as-of date for the reconciliation and an "unexplained" line; the fixture's differences are larger than the frame's (opening journals on the asset accounts, itemised) |
+| ACC-61 Asset: sources, capitalisation by approval, expected schedule | [`430:542`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=430-542) | `/dashboard/accounting/assets/[id]`, `/assets/new` | ACC-61-app-1440.png, ACC-61-editor | Figma first → built | The draft editor is a separate state of the same screen; the posted depreciation lines are listed above the expected schedule |
+| ACC-62 Monthly run: compute, approve, post, reverse | [`430:904`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=430-904) | `/dashboard/accounting/assets/runs` | ACC-62-app-1440.png | Figma first → built | The period picker and "compute" sit above the run; the frame shows them in the header |
+| ACC-63 Disposal: gain or loss, journal, reversal | [`431:119`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=431-119) | `/dashboard/accounting/assets/[id]` (disposal form and card) | ACC-63-app-1440.png | Figma first → built | The expected-journal table is shown after approval (from the posted figures), not in the form; the form shows an estimated gain or loss |
+| ACC-64 Classes and depreciation policy versions | [`431:421`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=431-421) | `/dashboard/accounting/assets/setup` | ACC-64-app-1440.png | Figma first → built | The policy statement is approved on the automation screen (link), as for the other policies |
+| ACC-65 Year-end: conditions, closing entry, next-year opening | [`431:759`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=431-759) | `/dashboard/accounting/periods/year-end` | ACC-65-app-1440.png | Figma first → built | The frame shows a year ready to close; the fixture has only the current year, so the capture shows its unmet conditions. The posted state (opening balances table) is exercised in the DB test, not captured |
+
+### Page 23 — Accounting · Stage 6 (e-invoicing local validation, VAT return), [`433:2`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=433-2) (added 2026-09-29)
+
+Designed **before** the code (Figma-first), with synthetic data; every frame carries the "local
+validation only — nothing sent to ZATCA" banner, as the screens do.
+
+| Frame | Figma node (link) | Route | App evidence | Status | Documented differences |
+|---|---|---|---|---|---|
+| ACC-70 E-invoices: chain and local validation, detail and attempts | [`433:177`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=433-177) | `/dashboard/accounting/tax` | ACC-70-app-1440.png, ACC-70-detail, ACC-70-390 | Figma first → built | App adds a generate/retry action and a buyer-address dialog for documents that failed locally (not drawn); rule list is longer than the frame's sample |
+| ACC-71 Seller profile and environment (local only) | [`433:433`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=433-433) | `/dashboard/accounting/tax/profile` | ACC-71-app-1440.png | Figma first → built | Shown as a read-only table once approved; the form appears for a new version |
+| ACC-72 VAT return and reconciliation | [`433:757`](https://www.figma.com/design/CYWypOA4538FYoTDUdGyP5/?node-id=433-757) | `/dashboard/accounting/tax/vat-return` | ACC-72-app-1440.png | Figma first → built | App adds the period pickers, an "unexplained" line and the unclassified-lines warning |
+
+Found by comparing the stage 5–6 screens with their frames and fixed before the tested commit:
+English text in the Arabic screens (catch-up note, reconciliation references, account names in the
+closing entry, the "not sent" reason) and a disposal form that closed when the server refused it.
+
 Fourth audit (Stage 4, 2026-09-28): ACC-40..47 added to `a11y.mjs`: 0 serious or critical findings
 (same scope and caveats as above). Fifth audit (stage 4b): ACC-48..51 (and ACC-48 at 390 px) added: 0 serious or critical findings.
+Sixth audit (stages 5–6): ACC-60..62, 64, 65, 70..72 (ACC-60 and ACC-70 also at 390 px) added; result in `TEST_RESULTS.md`.
 
 Figma was synchronised to three implementation decisions: one page title for the module, no branch
 selector (the ledger is company-wide; branch is a line dimension), Arabic role labels.

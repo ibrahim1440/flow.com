@@ -287,6 +287,40 @@ Synthetic example (from the automated test): opening cash 100,000; capital 50,00
 cash sales 20,000; accrued rent 5,000; depreciation 1,000; prepaid rent 2,400. This gives
 operating 17,600, investing −30,000, financing 50,000, and a cash change of 37,600.
 
+## 8. Fixed assets and depreciation (stage 5)
+
+Mechanism implemented; every choice below is a setting or an approvable version, refused or held
+until decided. Values in the fixture and tests are **synthetic** (`-SYN` codes).
+
+| Decision | Where | Until decided |
+|---|---|---|
+| Recognition, depreciation and disposal statement | policy `fixed_assets.depreciation` | capitalisation, depreciation and disposal journals are BLOCKED |
+| Asset classes and their accounts (cost, accumulated depreciation, expense) | asset classes | no class, no asset |
+| Per class: method (straight line / declining balance and factor), useful life, residual %, start convention (in-service month / month after), disposal-month convention, capitalisation threshold | class policy versions, approved by someone else | an asset of a class without an approved version cannot be registered |
+| Opening fixed assets at cutover: registered with opening accumulated depreciation and months used, either "already in the ledger" (opening trial balance) or against a counter account | per asset | — |
+| Where disposal proceeds are recorded (a clearing account; bank accounts are refused because bank lines post themselves) | per disposal | a sale cannot be submitted without it |
+| Rule used for late capitalisation: missed months are caught up in the first run (one line) | built-in, visible on the run | ask if a different treatment is wanted |
+
+## 9. Year-end close (stage 5)
+
+| Decision | Where | Until decided |
+|---|---|---|
+| Close statement: revenue and expense closed per account, branch and cost centre to retained earnings, dated the last day of the year | policy `closing.year_end` | the closing journal is BLOCKED |
+| Retained-earnings account | posting role `RETAINED_EARNINGS` (template: 3200) | — |
+| When a year may close: all periods locked, nothing pending, depreciation complete, previous year closed, next year created, year ended | built-in blockers | — |
+| Opening balances of the next year | carried forward by the perpetual ledger (no opening entry) | ask if an explicit opening entry is required |
+
+## 10. E-invoicing and VAT (stage 6, local only)
+
+| Decision | Where | Until decided |
+|---|---|---|
+| Seller legal data, VAT and CR numbers, national address, EGS unit naming | seller profile, approved by someone else | nothing is generated |
+| Which customers get standard (B2B) invoices: proposed rule "customer has a VAT number" | built-in rule | confirm or replace |
+| Exemption / zero-rating reason code and text per tax category | tax categories | lines of that category fail local validation |
+| Customers' national addresses (standard invoices) | customer | their invoices wait, not issued |
+| Onboarding: test CSR, compliance CSID, sandbox access; production CSID and key custody | outside this system (owner, IT) | submission stays LOCAL_ONLY |
+| VAT return box mapping and the items not modelled (exports, imports, reverse charge, corrections, carried-forward credit) | report | the report says what it does not model |
+
 ## Provisional test assumptions (implementation and synthetic tests only)
 
 These are **not** decisions. They let the code be built and tested, and they block production

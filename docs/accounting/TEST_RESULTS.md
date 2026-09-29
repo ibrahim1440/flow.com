@@ -1,57 +1,58 @@
 # Test results
 
-**Tested commit: `efa357ab1298762117db42a5280b8e20636743f3`** on branch `feature/accounting-ledger-core`
+**Tested commit: `da37cb06b54e489d0192fad90b1df060e52b1005`** on branch `feature/accounting-ledger-core`
 of [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) (unpushed; see
-`README.md` → "Which implementation this is"). The run started from a clean working tree
-(`git status --porcelain` was empty) and ran every step below on that one commit, including the
-backend regression certification and the Sales suites. Baseline: `origin/main` @ `fc64c05`.
+`README.md` → "Which implementation this is"). The run started from a clean working tree and ran
+every step below on that one commit, including the backend regression certification and all Sales
+suites. Baseline: `origin/main` @ `fc64c05`.
 
-Commits after `efa357a` change only `docs/accounting/`. To check this:
-`git diff --name-only efa357a HEAD` must list nothing outside `docs/`.
+Commits after `da37cb0` change only `docs/accounting/`. To check this:
+`git diff --name-only da37cb0 HEAD` must list nothing outside `docs/`.
 
 These are local results on synthetic data, produced and reported by the implementer. They are not
-an independent certification.
+an independent certification, not accountant acceptance and not production readiness. The stage 6
+tests show our own local checks pass; **they are not ZATCA validation**.
 
-Run: 2026-09-29 03:13–03:25 UTC (`evidence/test-runs/efa357a-summary.txt`).
+Run: 2026-09-29 09:00–09:17 UTC (`evidence/test-runs/da37cb0-summary.txt`).
 - **Environment:** container Linux, Node 22, PostgreSQL 16.13 on a local disposable server
   (127.0.0.1:54329); Chromium via Playwright. HTTP and browser steps run against `next start`
-  connected as the restricted runtime role `accounting_app`.
-- **Production differs:** it runs PostgreSQL 17 on Neon. Nothing here ran against Neon or Vercel.
+  connected as the restricted runtime role `accounting_app`; the Sales running-app suites run against
+  `next start` on a fresh disposable `sales_preview` as the DML-only role `sales_preview_app`.
+- **Production differs:** it runs PostgreSQL 17 on Neon. Nothing here ran against Neon, Vercel or ZATCA.
 - **Data:** all synthetic.
 - **Stored evidence (URLs masked; scanned for the fixture password and the run's generated Sales
-  role password: none):** `evidence/test-runs/efa357a-*.tap`, `efa357a-summary.txt`; captures in
-  `evidence/app/`; regressions written before their fixes: `stage4-gaps-before-fix.txt`,
-  `stage4b-workflows-before-fix.txt`, `stage4b-layer-check-before-fix.txt` (and the earlier ones).
-- **Runs that are not counted:**
-  - At `46e29a8`, the runner exported `.env` (the dev database) before the DB suites, and the
-    integration-database guard refused to run.
-  - At `373dbd0`, the first attempt failed nearly every step because the local PostgreSQL server
-    had stopped while the container was idle. The runner now checks the server first. The re-run
-    at `373dbd0` was all green; one Arabic string was then fixed (`efa357a`) and everything was run
-    again. Only the `efa357a` run is reported here.
+  role password: none):** `evidence/test-runs/da37cb0-*.tap`, `da37cb0-summary.txt`; captures in
+  `evidence/app/` (79 screens from `capture.mjs` plus the browser-form steps).
 
-| Kind | Command | Result @ `efa357a` | What it proves / does not |
+| Kind | Command | Result @ `da37cb0` | What it proves / does not |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit -p .` | clean | |
-| Lint | `npx eslint src/lib/accounting src/app/api/accounting src/app/dashboard/accounting src/app/dashboard/finance/_components src/components/AccountingStatusChip.tsx tests/accounting scripts/accounting` | clean | The operational pages touched for the status chip (purchases, production, packaging, dispatch) have lint errors identical in number to `main` (`fc64c05`); none is new |
+| Lint | accounting sources, tests, scripts | clean | operational pages touched for the status chip keep the lint errors `main` has; none is new |
 | Production build | `npm run build` | exit 0 | |
-| Accounting unit | `npm run test:accounting:unit` | **30/30** | |
-| Accounting DB integration | `npm run test:accounting:db` (owner role, `erp_finance_integration`) | **94/94** | Earlier 79 plus: stage 4 gaps (6, written failing first), stage 4b workflows (6: returns vs corrections over three periods, costing robustness ×3, conversion cost, supplier credit notes), operational integration (3: purchase → roast → pack incl. partial/top-up → dispatch → invoice; failures, retries, crashed worker, loss above band, locked period, unknown writer; roast cancellation, opening quantities, blend, QC rejection, kilogram lot). The chain test was re-derived by hand for stage 4b |
+| Accounting unit | `npm run test:accounting:unit` | **41/41** | +6 depreciation arithmetic, +5 e-invoice building blocks (QR encoding matches the published phase-1 example) |
+| Accounting DB integration | `npm run test:accounting:db` | **110/110** | +1 item link, +7 fixed assets, +2 year-end, +6 e-invoicing/VAT (retry, concurrency, locked/closed periods, chain and immutability guards) |
 | Accounting scripts | `npm run test:accounting:scripts` | **4/4** | credential-rotation verifier |
 | Finance regression | `test:finance:unit`, `test:finance:db` | **52/52, 40/40** | Finance behaviour unchanged |
-| HTTP, production configuration | server **without** `ACCOUNTING_PROVISIONAL_POSTING`, fresh fixture, `runtime-no-switch.test.mjs` | **2/2** | |
-| HTTP authorisation | `authz.test.mjs` | **5/5** | |
-| HTTP runtime workflow | `runtime-workflow.test.mjs` | **7/7** | |
-| HTTP Stage 2 | `stage2-workflow.test.mjs` | **4/4** | |
-| HTTP bank corrections | `bank-corrections.test.mjs` | **3/3** | |
-| HTTP receivables | `receivables-workflow.test.mjs` | **3/3** | |
-| HTTP inventory | `inventory-workflow.test.mjs` | **5/5** | |
-| HTTP operations | `ops-integration.test.mjs` | **1/1** (one scenario, 51 assertions) | As an operations user with no accounting access, through the routes the operational screens call: purchase, roast (with synthetic overhead absorption), QC, pack, dispatch; the invoice built from the order takes the dispatched cost; price credit note and supplier price-reduction credit note through the HTTP parsers; green-coffee count; cancelled batch with restock; blend; QC rejection; packaging-material count; the accountant's queue and reconciliation; the viewer cannot act |
-| Browser, operational forms | `tests/accounting/visual/ops-forms.mjs` | **2/2** | An operations user fills the real purchase form and roast-to-stock form; the screens show "posted to accounts" and the documents and journal exist (`evidence/app/OPS-form-*.png`). The dispatch and packing forms are driven over HTTP only |
-| Sales regression | `run-sales.mjs commission-engine quotes-domain`; `sales-commissions-db.mjs` on a fresh local `sales_preview` (DML-only role) | **161 pure (48 + 113); DB 23/23** | commission and quote behaviour unchanged. `sales-security` and `sales-workflow` (running-app suites) were not run |
-| Backend regression certification | `node scripts/e2e/regression/local-certification.mjs efa357a…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | includes the operational suites (orders to delivery, packaging, roasting) with the integration in their transactions |
-| Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 46 views incl. ACC-48..51) | **0 serious/critical** | automated rules only; no manual screen-reader test; the operational screens were not in the audit |
-| Browser capture | `capture.mjs` (66 screens incl. ACC-48..53, invoice costing, and the purchases, production, packaging, dispatch screens) | 0 page errors, 0 horizontal page overflow | rendering evidence (`evidence/app/`) |
+| HTTP, production configuration | server without `ACCOUNTING_PROVISIONAL_POSTING`, `runtime-no-switch.test.mjs` | **2/2** | |
+| HTTP (runtime role) | authz 5, runtime-workflow 7, stage2 4, bank-corrections 3, receivables 3, inventory 5, ops-integration 1 (51 assertions), fixed-assets 3, tax 2 | **all pass** | duties, four-eyes, concurrency, guards the runtime role cannot bypass |
+| Browser, operational forms | `ops-forms.mjs` | **2/2** | purchase and roast-to-stock forms |
+| Browser, packing and dispatch forms | `ops-pack-dispatch.mjs` | **6/6** | refusals; posted pack; held pack approved and posted by the accountant; blocked pack recovered by linking the item and retrying; dispatch refusals and postings; quantities, documents and journals checked |
+| Browser, fixed assets and year-end | `fa-forms.mjs` | **8/8** | capitalisation four-eyes; threshold refusal; disposal (refused, then posted with its loss); run computed, duplicate refused, approved, reversed; reconciliation with nothing unexplained; year-end blockers shown |
+| Browser, e-invoicing and VAT | `tax-forms.mjs` | **5/5** | profile four-eyes; invalid document fixed and retried; debit note through the receivables form; LOCAL_ONLY submission recorded as not sent; VAT return with nothing unexplained |
+| Sales regression | pure 161 (48 + 113); DB 23/23; **running app: `sales-security` 34/34, `sales-workflow` 231/231** | all pass | the running-app suites against `next start` on a disposable `sales_preview` as a DML-only role (`scripts/e2e/regression/local-sales-app-suites.sh`) |
+| Backend regression certification | `local-certification.mjs da37cb0…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,300 assertions, 0 failed** | see "Certification assertion count" below |
+| Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 56 views incl. ACC-60..65, ACC-70..72) | **0 serious/critical** | automated rules only; no manual screen-reader test |
+| Browser capture | `capture.mjs` (79 screens) | 0 page errors, 0 horizontal page overflow | rendering evidence |
+
+## Test changes since `efa357a`
+
+- New suites only (listed above); no existing assertion was weakened. `support.ts` and the fixture
+  reset also truncate the stage 5–6 tables. The fixture gained stage 5 data (synthetic classes,
+  assets, one run), an approved synthetic e-invoicing profile, a synthetic national address for one
+  customer, a 500 g SKU and an unlinked item (packing test).
+- Found by the new tests and fixed before `da37cb0`: the disposal form closed on a refusal
+  (defect 29); English text in the Arabic stage 5–6 screens (defect 30); the VAT reconciliation had
+  no unexplained remainder (defect 31).
 
 ## Test changes since `7943ed3` (why they are not weakening)
 
@@ -99,13 +100,14 @@ Run: 2026-09-29 03:13–03:25 UTC (`evidence/test-runs/efa357a-summary.txt`).
 ## Certification assertion count
 
 `completion-gate` adds one assertion only when a deliberately raced "complete order" request loses
-and receives 409. At `7943ed3` the log records `complete=200`, hence 2,300. It was 2,301 at `d92f592`
+and receives 409. At `da37cb0` the race ended `complete=200`, hence 2,300 (it was 2,301 at `efa357a`,
+where it ended 409). At `7943ed3` the log records `complete=200`, hence 2,300. It was 2,301 at `d92f592`
 and at `d580432` (409), and 2,300 at `cf3b43e` (200). The race outcome varies from run to run;
 0 failed in every run.
 
 ## Earlier SHAs
 
-`d49d8b6` (first stage 4b delivery), `7943ed3` (stage 4 delivery), `d92f592` (Stage 3 delivery), `cf3b43e` (first Stage 2 delivery) and earlier results are superseded by this table; their stored evidence stays in `evidence/test-runs/`.
+`efa357a` (stage 4b with certification and Sales), `d49d8b6` (first stage 4b delivery), `7943ed3` (stage 4 delivery), `d92f592` (Stage 3 delivery), `cf3b43e` (first Stage 2 delivery) and earlier results are superseded by this table; their stored evidence stays in `evidence/test-runs/`.
 
 ## Not run here
 
@@ -113,8 +115,9 @@ and at `d580432` (409), and 2,300 at `cf3b43e` (200). The race outcome varies fr
 |---|---|---|
 | Runtime on the Neon preview database | **blocked** | no TCP 5432 from this environment; `console.neon.tech` not allow-listed (`NETWORK_ACCESS.md`) |
 | Vercel Preview | **blocked** | Vercel team scope 403 |
-| ZATCA sandbox | not run | not implemented yet (stage 6) |
-| Migrations after the ledger core on a production copy | not run | needs Neon access or approval to use the connector on a fresh rehearsal branch (`MIGRATION_AND_CUTOVER.md`) |
-| `sales-security`, `sales-workflow` | not run | need the Sales running-app preview |
+| ZATCA SDK validation of the generated XML | **blocked** | the SDK is downloaded from zatca.gov.sa, which this environment's egress policy blocks |
+| ZATCA sandbox / simulation submission | not run | needs network access to gw-fatoora.zatca.gov.sa and a test CSID from the developer portal |
+| Migrations after the ledger core on a production copy | not run | eleven migrations; needs Neon access or approval to use the connector on a fresh rehearsal branch (`MIGRATION_AND_CUTOVER.md`) |
+| Year-end close through the browser | not run | the fixture has no prior year to close; the close is exercised in `year-end.test.ts` |
 
-Not claimed: "zero bugs"; regulatory compliance; production readiness.
+Not claimed: "zero bugs"; ZATCA or other regulatory compliance; accountant acceptance; production readiness.

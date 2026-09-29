@@ -56,6 +56,17 @@ purchase, a roast, a pack and a dispatch through the routes to confirm the opera
 unchanged and no UNINTEGRATED rows appear. Historical operational stock is **not** back-filled into
 the accounts: opening balances are a cutover decision (DECISION_PACK §6).
 
+**Stage 5 and 6 migrations (local only, not rehearsed on a production copy):**
+`20261002090000_accounting_fixed_assets_year_end` creates the fixed-asset and year-end tables and
+**replaces the journal-entry guard function** `acc_guard_journal_entry` so that a `CLOSING` entry may
+post into a `LOCKED` period (and only a CLOSING entry). `20261003090000_accounting_einvoicing_local`
+adds nullable columns to the existing `SalesInvoice` (`debitNoteOfId`) and `Customer`
+(`nationalAddress`) tables and creates the e-invoicing tables and guards.
+`20261003091000_accounting_tax_exemption_codes` adds two nullable columns to `TaxCategory`. None
+changes existing rows. The guard replacement must be part of the production-copy rehearsal: the
+function body on the copy must equal the file's, and ordinary postings into a locked period must
+still be refused.
+
 ## Cutover (proposal — dates and figures are the business's decision, see POLICIES D-4)
 1. Accountant approves the chart (template adapted), creates the fiscal year, maps roles.
 2. Choose cutover date C. Import the Qoyod trial balance at C−1 as one OPENING entry (four-eyes)

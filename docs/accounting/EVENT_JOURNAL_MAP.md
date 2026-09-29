@@ -65,6 +65,21 @@ Idempotency keys: `payables:<id>:<event>`, `bank:<id>:confirmed|voided`, `receiv
 Sales collections and commissions keep their own paths: a sales collection never posts; the bank
 line does, once (`receivables.test.ts`, `receivables-workflow.test.mjs`).
 
-**Not yet mapped:** purchase orders as documents (goods receipts exist, stage 4), fixed assets and
-depreciation runs, payroll, year-end closing, POS/gateway settlements (manual journals), contract
-liabilities for invoices issued before delivery.
+### Stage 5 — fixed assets and year-end
+
+| Source | Event | Gate | Journal |
+|---|---|---|---|
+| `FaAsset` CAPITALISED (approved by someone else) | `fa.asset.capitalised` | `fixed_assets.depreciation` | per source not already on the class's cost account: Dr cost / Cr counter (bill line's account or chosen account); opening depreciation with a counter: Dr counter / Cr accumulated. Nothing to post → SKIPPED |
+| `FaAsset` CANCELLED | `fa.asset.cancelled` | same | the capitalisation, reversed |
+| `FaDepRun` POSTED | `fa.depreciation.posted` | same | Dr depreciation expense / Cr accumulated depreciation, per class account pair, branch and cost centre, dated the period end |
+| `FaDepRun` REVERSED | `fa.depreciation.reversed` | same | mirror, same date (the period must be open) |
+| `FaDisposal` POSTED | `fa.disposal.posted` | same | Dr accumulated (to date) · Dr proceeds account / Cr cost · Cr FA_DISPOSAL_GAIN or Dr FA_DISPOSAL_LOSS |
+| `FaDisposal` REVERSED | `fa.disposal.reversed` | same | mirror, dated the disposal date |
+| `YearEndClose` POSTED | `gl.year.closed` | `closing.year_end` | **CLOSING** entry dated the last day of the year into the LOCKED period 12: each revenue and expense balance (per account, branch, cost centre) reversed; net to RETAINED_EARNINGS |
+| `YearEndClose` REVERSED (reopened) | `gl.year.reopened` | same | mirror, also CLOSING-typed |
+
+Stage 6 (e-invoicing) posts nothing: e-invoices are documents generated from posted sales
+documents; debit notes are invoices and post as `ar.invoice.posted`.
+
+**Not yet mapped:** purchase orders as documents (goods receipts exist, stage 4), payroll, POS/gateway
+settlements (manual journals), contract liabilities for invoices issued before delivery, zakat.

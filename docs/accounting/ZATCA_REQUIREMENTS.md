@@ -1,17 +1,27 @@
-# Saudi localisation — requirements matrix (NOT IMPLEMENTED)
+# Saudi localisation — requirements matrix
 
-**Status: nothing in this branch issues, signs, reports or clears an e-invoice, and no VAT return or
-zakat computation exists.** No compliance is claimed. The only related data is
-`TaxCategory.zatcaTaxCategoryCode` (pre-existing). Review date: 2026-09-27.
+**Status (stage 6): e-invoices are generated and checked LOCALLY; nothing has been sent to ZATCA
+(neither the sandbox / simulation nor production) or to any customer. No compliance is claimed.**
+A generated QR code or a document that passes our local checks is not compliance; only the official
+SDK or the Fatoora platform validates a document. Design and evidence: `STAGE_6_DESIGN.md`.
 
-Official sources could not be read from this environment (zatca.gov.sa is blocked by its network
-policy); versions below come from the licence research and are **unverified** until checked on
-https://zatca.gov.sa/en/E-Invoicing/Pages/default.aspx.
+Official sources: zatca.gov.sa is blocked by this environment's egress policy, so the documents
+could not be read. Their titles, versions, dates and URLs were confirmed by a search restricted to
+zatca.gov.sa (XML Implementation Standard v1.2 2023-05-19; Security Features Implementation
+Standards v1.2 2023-05-19; Detailed Guidelines v2 May 2023; Detailed Technical Guidelines v2 Nov
+2022; QR code guide; developer portal / integration sandbox) — `STAGE_6_DESIGN.md` §1 lists them
+with links and what each search result confirmed. Review date: 2026-09-29.
 
-| Area | Requirement to verify and implement | Status | Needs |
+| Area | Requirement | Local status | What is still needed (external) |
 |---|---|---|---|
-| 1. E-invoicing | Seller/buyer data (VAT no., CR, national address), invoice types (standard/simplified), credit/debit notes with reason and reference, UUID, ICV counter, previous-invoice hash, UBL 2.1 XML per the XML Implementation Standard (v1.2 reported 2023-05-19, unverified), cryptographic stamp, TLV QR (Phase 1 fields + Phase 2 signature fields), clearance (B2B) within the published window / reporting (B2C) within 24 h, CSID onboarding (compliance → production), secure private-key storage, retention of XML and responses, retries/outage queue, warning vs rejection handling | M | Company VAT/CR/address; ZATCA portal access; decision on library (`zatca-sdk` MIT, validated against SDK 238-R3.4.8 per its docs — unverified) behind an adapter; official Java SDK validation in CI; **sandbox only** until approved |
-| 2. VAT accounting & reporting | Output/input VAT accounts (in template: 2170, 1160), per-category rates incl. zero-rated and exempt with reasons, VAT return boxes by period, rounding rules per line/document | P (accounts only) | Sales invoicing and supplier bills first |
-| 3. Zakat / income tax | Zakat base computation and filing | M | Professional accounting input; out of scope for software alone |
-
-Rule kept from the brief: a generated QR code or one passing validation is not compliance.
+| 1.1 Documents | Standard (B2B) and simplified (B2C) invoices, credit notes (381) and debit notes (383) with the original's reference and a reason | implemented and tested locally (`einvoice.test.ts`, `tax-forms.mjs`) | SDK validation of the XML |
+| 1.2 Data | Seller VAT/CR/national address; buyer VAT and national address for standard invoices; UUID; issue date/time | implemented; seller data approved by someone else; buyer national address per customer | the company's real seller data (fixture values are synthetic) |
+| 1.3 Chain | ICV counter per EGS, previous-invoice hash | implemented, gapless under concurrency, DB-guarded; initial PIH per our reading (unverified) | SDK validation |
+| 1.4 XML | UBL 2.1 per the XML Implementation Standard | implemented per our reading; **unverified** (element paths, cardinalities) | read the standard; SDK validation |
+| 1.5 Hash / stamp | canonicalised hash; XAdES cryptographic stamp with a CSID | hash over our deterministic serialisation (C14N equivalence **unverified**); ECDSA secp256k1 with a **local test key**, not XAdES, not a CSID | compliance CSID from the developer portal; XAdES implementation checked with the SDK |
+| 1.6 QR | TLV base64, phase-2 tags | tags 1–8 (encoding matches the published phase-1 example); tag 9 omitted (no certificate) | certificate; SDK validation |
+| 1.7 Rules | BR-KSA business rules | 20+ local checks (`LOCAL-*`), not the official codes | official data dictionary; mapping to BR-KSA |
+| 1.8 Clearance / reporting | standard cleared before sharing; simplified reported within 24 h | submission adapter refuses production; LOCAL_ONLY records "not sent"; SANDBOX only to a local stub or ZATCA's developer-portal / simulation paths with test credentials; retries with back-off; append-only attempts | network access to gw-fatoora.zatca.gov.sa, test CSID, compliance invoice set |
+| 1.9 Retention / audit | XML and responses kept; who did what | immutable e-invoice rows, append-only attempts, audit log entries | retention period policy |
+| 2. VAT return | boxes by period; credit notes; reconciliation to the ledger | implemented from posted documents, reconciled to output/input VAT with an unexplained remainder | box numbering/wording checked against the official form; exports, imports, reverse charge, corrections and carried-forward credit are not modelled |
+| 3. Zakat | zakat base and filing | **not implemented** | professional input; out of scope for the software alone |

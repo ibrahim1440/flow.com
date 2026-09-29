@@ -31,6 +31,9 @@
 | 25 | A cost layer changed twice in one transaction failed the deferred layer check (found while re-deriving the chain test) | the check compared the row version of each change, not the current row | the check reads the current row | chain test (`evidence/test-runs/stage4b-layer-check-before-fix.txt`) |
 | 27 | The HTTP request parsers dropped the stage 4b invoice, credit-note and supplier credit-note fields, so those features were unreachable over HTTP (found by the UI work) | parsers whitelisted the stage 3 fields only | parsers pass the new fields; bill list carries `kind` | `ops-integration.test.mjs` (credit notes over HTTP; a credit note without a type is refused) |
 | 28 | A QC-rejected batch's roasted coffee stayed in the accounts | QC rejection writes no stock movement | QC rejection (terminal) writes the remaining roasted coffee off as QC waste, once per batch | `ops-integration.test.ts` test 3, `ops-integration.test.mjs` |
+| 29 | The disposal form closed when the server refused the submission, so the reason was lost and the user had to start again (found by the stage 5 browser test) | the handler closed the form whether or not the request succeeded | the form stays open and shows the refusal | `fa-forms.mjs` step 3 (refusal then success) |
+| 30 | English text in the Arabic stage 5–6 screens (catch-up note, reconciliation references, account names in the closing entry, the "not sent" reason) | server strings rendered as-is | structured fields localised in the UI | found comparing with Figma pages 22–23; captures |
+| 31 | The VAT reconciliation listed differences by source without saying how much remained unexplained | only the difference was computed | an "unexplained" remainder is computed and shown | `einvoice.test.ts` VAT case, `tax-forms.mjs` |
 | 26 | Operational stock changes (purchase, roast, pack, dispatch, counts) never reached the accounts except through manual drafts | no integration | operational events in the same transaction, automatic documents under an approved policy, UNINTEGRATED detection, exception queue, reconciliation | `ops-integration.test.ts` (3), `ops-integration.test.mjs` (HTTP) |
 
 ## Pre-existing (reproduced identically on `main` @ `fc64c05`)
@@ -43,13 +46,18 @@ All three now have a reproducible passing setup (`scripts/e2e/regression/local-c
 
 ## Limitations (known, not defects)
 - Implemented (locally, synthetic data): the ledger core, commission posting, payables, bank-to-ledger
-  with posted-line corrections, the cash-flow statement, sales invoices/receivables (stage 3), and
-  inventory valuation, manufacturing costing with approved conversion pools, durable COGS and the
-  operational integration (stages 4 and 4b, D-1 configurable and refused until decided). **Not**
-  implemented: fixed-asset register
-  and depreciation runs (depreciation is by manual journal), year-end close, ZATCA (see
-  `REQUIREMENTS_MATRIX.md`). The accounting system as a whole is **not complete** and **not
-  ZATCA-compliant**. Stages 2 and 3 are **not accepted**; they await the owner's review.
+  with posted-line corrections, the cash-flow statement, sales invoices/receivables (stage 3),
+  inventory valuation, manufacturing costing, durable COGS and the operational integration (stages
+  4 and 4b), fixed assets, depreciation, disposal and the year-end close (stage 5), and e-invoice
+  generation with **local** validation plus the VAT return (stage 6). The accounting system as a whole
+  is **not accepted**, **not released** and **not ZATCA-compliant**: no document has been validated by
+  ZATCA's SDK or sent to its sandbox. Stages 2 and 3 are **not accepted**; they await the owner's review.
+- Stage 5 limitations: one cost per asset (no later additions or revaluations), no impairment, no
+  partial disposals, depreciation by month (no daily proration), no asset transfers between branches;
+  year-end close needs the next fiscal year to exist and every period locked; the fixture has no
+  prior year, so the close is exercised in the DB tests only.
+- Stage 6 limitations: `STAGE_6_DESIGN.md` §2 and §5 (XML, hash canonicalisation, XAdES, rule codes
+  and API paths unverified; local test key; no tag 9; VAT return items not modelled; zakat absent).
 - Stage 3 limitations: `STAGE_3_DESIGN.md` §7 (single returns account, credit notes move no stock,
   credit limit warns only, D-2 changes apply forward only). The historical-aging limitation is
   resolved (defect 18).
