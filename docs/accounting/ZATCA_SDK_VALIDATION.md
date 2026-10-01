@@ -10,7 +10,7 @@ supported Java runtime is installed.
 
 | Status | State | Evidence / what is needed |
 |---|---|---|
-| Developer verification | **done locally** for the e-invoice code: unit, DB, HTTP and browser tests; the six-document matrix passes our local `LOCAL-*` rules | `TEST_RESULTS.md`; `evidence/zatca/matrix-19f3639/` |
+| Developer verification | **done locally** for the e-invoice code: unit, DB, HTTP and browser tests, all green on `fbcd1e4`; the six-document matrix (generated at `19f3639`, same product code) passes our local `LOCAL-*` rules | `TEST_RESULTS.md`; `evidence/zatca/matrix-19f3639/` |
 | Official SDK validation | **not done — blocked** | the official SDK archive (§2) |
 | Sandbox integration | **not done** | network access to `gw-fatoora.zatca.gov.sa`; developer-portal onboarding; a test CSID |
 | Independent review | **not done** | a reviewer other than the implementer |

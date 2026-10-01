@@ -1,20 +1,20 @@
 # Test results
 
-**Tested commit: `19f36397d26279ed62bf739e04ff5190731ed572`** on branch `feature/accounting-ledger-core`
+**Tested commit: `fbcd1e4e69c4a4ea286218c79bbfb36f5855348e`** on branch `feature/accounting-ledger-core`
 of [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) (unpushed; see
 `README.md` → "Which implementation this is"). One run of `scripts/accounting/local-release-gates.sh`
 from a clean working tree ran every step below on that one commit, including the isolated year-end
 browser scenario, the backend regression certification and all Sales suites. Baseline: `origin/main` @ `fc64c05`.
 
-Commits after `19f3639` change only `docs/accounting/`. To check this:
-`git diff --name-only 19f3639 HEAD` must list nothing outside `docs/`.
+Commits after `fbcd1e4` change only `docs/accounting/`. To check this:
+`git diff --name-only fbcd1e4 HEAD` must list nothing outside `docs/`.
 
 These are local results on synthetic data, produced and reported by the implementer. They are **not**
 an independent review, **not** accountant acceptance and **not** production readiness. The stage 6
 tests are local self-consistency and independent local checks; **they are not ZATCA validation**,
 which is blocked here (`ZATCA_REQUIREMENTS.md` §1–2).
 
-Run: 2026-10-01 06:29–06:45 UTC (`evidence/test-runs/19f3639-summary.txt`). Earlier full runs on `d55db63` and `74d4b03` (all green) are superseded.
+Run: 2026-10-01 06:47–07:03 UTC (`evidence/test-runs/fbcd1e4-summary.txt`). The run on `19f3639` (06:29–06:45, all green; `src/` and `prisma/` identical to `fbcd1e4`) and earlier full runs on `d55db63` and `74d4b03` are superseded. Both test servers were started by the run itself: the runner and, since `fbcd1e4`, the year-end script refuse a port that is already served (the `19f3639` year-end log shows a fresh "Ready" on :3041).
 - **Environment:** container Linux, Node 22, PostgreSQL 16.13 on a local disposable server
   (127.0.0.1:54329); Chromium via Playwright. HTTP and browser steps run against `next start`
   connected as the restricted runtime role `accounting_app`; the year-end scenario runs its own
@@ -23,7 +23,7 @@ Run: 2026-10-01 06:29–06:45 UTC (`evidence/test-runs/19f3639-summary.txt`). Ea
 - **Production differs:** PostgreSQL 17 on Neon. Nothing here ran against Neon, Vercel or ZATCA.
 - **Data:** all synthetic.
 - **Stored evidence (URLs masked; scanned for the fixture password and the run's generated Sales
-  role password: none):** `evidence/test-runs/19f3639-*.tap`, `19f3639-summary.txt`; captures in
+  role password: none):** `evidence/test-runs/fbcd1e4-*.tap`, `fbcd1e4-summary.txt`; captures in
   `evidence/app/` (79 screens from `capture.mjs` plus the browser-form steps, including
   `ACC-65-ye-*` and `ACC-70-simplified-gaps`).
 
@@ -33,7 +33,7 @@ provisional switch on) was still listening, the runner's own server could not bi
 tested the stale server: `http-no-switch` failed 0/2 and `tax-forms` failed for that reason. The
 runner now refuses to start when the port is already served (`74d4b03`); the rerun on `74d4b03` was all green and is itself superseded by the run on `d55db63` above.
 
-| Kind | Command | Result @ `19f3639` | What it proves / does not |
+| Kind | Command | Result @ `fbcd1e4` | What it proves / does not |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit -p .` | clean | |
 | Lint | accounting sources, tests, scripts | clean | |
@@ -50,7 +50,7 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 | Browser, e-invoicing and VAT | `tax-forms.mjs` | **6/6** | +1: a simplified invoice's QR layout (32/64/64 bytes, no tag 9) checked from the database and its standards gaps shown on screen (not SDK-validated, local key, encodings unconfirmed and curve/profile to confirm, tag 9 absent) |
 | **Browser, year-end close** | `local-year-end-browser.sh` → `year-end-forms.mjs` (isolated `erp_finance_yearend`) | **5/5** | conditions met; prepared by the preparer (their approval refused: no button, HTTP 403); approved and posted by a second person; CLOSING entry 2025-12-31 in the locked period 12 = hand-calculated lines; retained earnings 80,000.00; income statement unchanged; opening 2026 = hand figures, P&L zero; balance-sheet screen at 2025-12-31 (found defects 35 and 36) |
 | Sales regression | pure 161 (48 + 113); DB 23/23; running app `sales-security` 34/34, `sales-workflow` 231/231 | all pass | |
-| Backend regression certification | `local-certification.mjs 19f3639…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | see "Certification assertion count" |
+| Backend regression certification | `local-certification.mjs fbcd1e4…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,300 assertions, 0 failed** | see "Certification assertion count" |
 | Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 56 views) | **0 serious/critical** | automated rules only |
 | Browser capture | `capture.mjs` (79 screens) | 0 page errors, 0 horizontal overflow | |
 
@@ -148,7 +148,7 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 ## Certification assertion count
 
 `completion-gate` adds one assertion only when a deliberately raced "complete order" request loses
-and receives 409. At `d55db63` the count is 2,300 and at `74d4b03` it was 2,301 (the stored output
+and receives 409. At `fbcd1e4` it is 2,300 (2,301 at `19f3639`). At `d55db63` the count is 2,300 and at `74d4b03` it was 2,301 (the stored output
 does not print the race line; 2,301 is the 409 outcome). At `da37cb0` the race ended `complete=200`, hence 2,300 (it was 2,301 at `efa357a`,
 where it ended 409). At `7943ed3` the log records `complete=200`, hence 2,300. It was 2,301 at `d92f592`
 and at `d580432` (409), and 2,300 at `cf3b43e` (200). The race outcome varies from run to run;
