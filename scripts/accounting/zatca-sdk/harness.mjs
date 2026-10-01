@@ -24,7 +24,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { join, resolve, dirname, relative } from "node:path";
+import { join, resolve, dirname, relative, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as L from "./lib.mjs";
 
@@ -48,7 +48,11 @@ const RUN = join(OUT, runId);
 mkdirSync(RUN); // not recursive: fails if it already exists, so nothing from an earlier run can be in it
 
 const ev = { harness: "scripts/accounting/zatca-sdk/harness.mjs", runId, runDir: RUN, startedAt: now(), official: false, harnessTest, runner, image: runner === "container" ? image : null,
-  inputs: { matrix: MATRIX, archive: args.archive ?? null, sha256Expected: args.sha256 ?? null, sourceUrlClaimed: args["source-url"] ?? null }, preconditions: [], sdk: {}, documents: [] };
+  inputs: { matrix: MATRIX, archive: args.archive ?? null, archiveFileName: args.archive && args.archive !== true ? basename(args.archive) : null, sha256Expected: args.sha256 ?? null },
+  // Provenance as stated by the operator. None of it is verified by the harness: the SHA-256 shows the
+  // file is the one the operator hashed, not where it came from or that it is the current release.
+  provenanceClaimed: { sourceUrl: args["source-url"] ?? null, downloadedAt: args["downloaded-at"] ?? null, note: args["provenance-note"] ?? null,
+    authenticated: false, latestRelease: "not assumed" }, preconditions: [], sdk: {}, documents: [] };
 const pre = (name, status, detail) => { ev.preconditions.push({ name, status, detail }); return status === L.STATUS.PASS; };
 try { ev.applicationCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: HERE }).toString().trim(); } catch { ev.applicationCommit = null; }
 
@@ -89,13 +93,26 @@ if (canRun) {
   else {
     const root = dirname(install[0]);
     writeFileSync(join(SDK, ".sdk-root"), relative(SDK, root) || ".");
-    const readmes = execFileSync("find", [root, "-iname", "readme*.md"]).toString().trim().split("\n").filter(Boolean);
-    readme = readmes.length ? readFileSync(readmes[0], "utf8") : "";
-    const jars = execFileSync("find", [root, "-name", "*.jar"]).toString().trim().split("\n").filter(Boolean);
-    ev.sdk.root = relative(SDK, root) || "."; ev.sdk.readme = readmes[0] ? relative(SDK, readmes[0]) : null;
-    ev.sdk.jars = jars.map((j) => ({ path: relative(SDK, j), sha256: L.sha256File(j) }));
+    // Readmes anywhere in the archive (e.g. Readme/readme.rtf and Readme/readme.pdf); every one is
+    // recorded with its hash, and the first readable format in README_FORMATS order is used.
+    const rank = (f) => L.README_FORMATS.findIndex((x) => f.toLowerCase().endsWith(x));
+    const readmes = execFileSync("find", [SDK, "-type", "f", "-iname", "readme*"]).toString().trim().split("\n").filter(Boolean)
+      .filter((f) => rank(f) >= 0).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    ev.sdk.readmes = readmes.map((f) => ({ path: relative(SDK, f), sha256: L.sha256File(f), readable: L.readmeText(f).readable }));
+    const used = readmes.find((f) => L.readmeText(f).readable);
+    if (used) { const r = L.readmeText(used); readme = r.text; ev.sdk.readme = { path: relative(SDK, used), how: r.how }; writeFileSync(join(RUN, "readme-text.txt"), readme); }
+    const jars = execFileSync("find", [SDK, "-name", "*.jar"]).toString().trim().split("\n").filter(Boolean).sort();
+    ev.sdk.root = relative(SDK, root) || ".";
+    // Versions come from the jars themselves (file name, and the Maven pom.properties inside), recorded
+    // separately from the archive's file name, which says nothing reliable about the version.
+    ev.sdk.jars = jars.map((j) => {
+      const pom = spawnSync("unzip", ["-p", j, "META-INF/maven/*/*/pom.properties"], { encoding: "utf8" });
+      const prop = (k) => (new RegExp(`^${k}=(.*)$`, "m").exec(pom.stdout ?? "") ?? [])[1]?.trim() ?? null;
+      return { path: relative(SDK, j), sha256: L.sha256File(j), ...L.jarComponent(basename(j)), pom: pom.status === 0 && pom.stdout ? { groupId: prop("groupId"), artifactId: prop("artifactId"), version: prop("version") } : null };
+    });
     ev.sdk.javaRequirement = L.javaRequirement(readme);
-    if (!readme) { pre("readme found", L.STATUS.BLOCKED, "no readme in the archive"); blockedReason = "no readme"; }
+    if (!readme) { pre("readable readme found", L.STATUS.BLOCKED, readmes.length ? `only unreadable formats: ${readmes.map((f) => relative(SDK, f)).join(", ")}` : "no readme in the archive"); blockedReason = "no readme"; }
+    else pre("readable readme found", L.STATUS.PASS, `${ev.sdk.readme.path} (${ev.sdk.readme.how})`);
   }
 }
 const documentedCmd = { validate: L.documented(readme, L.COMMANDS.validate), generateHash: L.documented(readme, L.COMMANDS.hash) };
@@ -179,13 +196,22 @@ for (const key of L.MATRIX_KEYS) {
   ev.documents.push(entry);
 }
 
+if (archive && existsSync(archive) && ev.sdk.archiveSha256) {
+  const after = L.sha256File(archive);
+  if (!pre("original archive unchanged after the run", after === ev.sdk.archiveSha256 ? L.STATUS.PASS : L.STATUS.FAIL, after)) ev.archiveChanged = true;
+}
 const g = L.gate(ev.documents);
-const decision = preFailed && g.decision !== L.STATUS.FAIL ? { ...g, decision: L.STATUS.FAIL, exitCode: 1 } : preBlocked && g.decision === L.STATUS.PASS ? { ...g, decision: L.STATUS.BLOCKED, exitCode: 3 } : g;
+const decision = ev.preconditions.some((p) => p.status === L.STATUS.FAIL) && g.decision !== L.STATUS.FAIL ? { ...g, decision: L.STATUS.FAIL, exitCode: 1 } : preBlocked && g.decision === L.STATUS.PASS ? { ...g, decision: L.STATUS.BLOCKED, exitCode: 3 } : g;
 ev.official = !harnessTest && decision.decision === L.STATUS.PASS && profile.confirmed === true;
 ev.gate = decision; ev.finishedAt = now();
 writeFileSync(join(RUN, "summary.json"), JSON.stringify(ev, null, 2) + "\n");
 const md = [`# ZATCA SDK harness run — ${decision.decision}`, "", harnessTest ? "**HARNESS TEST (stub or direct runner) — NOT official SDK validation.**" : `Runner: container \`${image}\` (no network, read-only root, read-only inputs).`, "",
-  `Run \`${runId}\`. Application commit: \`${ev.applicationCommit}\`; started ${ev.startedAt}; finished ${ev.finishedAt}.`, "", "## Preconditions", "", "| Check | Status | Detail |", "|---|---|---|",
+  `Run \`${runId}\`. Application commit: \`${ev.applicationCommit}\`; started ${ev.startedAt}; finished ${ev.finishedAt}.`, "",
+  "## SDK and provenance", "", `- Archive file name: \`${ev.inputs.archiveFileName ?? "none"}\` (says nothing reliable about the version); SHA-256 \`${ev.sdk.archiveSha256 ?? "n/a"}\``,
+  ...(ev.sdk.jars ?? []).map((j) => `- Jar \`${j.path}\`: ${j.component} ${j.version ?? "?"}${j.pom ? ` (pom: ${j.pom.groupId}:${j.pom.artifactId}:${j.pom.version})` : ""}; SHA-256 \`${j.sha256}\``),
+  `- Readme used: ${ev.sdk.readme ? `\`${ev.sdk.readme.path}\` (${ev.sdk.readme.how})` : "none"}; Java requirement: ${ev.sdk.javaRequirement?.source ?? "not found"}; container: ${ev.sdk.java ?? "n/a"}`,
+  `- Provenance **as stated by the operator, not verified**: source ${ev.provenanceClaimed.sourceUrl ?? "not stated"}; downloaded ${ev.provenanceClaimed.downloadedAt ?? "not stated"}${ev.provenanceClaimed.note ? `; ${ev.provenanceClaimed.note}` : ""}. Not assumed to be the latest release.`, "",
+  "## Preconditions", "", "| Check | Status | Detail |", "|---|---|---|",
   ...ev.preconditions.map((p) => `| ${p.name} | ${p.status} | ${String(p.detail).replace(/\|/g, "/").slice(0, 300)} |`), "", "## Documents", "", "| Document | validate | generateHash vs application hash |", "|---|---|---|",
   ...ev.documents.map((d) => `| ${d.key} | ${d.checks.validate.status}${d.checks.validate.reason ? ` — ${d.checks.validate.reason}` : ""} | ${d.checks.generateHash.status}${d.checks.generateHash.reason ? ` — ${d.checks.generateHash.reason}` : ""} |`),
   "", `Gate: **${decision.decision}** (${decision.counts.pass}/${decision.counts.total} PASS, ${decision.counts.fail} FAIL, ${decision.counts.blocked} BLOCKED, ${decision.counts.notRun} NOT_RUN). Exit ${decision.exitCode}.`, ""].join("\n");

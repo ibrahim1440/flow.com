@@ -36,13 +36,21 @@ function makeMatrix(dir) {
 }
 
 /** A stub SDK archive. behaviour(key) decides what the stub prints for each document. */
-function makeStubArchive(name, { readmeCommands = ["validate", "generateHash"], behaviour = "pass", extra } = {}) {
+function makeStubArchive(name, { readmeCommands = ["validate", "generateHash"], behaviour = "pass", extra, readmeFormat = "md" } = {}) {
   const d = join(base, `${name}-src`, "stub-sdk");
   mkdirSync(join(d, "Apps"), { recursive: true }); mkdirSync(join(d, "Configuration"), { recursive: true });
-  writeFileSync(join(d, "readme.md"), ["STUB SDK FOR HARNESS TESTS — not the ZATCA SDK", "The prerequisite is using the Java SDK (JAR) versions >=11 and <15.",
-    ...readmeCommands.map((c) => `***fatoora -${c} -invoice <filename>***`)].join("\n"));
+  const lines = ["STUB SDK FOR HARNESS TESTS — not the ZATCA SDK", "The prerequisite is using the Java SDK (JAR) versions >=11 and <15.",
+    ...readmeCommands.map((c) => `***fatoora -${c} -invoice <filename>***`)];
+  if (readmeFormat === "md") writeFileSync(join(d, "readme.md"), lines.join("\n"));
+  else {
+    // Like the real archive: Readme/readme.rtf and Readme/readme.pdf, no readme.md.
+    mkdirSync(join(d, "Readme"));
+    const rtf = String.raw`{\rtf1\ansi\deff0{\fonttbl{\f0 Calibri;}}{\colortbl;\red0\green0\blue0;}{\*\generator Stub;}\f0\fs22 ` + lines.map((l) => l.replace(/—/g, "\\'97").replace(/\*/g, "")).join("\\par\n") + "}";
+    if (readmeFormat !== "pdf-only") writeFileSync(join(d, "Readme", "readme.rtf"), rtf);
+    writeFileSync(join(d, "Readme", "readme.pdf"), "%PDF-1.4 stub, not parsed");
+  }
+  writeFileSync(join(d, "Apps", "cli-9.9.1-jar-with-dependencies.jar"), "not a jar");
   writeFileSync(join(d, "install.sh"), 'echo "export FATOORA_HOME=${PWD}/Apps" >> ~/.bash-profile\necho "export SDK_CONFIG=${PWD}/Configuration/config.json" >> ~/.bash-profile\n');
-  writeFileSync(join(d, "Apps", "stub.jar"), "not a jar");
   writeFileSync(join(d, "Apps", "fatoora"), `#!/bin/sh
 # STUB: prints fixed lines so the harness can be tested. Behaviour: ${behaviour}
 CMD=$1; FILE=$3; KEY=$(basename $(dirname "$FILE"))
@@ -290,4 +298,36 @@ test("harness: a container that cannot launch → FAIL, nothing runs (skipped wi
   assert.equal(r.exit, 1);
   assert.equal(r.summary.preconditions.find((p) => p.name === "runner container launches")?.status, "FAIL");
   assert.equal(r.summary.gate.counts.notRun, 12);
+});
+
+// ── Archive layout of the SDK as supplied (readme as RTF/PDF, versions inside the jars) ──────────
+
+test("lib: RTF readme text, Java range and documented commands", () => {
+  const rtf = String.raw`{\rtf1\ansi{\fonttbl{\f0 Arial;}}{\*\generator X;}\f0 Java versions >=11 and <15\par fatoora -validate -invoice <filename>\par fatoora\~-generateHash -invoice <filename>\par caf\'e9 \u1593?}`;
+  const t = L.rtfToText(rtf);
+  assert.ok(!/Arial|generator/.test(t), t);
+  assert.deepEqual([L.javaRequirement(t).min, L.javaRequirement(t).maxExclusive], [11, 15]);
+  assert.ok(L.documented(t, L.COMMANDS.validate) && L.documented(t, L.COMMANDS.hash), t);
+  assert.match(t, /café ع/);
+  assert.deepEqual(L.jarComponent("cli-3.0.8-jar-with-dependencies.jar"), { component: "cli", version: "3.0.8" });
+  assert.deepEqual(L.jarComponent("sdk-3.0.8-jar-with-dependencies.jar"), { component: "sdk", version: "3.0.8" });
+});
+
+test("harness: readme only as Readme/readme.rtf + readme.pdf → read from the RTF; jar version recorded apart from the archive name", () => {
+  const a = makeStubArchive("rtf", { readmeFormat: "rtf" });
+  const r = run("rtf", { ...a, matrix: M, extra: ["--downloaded-at", "2026-10-01T12:00:00Z"] });
+  assert.equal(r.exit, 0, JSON.stringify(r.summary.preconditions));
+  assert.equal(r.summary.sdk.readme.path, "stub-sdk/Readme/readme.rtf");
+  assert.deepEqual(r.summary.sdk.readmes.map((x) => [x.path, x.readable]), [["stub-sdk/Readme/readme.rtf", true], ["stub-sdk/Readme/readme.pdf", false]]);
+  assert.deepEqual(r.summary.sdk.jars.map((j) => [j.component, j.version]), [["cli", "9.9.1"]]);
+  assert.equal(r.summary.inputs.archiveFileName, "rtf.zip");
+  assert.equal(r.summary.provenanceClaimed.authenticated, false);
+  assert.equal(r.summary.provenanceClaimed.latestRelease, "not assumed");
+  assert.equal(r.summary.preconditions.find((p) => p.name === "original archive unchanged after the run").status, "PASS");
+});
+
+test("harness: a readme only in PDF (no extractor) → BLOCKED, not guessed", () => {
+  const r = run("pdfonly", { ...makeStubArchive("pdfonly", { readmeFormat: "pdf-only" }), matrix: M });
+  assert.equal(r.exit, 3);
+  assert.equal(r.summary.preconditions.find((p) => p.name === "readable readme found").status, "BLOCKED");
 });

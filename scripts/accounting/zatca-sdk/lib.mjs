@@ -95,16 +95,16 @@ export function parseZipinfo(text) {
 /** The Java range stated in a readme ("between 11 and 15", ">=11 and <15"), or null if not stated. */
 export function javaRequirement(readme) {
   const t = readme.replace(/[\\*]/g, "");
-  let m = /versions?\s*>=\s*(\d+)\s*and\s*<\s*(\d+)/i.exec(t);
+  let m = /(?:versions?|java|jdk|jre)\s*>=\s*(\d+)\s*(?:and|,|&)\s*<\s*(\d+)/i.exec(t);
   if (m) return { min: Number(m[1]), maxExclusive: Number(m[2]), source: m[0] };
   m = /between\s+(\d+)\s+and\s+(\d+)/i.exec(t);
   if (m) return { min: Number(m[1]), maxExclusive: Number(m[2]), source: m[0] };
   return null;
 }
 
-/** Is the exact command syntax documented in the readme (markdown emphasis ignored)? */
+/** Is the exact command syntax documented in the readme (markdown emphasis and runs of spaces ignored)? */
 export function documented(readme, syntax) {
-  return readme.replace(/[\\*]/g, "").includes(syntax);
+  return readme.replace(/[\\*]/g, "").replace(/[ \t\u00a0]+/g, " ").includes(syntax);
 }
 
 /**
@@ -144,4 +144,57 @@ export function gate(results) {
   const fail = count(STATUS.FAIL), blocked = count(STATUS.BLOCKED), notRun = count(STATUS.NOT_RUN), pass = count(STATUS.PASS);
   const decision = all.length > 0 && pass === all.length ? STATUS.PASS : fail > 0 ? STATUS.FAIL : blocked > 0 ? STATUS.BLOCKED : STATUS.NOT_RUN;
   return { decision, exitCode: decision === STATUS.PASS ? 0 : decision === STATUS.FAIL ? 1 : 3, counts: { pass, fail, blocked, notRun, total: all.length } };
+}
+
+/**
+ * Plain text of an RTF document, enough to search it for documented commands and the Java range:
+ * destination groups (font and colour tables, pictures, \*\ groups) dropped, \par and \line as new
+ * lines, \'hh as a Windows-1252 byte, \uN as a Unicode code point (its fallback character skipped),
+ * other control words removed.
+ */
+export function rtfToText(rtf) {
+  let out = "", i = 0, depth = 0, skipDepth = null, ucSkip = 0;
+  const DEST = new Set(["fonttbl", "colortbl", "stylesheet", "info", "pict", "header", "footer", "listtable", "listoverridetable", "rsidtbl", "generator", "themedata", "colorschememapping", "datastore", "latentstyles", "xmlnstbl", "mmathPr"]);
+  const cp1252 = new TextDecoder("windows-1252");
+  while (i < rtf.length) {
+    const c = rtf[i];
+    if (c === "{") { depth++; i++; if (rtf.startsWith("\\*", i) && skipDepth === null) skipDepth = depth; continue; }
+    if (c === "}") { if (skipDepth === depth) skipDepth = null; depth--; i++; continue; }
+    if (c === "\\") {
+      const n = rtf[i + 1];
+      if (n === "'" ) { const b = parseInt(rtf.slice(i + 2, i + 4), 16); i += 4; if (skipDepth === null) { if (ucSkip > 0) ucSkip--; else out += cp1252.decode(Uint8Array.of(b)); } continue; }
+      if (n === "\\" || n === "{" || n === "}") { if (skipDepth === null) out += n; i += 2; continue; }
+      if (n === "~") { if (skipDepth === null) out += " "; i += 2; continue; }
+      if (n === "\n" || n === "\r") { if (skipDepth === null) out += "\n"; i += 2; continue; }
+      const m = /^\\([a-zA-Z]+)(-?\d+)? ?/.exec(rtf.slice(i, i + 40));
+      if (!m) { i += 2; continue; }
+      i += m[0].length;
+      const word = m[1];
+      if (skipDepth === null && DEST.has(word)) { skipDepth = depth; continue; }
+      if (skipDepth !== null) continue;
+      if (word === "par" || word === "line" || word === "row") out += "\n";
+      else if (word === "tab" || word === "cell") out += "\t";
+      else if (word === "u") { out += String.fromCodePoint((Number(m[2]) + 65536) % 65536); ucSkip = 1; }
+      continue;
+    }
+    if (c === "\n" || c === "\r") { i++; continue; }
+    if (skipDepth === null) { if (ucSkip > 0) ucSkip--; else out += c; }
+    i++;
+  }
+  return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/** Readme candidates in preference order: text formats the harness can read reliably come first. */
+export const README_FORMATS = Object.freeze([".md", ".txt", ".rtf", ".pdf"]);
+export function readmeText(path) {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".rtf")) return { text: rtfToText(readFileSync(path, "latin1")), readable: true, how: "rtf (control words removed)" };
+  if (lower.endsWith(".md") || lower.endsWith(".txt")) return { text: readFileSync(path, "utf8"), readable: true, how: "text" };
+  return { text: "", readable: false, how: "no text extractor for this format" };
+}
+
+/** Component and version from a jar file name such as cli-3.0.8-jar-with-dependencies.jar. */
+export function jarComponent(fileName) {
+  const m = /^(.+?)-(\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)*?)(?:-jar-with-dependencies)?\.jar$/.exec(fileName);
+  return m ? { component: m[1], version: m[2] } : { component: fileName.replace(/\.jar$/, ""), version: null };
 }
