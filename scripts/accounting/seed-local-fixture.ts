@@ -367,7 +367,8 @@ async function main() {
   await order(7012, K2);
   type SL = { d: string; q: string; p: string; disc?: string; code?: string };
   const sdoc = async (customerId: string, issue: Date, lines: SL[], until: "DRAFT" | "SUBMITTED" | "APPROVED" | "POSTED" | "REJECTED", extra: { orderId?: string; kind?: "CREDIT_NOTE"; originalInvoiceId?: string; reason?: string; description?: string; creditType?: "PRICE_ADJUSTMENT" | "RETURN_OF_GOODS" } = {}) => {
-    const d = await createSalesDoc({ customerId, issueDate: issue.toISOString().slice(0, 10), ...extra, lines: lines.map((l) => ({ description: l.d, quantity: l.q, unitPrice: l.p, discountPercent: l.disc ?? "0", accountId: l.code ? A[l.code] : undefined, taxCategoryId: vat15.id })) }, prep);
+    // Supply date = issue date for the synthetic documents (standard tax invoices need one: BR-KSA-15).
+    const d = await createSalesDoc({ customerId, issueDate: issue.toISOString().slice(0, 10), supplyDate: issue.toISOString().slice(0, 10), ...extra, lines: lines.map((l) => ({ description: l.d, quantity: l.q, unitPrice: l.p, discountPercent: l.disc ?? "0", accountId: l.code ? A[l.code] : undefined, taxCategoryId: vat15.id })) }, prep);
     if (until === "DRAFT") return d.id;
     await submitSalesDoc(d.id, prep);
     if (until === "SUBMITTED") return d.id;

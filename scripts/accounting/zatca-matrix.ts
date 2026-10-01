@@ -54,8 +54,10 @@ async function main() {
   await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: DB, query: (q: string) => prisma.$queryRawUnsafe(q) });
   if (await prisma.account.count()) { console.error("Refusing: the database is not freshly migrated (recreate it with zatca-matrix.sh)."); process.exit(1); }
   const commit = execSync("git rev-parse HEAD").toString().trim();
-  // The output directory may sit inside the repository (evidence); it does not make the tree "dirty".
-  const dirty = execSync(`git status --porcelain -- . ${JSON.stringify(`:(exclude)${OUT}`)}`).toString().trim() !== "";
+  // workingTreeDirty = tracked files differ from the commit (what matters for "generated at this
+  // commit"); untracked files (e.g. evidence folders) are counted separately.
+  const dirty = execSync("git status --porcelain --untracked-files=no").toString().trim() !== "";
+  const untracked = execSync("git status --porcelain --untracked-files=all").toString().split("\n").filter((l) => l.startsWith("??")).length;
 
   const prep = await user("matrix.preparer", "معدّ المصفوفة (تجريبي)");
   const appr = await user("matrix.approver", "معتمد المصفوفة (تجريبي)");
@@ -75,8 +77,10 @@ async function main() {
 
   const L = (description: string, quantity: string, unitPrice: string, taxCategoryId: string, discountPercent = "0"): SalesLineInput =>
     ({ description, quantity, unitPrice, discountPercent, taxCategoryId, stockTreatment: "NON_STOCK" } as SalesLineInput);
+  // Standard documents carry the supply date (entered in the invoice form; BR-KSA-15 in the rule file seen).
   const post = async (customerId: string, lines: SalesLineInput[], extra: Record<string, unknown> = {}) => {
-    const d = await createSalesDoc({ customerId, issueDate: ISSUE, lines, ...extra } as never, prep);
+    const supply = customerId === b2b ? { supplyDate: ISSUE } : {};
+    const d = await createSalesDoc({ customerId, issueDate: ISSUE, ...supply, lines, ...extra } as never, prep);
     await submitSalesDoc(d.id, prep); await approveSalesDoc(d.id, appr);
     const r = await postSalesDoc(d.id, appr);
     if (r.einvoice?.status !== "GENERATED") throw new Error(`e-invoice not generated: ${JSON.stringify(r.einvoice)}`);
@@ -115,7 +119,7 @@ async function main() {
     writeFileSync(`${dir}/qr.txt`, (e.qr ?? "") + "\n");
     writeFileSync(`${dir}/qr.bin`, qrBin);
     const rules = await revalidate(e.id);
-    const meta = { key, commit, workingTreeDirty: dirty, fixture: FIXTURE_ID, salesInvoiceId: id, eInvoiceId: e.id, typeCode: e.typeCode, subtype: e.subtype, icv: e.icv, uuid: e.uuid,
+    const meta = { key, commit, workingTreeDirty: dirty, untrackedFiles: untracked, fixture: FIXTURE_ID, salesInvoiceId: id, eInvoiceId: e.id, typeCode: e.typeCode, subtype: e.subtype, icv: e.icv, uuid: e.uuid,
       invoiceHash: e.invoiceHash, previousHash: e.previousHash, signer: e.signer, qrEncoding: QR_ENCODING, signingCurve: SIGNING_CURVE,
       sha256: { xml: sha256(xml), qrBase64: sha256(e.qr ?? ""), qrBinary: sha256(qrBin) },
       localRules: { total: rules.length, failed: rules.filter((r) => !r.ok).map((r) => r.id) }, standardsGaps: standardsGaps(e.subtype, e.qr).map((g) => g.id),
@@ -125,7 +129,7 @@ async function main() {
     for (const f of ["document.xml", "qr.txt", "qr.bin", "meta.json"]) sums.push(`${sha256(await import("node:fs").then((m) => m.readFileSync(`${dir}/${f}`)))}  ${key}/${f}`);
     console.log(`${key}: ${e.typeCode}/${e.subtype} ICV ${e.icv} xml ${meta.sha256.xml.slice(0, 12)} local rules failed: ${meta.localRules.failed.join(",") || "none"}`);
   }
-  writeFileSync(`${OUT}/MANIFEST.json`, JSON.stringify({ fixture: FIXTURE_ID, commit, workingTreeDirty: dirty, generatedAt: new Date().toISOString(), documents: manifest }, null, 2) + "\n");
+  writeFileSync(`${OUT}/MANIFEST.json`, JSON.stringify({ fixture: FIXTURE_ID, commit, workingTreeDirty: dirty, untrackedFiles: untracked, generatedAt: new Date().toISOString(), documents: manifest }, null, 2) + "\n");
   writeFileSync(`${OUT}/SHA256SUMS`, sums.join("\n") + "\n");
 }
 main().then(async () => { await prisma.$disconnect(); process.exit(0); }).catch(async (e) => { console.error(e instanceof Error ? e.message : e); await prisma.$disconnect(); process.exit(1); });

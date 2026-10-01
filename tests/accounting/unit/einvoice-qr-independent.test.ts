@@ -12,7 +12,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { buildXml, documentHash, qrTlv, readQr, tryReadQr, verifyQrStamp, derToP1363, signLocally, INITIAL_PIH, QR_ENCODING, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildXml, documentHash, canonicalForHash, hashOfStoredXml, legacyHashOfStoredXml, qrTlv, readQr, tryReadQr, verifyQrStamp, derToP1363, signLocally, INITIAL_PIH, QR_ENCODING, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
 import { validateDoc, standardsGaps } from "../../../src/lib/accounting/einvoice/rules";
 
 // ── secp256k1 (SEC 2 v2, §2.4.1), independent BigInt arithmetic ───────────────────────────────
@@ -161,7 +165,8 @@ test("local rules catch the previous encoding and a mismatched stamp; standards 
   const d = doc();
   const { Q, key } = keyFromScalar(B("1"));
   const h = documentHash(d);
-  assert.equal(Buffer.from(h, "base64").toString("hex"), createHash("sha256").update(buildXml(d, {}), "utf8").digest("hex"));
+  // The hash covers the canonical form (no XML declaration): checked against xmllint --c14n11 below.
+  assert.equal(Buffer.from(h, "base64").toString("hex"), createHash("sha256").update(buildXml(d, {}).replace(/^<\?xml[^?]*\?>/, ""), "utf8").digest("hex"));
   const s = signLocally(h, key);
   const fields = { sellerName: d.seller.name, vatNumber: d.seller.vatNumber, timestamp: "2026-09-29T10:15:00", total: "115.00", vat: "15.00" };
   const qr = qrTlv({ ...fields, hash: h, signature: s.signatureDer, publicKey: s.publicKeyDer });
@@ -192,4 +197,29 @@ test("malformed input: truncated, duplicated or non-base64 TLV and malformed DER
     "3026" + "0221" + "01" + "ff".repeat(32) + "020101" /* r longer than 32 bytes */]) {
     assert.throws(() => derToP1363(Buffer.from(bad, "hex")), /Not a DER|longer than the curve/, bad);
   }
+});
+
+test("invoice hash input = Canonical XML 1.1 as produced by an independent implementation (xmllint --c14n11), incl. quotes, & and Arabic; legacy hashes are recognised", () => {
+  const d = { ...doc(), typeCode: "381" as const, billingReference: "INV-1", reason: 'خصم "متفق عليه" & تعديل <سعر>', lines: [{ ...doc().lines[0], name: 'بن "مختص" & حلو', discountPercent: "10.00", quantity: "3", unitPrice: "33.3333", net: "90.00", vat: "13.50" }],
+    totals: { lineExtension: "90.00", taxExclusive: "90.00", tax: "13.50", taxInclusive: "103.50", prepaid: "0.00", payable: "103.50" } };
+  const { key } = keyFromScalar(B("1"));
+  const h = documentHash(d);
+  const s = signLocally(h, key);
+  const qr = qrTlv({ sellerName: d.seller.name, vatNumber: d.seller.vatNumber, timestamp: "2026-09-29T10:15:00", total: "103.50", vat: "13.50", hash: h, signature: s.signatureDer, publicKey: s.publicKeyDer });
+  const stored = buildXml(d, { signature: { value: s.signature, publicKey: s.publicKey }, qr });
+  // The stored document without the signature extension and QR reference, canonicalised by xmllint.
+  const dir = mkdtempSync(join(tmpdir(), "c14n-"));
+  const stripped = stored.replace(/<ext:UBLExtensions>[\s\S]*?<\/ext:UBLExtensions>/, "").replace(/<cac:Signature>[\s\S]*?<\/cac:Signature>/, "").replace(/<cac:AdditionalDocumentReference><cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/, "");
+  writeFileSync(join(dir, "doc.xml"), stripped);
+  const c14n = execFileSync("xmllint", ["--c14n11", join(dir, "doc.xml")]);
+  assert.equal(canonicalForHash(stored), c14n.toString("utf8"), "our canonical form equals xmllint's C14N 1.1 output byte for byte");
+  assert.equal(h, createHash("sha256").update(c14n).digest("base64"));
+  assert.equal(hashOfStoredXml(stored), h);
+  assert.notEqual(legacyHashOfStoredXml(stored), h, "the earlier method (XML declaration included) gives a different hash");
+  assert.match(stored, /<cbc:InstructionNote>خصم "متفق عليه" &amp; تعديل &lt;سعر&gt;<\/cbc:InstructionNote>/, "quotes are not escaped in text; & < > are");
+  // Line discount: amount and base amount present and consistent with net = quantity × price − allowance.
+  assert.match(stored, /<cac:AllowanceCharge><cbc:ChargeIndicator>false<\/cbc:ChargeIndicator><cbc:AllowanceChargeReason>discount<\/cbc:AllowanceChargeReason><cbc:MultiplierFactorNumeric>10.00<\/cbc:MultiplierFactorNumeric><cbc:Amount currencyID="SAR">10.00<\/cbc:Amount><cbc:BaseAmount currencyID="SAR">100.00<\/cbc:BaseAmount><\/cac:AllowanceCharge>/);
+  assert.match(stored, /<ext:ExtensionURI>urn:local:test-signature<\/ext:ExtensionURI>/);
+  assert.match(stored, /<cbc:PriceAmount currencyID="SAR">33.3333<\/cbc:PriceAmount>/, "unit price keeps its precision");
+  assert.match(stored, /<cbc:ID schemeAgencyID="6" schemeID="UN\/ECE 5305">S<\/cbc:ID>/, "attributes in canonical order");
 });

@@ -34,10 +34,17 @@ export type EDoc = {
 /** The initial previous-invoice hash for the first document of an EGS: base64 of the hex SHA-256 of "0" (as we read the standard; unverified). */
 export const INITIAL_PIH = Buffer.from(createHash("sha256").update("0").digest("hex")).toString("base64");
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// Text escaping exactly as Canonical XML (C14N 1.0/1.1, W3C) writes text nodes: &, <, > and CR.
+// (Quotes are NOT escaped in text — the earlier version did, which no canonical form produces.)
+// Attribute values in this file are fixed literals.
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\r/g, "&#xD;");
 const amt = (v: string) => Number(v).toFixed(2);
 const el = (tag: string, body: string, attrs = "") => `<${tag}${attrs}>${body}</${tag}>`;
 const cbc = (tag: string, v: string | number, attrs = "") => el(`cbc:${tag}`, esc(String(v)), attrs);
+// Attributes are written in Canonical XML order (sorted by name): the document is its own canonical form.
+// Unit prices keep their precision (at least 2 decimals, trailing zeros beyond that dropped): rounding
+// them to 2 decimals broke quantity × price = line base (33.3333 → 33.33).
+const unitPrice = (v: string) => { const [i, f = ""] = Number(v).toFixed(4).split("."); const t = f.replace(/0+$/, ""); return `${i}.${t.length >= 2 ? t : t.padEnd(2, "0")}`; };
 const money = (tag: string, v: string, cur: string) => cbc(tag, amt(v), ` currencyID="${cur}"`);
 
 function party(p: Party, supplier: boolean) {
@@ -64,7 +71,7 @@ export { subtotals as taxSubtotals };
 export function buildXml(d: EDoc, parts: { signature?: { value: string; publicKey: string } | null; qr?: string | null } = {}) {
   const cur = d.currency;
   const ext = parts.signature
-    ? el("ext:UBLExtensions", el("ext:UBLExtension", cbc("ExtensionURI", "urn:local:test-signature") + el("ext:ExtensionContent",
+    ? el("ext:UBLExtensions", el("ext:UBLExtension", el("ext:ExtensionURI", "urn:local:test-signature") + el("ext:ExtensionContent",
       `<!-- LOCAL TEST SIGNATURE: ECDSA secp256k1 over the document hash with a local test key; not XAdES, not a ZATCA CSID -->` +
       el("local:TestSignature", el("local:SignatureValue", parts.signature.value) + el("local:PublicKey", parts.signature.publicKey), ' xmlns:local="urn:local:test-signature"'))))
     : "";
@@ -77,13 +84,14 @@ export function buildXml(d: EDoc, parts: { signature?: { value: string; publicKe
   const subs = subtotals(d);
   const taxTotal = el("cac:TaxTotal", money("TaxAmount", d.totals.tax, cur) + subs.map((s) => el("cac:TaxSubtotal",
     money("TaxableAmount", String(s.taxable), cur) + money("TaxAmount", String(s.tax), cur) + el("cac:TaxCategory",
-      cbc("ID", s.cat, ' schemeID="UN/ECE 5305" schemeAgencyID="6"') + cbc("Percent", s.rate) + (s.code ? cbc("TaxExemptionReasonCode", s.code) : "") + (s.reason ? cbc("TaxExemptionReason", s.reason) : "") +
-      el("cac:TaxScheme", cbc("ID", "VAT", ' schemeID="UN/ECE 5153" schemeAgencyID="6"'))))).join(""));
+      cbc("ID", s.cat, ' schemeAgencyID="6" schemeID="UN/ECE 5305"') + cbc("Percent", s.rate) + (s.code ? cbc("TaxExemptionReasonCode", s.code) : "") + (s.reason ? cbc("TaxExemptionReason", s.reason) : "") +
+      el("cac:TaxScheme", cbc("ID", "VAT", ' schemeAgencyID="6" schemeID="UN/ECE 5153"'))))).join(""));
   const lines = d.lines.map((l) => el("cac:InvoiceLine",
     cbc("ID", l.no) + cbc("InvoicedQuantity", Number(l.quantity).toString(), ' unitCode="PCE"') + money("LineExtensionAmount", l.net, cur) +
+    lineAllowance(l, cur) +
     el("cac:TaxTotal", money("TaxAmount", l.vat, cur) + money("RoundingAmount", String(Math.round((Number(l.net) + Number(l.vat)) * 100) / 100), cur)) +
     el("cac:Item", cbc("Name", l.name) + el("cac:ClassifiedTaxCategory", cbc("ID", l.category) + cbc("Percent", Number(l.vatRate).toFixed(2)) + el("cac:TaxScheme", cbc("ID", "VAT")))) +
-    el("cac:Price", money("PriceAmount", l.unitPrice, cur) + (Number(l.discountPercent) > 0 ? el("cac:AllowanceCharge", cbc("ChargeIndicator", "false") + cbc("AllowanceChargeReason", "discount") + cbc("MultiplierFactorNumeric", l.discountPercent)) : "")))).join("");
+    el("cac:Price", cbc("PriceAmount", unitPrice(l.unitPrice), ` currencyID="${cur}"`)))).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>` +
     `<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">` +
     ext + cbc("ProfileID", "reporting:1.0") + cbc("ID", d.id) + cbc("UUID", d.uuid) + cbc("IssueDate", d.issueDate) + cbc("IssueTime", d.issueTime) +
@@ -99,18 +107,50 @@ export function buildXml(d: EDoc, parts: { signature?: { value: string; publicKe
     lines + `</Invoice>`;
 }
 
-/** SHA-256 (base64) of the document without the signature and QR parts. */
-export function documentHash(d: EDoc) {
-  return createHash("sha256").update(buildXml(d, {}), "utf8").digest("base64");
+/**
+ * Line discount as a line-level allowance (UBL cac:InvoiceLine/cac:AllowanceCharge), with the
+ * amount and base amount the UBL 2.1 schema and the EN 16931 rules require: base = quantity ×
+ * unit price (2 decimals), amount = base − line net, percentage as given. The price stays the
+ * gross unit price, so line net = quantity × price − allowance (BR-KSA-EN16931-11's formula).
+ */
+function lineAllowance(l: EDocLine, cur: string) {
+  if (!(Number(l.discountPercent) > 0)) return "";
+  const base = Math.round(Number(l.quantity) * Number(l.unitPrice) * 100) / 100;
+  const amount = Math.round((base - Number(l.net)) * 100) / 100;
+  return el("cac:AllowanceCharge", cbc("ChargeIndicator", "false") + cbc("AllowanceChargeReason", "discount") + cbc("MultiplierFactorNumeric", l.discountPercent) +
+    money("Amount", String(amount), cur) + money("BaseAmount", String(base), cur));
 }
 
-/** Remove the signature and QR parts from a stored XML — for re-checking a stored document's hash. */
-export function hashOfStoredXml(xml: string) {
-  const stripped = xml
+const XML_DECL = /^<\?xml[^?]*\?>/;
+/** The parts the invoice-hash transforms remove: signature extension, cac:Signature, QR reference. */
+function stripForHash(xml: string) {
+  return xml
     .replace(/<ext:UBLExtensions>[\s\S]*?<\/ext:UBLExtensions>/, "")
     .replace(/<cac:Signature>[\s\S]*?<\/cac:Signature>/, "")
     .replace(/<cac:AdditionalDocumentReference><cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/, "");
-  return createHash("sha256").update(stripped, "utf8").digest("base64");
+}
+
+/**
+ * The invoice hash: SHA-256 (base64) of the canonical form of the document without the signature
+ * extension, cac:Signature and the QR reference. The generator writes canonical XML already
+ * (no whitespace or comments, root-level namespace declarations in canonical order, C14N text
+ * escaping), so the canonical form is the document without its XML declaration — the test compares
+ * it byte for byte with `xmllint --c14n11`. Equality with ZATCA's own hash is UNCONFIRMED until the
+ * official SDK's -generateHash is compared (scripts/accounting/zatca-sdk/harness.mjs).
+ */
+export function canonicalForHash(xml: string) {
+  return stripForHash(xml).replace(XML_DECL, "");
+}
+export function documentHash(d: EDoc) {
+  return createHash("sha256").update(canonicalForHash(buildXml(d, {})), "utf8").digest("base64");
+}
+/** Re-check a stored document's hash (current method). */
+export function hashOfStoredXml(xml: string) {
+  return createHash("sha256").update(canonicalForHash(xml), "utf8").digest("base64");
+}
+/** The method used before the canonical-hash change: it also hashed the XML declaration. Only for recognising documents issued earlier. */
+export function legacyHashOfStoredXml(xml: string) {
+  return createHash("sha256").update(stripForHash(xml), "utf8").digest("base64");
 }
 
 /**

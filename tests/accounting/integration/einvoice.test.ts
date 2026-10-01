@@ -73,7 +73,8 @@ describe("profile and generation", () => {
     assert.equal(g.status, "GENERATED");
     const e = await einv(a.id);
     assert.deepEqual([e.icv, e.previousHash, e.typeCode, e.subtype, e.signer], [1, INITIAL_PIH, "388", "0100000", "LOCAL_TEST_KEY"]);
-    assert.deepEqual((e.validation as { ok: boolean }[]).filter((x) => !x.ok), []);
+    // No blocking failure; the only finding is the non-blocking supply-date warning (this sales document has no supply date).
+    assert.deepEqual((e.validation as { id: string; ok: boolean; severity?: string }[]).filter((x) => !x.ok).map((x) => [x.id, x.severity]), [["LOCAL-SUPPLY-DATE", "warning"]]);
     assert.equal((await EI.generateEInvoice(a.id, w.prep)).status, "ALREADY", "idempotent");
     assert.match(e.xml, /<cbc:CompanyID>300445566700003<\/cbc:CompanyID>/);
   });

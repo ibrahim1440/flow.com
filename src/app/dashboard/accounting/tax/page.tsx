@@ -8,7 +8,8 @@ import { api, ApiError, Badge, Button, Card, CardTitle, Dialog, EmptyState, Erro
 import { useAmount, useCan, useDay } from "../_components/kit";
 import { JOB, LocalOnlyBanner, OUTCOME, SUBTYPE, TYPE, TaxNav } from "./_ui";
 
-type Rule = { id: string; ok: boolean; en: string; ar: string; detail?: string };
+type Rule = { id: string; ok: boolean; en: string; ar: string; detail?: string; severity?: "warning" };
+const blocking = (r: Rule) => !r.ok && r.severity !== "warning";
 type Row = { salesInvoiceId: string; customerId: string; nationalAddress: Record<string, string> | null; doc: string; kind: string; debitNote: boolean; status: string; customer: string; gross: string; issueDate: string; reversedAfterIssue: boolean;
   einvoice: { id: string; icv: number; typeCode: string; subtype: string; valid: boolean; failed: number; lastSubmission: { outcome: string; attempt: number; environment: string } | null } | null;
   job: { status: string; attempts: number; errors: Rule[] | { message: string }[] | null } | null };
@@ -72,7 +73,7 @@ export default function EInvoicesPage() {
         <Card>
           <CardTitle title={`${d.doc} · ${L(TYPE[d.typeCode][0], TYPE[d.typeCode][1])} ${L(SUBTYPE[d.subtype][0], SUBTYPE[d.subtype][1])}`}
             sub={`UUID ${d.uuid} · ICV ${d.icv} · ${L("أُنشئ عند الترحيل ولا يتغير", "created at posting; never changes")}`}
-            right={shownRules.every((x) => x.ok) ? <Badge tone="ok">{L("صالح محلياً", "Valid locally")}</Badge> : <Badge tone="bad">{L("مخالف محلياً", "Invalid locally")}</Badge>} />
+            right={shownRules.some(blocking) ? <Badge tone="bad">{L("مخالف محلياً", "Invalid locally")}</Badge> : shownRules.some((x) => !x.ok) ? <Badge tone="warn">{L("صالح محلياً مع تنبيهات", "Valid locally, with warnings")}</Badge> : <Badge tone="ok">{L("صالح محلياً", "Valid locally")}</Badge>} />
           <div className="grid md:grid-cols-3 gap-3 text-[13px]">
             <div><div className="text-[12px] font-bold">{L("تجزئة المستند (SHA-256)", "Document hash (SHA-256)")}</div><code className="block break-all text-[11px] mt-1" dir="ltr">{d.invoiceHash}</code><span className="text-[11px] text-brown">{L("فوق التمثيل المحدد بعد حذف التوقيع والامتداد — المطابقة مع C14N غير متحقق منها", "Over our deterministic serialisation without signature and extension — equivalence with C14N unverified")}</span></div>
             <div><div className="text-[12px] font-bold">{L("تجزئة المستند السابق (PIH)", "Previous-invoice hash (PIH)")}</div><code className="block break-all text-[11px] mt-1" dir="ltr">{d.previousHash}</code></div>
@@ -80,7 +81,7 @@ export default function EInvoicesPage() {
           </div>
           <Table>
             <thead><tr><Th>{L("القاعدة (محلية)", "Rule (local)")}</Th><Th>{L("الوصف", "Description")}</Th><Th>{L("النتيجة", "Result")}</Th></tr></thead>
-            <tbody>{shownRules.map((x) => <tr key={x.id} className="border-t border-border"><Td><code dir="ltr">{x.id}</code></Td><Td>{L(x.ar, x.en)}{x.detail && !x.ok && <span className="block text-[11px] text-red-700">{x.detail}</span>}</Td><Td>{x.ok ? <Badge tone="ok">✓</Badge> : <Badge tone="bad">✗</Badge>}</Td></tr>)}</tbody>
+            <tbody>{shownRules.map((x) => <tr key={x.id} className="border-t border-border"><Td><code dir="ltr">{x.id}</code></Td><Td>{L(x.ar, x.en)}{x.detail && !x.ok && <span className="block text-[11px] text-red-700">{x.detail}</span>}</Td><Td>{x.ok ? <Badge tone="ok">✓</Badge> : x.severity === "warning" ? <Badge tone="warn">{L("تنبيه", "Warning")}</Badge> : <Badge tone="bad">✗</Badge>}</Td></tr>)}</tbody>
           </Table>
           <Notice tone="bad"><strong>{L("غير مطابق للمعيار — تحقق محلي فقط:", "Not standards-compliant — local validation only:")}</strong>
             <ul className="list-disc ps-5 mt-1">{(d.standardsGaps ?? []).map((g) => <li key={g.id}>{L(g.ar, g.en)}</li>)}</ul></Notice>
@@ -95,7 +96,7 @@ export default function EInvoicesPage() {
           <div className="flex gap-2 justify-end flex-wrap">
             <a href={`/api/accounting/tax/einvoices/${d.id}/xml`}><Button>{L("تنزيل XML", "Download XML")}</Button></a>
             {can("einv_submit") && <Button busy={busy === "submit"} onClick={() => act("submit", () => api(`/api/accounting/tax/einvoices/${d.id}/submit`, { method: "POST", json: {} }), (x) => { const o = (x as { outcome: string }).outcome; return L(`سُجّلت المحاولة: ${OUTCOME[o]?.[0] ?? o}`, `Attempt recorded: ${OUTCOME[o]?.[1] ?? o}`); })}>{L("إرسال (بيئة اختبار فقط)", "Submit (test environment only)")}</Button>}
-            {can("einv_generate") && <Button kind="primary" busy={busy === "reval"} onClick={() => act("reval", async () => { const r = await api<Rule[]>(`/api/accounting/tax/einvoices/${d.id}/revalidate`, { method: "POST", json: {} }); setRules(r); return r; }, (r) => (r as Rule[]).every((x) => x.ok) ? L("أعيد التحقق محلياً: كل القواعد متحققة.", "Re-validated locally: all rules pass.") : L("أعيد التحقق محلياً: توجد مخالفات.", "Re-validated locally: some rules fail."))}>{L("إعادة التحقق محلياً", "Re-validate locally")}</Button>}
+            {can("einv_generate") && <Button kind="primary" busy={busy === "reval"} onClick={() => act("reval", async () => { const r = await api<Rule[]>(`/api/accounting/tax/einvoices/${d.id}/revalidate`, { method: "POST", json: {} }); setRules(r); return r; }, (r) => !(r as Rule[]).some(blocking) && (r as Rule[]).every((x) => x.ok) ? L("أعيد التحقق محلياً: كل القواعد متحققة.", "Re-validated locally: all rules pass.") : !(r as Rule[]).some(blocking) ? L("أعيد التحقق محلياً: متحقق مع تنبيهات.", "Re-validated locally: passes, with warnings.") : L("أعيد التحقق محلياً: توجد مخالفات.", "Re-validated locally: some rules fail."))}>{L("إعادة التحقق محلياً", "Re-validate locally")}</Button>}
           </div>
         </Card>) : det.error ? <ErrorState error={det.error} onRetry={det.reload} /> : <LoadingState />)}
       <Dialog open={!!addr} onClose={() => setAddr(null)} title={L("العنوان الوطني للمشتري", "Buyer's national address")} sub={addr?.row.customer}>

@@ -25,6 +25,8 @@ step build npm run -s build
 step acc-unit npm run -s test:accounting:unit
 step acc-db npm run -s test:accounting:db
 step acc-scripts npm run -s test:accounting:scripts
+# ZATCA SDK harness tests (stub SDK; the container case runs only if Docker and the runner image exist).
+step acc-harness npm run -s test:accounting:harness
 step fin-unit npm run -s test:finance:unit
 step fin-db npm run -s test:finance:db
 # HTTP, capture and audit need the fixture credentials (after the DB suites, so .env never overrides .env.test).

@@ -4,9 +4,11 @@
 // are known to require (titles and versions confirmed on zatca.gov.sa; contents not readable from
 // this environment). They are NOT the official BR-KSA rule codes, and passing them is NOT ZATCA
 // validation: only the official SDK or the Fatoora platform validates a document.
-import { hashOfStoredXml, readQr, tryReadQr, qrTlv, verifyLocally, verifyQrStamp, taxSubtotals, QR_ENCODING, type EDoc } from "./ubl";
+import { hashOfStoredXml, legacyHashOfStoredXml, readQr, tryReadQr, qrTlv, verifyLocally, verifyQrStamp, taxSubtotals, QR_ENCODING, type EDoc } from "./ubl";
 
-export type RuleResult = { id: string; ok: boolean; en: string; ar: string; detail?: string };
+/** severity "warning": reported, never blocks generation (mirrors rules the official rule set flags as warnings). */
+export type RuleResult = { id: string; ok: boolean; en: string; ar: string; detail?: string; severity?: "warning" };
+export const isBlocking = (r: RuleResult) => !r.ok && r.severity !== "warning";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const near = (a: number, b: number, tol = 0.01) => Math.abs(a - b) <= tol + 1e-9;
 const VAT = /^3\d{13}3$/;
@@ -32,6 +34,10 @@ export function validateDoc(d: EDoc, stored?: { xml: string; invoiceHash: string
       "Buyer national address complete (standard invoice)", "عنوان المشتري الوطني مكتمل (فاتورة قياسية)", "street, building number, district, city, postal code");
   }
 
+  if (d.typeCode === "388" && !simplified) {
+    out.push({ id: "LOCAL-SUPPLY-DATE", ok: !!d.supplyDate, severity: "warning", en: "Standard tax invoice carries the supply date (cac:Delivery/cbc:ActualDeliveryDate)", ar: "الفاتورة الضريبية القياسية تتضمن تاريخ التوريد",
+      ...(d.supplyDate ? {} : { detail: "no supply date on the sales document; enter it in the invoice form (rule BR-KSA-15 in the rule file seen flags this as a warning)" }) });
+  }
   rule("LOCAL-DOC-ID", !!d.id, "Document number present", "رقم المستند موجود");
   rule("LOCAL-UUID", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(d.uuid), "UUID (version 4)", "المعرف الفريد UUID (الإصدار 4)");
   rule("LOCAL-TYPE", ["388", "381", "383"].includes(d.typeCode) && /^0[12]\d{5}$/.test(d.subtype), "Type code 388/381/383 with a standard (01…) or simplified (02…) subtype", "رمز النوع 388/381/383 مع نوع فرعي قياسي أو مبسط");
@@ -72,7 +78,10 @@ export function validateDoc(d: EDoc, stored?: { xml: string; invoiceHash: string
   rule("LOCAL-PAYABLE", near(Number(T.payable), r2(Number(T.taxInclusive) - Number(T.prepaid))), "Payable = amount with VAT − prepaid", "المستحق = الإجمالي مع الضريبة − المدفوع مقدماً");
 
   if (stored) {
-    rule("LOCAL-HASH", hashOfStoredXml(stored.xml) === stored.invoiceHash, "Stored XML hashes to the stored document hash", "تجزئة XML المخزّن تساوي التجزئة المسجلة");
+    const current = hashOfStoredXml(stored.xml) === stored.invoiceHash;
+    const legacy = !current && legacyHashOfStoredXml(stored.xml) === stored.invoiceHash;
+    rule("LOCAL-HASH", current, "Stored XML hashes (canonical form) to the stored document hash", "تجزئة XML المخزّن (الصيغة القياسية) تساوي التجزئة المسجلة",
+      legacy ? "issued with the earlier hash method (XML declaration included); the document is immutable and is not re-issued" : "hash differs");
     if (simplified) {
       const parsed = tryReadQr(stored.qr);
       const q: Record<number, Buffer> = parsed ?? {};

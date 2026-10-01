@@ -19,7 +19,7 @@ import { auditAccounting } from "../audit";
 import { dateStr } from "../dates";
 import { riyadhDateString } from "@/lib/finance/dates";
 import { buildXml, documentHash, qrTlv, signLocally, INITIAL_PIH, type EDoc, type TaxCat, type Address } from "./ubl";
-import { validateDoc, standardsGaps, type RuleResult } from "./rules";
+import { validateDoc, standardsGaps, isBlocking, type RuleResult } from "./rules";
 import { submissionTarget } from "./target";
 export { submissionTarget };
 
@@ -125,7 +125,7 @@ export async function generateEInvoice(salesInvoiceId: string, userId: string): 
 
   // Validate first, outside the chain: an invalid document never takes an ICV.
   const trial = await docModel(prisma, salesInvoiceId, profile, { icv: 1, previousHash: INITIAL_PIH, uuid: randomUUID() });
-  const pre = validateDoc(trial.doc).filter((x) => !x.ok);
+  const pre = validateDoc(trial.doc).filter(isBlocking);
   if (pre.length) {
     await job("INVALID", pre);
     await prisma.$transaction((tx) => auditAccounting(tx, { action: "einvoice.invalid", entityType: "einvoice_job", entityId: salesInvoiceId, userId, after: pre.map((x) => x.id) }));
@@ -151,7 +151,7 @@ export async function generateEInvoice(salesInvoiceId: string, userId: string): 
       issueAt: new Date(`${doc.issueDate}T${doc.issueTime}+03:00`), xml, invoiceHash: hash, previousHash: chain.previousHash, qr, signature: signed?.signature ?? null,
       publicKey: signed?.publicKey ?? null, signer: SIGNER, validation: validation as unknown as Prisma.InputJsonValue, createdBy: userId } });
     await job("GENERATED", null, tx);
-    await auditAccounting(tx, { action: "einvoice.generate", entityType: "einvoice", entityId: e.id, userId, after: { doc: doc.id, icv: e.icv, hash, subtype: doc.subtype, valid: validation.every((v) => v.ok) } });
+    await auditAccounting(tx, { action: "einvoice.generate", entityType: "einvoice", entityId: e.id, userId, after: { doc: doc.id, icv: e.icv, hash, subtype: doc.subtype, valid: !validation.some(isBlocking) } });
     return { status: "GENERATED" as const, eInvoiceId: e.id };
   });
 }
@@ -252,7 +252,7 @@ export async function eInvoiceList() {
     const v = (e?.validation ?? []) as unknown as RuleResult[];
     return {
       salesInvoiceId: d.id, doc: label(d), kind: d.kind, debitNote: !!d.debitNoteOfId, status: d.status, customer: d.customer.nameAr ?? d.customer.name, customerId: d.customerId, nationalAddress: d.customer.nationalAddress, gross: d.totalGross.toFixed(2), issueDate: dateStr(d.issueDate),
-      einvoice: e ? { id: e.id, icv: e.icv, typeCode: e.typeCode, subtype: e.subtype, valid: v.every((x) => x.ok), failed: v.filter((x) => !x.ok).length, lastSubmission: e.submissions[0] ? { outcome: e.submissions[0].outcome, attempt: e.submissions[0].attempt, environment: e.submissions[0].environment } : null } : null,
+      einvoice: e ? { id: e.id, icv: e.icv, typeCode: e.typeCode, subtype: e.subtype, valid: !v.some(isBlocking), failed: v.filter((x) => !x.ok).length, lastSubmission: e.submissions[0] ? { outcome: e.submissions[0].outcome, attempt: e.submissions[0].attempt, environment: e.submissions[0].environment } : null } : null,
       job: j ? { status: j.status, attempts: j.attempts, errors: j.errors } : null,
       reversedAfterIssue: d.status === "REVERSED" && !!e,
     };
