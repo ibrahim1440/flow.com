@@ -12,12 +12,13 @@ Review date: 2026-09-29.
 |---|---|---|
 | **Local self-consistency** (`einvoice.test.ts`, `tax.test.mjs`, `tax-forms.mjs`, `einvoice-pure.test.ts`) | our generator, chain, rules and screens agree with each other and with our reading of the standard | that the reading is right |
 | **Independent local checks** (`einvoice-qr-independent.test.ts`) | QR bytes equal TLV sequences written out by hand for both layouts; tag 8 equals X‖Y of d·G computed from SEC 2 constants; tag 7 equals r‖s from a DER signature parsed by hand; the QR's own tags verify under a local ECDSA verifier (BigInt); P1363 padding on hand-made DER; SHA-256 test vector | that ZATCA accepts the layout. These tests encode implementation assumptions and do not validate official conformance |
-| **Official standards validation** (ZATCA SDK, Fatoora sandbox/simulation) | conformance | — **not done: blocked (§2)** |
+| **Secondary checks** (`zatca-secondary-check.sh`) | our XML against the UBL 2.1 XSD and the EN 16931 / ZATCA business-rule files of a third-party SDK copy (provenance unverified; checksums recorded) — all six documents XSD-valid; remaining rule findings BR-KSA-28/29 on simplified documents (XAdES) | official conformance — the files are not authenticated and the SDK itself (signature, hash, QR checks) did not run |
+| **Official standards validation** (ZATCA SDK, Fatoora sandbox/simulation) | conformance | — **not done: blocked (§2)**; harness ready (`ZATCA_SDK_VALIDATION.md` §3) |
 
 ## 2. Official sources and validator: access evidence
 
 Every official host is refused by this environment's network policy (the proxy answers 403 to
-CONNECT), re-checked on 2026-10-01T05:42Z. Nothing was worked around. Raw attempts:
+CONNECT), re-checked on 2026-10-01T05:42Z and 08:14Z. Nothing was worked around. Raw attempts:
 `evidence/zatca/access-attempts-2026-09-29.txt`, `access-attempts-2026-10-01.txt`. The SDK run that
 is ready to go (application-generated six-document matrix, harness, Java 11) and the six separate
 statuses (developer verification → production readiness) are in `ZATCA_SDK_VALIDATION.md`.
@@ -92,8 +93,8 @@ documents.
 | 1.1 Documents | Standard (B2B) and simplified (B2C) invoices, credit notes (381) and debit notes (383) with the original's reference and a reason | implemented, local tests | SDK validation of the XML |
 | 1.2 Data | Seller VAT/CR/national address; buyer VAT and address for standard invoices; UUID; issue date/time | implemented; seller data approved by someone else | the company's real seller data (fixture values are synthetic) |
 | 1.3 Chain | ICV per EGS, previous-invoice hash | gapless under concurrency, DB-guarded; initial PIH per our reading (unverified) | SDK validation |
-| 1.4 XML | UBL 2.1 per the XML Implementation Standard | per our reading; **unverified** | the standard's text; SDK validation |
-| 1.5 Hash / stamp | canonicalised hash; XAdES stamp with a CSID | hash over our deterministic serialisation (C14N equivalence **unverified**); ECDSA secp256k1 with a **local test key**, not XAdES, not a CSID | compliance CSID; XAdES checked with the SDK |
+| 1.4 XML | UBL 2.1 per the XML Implementation Standard | XSD-valid against the UBL 2.1 schema (third-party copy of the schema files); line allowances with amount and base amount; supply date on standard invoices; **official validation not run** | SDK validation |
+| 1.5 Hash / stamp | canonicalised hash; XAdES stamp with a CSID | hash = SHA-256 of the canonical form, byte-equal to `xmllint --c14n11` (test); ECDSA secp256k1 with a **local test key**, not XAdES, not a CSID; BR-KSA-28/29 (secondary rule files) fire on simplified documents | XAdES per the official documents; equality with `fatoora -generateHash`; compliance CSID |
 | 1.6 QR | TLV base64, phase-2 tags | §3: tags 6–8 now use the encodings the official documents specify as cited (32-byte hash, P1363 signature, 64-byte key); tag 9 absent | certificate; curve/profile confirmation; SDK validation |
 | 1.7 Rules | BR-KSA business rules | 20+ local checks (`LOCAL-*`), not the official codes | official data dictionary; mapping to BR-KSA |
 | 1.8 Clearance / reporting | standard invoices cleared before sharing; simplified reported within 24 h | production refused; LOCAL_ONLY records "not sent"; SANDBOX only to a local stub or ZATCA's developer-portal / simulation paths; retries with back-off; append-only attempts | network access to gw-fatoora, test CSID, compliance invoice set |

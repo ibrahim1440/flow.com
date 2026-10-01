@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: no session: every accounting endpoint answers 401
+ok 1 - no session: every accounting endpoint answers 401
+  ---
+  duration_ms: 215.518607
+  type: 'test'
+  ...
+# Subtest: no accounting module: 403 on reads and writes
+ok 2 - no accounting module: 403 on reads and writes
+  ---
+  duration_ms: 440.988603
+  type: 'test'
+  ...
+# Subtest: view-only: reads succeed, every write is refused
+ok 3 - view-only: reads succeed, every write is refused
+  ---
+  duration_ms: 440.056944
+  type: 'test'
+  ...
+# Subtest: separation of duties over HTTP: the preparer cannot approve; the approver cannot create; identity comes from the session
+ok 4 - separation of duties over HTTP: the preparer cannot approve; the approver cannot create; identity comes from the session
+  ---
+  duration_ms: 438.6762
+  type: 'test'
+  ...
+# Subtest: reports balance on the fixture
+ok 5 - reports balance on the fixture
+  ---
+  duration_ms: 153.291522
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1795.897074

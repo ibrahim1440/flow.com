@@ -1,0 +1,88 @@
+TAP version 13
+# Subtest: harness: all six documents pass → exit 0, still marked harness test (never official)
+ok 1 - harness: all six documents pass → exit 0, still marked harness test (never official)
+  ---
+  duration_ms: 948.112052
+  type: 'test'
+  ...
+# Subtest: harness: an SDK command failure on one document → exit 1, the other five are still collected
+ok 2 - harness: an SDK command failure on one document → exit 1, the other five are still collected
+  ---
+  duration_ms: 980.608307
+  type: 'test'
+  ...
+# Subtest: harness: SDK hash differs from the application hash → FAIL, exit 1
+ok 3 - harness: SDK hash differs from the application hash → FAIL, exit 1
+  ---
+  duration_ms: 908.875215
+  type: 'test'
+  ...
+# Subtest: harness: a missing document → FAIL for it, exit 1; evidence still lists all six
+ok 4 - harness: a missing document → FAIL for it, exit 1; evidence still lists all six
+  ---
+  duration_ms: 793.040484
+  type: 'test'
+  ...
+# Subtest: harness: a corrupted input (checksum mismatch) → FAIL for that document, exit 1
+ok 5 - harness: a corrupted input (checksum mismatch) → FAIL for that document, exit 1
+  ---
+  duration_ms: 857.755925
+  type: 'test'
+  ...
+# Subtest: harness: output it cannot interpret → BLOCKED, exit 3 (exit code 0 is never taken as a pass)
+ok 6 - harness: output it cannot interpret → BLOCKED, exit 3 (exit code 0 is never taken as a pass)
+  ---
+  duration_ms: 985.799599
+  type: 'test'
+  ...
+# Subtest: harness: an unconfirmed output profile → BLOCKED everywhere, exit 3
+ok 7 - harness: an unconfirmed output profile → BLOCKED everywhere, exit 3
+  ---
+  duration_ms: 994.152534
+  type: 'test'
+  ...
+# Subtest: harness: wrong archive hash → FAIL precondition, nothing runs, exit 1
+ok 8 - harness: wrong archive hash → FAIL precondition, nothing runs, exit 1
+  ---
+  duration_ms: 71.988148
+  type: 'test'
+  ...
+# Subtest: harness: no archive → NOT_RUN, exit 3
+ok 9 - harness: no archive → NOT_RUN, exit 3
+  ---
+  duration_ms: 79.9698
+  type: 'test'
+  ...
+# Subtest: harness: an undocumented command → BLOCKED for that command
+ok 10 - harness: an undocumented command → BLOCKED for that command
+  ---
+  duration_ms: 581.085269
+  type: 'test'
+  ...
+# Subtest: harness: unsafe archive entries (traversal, symbolic link) are refused before extraction
+ok 11 - harness: unsafe archive entries (traversal, symbolic link) are refused before extraction
+  ---
+  duration_ms: 117.75193
+  type: 'test'
+  ...
+# Subtest: lib: java requirement parsing and archive entry checks
+ok 12 - lib: java requirement parsing and archive entry checks
+  ---
+  duration_ms: 0.812347
+  type: 'test'
+  ...
+# Subtest: harness: the container runner runs the stub with no network and read-only inputs (skipped without Docker)
+ok 13 - harness: the container runner runs the stub with no network and read-only inputs (skipped without Docker)
+  ---
+  duration_ms: 4264.513987
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11720.7807

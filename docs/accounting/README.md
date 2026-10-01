@@ -65,6 +65,8 @@ been deployed or run against production.
 | [MIGRATION_AND_CUTOVER.md](MIGRATION_AND_CUTOVER.md) | Migration, rehearsal on a production copy, cutover, rollback/roll-forward |
 | [TEST_RESULTS.md](TEST_RESULTS.md) | Commands, environment, commit, results — and what each kind of test does and does not prove |
 | [FIGMA_PARITY.md](FIGMA_PARITY.md) | Figma file/frames, frame → route/component map, side-by-side status, deviations |
+| [REVIEW_PACKAGE.md](REVIEW_PACKAGE.md) | Independent technical review: scope, risk areas, how to reproduce (prepared; no review yet) |
+| [ACCOUNTANT_ACCEPTANCE.md](ACCOUNTANT_ACCEPTANCE.md) | Acceptance scenarios with expected results, and the decisions only the accountant/owner can take (prepared; not performed) |
 | [ZATCA_SDK_VALIDATION.md](ZATCA_SDK_VALIDATION.md) | Official SDK validation: status (not run), six-document matrix from the app, harness, inputs needed |
 | [ZATCA_REQUIREMENTS.md](ZATCA_REQUIREMENTS.md) | Saudi e-invoicing / VAT / zakat requirements matrix — local only, not compliant |
 | [STAGE_5_DESIGN.md](STAGE_5_DESIGN.md) | Fixed assets, depreciation, disposal, year-end close |

@@ -1,0 +1,12 @@
+started 2026-10-01T08:53:48Z; source database erp_finance_dev (local, disposable fixture)
+dump: 2.9M sha256 0a4b3932eeea5af247f44d495893b027c4140cbe3beca8990317fdbafb714a24
+NOTICE:  database "erp_finance_restore_check" does not exist, skipping
+restored into erp_finance_restore_check
+COUNTS: match (Account=69 AccountMapping=31 AccountingEvent=54 AccountingPolicy=7 AccountingSettings=1 Activity=0 AdvanceApplication=0 )
+LEDGER: match (251 journal lines, debit 4567544.30, credit 4567544.30, per-account md5 2f018e39110fffb1cb432200f0284442)
+TRIG: match (66 triggers, md5 1dcff623821861dde11acadc92e8b05c)
+FUNC: match (253 functions, md5 dc5127330bb6fc06850ed443a93ef607)
+CHAIN: match (3 e-invoices, chain true)
+guard: posted journal line update refused in the restored copy (ERROR:  Lines of a POSTED journal entry cannot be changed)
+guard: issued e-invoice update refused in the restored copy (ERROR:  An e-invoice cannot be changed or deleted)
+restore database dropped; result: PASS; finished 2026-10-01T08:53:51Z
