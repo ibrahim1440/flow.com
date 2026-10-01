@@ -1,0 +1,9 @@
+Year-end scenario: year 2025 (12 periods locked), next year 2026; synthetic net income 80,000.00.
+server as accounting_app on :3041, database erp_finance_yearend
+ok - year 2025: all seven conditions met in the page; computed closing entry = hand figures (net income 80,000.00; 4100 by branch, 4900, 5100, 6100, 6200)
+ok - close prepared in the form by the preparer (DRAFT, 80,000.00); no approve button for them and the server refuses their approval (403); nothing posted
+ok - approved and posted by the second person: one CLOSING entry dated 2025-12-31 in the LOCKED period 12; lines equal the hand-calculated entry (345,000.00 each side, Cr 3200 80,000.00)
+ok - retained earnings 3200 at 2025-12-31 = 80,000.00 Cr; income statement 2025 still 80,000.00; balance sheet current earnings 0 and balanced; opening 2026: 1120 280,000.00 Dr, 3100 200,000.00 Cr, 3200 80,000.00 Cr, every P&L account 0; 2026 P&L holds only its own 1,000.00
+ok - balance sheet screen at 2025-12-31 shows retained earnings 80,000.00
+# pass 5
+# fail 0

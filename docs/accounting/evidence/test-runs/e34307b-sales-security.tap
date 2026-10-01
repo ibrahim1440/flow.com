@@ -1,0 +1,104 @@
+database: sales_preview   app: http://127.0.0.1:3020
+
+==============================================================================
+  A — NO SESSION, NO ACCESS
+==============================================================================
+
+── A1. every sales endpoint refuses an unauthenticated caller 
+  [PASS] GET /api/sales/leads refuses without a session
+  [PASS] POST /api/sales/leads refuses without a session
+  [PASS] GET /api/commissions/me refuses without a session
+  [PASS] GET /api/commissions/sandbox-collections refuses without a session
+
+==============================================================================
+  B — A ROLE WITHOUT THE MODULE IS REFUSED
+==============================================================================
+
+── B1. an employee with no sales module cannot read or write leads 
+  [PASS] reading leads is refused
+  [PASS] creating a lead is refused
+  [PASS] reading own commission is refused without the module
+
+==============================================================================
+  C — OWNERSHIP CANNOT BE FORGED (MASS ASSIGNMENT)
+==============================================================================
+
+── C1. a rep cannot plant a lead on a colleague ──────────────
+  [PASS] the request is accepted
+  [PASS] but the owner is the CALLER, not the id they supplied
+
+── C2. a rep without lead_assign sees only their own leads ───
+  [PASS] the list is scoped
+  [PASS] and contains no other rep's lead
+
+==============================================================================
+  D — ID MANIPULATION DOES NOT REACH ANOTHER REP'S RECORD
+==============================================================================
+
+── D1. rep B's lead cannot be converted by rep A through the URL 
+  [PASS] rep B's own lead is created
+  [PASS] rep A cannot convert it
+  [PASS] and the refusal does not confirm the lead exists
+  [PASS] no conversion was created by the attempt
+
+==============================================================================
+  E — A REP CANNOT MANUFACTURE THE MONEY THEY ARE PAID ON
+==============================================================================
+
+── E1. recording a sandbox collection needs its own privilege 
+  [PASS] a rep is refused
+  [PASS] and nothing was recorded
+
+── E2. a rep cannot read the sandbox collection list either ──
+  [PASS] refused
+
+── E3. a manager with the privilege CAN record one, and it is stamped SANDBOX 
+  [PASS] accepted for the privileged role
+  [PASS] the response says it is sandbox, not a real payment
+  [PASS] and the stored row carries the SANDBOX stamp
+
+── E4. re-delivering the same collection reference does not record a second one 
+  [PASS] the retry is answered as a replay
+  [PASS] exactly one collection event exists
+
+==============================================================================
+  F — VALIDATION REFUSES NONSENSE RATHER THAN STORING IT
+==============================================================================
+
+── F1. tax cannot exceed the amount collected ────────────────
+  [PASS] refused with 400
+
+── F2. a non-SAR collection is refused, not converted at an invented rate 
+  [PASS] refused with 409
+  [PASS] and it says why
+
+── F3. a collection with no external reference is refused ────
+  [PASS] refused with 400
+
+── F4. a lead needs a company and a contact ──────────────────
+  [PASS] refused with 400
+
+==============================================================================
+  G — STORED TEXT IS NOT INTERPRETED
+==============================================================================
+
+── G1. a script tag in a lead name is stored as text, not neutralised into something else 
+  [PASS] the lead is accepted
+  [PASS] the payload is stored verbatim, so nothing was silently rewritten
+
+── G2. a CSV formula in a name is stored, and is the export's problem to neutralise 
+  [PASS] accepted and stored
+
+==============================================================================
+  H — ERRORS DO NOT LEAK THE DATABASE
+==============================================================================
+
+── H1. a bad foreign key surfaces as a domain message, not a Prisma error 
+  [PASS] refused
+  [PASS] no Prisma internals in the response
+  [PASS] no SQL or stack trace in the response
+
+==============================================================================
+  SALES SECURITY RESULT
+==============================================================================
+34 passed, 0 failed
