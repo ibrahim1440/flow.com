@@ -187,11 +187,25 @@ export function verifyQrStamp(q: Record<number, Buffer>, encoding: QrEncoding = 
   } catch { return false; }
 }
 
+/** Parse a base64 TLV QR. Strict: a truncated or duplicated tag, or a non-base64 string, throws. */
 export function readQr(b64: string) {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64.trim())) throw new Error("QR is not base64.");
   const buf = Buffer.from(b64, "base64");
   const out: Record<number, Buffer> = {};
-  for (let i = 0; i < buf.length;) { const tag = buf[i], len = buf[i + 1]; out[tag] = buf.subarray(i + 2, i + 2 + len); i += 2 + len; }
+  for (let i = 0; i < buf.length;) {
+    if (i + 2 > buf.length) throw new Error(`QR is truncated at byte ${i} (no length byte).`);
+    const tag = buf[i], len = buf[i + 1];
+    if (i + 2 + len > buf.length) throw new Error(`QR tag ${tag} is truncated: ${len} bytes declared, ${buf.length - i - 2} present.`);
+    if (out[tag]) throw new Error(`QR tag ${tag} appears twice.`);
+    out[tag] = buf.subarray(i + 2, i + 2 + len); i += 2 + len;
+  }
   return out;
+}
+
+/** readQr that returns null instead of throwing (for validation rules over stored data). */
+export function tryReadQr(b64: string | null | undefined) {
+  if (!b64) return null;
+  try { return readQr(b64); } catch { return null; }
 }
 
 export const SIGNING_CURVE = "secp256k1";

@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { buildXml, documentHash, qrTlv, readQr, verifyQrStamp, derToP1363, signLocally, INITIAL_PIH, QR_ENCODING, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
+import { buildXml, documentHash, qrTlv, readQr, tryReadQr, verifyQrStamp, derToP1363, signLocally, INITIAL_PIH, QR_ENCODING, type EDoc } from "../../../src/lib/accounting/einvoice/ubl";
 import { validateDoc, standardsGaps } from "../../../src/lib/accounting/einvoice/rules";
 
 // ── secp256k1 (SEC 2 v2, §2.4.1), independent BigInt arithmetic ───────────────────────────────
@@ -175,4 +175,21 @@ test("local rules catch the previous encoding and a mismatched stamp; standards 
   assert.deepEqual(bad(qrTlv({ ...fields, hash: h, signature: other.signatureDer, publicKey: spki(Q) })), ["LOCAL-QR-STAMP"]);
   assert.deepEqual(standardsGaps("0200000", qr).map((g) => g.id), ["NOT-SDK-VALIDATED", "NO-ZATCA-CERTIFICATE", "QR-LAYOUT-UNCONFIRMED", "QR-TAG-9-ABSENT"]);
   assert.deepEqual(standardsGaps("0100000", null).map((g) => g.id), ["NOT-SDK-VALIDATED"]);
+});
+
+test("malformed input: truncated, duplicated or non-base64 TLV and malformed DER are refused, never read as shorter values", () => {
+  const b64 = (hex: string) => Buffer.from(hex, "hex").toString("base64");
+  assert.deepEqual(Object.keys(readQr(b64("0103414243" + "0200"))), ["1", "2"], "well-formed, including an empty value");
+  assert.throws(() => readQr(b64("010541424344")), /tag 1 is truncated: 5 bytes declared, 4 present/);
+  assert.throws(() => readQr(b64("0103414243" + "02")), /truncated at byte 5/);
+  assert.throws(() => readQr(b64("010141" + "010142")), /tag 1 appears twice/);
+  assert.throws(() => readQr("not base64!"), /not base64/);
+  assert.equal(tryReadQr(b64("010541424344")), null);
+  assert.equal(tryReadQr(null), null);
+  const ok = "3006" + "020105" + "020107";
+  assert.equal(derToP1363(Buffer.from(ok, "hex")).toString("hex"), "00".repeat(31) + "05" + "00".repeat(31) + "07");
+  for (const bad of ["3106020105020107" /* not a SEQUENCE */, "3007020105020107" /* length mismatch */, "3006030105020107" /* not an INTEGER */,
+    "3026" + "0221" + "01" + "ff".repeat(32) + "020101" /* r longer than 32 bytes */]) {
+    assert.throws(() => derToP1363(Buffer.from(bad, "hex")), /Not a DER|longer than the curve/, bad);
+  }
 });

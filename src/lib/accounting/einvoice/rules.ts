@@ -4,7 +4,7 @@
 // are known to require (titles and versions confirmed on zatca.gov.sa; contents not readable from
 // this environment). They are NOT the official BR-KSA rule codes, and passing them is NOT ZATCA
 // validation: only the official SDK or the Fatoora platform validates a document.
-import { hashOfStoredXml, readQr, qrTlv, verifyLocally, verifyQrStamp, taxSubtotals, QR_ENCODING, type EDoc } from "./ubl";
+import { hashOfStoredXml, readQr, tryReadQr, qrTlv, verifyLocally, verifyQrStamp, taxSubtotals, QR_ENCODING, type EDoc } from "./ubl";
 
 export type RuleResult = { id: string; ok: boolean; en: string; ar: string; detail?: string };
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -74,8 +74,9 @@ export function validateDoc(d: EDoc, stored?: { xml: string; invoiceHash: string
   if (stored) {
     rule("LOCAL-HASH", hashOfStoredXml(stored.xml) === stored.invoiceHash, "Stored XML hashes to the stored document hash", "تجزئة XML المخزّن تساوي التجزئة المسجلة");
     if (simplified) {
-      const q: Record<number, Buffer> = stored.qr ? readQr(stored.qr) : {};
-      rule("LOCAL-QR", !!stored.qr && q[1]?.toString("utf8") === s.name && q[2]?.toString("utf8") === s.vatNumber,
+      const parsed = tryReadQr(stored.qr);
+      const q: Record<number, Buffer> = parsed ?? {};
+      rule("LOCAL-QR", !!parsed && q[1]?.toString("utf8") === s.name && q[2]?.toString("utf8") === s.vatNumber,
         "QR present with seller name and VAT number", "رمز QR موجود باسم البائع ورقمه الضريبي");
       // Expected tags 6–8, rebuilt from the stored hash, signature and key in the configured layout.
       let want: Record<number, Buffer> = {};
@@ -107,7 +108,7 @@ export function standardsGaps(subtype: string, qr?: string | null): StandardsGap
   if (subtype === "0200000") {
     gaps.push({ id: "NO-ZATCA-CERTIFICATE", en: "Stamped with a local test key, not a ZATCA-issued CSID; not a XAdES signature", ar: "مختوم بمفتاح اختبار محلي وليس بشهادة CSID من الهيئة؛ وليس توقيع XAdES" });
     gaps.push({ id: "QR-LAYOUT-UNCONFIRMED", en: `QR tags 6–8 follow the official documents' encodings as cited (${QR_ENCODING}); unconfirmed until ZATCA's SDK validates them, and the curve and certificate profile (secp256k1 here) are still to be confirmed`, ar: "ترميز الوسوم 6–8 في QR يتبع الوثائق الرسمية كما وردت، ولم يُؤكَّد حتى يتحقق منه SDK الهيئة؛ والمنحنى وملف الشهادة لم يؤكَّدا بعد" });
-    if (!qr || !readQr(qr)[9]) gaps.push({ id: "QR-TAG-9-ABSENT", en: "QR tag 9 (ZATCA technical CA signature of the stamp's public key) is absent — it needs a ZATCA certificate", ar: "الوسم 9 في QR (توقيع جهة التصديق التقنية للهيئة على المفتاح العام) غير موجود — يتطلب شهادة من الهيئة" });
+    if (!tryReadQr(qr)?.[9]) gaps.push({ id: "QR-TAG-9-ABSENT", en: "QR tag 9 (ZATCA technical CA signature of the stamp's public key) is absent — it needs a ZATCA certificate", ar: "الوسم 9 في QR (توقيع جهة التصديق التقنية للهيئة على المفتاح العام) غير موجود — يتطلب شهادة من الهيئة" });
   }
   return gaps;
 }
