@@ -1,0 +1,82 @@
+database: sales_preview  (verified preview target)
+
+==============================================================================
+  A — SCHEMA CONSTRAINTS EXIST, NOT JUST INTENDED
+==============================================================================
+
+── A1. a lead can be converted only once ───────────────────────
+  [PASS] a second conversion of one lead is refused by the database
+
+── A2. the same collection cannot be recorded twice under one source reference 
+  [PASS] a re-delivered collection reference is refused
+
+── A3. an accrual is unique per (collection, employee, plan version) 
+  [PASS] the same collection cannot accrue twice for one person on one plan
+
+── A4. a foreign key refuses a dangling reference ──────────────
+  [PASS] an opportunity cannot reference a stage that does not exist
+
+==============================================================================
+  B — CONCURRENCY: ONE RESULT, NOT TWO
+==============================================================================
+
+── B1. two simultaneous conversions of one lead produce exactly one 
+    outcomes: replayed / converted
+  [PASS] exactly one conversion row exists
+  [PASS] and exactly one customer was created, not two
+  [PASS] neither attempt reported a server-side crash
+
+── B2. a rolled-back conversion leaves nothing behind ──────────
+  [PASS] the customer created inside the aborted transaction is gone
+
+==============================================================================
+  C — COMMISSION PERSISTENCE AND THE LEDGER
+==============================================================================
+
+── C1. a partial collection then the rest accrues 50 + 50, never 100 + 100 
+  [PASS] the ledger totals 100.00 after two halves
+
+── C2. a reversal after a refund lands as a negative entry, not an edit 
+  [PASS] the ledger now totals 80.00
+  [PASS] and the original 50.00 entry was not rewritten
+
+── C3. an approved accrual survives a reload with its explanation intact 
+  [PASS] status is APPROVED
+  [PASS] the base, rate and amount that produced it are all still readable
+  [PASS] and it records who approved it
+
+── C4. Decimal columns do not drift the way a float would ──────
+  [PASS] 0.10 + 0.20 stored and summed is exactly 0.30
+
+==============================================================================
+  D — RIYADH PERIOD BOUNDARIES SURVIVE A ROUND TRIP
+==============================================================================
+
+── D1. an instant stored and re-read keeps its month ───────────
+  [PASS] the stored instant is byte-for-byte the one written
+  [PASS] and its Riyadh month is February (month index 1), not January
+
+==============================================================================
+  E — THE SANDBOX COLLECTION SOURCE IS LABELLED IN THE DATA
+==============================================================================
+
+── E1. every collection row says which system it came from ─────
+  [PASS] all test collections are stamped SANDBOX
+  [PASS] so a real integration's rows could never be confused with these
+
+==============================================================================
+  F — PRE-EXISTING DOMAIN IS UNDISTURBED
+==============================================================================
+
+── F1. the sales migration added no column to any existing table 
+  [PASS] no sales column was grafted onto an existing table
+
+── F2. the existing tables still carry their own shape ─────────
+  [PASS] Customer.nameAr is still present
+  [PASS] Order.status is still present
+  [PASS] FinishedGoodsLot.actualContentGrams is still present
+
+==============================================================================
+  SALES & COMMISSIONS INTEGRATION RESULT
+==============================================================================
+23 passed, 0 failed

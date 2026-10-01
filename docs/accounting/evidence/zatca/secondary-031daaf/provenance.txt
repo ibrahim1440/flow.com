@@ -1,0 +1,10 @@
+# Secondary check — NOT official ZATCA validation
+date: 2026-10-01T08:33:01Z
+matrix: /home/user/flow.com/docs/accounting/evidence/zatca/matrix-031daaf
+matrix commit: 031daaf44c572662945f9a74a52929701e0084d9
+schema: 40fae8cb436f3a9506d7acce65ba162caef3b0bed4d5cbc0992b2153ded4edf4  Schemas/xsds/UBL2.1/xsd/maindoc/UBL-Invoice-2.1.xsd
+rules:  3312e1938829b8972dacf19a3d933deeb97cb71c7e982c56a434b76cc0e5f0c4  Rules/Schematrons/20210819_ZATCA_E-invoice_Validation_Rules.xsl
+rules:  378a7a4d697aa96e05edb4649ab4536b33546b8e288453324a5668c3e15735b0  Rules/Schematrons/CEN-EN16931-UBL.xsl
+tool:   98c3a91e6e5aaf9b3e2b37601e04b214a6e67098493cdd8232fcb705fddcb674  Saxon-HE-12.5.jar
+tool:   efc92bd7ed32b3e57095e0b3e872051ccfbbdcc980831ef33e89e38161a85222  xmlresolver-5.2.2.jar
+image:  zatca-sdk-runner:11 sha256:0ffef9a163f8d24c89aeb61e0e07b4041e290b4628bc2fcd55c09be996d69147

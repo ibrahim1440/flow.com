@@ -1,0 +1,39 @@
+commit d92f5921de01f8efc59b62958d8bb84ca6da4724
+tree clean: yes
+base origin/main fc64c05c1ef4e607365e0e0c5d7c32482ed2e26e
+started 2026-09-28T04:10:26Z · node v22.22.2 · psql (PostgreSQL) 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
+typecheck              exit 0  
+lint                   exit 0  
+build                  exit 0  
+acc-unit               exit 0  # tests 23 # pass 23 # fail 0 
+acc-db                 exit 0  # tests 65 # pass 65 # fail 0 
+acc-scripts            exit 0  # tests 4 # pass 4 # fail 0 
+fin-unit               exit 0  # tests 52 # pass 52 # fail 0 
+fin-db                 exit 0  # tests 40 # pass 40 # fail 0 
+fixture                exit 0  
+http-no-switch         exit 0  # tests 1 # pass 1 # fail 0 
+http-authz             exit 0  # tests 5 # pass 5 # fail 0 
+http-runtime           exit 0  # tests 7 # pass 7 # fail 0 
+http-stage2            exit 0  # tests 4 # pass 4 # fail 0 
+http-corrections       exit 0  # tests 3 # pass 3 # fail 0 
+http-receivables       exit 0  # tests 3 # pass 3 # fail 0 
+fixture-visual         exit 0  
+a11y                   exit 0  
+serious/critical violations inside accounting content: 0
+capture                exit 0  
+captures: 41 · with page errors: 0 · with overflow: 0
+sales-pure             exit 0  
+sales_preview migrated
+sales-db               exit 0  
+sales-pure.log:  [PASS] EXPIRED is revisable
+sales-pure.log:113 passed, 0 failed
+sales-pure.log:  commission-engine        48 passed
+sales-pure.log:  quotes-domain            113 passed
+sales-pure.log:  ALL SALES SUITES GREEN
+sales-db.log:23 passed, 0 failed
+certification          exit 0  
+  reset-safety               30 passed    0 failed  exit 0  ok
+  26 suite(s), 2301 harness assertions, 0 failed
+  ALL SUITES GREEN
+commit d92f5921de01f8efc59b62958d8bb84ca6da4724 · exit 0 · log /tmp/certification-d92f592.log
+finished 2026-09-28T04:19:32Z

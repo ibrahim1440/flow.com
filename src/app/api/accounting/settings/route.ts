@@ -1,72 +1,38 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
+import { accountingRoute, body } from "@/lib/accounting/http";
+import { AccountingError } from "@/lib/accounting/errors";
+import { accountingDate } from "@/lib/accounting/dates";
+import { getSettings, updateSettings } from "@/lib/accounting/setup-service";
+import { requireSub } from "@/lib/auth-server";
 
-export async function GET() {
-  const { error } = await requireModule("accounting");
-  if (error) return error;
+export const GET = accountingRoute(null, () => getSettings());
 
-  const settings = await prisma.accountingSettings.findUnique({ where: { id: "singleton" } });
-  if (!settings) {
-    return NextResponse.json(
-      { configured: false, settings: null, error: "Accounting settings have not been initialized." },
-      { status: 404 },
-    );
+// Cutover date needs mapping_manage; completing set-up needs settings_manage. Costing, COGS
+// and branch-mode settings are not editable here: they wait for the accountant's policy
+// decision (docs/accounting/POLICIES.md) and no code reads them yet.
+export const PATCH = accountingRoute("settings_manage", async ({ user, request }) => {
+  const b = await body(request);
+  const patch: { ledgerCutoverDate?: Date | null; setupComplete?: boolean; bankPostingFrom?: Date | null; advanceVatTreatment?: "AT_RECEIPT" | "NOT_AT_RECEIPT" | null } = {};
+  if ("ledgerCutoverDate" in b) {
+    const auth = await requireSub("accounting", "mapping_manage");
+    if (auth.error) throw new AccountingError("Setting the cutover date needs the mapping permission.", 403);
+    patch.ledgerCutoverDate = b.ledgerCutoverDate === null ? null : accountingDate(b.ledgerCutoverDate);
   }
-  return NextResponse.json(settings);
-}
-
-const ALLOWED_FIELDS = [
-  "baseCurrency",
-  "costingMethod",
-  "cogsPolicy",
-  "branchAccountingMode",
-  "exportToQoyod",
-  "setupComplete",
-] as const;
-
-export async function PATCH(request: Request) {
-  const { user, error } = await requireSub("accounting", "settings_manage");
-  if (error) return error;
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  if ("bankPostingFrom" in b) {
+    const auth = await requireSub("accounting", "bank_posting_manage");
+    if (auth.error) throw new AccountingError("Setting the bank posting start date needs the bank posting permission.", 403);
+    patch.bankPostingFrom = b.bankPostingFrom === null ? null : accountingDate(b.bankPostingFrom);
   }
-
-  const input = (body ?? {}) as Record<string, unknown>;
-  const data: Record<string, unknown> = {};
-
-  for (const field of ALLOWED_FIELDS) {
-    if (!(field in input)) continue;
-    const value = input[field];
-    if (field === "exportToQoyod" || field === "setupComplete") {
-      if (typeof value !== "boolean") {
-        return NextResponse.json({ error: `${field} must be a boolean.` }, { status: 400 });
-      }
-    } else if (typeof value !== "string" || !value.trim()) {
-      return NextResponse.json({ error: `${field} must be a non-empty string.` }, { status: 400 });
-    }
-    data[field] = value;
+  if ("advanceVatTreatment" in b) {
+    // Decision D-2. Applies to receipts assigned from now on; posted receipts keep their VAT.
+    if (b.advanceVatTreatment !== null && b.advanceVatTreatment !== "AT_RECEIPT" && b.advanceVatTreatment !== "NOT_AT_RECEIPT") throw new AccountingError("VAT on advances is AT_RECEIPT, NOT_AT_RECEIPT or null (undecided).", 400);
+    patch.advanceVatTreatment = b.advanceVatTreatment as "AT_RECEIPT" | "NOT_AT_RECEIPT" | null;
   }
-
-  if (Object.keys(data).length === 0) {
-    return NextResponse.json({ error: "No valid fields provided." }, { status: 400 });
+  if ("setupComplete" in b) {
+    if (typeof b.setupComplete !== "boolean") throw new AccountingError("setupComplete must be true or false.", 400);
+    patch.setupComplete = b.setupComplete;
   }
-
-  data.updatedBy = user.id;
-
-  try {
-    const settings = await prisma.accountingSettings.upsert({
-      where: { id: "singleton" },
-      create: { id: "singleton", ...data },
-      update: data,
-    });
-    return NextResponse.json(settings);
-  } catch (err) {
-    return handlePrismaError(err);
-  }
-}
+  const other = Object.keys(b).filter((k) => !["ledgerCutoverDate", "setupComplete", "bankPostingFrom", "advanceVatTreatment"].includes(k));
+  if (other.length) throw new AccountingError(`These settings are not editable yet: ${other.join(", ")}.`, 400);
+  if (!Object.keys(patch).length) throw new AccountingError("Nothing to change.", 400);
+  return updateSettings(patch, user.id);
+});

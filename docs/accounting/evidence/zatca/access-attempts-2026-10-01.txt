@@ -1,0 +1,16 @@
+2026-10-01T05:42:24Z
+== https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Pages/DownloadSDK.aspx
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://zatca.gov.sa/ar/E-Invoicing/SystemsDevelopers/Documents/20230519_ZATCA_Electronic_Invoice_Security_Features_Implementation_Standards_vF.pdf
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Documents/Developer%20Portal%20User%20Manual.pdf
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://sandbox.zatca.gov.sa/
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal
+curl: (56) CONNECT tunnel failed, response 403
+http=000

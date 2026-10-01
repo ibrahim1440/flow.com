@@ -1,0 +1,136 @@
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "erp_finance_zatca", schema "public" at "127.0.0.1:54329"
+
+41 migrations found in prisma/migrations
+
+Applying migration `20260522000000_baseline`
+Applying migration `20260526115344_add_qc_final_decision_reason`
+Applying migration `20260528084853_add_rate_limit`
+Applying migration `20260605063702_add_business_indexes`
+Applying migration `20260607171541_add_qc_and_batch_history`
+Applying migration `20260619131429_drop_fgl_batchnumber_unique_index`
+Applying migration `20260621130000_add_workstation_s0_claims`
+Applying migration `20260624120000_add_auth_audit_log`
+Applying migration `20260626130557_add_accounting_s0_foundation`
+Applying migration `20260801111404_add_order_operations_s0`
+Applying migration `20260826090000_add_shelf_allocation`
+Applying migration `20260826120000_backfill_shelf_reservations`
+Applying migration `20260827090000_allow_roast_to_stock`
+Applying migration `20260828120000_add_product_catalog_enums`
+Applying migration `20260828120100_add_finished_products_and_bom`
+Applying migration `20260828130000_link_packed_lots_to_batch`
+Applying migration `20260913090000_add_packaging_operation_idempotency`
+Applying migration `20260915100000_add_delivery_idempotency_and_pin_lookup`
+Applying migration `20260918000000_remove_legacy_pin_hash`
+Applying migration `20260918120000_unified_packaging_partial_lots`
+Applying migration `20260924090000_add_sales_crm_and_commissions`
+Applying migration `20260925130833_add_sales_collections`
+Applying migration `20260925131140_add_pipeline_stage_purpose`
+Applying migration `20260926005011_add_finance_cash_budget`
+Applying migration `20260926092523_finance_statement_matching_and_db_controls`
+Applying migration `20260926140000_finance_strict_four_eyes`
+Applying migration `20260926150000_finance_sales_collection_links`
+Applying migration `20260926190000_commission_movement_provenance`
+Applying migration `20260927100000_protect_movement_provenance`
+Applying migration `20260928090000_accounting_ledger_core`
+Applying migration `20260928120000_accounting_payables_bank`
+Applying migration `20260928130000_accounting_cash_flow_class`
+Applying migration `20260929090000_accounting_bank_corrections`
+Applying migration `20260929120000_accounting_receivables`
+Applying migration `20260930090000_accounting_open_items`
+Applying migration `20260930120000_accounting_inventory`
+Applying migration `20260930130000_accounting_inventory_sales_location`
+Applying migration `20261001090000_accounting_stage4b`
+Applying migration `20261002090000_accounting_fixed_assets_year_end`
+Applying migration `20261003090000_accounting_einvoicing_local`
+Applying migration `20261003091000_accounting_tax_exemption_codes`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260522000000_baseline/
+    └─ migration.sql
+  └─ 20260526115344_add_qc_final_decision_reason/
+    └─ migration.sql
+  └─ 20260528084853_add_rate_limit/
+    └─ migration.sql
+  └─ 20260605063702_add_business_indexes/
+    └─ migration.sql
+  └─ 20260607171541_add_qc_and_batch_history/
+    └─ migration.sql
+  └─ 20260619131429_drop_fgl_batchnumber_unique_index/
+    └─ migration.sql
+  └─ 20260621130000_add_workstation_s0_claims/
+    └─ migration.sql
+  └─ 20260624120000_add_auth_audit_log/
+    └─ migration.sql
+  └─ 20260626130557_add_accounting_s0_foundation/
+    └─ migration.sql
+  └─ 20260801111404_add_order_operations_s0/
+    └─ migration.sql
+  └─ 20260826090000_add_shelf_allocation/
+    └─ migration.sql
+  └─ 20260826120000_backfill_shelf_reservations/
+    └─ migration.sql
+  └─ 20260827090000_allow_roast_to_stock/
+    └─ migration.sql
+  └─ 20260828120000_add_product_catalog_enums/
+    └─ migration.sql
+  └─ 20260828120100_add_finished_products_and_bom/
+    └─ migration.sql
+  └─ 20260828130000_link_packed_lots_to_batch/
+    └─ migration.sql
+  └─ 20260913090000_add_packaging_operation_idempotency/
+    └─ migration.sql
+  └─ 20260915100000_add_delivery_idempotency_and_pin_lookup/
+    └─ migration.sql
+  └─ 20260918000000_remove_legacy_pin_hash/
+    └─ migration.sql
+  └─ 20260918120000_unified_packaging_partial_lots/
+    └─ migration.sql
+  └─ 20260924090000_add_sales_crm_and_commissions/
+    └─ migration.sql
+  └─ 20260925130833_add_sales_collections/
+    └─ migration.sql
+  └─ 20260925131140_add_pipeline_stage_purpose/
+    └─ migration.sql
+  └─ 20260926005011_add_finance_cash_budget/
+    └─ migration.sql
+  └─ 20260926092523_finance_statement_matching_and_db_controls/
+    └─ migration.sql
+  └─ 20260926140000_finance_strict_four_eyes/
+    └─ migration.sql
+  └─ 20260926150000_finance_sales_collection_links/
+    └─ migration.sql
+  └─ 20260926190000_commission_movement_provenance/
+    └─ migration.sql
+  └─ 20260927100000_protect_movement_provenance/
+    └─ migration.sql
+  └─ 20260928090000_accounting_ledger_core/
+    └─ migration.sql
+  └─ 20260928120000_accounting_payables_bank/
+    └─ migration.sql
+  └─ 20260928130000_accounting_cash_flow_class/
+    └─ migration.sql
+  └─ 20260929090000_accounting_bank_corrections/
+    └─ migration.sql
+  └─ 20260929120000_accounting_receivables/
+    └─ migration.sql
+  └─ 20260930090000_accounting_open_items/
+    └─ migration.sql
+  └─ 20260930120000_accounting_inventory/
+    └─ migration.sql
+  └─ 20260930130000_accounting_inventory_sales_location/
+    └─ migration.sql
+  └─ 20261001090000_accounting_stage4b/
+    └─ migration.sql
+  └─ 20261002090000_accounting_fixed_assets_year_end/
+    └─ migration.sql
+  └─ 20261003090000_accounting_einvoicing_local/
+    └─ migration.sql
+  └─ 20261003091000_accounting_tax_exemption_codes/
+    └─ migration.sql
+
+All migrations have been successfully applied.

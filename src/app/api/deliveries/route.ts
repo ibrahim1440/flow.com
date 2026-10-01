@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -86,6 +87,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    let opsEventId: string | undefined;
     const outcome: DeliveryOutcome = await prisma.$transaction(async (tx) => {
       const orderItem = await tx.orderItem.findUnique({
         where: { id: orderItemId },
@@ -258,6 +260,11 @@ export async function POST(request: Request) {
             notes: `${units} x ${sku.skuCode}`,
           },
         });
+        // Accounting: whole units leave for the customer (held at cost until invoiced).
+        opsEventId = (await recordStockEvent(tx, {
+          kind: "DISPATCH", sourceId: newDelivery.id, userId: user.id,
+          payload: { mode: "UNITS", deliveryId: newDelivery.id, orderItemId, lotId: finishedGoodsLotId, productSkuId: orderItem.productSkuId, units },
+        })).id;
 
         // Hand back units this line no longer needs — it may hold reservations on lots
         // this shipment never touched.
@@ -393,6 +400,10 @@ export async function POST(request: Request) {
           notes: null,
         },
       });
+      opsEventId = (await recordStockEvent(tx, {
+        kind: "DISPATCH", sourceId: newDelivery.id, userId: user.id,
+        payload: { mode: "KG", deliveryId: newDelivery.id, orderItemId, lotId: finishedGoodsLotId, kg: qty },
+      })).id;
 
       // 4. Hand back any promise this item no longer needs. An item may hold reservations
       //    on several lots while a delivery draws on only one of them; without this the
@@ -418,6 +429,7 @@ export async function POST(request: Request) {
       return { delivery: newDelivery, replayed: false };
     }, TX_OPTS);
 
+    await integrateNow([opsEventId]);
     return NextResponse.json(outcome.delivery, { status: outcome.replayed ? 200 : 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {

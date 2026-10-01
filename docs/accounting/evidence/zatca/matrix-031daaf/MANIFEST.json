@@ -1,0 +1,204 @@
+{
+  "fixture": "zatca-matrix-v1",
+  "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+  "workingTreeDirty": false,
+  "untrackedFiles": 1,
+  "generatedAt": "2026-10-01T08:33:01.370Z",
+  "documents": [
+    {
+      "key": "standard-invoice",
+      "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+      "workingTreeDirty": false,
+      "untrackedFiles": 1,
+      "fixture": "zatca-matrix-v1",
+      "salesInvoiceId": "cmupa12gv003k4v7dvif75qa6",
+      "eInvoiceId": "cmupa12l400414v7dqxk2cdxf",
+      "typeCode": "388",
+      "subtype": "0100000",
+      "icv": 1,
+      "uuid": "52c54b88-6483-4878-956c-6a4bd5cd7cdb",
+      "invoiceHash": "yQWe7vcoejPNNI5G9h8BItXEfsKZXMjL2C9Yc8OTb3w=",
+      "previousHash": "NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==",
+      "signer": "LOCAL_TEST_KEY",
+      "qrEncoding": "OFFICIAL_DOCS",
+      "signingCurve": "secp256k1",
+      "sha256": {
+        "xml": "3c62385e73e8469d9c3faffe4d2d4ae3143da665a642d624b1866e3c02e0578f",
+        "qrBase64": "7ac043ff42587642e1a4d14d5f844456f9e2f5ae1ccd3ff85cbdd7eb71bd9a87",
+        "qrBinary": "491e28da4e95c501004b32eafc1bd7836a1ee6a95a4eb412f92bd13dce7c8001"
+      },
+      "localRules": {
+        "total": 23,
+        "failed": []
+      },
+      "standardsGaps": [
+        "NOT-SDK-VALIDATED"
+      ],
+      "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+    },
+    {
+      "key": "standard-credit-note",
+      "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+      "workingTreeDirty": false,
+      "untrackedFiles": 1,
+      "fixture": "zatca-matrix-v1",
+      "salesInvoiceId": "cmupa12lr00444v7dlzgo1nfy",
+      "eInvoiceId": "cmupa12o0004f4v7d31p2m8u0",
+      "typeCode": "381",
+      "subtype": "0100000",
+      "icv": 2,
+      "uuid": "a90ec044-06e4-4426-a7eb-af64e00eccee",
+      "invoiceHash": "XUh64ofnT+zW+p9GnR3FuPoXtnPFUgzTa03PXCuR5QA=",
+      "previousHash": "yQWe7vcoejPNNI5G9h8BItXEfsKZXMjL2C9Yc8OTb3w=",
+      "signer": "LOCAL_TEST_KEY",
+      "qrEncoding": "OFFICIAL_DOCS",
+      "signingCurve": "secp256k1",
+      "sha256": {
+        "xml": "737f75a2508da7c6197ae88c5f9fc450c4d4b13a355db8e48e67663af5e85400",
+        "qrBase64": "a4c5ca78907eebefa2ff642942561e788609001cfd712cbbd6164166f30e98b8",
+        "qrBinary": "c4fc81cad8ac204758dabb1ae847dc9a6178ca2d7acbacb6e2faea7863be8fb1"
+      },
+      "localRules": {
+        "total": 24,
+        "failed": []
+      },
+      "standardsGaps": [
+        "NOT-SDK-VALIDATED"
+      ],
+      "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+    },
+    {
+      "key": "standard-debit-note",
+      "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+      "workingTreeDirty": false,
+      "untrackedFiles": 1,
+      "fixture": "zatca-matrix-v1",
+      "salesInvoiceId": "cmupa12of004i4v7dv7qo0mr4",
+      "eInvoiceId": "cmupa12rf004t4v7dk7oe3s9t",
+      "typeCode": "383",
+      "subtype": "0100000",
+      "icv": 3,
+      "uuid": "3722e626-571b-4874-a799-325b57169fd9",
+      "invoiceHash": "0v5KOiMyYgZdP3IE/No7TuLf25rFHsOic/847wt18FQ=",
+      "previousHash": "XUh64ofnT+zW+p9GnR3FuPoXtnPFUgzTa03PXCuR5QA=",
+      "signer": "LOCAL_TEST_KEY",
+      "qrEncoding": "OFFICIAL_DOCS",
+      "signingCurve": "secp256k1",
+      "sha256": {
+        "xml": "da035240b2bc81654573c04b1b58cc68fc3840716a1018b33112996607450243",
+        "qrBase64": "7f7eb5c15b082de799c9d0c1973c6430510beef058aec89d609645fcb5a96216",
+        "qrBinary": "7f8260f84ba9a3f126ce85896e36573ce5743d05bee509e4b69febcc9199a343"
+      },
+      "localRules": {
+        "total": 24,
+        "failed": []
+      },
+      "standardsGaps": [
+        "NOT-SDK-VALIDATED"
+      ],
+      "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+    },
+    {
+      "key": "simplified-invoice",
+      "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+      "workingTreeDirty": false,
+      "untrackedFiles": 1,
+      "fixture": "zatca-matrix-v1",
+      "salesInvoiceId": "cmupa12rv004w4v7dfrdiah7b",
+      "eInvoiceId": "cmupa12v100594v7dlmqw2jzi",
+      "typeCode": "388",
+      "subtype": "0200000",
+      "icv": 4,
+      "uuid": "2cc1f9ca-7c4b-48d6-89a5-290e09796977",
+      "invoiceHash": "v65MK/4JjFzrYFGqzRDr8bx7qtp9Wqp5mlFYg6UFkCw=",
+      "previousHash": "0v5KOiMyYgZdP3IE/No7TuLf25rFHsOic/847wt18FQ=",
+      "signer": "LOCAL_TEST_KEY",
+      "qrEncoding": "OFFICIAL_DOCS",
+      "signingCurve": "secp256k1",
+      "sha256": {
+        "xml": "024ffd82755c9d9e0f8b6fd46988e68d234c75929cb5c18208784a5344804594",
+        "qrBase64": "351718c7a5be5aad262c183c94eae5b5eba48f6e3f663117b3f4f91e15a3c50a",
+        "qrBinary": "6f44239caaae1b225c01aae71e07ca1c4071230bca56a034047212741e5cc979"
+      },
+      "localRules": {
+        "total": 22,
+        "failed": []
+      },
+      "standardsGaps": [
+        "NOT-SDK-VALIDATED",
+        "NO-ZATCA-CERTIFICATE",
+        "QR-LAYOUT-UNCONFIRMED",
+        "QR-TAG-9-ABSENT"
+      ],
+      "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+    },
+    {
+      "key": "simplified-credit-note",
+      "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+      "workingTreeDirty": false,
+      "untrackedFiles": 1,
+      "fixture": "zatca-matrix-v1",
+      "salesInvoiceId": "cmupa12vo005c4v7dysobhpi0",
+      "eInvoiceId": "cmupa12xp005n4v7dxg0n31n1",
+      "typeCode": "381",
+      "subtype": "0200000",
+      "icv": 5,
+      "uuid": "7b123ad3-5ce7-46d3-8586-2bc085df7000",
+      "invoiceHash": "UJ/aLUo/aTBuJXZdXlHA6hkKyCwAWcJnRaWcnlKwz50=",
+      "previousHash": "v65MK/4JjFzrYFGqzRDr8bx7qtp9Wqp5mlFYg6UFkCw=",
+      "signer": "LOCAL_TEST_KEY",
+      "qrEncoding": "OFFICIAL_DOCS",
+      "signingCurve": "secp256k1",
+      "sha256": {
+        "xml": "07f8597696ac202bb70e1af0ffa8748107072c25012986293412ee9b0c0a173d",
+        "qrBase64": "24c67899f30d3c4ef4691a2246382a93957d9ea50e86325c9d092c2a0af48d4d",
+        "qrBinary": "030fbd80fe8dd321cf128e4c73be2d38f2593942e35e6b9fcaf49bf6222d4861"
+      },
+      "localRules": {
+        "total": 24,
+        "failed": []
+      },
+      "standardsGaps": [
+        "NOT-SDK-VALIDATED",
+        "NO-ZATCA-CERTIFICATE",
+        "QR-LAYOUT-UNCONFIRMED",
+        "QR-TAG-9-ABSENT"
+      ],
+      "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+    },
+    {
+      "key": "simplified-debit-note",
+      "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+      "workingTreeDirty": false,
+      "untrackedFiles": 1,
+      "fixture": "zatca-matrix-v1",
+      "salesInvoiceId": "cmupa12y4005q4v7dzxt1r9tj",
+      "eInvoiceId": "cmupa130b00614v7dmk7we38e",
+      "typeCode": "383",
+      "subtype": "0200000",
+      "icv": 6,
+      "uuid": "4e4812e4-e702-4e68-a567-76a7bdf92b7d",
+      "invoiceHash": "qW8Afd4M+d+5M1v9Nxj4sdTVGaNuIVyC1iFZw8hki80=",
+      "previousHash": "UJ/aLUo/aTBuJXZdXlHA6hkKyCwAWcJnRaWcnlKwz50=",
+      "signer": "LOCAL_TEST_KEY",
+      "qrEncoding": "OFFICIAL_DOCS",
+      "signingCurve": "secp256k1",
+      "sha256": {
+        "xml": "1e3a2cc79011f732c34304bcecacbb371526e4369745afcbf912c1e6cf281ee2",
+        "qrBase64": "a77c46b0b7dae4f728e00e54e34d4bf67c5ac2e7b7b5d2b8e230de77eefe6107",
+        "qrBinary": "3fca2b1845039c71801773711123cbb9bb3757fa6c8f61a2979b77669ddb242d"
+      },
+      "localRules": {
+        "total": 24,
+        "failed": []
+      },
+      "standardsGaps": [
+        "NOT-SDK-VALIDATED",
+        "NO-ZATCA-CERTIFICATE",
+        "QR-LAYOUT-UNCONFIRMED",
+        "QR-TAG-9-ABSENT"
+      ],
+      "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+    }
+  ]
+}

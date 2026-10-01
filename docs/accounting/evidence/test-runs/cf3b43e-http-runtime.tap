@@ -1,0 +1,10 @@
+ok 1 - the server's database sessions are the runtime role, which has no elevated rights
+ok 2 - runtime role cannot bypass ledger controls directly in SQL
+ok 3 - journal workflow as the runtime role: create → submit → approve (four-eyes) → post, then reversal
+ok 4 - period controls: no posting into a locked or closed period; unlock needs a reason
+ok 5 - commission integration as the runtime role: accrual → one journal; duplicate processing adds nothing; subledger ties
+ok 6 - provisional plan version: posts only because this is a marked disposable database with the isolated-test switch, and is labelled
+ok 7 - reports stay consistent after all of the above
+# tests 7
+# pass 7
+# fail 0

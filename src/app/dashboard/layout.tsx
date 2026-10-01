@@ -127,7 +127,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">{user.name}</p>
-              <p className="text-[11px] text-orange">{ROLE_LABELS[user.role] || user.role}</p>
+              <p className="text-[11px] text-violet-300">{ROLE_LABELS[user.role] || user.role}</p>
             </div>
             <UserCircle size={16} className="text-white/30 flex-shrink-0" />
           </button>

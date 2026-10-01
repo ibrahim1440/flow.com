@@ -1,0 +1,17 @@
+# Attempts to reach ZATCA from this environment (container egress via the agent proxy).
+# Nothing was downloaded; no workaround was attempted. 'CONNECT tunnel failed, response 403' = the
+# environment's network policy refuses the host. Proxy status excerpt follows the attempts.
+2026-09-29T11:54:13Z
+== https://zatca.gov.sa/ar/E-Invoicing/SystemsDevelopers/Documents/20230519_ZATCA_Electronic_Invoice_Security_Features_Implementation_Standards_vF.pdf
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://zatca.gov.sa/en/e-invoicing/introduction/guidelines/documents/e-invoicing_detailed__guideline.pdf
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Documents/Developer%20Portal%20User%20Manual.pdf
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+== https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Pages/DownloadSDK.aspx
+curl: (56) CONNECT tunnel failed, response 403
+http=000
+{ proxy: enabled=true, selective=false — zatca.gov.sa, sandbox.zatca.gov.sa and gw-fatoora.zatca.gov.sa are not in the allowed set }

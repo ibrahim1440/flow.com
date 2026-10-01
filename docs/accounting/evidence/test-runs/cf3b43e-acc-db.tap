@@ -1,0 +1,18 @@
+ok 1 - statement for the year: hand-worked sections, opening entry treated as opening cash, identity holds
+ok 2 - a later start date moves earlier flows into opening cash
+ok 3 - classification: explicit change, default fallback listed, EXCLUDED breaks the check, bad value refused
+ok 4 - outbox
+ok 5 - posting gate
+ok 6 - accounting effect
+ok 7 - set-up
+ok 8 - manual journals
+ok 9 - database guards (any writer, not just the service)
+ok 10 - reversal
+ok 11 - periods
+ok 12 - concurrency
+ok 13 - statements
+ok 14 - stage 2 — supplier bills
+ok 15 - stage 2 — bank to ledger
+# tests 41
+# pass 41
+# fail 0

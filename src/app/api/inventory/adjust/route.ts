@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    let opsEventId: string | undefined;
     const outcome = await prisma.$transaction(async (tx) => {
       // ── Serialise against a concurrent delete of this coffee ────────────────
       // InventoryMovement.referenceEntityId is an untyped string
@@ -85,6 +87,12 @@ export async function POST(request: Request) {
         where: { id: entityId },
         data: { quantityKg: newActualQuantity },
       });
+      // Accounting: the counted difference, at cost.
+      const ev = await recordStockEvent(tx, {
+        kind: "ADJUST", sourceId: `green:${entityId}:${Date.now()}`, userId: user.id,
+        payload: { greenBeanId: entityId, quantityChanged, previousQuantity, newQuantity: newActualQuantity, reason: explained.reason },
+      });
+      opsEventId = ev.id;
 
       return { noChange: false as const, updatedBean, quantityChanged };
     });
@@ -96,6 +104,7 @@ export async function POST(request: Request) {
       });
     }
 
+    await integrateNow([opsEventId]);
     return NextResponse.json(outcome, { status: 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {

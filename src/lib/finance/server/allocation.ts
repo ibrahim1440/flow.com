@@ -13,6 +13,7 @@
 //     than the pool's unallocated cash.
 //   - Ledgers are append-only (DB trigger). Corrections are reversing entries.
 import { Prisma } from "@/generated/prisma/client";
+import { POSTED_BANK_LINE_MESSAGE, postedBankLines } from "@/lib/accounting/bank-posted";
 import { prisma } from "@/lib/db";
 import {
   computeAllocation, fundingNeed, validateRuleSteps, AllocationRefused,
@@ -688,6 +689,7 @@ export async function executeReservation(actor: FinanceActor, scope: FinanceScop
     if (r.obligationId) {
       const existing = await tx.bankTransactionMatch.findFirst({ where: { transactionId: txnId, targetType: "OBLIGATION", targetId: r.obligationId, active: true } });
       if (!existing) {
+        if ((await postedBankLines(tx, [txnId])).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
         await tx.bankTransactionMatch.create({ data: { transactionId: txnId, targetType: "OBLIGATION", targetId: r.obligationId, amount: fromMinor(amount), createdBy: actor.id } });
       }
       await recomputeObligationStatus(tx, r.obligationId);

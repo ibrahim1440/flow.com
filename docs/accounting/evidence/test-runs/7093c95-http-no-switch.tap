@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: without the isolated-test switch an unapproved plan version cannot post
+not ok 1 - without the isolated-test switch an unapproved plan version cannot post
+  ---
+  duration_ms: 347.879674
+  type: 'test'
+  location: '/home/user/flow.com/tests/accounting/http/runtime-no-switch.test.mjs:17:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'TRANSLATED'
+    - 'BLOCKED'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'BLOCKED'
+  actual: 'TRANSLATED'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/flow.com/tests/accounting/http/runtime-no-switch.test.mjs:36:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: without the isolated-test switch an inventory document cannot post while decision D-1 is undecided
+not ok 2 - without the isolated-test switch an inventory document cannot post while decision D-1 is undecided
+  ---
+  duration_ms: 226.767247
+  type: 'test'
+  location: '/home/user/flow.com/tests/accounting/http/runtime-no-switch.test.mjs:42:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    200 !== 409
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 409
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/flow.com/tests/accounting/http/runtime-no-switch.test.mjs:53:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 692.478012

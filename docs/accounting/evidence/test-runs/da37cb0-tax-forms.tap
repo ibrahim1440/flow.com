@@ -1,0 +1,7 @@
+ok - seller profile v2 prepared in the form, not approvable by its preparer, approved by the approver; v1 retired
+ok - INV-2: buyer address entered in the dialog, generation retried → ICV 3, previous hash = ICV 2, valid locally
+ok - debit note DN-10 prepared in the receivables form against INV-1, approved and posted by the approver → e-invoice 383 referencing it, valid locally
+ok - e-invoice detail: submission on a LOCAL_ONLY profile recorded as not sent (nothing left the system); local re-validation passes
+ok - VAT return page: box 1 VAT 1685.62, net VAT -3514.65; output VAT from documents 1685.62 vs ledger 41969.62 (difference 40284.00, all of it journals from outside the documents; unexplained 0.00)
+# pass 5
+# fail 0

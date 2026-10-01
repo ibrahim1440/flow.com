@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
@@ -314,6 +315,7 @@ export async function POST(request: Request) {
   // ─────────────────────────────────────────────────────────────────────────
 
   try {
+  let roastEventId: string | undefined;
   const batch = await prisma.$transaction(async (tx) => {
     // Set only when this roast is committed as an authorized surplus, and used twice
     // below: once on the ledger note and once on the order timeline. It lives inside the
@@ -551,6 +553,12 @@ export async function POST(request: Request) {
             : null,
         },
       });
+      // Accounting: green in, roasted out, as recorded on the batch.
+      roastEventId = (await recordStockEvent(tx, {
+        kind: "ROAST", sourceId: newBatch.id, occurredOn: newBatch.date, userId: user.id,
+        payload: { batchId: newBatch.id, batchNumber: newBatch.batchNumber, greenBeanId, productId: newBatch.productId ?? newBatch.orderItem?.productId ?? null,
+          orderItemId: newBatch.orderItemId, greenKg: qty, roastedKg: roastedQty, wasteKg: wasteQty },
+      })).id;
     }
 
     if (!isStockBatch) await recalcOrderItemStatus(orderItemId, tx);
@@ -606,6 +614,7 @@ export async function POST(request: Request) {
     return newBatch;
   }, TX_OPTS);
 
+  await integrateNow([roastEventId]);
   return NextResponse.json(batch, { status: 201 });
   } catch (err: unknown) {
     if (err instanceof AppError) {

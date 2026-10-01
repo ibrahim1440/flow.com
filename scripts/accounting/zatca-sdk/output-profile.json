@@ -1,0 +1,17 @@
+{
+  "confirmed": false,
+  "confirmedBy": null,
+  "confirmedAgainst": null,
+  "note": "How to read the official SDK's output. NOT CONFIRMED: the official SDK has not been obtained, and the readme seen documents only that validation prints PASS or NOT PASS, not exact line formats. While confirmed=false every SDK result is BLOCKED (cannot be interpreted reliably). To confirm: run the official SDK once on its own sample files, copy the exact result and hash line formats into the patterns below, set confirmed=true, confirmedBy (person), confirmedAgainst (SDK jar name and SHA-256), and commit with the raw output as evidence.",
+  "validate": {
+    "globalResult": "",
+    "checkResult": "",
+    "warning": "",
+    "error": "",
+    "passValues": [],
+    "failValues": []
+  },
+  "hash": {
+    "line": ""
+  }
+}

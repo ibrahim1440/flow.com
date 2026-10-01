@@ -1,0 +1,14 @@
+Stage 4b chain test (tests/accounting/integration/inventory.test.ts), run before the fix to
+acc_check_inv_layer, local PostgreSQL 16, database erp_finance_integration (disposable):
+
+    not ok 1 - the whole chain, journals by hand, valuation equals the ledger at every month end
+      error: 'Cost layer … does not equal its moves (quantity 47.0000 vs 47.0000, value 2017.56 vs 1948.78)'
+      name: 'AccountingError'
+
+Cause: landed cost L1 is traced from two receipt layers (R1 and R2) into the same roasted output
+layer of P1, so that layer is updated twice in one transaction. The deferred constraint trigger
+ran once per update with that update's row version (NEW), so the first check saw the layer before
+the second revaluation (1,948.78 = 1,834.15 + 114.63) against moves that already included both
+(2,017.56 = 1,834.15 + 183.41). Fix: the check reads the layer's current row
+(migration 20261001090000_accounting_stage4b, last statement). After the fix the chain test passes
+with the hand-worked figures in its header.

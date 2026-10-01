@@ -1,0 +1,378 @@
+TAP version 13
+# Subtest: amounts and dates convert exactly: Decimal SAR → halalas, UTC instant → Riyadh date
+ok 1 - amounts and dates convert exactly: Decimal SAR → halalas, UTC instant → Riyadh date
+  ---
+  duration_ms: 1.829138
+  type: 'test'
+  ...
+# Subtest: one approved collection with the same reference → MATCH by reference
+ok 2 - one approved collection with the same reference → MATCH by reference
+  ---
+  duration_ms: 1.856788
+  type: 'test'
+  ...
+# Subtest: no reference on the bank line → MATCH on exact amount within the window
+ok 3 - no reference on the bank line → MATCH on exact amount within the window
+  ---
+  duration_ms: 0.266529
+  type: 'test'
+  ...
+# Subtest: a different reference on both sides refutes an amount/date coincidence
+ok 4 - a different reference on both sides refutes an amount/date coincidence
+  ---
+  duration_ms: 0.127193
+  type: 'test'
+  ...
+# Subtest: two approved candidates → AMBIGUOUS; a person chooses
+ok 5 - two approved candidates → AMBIGUOUS; a person chooses
+  ---
+  duration_ms: 0.436346
+  type: 'test'
+  ...
+# Subtest: status gate: pending is awaiting verification; rejected and reversed are never offered
+ok 6 - status gate: pending is awaiting verification; rejected and reversed are never offered
+  ---
+  duration_ms: 0.337098
+  type: 'test'
+  ...
+# Subtest: one-to-one: a linked collection or a linked bank line is never matched again
+ok 7 - one-to-one: a linked collection or a linked bank line is never matched again
+  ---
+  duration_ms: 0.124617
+  type: 'test'
+  ...
+# Subtest: only confirmed money in; only 1:1 payment methods; SAR only; exact amount
+ok 8 - only confirmed money in; only 1:1 payment methods; SAR only; exact amount
+  ---
+  duration_ms: 0.179087
+  type: 'test'
+  ...
+# Subtest: accepts only the declared local disposable database
+ok 9 - accepts only the declared local disposable database
+  ---
+  duration_ms: 2.139718
+  type: 'test'
+  ...
+# Subtest: refuses shared endpoints, hosted providers, other hosts, ports and names
+ok 10 - refuses shared endpoints, hosted providers, other hosts, ports and names
+  ---
+  duration_ms: 0.390133
+  type: 'test'
+  ...
+# Subtest: NODE_ENV is irrelevant; the operator must declare the exact database
+ok 11 - NODE_ENV is irrelevant; the operator must declare the exact database
+  ---
+  duration_ms: 0.245023
+  type: 'test'
+  ...
+# Subtest: the server-side marker is required
+ok 12 - the server-side marker is required
+  ---
+  duration_ms: 0.705495
+  type: 'test'
+  ...
+# Subtest: pending outgoing line: committed when a person recorded it, a payment is booked, or it was reviewed
+ok 13 - pending outgoing line: committed when a person recorded it, a payment is booked, or it was reviewed
+  ---
+  duration_ms: 1.19875
+  type: 'test'
+  ...
+# Subtest: line effects: confirmed counts; committed pending outflow counts; pending inflow and unreviewed import do not
+ok 14 - line effects: confirmed counts; committed pending outflow counts; pending inflow and unreviewed import do not
+  ---
+  duration_ms: 0.26366
+  type: 'test'
+  ...
+# Subtest: a possible-duplicate pair counts once, whatever the combination
+ok 15 - a possible-duplicate pair counts once, whatever the combination
+  ---
+  duration_ms: 0.612938
+  type: 'test'
+  ...
+# Subtest: category commitment = max(balance, approved reservations, 0)
+ok 16 - category commitment = max(balance, approved reservations, 0)
+  ---
+  duration_ms: 0.139152
+  type: 'test'
+  ...
+# Subtest: an approved request and its unlinked payment line are matched one-to-one
+ok 17 - an approved request and its unlinked payment line are matched one-to-one
+  ---
+  duration_ms: 11.722079
+  type: 'test'
+  ...
+# Subtest: money
+    # Subtest: parses and formats without floating point
+    ok 1 - parses and formats without floating point
+      ---
+      duration_ms: 15.833439
+      type: 'test'
+      ...
+    # Subtest: splitByWeights always sums exactly and is deterministic
+    ok 2 - splitByWeights always sums exactly and is deterministic
+      ---
+      duration_ms: 1.830867
+      type: 'test'
+      ...
+    1..2
+ok 18 - money
+  ---
+  duration_ms: 18.607879
+  type: 'suite'
+  ...
+# Subtest: allocation engine
+    # Subtest: ACCEPTANCE 1 — SAR 10,000 at 65/5/18/7/5% is exactly 6,500 / 500 / 1,800 / 700 / 500
+    ok 1 - ACCEPTANCE 1 — SAR 10,000 at 65/5/18/7/5% is exactly 6,500 / 500 / 1,800 / 700 / 500
+      ---
+      duration_ms: 1.327254
+      type: 'test'
+      ...
+    # Subtest: odd amounts still allocate to the halala with no drift
+    ok 2 - odd amounts still allocate to the halala with no drift
+      ---
+      duration_ms: 0.250064
+      type: 'test'
+      ...
+    # Subtest: percentages above 100% and flat-percent tax reserves are refused
+    ok 3 - percentages above 100% and flat-percent tax reserves are refused
+      ---
+      duration_ms: 0.422722
+      type: 'test'
+      ...
+    # Subtest: execution order is fixed: VAT, percentages on one base, obligations, targets, remainder
+    ok 4 - execution order is fixed: VAT, percentages on one base, obligations, targets, remainder
+      ---
+      duration_ms: 0.493191
+      type: 'test'
+      ...
+    # Subtest: a run never exceeds the pool's unallocated cash
+    ok 5 - a run never exceeds the pool's unallocated cash
+      ---
+      duration_ms: 0.568887
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 5/6 (pure) — monthly target does not refill after spending; replenishing reserve does
+    ok 6 - ACCEPTANCE 5/6 (pure) — monthly target does not refill after spending; replenishing reserve does
+      ---
+      duration_ms: 0.308896
+      type: 'test'
+      ...
+    1..6
+ok 19 - allocation engine
+  ---
+  duration_ms: 3.856956
+  type: 'suite'
+  ...
+# Subtest: variance
+    # Subtest: ACCEPTANCE 10 — expense budget 10,000, actual 12,000 → 2,000 overrun, +20%
+    ok 1 - ACCEPTANCE 10 — expense budget 10,000, actual 12,000 → 2,000 overrun, +20%
+      ---
+      duration_ms: 0.382976
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 11 — revenue plan 10,000, actual 8,000 → −2,000 (shortfall of 20%)
+    ok 2 - ACCEPTANCE 11 — revenue plan 10,000, actual 8,000 → −2,000 (shortfall of 20%)
+      ---
+      duration_ms: 0.238731
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 12 — spending against a zero budget is Unbudgeted, never infinite
+    ok 3 - ACCEPTANCE 12 — spending against a zero budget is Unbudgeted, never infinite
+      ---
+      duration_ms: 0.170428
+      type: 'test'
+      ...
+    # Subtest: expense below plan is 'below budget', not savings
+    ok 4 - expense below plan is 'below budget', not savings
+      ---
+      duration_ms: 0.13571
+      type: 'test'
+      ...
+    # Subtest: aggregate percentages come from aggregate amounts
+    ok 5 - aggregate percentages come from aggregate amounts
+      ---
+      duration_ms: 0.191814
+      type: 'test'
+      ...
+    # Subtest: threshold logic: EITHER vs BOTH
+    ok 6 - threshold logic: EITHER vs BOTH
+      ---
+      duration_ms: 0.157143
+      type: 'test'
+      ...
+    # Subtest: FAC = actual + remaining forecast (commitments + additional)
+    ok 7 - FAC = actual + remaining forecast (commitments + additional)
+      ---
+      duration_ms: 0.124032
+      type: 'test'
+      ...
+    1..7
+ok 20 - variance
+  ---
+  duration_ms: 1.741153
+  type: 'suite'
+  ...
+# Subtest: phasing
+    # Subtest: ACCEPTANCE 14 — mid-month compares against the plan due by the reporting date
+    ok 1 - ACCEPTANCE 14 — mid-month compares against the plan due by the reporting date
+      ---
+      duration_ms: 0.546263
+      type: 'test'
+      ...
+    1..1
+ok 21 - phasing
+  ---
+  duration_ms: 1.795964
+  type: 'suite'
+  ...
+# Subtest: 13-week forecast
+    # Subtest: closing becomes next opening; shortfall and conservative delay
+    ok 1 - closing becomes next opening; shortfall and conservative delay
+      ---
+      duration_ms: 0.923077
+      type: 'test'
+      ...
+    1..1
+ok 22 - 13-week forecast
+  ---
+  duration_ms: 1.079222
+  type: 'suite'
+  ...
+# Subtest: CSV
+    # Subtest: two identical legitimate rows both get distinct fingerprints; re-import gives identical ones
+    ok 1 - two identical legitimate rows both get distinct fingerprints; re-import gives identical ones
+      ---
+      duration_ms: 2.117674
+      type: 'test'
+      ...
+    # Subtest: validation errors are reported per row
+    ok 2 - validation errors are reported per row
+      ---
+      duration_ms: 0.36135
+      type: 'test'
+      ...
+    1..2
+ok 23 - CSV
+  ---
+  duration_ms: 2.597687
+  type: 'suite'
+  ...
+# Subtest: D4a row completeness
+    # Subtest: no indicators → verified zero
+    ok 1 - no indicators → verified zero
+      ---
+      duration_ms: 2.110078
+      type: 'test'
+      ...
+    # Subtest: an unclassified receipt awaiting review affects receipt rows only
+    ok 2 - an unclassified receipt awaiting review affects receipt rows only
+      ---
+      duration_ms: 0.251299
+      type: 'test'
+      ...
+    # Subtest: a line already classified to another category does not make this row incomplete
+    ok 3 - a line already classified to another category does not make this row incomplete
+      ---
+      duration_ms: 0.169517
+      type: 'test'
+      ...
+    # Subtest: pending lines in the row's direction count, reviewed confirmed lines do not
+    ok 4 - pending lines in the row's direction count, reviewed confirmed lines do not
+      ---
+      duration_ms: 0.131736
+      type: 'test'
+      ...
+    # Subtest: an account not reconciled through the report date keeps every row unverified
+    ok 5 - an account not reconciled through the report date keeps every row unverified
+      ---
+      duration_ms: 0.186271
+      type: 'test'
+      ...
+    1..5
+ok 24 - D4a row completeness
+  ---
+  duration_ms: 3.870627
+  type: 'suite'
+  ...
+# Subtest: D3b profit-like categories
+    # Subtest: flags {"nameEn":"Owner profit share"}
+    ok 1 - flags {"nameEn":"Owner profit share"}
+      ---
+      duration_ms: 0.308451
+      type: 'test'
+      ...
+    # Subtest: flags {"nameAr":"حصة أرباح المالك"}
+    ok 2 - flags {"nameAr":"حصة أرباح المالك"}
+      ---
+      duration_ms: 0.412528
+      type: 'test'
+      ...
+    # Subtest: flags {"code":"AL-PROFIT"}
+    ok 3 - flags {"code":"AL-PROFIT"}
+      ---
+      duration_ms: 0.243836
+      type: 'test'
+      ...
+    # Subtest: flags {"nameEn":"Dividends"}
+    ok 4 - flags {"nameEn":"Dividends"}
+      ---
+      duration_ms: 0.176952
+      type: 'test'
+      ...
+    # Subtest: flags {"nameEn":"Partner draw"}
+    ok 5 - flags {"nameEn":"Partner draw"}
+      ---
+      duration_ms: 0.342847
+      type: 'test'
+      ...
+    # Subtest: flags {"nameAr":"توزيعات الشركاء"}
+    ok 6 - flags {"nameAr":"توزيعات الشركاء"}
+      ---
+      duration_ms: 0.238613
+      type: 'test'
+      ...
+    # Subtest: flags {"nameAr":"مسحوبات المالك"}
+    ok 7 - flags {"nameAr":"مسحوبات المالك"}
+      ---
+      duration_ms: 0.1072
+      type: 'test'
+      ...
+    # Subtest: does not flag {"nameEn":"Salaries","nameAr":"الرواتب"}
+    ok 8 - does not flag {"nameEn":"Salaries","nameAr":"الرواتب"}
+      ---
+      duration_ms: 0.11944
+      type: 'test'
+      ...
+    # Subtest: does not flag {"nameEn":"Green coffee purchasing","code":"AL-GREEN"}
+    ok 9 - does not flag {"nameEn":"Green coffee purchasing","code":"AL-GREEN"}
+      ---
+      duration_ms: 0.126131
+      type: 'test'
+      ...
+    # Subtest: does not flag {"nameEn":"VAT reserve"}
+    ok 10 - does not flag {"nameEn":"VAT reserve"}
+      ---
+      duration_ms: 0.061396
+      type: 'test'
+      ...
+    # Subtest: does not flag {"nameEn":"Operating reserve","nameAr":"الاحتياطي التشغيلي"}
+    ok 11 - does not flag {"nameEn":"Operating reserve","nameAr":"الاحتياطي التشغيلي"}
+      ---
+      duration_ms: 0.053033
+      type: 'test'
+      ...
+    1..11
+ok 25 - D3b profit-like categories
+  ---
+  duration_ms: 2.720121
+  type: 'suite'
+  ...
+1..25
+# tests 52
+# suites 8
+# pass 52
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 694.843587

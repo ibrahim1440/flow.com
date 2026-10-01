@@ -1,0 +1,34 @@
+TAP version 13
+# Subtest: refuses secrets on the command line or directly in the environment
+ok 1 - refuses secrets on the command line or directly in the environment
+  ---
+  duration_ms: 308.283403
+  type: 'test'
+  ...
+# Subtest: old password still valid → FAIL (exit 1)
+ok 2 - old password still valid → FAIL (exit 1)
+  ---
+  duration_ms: 84.684796
+  type: 'test'
+  ...
+# Subtest: after rotation: reachable endpoint rejecting with 28P01 → PASS; closed port → INCONCLUSIVE, never PASS
+ok 3 - after rotation: reachable endpoint rejecting with 28P01 → PASS; closed port → INCONCLUSIVE, never PASS
+  ---
+  duration_ms: 174.404245
+  type: 'test'
+  ...
+# Subtest: new credential on the wrong database → FAIL
+ok 4 - new credential on the wrong database → FAIL
+  ---
+  duration_ms: 89.239434
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 798.37632

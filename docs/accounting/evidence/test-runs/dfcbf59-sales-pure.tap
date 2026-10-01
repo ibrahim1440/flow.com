@@ -1,0 +1,399 @@
+
+##############################################################################
+#  commission-engine
+##############################################################################
+
+==============================================================================
+  A — THE BASE IS NET OF TAX AND OF WHAT DOES NOT QUALIFY
+==============================================================================
+
+── A1. brief: a fully qualifying invoice, net 10,000 + VAT 1,500 ─
+  [PASS] collecting 11,500 on net 10,000 gives a base of 10,000
+
+── A2. brief: a partial collection of 5,750 on that same invoice ─
+  [PASS] collecting 5,750 gives a qualifying base of 5,000
+
+── A3. non-qualifying lines come out too ─────────────────────────
+  [PASS] 10,000 net less 2,000 non-qualifying is 8,000
+
+── A4. a base can never go negative ──────────────────────────────
+  [PASS] an over-subtracted base floors at zero, it does not claw back
+
+==============================================================================
+  B — DIFFERENT RATES PER EMPLOYEE, NO TIERS
+==============================================================================
+
+── B1. brief: employee A on 1% and employee B on 2%, base 10,000 ─
+  [PASS] A earns 100.00
+  [PASS] B earns 200.00
+  [PASS] and the rate reported back is the rate applied
+
+── B2. a zero base earns nothing, and does not throw ─────────────
+  [PASS] zero base, zero commission
+
+==============================================================================
+  C — TIERS APPLY TO THE SLICE, NOT TO THE WHOLE BASE
+==============================================================================
+
+── C1. brief: a cumulative base of 110,000 earns 1,150 ───────────
+  [PASS] 110,000 earns exactly 1,150.00
+  [PASS] the effective rate is 1.045455%, not 1.5%
+
+── C2. below the band, the tier contributes nothing ──────────────
+  [PASS] 90,000 earns 900.00
+
+── C3. exactly at the lower bound is still outside the band ──────
+  [PASS] 100,000 earns 1,000.00
+
+── C4. above the band, only the band's own width is uplifted ─────
+  [PASS] 130,000 earns 1,400.00 — the uplift stops at the band's ceiling
+
+── C5. one riyal inside the band ─────────────────────────────────
+  [PASS] 100,001 earns 1,000.02 — halves round up, they are not dropped
+
+── C6. an open-ended top band ────────────────────────────────────
+  [PASS] an 'and above' band uplifts everything past its floor
+
+==============================================================================
+  D — SPLIT OWNERSHIP DIVIDES THE BASE
+==============================================================================
+
+── D1. brief: base 5,000 split 60/40, A on 1% and B on 2% ────────
+  [PASS] A's share of base is 3,000
+  [PASS] B's share of base is 2,000
+  [PASS] A earns 30.00
+  [PASS] B earns 40.00
+
+── D2. splits must total exactly 100 ─────────────────────────────
+  [PASS] 90% total is refused, not normalised
+  [PASS] 100% total is accepted
+  [PASS] the same person twice is refused
+
+==============================================================================
+  E — PARTIAL PAYMENTS ACCRUE ONCE, CUMULATIVELY
+==============================================================================
+
+── E1. brief: 5,000 then the remaining 5,000 adds 50, it does not re-add 100 
+  [PASS] the first 5,000 earns 50.00
+  [PASS] cumulative 10,000 is worth 100.00
+  [PASS] so the second payment adds 50.00, not another 100.00
+
+── E2. a re-delivered payment adds nothing ───────────────────────
+  [PASS] recomputing the same cumulative base yields a zero increment
+
+── E3. thirds of a riyal do not leak across three payments ───────
+  [PASS] three increments total exactly 100.00 (33.33 + 33.34 + 33.33)
+
+── E4. a refund reduces the cumulative base and reverses the difference 
+  [PASS] a 2,000 refund produces a −20.00 adjustment
+
+==============================================================================
+  F — RULES WE REFUSE RATHER THAN APPROXIMATE
+==============================================================================
+
+── F1. retroactive tiers are refused ─────────────────────────────
+  [PASS] a retroactive plan cannot be saved
+  [PASS] and the refusal explains why rather than just failing
+
+── F2. a non-SAR plan is refused, not converted ──────────────────
+  [PASS] USD is refused
+  [PASS] because there is no exchange policy to honour
+
+── F3. overlapping tiers are refused ─────────────────────────────
+  [PASS] overlapping bands cannot be saved
+
+── F4. an empty band and a band above an open band are refused ───
+  [PASS] a zero-width band is refused
+  [PASS] nothing may sit above an open-ended band
+
+── F5. a valid incremental plan passes clean ─────────────────────
+  [PASS] the brief's own tiered plan validates
+
+==============================================================================
+  G — PERIODS ARE RIYADH MONTHS, STORED AS UTC INSTANTS
+==============================================================================
+
+── G1. a Riyadh month begins at 21:00 UTC on the last day of the previous month 
+  [PASS] February 2026 starts at 2026-01-31T21:00:00Z
+  [PASS] and ends at 2026-02-28T21:00:00Z
+
+── G2. the month edge falls on the Riyadh boundary, not the UTC one 
+  [PASS] 22:00 UTC on 31 Jan belongs to February
+  [PASS] 20:00 UTC on 31 Jan still belongs to January
+
+── G3. December rolls into the next year ─────────────────────────
+  [PASS] December 2026 ends at 2026-12-31T21:00:00Z
+
+==============================================================================
+  H — PLAN VERSIONS AND ASSIGNMENT OVERLAP
+==============================================================================
+
+── H1. the version in force is chosen by the date the money arrived 
+  [PASS] a March collection uses v1
+  [PASS] a September collection uses v2
+  [PASS] the boundary belongs to the version that starts on it
+  [PASS] a date before any version has no plan, rather than a guessed one
+
+── H2. overlapping assignments for one employee are detected ─────
+  [PASS] an overlapping assignment is refused
+  [PASS] an adjacent assignment is allowed
+  [PASS] an open-ended existing assignment blocks everything after it
+
+==============================================================================
+  COMMISSION ENGINE RESULT
+==============================================================================
+48 passed, 0 failed
+
+##############################################################################
+#  quotes-domain
+##############################################################################
+
+==============================================================================
+  A — LINE PRICING
+==============================================================================
+
+── A1. quantity x price, with no discount and no tax ─────────────
+  [PASS] gross is 255.00
+  [PASS] nothing is discounted
+  [PASS] the line total equals the gross
+
+── A2. a 15% VAT line ────────────────────────────────────────────
+  [PASS] subtotal 384.00
+  [PASS] tax 57.60
+  [PASS] total 441.60
+
+── A3. the discount comes off BEFORE tax ─────────────────────────
+  [PASS] discount 100.00
+  [PASS] net 900.00
+  [PASS] tax on the NET, 135.00
+  [PASS] total 1035.00
+
+── A4. fractional kilograms price exactly ────────────────────────
+  [PASS] 2.5 x 73.20 is exactly 183.00
+
+── A5. a rounding case that a float gets wrong ───────────────────
+  [PASS] 3 x 0.415 rounds up to 1.25, not down to 1.24
+
+==============================================================================
+  B — QUOTE TOTALS
+==============================================================================
+
+── B1. the stored components reconcile exactly ───────────────────
+  [PASS] subtotal 1419.00
+  [PASS] discount total 100.00
+  [PASS] tax total 192.60
+  [PASS] grand total 1511.60
+  [PASS] subtotal - discount + tax === grand total, exactly
+  [PASS] and the printed line totals add up to the same figure
+
+── B2. an empty quote is zero, not NaN ───────────────────────────
+  [PASS] grand total 0.00
+  [PASS] the effective discount of nothing is 0, not a division by zero
+
+── B3. the effective discount is measured against the pre-discount subtotal 
+  [PASS] 12%
+
+── B4. a mixed-discount quote averages by value, not by line count 
+  [PASS] 18%
+
+==============================================================================
+  C — WHAT IS REFUSED
+==============================================================================
+
+── C1. a line with neither a product nor a description ───────────
+  [PASS] refused
+
+── C2. zero and negative quantities ──────────────────────────────
+  [PASS] zero is refused
+  [PASS] negative is refused
+
+── C3. a negative price ──────────────────────────────────────────
+  [PASS] refused
+
+── C4. a discount above the hard ceiling ─────────────────────────
+  [PASS] above 60% is refused outright
+  [PASS] and a discount at the ceiling is allowed
+
+── C5. fractional retail packs ───────────────────────────────────
+  [PASS] 1.5 bags is refused
+  [PASS] but 1.5 kg of bulk coffee is ordinary and allowed
+
+── C6. an inactive product ───────────────────────────────────────
+  [PASS] refused, naming the SKU
+
+── C7. an empty quotation ────────────────────────────────────────
+  [PASS] refused
+
+==============================================================================
+  D — THE DISCOUNT APPROVAL THRESHOLD
+==============================================================================
+
+── D1. at, below and above the threshold ─────────────────────────
+  [PASS] 9% needs no approval
+  [PASS] exactly 10% needs no approval
+  [PASS] 10.01% does
+
+── D2. the threshold is measured on the whole quote, not per line 
+  [PASS] 6% across two lines needs no approval
+  [PASS] a 12% discount on the bulk of the value does need approval
+
+==============================================================================
+  E — THE LIFECYCLE
+==============================================================================
+
+── E1. nothing leads out of ACCEPTED or SUPERSEDED ───────────────
+  [PASS] ACCEPTED is terminal
+  [PASS] SUPERSEDED is terminal
+  [PASS] REJECTED is terminal
+
+── E2. only a draft may be edited ────────────────────────────────
+  [PASS] DRAFT is editable
+  [PASS] ISSUED is not
+  [PASS] ACCEPTED is not
+  [PASS] REJECTED is not
+  [PASS] EXPIRED is not
+  [PASS] SUPERSEDED is not
+
+── E3. an accepted quotation cannot be revised, but a lapsed one can 
+  [PASS] ISSUED is revisable
+  [PASS] EXPIRED is revisable
+  [PASS] REJECTED is revisable
+  [PASS] ACCEPTED is NOT — it is what the customer agreed to
+  [PASS] nor is a SUPERSEDED one
+
+── E4. illegal transitions are refused with an explanation ───────
+  [PASS] a draft cannot be accepted without being issued
+  [PASS] an accepted quotation cannot be un-accepted
+  [PASS] and the message says what to do instead
+  [PASS] and does not send them to revise an accepted quotation, which is refused
+  [PASS] issuing twice is refused as already-done, not as illegal
+  [PASS] and the legal move is not refused
+
+── E5. expiry is a comparison against the validity date, both ways 
+  [PASS] a quote valid until yesterday has expired
+  [PASS] one valid until tomorrow has not
+  [PASS] and one with no validity date never expires
+
+==============================================================================
+  F — PARSING REQUEST INPUT
+==============================================================================
+
+── F1. amounts arrive as strings and stay exact ──────────────────
+  [PASS] 2.5 x 73.20 is exactly 183.00 through the parser too
+  [PASS] the discount defaults to zero
+
+── F2. a missing or unusable amount is refused, naming the line ──
+  [PASS] a missing quantity is refused
+  [PASS] and the message names line 1
+  [PASS] a non-numeric quantity on the second line names line 2
+
+==============================================================================
+  G — CSV: READING WHAT REAL FILES CONTAIN
+==============================================================================
+
+── G1. a comma inside a quoted field is not a delimiter ──────────
+  [PASS] two columns, not three
+  [PASS] the comma is part of the name
+
+── G2. doubled quotes, embedded newlines, CRLF and the Excel BOM ─
+  [PASS] the BOM does not become part of the first heading
+  [PASS] "" reads as one quote
+  [PASS] a newline inside quotes does not split the row
+  [PASS] and there are exactly two rows
+
+── G3. an empty trailing field is preserved ──────────────────────
+  [PASS] the middle field is empty, not missing
+
+==============================================================================
+  H — CSV: WRITING SOMETHING SAFE TO OPEN
+==============================================================================
+
+── H1. a formula is neutralised on the way out ───────────────────
+  [PASS] =1+1 is prefixed
+  [PASS] +1 is prefixed
+  [PASS] -1 is prefixed
+  [PASS] @SUM(A1) is prefixed
+  [PASS] =HYPERLINK(" is prefixed
+
+── H2. ordinary text is left exactly alone ───────────────────────
+  [PASS] a company name is untouched
+  [PASS] Arabic is untouched
+  [PASS] a number is untouched
+
+── H3. the guard round-trips through our own importer ────────────
+  [PASS] stripped back to exactly what it was
+  [PASS] and a legitimate leading apostrophe is NOT stripped
+
+── H4. fields that would break the row shape are quoted ──────────
+  [PASS] a comma is quoted
+  [PASS] a quote is doubled and quoted
+  [PASS] a newline is quoted
+  [PASS] plain text is not quoted
+
+── H5. the document carries a BOM and CRLF endings ───────────────
+  [PASS] starts with the BOM, so Excel reads Arabic rather than mojibake
+  [PASS] rows end with CRLF
+
+==============================================================================
+  I — CSV: THE LEAD IMPORTER
+==============================================================================
+
+── I1. a clean file ──────────────────────────────────────────────
+  [PASS] one row read
+  [PASS] and one row seen
+  [PASS] no problems
+  [PASS] the phone came through
+
+── I2. human column headings are recognised ──────────────────────
+  [PASS] 'Company Name' maps to companyName
+  [PASS] 'Mobile' maps to phone
+
+── I3. Arabic column headings are recognised ─────────────────────
+  [PASS] the Arabic heading maps
+
+── I4. a file with no companyName column is refused as a whole ───
+  [PASS] nothing is imported
+  [PASS] and the message lists the columns it accepts
+
+── I5. bad rows are reported by the row number the operator sees ─
+  [PASS] only the good row is kept
+  [PASS] four rows are reported
+  [PASS] and the count of rows the FILE held is five, not one
+  [PASS] the short company name is row 3
+  [PASS] the bad email is row 4
+  [PASS] the bad date is row 5
+  [PASS] the unknown source is row 6
+  [PASS] and the unknown source is named in the message
+
+── I6. a source is normalised rather than rejected for its spelling 
+  [PASS] 'walk in' becomes WALK_IN
+
+── I7. an unrecognised column is reported, never silently dropped 
+  [PASS] the row still imports
+  [PASS] and the extra column is named
+
+── I8. a formula in an imported cell is stripped of our own guard, not executed 
+  [PASS] the guard our exporter added is removed on the way back in
+
+── I9. the row limit is enforced ─────────────────────────────────
+  [PASS] nothing is imported
+  [PASS] and the message says how many rows the file had
+  [PASS] exactly 500 rows is accepted
+
+── I10. an empty file says so rather than importing nothing quietly 
+  [PASS] reported as empty
+
+==============================================================================
+  QUOTES & CSV DOMAIN RESULT
+==============================================================================
+113 passed, 0 failed
+
+==============================================================================
+  SALES REGRESSION SUMMARY
+==============================================================================
+  commission-engine        48 passed
+  quotes-domain            113 passed
+
+  161 assertions across 2 suites
+  ALL SALES SUITES GREEN
+

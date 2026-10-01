@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import { AccountingStatusChip, useAccountingStatus } from "@/components/AccountingStatusChip";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ export default function DispatchPage() {
   // ── Core data ─────────────────────────────────────────────────────────────
   const [orders,     setOrders]     = useState<{ items: OrderItem[] }[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
+  const accounting = useAccountingStatus(deliveries.map((d) => d.id));
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [search,      setSearch]      = useState("");
@@ -423,7 +425,7 @@ export default function DispatchPage() {
             className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
           />
         </div>
-        <div className="bg-white rounded-2xl border border-border overflow-hidden">
+        <div className="bg-white rounded-2xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-cream">
               <tr>
@@ -433,6 +435,7 @@ export default function DispatchPage() {
                 <th className="text-start px-4 py-3 font-semibold">{t("beanCol")}</th>
                 <th className="text-end px-4 py-3 font-semibold">{t("qtyKg")}</th>
                 <th className="text-center px-4 py-3 font-semibold">{t("type")}</th>
+                <th className="text-start px-4 py-3 font-semibold">{lang === "ar" ? "المحاسبة" : "Accounting"}</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -453,6 +456,7 @@ export default function DispatchPage() {
                         {d.deliveryType === "full" ? t("fullBadge") : t("partialBadge")}
                       </span>
                     </td>
+                    <td className="px-4 py-3"><AccountingStatusChip entries={accounting[d.id]} /></td>
                   </tr>
                 ))}
             </tbody>

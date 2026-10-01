@@ -1,0 +1,102 @@
+    not ok 1 - fixed asset bought on credit: no flow at purchase; partial and full payments are investing outflows
+      ---
+      error: |-
+        no cash moved in February
+        + actual - expected
+        
+          {
+            financing: '0.00',
+        +   investing: '-30000.00',
+        -   investing: '0.00',
+            netChange: '0.00',
+        +   operating: '30000.00'
+        -   operating: '0.00'
+          }
+        
+      name: 'AssertionError'
+      expected:
+        operating: '0.00'
+--
+    not ok 2 - asset financed directly by a loan: disclosed as non-cash; loan repayment is financing
+      ---
+      error: |-
+        Expected values to be strictly deep-equal:
+        + actual - expected
+        
+          {
+        +   financing: '0.00',
+        +   investing: '-80000.00',
+        -   financing: '-5000.00',
+        -   investing: '0.00',
+            netChange: '-5000.00',
+        +   operating: '75000.00'
+        -   operating: '0.00'
+          }
+        
+      name: 'AssertionError'
+      expected:
+--
+    not ok 3 - depreciation and disposals: proceeds are investing; depreciation, loss and gain adjust profit
+      ---
+      error: |-
+        investing = −50,000 purchase + 12,000 + 18,000 proceeds; no operating cash
+        + actual - expected
+        
+          {
+            financing: '0.00',
+        +   investing: '-15000.00',
+        -   investing: '-20000.00',
+            netChange: '-20000.00',
+        +   operating: '-5000.00'
+        -   operating: '0.00'
+          }
+        
+      name: 'AssertionError'
+      expected:
+        operating: '0.00'
+--
+    not ok 4 - internal cash transfers are not cash flows
+      ---
+      error: "Cannot read properties of undefined (reading 'map')"
+      name: 'TypeError'
+        nonCash (/home/user/flow.com/tests/accounting/integration/cashflow-transactions.test.ts:46:83)
+        TestContext.<anonymous> (/home/user/flow.com/tests/accounting/integration/cashflow-transactions.test.ts:114:22)
+      ...
+    # Subtest: working capital and a mixed receipt are still reported correctly
+    not ok 5 - working capital and a mixed receipt are still reported correctly
+      ---
+      error: |-
+        Expected values to be strictly deep-equal:
+        + actual - expected
+        
+          {
+        +   financing: '0.00',
+        -   financing: '9500.00',
+            investing: '0.00',
+            netChange: '10650.00',
+        +   operating: '10650.00'
+        -   operating: '1150.00'
+          }
+        
+      name: 'AssertionError'
+      expected:
+        operating: '1150.00'
+--
+    not ok 1 - bill on credit is non-cash; bank payments matched to it are investing (net) and operating (VAT)
+      ---
+      error: |-
+        Expected values to be strictly deep-equal:
+        + actual - expected
+        
+          {
+            financing: '0.00',
+        +   investing: '-40000.00',
+        -   investing: '0.00',
+            netChange: '0.00',
+        +   operating: '40000.00'
+        -   operating: '0.00'
+          }
+        
+      name: 'AssertionError'
+      expected:
+        operating: '0.00'

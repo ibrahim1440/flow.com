@@ -1,0 +1,7 @@
+ok 1 - permissions: no module → 403; viewer reads but cannot write; preparer cannot approve, post or map
+ok 2 - bill lifecycle over HTTP: create → submit → four-eyes approve → post → payment from the bank → settled and tied out
+ok 3 - runtime role cannot bypass the bill rules directly in SQL
+ok 4 - bank mapping and reconciliation over HTTP; manual journals on the mapped bank account are refused after the start date
+# tests 4
+# pass 4
+# fail 0

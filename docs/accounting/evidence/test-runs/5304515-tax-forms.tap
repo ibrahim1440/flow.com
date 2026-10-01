@@ -1,0 +1,8 @@
+ok - seller profile v2 prepared in the form, not approvable by its preparer, approved by the approver; v1 retired
+ok - INV-2: buyer address entered in the dialog, generation retried → ICV 4, previous hash = ICV 3, valid locally
+ok - debit note DN-11 prepared in the receivables form against INV-1, approved and posted by the approver → e-invoice 383 referencing it, valid locally
+ok - e-invoice detail: submission on a LOCAL_ONLY profile recorded as not sent (nothing left the system); local re-validation passes; the screen states it is not standards-compliant (not SDK-validated)
+ok - simplified INV-9: QR in the default OFFICIAL_DOCS layout (tag 6 = 32-byte hash, tag 7 = 64-byte P1363 signature, tag 8 = 64-byte public key), no tag 9; the detail lists the missing ZATCA certificate, the unconfirmed encodings and tag 9
+ok - VAT return page: box 1 VAT 22.50, net VAT 22.50; output VAT from documents 22.50 vs ledger 22.50 (difference 0.00, all of it journals from outside the documents; unexplained 0.00)
+# pass 6
+# fail 0

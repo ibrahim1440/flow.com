@@ -1,0 +1,343 @@
+{
+  "source": "user-provided extracted SDK via Google Drive folder 1nq8bzCNNYE6ZqSvGmKd1JNNZE_A6KbQZ (transfer location only)",
+  "downloadedAt": "2026-10-01T12:38:24Z",
+  "originalArchiveChecksum": "NOT VERIFIED",
+  "authenticity": "not independently confirmed",
+  "currentVersion": "not independently confirmed",
+  "complete": false,
+  "files": [
+    {
+      "relative_path": "Apps/fatoora",
+      "drive_file_id": "1LUN2PncBKApcXme6jz1bphRECo6wZQdB",
+      "drive_size": 341,
+      "local_size": 341,
+      "sha256": "ca5ae04a94c1555b6b6b37129dbc0d37b1ccc678b6158d28fc2b5421a257aa09",
+      "drive_mime": "application/x-shellscript",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Apps/fatoora.ba_",
+      "drive_file_id": "1iauKfaMw5MAxyaTgzCp4iGOXdKmYvrbY",
+      "drive_size": 490,
+      "local_size": 490,
+      "sha256": "6c57f361abb65f1ee02997533fc0274687b27cb4931b40225c194dbd3562075e",
+      "drive_mime": "application/octet-stream",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Apps/global.json",
+      "drive_file_id": "1eZQ7xRHtAmTttOOMXKj0cNEzla789L8N",
+      "drive_size": 51,
+      "local_size": 51,
+      "sha256": "a0cd53a641a77f25c37a5bced6bc982f85dab59dd125948d1feef7ad7a125cd8",
+      "drive_mime": "application/json",
+      "drive_modified_time": "2022-05-11T11:15:40Z"
+    },
+    {
+      "relative_path": "Apps/jq.ex_",
+      "drive_file_id": "1piGdkKSEKP1bHH4_JRgIEGnFfjXg3sCJ",
+      "drive_size": 3525307,
+      "local_size": 3525307,
+      "sha256": "a51d36968dcbdeabb3142c6f5cf9b401a65dc3a095f3144bd0c118d5bb192753",
+      "drive_mime": "application/x-dosexec",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Configuration/config.json",
+      "drive_file_id": "178km6gxPPeRTorS6v98bRHV_tTFY7aYx",
+      "drive_size": 725,
+      "local_size": 725,
+      "sha256": "df8781673870d9eb474e176aa22cd25ed15770e366616fa5267cf709bc51068b",
+      "drive_mime": "application/json",
+      "drive_modified_time": "2022-05-11T11:18:28Z"
+    },
+    {
+      "relative_path": "Configuration/defaults.json",
+      "drive_file_id": "1yCRbm4vQJb1lbFpsZHfKWC0xv3M0MV_X",
+      "drive_size": 507,
+      "local_size": 507,
+      "sha256": "829da7fd0712dee5d2d890b8a4e52d4170706022dc3c4ab0cca48dc0518248c3",
+      "drive_mime": "application/json",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Configuration/jq.ex_",
+      "drive_file_id": "1j5liqJ0W8RNXYSfAyV_Arprjxr5si-Ui",
+      "drive_size": 3525307,
+      "local_size": 3525307,
+      "sha256": "a51d36968dcbdeabb3142c6f5cf9b401a65dc3a095f3144bd0c118d5bb192753",
+      "drive_mime": "application/x-dosexec",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Configuration/usage.txt",
+      "drive_file_id": "1rMotO5VmP9jczqQ0h60w5ugb_DJLhO4z",
+      "drive_size": 908,
+      "local_size": 908,
+      "sha256": "7c387f579437e0daf93593ca3d770ab150eaca4f101274643669fc053d2c17da",
+      "drive_mime": "text/plain",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Certificates/cert.pem",
+      "drive_file_id": "198-2sJkuI1J5v5knexwES8FZ2scHPddI",
+      "drive_size": 1360,
+      "local_size": 1360,
+      "sha256": "69a95fc237b42714dc4457a33b94cc452fd9f110504c683c401144d9544894fb",
+      "drive_mime": "application/x-x509-ca-cert",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Certificates/ec-secp256k1-priv-key.pem",
+      "drive_file_id": "1w1F2LZ4i56E_KvMtFs2V7MjJ3QJTrRfj",
+      "drive_size": 160,
+      "local_size": 160,
+      "sha256": "1fdf6a61e7a4ec87c84b32315282f8406cdbd30f992c24da4fc6d8e288525651",
+      "drive_mime": "application/x-x509-ca-cert",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Input/csr-config-example.properties",
+      "drive_file_id": "1vmbFjznffKflNSJIbSrf4PqfeyOUcdY6",
+      "drive_size": 341,
+      "local_size": 341,
+      "sha256": "bf3299723d2c84a263acf5e782e609aa13f230489b054f179a0e2cfeee887b21",
+      "drive_mime": "application/octet-stream",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Input/csr-config-template.properties",
+      "drive_file_id": "1IeFE54878R4fhmOnXVoNSbpJCRwbpyAw",
+      "drive_size": 215,
+      "local_size": 215,
+      "sha256": "4b6a37ed39f523a4dd2fa729d84b7a1d90411aad1f1f2adabfd50ba92a94746f",
+      "drive_mime": "application/octet-stream",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/PIH/pih.txt",
+      "drive_file_id": "1GcRLQMIu3aB5c-QdIknS2YJh8kChaOrY",
+      "drive_size": 88,
+      "local_size": 88,
+      "sha256": "b4e7127a3f4e7a4be7047dfb5c87d2982275d49c6f41574b6aaf1c7ee91171b7",
+      "drive_mime": "text/plain",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Rules/schematrons/20210819_ZATCA_E-invoice_Validation_Rules.xsl",
+      "drive_file_id": "1OpfMLPrYS-PTzVc1drG-REPiIbkwjekQ",
+      "drive_size": 253122,
+      "local_size": 253122,
+      "sha256": "e911003eba9ad2531789dc96cf15c616316fe8da3b54d16c84a4842cbdd828ff",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Rules/schematrons/CEN-EN16931-UBL.xsl",
+      "drive_file_id": "1pK0efXtH4OaxboF5aopytihxc0jQFLYK",
+      "drive_size": 211571,
+      "local_size": 211571,
+      "sha256": "50e283515054c95ec5bd03a937e5dd3f5bf09c2a2e9fd1f4b330c6e4856aaec4",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/CCTS_CCT_SchemaModule-2.1.xsd",
+      "drive_file_id": "1uqeeuTRWmtzVnfyLXVUaySHDhMod2_dT",
+      "drive_size": 45268,
+      "local_size": 45268,
+      "sha256": "dd546e4809df86b6445589f69f0d6c9df162840ae386574ddfc1da7638103e15",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-CommonAggregateComponents-2.1.xsd",
+      "drive_file_id": "1x3_bgZj9y-RShB_aFHl0Jf3L8bV48hD-",
+      "drive_size": 2572115,
+      "local_size": 2572115,
+      "sha256": "9bd9582ed0c575d929dba2a9c9bfd97f97ceb0e758aa8d8ea259b8ae3ef1c250",
+      "drive_mime": "application/octet-stream",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-CommonBasicComponents-2.1.xsd",
+      "drive_file_id": "1BRYIQOCxz3FoFNLhJ3pK8NimQhtBqm_m",
+      "drive_size": 219895,
+      "local_size": 219895,
+      "sha256": "bd4ad043ee1d9da1c7f8018dabf739cfafdfb59143d0d16b9ef769e6b7c408a7",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-CommonExtensionComponents-2.1.xsd",
+      "drive_file_id": "1RVeJL5yNUS1kZA22SoR6oZW5QtmFWtvF",
+      "drive_size": 9491,
+      "local_size": 9491,
+      "sha256": "ad7a4e490978adfbcfc5ec0bb20941cf11ac960ccf0c4de8791a7c731a8dbe87",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-CommonSignatureComponents-2.1.xsd",
+      "drive_file_id": "1LO0xUKOmvLx0bFZl8q_fAgXVjVmDo1wL",
+      "drive_size": 5548,
+      "local_size": 5548,
+      "sha256": "3db472305f029bba5c1ae157bfd0178f715c3f9b94bd8e6c557dbce5e88da874",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-CoreComponentParameters-2.1.xsd",
+      "drive_file_id": "15YsVfPjwwdD7_vE0oa0XJNwA8-9xU1gg",
+      "drive_size": 3173,
+      "local_size": 3173,
+      "sha256": "8be3379dbdcbcc7802fafdd16bac72c48fff1c0bb364213a31a17911dd06100b",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-ExtensionContentDataType-2.1.xsd",
+      "drive_file_id": "1dcXSQTvpjIEZcC-XysYPFvxAANKyqUVr",
+      "drive_size": 4314,
+      "local_size": 4314,
+      "sha256": "fcee77a11870208e6377ea6311b9f2a050bca24bdad8606ea02d71e9f9e72f8d",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-QualifiedDataTypes-2.1.xsd",
+      "drive_file_id": "1fGi5fcZfziYNG8nZMwHZmO3ISULXolUH",
+      "drive_size": 3590,
+      "local_size": 3590,
+      "sha256": "7dcb156e610239c97ae70940cf4653b88e48c3595bf5f56a2204a32e2893e6cf",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-SignatureAggregateComponents-2.1.xsd",
+      "drive_file_id": "1KlTbCN6a0z1LPb4MNtoSacJUSfHHtuLB",
+      "drive_size": 7784,
+      "local_size": 7784,
+      "sha256": "17bb6b62d709b4fd81449a37655af36aa6a1276ad4fdb1b2e249a5ed4b7c2172",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-SignatureBasicComponents-2.1.xsd",
+      "drive_file_id": "16JStJyaJQPxOcjvXEXi6Z932dio28sS8",
+      "drive_size": 4207,
+      "local_size": 4207,
+      "sha256": "cef924d7ba3d1d8ade14469325cde1364f8c174e46f0198ec02da8e9e748a489",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-UnqualifiedDataTypes-2.1.xsd",
+      "drive_file_id": "1fbqsX7jCclm6TFkWCszvU-HkVPk9k77U",
+      "drive_size": 27300,
+      "local_size": 27300,
+      "sha256": "09052d406b4293e2a5f9c2bfee6df10ad4d8d5f0b36e24a6349d7f7936d89eb6",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-XAdESv132-2.1.xsd",
+      "drive_file_id": "1O6GefxqEsF6oxeIk93NXCHdgRJ233UCy",
+      "drive_size": 21664,
+      "local_size": 21664,
+      "sha256": "a4f726bcf8cc3f7d9ffa4dab99e005535a8e8b60dced1e5d94578d2e05afa96e",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-XAdESv141-2.1.xsd",
+      "drive_file_id": "1xSETxfSeR0tLLkFnhIYfKUaFXnf_icsN",
+      "drive_size": 1316,
+      "local_size": 1316,
+      "sha256": "1fa4625e9cefcb7a9abb5ac1b64315547450031eece8a55bd584e4ba4b79dbc1",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/common/UBL-xmldsig-core-schema-2.1.xsd",
+      "drive_file_id": "152XugXn0SRHA3wiEK3qE6Gu-qgs1VbkM",
+      "drive_size": 10750,
+      "local_size": 10750,
+      "sha256": "101909c9f06456d61ddcc4fb982f1d40dc357b439f393b1a2eb46e42acd60809",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Data/Schemas/xsds/UBL2.1/xsd/maindoc/UBL-Invoice-2.1.xsd",
+      "drive_file_id": "1JzDeDgVDG0fIEGWEmGv6_525n1PlyAt7",
+      "drive_size": 60178,
+      "local_size": 60178,
+      "sha256": "40fae8cb436f3a9506d7acce65ba162caef3b0bed4d5cbc0992b2153ded4edf4",
+      "drive_mime": "text/xml",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "LICENSE.txt",
+      "drive_file_id": "1e-YLe5xKE6mPKF9JeW7yfOzT6NdQ9NrO",
+      "drive_size": 7424,
+      "local_size": 7424,
+      "sha256": "136b89bba2166b2f43688b27f553a29a55fad45c5a55fd3cf0a7d1186006a242",
+      "drive_mime": "text/plain",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Readme/readme.pdf",
+      "drive_file_id": "1n78h-JndgA8FacTLZD3C-jgORjJ7Xzwk",
+      "drive_size": 242727,
+      "local_size": 242727,
+      "sha256": "1b31b6bd8b0842731ae529871e303c7365b0d2726d3518cc6d085cc037733e8c",
+      "drive_mime": "application/pdf",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "Readme/readme.rtf",
+      "drive_file_id": "1kZiG92iyKFDzNJOGM7Qk-KgZ2PW_3eRb",
+      "drive_size": 204201,
+      "local_size": 204201,
+      "sha256": "6f7cd47e3c45d90c1a2a0b68e7b24495ede3d533ed2988b6085b2b5af6d802ca",
+      "drive_mime": "text/rtf",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "install.ba_",
+      "drive_file_id": "1n5Belsx6xa96niZ2Ag3UYa7NHgMvL3zc",
+      "drive_size": 2292,
+      "local_size": 2292,
+      "sha256": "4ed9f5144b08c914fd0b697d06de78836a62f4239486ba80457418cf9dbce304",
+      "drive_mime": "application/octet-stream",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    },
+    {
+      "relative_path": "install.sh",
+      "drive_file_id": "1L0edHm1HRE7EF5U_F35Zh200mCJMWodY",
+      "drive_size": 1751,
+      "local_size": 1751,
+      "sha256": "7bb061117287e7505e85bb6f3129cebd7fc8cb6b8824a01d4db7b57ba44a10e3",
+      "drive_mime": "application/x-sh",
+      "drive_modified_time": "2022-05-11T08:15:20Z"
+    }
+  ],
+  "skipped": [
+    {
+      "relative_path": "Apps/cli-3.0.8-jar-with-dependencies.jar",
+      "drive_file_id": "1ebAdMWxD-O5AiJUcfMSNbbzUybwjEyvB",
+      "drive_size": 21178861,
+      "drive_mime": "application/java-archive",
+      "drive_modified_time": "2022-05-11T10:58:12Z",
+      "reason": "not downloaded: Google Drive MCP download_file_content refuses files over 10 MB ('File too large for download, over limit of 10 MB')"
+    },
+    {
+      "relative_path": "Lib/Java/sdk-3.0.8-jar-with-dependencies.jar",
+      "drive_file_id": "1Xfan7aqZbbNzFfB5CUrv3CGFNURXL_Ps",
+      "drive_size": 21178861,
+      "drive_mime": "application/java-archive",
+      "drive_modified_time": "2022-05-11T10:58:12Z",
+      "reason": "not downloaded: Google Drive MCP download_file_content refuses files over 10 MB ('File too large for download, over limit of 10 MB')"
+    }
+  ]
+}

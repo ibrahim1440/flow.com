@@ -1,0 +1,8 @@
+ok - packing form refuses 15 kg from a 10.2 kg roast (confirm disabled); nothing changed
+ok - packing form: 8 × 250 g posted (Dr 1174 90.71 / Cr 1173 roasted, Cr 1172 bags); chip "In the accounts"
+ok - packing with 5.66% loss held; accountant approved and posted document #23 in the browser (abnormal loss to 5300); chip back to "In the accounts"
+ok - packing of an unlinked SKU blocked; accountant linked the item in setup and retried from the queue in the browser; 2 × 500 g posted
+ok - dispatch form refuses 20 units against 8 outstanding (confirm disabled); nothing changed
+ok - dispatch form: 8 × 250 g (Dr 1176 94.15 / Cr 1174, WEIGHTED_AVERAGE over 87 units worth 1023.91) and 2 × 500 g posted to delivered, not invoiced
+# pass 6
+# fail 0

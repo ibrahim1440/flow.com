@@ -1,0 +1,58 @@
+ACC-01 overview            rtl/ar  no violations
+ACC-02 journals            rtl/ar  no violations
+ACC-03 editor              rtl/ar  no violations
+ACC-04 detail              rtl/ar  no violations
+ACC-05 accounts            rtl/ar  no violations
+ACC-06 periods             rtl/ar  no violations
+ACC-07 reports TB          rtl/ar  no violations
+ACC-08 income statement    rtl/ar  no violations
+ACC-08 balance sheet       rtl/ar  no violations
+ACC-09 automation          rtl/ar  no violations
+ACC-10 no permission       rtl/ar  no violations
+ACC-11 mobile detail       rtl/ar  no violations
+ACC-12 English detail      ltr/en  no violations
+ACC-12 English reports     ltr/en  no violations
+ACC-20 bills               rtl/ar  no violations
+ACC-21 bill editor         rtl/ar  no violations
+ACC-22 bill detail         rtl/ar  no violations
+ACC-22 bill detail EN      ltr/en  no violations
+ACC-23 aging               rtl/ar  no violations
+ACC-24 bank                rtl/ar  no violations
+ACC-25 bank reconciliation rtl/ar  no violations
+ACC-26 mobile bills        rtl/ar  no violations
+ACC-28 bank corrections    rtl/ar  no violations
+ACC-28 correction request  rtl/ar  no violations
+ACC-30 sales invoices      rtl/ar  no violations
+ACC-31 sales invoice editor rtl/ar  no violations
+ACC-32 sales invoice detail rtl/ar  no violations
+ACC-33 customer receipts   rtl/ar  no violations
+ACC-33 receipt assignment  rtl/ar  no violations
+ACC-34 receivables aging   rtl/ar  no violations
+ACC-35 credit note         rtl/ar  no violations
+ACC-36 mobile sales invoices rtl/ar  no violations
+ACC-40 inventory valuation rtl/ar  no violations
+ACC-41 inventory documents rtl/ar  no violations
+ACC-42 inventory document editor rtl/ar  no violations
+ACC-43 inventory document detail rtl/ar  no violations
+ACC-44 stock card          rtl/ar  no violations
+ACC-45 GRNI and matching   rtl/ar  no violations
+ACC-46 inventory setup     rtl/ar  no violations
+ACC-47 mobile inventory approvals rtl/ar  no violations
+ACC-48 exceptions queue    rtl/ar  no violations
+ACC-48 exceptions 390      rtl/ar  no violations
+ACC-49 customer returns    rtl/ar  no violations
+ACC-50 gross margin        rtl/ar  no violations
+ACC-51 inventory setup + pools rtl/ar  no violations
+ACC-60 fixed-asset register rtl/ar  no violations
+ACC-60 register 390        rtl/ar  no violations
+ACC-61 asset editor        rtl/ar  no violations
+ACC-62 depreciation runs   rtl/ar  no violations
+ACC-64 classes and policies rtl/ar  no violations
+ACC-65 year-end close      rtl/ar  no violations
+ACC-70 e-invoices          rtl/ar  no violations
+ACC-70 e-invoices 390      rtl/ar  no violations
+ACC-71 seller profile      rtl/ar  no violations
+ACC-72 VAT return          rtl/ar  no violations
+ACC-27 cash flow           rtl/ar  no violations
+
+serious/critical violations inside accounting content: 0

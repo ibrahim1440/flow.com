@@ -1,0 +1,42 @@
+seeded erp_e2e at 7093c95 · roasting batches without a green bean: 0
+  [PASS] its shelf-covered line still ships
+── Green coffee (test ledger vs ERP) ───────────────────────────
+── Ordered vs reserved vs delivered ────────────────────────────
+    P3-BRA-250G [Cancelled] ordered 40 delivered 25 reserved 0
+    P3-ETH-250G [Cancelled] ordered 24 delivered 0 reserved 0
+    P3-BRA-1KG [Ready for Shipping] ordered 12 delivered 12 reserved 0
+    P3-ETH-1KG [Cancelled] ordered 6 delivered 0 reserved 0
+    P3-IDN-250G [Cancelled] ordered 16 delivered 0 reserved 0
+    P3-BRA-1KG [Cancelled] ordered 50 delivered 0 reserved 0
+    P3-ETH-250G [Cancelled] ordered 10 delivered 10 reserved 0
+66 passed, 0 failed
+30 passed, 0 failed
+  harness-selftest          375 passed    0 failed  exit 0  ok
+  production-gate            71 passed    0 failed  exit 0  ok
+  workflow-alignment         45 passed    0 failed  exit 0  ok
+  production-concurrency     37 passed    0 failed  exit 0  ok
+  lifecycle-locks            39 passed    0 failed  exit 0  ok
+  completion-gate            70 passed    0 failed  exit 0  ok
+  reservation-cas            22 passed    0 failed  exit 0  ok
+  packaging-stock            49 passed    0 failed  exit 0  ok
+  packaging-concurrency      24 passed    0 failed  exit 0  ok
+  packaging-idempotency      64 passed    0 failed  exit 0  ok
+  packaging-identity         73 passed    0 failed  exit 0  ok
+  unified-packaging         183 passed    0 failed  exit 0  ok
+  legacy-packaging-routes    53 passed    0 failed  exit 0  ok
+  production-demand          81 passed    0 failed  exit 0  ok
+  blend-integrity           105 passed    0 failed  exit 0  ok
+  po-lifecycle              132 passed    0 failed  exit 0  ok
+  hardening                 117 passed    0 failed  exit 0  ok
+  platform-hardening         47 passed    0 failed  exit 0  ok
+  h2a-hardening             145 passed    0 failed  exit 0  ok
+  h2b-hardening             165 passed    0 failed  exit 0  ok
+  finished-products          61 passed    0 failed  exit 0  ok
+  delivery                   22 passed    0 failed  exit 0  ok
+  order-edit-integrity      137 passed    0 failed  exit 0  ok
+  order-to-delivery          88 passed    0 failed  exit 0  ok
+  release-simulation         66 passed    0 failed  exit 0  ok
+  reset-safety               30 passed    0 failed  exit 0  ok
+  26 suite(s), 2301 harness assertions, 0 failed
+  ALL SUITES GREEN
+commit 7093c95335f9dd4b1b0819024be354b603956b8e · exit 0 · log /tmp/certification-7093c95.log

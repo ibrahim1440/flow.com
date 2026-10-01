@@ -1,0 +1,19 @@
+baseline: main fc64c05c1ef4e607365e0e0c5d7c32482ed2e26e; branch: 031daaf44c572662945f9a74a52929701e0084d9; started 2026-10-01T08:36:36Z
+main schema: 29 migrations applied; seeded
+fingerprinted 92 pre-existing tables (249 rows)
+branch migrations applied: 12 in 1.8 s; now 41 in _prisma_migrations
+  Applying migration `20260928090000_accounting_ledger_core`
+  Applying migration `20260928120000_accounting_payables_bank`
+  Applying migration `20260928130000_accounting_cash_flow_class`
+  Applying migration `20260929090000_accounting_bank_corrections`
+  Applying migration `20260929120000_accounting_receivables`
+  Applying migration `20260930090000_accounting_open_items`
+  Applying migration `20260930120000_accounting_inventory`
+  Applying migration `20260930130000_accounting_inventory_sales_location`
+  Applying migration `20261001090000_accounting_stage4b`
+  Applying migration `20261002090000_accounting_fixed_assets_year_end`
+  Applying migration `20261003090000_accounting_einvoicing_local`
+  Applying migration `20261003091000_accounting_tax_exemption_codes`
+pre-existing data: UNCHANGED (all 92 tables identical over their original columns)
+new tables: 129 total; triggers: 66
+result: PASS; finished 2026-10-01T08:37:07Z

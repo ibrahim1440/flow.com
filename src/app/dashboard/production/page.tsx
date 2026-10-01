@@ -10,6 +10,7 @@ import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { canStartProduction } from "@/lib/order-operations-client";
 import { useI18n } from "@/lib/i18n/context";
+import { AccountingStatusChip, useAccountingStatus } from "@/components/AccountingStatusChip";
 import { type TranslationKey } from "@/lib/i18n/translations";
 
 type Batch = {
@@ -86,6 +87,7 @@ export default function ProductionPage() {
   const [orders, setOrders] = useState<{ items: OrderItem[] }[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const accounting = useAccountingStatus(batches.map((b) => b.id));
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -714,6 +716,7 @@ export default function ProductionPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
+                      <AccountingStatusChip entries={accounting[batch.id]} />
                       {canEditDate && (
                         <button
                           onClick={() => setEditDateBatch(batch)}

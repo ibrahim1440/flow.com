@@ -1,0 +1,370 @@
+
+==============================================================================
+  A — LEAD TO DEAL
+==============================================================================
+
+── A1. a rep creates a lead and it is theirs ─────────────────
+  [PASS] created
+  [PASS] owned by the rep who created it, not by whoever the body named
+  [PASS] owner is the rep
+  [PASS] the duplicate key was normalised to the last nine digits
+
+── A2. the same phone in a different format is reported as a duplicate 
+  [PASS] refused with 409
+  [PASS] and the existing lead is named
+  [PASS] nothing was created
+
+── A3. acknowledged, it is created — the operator decides, not the system 
+  [PASS] created
+  [PASS] and nothing was merged: both leads exist
+
+── A4. the lead can be edited, and the duplicate key follows the edit 
+  [PASS] updated
+  [PASS] status is QUALIFIED in the row
+  [PASS] and the normalised phone was recomputed, not left stale
+
+── A5. conversion creates one customer and one deal, and is idempotent 
+  [PASS] converted
+  [PASS] an opportunity id came back
+  [PASS] the second call replays rather than converting again
+  [PASS] exactly one conversion row
+  [PASS] the lead now reads CONVERTED
+
+── A6. a converted lead is read-only ─────────────────────────
+  [PASS] refused with 409
+  [PASS] and the row is unchanged
+
+==============================================================================
+  B — ACTIVITIES AND SAMPLES
+==============================================================================
+
+── B1. logging a call, and completing a task ─────────────────
+  [PASS] the call is logged
+  [PASS] recorded as already done
+  [PASS] and owned by the caller, never by the body
+  [PASS] a task with no due date is refused — it would never appear on an overdue list
+  [PASS] a task with one is created
+  [PASS] and it shows on the overdue list
+  [PASS] completing it succeeds
+  [PASS] completing twice keeps the ORIGINAL timestamp, so 'when did you visit' stays answerable
+  [PASS] and a completed activity cannot be deleted
+
+── B2. a sample is recorded, and it does NOT move stock ──────
+  [PASS] recorded
+  [PASS] and the response says plainly that stock did not move
+  [PASS] no inventory movement was written
+  [PASS] a follow-up task was scheduled with it
+  [PASS] feedback is recorded
+  [PASS] a score on a sample that was never sent is refused
+
+==============================================================================
+  C — QUOTATIONS
+==============================================================================
+
+── C1. a deal cannot be won before a quotation is accepted ───
+  [PASS] refused
+  [PASS] and the message says why
+  [PASS] the deal is still open
+
+── C2. a rep raises a quotation and the server prices it ─────
+  [PASS] created
+  [PASS] the total is the server's arithmetic: 1265.00
+  [PASS] and it is what was stored
+  [PASS] tax stored separately
+  [PASS] status DRAFT
+
+── C3. a client-supplied total is ignored, not trusted ───────
+  [PASS] accepted
+  [PASS] the stored total is still 1265.00, not the 1.00 the body claimed
+
+── C4. a fractional pack count is refused ────────────────────
+  [PASS] refused
+  [PASS] and the SKU is named
+
+── C5. a discount above the threshold cannot be issued by a rep 
+  [PASS] the rep is refused with 403
+  [PASS] and the quotation is still a draft
+  [PASS] a manager with discount approval can issue it
+  [PASS] status ISSUED
+  [PASS] the approver is recorded on the quotation, not merely implied
+  [PASS] and the lines and prices were frozen into a snapshot
+
+── C6. an issued quotation cannot be edited ──────────────────
+  [PASS] refused with 409
+  [PASS] and the issued total is untouched
+
+── C7. revising supersedes the original and starts a new draft 
+  [PASS] created
+  [PASS] revision 2
+  [PASS] the original reads SUPERSEDED
+  [PASS] the revision is a draft
+  [PASS] and points back at what it revises
+  [PASS] with the lines carried over and re-priced
+  [PASS] one line copied
+
+── C8. the revision is issued and accepted at a corrected price 
+  [PASS] issued
+  [PASS] at 1201.75
+  [PASS] accepted
+  [PASS] stored as ACCEPTED with a timestamp
+  [PASS] an accepted quotation cannot then be rejected
+
+==============================================================================
+  D — QUOTE TO ORDER, THROUGH THE ORDER SERVICE
+==============================================================================
+
+── D1. the accepted quotation becomes a real order ───────────
+  [PASS] created
+  [PASS] it is flagged as the first order on the deal
+  [PASS] exactly one order was added
+  [PASS] one line
+  [PASS] ten units, taken from the quotation
+  [PASS] and the kilograms were DERIVED by the order service, not sent by the CRM
+  [PASS] the order carries the quotation reference
+  [PASS] and goes to the state the preparation review runs from
+  [PASS] the link back to the quotation exists
+
+── D2. clicking twice does not make two orders ───────────────
+  [PASS] the second call succeeds rather than erroring
+  [PASS] and reports the replay plainly
+  [PASS] returning the SAME order
+  [PASS] no second order was created
+
+── D3. a draft quotation cannot become an order ──────────────
+  [PASS] refused with 409
+  [PASS] and the message says what state it is in
+
+── D4. a free-text line is refused by name, not silently dropped 
+  [PASS] refused with 409
+  [PASS] and the offending line is named
+  [PASS] no partial order was created
+
+── D4b. two quotations converting at the same instant get two different order numbers 
+  [PASS] both conversions succeeded
+  [PASS] and they are two DIFFERENT orders
+  [PASS] exactly two orders were added
+  [PASS] no two orders share a number
+
+── D4c. the SAME quotation converting twice at the same instant makes one order 
+  [PASS] both callers got an answer, neither errored
+  [PASS] and both were told about the SAME order
+  [PASS] exactly one of them reports having created it
+  [PASS] exactly one order was added
+  [PASS] and exactly one quote-to-order relationship exists
+
+── D4d. a quotation conversion racing the ordinary order-creation path 
+  [PASS] the quotation conversion succeeded
+  [PASS] the ordinary order creation succeeded
+  [PASS] they are two different order numbers
+  [PASS] exactly two orders were added
+  [PASS] and no two orders anywhere share a number
+
+── D4e. a conversion that is refused mid-transaction leaves nothing behind, and can be retried 
+  [PASS] refused with 409
+  [PASS] no order was left behind by the rolled-back transaction
+  [PASS] and no link row either
+  [PASS] and the idempotency key was released by the rollback
+  [PASS] the accepted quotation refuses to be revised, as designed
+  [PASS] a corrected quotation on the same deal converts normally
+  [PASS] adding exactly one order
+
+── D5. the deal was won by the acceptance itself, and the pipeline records it 
+  [PASS] winning it again by hand is refused as redundant, not applied twice
+  [PASS] stored as WON with a close date
+  [PASS] and the move is on the deal's timeline
+  [PASS] a won deal cannot be flipped to lost without reopening
+
+==============================================================================
+  E — COMMISSION: PLAN, COLLECTION, ACCRUAL
+==============================================================================
+
+── E1. a manager creates a tiered plan and assigns the rep ───
+  [PASS] plan created
+  [PASS] a manager cannot put THEMSELVES on a plan
+  [PASS] but can assign the rep
+  [PASS] a second, overlapping assignment is refused
+
+── E2. a retroactive plan is refused rather than half-implemented 
+  [PASS] refused with 400
+  [PASS] and the refusal explains the difference
+
+── E3. a partial collection accrues once ─────────────────────
+  [PASS] recorded
+  [PASS] the ledger holds 50.00
+  [PASS] from exactly one entry
+
+── E4. the same payment delivered twice changes nothing ──────
+  [PASS] reported as a replay
+  [PASS] still 50.00, not 100.00
+  [PASS] and no second ledger entry was written
+
+── E5. the second instalment adds the DIFFERENCE, and the rows sum to the period 
+  [PASS] recorded
+  [PASS] the ledger now holds 100.00 — the second payment added 50, not another 100
+  [PASS] two accrual rows
+  [PASS] each carries its OWN event's contribution: 50 and 50
+  [PASS] each carries its own base of 5,000 rather than a running 10,000
+  [PASS] so the rows sum to exactly what the ledger says
+
+── E6. the review screen reconciles the two and says so ──────
+  [PASS] readable by finance
+  [PASS] the rep appears
+  [PASS] accrued 100.00
+  [PASS] the accrual rows total the same
+  [PASS] and it is reported as reconciled
+  [PASS] the whole screen is marked sandbox
+
+── E6b. a period holding real money is NOT marked sandbox ────
+  [PASS] a sandbox collection lands in the mixed month
+  [PASS] with only synthetic money the flag is true
+  [PASS] once real money is in the period the flag is false
+  [PASS] and both sources are named rather than one hidden
+  [PASS] with no misleading notice attached
+
+── E6c. every movement this suite wrote can be traced to what produced it 
+  [PASS] the period reports its movement count
+  [PASS] none of them is missing provenance
+  [PASS] no reversal money is left unaccounted for
+  [PASS] so the period is reported as traceable
+
+── E7. nobody approves their own commission ──────────────────
+  [PASS] refused with 403
+  [PASS] but the rep's period can be approved
+  [PASS] two accruals approved
+  [PASS] both rows read APPROVED
+  [PASS] and carry the approver
+
+── E8. a refund after approval corrects the LEDGER and leaves the approved rows alone 
+  [PASS] the reversal is accepted
+  [PASS] the ledger drops to 50.00
+  [PASS] recorded as a NEGATIVE reversal entry, not as an edit
+  [PASS] and every APPROVED accrual is byte-for-byte what was approved
+  [PASS] reversing twice is harmless
+  [PASS] and the ledger is still 50.00
+
+── E9. an adjustment appends, and a payout cannot exceed what is owed 
+  [PASS] a zero adjustment is refused rather than stored
+  [PASS] an adjustment with no reason is refused
+  [PASS] a reasoned adjustment is recorded
+  [PASS] outstanding becomes 60.00
+  [PASS] and it is reported SEPARATELY from the accrued figure, not folded into it
+  [PASS] carrying the reason
+  [PASS] and who made it
+  [PASS] paying more than is owed is refused
+  [PASS] paying exactly what is owed is recorded
+  [PASS] and nothing remains outstanding
+  [PASS] the response says plainly that no money moved
+  [PASS] the approved accruals now read PAID
+
+── E10. the rep sees their own figure, and the same figure ───
+  [PASS] readable
+  [PASS] accrued 50.00, matching what finance saw
+  [PASS] paid 60.00
+  [PASS] and the sandbox notice is on the rep's own screen too
+  [PASS] but the rep cannot open the team review
+
+==============================================================================
+  F — SPLIT ATTRIBUTION
+==============================================================================
+
+── F1. a split divides the BASE between two people ───────────
+  [PASS] the second person is on the plan too
+  [PASS] the split is stored
+  [PASS] a split that does not total 100 is refused, not normalised
+  [PASS] the collection is recorded
+  [PASS] the 40% share earns 40.00
+  [PASS] and the 60% share adds 60.00 to what the rep already had
+  [PASS] the accrual for the payment that predates the split still records a 100% share
+
+==============================================================================
+  G — TARGETS AND REPORTS
+==============================================================================
+
+── G1. a target is set by a manager, never by its owner ──────
+  [PASS] setting your own target is refused
+  [PASS] a target of zero is refused — it is met by doing nothing
+  [PASS] a real target is stored
+
+── G2. progress is measured against collections, not deal value 
+  [PASS] readable
+  [PASS] achieved 11000.00 from the collections, not from the pipeline
+  [PASS] the 10,000 target is met
+  [PASS] and the figure is marked as coming from the sandbox
+
+── G3. conversion rate is a cohort rate, computed from real links 
+  [PASS] readable
+  [PASS] the leads created this month are counted
+  [PASS] and the conversions among THEM
+  [PASS] the rate is converted/created, not an unrelated ratio (50.0%)
+  [PASS] a won deal is reported
+  [PASS] and the cycle length carries its sample size
+
+==============================================================================
+  H — CSV IMPORT AND EXPORT
+==============================================================================
+
+── H1. a dry run reports without writing ─────────────────────
+  [PASS] the dry run answers
+  [PASS] two rows would import
+  [PASS] and the third is reported by its spreadsheet row number
+  [PASS] nothing was written
+
+── H2. the commit writes exactly what the dry run promised ───
+  [PASS] imported
+  [PASS] two rows
+  [PASS] both are in the database
+  [PASS] owned by the importer, not by anything the body could name
+  [PASS] with duplicate keys computed on the way in
+
+── H3. a row whose phone already exists is held back until acknowledged 
+  [PASS] refused with 409
+  [PASS] naming the lead it matches
+  [PASS] and nothing was written
+  [PASS] acknowledged, it imports
+
+── H4. two rows in the FILE sharing a phone: the second is held back 
+  [PASS] one of the two would import
+  [PASS] and the duplicate names the row it repeats
+
+── H5. export needs its own privilege, and neutralises formulas 
+  [PASS] the rep may export their own
+  [PASS] served as a CSV attachment
+  [PASS] and never cached
+  [PASS] the file starts with a UTF-8 BOM so Excel reads Arabic properly
+  [PASS] the formula is neutralised with a leading apostrophe
+  [PASS] and it is NOT left executable
+  [PASS] somebody without the privilege is refused
+
+==============================================================================
+  I — CONFIGURATION: STAGES AND ASSIGNMENTS
+==============================================================================
+
+── I1. a stage can be added, renamed and reordered ───────────
+  [PASS] a stage with no Arabic name is refused — it would render as a gap on the board most people use
+  [PASS] with both names it is created
+  [PASS] and it lands at the end of the board
+  [PASS] renaming and reordering succeed
+  [PASS] the label changed
+  [PASS] the position changed
+  [PASS] and the CODE — the stable identity — did not
+
+── I2. a stage holding deals cannot be retired ───────────────
+  [PASS] refused with 409
+  [PASS] and the message says how many deals are in the way
+  [PASS] the stage is still active — the board did not lose a column with cards in it
+  [PASS] once it is empty it retires
+  [PASS] stored as inactive rather than deleted
+
+── I3. an assignment is ENDED, never deleted ─────────────────
+  [PASS] the finance assignment from section F exists
+  [PASS] and is open-ended
+  [PASS] a manager may end somebody else's assignment
+  [PASS] the row still exists — money accrued under it and the accruals reach the plan through it
+  [PASS] and now carries an end date
+  [PASS] an end date before the start is refused
+  [PASS] a manager still cannot put themselves on a plan
+
+==============================================================================
+  SALES WORKFLOW RESULT
+==============================================================================
+231 passed, 0 failed
