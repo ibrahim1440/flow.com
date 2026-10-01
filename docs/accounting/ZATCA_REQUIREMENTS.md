@@ -17,7 +17,10 @@ Review date: 2026-09-29.
 ## 2. Official sources and validator: access evidence
 
 Every official host is refused by this environment's network policy (the proxy answers 403 to
-CONNECT). Nothing was worked around. Raw attempts: `evidence/zatca/access-attempts-2026-09-29.txt`.
+CONNECT), re-checked on 2026-10-01T05:42Z. Nothing was worked around. Raw attempts:
+`evidence/zatca/access-attempts-2026-09-29.txt`, `access-attempts-2026-10-01.txt`. The SDK run that
+is ready to go (application-generated six-document matrix, harness, Java 11) and the six separate
+statuses (developer verification → production readiness) are in `ZATCA_SDK_VALIDATION.md`.
 The two "opened via web retrieval" rows below record the owner's retrieval and line references; web
 retrieval from this environment was also attempted on 2026-09-29 and returned `EGRESS_BLOCKED`, so
 those lines were **not re-read here**. The implementation follows them as cited.
