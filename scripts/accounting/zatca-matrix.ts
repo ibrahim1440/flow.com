@@ -54,7 +54,8 @@ async function main() {
   await assertDisposableFinanceDb({ url: process.env.DATABASE_URL, expectedDb: DB, query: (q: string) => prisma.$queryRawUnsafe(q) });
   if (await prisma.account.count()) { console.error("Refusing: the database is not freshly migrated (recreate it with zatca-matrix.sh)."); process.exit(1); }
   const commit = execSync("git rev-parse HEAD").toString().trim();
-  const dirty = execSync("git status --porcelain").toString().trim() !== "";
+  // The output directory may sit inside the repository (evidence); it does not make the tree "dirty".
+  const dirty = execSync(`git status --porcelain -- . ${JSON.stringify(`:(exclude)${OUT}`)}`).toString().trim() !== "";
 
   const prep = await user("matrix.preparer", "معدّ المصفوفة (تجريبي)");
   const appr = await user("matrix.approver", "معتمد المصفوفة (تجريبي)");
