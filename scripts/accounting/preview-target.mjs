@@ -34,7 +34,7 @@ export const ALLOWLIST = [{
   project: PREVIEW.project, branch: PREVIEW.branch, endpoint: PREVIEW.endpoint, database: PREVIEW.database,
   hosts: ["ep-plain-field-awqkif28.c-12.us-east-1.aws.neon.tech", "ep-plain-field-awqkif28-pooler.c-12.us-east-1.aws.neon.tech"],
 }];
-const DENIED = ["ep-dawn-dust-aqn1u1uf", "ep-jolly-feather-aqne6cp1", "ep-icy-field-aq4upc3z", "ep-noisy-night-aq3qczk4", "ep-wandering-leaf-aqjtuin5", "ep-lingering-wave-aqtxp32f", "ep-proud-block-aq9mtqql"];
+const DENIED = ["ep-dawn-dust-aqn1u1uf", "ep-jolly-feather-aqne6cp1", "ep-icy-field-aq4upc3z", "ep-noisy-night-aq3qczk4", "ep-wandering-leaf-aqjtuin5", "ep-lingering-wave-aqtxp32f", "ep-proud-block-aq9mtqql", "ep-rapid-rain-aq9ft4ev" /* backup-pre-payout-integrity-20260929, added 2026-10-01 */];
 
 export function isPreviewTarget(rawUrl) {
   let u;

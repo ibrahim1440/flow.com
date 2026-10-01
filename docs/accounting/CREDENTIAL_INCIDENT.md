@@ -128,13 +128,42 @@ console, so its password never passes through this session. Grants come from
 | `br-weathered-bread-aqais7hp` | `ep-dawn-dust-aqn1u1uf` | 2026-05-10 07:43:33 | live production (RELEASE-20260927 §1b; to be re-confirmed from Vercel config when access exists) |
 | `br-fragrant-poetry-aqd0ndyx` | `ep-jolly-feather-aqne6cp1` | same | project default, named "production", not live |
 | `br-bold-forest-aq3z2qjq` | `ep-wandering-leaf-aqjtuin5` | same | production-data copy |
-| `br-billowing-fire-aq5eyiku` | `ep-noisy-night-aq3qczk4` | same | E1 source |
+| `br-billowing-fire-aq5eyiku` | `ep-noisy-night-aq3qczk4` | same | E1 source — **no longer listed by the Neon API on 2026-10-01** (deleted) |
 | `br-rough-violet-aq9nwnom` | `ep-lingering-wave-aqtxp32f` | same | |
 | `br-wild-credit-aqn8vqh6` | `ep-proud-block-aq9mtqql` | same | archived |
 | `br-cold-wave-aqrk91we` | — | same | |
 | `br-fancy-unit-aqxm3hef` | — | same | restore source |
 | `br-quiet-sky-aqgw77yy` | — | same | |
 | `br-crimson-glitter-aq2ncfll` | — | same | |
+| `br-delicate-pond-aqs3rb3h` | `ep-rapid-rain-aq9ft4ev` | same (read 2026-10-01) | **new since the register was made**: `backup-pre-payout-integrity-20260929`, created 2026-09-29 from the live branch; carries `neondb_owner` and `erp_app`; treat as exposed; added to the preview deny list |
+
+## 10. Inventory refresh (2026-10-01, Neon metadata only, no secret read)
+
+- **Production `neondb_owner` not rotated:** the live branch `br-weathered-bread-aqais7hp` still has
+  `neondb_owner` with `updated_at` 2026-05-10T07:43:33Z. Nothing indicates a rotation.
+- **`erp_app` unchanged:** created 2026-09-27T06:21:45Z, not updated since.
+- **One branch gone, one new:** `br-billowing-fire-aq5eyiku` (E1 source) is gone, and
+  `br-delicate-pond-aqs3rb3h` is new (§8).
+- **Endpoints:** every compute endpoint of the project reports `passwordless_access: true`, which is
+  account-authenticated `psql` (not a password).
+- **GitHub:** this session can push to `ibrahim1440/flow.com` through the Claude GitHub App (git
+  proxy). No repository secrets were read; `.github/` is still absent from the branch.
+- **Vercel:** the connector lists projects, but project-scoped calls (environment-variable metadata)
+  return 403 for scope `ibrahimmutambak-4927s-projects`. So the Vercel consumers in §3 remain
+  HYPOTHESES.
+
+### Concrete rotation plan (for the owner; NOT executed, NOT authorised)
+
+| Step | Action | Who | Verification |
+|---|---|---|---|
+| R0 | Freeze changes to production; create restore point `backup-pre-rotation-<date>` from the live branch | owner | Neon branch listed; read-only row counts recorded |
+| R1 | List every consumer of `neondb_owner` (§3) and confirm each from metadata. Vercel needs the connector re-authorised for the team scope | owner / implementer | §3 rows moved from HYPOTHESIS to FACT |
+| R2 | Reset `neondb_owner` on the **live** branch (Neon console → Roles → Reset password). The new value goes straight into a secret store, never into chat or a file in the repository | owner | `updated_at` changes in the Neon API |
+| R3 | Update the consumers that legitimately need the owner role: migration operators' `DIRECT_URL` only. Production `DATABASE_URL` stays `erp_app` | owner | `classify-db-urls.mjs` shows the expected role classes |
+| R4 | Redeploy anything built with the old value (the rollback deployment named in §3), or retire it | owner | the deployment's build time is after the variable change |
+| R5 | Reset `neondb_owner` on every other branch in §8 that keeps an endpoint, or delete branches no longer needed (`br-delicate-pond`, `br-rough-violet`, `br-bold-forest`, `br-wild-credit`) | owner | per-branch `updated_at`; the old password fails to authenticate (V1/V2, needs TCP 5432) |
+| R6 | Rotate `erp_app` if any evidence shows it was exposed (none so far) | owner | — |
+| R7 | Record times, steps and verifications in §9; keep the hypotheses until they are verified | owner | — |
 
 ## 9. Log
 
@@ -144,3 +173,4 @@ console, so its password never passes through this session. Grants come from
 | 2026-09-27, before 16:00 | local `.env.rehearsal` deleted |
 | 2026-09-27 16:00–16:10 | scope from metadata |
 | 2026-09-27 ~19:00 | facts separated from hypotheses; recovery path and strict verifier prepared; no rotation |
+| 2026-10-01 08:20 | inventory refreshed from Neon metadata (§10); new branch `br-delicate-pond` added and denied for previews; rotation plan made concrete; no rotation |

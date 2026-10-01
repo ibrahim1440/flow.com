@@ -17,6 +17,7 @@ describe("preview target", () => {
     assert.equal(isPreviewTarget(url), true);
     assert.equal(isPreviewTarget(url.replace("accounting_preview", "neondb")), false);
     assert.equal(isPreviewTarget("postgresql://x:y@ep-dawn-dust-aqn1u1uf.c-8.us-east-1.aws.neon.tech/accounting_preview"), false);
+    assert.equal(isPreviewTarget("postgresql://x:y@ep-rapid-rain-aq9ft4ev.c-8.us-east-1.aws.neon.tech/accounting_preview"), false, "backup branch of production (added 2026-10-01)");
     assert.equal(isPreviewTarget("not a url"), false);
     // exact host only: a look-alike host with the endpoint id as a prefix is refused
     assert.equal(isPreviewTarget("postgresql://x:y@ep-plain-field-awqkif28.evil.example.com/accounting_preview"), false);

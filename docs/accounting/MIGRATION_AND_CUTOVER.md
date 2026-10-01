@@ -84,3 +84,81 @@ still be refused.
 - **Roll forward** is the default for defects: fix, redeploy, re-run the processor (idempotent).
 - **Backup:** take a Neon branch of the live branch immediately before the production migration
   (as was done for the finance release); it is the restore point.
+
+## Rehearsal of all twelve migrations (2026-10-01)
+
+### Local rehearsal on main's schema and seed — done
+
+`scripts/accounting/local-migration-rehearsal.sh`; evidence in `evidence/rehearsal/local-rehearsal-031daaf.txt`.
+
+1. `main` (`fc64c05`) built a fresh disposable database: 29 migrations plus `main`'s own seed (synthetic).
+2. All 92 pre-existing tables were fingerprinted (249 rows).
+3. The branch's twelve migrations were applied with `prisma migrate deploy`: 1.8 s, 41 migrations in total.
+4. **All 92 tables were byte-identical over their original columns afterwards.**
+
+This shows the migrations apply cleanly on production's schema shape. It does **not** cover:
+- production's data volume;
+- PostgreSQL 17 / Neon;
+- timing under load.
+
+### Production-copy rehearsal — plan, awaiting authorisation
+
+**Status: not run.** It needs a fresh copy of the live branch `br-weathered-bread-aqais7hp`
+(`ep-dawn-dust`). Project `dark-lab-61530722` already has 10 branches. The 2026-09-27
+ledger-core rehearsal branch (`br-billowing-fire-aq5eyiku`) no longer exists. Creating a new branch,
+or reusing an existing one, needs the owner's decision: the plan's branch limits and cost, and which
+existing branch may be used or removed.
+
+1. **Create the copy.** Create branch `rehearsal-accounting-12-<date>` from `br-weathered-bread-aqais7hp`
+   (Neon copy-on-write). Production is not written.
+2. **Check the copy is not production.** Confirm through the Neon API that the branch id and endpoint
+   differ from `ep-dawn-dust` and are not in the `preview-target.mjs` deny list.
+3. **Record the before state.** Read `_prisma_migrations` and expect 29 rows, the latest
+   `20260927100000_protect_movement_provenance`. Take row counts and md5 fingerprints of every table,
+   using the same queries as the local script.
+4. **Apply the migrations.** Run the twelve migrations in order, inside one transaction per migration,
+   timing each. Use `prisma migrate deploy` from a machine with TCP access to Neon, or the Neon
+   connector with each `migration.sql` verbatim.
+5. **Verify the result:**
+   - 41 rows in `_prisma_migrations`;
+   - every pre-existing table's fingerprint unchanged over its original columns;
+   - the trigger count matches the local result (66 non-internal triggers on the fixture schema);
+   - `erp_app` privileges are unchanged.
+6. **Build against the copy.** Run the new build against the copy as `erp_app`: `/dashboard/accounting`
+   shows "set-up not complete" and nothing posts.
+7. **Clean up.** Delete the rehearsal branch, or keep it labelled until the release decision.
+
+Input needed: the owner authorises step 1 (branch creation, or a named branch to reuse).
+
+## Backup and restore (2026-10-01)
+
+### Local verification — done
+
+`scripts/accounting/local-backup-restore-check.sh`; evidence in
+`evidence/backup-restore/local-backup-restore-031daaf.txt`.
+
+1. `pg_dump` of the fixture database, restored into a fresh disposable database.
+2. Compared and found identical:
+   - row counts of every table;
+   - ledger totals: 251 lines, debits = credits = 4,567,544.30, per-account md5;
+   - 66 triggers and 253 functions;
+   - the e-invoice chain.
+3. The restored copy still refuses changes to posted journal lines and issued e-invoices.
+
+This check is part of the release gates.
+
+### Neon (production) — procedure, not executed
+
+**Restore point before any production step:**
+- create a branch from the live branch at the current point in time; this is how the existing
+  `backup-pre-*` branches were made;
+- record its id;
+- verify it with read-only row counts.
+
+**Restore:**
+- restore from that branch, or use point-in-time restore within the project's history retention
+  (21,600 s = 6 hours on `dark-lab-61530722`, per the Neon project settings read on 2026-10-01);
+- after any restore, re-run the credential checks in `CREDENTIAL_INCIDENT.md` §6, because restored
+  branches carry the same roles.
+
+**Not yet exercised on Neon.** It needs the owner's authorisation for branch creation, as above.
