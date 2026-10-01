@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svrl:schematron-output xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+                        xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+                        xmlns:cn="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+                        xmlns:dn="urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2"
+                        xmlns:error="https://doi.org/10.5281/zenodo.1495494#error"
+                        xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"
+                        xmlns:qdt="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDataTypes-2"
+                        xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                        xmlns:sac="urn:oasis:names:specification:ubl:schema:xsd:SignatureAggregateComponents-2"
+                        xmlns:sbc="urn:oasis:names:specification:ubl:schema:xsd:SignatureBasicComponents-2"
+                        xmlns:sch="http://purl.oclc.org/dsdl/schematron"
+                        xmlns:schxslt="https://doi.org/10.5281/zenodo.1495494"
+                        xmlns:schxslt-api="https://doi.org/10.5281/zenodo.1495494#api"
+                        xmlns:sig="urn:oasis:names:specification:ubl:schema:xsd:CommonSignatureComponents-2"
+                        xmlns:svrl="http://purl.oclc.org/dsdl/svrl"
+                        xmlns:ubl="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+                        xmlns:udt="urn:oasis:names:specification:ubl:schema:xsd:UnqualifiedDataTypes-2"
+                        xmlns:xs="http://www.w3.org/2001/XMLSchema">
+   <svrl:ns-prefix-in-attribute-values prefix="ext"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="cbc"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="cac"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="sig"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:CommonSignatureComponents-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="sac"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:SignatureAggregateComponents-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="sbc"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:CommonSignatureComponents-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="qdt"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDataTypes-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="udt"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:UnqualifiedDataTypes-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="cn"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="dn"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="ubl"
+                                       uri="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"/>
+   <svrl:ns-prefix-in-attribute-values prefix="xs" uri="http://www.w3.org/2001/XMLSchema"/>
+   <svrl:metadata xmlns:dct="http://purl.org/dc/terms/"
+                  xmlns:skos="http://www.w3.org/2004/02/skos/core#">
+      <dct:creator>
+         <dct:Agent>
+            <skos:prefLabel>SAXON/HE 12.5</skos:prefLabel>
+         </dct:Agent>
+      </dct:creator>
+      <dct:created>2026-10-01T08:33:20.39039Z</dct:created>
+      <dct:source>
+         <rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dct:creator>
+               <dct:Agent>
+                  <skos:prefLabel>SchXslt/${project.version} SAXON/HE 10.5</skos:prefLabel>
+                  <schxslt.compile.typed-variables xmlns="https://doi.org/10.5281/zenodo.1495494#">true</schxslt.compile.typed-variables>
+               </dct:Agent>
+            </dct:creator>
+            <dct:created>2021-08-31T19:22:55.011988533+02:00</dct:created>
+         </rdf:Description>
+      </dct:source>
+   </svrl:metadata>
+   <svrl:active-pattern id="CustomRules"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="/ubl:Invoice | /cn:CreditNote"/>
+   <svrl:fired-rule context="cbc:IssueDate"/>
+   <svrl:fired-rule context="cbc:InvoiceTypeCode"/>
+   <svrl:fired-rule context="/ubl:Invoice/cac:TaxExchangeRate"/>
+   <svrl:fired-rule context="/ubl:Invoice/cac:TaxExchangeRate"/>
+   <svrl:fired-rule context="cac:AdditionalDocumentReference[normalize-space(cbc:ID) = 'PIH']/cac:Attachment"/>
+   <!--WARNING: Rule for context "cac:AdditionalDocumentReference/cac:Attachment" shadowed by preceding rule-->
+   <svrl:suppressed-rule context="cac:AdditionalDocumentReference/cac:Attachment"/>
+   <svrl:fired-rule context="cac:AdditionalDocumentReference/cac:Attachment"/>
+   <svrl:failed-assert location="/Q{urn:oasis:names:specification:ubl:schema:xsd:Invoice-2}Invoice[1]/Q{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}AdditionalDocumentReference[3]/Q{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Attachment[1]"
+                       flag="error"
+                       id="BR-KSA-28"
+                       test="exists(cbc:EmbeddedDocumentBinaryObject) and (cbc:EmbeddedDocumentBinaryObject) != '' and (//ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent/sig:UBLDocumentSignatures/sac:SignatureInformation/cbc:ID) = 'urn:oasis:names:specification:ubl:signature:1'">
+      <svrl:text>[BR-KSA-28]-If the cryptographic stamp (KSA-15) exists in the invoice, this cryptographic stamp (KSA-15) must contain the exact  "urn:oasis:names:specification:ubl:signature:1" value for signature information ID.</svrl:text>
+      <svrl:message-code>BR-KSA-28</svrl:message-code>
+      <svrl:message-category>KSA - business rules (BR-KSA)</svrl:message-category>
+   </svrl:failed-assert>
+   <svrl:failed-assert location="/Q{urn:oasis:names:specification:ubl:schema:xsd:Invoice-2}Invoice[1]/Q{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}AdditionalDocumentReference[3]/Q{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Attachment[1]"
+                       flag="warning"
+                       id="BR-KSA-29"
+                       test="exists(cbc:EmbeddedDocumentBinaryObject) and (cbc:EmbeddedDocumentBinaryObject) != '' and (//cac:Signature/cbc:ID) = 'urn:oasis:names:specification:ubl:signature:Invoice'">
+      <svrl:text>[BR-KSA-29]-If the cryptographic stamp (KSA-15) exists in the invoice, this  cryptographic stamp (KSA-15) must contain the exact  "urn:oasis:names:specification:ubl:signature:Invoice" value for referenced signature ID and signature ID.</svrl:text>
+      <svrl:message-code>BR-KSA-29</svrl:message-code>
+      <svrl:message-category>KSA - business rules (BR-KSA)</svrl:message-category>
+   </svrl:failed-assert>
+   <svrl:fired-rule context="cac:AccountingSupplierParty"/>
+   <svrl:fired-rule context="cac:AccountingSupplierParty/cac:Party"/>
+   <svrl:fired-rule context="cac:AccountingSupplierParty/cac:Party/cac:PostalAddress"/>
+   <svrl:fired-rule context="//cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cac:TaxScheme[cbc:ID = 'VAT'][//cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID]"/>
+   <svrl:fired-rule context="cac:AccountingCustomerParty"/>
+   <svrl:fired-rule context="cac:AccountingCustomerParty/cac:Party"/>
+   <svrl:fired-rule context="cac:InvoiceLine/cac:TaxTotal"/>
+   <svrl:fired-rule context="/ubl:Invoice/cac:InvoiceLine/cac:DocumentReference/cbc:DocumentTypeCode"/>
+   <svrl:fired-rule context="cac:InvoiceLine/cac:TaxTotal"/>
+   <svrl:fired-rule context="cac:InvoiceLine/cac:TaxTotal"/>
+   <svrl:active-pattern id="CustomRules_Attachment_QR_binary"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_customerParty_HQ"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_companyId_HQ"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_customerParty_SA"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="cac:AccountingCustomerParty/cac:Party/cac:PostalAddress/cac:Country[cbc:IdentificationCode = 'SA']"/>
+   <svrl:active-pattern id="CustomRules_typeCode_01"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="cbc:InvoiceTypeCode[substring(@name, 1, 2) = '01']"/>
+   <svrl:active-pattern id="CustomRules_typeCode_01_388"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_typeCode_01_Registration"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_Code_383_381"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="/ubl:Invoice[cbc:InvoiceTypeCode = '381'] | /ubl:Invoice[cbc:InvoiceTypeCode = '383']"/>
+   <svrl:active-pattern id="CustomRules_typeCode_02"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="cbc:InvoiceTypeCode[substring(@name, 1, 2) = '02']"/>
+   <svrl:active-pattern id="CustomRules_typeCode_5"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_typeCode_5_0_Company"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_typeCode_5__HQ"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="CustomRules_typeCode_5_0_HQ"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="Decimals" documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="cac:AllowanceCharge/cbc:MultiplierFactorNumeric | cac:InvoiceLine/cac:AllowanceCharge/cbc:MultiplierFactorNumeric"/>
+   <svrl:fired-rule context="cac:AllowanceCharge/cac:TaxCategory/cbc:Percent | cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent | cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent"/>
+   <svrl:fired-rule context="cac:InvoiceLine"/>
+   <svrl:fired-rule context="cac:AllowanceCharge/cac:TaxCategory/cbc:Percent | cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent | cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent"/>
+   <svrl:active-pattern id="CodeList" documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:DocumentCurrencyCode | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount/@currencyID | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount/@currencyID"/>
+   <svrl:fired-rule flag="error"
+                    context="cac:AdditionalDocumentReference/cac:Attachment/cbc:EmbeddedDocumentBinaryObject"/>
+   <svrl:fired-rule flag="error"
+                    context="cac:AdditionalDocumentReference/cac:Attachment/cbc:EmbeddedDocumentBinaryObject"/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="&#xA;                     not(floor(number(/ubl:Invoice/cac:AllowanceCharge/cac:TaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:AllowanceCharge/cac:TaxCategory/cbc:Percent = 5)))&#xA;                     or not(floor(number(/ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent = 5)))&#xA;                     or not(floor(number(/ubl:Invoice/cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent = 5)))&#xA;                     or exists(/ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent) and not(floor(number(/ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent = 5)))&#xA;                  "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:fired-rule flag="error"
+                    context="&#xA;                     not(floor(number(/ubl:Invoice/cac:AllowanceCharge/cac:TaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:AllowanceCharge/cac:TaxCategory/cbc:Percent = 5)))&#xA;                     or not(floor(number(/ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent = 5)))&#xA;                     or not(floor(number(/ubl:Invoice/cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent = 5)))&#xA;                     or exists(/ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent) and not(floor(number(/ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent)) = 15 or floor(number(/ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:Percent = 5)))&#xA;                  "/>
+   <svrl:fired-rule flag="error"
+                    context="cbc:Amount | cbc:BaseAmount | cbc:PriceAmount |  cbc:LineExtensionAmount | cbc:TaxExclusiveAmount | cbc:TaxInclusiveAmount | cbc:AllowanceTotalAmount | cbc:ChargeTotalAmount | cbc:PrepaidAmount | cbc:PayableRoundingAmount | cbc:PayableAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount "/>
+   <svrl:active-pattern id="Formats_allfields"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:active-pattern id="Formats" documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="cbc:IssueDate | cbc:DueDate | cac:Delivery/cbc:ActualDeliveryDate | cac:BillingReference/cac:InvoiceDocumentReference/cbc:IssueDate | cac:InvoiceLine/cac:DocumentReference/cbc:IssueDates | cbc:TaxPointDate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:fired-rule context="&#34;ubl:Invoice/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PrepaidAmount | ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount | ubl:Invoice/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cbc:LineExtensionAmount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cbc:RoundingAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cbc:PriceAmount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:Amount | ubl:Invoice/cac:InvoiceLine/cac:Price/cac:AllowanceCharge/cbc:BaseAmount | ubl:Invoice/cac:InvoiceLine/cbc:InvoicedQuantity | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount | ubl:Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount | ubl:Invoice/cac:TaxExchangeRate/cbc:CalculationRate"/>
+   <svrl:active-pattern id="EN16931" documents="file:/in/simplified-credit-note/document.xml"/>
+   <svrl:fired-rule context="/ubl:Invoice"/>
+   <svrl:fired-rule context="cbc:TaxCurrencyCode"/>
+   <svrl:fired-rule context="cac:InvoiceLine"/>
+   <svrl:active-pattern id="EN16931_baseAmount"
+                        documents="file:/in/simplified-credit-note/document.xml"/>
+</svrl:schematron-output>

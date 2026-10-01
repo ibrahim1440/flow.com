@@ -119,7 +119,7 @@ for (const key of L.MATRIX_KEYS) {
   const inputProblems = m.problems.filter((p) => p.startsWith(key) || p.includes(`${key}/`) || p.includes(`: ${key}`));
   for (const cmd of ["validate", "generateHash"]) {
     if (!doc || inputProblems.length) { entry.checks[cmd] = { status: L.STATUS.FAIL, reason: inputProblems.join("; ") || "document missing" }; continue; }
-    if (!canRun) { entry.checks[cmd] = { status: L.STATUS.NOT_RUN, reason: ev.preconditions.find((p) => p.status !== L.STATUS.PASS)?.name ?? "precondition" }; continue; }
+    if (!canRun) { const p = ev.preconditions.find((x) => x.status !== L.STATUS.PASS); entry.checks[cmd] = { status: L.STATUS.NOT_RUN, reason: p ? `precondition not met: ${p.name} (${p.detail})` : "precondition not met" }; continue; }
     if (!documentedCmd[cmd]) { entry.checks[cmd] = { status: L.STATUS.BLOCKED, reason: `'${cmd}' not documented in the archive's readme` }; continue; }
     if (blockedReason === "java" || blockedReason === "no readme") { entry.checks[cmd] = { status: L.STATUS.BLOCKED, reason: blockedReason }; continue; }
     const r = runOne(cmd, key);

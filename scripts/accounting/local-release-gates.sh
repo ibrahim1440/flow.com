@@ -62,6 +62,9 @@ echo "capture pageErrors: $(grep -c '"pageErrors":\[\]' $TMP/capture.tap) clean 
 step a11y env BASE_URL=http://localhost:3040 FIN_PASSWORD=$FIN_FIXTURE_PASSWORD PW_CHROMIUM=${PW_CHROMIUM:-/opt/pw-browsers/chromium} node tests/accounting/visual/a11y.mjs $TMP/a11y.json
 grep "serious/critical" $TMP/a11y.tap | tee -a $S
 kill "$(cat $PIDFILE)" 2>/dev/null
+# Backup → restore → verify on local disposable databases (fixture reseeded first).
+reseed
+step backup-restore bash scripts/accounting/local-backup-restore-check.sh $TMP/backup-restore
 # Sales: pure engine suites, and the DB suite on a fresh local disposable sales_preview (DML-only role).
 step sales-pure node scripts/e2e/regression/run-sales.mjs commission-engine quotes-domain
 ADMIN=$(echo "$DATABASE_URL" | sed -E 's#/[^/?]+(\?.*)?$#/postgres#')
