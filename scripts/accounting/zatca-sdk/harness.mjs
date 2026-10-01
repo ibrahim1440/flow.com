@@ -5,7 +5,14 @@
 //
 //   node scripts/accounting/zatca-sdk/harness.mjs --matrix <dir> --out <dir> --archive <sdk.zip> \
 //     --sha256 <hex> --source-url <where it was downloaded from> [--profile <output-profile.json>]
-//     [--image zatca-sdk-runner:11] [--runner container|direct] [--harness-test]
+//     [--image zatca-sdk-runner:11] [--runner container|direct] [--harness-test] [--timeout-seconds 600]
+//
+// Fresh evidence only: every invocation creates a NEW run directory <out>/<runId>/ (creation fails if
+// it already exists) and a new, empty directory per command inside it. Each command's runner writes
+// the run ID and the SHA-256 of the input it actually read; a result counts only if both match this
+// run and the verified matrix. A container launch failure, a nonzero runner exit, a timeout, or
+// missing or foreign output is a FAIL — evidence from an earlier run is never read. <out>/LATEST is
+// removed when a run starts and written only when it finishes.
 //
 // Isolation: --runner container (default, the only mode that can produce an official result) runs
 // every SDK command in a fresh container with no network, a read-only root, the SDK and matrix
@@ -15,7 +22,8 @@
 // Provenance: --sha256 verifies the archive's integrity against that value; --source-url is recorded
 // as the operator's claim — it does not authenticate where the archive came from.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, readdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join, resolve, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as L from "./lib.mjs";
@@ -29,9 +37,17 @@ const harnessTest = !!args["harness-test"] || runner !== "container";
 const image = args.image ?? "zatca-sdk-runner:11";
 const profile = JSON.parse(readFileSync(args.profile ? resolve(args.profile) : join(HERE, "output-profile.json"), "utf8"));
 const now = () => new Date().toISOString();
+const TIMEOUT_MS = Number(args["timeout-seconds"] ?? 600) * 1000;
+// Test-only: replace run-one.sh (direct runner + --harness-test only; never official).
+const runnerScript = args["runner-script"] && args["runner-script"] !== true ? resolve(args["runner-script"]) : null;
+if (runnerScript && (runner !== "direct" || !args["harness-test"])) { console.error("--runner-script is only allowed with --runner direct --harness-test"); process.exit(64); }
 mkdirSync(OUT, { recursive: true });
+rmSync(join(OUT, "LATEST"), { force: true });
+const runId = `${new Date().toISOString().replace(/[-:.]/g, "")}-${randomBytes(6).toString("hex")}`;
+const RUN = join(OUT, runId);
+mkdirSync(RUN); // not recursive: fails if it already exists, so nothing from an earlier run can be in it
 
-const ev = { harness: "scripts/accounting/zatca-sdk/harness.mjs", startedAt: now(), official: false, harnessTest, runner, image: runner === "container" ? image : null,
+const ev = { harness: "scripts/accounting/zatca-sdk/harness.mjs", runId, runDir: RUN, startedAt: now(), official: false, harnessTest, runner, image: runner === "container" ? image : null,
   inputs: { matrix: MATRIX, archive: args.archive ?? null, sha256Expected: args.sha256 ?? null, sourceUrlClaimed: args["source-url"] ?? null }, preconditions: [], sdk: {}, documents: [] };
 const pre = (name, status, detail) => { ev.preconditions.push({ name, status, detail }); return status === L.STATUS.PASS; };
 try { ev.applicationCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: HERE }).toString().trim(); } catch { ev.applicationCommit = null; }
@@ -52,7 +68,7 @@ else {
   else pre("archive SHA-256 matches the supplied value", L.STATUS.PASS, actual);
 }
 
-const SDK = join(OUT, "sdk-extracted");
+const SDK = join(RUN, "sdk-extracted");
 if (canRun) {
   const info = spawnSync("zipinfo", ["-l", archive], { encoding: "utf8" });
   const entries = L.parseZipinfo(info.stdout ?? "");
@@ -61,7 +77,7 @@ if (canRun) {
   if (!pre("archive entries safe (no absolute paths, traversal or links)", problems.length ? L.STATUS.FAIL : L.STATUS.PASS, problems.slice(0, 20).join("; ") || `${entries.length} entries`)) canRun = false;
 }
 if (canRun) {
-  rmSync(SDK, { recursive: true, force: true }); mkdirSync(SDK, { recursive: true });
+  mkdirSync(SDK);
   const unz = spawnSync("unzip", ["-q", "-n", archive, "-d", SDK], { encoding: "utf8" });
   const links = execFileSync("find", [SDK, "-type", "l"]).toString().trim();
   if (!pre("archive extracted, no links after extraction", unz.status === 0 && !links ? L.STATUS.PASS : L.STATUS.FAIL, unz.status !== 0 ? `unzip exit ${unz.status}` : links ? `links: ${links.slice(0, 200)}` : "ok")) canRun = false;
@@ -87,30 +103,54 @@ if (canRun) pre("commands documented in the archive's readme", documentedCmd.val
 if (canRun) pre("SDK output profile confirmed against the official SDK", profile.confirmed ? L.STATUS.PASS : L.STATUS.BLOCKED, profile.confirmed ? `${profile.confirmedBy} / ${profile.confirmedAgainst}` : "not confirmed — results cannot be interpreted reliably");
 
 // ── Runner ──────────────────────────────────────────────────────────────────────────────────
-const RUN_ONE = join(HERE, "run-one.sh");
+// Each command gets a NEW empty directory (mkdir fails if it exists) that is the only thing the
+// runner can write. The result is read only from there, and only if the runner completed.
+const RUN_ONE = runnerScript ?? join(HERE, "run-one.sh");
 function runOne(cmd, key) {
+  const dir = join(RUN, "cmd", key, cmd);
+  mkdirSync(join(RUN, "cmd", key), { recursive: true });
+  mkdirSync(dir);
+  const opts = { encoding: "utf8", timeout: TIMEOUT_MS, killSignal: "SIGKILL" };
+  let r, name = null;
   if (runner === "container") {
-    const r = spawnSync("docker", ["run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "512", "--memory", "2g",
-      "--tmpfs", "/work:rw,exec,size=1g", "--tmpfs", "/tmp:rw,size=256m", "-e", "SDK_DIR=/sdk", "-e", "IN_DIR=/in", "-e", "OUT_DIR=/out", "-e", "WORK_DIR=/work",
-      "-v", `${SDK}:/sdk:ro`, "-v", `${MATRIX}:/in:ro`, "-v", `${join(OUT, "runs")}:/out:rw`, "-v", `${RUN_ONE}:/runner/run-one.sh:ro`, image, "sh", "/runner/run-one.sh", cmd, key], { encoding: "utf8", timeout: 600000 });
-    return { runnerExit: r.status, runnerStderr: (r.stderr ?? "").slice(0, 2000) };
+    chmodSync(dir, 0o777); // the container runs as uid 10001; only this directory is writable to it
+    name = `zatca-${runId}-${key}-${cmd}`.toLowerCase();
+    r = spawnSync("docker", ["run", "--rm", "--name", name, "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "512", "--memory", "2g",
+      "--tmpfs", "/work:rw,exec,size=1g", "--tmpfs", "/tmp:rw,size=256m", "-e", "SDK_DIR=/sdk", "-e", "IN_DIR=/in", "-e", "OUT_DIR=/out", "-e", "WORK_DIR=/work", "-e", `RUN_ID=${runId}`,
+      "-v", `${SDK}:/sdk:ro`, "-v", `${MATRIX}:/in:ro`, "-v", `${dir}:/out:rw`, "-v", `${RUN_ONE}:/runner/run-one.sh:ro`, image, "sh", "/runner/run-one.sh", cmd, key], opts);
+  } else {
+    r = spawnSync("sh", [RUN_ONE, cmd, key], { ...opts, env: { ...process.env, SDK_DIR: SDK, IN_DIR: MATRIX, OUT_DIR: dir, WORK_DIR: join(RUN, "work"), RUN_ID: runId } });
   }
-  const r = spawnSync("sh", [RUN_ONE, cmd, key], { encoding: "utf8", env: { ...process.env, SDK_DIR: SDK, IN_DIR: MATRIX, OUT_DIR: join(OUT, "runs"), WORK_DIR: join(OUT, "work") }, timeout: 600000 });
-  return { runnerExit: r.status, runnerStderr: (r.stderr ?? "").slice(0, 2000) };
+  const timedOut = r.error?.code === "ETIMEDOUT";
+  if (name && (r.error || r.signal)) spawnSync("docker", ["rm", "-f", name], { encoding: "utf8" });
+  return { dir, runnerExit: r.status, signal: r.signal ?? null, timedOut, launchError: r.error && !timedOut ? String(r.error.code ?? r.error.message) : null, runnerStderr: (r.stderr ?? "").slice(-2000) };
+}
+/** Why a runner result cannot be used, or null if it is a complete, fresh result of this run. */
+function runnerProblem(r, read, expectedInputSha) {
+  if (r.timedOut) return `runner timed out after ${TIMEOUT_MS / 1000} s`;
+  if (r.launchError) return `runner could not be launched (${r.launchError})`;
+  if (r.signal) return `runner killed by ${r.signal}`;
+  if (r.runnerExit !== 0) return `runner exit ${r.runnerExit}${read("runner-error") ? `: ${read("runner-error").trim()}` : ""}${runner === "container" && r.runnerExit === 125 ? " (container launch failure)" : ""}`;
+  const got = read("run-id")?.trim();
+  if (got !== runId) return got ? `output belongs to another run (${got})` : "no fresh output: run-id missing";
+  const seen = read("input.sha256")?.trim();
+  if (seen !== expectedInputSha) return seen ? `runner read a different input (sha256 ${seen.slice(0, 12)}…, verified ${String(expectedInputSha).slice(0, 12)}…)` : "no fresh output: input.sha256 missing";
+  for (const f of ["exit", "argv", "started", "finished", "stdout"]) if (read(f) === null) return `no fresh output: ${f} missing`;
+  return null;
 }
 if (canRun && runner === "container") {
-  const v = spawnSync("docker", ["run", "--rm", "--network", "none", image, "java", "-version"], { encoding: "utf8" });
-  const major = Number((/version "(\d+)/.exec(v.stderr ?? "") ?? [])[1]);
-  ev.sdk.java = (v.stderr ?? "").split("\n")[0];
-  const req = ev.sdk.javaRequirement;
-  const ok = req ? major >= req.min && major < req.maxExclusive : false;
-  if (!pre("container Java satisfies the readme's requirement", ok ? L.STATUS.PASS : L.STATUS.BLOCKED, `${ev.sdk.java}; readme: ${req?.source ?? "not stated"}`)) blockedReason = "java";
+  const v = spawnSync("docker", ["run", "--rm", "--network", "none", image, "java", "-version"], { encoding: "utf8", timeout: 120000 });
+  if (v.status !== 0 && !/version "/.test(v.stderr ?? "")) { pre("runner container launches", L.STATUS.FAIL, `docker run exit ${v.status}${v.error ? ` (${v.error.code})` : ""}: ${(v.stderr ?? "").trim().split("\n").pop()}`); canRun = false; }
+  else {
+    const major = Number((/version "(\d+)/.exec(v.stderr ?? "") ?? [])[1]);
+    ev.sdk.java = (v.stderr ?? "").split("\n")[0];
+    const req = ev.sdk.javaRequirement;
+    const ok = req ? major >= req.min && major < req.maxExclusive : false;
+    if (!pre("container Java satisfies the readme's requirement", ok ? L.STATUS.PASS : L.STATUS.BLOCKED, `${ev.sdk.java}; readme: ${req?.source ?? "not stated"}`)) blockedReason = "java";
+  }
 }
 
 // ── Evidence for every document (always six entries) ─────────────────────────────────────────
-mkdirSync(join(OUT, "runs"), { recursive: true });
-// The container runs as an unprivileged uid (10001); only this directory is writable to it.
-if (runner === "container") chmodSync(join(OUT, "runs"), 0o777);
 const preFailed = ev.preconditions.some((p) => p.status === L.STATUS.FAIL);
 const preBlocked = ev.preconditions.some((p) => p.status === L.STATUS.BLOCKED);
 for (const key of L.MATRIX_KEYS) {
@@ -123,13 +163,15 @@ for (const key of L.MATRIX_KEYS) {
     if (!documentedCmd[cmd]) { entry.checks[cmd] = { status: L.STATUS.BLOCKED, reason: `'${cmd}' not documented in the archive's readme` }; continue; }
     if (blockedReason === "java" || blockedReason === "no readme") { entry.checks[cmd] = { status: L.STATUS.BLOCKED, reason: blockedReason }; continue; }
     const r = runOne(cmd, key);
-    const d = join(OUT, "runs", key);
-    const read = (f) => (existsSync(join(d, `${cmd}.${f}`)) ? readFileSync(join(d, `${cmd}.${f}`), "utf8") : null);
+    const read = (f) => (existsSync(join(r.dir, f)) ? readFileSync(join(r.dir, f), "utf8") : null);
+    const rel = relative(RUN, r.dir);
     const exitTxt = read("exit");
-    const exit = exitTxt === null ? null : Number(exitTxt.trim());
-    const raw = { argv: read("argv")?.trim().split("\n") ?? null, exitCode: exit, startedAt: read("started")?.trim() ?? null, finishedAt: read("finished")?.trim() ?? null,
-      stdout: `runs/${key}/${cmd}.stdout`, stderr: `runs/${key}/${cmd}.stderr`, runnerExit: r.runnerExit };
-    if (exit === null || Number.isNaN(exit)) { entry.checks[cmd] = { status: L.STATUS.FAIL, reason: `the command did not complete (runner exit ${r.runnerExit}) ${r.runnerStderr}`.trim(), raw }; continue; }
+    const exit = exitTxt === null || !/^\d+$/.test(exitTxt.trim()) ? null : Number(exitTxt.trim());
+    const raw = { runId, inputSha256: doc.files["document.xml"], observedInputSha256: read("input.sha256")?.trim() ?? null, argv: read("argv")?.trim().split("\n") ?? null, exitCode: exit,
+      startedAt: read("started")?.trim() ?? null, finishedAt: read("finished")?.trim() ?? null, stdout: `${rel}/stdout`, stderr: `${rel}/stderr`,
+      runnerExit: r.runnerExit, runnerSignal: r.signal, timedOut: r.timedOut, launchError: r.launchError, filesWritten: readdirSync(r.dir).sort() };
+    const problem = runnerProblem(r, read, doc.files["document.xml"]) ?? (exit === null ? "no fresh output: exit code missing or not a number" : null);
+    if (problem) { entry.checks[cmd] = { status: L.STATUS.FAIL, reason: `${problem} ${r.runnerStderr ? `— ${r.runnerStderr.trim().split("\n").pop()}` : ""}`.trim(), raw }; continue; }
     const out = read("stdout") ?? "";
     const verdict = cmd === "validate" ? L.interpretValidate(out, exit, profile) : L.interpretHash(out, exit, entry.appHash, profile);
     entry.checks[cmd] = { ...verdict, raw };
@@ -141,12 +183,14 @@ const g = L.gate(ev.documents);
 const decision = preFailed && g.decision !== L.STATUS.FAIL ? { ...g, decision: L.STATUS.FAIL, exitCode: 1 } : preBlocked && g.decision === L.STATUS.PASS ? { ...g, decision: L.STATUS.BLOCKED, exitCode: 3 } : g;
 ev.official = !harnessTest && decision.decision === L.STATUS.PASS && profile.confirmed === true;
 ev.gate = decision; ev.finishedAt = now();
-writeFileSync(join(OUT, "summary.json"), JSON.stringify(ev, null, 2) + "\n");
+writeFileSync(join(RUN, "summary.json"), JSON.stringify(ev, null, 2) + "\n");
 const md = [`# ZATCA SDK harness run — ${decision.decision}`, "", harnessTest ? "**HARNESS TEST (stub or direct runner) — NOT official SDK validation.**" : `Runner: container \`${image}\` (no network, read-only root, read-only inputs).`, "",
-  `Application commit: \`${ev.applicationCommit}\`; started ${ev.startedAt}; finished ${ev.finishedAt}.`, "", "## Preconditions", "", "| Check | Status | Detail |", "|---|---|---|",
+  `Run \`${runId}\`. Application commit: \`${ev.applicationCommit}\`; started ${ev.startedAt}; finished ${ev.finishedAt}.`, "", "## Preconditions", "", "| Check | Status | Detail |", "|---|---|---|",
   ...ev.preconditions.map((p) => `| ${p.name} | ${p.status} | ${String(p.detail).replace(/\|/g, "/").slice(0, 300)} |`), "", "## Documents", "", "| Document | validate | generateHash vs application hash |", "|---|---|---|",
   ...ev.documents.map((d) => `| ${d.key} | ${d.checks.validate.status}${d.checks.validate.reason ? ` — ${d.checks.validate.reason}` : ""} | ${d.checks.generateHash.status}${d.checks.generateHash.reason ? ` — ${d.checks.generateHash.reason}` : ""} |`),
   "", `Gate: **${decision.decision}** (${decision.counts.pass}/${decision.counts.total} PASS, ${decision.counts.fail} FAIL, ${decision.counts.blocked} BLOCKED, ${decision.counts.notRun} NOT_RUN). Exit ${decision.exitCode}.`, ""].join("\n");
-writeFileSync(join(OUT, "SUMMARY.md"), md);
-console.log(`gate ${decision.decision} (exit ${decision.exitCode}) — ${join(OUT, "SUMMARY.md")}`);
+writeFileSync(join(RUN, "SUMMARY.md"), md);
+rmSync(join(RUN, "work"), { recursive: true, force: true });
+writeFileSync(join(OUT, "LATEST"), runId + "\n");
+console.log(`gate ${decision.decision} (exit ${decision.exitCode}) run ${runId} — ${join(RUN, "SUMMARY.md")}`);
 process.exit(decision.exitCode);

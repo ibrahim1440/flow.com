@@ -71,15 +71,24 @@ exit 2
   return { archive: zip, sha256: sha(readFileSync(zip)) };
 }
 
-function run(t, { archive, sha256, matrix, profile = profilePath, runner = "direct", extra = [] }) {
+/** Runs the harness. keep=true reuses the same requested output location (no cleanup). */
+function run(t, { archive, sha256, matrix, profile = profilePath, runner = "direct", extra = [], keep = false }) {
   const out = join(base, `out-${t}`);
-  rmSync(out, { recursive: true, force: true });
+  if (!keep) rmSync(out, { recursive: true, force: true });
   const a = ["--matrix", matrix, "--out", out, "--profile", profile, "--runner", runner, "--harness-test", "--source-url", "https://zatca.gov.sa/stub-test"];
   if (archive) a.push("--archive", archive);
   if (sha256) a.push("--sha256", sha256);
   const r = spawnSync("node", [HARNESS, ...a, ...extra], { encoding: "utf8" });
-  const summary = JSON.parse(readFileSync(join(out, "summary.json"), "utf8"));
-  return { exit: r.status, summary, status: (key, cmd) => summary.documents.find((d) => d.key === key).checks[cmd].status };
+  const runId = readFileSync(join(out, "LATEST"), "utf8").trim();
+  const summary = JSON.parse(readFileSync(join(out, runId, "summary.json"), "utf8"));
+  const check = (key, cmd) => summary.documents.find((d) => d.key === key).checks[cmd];
+  return { exit: r.status, out, runId, summary, check, status: (key, cmd) => check(key, cmd).status };
+}
+/** A replacement runner (direct runner, harness tests only). */
+function runnerScript(name, body) {
+  const p = join(base, `runner-${name}.sh`);
+  writeFileSync(p, `#!/bin/sh\n# HARNESS TEST RUNNER: ${name}\n${body}\n`);
+  return p;
 }
 
 let M, pass;
@@ -192,8 +201,93 @@ test("harness: the container runner runs the stub with no network and read-only 
   const out = join(base, "out-container");
   rmSync(out, { recursive: true, force: true });
   const r = spawnSync("node", [HARNESS, "--matrix", M, "--out", out, "--profile", profilePath, "--runner", "container", "--harness-test", "--archive", pass.archive, "--sha256", pass.sha256, "--source-url", "https://zatca.gov.sa/stub-test"], { encoding: "utf8" });
-  const s = JSON.parse(readFileSync(join(out, "summary.json"), "utf8"));
+  const s = JSON.parse(readFileSync(join(out, readFileSync(join(out, "LATEST"), "utf8").trim(), "summary.json"), "utf8"));
   assert.equal(r.status, 0, JSON.stringify(s.preconditions) + JSON.stringify(s.documents[0]));
   assert.equal(s.runner, "container");
   assert.equal(s.official, false, "a stub run is never official");
+});
+
+// ── Stale evidence: a run can only ever be judged on output written by that run ──────────────
+
+test("harness: REGRESSION — a successful run, then a failing runner on the same output location, cannot PASS", () => {
+  const first = run("reuse", { ...pass, matrix: M });
+  assert.equal(first.exit, 0);
+  assert.equal(first.summary.gate.decision, "PASS");
+  // Same requested --out, nothing cleaned up; the runner now fails without writing anything.
+  const failing = runnerScript("exits-1", 'echo "simulated runner failure" >&2; exit 1');
+  const second = run("reuse", { ...pass, matrix: M, keep: true, extra: ["--runner-script", failing] });
+  assert.notEqual(second.runId, first.runId, "every run gets its own run directory");
+  assert.equal(second.exit, 1);
+  assert.equal(second.summary.gate.decision, "FAIL");
+  assert.equal(second.summary.gate.counts.pass, 0, "nothing from the first run may be counted");
+  assert.equal(second.summary.gate.counts.fail, 12);
+  assert.match(second.check("standard-invoice", "validate").reason, /runner exit 1/);
+  assert.equal(second.check("standard-invoice", "validate").raw.runId, second.runId);
+  // The first run's evidence is untouched and still says what it said.
+  const kept = JSON.parse(readFileSync(join(first.out, first.runId, "summary.json"), "utf8"));
+  assert.equal(kept.gate.decision, "PASS");
+  assert.equal(kept.runId, first.runId);
+});
+
+test("harness: a runner that replays an earlier run's output files is refused (foreign run ID)", () => {
+  const first = run("replay", { ...pass, matrix: M });
+  assert.equal(first.exit, 0);
+  // Copies the earlier run's evidence for this command into its fresh directory and claims success.
+  const replay = runnerScript("replay", `CMD=$1 KEY=$2
+for d in "$OUT_DIR"/../../../../*/cmd/$KEY/$CMD; do [ "$d" -ef "$OUT_DIR" ] && continue; cp "$d"/* "$OUT_DIR"/; break; done
+exit 0`);
+  const second = run("replay", { ...pass, matrix: M, keep: true, extra: ["--runner-script", replay] });
+  assert.equal(second.exit, 1);
+  assert.equal(second.summary.gate.counts.pass, 0);
+  assert.match(second.check("simplified-invoice", "generateHash").reason, new RegExp(`output belongs to another run \\(${first.runId}\\)`));
+});
+
+test("harness: output bound to this run but to a different input is refused", () => {
+  const forge = runnerScript("wrong-input", `echo "$RUN_ID" > "$OUT_DIR/run-id"; echo ${"0".repeat(64)} > "$OUT_DIR/input.sha256"
+printf 'fatoora\\n' > "$OUT_DIR/argv"; date > "$OUT_DIR/started"; date > "$OUT_DIR/finished"
+echo "STUB GLOBAL RESULT = PASSED" > "$OUT_DIR/stdout"; echo 0 > "$OUT_DIR/exit"; exit 0`);
+  const r = run("wrong-input", { ...pass, matrix: M, extra: ["--runner-script", forge] });
+  assert.equal(r.exit, 1);
+  assert.equal(r.summary.gate.counts.pass, 0);
+  assert.match(r.check("standard-invoice", "validate").reason, /runner read a different input/);
+});
+
+test("harness: a runner that exits 0 but writes no fresh output → FAIL", () => {
+  const silent = runnerScript("silent", "exit 0");
+  const r = run("silent", { ...pass, matrix: M, extra: ["--runner-script", silent] });
+  assert.equal(r.exit, 1);
+  assert.match(r.check("standard-invoice", "validate").reason, /no fresh output: run-id missing/);
+});
+
+test("harness: a runner timeout → FAIL", () => {
+  const hang = runnerScript("hang", "exec sleep 30");
+  const t0 = Date.now();
+  const r = run("timeout", { ...pass, matrix: M, extra: ["--runner-script", hang, "--timeout-seconds", "1"] });
+  assert.equal(r.exit, 1);
+  assert.ok(Date.now() - t0 < 25000, "the harness did not wait for the hung runner");
+  assert.match(r.check("standard-invoice", "validate").reason, /runner timed out after 1 s/);
+});
+
+test("harness: SDK installation failure stops the runner and is recorded as FAIL", () => {
+  const broken = makeStubArchive("installfail", { extra: (d) => writeFileSync(join(d, "install.sh"), 'echo "simulated install failure" >&2; exit 3\n') });
+  const r = run("installfail", { ...broken, matrix: M });
+  assert.equal(r.exit, 1);
+  assert.equal(r.summary.gate.counts.fail, 12);
+  const c = r.check("standard-invoice", "validate");
+  assert.match(c.reason, /runner exit 72: SDK installation failed \(install.sh exit 3/);
+  assert.equal(c.raw.exitCode, null, "the SDK command never ran");
+  assert.ok(!c.raw.filesWritten.includes("stdout"));
+});
+
+test("harness: --runner-script is refused outside direct harness tests", () => {
+  const r = spawnSync("node", [HARNESS, "--matrix", M, "--out", join(base, "out-refuse"), "--runner", "container", "--runner-script", "/bin/true", "--source-url", "x"], { encoding: "utf8" });
+  assert.equal(r.status, 64);
+});
+
+test("harness: a container that cannot launch → FAIL, nothing runs (skipped without Docker)", (t) => {
+  if (spawnSync("docker", ["info"]).status !== 0) { t.skip("Docker is not available"); return; }
+  const r = run("nolaunch", { ...pass, matrix: M, runner: "container", extra: ["--image", "zatca-sdk-runner:does-not-exist"] });
+  assert.equal(r.exit, 1);
+  assert.equal(r.summary.preconditions.find((p) => p.name === "runner container launches")?.status, "FAIL");
+  assert.equal(r.summary.gate.counts.notRun, 12);
 });
