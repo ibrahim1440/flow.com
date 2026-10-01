@@ -1,20 +1,20 @@
 # Test results
 
-**Tested commit: `d55db6386770ffe08d7b17760341cf065fc039c4`** on branch `feature/accounting-ledger-core`
+**Tested commit: `19f36397d26279ed62bf739e04ff5190731ed572`** on branch `feature/accounting-ledger-core`
 of [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) (unpushed; see
 `README.md` → "Which implementation this is"). One run of `scripts/accounting/local-release-gates.sh`
 from a clean working tree ran every step below on that one commit, including the isolated year-end
 browser scenario, the backend regression certification and all Sales suites. Baseline: `origin/main` @ `fc64c05`.
 
-Commits after `d55db63` change only `docs/accounting/`. To check this:
-`git diff --name-only d55db63 HEAD` must list nothing outside `docs/`.
+Commits after `19f3639` change only `docs/accounting/`. To check this:
+`git diff --name-only 19f3639 HEAD` must list nothing outside `docs/`.
 
 These are local results on synthetic data, produced and reported by the implementer. They are **not**
 an independent review, **not** accountant acceptance and **not** production readiness. The stage 6
 tests are local self-consistency and independent local checks; **they are not ZATCA validation**,
 which is blocked here (`ZATCA_REQUIREMENTS.md` §1–2).
 
-Run: 2026-09-29 17:19–17:35 UTC (`evidence/test-runs/d55db63-summary.txt`). The previous full run on `74d4b03` (12:59–13:16 UTC, all green) is superseded because the QR encodings changed.
+Run: 2026-10-01 06:29–06:45 UTC (`evidence/test-runs/19f3639-summary.txt`). Earlier full runs on `d55db63` and `74d4b03` (all green) are superseded.
 - **Environment:** container Linux, Node 22, PostgreSQL 16.13 on a local disposable server
   (127.0.0.1:54329); Chromium via Playwright. HTTP and browser steps run against `next start`
   connected as the restricted runtime role `accounting_app`; the year-end scenario runs its own
@@ -23,7 +23,7 @@ Run: 2026-09-29 17:19–17:35 UTC (`evidence/test-runs/d55db63-summary.txt`). Th
 - **Production differs:** PostgreSQL 17 on Neon. Nothing here ran against Neon, Vercel or ZATCA.
 - **Data:** all synthetic.
 - **Stored evidence (URLs masked; scanned for the fixture password and the run's generated Sales
-  role password: none):** `evidence/test-runs/d55db63-*.tap`, `d55db63-summary.txt`; captures in
+  role password: none):** `evidence/test-runs/19f3639-*.tap`, `19f3639-summary.txt`; captures in
   `evidence/app/` (79 screens from `capture.mjs` plus the browser-form steps, including
   `ACC-65-ye-*` and `ACC-70-simplified-gaps`).
 
@@ -33,13 +33,13 @@ provisional switch on) was still listening, the runner's own server could not bi
 tested the stale server: `http-no-switch` failed 0/2 and `tax-forms` failed for that reason. The
 runner now refuses to start when the port is already served (`74d4b03`); the rerun on `74d4b03` was all green and is itself superseded by the run on `d55db63` above.
 
-| Kind | Command | Result @ `d55db63` | What it proves / does not |
+| Kind | Command | Result @ `19f3639` | What it proves / does not |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit -p .` | clean | |
 | Lint | accounting sources, tests, scripts | clean | |
 | Production build | `npm run build` | exit 0 | |
-| Accounting unit | `npm run test:accounting:unit` | **47/47** | `einvoice-qr-independent.test.ts` (6): default layout OFFICIAL_DOCS — tag 6 = 32-byte hash, tag 7 = r‖s from DER parsed by hand, tag 8 = X‖Y of d·G from the SEC 2 constants, the QR's own tags verified by a BigInt ECDSA verifier; P1363 padding on hand-made DER; the SDK-sample layout as alternate; other curves refused; rules catch the other layout. These encode implementation assumptions — **not ZATCA validation** |
-| Accounting DB integration | `npm run test:accounting:db` | **110/110** | e-invoice case checks the QR layout (32/64/64 bytes), tag 7 = the stored signature as r‖s, and that the QR's own stamp verifies |
+| Accounting unit | `npm run test:accounting:unit` | **48/48** | `einvoice-qr-independent.test.ts` (7, incl. malformed TLV/DER): default layout OFFICIAL_DOCS — tag 6 = 32-byte hash, tag 7 = r‖s from DER parsed by hand, tag 8 = X‖Y of d·G from the SEC 2 constants, the QR's own tags verified by a BigInt ECDSA verifier; P1363 padding on hand-made DER; the SDK-sample layout as alternate; other curves refused; rules catch the other layout. These encode implementation assumptions — **not ZATCA validation** |
+| Accounting DB integration | `npm run test:accounting:db` | **111/111** | e-invoice case checks the QR layout (32/64/64 bytes), tag 7 = the stored signature as r‖s, and that the QR's own stamp verifies |
 | Accounting scripts | `npm run test:accounting:scripts` | **4/4** | credential-rotation verifier |
 | Finance regression | `test:finance:unit`, `test:finance:db` | **52/52, 40/40** | Finance behaviour unchanged |
 | HTTP, production configuration | server without `ACCOUNTING_PROVISIONAL_POSTING`, `runtime-no-switch.test.mjs` | **2/2** | |
@@ -50,9 +50,28 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 | Browser, e-invoicing and VAT | `tax-forms.mjs` | **6/6** | +1: a simplified invoice's QR layout (32/64/64 bytes, no tag 9) checked from the database and its standards gaps shown on screen (not SDK-validated, local key, encodings unconfirmed and curve/profile to confirm, tag 9 absent) |
 | **Browser, year-end close** | `local-year-end-browser.sh` → `year-end-forms.mjs` (isolated `erp_finance_yearend`) | **5/5** | conditions met; prepared by the preparer (their approval refused: no button, HTTP 403); approved and posted by a second person; CLOSING entry 2025-12-31 in the locked period 12 = hand-calculated lines; retained earnings 80,000.00; income statement unchanged; opening 2026 = hand figures, P&L zero; balance-sheet screen at 2025-12-31 (found defects 35 and 36) |
 | Sales regression | pure 161 (48 + 113); DB 23/23; running app `sales-security` 34/34, `sales-workflow` 231/231 | all pass | |
-| Backend regression certification | `local-certification.mjs d55db63…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,300 assertions, 0 failed** | see "Certification assertion count" |
+| Backend regression certification | `local-certification.mjs 19f3639…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | see "Certification assertion count" |
 | Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 56 views) | **0 serious/critical** | automated rules only |
 | Browser capture | `capture.mjs` (79 screens) | 0 page errors, 0 horizontal overflow | |
+
+## Runs on 2026-10-01 that failed, kept as evidence
+
+- `5304515` (`evidence/test-runs/5304515-*`): `acc-db` 108/110 and `fa-forms` failed. Cause: the date
+  (1 October). One real code defect (39: a late stock document refused when its first open day already
+  had a movement) and two date-bound test/fixture assumptions (40, 41). Fixed in `e34307b`.
+- `e34307b` (`evidence/test-runs/e34307b-*`): everything green except the typecheck (a nullable
+  assertion message in the new regression test). Fixed in `6be4b41`; `19f3639` adds only that run's
+  evidence files.
+
+## Test changes since `d55db63`
+
+- New: a regression test for defect 39 in `ops-integration.test.ts` (fails without the fix with the
+  same message seen in the gate run; passes with it); malformed TLV/DER cases in
+  `einvoice-qr-independent.test.ts`.
+- Changed, not weakened: `fixed-assets.test.ts` reconciles as of the later of 09-30 and today; the
+  fixture runs depreciation through last month; `fa-forms.mjs` comments.
+- New tools, not gates: `zatca-matrix.sh` (six-document matrix) and `zatca-sdk-validate.sh` (official
+  SDK harness, exercised only with a stub — `ZATCA_SDK_VALIDATION.md`).
 
 ## Test changes since `74d4b03`
 
@@ -145,7 +164,7 @@ and at `d580432` (409), and 2,300 at `cf3b43e` (200). The race outcome varies fr
 |---|---|---|
 | Runtime on the Neon preview database | **blocked** | no TCP 5432 from this environment; `console.neon.tech` not allow-listed (`NETWORK_ACCESS.md`) |
 | Vercel Preview | **blocked** | Vercel team scope 403 |
-| ZATCA SDK validation of the generated XML and QR | **blocked** | the SDK is downloaded from zatca.gov.sa, refused by this environment's egress policy (re-attempted 2026-09-29, `evidence/zatca/access-attempts-2026-09-29.txt`); a third-party copy was not run (provenance unverified) |
+| ZATCA SDK validation of the generated XML and QR | **blocked** (re-checked 2026-10-01; matrix and harness ready — `ZATCA_SDK_VALIDATION.md`) | the SDK is downloaded from zatca.gov.sa, refused by this environment's egress policy (re-attempted 2026-09-29, `evidence/zatca/access-attempts-2026-09-29.txt`); a third-party copy was not run (provenance unverified) |
 | ZATCA sandbox / simulation submission | not run | needs network access to gw-fatoora.zatca.gov.sa and a test CSID from the developer portal |
 | Migrations after the ledger core on a production copy | not run | eleven migrations (no new migration in this round); needs Neon access or approval to use the connector on a fresh rehearsal branch (`MIGRATION_AND_CUTOVER.md`) |
 | Independent review, accountant acceptance | not done | not something the implementer can do |
