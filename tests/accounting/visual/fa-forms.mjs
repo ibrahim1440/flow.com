@@ -6,7 +6,7 @@
 //  2. registering an asset through the form: below the class threshold is refused, then registered
 //     and submitted;
 //  3. disposal of the van: a bank account as proceeds account is refused; submitted; approved by
-//     the approver → cost, accumulated depreciation to August, proceeds and the loss;
+//     the approver → cost, accumulated depreciation to last month, proceeds and the loss;
 //  4. depreciation run for the current month: computed by the preparer (a second run for the same
 //     period is refused), approved and posted by the approver (journal 6600 / 1290 = run total);
 //     the disposed van is not in it; the espresso machine is caught up from July;
@@ -100,7 +100,7 @@ try {
   assert.deepEqual([scale.status, scale.cost], ["SUBMITTED", "4500.00"]);
   ok("asset form: 400.00 refused (below the class's capitalisation threshold), 4,500.00 registered and submitted");
 
-  // 3. Disposal of the van (before this month's run: depreciation through August has posted).
+  // 3. Disposal of the van (before this month's run: depreciation through last month has posted).
   await go(P, `/dashboard/accounting/assets/${van.id}`);
   await P.getByRole("button", { name: "استبعاد الأصل…" }).click();
   await P.getByLabel("المتحصلات", { exact: true }).fill("80000");

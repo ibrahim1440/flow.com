@@ -570,8 +570,11 @@ async function main() {
   await asset({ name: "مطحنة تجارية (تجريبي)", classId: mach, inServiceDate: ymd(8, 5), sources: [{ kind: "BILL_LINE", billLineId: eqLine }] }, "CAPITALISED");
   await asset({ name: "سيارة توصيل (تجريبي)", classId: veh, inServiceDate: ymd(1, 15), sources: [{ kind: "ACCOUNT", counterAccountId: A["2195"], amount: "95000", description: "سيارة توصيل (تجريبي)" }] }, "CAPITALISED");
   await asset({ name: "ماكينة إسبريسو (تجريبي)", classId: mach, inServiceDate: ymd(7, 1), usefulLifeMonths: 48, deviationReason: "SYNTHETIC: heavy café use", sources: [{ kind: "ACCOUNT", counterAccountId: A["2195"], amount: "42000", description: "تركيب وتشغيل (تجريبي)" }] }, "SUBMITTED");
-  // Monthly runs for past open months (a locked month is caught up by the next run, as the service does).
-  for (let mm = 1; mm < m; mm++) {
+  // Monthly runs for every past open month up to the one before the CURRENT month (not the capped
+  // work month m): a disposal this month needs depreciation through last month (from October on, a
+  // cap at m = 9 left September unposted and the disposal was rightly refused). A locked month is
+  // caught up by the next run, as the service does.
+  for (let mm = 1; mm < CURRENT_MONTH; mm++) {
     const per = await prisma.fiscalPeriod.findFirstOrThrow({ where: { year: YEAR, periodNo: mm } });
     if (per.status !== "OPEN") continue;
     const r = await FA.createRun(per.id, prep).catch(() => null);

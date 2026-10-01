@@ -212,7 +212,10 @@ describe("disposal, reversal, reconciliation, cancellation", () => {
     const sep = await run(w, 9);                                   // the grinder is out
     assert.deepEqual(await journal(sep.id, "fa.depreciation.posted"), ["1290:0.00:1800.00", "6600:1800.00:0.00"]);
 
-    const rec = await FA.reconcileRegister(accountingDate(D(9, 30)));   // the September run is dated 09-30
+    // As of the later of 09-30 (the September run's date) and today: capitalisation is dated on its
+    // approval day, so a fixed 09-30 broke the test once the run date passed September.
+    const asOf = [D(9, 30), todayAccountingDate().toISOString().slice(0, 10)].sort()[1];
+    const rec = await FA.reconcileRegister(accountingDate(asOf));
     const byCode = Object.fromEntries(rec.accounts.map((a) => [a.code, a]));
     // 1210: bill 18,500 + 3,600, roaster 120,000, disposal −18,500 = 123,600; register 120,000.
     assert.deepEqual([byCode["1210"].register, byCode["1210"].ledger, byCode["1210"].difference, byCode["1210"].unexplained], ["120000.00", "123600.00", "3600.00", "0.00"]);

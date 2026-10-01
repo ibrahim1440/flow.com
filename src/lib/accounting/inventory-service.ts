@@ -588,9 +588,11 @@ export async function postInvDoc(id: string, userId: string, opts: { late?: bool
         bookOn = last.date; lateWhy.push(`document ${last.document.docNo} already moved this stock on ${last.date.toISOString().slice(0, 10)}`);
         continue;
       }
-      if (last && last.date > cur.docDate) {
+      // Compare with the day the document will be booked on (a late document has already been moved
+      // to the first open day; a movement on that same day is not "later").
+      if (last && last.date > bookOn) {
         const item = cur.lines.find((l) => l.itemId === itemId)?.item;
-        throw new AccountingError(`${item?.code ?? "An item"} already has a posted movement on ${last.date.toISOString().slice(0, 10)} (document ${last.document.docNo}); a document dated ${cur.docDate.toISOString().slice(0, 10)} would change costs already issued. Date it on or after that day.`, 409);
+        throw new AccountingError(`${item?.code ?? "An item"} already has a posted movement on ${last.date.toISOString().slice(0, 10)} (document ${last.document.docNo}); a document dated ${bookOn.toISOString().slice(0, 10)} would change costs already issued. Date it on or after that day.`, 409);
       }
     }
 

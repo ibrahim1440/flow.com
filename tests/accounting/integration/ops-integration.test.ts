@@ -174,6 +174,26 @@ describe("stage 4b — operational stock events become inventory documents", () 
     assert.equal(await prisma.invOpsEvent.count({ where: { kind: "UNINTEGRATED" } }), 1);
   });
 
+  test("a late event whose first open day already has a movement posts on that day (regression: refused when the first open day was the 1st of the month)", async (t) => {
+    const first = new Date(todayAccountingDate()); first.setUTCDate(1);
+    const prevDay = new Date(first); prevDay.setUTCDate(0);
+    if (first.getUTCMonth() === 0) { t.skip("in January the previous day is in the previous fiscal year, before the test's cutover"); return; }
+    const w = await world();
+    const O = await ops(w);
+    await approveOpsPolicy(w);
+    const buy = (sourceId: string, occurredOn: Date) => record({ kind: "PURCHASE", sourceId, occurredOn, payload: { purchaseId: sourceId, greenBeanId: O.bean, quantity: 10, costPerUnit: 30, supplierId: w.S.green } });
+    const onFirst = await buy("pur-first", first);
+    assert.equal((await Ops.processOpsEvent(onFirst.id)).status, "POSTED");
+    const late = await buy("pur-prev", prevDay);
+    const period = await prisma.fiscalPeriod.findFirstOrThrow({ where: { startDate: { lte: prevDay }, endDate: { gte: prevDay } } });
+    await lockFiscalPeriod(period.id, w.appr);
+    const r = await Ops.processOpsEvent(late.id);
+    assert.equal(r.status, "POSTED", r.reason);
+    const doc = await prisma.invDocument.findUniqueOrThrow({ where: { id: await docOf(late.id) } });
+    assert.deepEqual([doc.docDate.toISOString().slice(0, 10), doc.originalDate?.toISOString().slice(0, 10)], [first.toISOString().slice(0, 10), prevDay.toISOString().slice(0, 10)]);
+    assert.match(doc.lateReason ?? "", /not open/);
+  });
+
   test("roast cancellation, opening quantities, a blend, and dispatch of an unintegrated kilogram lot", async () => {
     const w = await world();
     const O = await ops(w);

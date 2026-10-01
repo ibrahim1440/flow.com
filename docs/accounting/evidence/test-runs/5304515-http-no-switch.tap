@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: without the isolated-test switch an unapproved plan version cannot post
+ok 1 - without the isolated-test switch an unapproved plan version cannot post
+  ---
+  duration_ms: 537.390136
+  type: 'test'
+  ...
+# Subtest: without the isolated-test switch an inventory document cannot post while decision D-1 is undecided
+ok 2 - without the isolated-test switch an inventory document cannot post while decision D-1 is undecided
+  ---
+  duration_ms: 154.146037
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 797.933919
