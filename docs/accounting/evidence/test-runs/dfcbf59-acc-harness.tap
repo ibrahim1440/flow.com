@@ -1,0 +1,136 @@
+TAP version 13
+# Subtest: harness: all six documents pass → exit 0, still marked harness test (never official)
+ok 1 - harness: all six documents pass → exit 0, still marked harness test (never official)
+  ---
+  duration_ms: 967.004774
+  type: 'test'
+  ...
+# Subtest: harness: an SDK command failure on one document → exit 1, the other five are still collected
+ok 2 - harness: an SDK command failure on one document → exit 1, the other five are still collected
+  ---
+  duration_ms: 1002.078791
+  type: 'test'
+  ...
+# Subtest: harness: SDK hash differs from the application hash → FAIL, exit 1
+ok 3 - harness: SDK hash differs from the application hash → FAIL, exit 1
+  ---
+  duration_ms: 970.286768
+  type: 'test'
+  ...
+# Subtest: harness: a missing document → FAIL for it, exit 1; evidence still lists all six
+ok 4 - harness: a missing document → FAIL for it, exit 1; evidence still lists all six
+  ---
+  duration_ms: 817.764314
+  type: 'test'
+  ...
+# Subtest: harness: a corrupted input (checksum mismatch) → FAIL for that document, exit 1
+ok 5 - harness: a corrupted input (checksum mismatch) → FAIL for that document, exit 1
+  ---
+  duration_ms: 840.910788
+  type: 'test'
+  ...
+# Subtest: harness: output it cannot interpret → BLOCKED, exit 3 (exit code 0 is never taken as a pass)
+ok 6 - harness: output it cannot interpret → BLOCKED, exit 3 (exit code 0 is never taken as a pass)
+  ---
+  duration_ms: 956.848856
+  type: 'test'
+  ...
+# Subtest: harness: an unconfirmed output profile → BLOCKED everywhere, exit 3
+ok 7 - harness: an unconfirmed output profile → BLOCKED everywhere, exit 3
+  ---
+  duration_ms: 958.062748
+  type: 'test'
+  ...
+# Subtest: harness: wrong archive hash → FAIL precondition, nothing runs, exit 1
+ok 8 - harness: wrong archive hash → FAIL precondition, nothing runs, exit 1
+  ---
+  duration_ms: 77.401655
+  type: 'test'
+  ...
+# Subtest: harness: no archive → NOT_RUN, exit 3
+ok 9 - harness: no archive → NOT_RUN, exit 3
+  ---
+  duration_ms: 78.546271
+  type: 'test'
+  ...
+# Subtest: harness: an undocumented command → BLOCKED for that command
+ok 10 - harness: an undocumented command → BLOCKED for that command
+  ---
+  duration_ms: 543.427395
+  type: 'test'
+  ...
+# Subtest: harness: unsafe archive entries (traversal, symbolic link) are refused before extraction
+ok 11 - harness: unsafe archive entries (traversal, symbolic link) are refused before extraction
+  ---
+  duration_ms: 121.364166
+  type: 'test'
+  ...
+# Subtest: lib: java requirement parsing and archive entry checks
+ok 12 - lib: java requirement parsing and archive entry checks
+  ---
+  duration_ms: 1.204225
+  type: 'test'
+  ...
+# Subtest: harness: the container runner runs the stub with no network and read-only inputs (skipped without Docker)
+ok 13 - harness: the container runner runs the stub with no network and read-only inputs (skipped without Docker)
+  ---
+  duration_ms: 4236.576304
+  type: 'test'
+  ...
+# Subtest: harness: REGRESSION — a successful run, then a failing runner on the same output location, cannot PASS
+ok 14 - harness: REGRESSION — a successful run, then a failing runner on the same output location, cannot PASS
+  ---
+  duration_ms: 1125.620567
+  type: 'test'
+  ...
+# Subtest: harness: a runner that replays an earlier run's output files is refused (foreign run ID)
+ok 15 - harness: a runner that replays an earlier run's output files is refused (foreign run ID)
+  ---
+  duration_ms: 1141.357447
+  type: 'test'
+  ...
+# Subtest: harness: output bound to this run but to a different input is refused
+ok 16 - harness: output bound to this run but to a different input is refused
+  ---
+  duration_ms: 176.365665
+  type: 'test'
+  ...
+# Subtest: harness: a runner that exits 0 but writes no fresh output → FAIL
+ok 17 - harness: a runner that exits 0 but writes no fresh output → FAIL
+  ---
+  duration_ms: 132.894409
+  type: 'test'
+  ...
+# Subtest: harness: a runner timeout → FAIL
+ok 18 - harness: a runner timeout → FAIL
+  ---
+  duration_ms: 12139.271882
+  type: 'test'
+  ...
+# Subtest: harness: SDK installation failure stops the runner and is recorded as FAIL
+ok 19 - harness: SDK installation failure stops the runner and is recorded as FAIL
+  ---
+  duration_ms: 837.868398
+  type: 'test'
+  ...
+# Subtest: harness: --runner-script is refused outside direct harness tests
+ok 20 - harness: --runner-script is refused outside direct harness tests
+  ---
+  duration_ms: 67.543598
+  type: 'test'
+  ...
+# Subtest: harness: a container that cannot launch → FAIL, nothing runs (skipped without Docker)
+ok 21 - harness: a container that cannot launch → FAIL, nothing runs (skipped without Docker)
+  ---
+  duration_ms: 1524.154836
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 28838.82534

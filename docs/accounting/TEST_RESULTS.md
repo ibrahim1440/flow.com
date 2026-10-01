@@ -1,22 +1,24 @@
 # Test results
 
-**Tested commit: `4fdb78d33d051641019643617f4d33c6b62159e1`** on branch `feature/accounting-ledger-core`
+**Tested commit: `dfcbf59f96695c41b33dbcea8b74249e98a36b3f`** on branch `feature/accounting-ledger-core`
 of [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) (unpushed; see
 `README.md` → "Which implementation this is"). One run of `scripts/accounting/local-release-gates.sh`
 from a clean working tree ran every step below on that one commit, including the isolated year-end
 browser scenario, the backend regression certification and all Sales suites. Baseline: `origin/main` @ `fc64c05`.
 
-Delivery: the branch is pushed to GitHub (`origin/feature/accounting-ledger-core`) with the documentation commit that follows `4fdb78d`; `git ls-remote origin feature/accounting-ledger-core` shows the pushed head. No pull request, merge or deployment.
+Delivery: the branch is pushed to GitHub (`origin/feature/accounting-ledger-core`) with the documentation commit that follows `dfcbf59`; `git ls-remote origin feature/accounting-ledger-core` shows the pushed head. A **draft** pull request is open for technical review (`RELEASE_PROPOSAL.md`); no merge, no deployment.
 
-Commits after `4fdb78d` change only `docs/accounting/`. To check this:
-`git diff --name-only 4fdb78d HEAD` must list nothing outside `docs/`.
+Commits after `dfcbf59` change only `docs/accounting/`. To check this:
+`git diff --name-only dfcbf59 HEAD` must list nothing outside `docs/`.
+
+**Green results here verify what is implemented; they do not mean the implementation is complete.** XAdES, QR tag 9, the BR-KSA code mapping, several VAT return items and zakat are not implemented (`RELEASE_PROPOSAL.md`).
 
 These are local results on synthetic data, produced and reported by the implementer. They are **not**
 an independent review, **not** accountant acceptance and **not** production readiness. The stage 6
 tests are local self-consistency and independent local checks; **they are not ZATCA validation**,
 which is blocked here (`ZATCA_REQUIREMENTS.md` §1–2).
 
-Run: 2026-10-01 08:39–08:57 UTC (`evidence/test-runs/4fdb78d-summary.txt`). It supersedes the runs on `fbcd1e4` (06:47–07:03, all green), `19f3639`, `d55db63` and `74d4b03`. All test servers were started by the run (each refuses an occupied port).
+Run: 2026-10-01 11:31–11:50 UTC (`evidence/test-runs/dfcbf59-summary.txt`). It supersedes the runs on `4fdb78d` (08:39–08:57, all green, 13 harness tests), `fbcd1e4` (06:47–07:03, all green), `19f3639`, `d55db63` and `74d4b03`. All test servers were started by the run (each refuses an occupied port).
 - **Environment:** container Linux, Node 22, PostgreSQL 16.13 on a local disposable server
   (127.0.0.1:54329); Chromium via Playwright. HTTP and browser steps run against `next start`
   connected as the restricted runtime role `accounting_app`; the year-end scenario runs its own
@@ -25,7 +27,7 @@ Run: 2026-10-01 08:39–08:57 UTC (`evidence/test-runs/4fdb78d-summary.txt`). It
 - **Production differs:** PostgreSQL 17 on Neon. Nothing here ran against Neon, Vercel or ZATCA.
 - **Data:** all synthetic.
 - **Stored evidence (URLs masked; scanned for the fixture password and the run's generated Sales
-  role password: none):** `evidence/test-runs/4fdb78d-*.tap`, `4fdb78d-summary.txt`; captures in
+  role password: none):** `evidence/test-runs/dfcbf59-*.tap`, `dfcbf59-summary.txt`; captures in
   `evidence/app/` (79 screens from `capture.mjs` plus the browser-form steps, including
   `ACC-65-ye-*` and `ACC-70-simplified-gaps`).
 
@@ -35,7 +37,7 @@ provisional switch on) was still listening, the runner's own server could not bi
 tested the stale server: `http-no-switch` failed 0/2 and `tax-forms` failed for that reason. The
 runner now refuses to start when the port is already served (`74d4b03`); the rerun on `74d4b03` was all green and is itself superseded by the run on `d55db63` above.
 
-| Kind | Command | Result @ `4fdb78d` | What it proves / does not |
+| Kind | Command | Result @ `dfcbf59` | What it proves / does not |
 |---|---|---|---|
 | Typecheck | `npx tsc --noEmit -p .` | clean | |
 | Lint | accounting sources, tests, scripts | clean | |
@@ -43,7 +45,7 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 | Accounting unit | `npm run test:accounting:unit` | **49/49** | `einvoice-qr-independent.test.ts` (8, incl. malformed TLV/DER and the canonical form byte-equal to `xmllint --c14n11`): default layout OFFICIAL_DOCS — tag 6 = 32-byte hash, tag 7 = r‖s from DER parsed by hand, tag 8 = X‖Y of d·G from the SEC 2 constants, the QR's own tags verified by a BigInt ECDSA verifier; P1363 padding on hand-made DER; the SDK-sample layout as alternate; other curves refused; rules catch the other layout. These encode implementation assumptions — **not ZATCA validation** |
 | Accounting DB integration | `npm run test:accounting:db` | **111/111** | e-invoice case checks the QR layout (32/64/64 bytes), tag 7 = the stored signature as r‖s, and that the QR's own stamp verifies |
 | Accounting scripts | `npm run test:accounting:scripts` | **4/4** | credential-rotation verifier |
-| ZATCA SDK harness | `npm run test:accounting:harness` | **13/13** (0 skipped) | **harness tests with a stub SDK — not SDK validation**; one case runs in the real no-network container |
+| ZATCA SDK harness | `npm run test:accounting:harness` | **21/21** (0 skipped) | **harness tests with a stub SDK — not SDK validation**; two cases run in the real no-network container; includes the stale-evidence regression (defect 48) |
 | Backup → restore → verify | `local-backup-restore-check.sh` | **PASS** | row counts, ledger totals, 66 triggers, 253 functions, e-invoice chain identical; guards still refuse in the restored copy |
 | Finance regression | `test:finance:unit`, `test:finance:db` | **52/52, 40/40** | Finance behaviour unchanged |
 | HTTP, production configuration | server without `ACCOUNTING_PROVISIONAL_POSTING`, `runtime-no-switch.test.mjs` | **2/2** | |
@@ -54,7 +56,7 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 | Browser, e-invoicing and VAT | `tax-forms.mjs` | **6/6** | +1: a simplified invoice's QR layout (32/64/64 bytes, no tag 9) checked from the database and its standards gaps shown on screen (not SDK-validated, local key, encodings unconfirmed and curve/profile to confirm, tag 9 absent) |
 | **Browser, year-end close** | `local-year-end-browser.sh` → `year-end-forms.mjs` (isolated `erp_finance_yearend`) | **5/5** | conditions met; prepared by the preparer (their approval refused: no button, HTTP 403); approved and posted by a second person; CLOSING entry 2025-12-31 in the locked period 12 = hand-calculated lines; retained earnings 80,000.00; income statement unchanged; opening 2026 = hand figures, P&L zero; balance-sheet screen at 2025-12-31 (found defects 35 and 36) |
 | Sales regression | pure 161 (48 + 113); DB 23/23; running app `sales-security` 34/34, `sales-workflow` 231/231 | all pass | |
-| Backend regression certification | `local-certification.mjs 4fdb78d…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | see "Certification assertion count" |
+| Backend regression certification | `local-certification.mjs dfcbf59…` (clean worktree, fresh `erp_e2e`) | **26 suites, 2,301 assertions, 0 failed** | see "Certification assertion count" |
 | Accessibility | `a11y.mjs` (axe-core, WCAG 2.1 A/AA; 56 views) | **0 serious/critical** | automated rules only |
 | Browser capture | `capture.mjs` (79 screens) | 0 page errors, 0 horizontal overflow | |
 
@@ -63,13 +65,13 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 - **Local migration rehearsal** (`local-migration-rehearsal.sh`, at `031daaf`): PASS. `main`'s 29
   migrations and seed, then the branch's 12 migrations in 1.8 s; all 92 pre-existing tables unchanged
   over their original columns. Evidence: `evidence/rehearsal/`.
-- **Six-document matrix** at `031daaf`, same `src/` and `prisma/` as `4fdb78d`; all six pass the
+- **Six-document matrix** at `031daaf`, same `src/` and `prisma/` as `dfcbf59`; all six pass the
   local rules. Evidence: `evidence/zatca/matrix-031daaf/`.
 - **Secondary check** (third-party schema and rule files, NOT official): all six documents
   XSD-valid; BR-KSA-28 (error) and BR-KSA-29 (warning) on the three simplified documents (XAdES).
   Exit 1. Evidence: `evidence/zatca/secondary-031daaf/`.
 - **Official SDK harness:** gate NOT_RUN, exit 3 — no official archive. Evidence:
-  `evidence/zatca/harness-4fdb78d/`.
+  `evidence/zatca/harness-dfcbf59/<runId>/`.
 
 ## Runs on 2026-10-01 that failed, kept as evidence
 
@@ -179,7 +181,7 @@ runner now refuses to start when the port is already served (`74d4b03`); the rer
 ## Certification assertion count
 
 `completion-gate` adds one assertion only when a deliberately raced "complete order" request loses
-and receives 409. At `4fdb78d` it is 2,301 (2,300 at `fbcd1e4`, 2,301 at `19f3639`). At `d55db63` the count is 2,300 and at `74d4b03` it was 2,301 (the stored output
+and receives 409. At `dfcbf59` it is 2,301 (2,301 at `4fdb78d`, 2,300 at `fbcd1e4`, 2,301 at `19f3639`). At `d55db63` the count is 2,300 and at `74d4b03` it was 2,301 (the stored output
 does not print the race line; 2,301 is the 409 outcome). At `da37cb0` the race ended `complete=200`, hence 2,300 (it was 2,301 at `efa357a`,
 where it ended 409). At `7943ed3` the log records `complete=200`, hence 2,300. It was 2,301 at `d92f592`
 and at `d580432` (409), and 2,300 at `cf3b43e` (200). The race outcome varies from run to run;

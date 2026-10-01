@@ -1,8 +1,13 @@
 # Official ZATCA SDK validation — status and handover
 
 **Official SDK validation has not run.** The official SDK could not be obtained: every ZATCA host
-was refused by this environment's network policy, re-checked 2026-10-01T08:14Z. No result below is
+was refused by this environment's network policy, re-checked 2026-10-01T11:29Z. No result below is
 an official SDK result.
+
+**The e-invoicing implementation is not complete.** The XAdES cryptographic stamp is not
+implemented, so simplified documents carry only a local test signature and cannot pass ZATCA's
+signature checks; QR tag 9 is absent. Passing local tests shows that what *is* implemented behaves as
+tested. It does not show that the implementation is complete.
 
 Done meanwhile:
 - the application generates the six-document matrix;
@@ -14,7 +19,7 @@ Done meanwhile:
 
 | Status | State | Evidence / what is needed |
 |---|---|---|
-| 1. Local implementation and verification | **done locally**; full release gates green on the commit named in `TEST_RESULTS.md` | `TEST_RESULTS.md` |
+| 1. Local implementation and verification | **implementation incomplete**: XAdES stamp not implemented, QR tag 9 absent, BR-KSA codes not mapped (§6). What is implemented passes the local release gates on the commit named in `TEST_RESULTS.md` | XAdES needs the official Security Features standard (§6); `TEST_RESULTS.md` |
 | 2. Official SDK validation | **NOT DONE — blocked** (harness gate: NOT_RUN) | the official SDK archive (§2) |
 | 3. ZATCA sandbox integration | **not done** | network access to `gw-fatoora.zatca.gov.sa`, developer-portal onboarding, a test CSID |
 | 4. Independent technical review | **not done**; package prepared | `REVIEW_PACKAGE.md`; a reviewer |
@@ -26,7 +31,7 @@ Done meanwhile:
 | Item | Value |
 |---|---|
 | Official page | https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Pages/DownloadSDK.aspx |
-| Attempts | 2026-09-29, 2026-10-01T05:42Z, 2026-10-01T08:14Z: `CONNECT tunnel failed, response 403` (environment egress proxy) for zatca.gov.sa, sandbox.zatca.gov.sa and gw-fatoora.zatca.gov.sa — `evidence/zatca/access-attempts-*.txt` |
+| Attempts | 2026-09-29, 2026-10-01T05:42Z, 08:14Z and 11:29Z: `CONNECT tunnel failed, response 403` / connection refused by the environment egress proxy for zatca.gov.sa, sandbox.zatca.gov.sa and gw-fatoora.zatca.gov.sa; at 11:29Z also the W3C, ETSI, OASIS and SECG standards pages, and the web-retrieval tool (`EGRESS_BLOCKED`) — `evidence/zatca/access-attempts-*.txt` |
 | Download URL, time, version, SHA-256, Java requirement | **unknown** — not downloaded |
 | Third-party copy | `github.com/aashahin/zatca-sdk` @ 7ed2964 redistributes `zatca-einvoicing-sdk-238-R3.4.8`. It is **not** an authenticated official download and was **not executed**. Only its data files (UBL XSD, rule XSLs) were used, for the secondary check in §5, with their SHA-256 recorded |
 
@@ -53,6 +58,20 @@ of origin: the harness cannot authenticate it.
 | 0 | PASS | all twelve checks PASS (requires a confirmed output profile) |
 | 1 | FAIL | any precondition or check fails: archive hash, unsafe archive entry, missing or corrupted document, SDK command exit ≠ 0, global result not passed, SDK hash ≠ application hash |
 | 3 | BLOCKED / NOT_RUN | the SDK is missing, a command is not documented in the archive's readme, Java is outside the readme's range, or output cannot be interpreted reliably |
+
+**Fresh evidence only** (fixed in `dfcbf59`; defect 48). Until then the harness read each
+command's result from fixed paths under `--out` without checking that this run had written them: a
+second run into the same directory whose runner failed outright still reported PASS from the first
+run's files (demonstrated on `f7fbb37`: `evidence/zatca/harness-stale-evidence/`). Now:
+- every run creates a new directory `<out>/<runId>/` and refuses to start if it already exists;
+- each command gets its own new, empty output directory, the only one the runner can write;
+- the runner writes the run ID and the SHA-256 of the input it actually read, and a result counts
+  only if both match this run and the verified matrix;
+- a container launch failure, a nonzero runner exit, a signal, a timeout (the container is
+  removed), or missing output is a FAIL;
+- `run-one.sh` stops with its own exit code and a `runner-error` file if copying the SDK, Java,
+  `install.sh`, the profile or the launcher fails. Nothing runs on a half-installed SDK;
+- `<out>/LATEST` is removed when a run starts and written only when it finishes.
 
 **Before execution:**
 - **Matrix:** exactly the six required documents, verified against `SHA256SUMS`, with nothing extra.
@@ -92,16 +111,19 @@ of origin: the harness cannot authenticate it.
 - input checksums, the SDK jar hashes and the Java version;
 - `summary.json` (machine-readable) and `SUMMARY.md`.
 
-**Harness tests:** `tests/accounting/harness/zatca-sdk-harness.test.mjs`, 13 tests, part of the
+**Harness tests:** `tests/accounting/harness/zatca-sdk-harness.test.mjs`, 21 tests, part of the
 release gates. They cover:
 - success, SDK failure, hash mismatch, a missing document and corrupted input;
 - unrecognised output and an unconfirmed profile;
 - a wrong archive hash, no archive, an undocumented command, and traversal or symbolic-link entries;
-- one run of the stub inside the real container.
+- one run of the stub inside the real container;
+- stale evidence: a successful run followed by a failing runner on the same output location cannot
+  PASS (regression test), replayed earlier output, output for a different input, a runner that
+  writes nothing, a timeout, an installation failure, and a container that cannot launch.
 
 They use a **stub SDK** and are **harness tests, not SDK validation**.
 
-**Current run:** `evidence/zatca/harness-<commit>/` → **NOT_RUN**, exit 3 (no archive).
+**Current run:** `evidence/zatca/harness-dfcbf59/<runId>/` → **NOT_RUN**, exit 3 (no archive).
 
 ## 4. Application-generated matrix
 
@@ -170,6 +192,13 @@ without a signature the SDK could verify.
 - equality with ZATCA's hash is unconfirmed until `fatoora -generateHash` is compared.
 
 ## 6. Open items that need the official SDK or documents
+
+Nothing further was implemented on 2026-10-01: every official and standards source was refused
+(11:29Z), and ZATCA PDFs that exist inside third-party repositories are unauthenticated copies, so
+they were not used. To implement XAdES, one of these is needed:
+- network access to `zatca.gov.sa`;
+- the official PDFs uploaded here, with their download URLs: the *Security Features Implementation
+  Standards* and the *XML Implementation Standard*. The SDK archive also contains signing samples.
 
 1. **XAdES signing:** `SignedInfo`, `SignedProperties`, the certificate digest, the two References and
    their transforms. The rule files check only fixed identifiers. ZATCA's digest conventions for

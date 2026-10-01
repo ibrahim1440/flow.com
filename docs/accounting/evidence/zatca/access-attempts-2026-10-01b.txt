@@ -1,0 +1,18 @@
+# Official-source access attempts, 2026-10-01T11:30:24Z (re-check before implementing further requirements)
+# curl through the environment proxy (http_code 000 = CONNECT refused by the egress proxy; proxy status reports connect_rejected)
+2026-10-01T11:29:14Z https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/ComplianceEnablementToolbox/Pages/DownloadSDK.aspx -> 000
+2026-10-01T11:29:14Z https://sandbox.zatca.gov.sa/ -> 000
+2026-10-01T11:29:14Z https://gw-fatoora.zatca.gov.sa/ -> 000
+# Official standards needed for XAdES and canonicalisation:
+000 https://zatca.gov.sa/ar/E-Invoicing/SystemsDevelopers/Documents/20230519_ZATCA_Electronic_Invoice_Security_Features_Implementation_Standards_vF.pdf
+000 https://docs.oasis-open.org/ubl/os-UBL-2.1/xsd/maindoc/UBL-Invoice-2.1.xsd
+000 https://www.w3.org/TR/xmldsig-core1/
+000 https://www.w3.org/2006/12/xml-c14n11
+000 https://www.etsi.org/deliver/etsi_ts/101900_101999/101903/01.04.02_60/ts_101903v010402p.pdf
+000 https://uri.etsi.org/01903/v1.3.2/XAdES01903v132-201601.xsd
+000 https://www.secg.org/sec2-v2.pdf
+# Web retrieval tool:
+zatca.gov.sa Security Features standard PDF -> EGRESS_BLOCKED
+www.w3.org/TR/xmldsig-core1/ -> EGRESS_BLOCKED
+# Not used: ZATCA PDFs found inside third-party repositories (scratchpad clones of zatca-xml-js forks).
+# They are unauthenticated copies and were not used as a basis for implementation.

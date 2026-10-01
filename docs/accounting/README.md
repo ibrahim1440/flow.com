@@ -5,17 +5,22 @@
 | | |
 |---|---|
 | Repository | [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com) — **not** `hiqbah_share2`, a sanitised public export that contains none of this work |
-| Branch | `feature/accounting-ledger-core`, based on `main` @ `fc64c05` — on GitHub it will be [https://github.com/ibrahim1440/flow.com/tree/feature/accounting-ledger-core](https://github.com/ibrahim1440/flow.com/tree/feature/accounting-ledger-core) once pushed |
-| Where it is | **not pushed** (GitHub App not installed on `flow.com`): it exists in the working clone and in the incremental git bundle described in `RECOVERY_BUNDLE.md` |
+| Branch | `feature/accounting-ledger-core`, based on `main` @ `fc64c05` — [https://github.com/ibrahim1440/flow.com/tree/feature/accounting-ledger-core](https://github.com/ibrahim1440/flow.com/tree/feature/accounting-ledger-core) |
+| Where it is | **pushed** to GitHub (not merged); a draft pull request for technical review is named in `RELEASE_PROPOSAL.md`. The earlier recovery bundles (`RECOVERY_BUNDLE.md`) are superseded by the pushed branch |
 | Tested commit | the SHA named at the top of `TEST_RESULTS.md`; later commits change documentation only |
 
 Links between these documents are relative paths inside this branch. On GitHub a file is at
 `https://github.com/ibrahim1440/flow.com/blob/feature/accounting-ledger-core/<path>` — for example
 [docs/accounting/README.md](https://github.com/ibrahim1440/flow.com/blob/feature/accounting-ledger-core/docs/accounting/README.md) —
-and these links resolve **only after the branch is pushed**; today it is unpushed. A link through
+and these links resolve now that the branch is pushed. A link through
 `hiqbah_share2` does not identify this implementation.
 
 ## Status
+
+**Implementation is not complete.** E-invoicing lacks the XAdES cryptographic stamp, QR tag 9 and the
+mapping of local rules to the official BR-KSA codes; the VAT return lacks several items, and zakat is
+absent (`DEFECTS_AND_LIMITATIONS.md`, `ZATCA_SDK_VALIDATION.md` §6). Green local tests verify what is
+implemented; they do not make it complete.
 
 Implemented and tested **locally on synthetic data**:
 - stage 1: ledger core, commissions;
@@ -28,8 +33,8 @@ Implemented and tested **locally on synthetic data**:
   separate from invoice corrections, gross margin reconciled to the ledger, labour and overhead
   absorption, later cost changes traced through production, supplier credit notes.
 
-Four levels are kept apart throughout (`REQUIREMENTS_MATRIX.md`): local verification (done, per
-row), independent review (not done), accountant acceptance (not done) and production readiness (not
+Four levels are kept apart throughout (`REQUIREMENTS_MATRIX.md`): local verification (per row;
+rows marked P or M are not implemented), independent review (not done), accountant acceptance (not done) and production readiness (not
 ready; only the ledger-core migration was rehearsed on a production copy).
 
 Stages 2 and 3 are **not accepted**; they await the owner's review. The historical-reporting defects
@@ -81,7 +86,7 @@ been deployed or run against production.
 | [STAGE_4B_DESIGN.md](STAGE_4B_DESIGN.md) | Stage 4b: operational integration, durable cost of sales, returns vs corrections, margin reconciliation, conversion cost, tracing, supplier credits |
 | [STAGE_4B_EVIDENCE.md](STAGE_4B_EVIDENCE.md) | Stage 4b requirement → evidence matrix in five categories |
 | [DECISION_PACK.md](DECISION_PACK.md) | Decisions the accountant must take (D-1 costing, D-2 advances VAT, cash-flow classes, cutover) |
-| [RECOVERY_BUNDLE.md](RECOVERY_BUNDLE.md) | How to restore the unpushed branch from the incremental bundle (needs `fc64c05`) |
+| [RECOVERY_BUNDLE.md](RECOVERY_BUNDLE.md) | How the branch was carried before it could be pushed (historical; the pushed branch supersedes it) |
 | [RELEASE_PROPOSAL.md](RELEASE_PROPOSAL.md) | What would be released, gates, approvals needed, recovery plan |
 
 Evidence: `evidence/app/` (running application, synthetic fixture), `evidence/figma/` (Figma frames),

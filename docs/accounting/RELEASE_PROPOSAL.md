@@ -12,8 +12,12 @@ tests, docs. **No release package is proposed yet:** the gates below come first.
 LOCAL ONLY: releasing it does not connect to ZATCA.
 
 ## Gates still open before any production step
+**The implementation is not complete**, so no gate below can make this releasable on its own. Green
+local tests verify what is implemented; they do not show completeness.
+
 | Gate | State | Owner action |
 |---|---|---|
+| Implementation complete | **no**: XAdES cryptographic stamp not implemented (simplified documents carry a local test signature; BR-KSA-28/29 fire in the secondary check); QR tag 9 absent (needs a ZATCA certificate); local rules not mapped to BR-KSA codes; VAT return items (exports, imports, reverse charge, corrections, carried-forward credit) and zakat not modelled | XAdES: network access to zatca.gov.sa or the official Security Features and XML Implementation standards uploaded with their URLs (`ZATCA_SDK_VALIDATION.md` §6); VAT and zakat: professional input |
 | Branch pushed / draft PR | branch push possible since 2026-10-01 (see `TEST_RESULTS.md` for the pushed head); **no pull request opened** | owner: open a PR for review when wanted |
 | Vercel Preview | **blocked** — the Vercel connector lists projects but project-scoped calls return 403 for scope `ibrahimmutambak-4927s-projects`; `vercel.json` disables deployments of this branch until its Preview env is set | re-authorise the Vercel connector for that scope; set branch-scoped Preview `DATABASE_URL`/`DIRECT_URL` → Neon `hiqbah-erp-test` / `preview-accounting-ledger-core` / `accounting_preview` yourself (secret; never production); then remove the `false` entry |
 | Preview database contents | empty (created and marked disposable) | allow this environment's egress to `*.neon.tech` (or run `scripts/accounting/preview-setup.sh` from a machine that can reach Neon) |
@@ -40,5 +44,5 @@ LOCAL ONLY: releasing it does not connect to ZATCA.
 ## Risk notes
 - The commission outbox trigger starts writing `AccountingEvent` rows immediately after the
   migration, even before set-up; they wait (no journals). Harmless, but the table grows.
-- The ledger-core rehearsal proved that schema on production's shape; it did not run the new build against that copy, and the later eleven migrations have not been rehearsed at all.
+- The ledger-core rehearsal proved that schema on production's shape; it did not run the new build against that copy. The later eleven migrations were rehearsed only locally (main's schema and seed), not on a production copy.
 - After the stage 4b migration, operational stock writes from outside this code (scripts, manual SQL) create UNINTEGRATED exception rows; they do not block the write.

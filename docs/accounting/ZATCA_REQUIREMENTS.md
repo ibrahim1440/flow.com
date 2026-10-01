@@ -18,7 +18,7 @@ Review date: 2026-09-29.
 ## 2. Official sources and validator: access evidence
 
 Every official host is refused by this environment's network policy (the proxy answers 403 to
-CONNECT), re-checked on 2026-10-01T05:42Z and 08:14Z. Nothing was worked around. Raw attempts:
+CONNECT), re-checked on 2026-10-01T05:42Z, 08:14Z and 11:29Z (`access-attempts-2026-10-01b.txt`, which also covers the W3C, ETSI, OASIS and SECG pages). Nothing was worked around. Raw attempts:
 `evidence/zatca/access-attempts-2026-09-29.txt`, `access-attempts-2026-10-01.txt`. The SDK run that
 is ready to go (application-generated six-document matrix, harness, Java 11) and the six separate
 statuses (developer verification → production readiness) are in `ZATCA_SDK_VALIDATION.md`.

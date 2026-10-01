@@ -1,7 +1,7 @@
 # Requirements coverage matrix (against the brief)
 
 Repository [https://github.com/ibrahim1440/flow.com](https://github.com/ibrahim1440/flow.com), branch
-`feature/accounting-ledger-core` (**unpushed**). The commit the named tests ran on, and their counts,
+`feature/accounting-ledger-core` (pushed; not merged). The commit the named tests ran on, and their counts,
 are in [`TEST_RESULTS.md`](TEST_RESULTS.md). Stage 4b detail is in
 [`STAGE_4B_EVIDENCE.md`](STAGE_4B_EVIDENCE.md).
 
@@ -9,7 +9,7 @@ are in [`TEST_RESULTS.md`](TEST_RESULTS.md). Stage 4b detail is in
 
 | Level | Meaning | State for everything below |
 |---|---|---|
-| 1. Local verification | a named test or browser run exercised it and passed, on synthetic data, on the local PostgreSQL 16 server, run by the implementer | as marked per row |
+| 1. Local verification | a named test or browser run exercised it and passed, on synthetic data, on the local PostgreSQL 16 server, run by the implementer | as marked per row. Green tests cover only what exists: rows marked P or M (e.g. XAdES, QR tag 9, zakat) are **not implemented**, so the module is not implementation-complete |
 | 2. Independent review | someone other than the implementer reviewed the code and evidence | **not done** for any row; the owner's review of stages 2–3 is open and those stages are **not accepted** |
 | 3. Accountant acceptance | the accountant ran acceptance (e.g. `UAT_AR.md`) and took the decisions in `DECISION_PACK.md` | **not done** for any row; every policy used in tests is a labelled synthetic assumption |
 | 4. Production readiness | migrations rehearsed on a production copy, Preview deployed and smoke-tested, credentials remediated, release approved | **not ready**: see "Migration rehearsal" below and `RELEASE_PROPOSAL.md` |
