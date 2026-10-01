@@ -168,7 +168,6 @@ if (canRun && runner === "container") {
 }
 
 // ── Evidence for every document (always six entries) ─────────────────────────────────────────
-const preFailed = ev.preconditions.some((p) => p.status === L.STATUS.FAIL);
 const preBlocked = ev.preconditions.some((p) => p.status === L.STATUS.BLOCKED);
 for (const key of L.MATRIX_KEYS) {
   const doc = m.documents[key];
