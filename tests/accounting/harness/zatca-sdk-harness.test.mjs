@@ -331,3 +331,15 @@ test("harness: a readme only in PDF (no extractor) → BLOCKED, not guessed", ()
   assert.equal(r.exit, 3);
   assert.equal(r.summary.preconditions.find((p) => p.name === "readable readme found").status, "BLOCKED");
 });
+
+test("harness: a locally repackaged archive is labelled as such and its original checksum NOT VERIFIED", () => {
+  const manifest = join(base, "extracted-manifest.json");
+  writeFileSync(manifest, JSON.stringify({ files: [{ path: "install.sh" }] }));
+  const r = run("repackaged", { ...pass, matrix: M, extra: ["--repackaged-from", manifest] });
+  assert.equal(r.exit, 0);
+  assert.equal(r.summary.originalArchiveChecksum, "NOT VERIFIED");
+  assert.match(r.summary.archiveKind, /locally repackaged.*NOT the original/);
+  assert.equal(r.summary.sourceManifest.sha256, sha(readFileSync(manifest)));
+  assert.equal(r.summary.official, false);
+  assert.match(readFileSync(join(r.out, r.runId, "SUMMARY.md"), "utf8"), /original archive checksum: \*\*NOT VERIFIED\*\*/);
+});

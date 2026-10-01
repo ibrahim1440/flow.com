@@ -6,6 +6,13 @@
 //   node scripts/accounting/zatca-sdk/harness.mjs --matrix <dir> --out <dir> --archive <sdk.zip> \
 //     --sha256 <hex> --source-url <where it was downloaded from> [--profile <output-profile.json>]
 //     [--image zatca-sdk-runner:11] [--runner container|direct] [--harness-test] [--timeout-seconds 600]
+//     [--downloaded-at <time>] [--provenance-note <text>]
+//     [--repackaged-from <MANIFEST.json of the extracted files>]
+//
+// --repackaged-from: the archive is a LOCAL transport zip made from extracted files (e.g. received
+// unzipped), not the original download. --sha256 then checks only that transport zip; the original
+// archive's checksum is recorded as NOT VERIFIED, the source manifest's own SHA-256 is recorded, and
+// the run can never be marked official, whatever its results.
 //
 // Fresh evidence only: every invocation creates a NEW run directory <out>/<runId>/ (creation fails if
 // it already exists) and a new, empty directory per command inside it. Each command's runner writes
@@ -53,6 +60,12 @@ const ev = { harness: "scripts/accounting/zatca-sdk/harness.mjs", runId, runDir:
   // file is the one the operator hashed, not where it came from or that it is the current release.
   provenanceClaimed: { sourceUrl: args["source-url"] ?? null, downloadedAt: args["downloaded-at"] ?? null, note: args["provenance-note"] ?? null,
     authenticated: false, latestRelease: "not assumed" }, preconditions: [], sdk: {}, documents: [] };
+const repackagedFrom = args["repackaged-from"] && args["repackaged-from"] !== true ? resolve(args["repackaged-from"]) : null;
+if (repackagedFrom) {
+  ev.archiveKind = "locally repackaged transport zip, built from user-provided extracted files; NOT the original downloaded archive";
+  ev.originalArchiveChecksum = "NOT VERIFIED";
+  ev.sourceManifest = existsSync(repackagedFrom) ? { path: repackagedFrom, sha256: L.sha256File(repackagedFrom), files: JSON.parse(readFileSync(repackagedFrom, "utf8")).files?.length ?? null } : { path: repackagedFrom, missing: true };
+} else ev.archiveKind = "archive as supplied";
 const pre = (name, status, detail) => { ev.preconditions.push({ name, status, detail }); return status === L.STATUS.PASS; };
 try { ev.applicationCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: HERE }).toString().trim(); } catch { ev.applicationCommit = null; }
 
@@ -201,12 +214,14 @@ if (archive && existsSync(archive) && ev.sdk.archiveSha256) {
 }
 const g = L.gate(ev.documents);
 const decision = ev.preconditions.some((p) => p.status === L.STATUS.FAIL) && g.decision !== L.STATUS.FAIL ? { ...g, decision: L.STATUS.FAIL, exitCode: 1 } : preBlocked && g.decision === L.STATUS.PASS ? { ...g, decision: L.STATUS.BLOCKED, exitCode: 3 } : g;
-ev.official = !harnessTest && decision.decision === L.STATUS.PASS && profile.confirmed === true;
+ev.official = !harnessTest && !repackagedFrom && decision.decision === L.STATUS.PASS && profile.confirmed === true;
+ev.officialReason = ev.official ? "all checks PASS with the archive as supplied and a confirmed output profile" : harnessTest ? "harness test" : repackagedFrom ? "original archive checksum NOT VERIFIED (locally repackaged from extracted files)" : decision.decision !== L.STATUS.PASS ? `gate ${decision.decision}` : "output profile not confirmed";
 ev.gate = decision; ev.finishedAt = now();
 writeFileSync(join(RUN, "summary.json"), JSON.stringify(ev, null, 2) + "\n");
 const md = [`# ZATCA SDK harness run — ${decision.decision}`, "", harnessTest ? "**HARNESS TEST (stub or direct runner) — NOT official SDK validation.**" : `Runner: container \`${image}\` (no network, read-only root, read-only inputs).`, "",
   `Run \`${runId}\`. Application commit: \`${ev.applicationCommit}\`; started ${ev.startedAt}; finished ${ev.finishedAt}.`, "",
-  "## SDK and provenance", "", `- Archive file name: \`${ev.inputs.archiveFileName ?? "none"}\` (says nothing reliable about the version); SHA-256 \`${ev.sdk.archiveSha256 ?? "n/a"}\``,
+  "## SDK and provenance", "", `- Archive kind: ${ev.archiveKind}${repackagedFrom ? `; original archive checksum: **NOT VERIFIED**; source manifest \`${ev.sourceManifest.path}\` SHA-256 \`${ev.sourceManifest.sha256 ?? "missing"}\`` : ""}`,
+  `- Official result: **${ev.official ? "yes" : "no"}** (${ev.officialReason})`, `- Archive file name: \`${ev.inputs.archiveFileName ?? "none"}\` (says nothing reliable about the version); SHA-256 \`${ev.sdk.archiveSha256 ?? "n/a"}\``,
   ...(ev.sdk.jars ?? []).map((j) => `- Jar \`${j.path}\`: ${j.component} ${j.version ?? "?"}${j.pom ? ` (pom: ${j.pom.groupId}:${j.pom.artifactId}:${j.pom.version})` : ""}; SHA-256 \`${j.sha256}\``),
   `- Readme used: ${ev.sdk.readme ? `\`${ev.sdk.readme.path}\` (${ev.sdk.readme.how})` : "none"}; Java requirement: ${ev.sdk.javaRequirement?.source ?? "not found"}; container: ${ev.sdk.java ?? "n/a"}`,
   `- Provenance **as stated by the operator, not verified**: source ${ev.provenanceClaimed.sourceUrl ?? "not stated"}; downloaded ${ev.provenanceClaimed.downloadedAt ?? "not stated"}${ev.provenanceClaimed.note ? `; ${ev.provenanceClaimed.note}` : ""}. Not assumed to be the latest release.`, "",
