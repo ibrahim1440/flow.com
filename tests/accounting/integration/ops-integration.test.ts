@@ -188,7 +188,7 @@ describe("stage 4b — operational stock events become inventory documents", () 
     const period = await prisma.fiscalPeriod.findFirstOrThrow({ where: { startDate: { lte: prevDay }, endDate: { gte: prevDay } } });
     await lockFiscalPeriod(period.id, w.appr);
     const r = await Ops.processOpsEvent(late.id);
-    assert.equal(r.status, "POSTED", r.reason);
+    assert.equal(r.status, "POSTED", r.reason ?? undefined);
     const doc = await prisma.invDocument.findUniqueOrThrow({ where: { id: await docOf(late.id) } });
     assert.deepEqual([doc.docDate.toISOString().slice(0, 10), doc.originalDate?.toISOString().slice(0, 10)], [first.toISOString().slice(0, 10), prevDay.toISOString().slice(0, 10)]);
     assert.match(doc.lateReason ?? "", /not open/);
