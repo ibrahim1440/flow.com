@@ -19,8 +19,8 @@
  * scoped to Node and the import is dynamic — an Edge instance never loads it at all.
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
-
-  const { assertServerEnv } = await import("./lib/server-env");
-  assertServerEnv(process.env);
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { assertServerEnv } = await import("./lib/server-env");
+    assertServerEnv(process.env);
+  }
 }
