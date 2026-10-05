@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import { AccountingStatusChip, useAccountingStatus } from "@/components/AccountingStatusChip";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -414,6 +415,8 @@ export default function PurchasesPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const accounting = useAccountingStatus(purchases.map((p) => p.id));
+
   // Build a bean lookup map for table display
   const beanMap = useMemo(
     () => new Map(beans.map((b) => [b.id, b])),
@@ -561,6 +564,7 @@ export default function PurchasesPage() {
                   <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("costPerUnit")}</th>
                   <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("totalCost")}</th>
                   <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("notes")}</th>
+                  <th className="text-start px-4 py-3 font-semibold text-charcoal whitespace-nowrap">{lang === "ar" ? "المحاسبة" : "Accounting"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -595,6 +599,7 @@ export default function PurchasesPage() {
                     <td className="px-4 py-3 text-brown/70 max-w-[180px] truncate">
                       {p.notes || "—"}
                     </td>
+                    <td className="px-4 py-3"><AccountingStatusChip entries={accounting[p.id]} /></td>
                   </tr>
                 ))}
               </tbody>

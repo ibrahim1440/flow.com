@@ -1,0 +1,354 @@
+TAP version 13
+# Subtest: editor line maths equals the server's for 5,000 generated lines, including half-halala cases
+ok 1 - editor line maths equals the server's for 5,000 generated lines, including half-halala cases
+  ---
+  duration_ms: 107.014331
+  type: 'test'
+  ...
+# Subtest: allocate splits to the cent and always sums exactly
+ok 2 - allocate splits to the cent and always sums exactly
+  ---
+  duration_ms: 2.425991
+  type: 'test'
+  ...
+# Subtest: partly-cash asset purchase: cash part investing, credit part disclosed
+ok 3 - partly-cash asset purchase: cash part investing, credit part disclosed
+  ---
+  duration_ms: 2.079178
+  type: 'test'
+  ...
+# Subtest: disposal at a gain: all proceeds investing, gain removed from profit
+ok 4 - disposal at a gain: all proceeds investing, gain removed from profit
+  ---
+  duration_ms: 8.280409
+  type: 'test'
+  ...
+# Subtest: debt converted to equity is non-cash; nothing moves in any section
+ok 5 - debt converted to equity is non-cash; nothing moves in any section
+  ---
+  duration_ms: 0.342677
+  type: 'test'
+  ...
+# Subtest: ordinary operating entries give no non-cash disclosure and indirect = direct
+ok 6 - ordinary operating entries give no non-cash disclosure and indirect = direct
+  ---
+  duration_ms: 0.777805
+  type: 'test'
+  ...
+# Subtest: an unbalanced classification is reported, not hidden: cash into an EXCLUDED account
+ok 7 - an unbalanced classification is reported, not hidden: cash into an EXCLUDED account
+  ---
+  duration_ms: 0.318175
+  type: 'test'
+  ...
+# Subtest: every postable balance-sheet template account gets a class; P&L accounts none
+ok 8 - every postable balance-sheet template account gets a class; P&L accounts none
+  ---
+  duration_ms: 1.224252
+  type: 'test'
+  ...
+# Subtest: specific defaults
+ok 9 - specific defaults
+  ---
+  duration_ms: 0.207531
+  type: 'test'
+  ...
+# Subtest: initial previous-invoice hash is base64 of the hex SHA-256 of "0"
+ok 10 - initial previous-invoice hash is base64 of the hex SHA-256 of "0"
+  ---
+  duration_ms: 0.645757
+  type: 'test'
+  ...
+# Subtest: QR TLV: tag, length, UTF-8 value, base64 — the widely published phase-1 example encodes to the same string
+ok 11 - QR TLV: tag, length, UTF-8 value, base64 — the widely published phase-1 example encodes to the same string
+  ---
+  duration_ms: 0.805448
+  type: 'test'
+  ...
+# Subtest: hash: the stored XML with signature and QR hashes to the document hash; a changed byte does not
+ok 12 - hash: the stored XML with signature and QR hashes to the document hash; a changed byte does not
+  ---
+  duration_ms: 10.563544
+  type: 'test'
+  ...
+# Subtest: local rules: a complete standard invoice passes; each defect is caught by its rule
+ok 13 - local rules: a complete standard invoice passes; each defect is caught by its rule
+  ---
+  duration_ms: 1.023671
+  type: 'test'
+  ...
+# Subtest: submission target: never production; only a local stub or ZATCA's developer-portal / simulation paths with test credentials
+ok 14 - submission target: never production; only a local stub or ZATCA's developer-portal / simulation paths with test credentials
+  ---
+  duration_ms: 0.46334
+  type: 'test'
+  ...
+# Subtest: independent curve check: d·G computed here in BigInt equals the public key Node derives, and the SPKI matches the hand-built bytes
+ok 15 - independent curve check: d·G computed here in BigInt equals the public key Node derives, and the SPKI matches the hand-built bytes
+  ---
+  duration_ms: 116.860499
+  type: 'test'
+  ...
+# Subtest: QR bytes, both layouts: tags 1–8 equal TLV sequences written out by hand (Arabic name counted in UTF-8 bytes)
+ok 16 - QR bytes, both layouts: tags 1–8 equal TLV sequences written out by hand (Arabic name counted in UTF-8 bytes)
+  ---
+  duration_ms: 141.706869
+  type: 'test'
+  ...
+# Subtest: P1363 conversion: hand-made DER with a 1-byte r and a 33-byte (sign-padded) s; and 200 real signatures
+ok 17 - P1363 conversion: hand-made DER with a 1-byte r and a 33-byte (sign-padded) s; and 200 real signatures
+  ---
+  duration_ms: 176.572644
+  type: 'test'
+  ...
+# Subtest: signature: DER (not base64 text, not raw r‖s), over the 32 hash bytes, verified by the independent BigInt verifier
+ok 18 - signature: DER (not base64 text, not raw r‖s), over the 32 hash bytes, verified by the independent BigInt verifier
+  ---
+  duration_ms: 1977.959465
+  type: 'test'
+  ...
+# Subtest: curve: only secp256k1 keys sign; P-256 and Ed25519 keys are refused
+ok 19 - curve: only secp256k1 keys sign; P-256 and Ed25519 keys are refused
+  ---
+  duration_ms: 1.740348
+  type: 'test'
+  ...
+# Subtest: local rules catch the previous encoding and a mismatched stamp; standards gaps are always reported
+ok 20 - local rules catch the previous encoding and a mismatched stamp; standards gaps are always reported
+  ---
+  duration_ms: 10.594357
+  type: 'test'
+  ...
+# Subtest: malformed input: truncated, duplicated or non-base64 TLV and malformed DER are refused, never read as shorter values
+ok 21 - malformed input: truncated, duplicated or non-base64 TLV and malformed DER are refused, never read as shorter values
+  ---
+  duration_ms: 1.061634
+  type: 'test'
+  ...
+# Subtest: preview target
+    # Subtest: URL guard needs the preview endpoint, database and explicit env confirmation
+    ok 1 - URL guard needs the preview endpoint, database and explicit env confirmation
+      ---
+      duration_ms: 0.940993
+      type: 'test'
+      ...
+    # Subtest: server identity: every id must match; production project is named explicitly
+    ok 2 - server identity: every id must match; production project is named explicitly
+      ---
+      duration_ms: 1.296183
+      type: 'test'
+      ...
+    1..2
+ok 22 - preview target
+  ---
+  duration_ms: 3.126275
+  type: 'suite'
+  ...
+# Subtest: URL classifier (credential incident)
+    # Subtest: classifies by endpoint id, flags the production owner credential, never returns the password
+    ok 1 - classifies by endpoint id, flags the production owner credential, never returns the password
+      ---
+      duration_ms: 0.589701
+      type: 'test'
+      ...
+    1..1
+ok 23 - URL classifier (credential incident)
+  ---
+  duration_ms: 0.708231
+  type: 'suite'
+  ...
+# Subtest: Neon control-plane cross-check (authoritative identity)
+    # Subtest: pure check: every id, host and the database must match the allowlist
+    ok 1 - pure check: every id, host and the database must match the allowlist
+      ---
+      duration_ms: 0.309657
+      type: 'test'
+      ...
+    # Subtest: fails closed: no key, unreachable API, error status, or mismatching metadata
+    ok 2 - fails closed: no key, unreachable API, error status, or mismatching metadata
+      ---
+      duration_ms: 75.938103
+      type: 'test'
+      ...
+    1..2
+ok 24 - Neon control-plane cross-check (authoritative identity)
+  ---
+  duration_ms: 76.493208
+  type: 'suite'
+  ...
+# Subtest: straight line, cumulative target: 18,500 over 36 months, no drift, last month exact
+ok 25 - straight line, cumulative target: 18,500 over 36 months, no drift, last month exact
+  ---
+  duration_ms: 4.393641
+  type: 'test'
+  ...
+# Subtest: catch-up: an asset first charged five months after it went into service takes the months in one line
+ok 26 - catch-up: an asset first charged five months after it went into service takes the months in one line
+  ---
+  duration_ms: 0.35236
+  type: 'test'
+  ...
+# Subtest: start convention NEXT_MONTH and residual value: 120,000 − 12,000 over 60 months = 1,800.00 a month
+ok 27 - start convention NEXT_MONTH and residual value: 120,000 − 12,000 over 60 months = 1,800.00 a month
+  ---
+  duration_ms: 1.380185
+  type: 'test'
+  ...
+# Subtest: opening depreciation at cutover: 60,000 with 24,000 over 24 months, life 60 → 36,000 over the 36 months left
+ok 28 - opening depreciation at cutover: 60,000 with 24,000 over 24 months, life 60 → 36,000 over the 36 months left
+  ---
+  duration_ms: 2.763063
+  type: 'test'
+  ...
+# Subtest: declining balance, factor 2 over 5 years: 10,000 → 333.33, then on the reduced NBV; never below the residual; last month to the residual
+ok 29 - declining balance, factor 2 over 5 years: 10,000 → 333.33, then on the reduced NBV; never below the residual; last month to the residual
+  ---
+  duration_ms: 2.978342
+  type: 'test'
+  ...
+# Subtest: nothing to charge when the base is used up or the asset has no life left
+ok 30 - nothing to charge when the base is used up or the asset has no life left
+  ---
+  duration_ms: 0.209537
+  type: 'test'
+  ...
+# Subtest: DECISION_PACK §3 example: 100 kg @ 30 + 50 kg @ 36 → average 32.00; issue 60 kg = 1,920.00
+ok 31 - DECISION_PACK §3 example: 100 kg @ 30 + 50 kg @ 36 → average 32.00; issue 60 kg = 1,920.00
+  ---
+  duration_ms: 3.408084
+  type: 'test'
+  ...
+# Subtest: DECISION_PACK §3 example: band 18% (synthetic), 60 kg in, 47 kg out → 1,834.15 to output, 85.85 abnormal (5300)
+ok 32 - DECISION_PACK §3 example: band 18% (synthetic), 60 kg in, 47 kg out → 1,834.15 to output, 85.85 abnormal (5300)
+  ---
+  duration_ms: 1.00963
+  type: 'test'
+  ...
+# Subtest: packing: roasted coffee yields, bags and labels do not; output split by yield weight
+ok 33 - packing: roasted coffee yields, bags and labels do not; output split by yield weight
+  ---
+  duration_ms: 0.321723
+  type: 'test'
+  ...
+# Subtest: FIFO takes the oldest layers at their own cost; running out is refused
+ok 34 - FIFO takes the oldest layers at their own cost; running out is refused
+  ---
+  duration_ms: 0.673251
+  type: 'test'
+  ...
+# Subtest: conservation: 3,000 random sequences — no value created or lost, no layer below zero, last issue empties exactly
+ok 35 - conservation: 3,000 random sequences — no value created or lost, no layer below zero, last issue empties exactly
+  ---
+  duration_ms: 553.771682
+  type: 'test'
+  ...
+# Subtest: landed cost / price difference: exact allocation by weight; on-hand vs consumed split
+ok 36 - landed cost / price difference: exact allocation by weight; on-hand vs consumed split
+  ---
+  duration_ms: 0.836238
+  type: 'test'
+  ...
+# Subtest: units: a 12-litre carton is 12 L; a 60 kg sack is 60 kg; factors must be positive
+ok 37 - units: a 12-litre carton is 12 L; a 60 kg sack is 60 kg; factors must be positive
+  ---
+  duration_ms: 0.306475
+  type: 'test'
+  ...
+# Subtest: money
+    # Subtest: amounts are exact to the halala; a third decimal, a negative or text is refused
+    ok 1 - amounts are exact to the halala; a third decimal, a negative or text is refused
+      ---
+      duration_ms: 2.201274
+      type: 'test'
+      ...
+    # Subtest: rounding is half-up at two places, and 0.1 + 0.2 is exactly 0.30 in Decimal
+    ok 2 - rounding is half-up at two places, and 0.1 + 0.2 is exactly 0.30 in Decimal
+      ---
+      duration_ms: 5.04428
+      type: 'test'
+      ...
+    1..2
+ok 38 - money
+  ---
+  duration_ms: 8.00856
+  type: 'suite'
+  ...
+# Subtest: dates
+    # Subtest: calendar dates only; an instant maps to its Riyadh day
+    ok 1 - calendar dates only; an instant maps to its Riyadh day
+      ---
+      duration_ms: 0.806282
+      type: 'test'
+      ...
+    1..1
+ok 39 - dates
+  ---
+  duration_ms: 0.922184
+  type: 'suite'
+  ...
+# Subtest: database guard messages
+    # Subtest: found wherever the driver adapter nests them; other errors are not mistaken for guards
+    ok 1 - found wherever the driver adapter nests them; other errors are not mistaken for guards
+      ---
+      duration_ms: 0.526983
+      type: 'test'
+      ...
+    1..1
+ok 40 - database guard messages
+  ---
+  duration_ms: 0.620829
+  type: 'suite'
+  ...
+# Subtest: chart template
+    # Subtest: codes are unique, parents come first and share the child's type
+    ok 1 - codes are unique, parents come first and share the child's type
+      ---
+      duration_ms: 0.426227
+      type: 'test'
+      ...
+    # Subtest: every posting role has a default mapping to a postable, non-header template account
+    ok 2 - every posting role has a default mapping to a postable, non-header template account
+      ---
+      duration_ms: 0.326054
+      type: 'test'
+      ...
+    # Subtest: receivable, payable, inventory and commission control accounts are closed to manual journals
+    ok 3 - receivable, payable, inventory and commission control accounts are closed to manual journals
+      ---
+      duration_ms: 0.195748
+      type: 'test'
+      ...
+    1..3
+ok 41 - chart template
+  ---
+  duration_ms: 1.268233
+  type: 'suite'
+  ...
+# Subtest: policies
+    # Subtest: every commission event type is governed by exactly one policy
+    ok 1 - every commission event type is governed by exactly one policy
+      ---
+      duration_ms: 0.133887
+      type: 'test'
+      ...
+    1..1
+ok 42 - policies
+  ---
+  duration_ms: 0.202606
+  type: 'suite'
+  ...
+# Subtest: editor sales-line maths equals the server's for 5,000 generated lines
+ok 43 - editor sales-line maths equals the server's for 5,000 generated lines
+  ---
+  duration_ms: 105.481831
+  type: 'test'
+  ...
+1..43
+# tests 48
+# suites 8
+# pass 48
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3151.128712

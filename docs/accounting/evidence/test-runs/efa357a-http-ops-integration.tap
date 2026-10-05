@@ -1,0 +1,16 @@
+TAP version 13
+# Subtest: operations drive the inventory accounts: purchase → roast → QC → pack → dispatch → invoice, and the exceptions
+ok 1 - operations drive the inventory accounts: purchase → roast → QC → pack → dispatch → invoice, and the exceptions
+  ---
+  duration_ms: 1980.049018
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2108.828997

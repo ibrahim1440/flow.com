@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
   try {
     const requested = normalizeBlendSources(body);
 
+    let blendEventId: string | undefined;
     const result = await prisma.$transaction(async (tx) => {
       // ── 1. Every source, locked, in one canonical order ────────────────────
       // Ordered by id inside the query, not by the order the operator ticked boxes in. Two
@@ -166,12 +168,13 @@ export async function POST(request: Request) {
         })),
       });
 
-      await recordBlendMovements(tx, {
+      blendEventId = await recordBlendMovements(tx, {
         blendBatchId: blendedBatch.id,
         blendBatchNumber: blendedBatch.batchNumber,
         consumed,
         totalKg,
         userId: user.id,
+        productId: blendProductId,
       });
 
       // ── 7. OrderItem before ProductionOrder ────────────────────────────────
@@ -204,6 +207,7 @@ export async function POST(request: Request) {
       });
     }, TX_OPTS);
 
+    await integrateNow([blendEventId]);
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     if (err && typeof err === "object" && "_appCode" in err) {

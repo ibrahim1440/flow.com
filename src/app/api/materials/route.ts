@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireEdit("inventory");
+  const { error, user } = await requireEdit("inventory");
   if (error) return error;
 
   let body: unknown;
@@ -105,7 +106,9 @@ export async function POST(request: Request) {
     if (clash)
       return NextResponse.json({ error: `Material code "${code}" already exists.` }, { status: 409 });
 
-    const item = await prisma.materialItem.create({
+    let opsEventId: string | undefined;
+    const item = await prisma.$transaction(async (tx) => {
+      const created = await tx.materialItem.create({
       data: {
         code,
         name,
@@ -117,7 +120,12 @@ export async function POST(request: Request) {
         isActive: b.isActive === undefined ? true : b.isActive === true,
         notes: typeof b.notes === "string" && b.notes.trim() ? b.notes.trim() : null,
       },
+      });
+      // Accounting: an opening quantity has no cost here; an accountant completes it.
+      if (quantityOnHand > 0) opsEventId = (await recordStockEvent(tx, { kind: "OPENING", sourceId: `material:${created.id}`, userId: user?.id ?? null, payload: { materialItemId: created.id, quantity: quantityOnHand } })).id;
+      return created;
     });
+    await integrateNow([opsEventId]);
     return NextResponse.json(item, { status: 201 });
   } catch (err) {
     return handlePrismaError(err);

@@ -1,0 +1,42 @@
+commit 5304515af13b59e2a21ceef6b128d6fa045a6023 start 2026-10-01T05:50:25Z
+tsc rc=0  
+lint rc=0  
+build rc=0  
+acc-unit rc=0 # pass 48 # fail 0
+acc-db rc=1 # pass 108 # fail 2
+acc-scripts rc=0 # pass 4 # fail 0
+fin-unit rc=0 # pass 52 # fail 0
+fin-db rc=0 # pass 40 # fail 0
+http-no-switch rc=0 # pass 2 # fail 0
+http-authz rc=0 # pass 5 # fail 0
+http-runtime-workflow rc=0 # pass 7 # fail 0
+http-stage2-workflow rc=0 # pass 4 # fail 0
+http-bank-corrections rc=0 # pass 3 # fail 0
+http-receivables-workflow rc=0 # pass 3 # fail 0
+http-inventory-workflow rc=0 # pass 5 # fail 0
+http-ops-integration rc=0 # pass 1 # fail 0
+http-fixed-assets rc=0 # pass 3 # fail 0
+http-tax rc=0 # pass 2 # fail 0
+ops-forms rc=0 # pass 2 # fail 0
+ops-pack-dispatch rc=0 # pass 6 # fail 0
+fa-forms rc=1  
+tax-forms rc=0 # pass 6 # fail 0
+year-end-forms rc=0 # pass 5 # fail 0
+capture rc=0  
+capture pageErrors: 79 clean of 79; overflow true: 0
+a11y rc=0  
+serious/critical violations inside accounting content: 0
+sales-pure rc=0  
+sales_preview migrated
+sales-db rc=0  
+  [PASS] EXPIRED is revisable
+113 passed, 0 failed
+  ALL SALES SUITES GREEN
+23 passed, 0 failed
+sales-app rc=0  
+sales-security: 34 passed, 0 failed
+sales-workflow: 231 passed, 0 failed
+certification rc=0  
+  26 suite(s), 2301 harness assertions, 0 failed
+  ALL SUITES GREEN
+end 2026-10-01T06:07:25Z

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth";
@@ -18,7 +19,7 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const batch = await prisma.roastingBatch.findUnique({
     where: { id },
-    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, productionOrderId: true },
+    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, roastedBeanQuantity: true, productionOrderId: true, productId: true, batchNumber: true, isBlend: true, orderItem: { select: { productId: true } } },
   });
 
   if (!batch) {
@@ -35,6 +36,7 @@ export async function DELETE(request: Request, { params }: Params) {
     }
   }
 
+  let cancelEventId: string | undefined;
   try { await prisma.$transaction(async (tx) => {
     // 0. Lock the batch, then refuse to delete one that has packaging history.
     //
@@ -117,6 +119,15 @@ export async function DELETE(request: Request, { params }: Params) {
     }
 
     // 2. Delete batch (QcRecords cascade via schema onDelete: Cascade)
+    // Accounting: the roast is undone (green restocked) or its output written off.
+    if (batch.greenBeanId && !batch.isBlend) {
+      cancelEventId = (await recordStockEvent(tx, {
+        kind: "ROAST_CANCEL", sourceId: id, userId: user!.id,
+        payload: { batchId: id, batchNumber: batch.batchNumber, greenBeanId: batch.greenBeanId, productId: batch.productId ?? batch.orderItem?.productId ?? null,
+          greenKg: batch.greenBeanQuantity, roastedKg: batch.roastedBeanQuantity, restock: restock && batch.greenBeanQuantity > 0 },
+      })).id;
+    }
+
     await tx.roastingBatch.delete({ where: { id } });
 
     // 3. Recalculate order item and production order status after deletion.
@@ -128,6 +139,7 @@ export async function DELETE(request: Request, { params }: Params) {
     }
   });
 
+  await integrateNow([cancelEventId]);
   return NextResponse.json({ success: true });
   } catch (err) {
     if (err && typeof err === "object" && "_appCode" in err) {

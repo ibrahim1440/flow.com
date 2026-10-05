@@ -1,0 +1,72 @@
+# subledger-history.test.ts against ec6de49 (before the fix), 2026-09-28T10:01:46Z
+# Both failures come from the SECOND snapshot (after the later void and reversals): the March cutoffs change.
+TAP version 13
+# (node:1870) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: period-end subledgers are reproducible and agree with the ledger
+    # Subtest: receivables: aging and statement for March unchanged by later voids and reversals
+    not ok 1 - receivables: aging and statement for March unchanged by later voids and reversals
+      ---
+      duration_ms: 1128.432225
+      type: 'test'
+      location: '/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:2:5267'
+      failureType: 'testCodeFailure'
+      error: |-
+        aging 03-09
+        + actual - expected
+        
+        + '1150.00'
+        - '3450.00'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: '3450.00'
+      actual: '1150.00'
+      operator: 'strictEqual'
+      stack: |-
+        snapshot (/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:100:16)
+        async TestContext.<anonymous> (/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:121:22)
+        async Promise.all (index 0)
+      ...
+    # Subtest: payables: aging and statement for March unchanged by a later void and bill reversal
+    not ok 2 - payables: aging and statement for March unchanged by a later void and bill reversal
+      ---
+      duration_ms: 523.108681
+      type: 'test'
+      location: '/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:2:8992'
+      failureType: 'testCodeFailure'
+      error: |-
+        AP aging 03-10
+        + actual - expected
+        
+        + '1150.00'
+        - '3450.00'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: '3450.00'
+      actual: '1150.00'
+      operator: 'strictEqual'
+      stack: |-
+        snapshot (/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:146:16)
+        async TestContext.<anonymous> (/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:162:22)
+      ...
+    1..2
+not ok 1 - period-end subledgers are reproducible and agree with the ledger
+  ---
+  duration_ms: 1652.834392
+  type: 'suite'
+  location: '/home/user/flow.com/tests/accounting/integration/subledger-history.test.ts:2:5157'
+  failureType: 'subtestsFailed'
+  error: '2 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 2
+# suites 1
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2188.615482

@@ -1,0 +1,8 @@
+ok 1 - no session: every accounting endpoint answers 401
+ok 2 - no accounting module: 403 on reads and writes
+ok 3 - view-only: reads succeed, every write is refused
+ok 4 - separation of duties over HTTP: the preparer cannot approve; the approver cannot create; identity comes from the session
+ok 5 - reports balance on the fixture
+# tests 5
+# pass 5
+# fail 0

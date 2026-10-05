@@ -1,0 +1,10 @@
+ok - capitalisation: the preparer cannot approve their own asset; the approver capitalised FA-0004 in the browser (Dr 1210 42,000 / Cr 2195)
+ok - asset form: 400.00 refused (below the class's capitalisation threshold), 4,500.00 registered and submitted
+ok - disposal form: no bank account offered, a missing proceeds account refused; approved by the approver → Dr 1290 11083.33 · Dr 2190 80,000 · Dr 6960 3916.67 / Cr 1230 95000.00
+ok - run form: 2026-09 computed (4733.34; van excluded, espresso caught up 3 months); a second run for the period refused
+ok - run approved and posted by the approver in the browser: Dr 6600 4733.34 / Cr 1290
+ok - run reversal requested by the preparer and approved by the approver in the browser; reversing journal posted
+ok - register and reconciliation: 1210 difference 1302167.89, 1220 difference 96000.00, 1230 difference 118000.00, 1290 difference -272500.00; nothing unexplained
+ok - year-end page: the current year shows its unmet conditions (not ended, periods open) and cannot be prepared
+# pass 8
+# fail 0

@@ -1,0 +1,664 @@
+TAP version 13
+# (node:15400) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: posted bank lines — database guard
+    # Subtest: every accounting-relevant field, split, match and the transfer link is frozen once posted; other fields are not
+    ok 1 - every accounting-relevant field, split, match and the transfer link is frozen once posted; other fields are not
+      ---
+      duration_ms: 925.459898
+      type: 'test'
+      ...
+    # Subtest: a line that has not posted (blocked) can still be fixed, and then posts the fixed data
+    ok 2 - a line that has not posted (blocked) can still be fixed, and then posts the fixed data
+      ---
+      duration_ms: 398.736437
+      type: 'test'
+      ...
+    # Subtest: an edit racing the posting: the edit that commits first is what posts; after posting it is refused
+    ok 3 - an edit racing the posting: the edit that commits first is what posts; after posting it is refused
+      ---
+      duration_ms: 762.515579
+      type: 'test'
+      ...
+    1..3
+ok 1 - posted bank lines — database guard
+  ---
+  duration_ms: 2087.818862
+  type: 'suite'
+  ...
+# Subtest: posted bank lines — reversal-and-replacement correction
+    # Subtest: replace: four-eyes; original voided and mirrored; replacement posts; audit trail; request immutable
+    ok 1 - replace: four-eyes; original voided and mirrored; replacement posts; audit trail; request immutable
+      ---
+      duration_ms: 560.238364
+      type: 'test'
+      ...
+    # Subtest: supplier allocation corrected: payment matched to a bill replaced by a smaller one; obligation and aging follow
+    ok 2 - supplier allocation corrected: payment matched to a bill replaced by a smaller one; obligation and aging follow
+      ---
+      duration_ms: 645.966612
+      type: 'test'
+      ...
+    # Subtest: two approvers at the same moment: exactly one applies
+    ok 3 - two approvers at the same moment: exactly one applies
+      ---
+      duration_ms: 513.240426
+      type: 'test'
+      ...
+    # Subtest: periods: the original's period may be locked; the replacement and today's reversal need open periods
+    ok 4 - periods: the original's period may be locked; the replacement and today's reversal need open periods
+      ---
+      duration_ms: 390.228069
+      type: 'test'
+      ...
+    # Subtest: transfers are voided on both legs; replacement of a transfer and corrections of unposted lines are refused
+    ok 5 - transfers are voided on both legs; replacement of a transfer and corrections of unposted lines are refused
+      ---
+      duration_ms: 543.600259
+      type: 'test'
+      ...
+    1..5
+ok 2 - posted bank lines — reversal-and-replacement correction
+  ---
+  duration_ms: 2654.177
+  type: 'suite'
+  ...
+# (node:15448) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: cash flow — history is stable when a later correction is approved
+    # Subtest: asset bill paid in January, payment voided in a later month
+    ok 1 - asset bill paid in January, payment voided in a later month
+      ---
+      duration_ms: 938.843982
+      type: 'test'
+      ...
+    # Subtest: two partial payments; the second is voided later
+    ok 2 - two partial payments; the second is voided later
+      ---
+      duration_ms: 541.666019
+      type: 'test'
+      ...
+    # Subtest: void and replace: the replacement is classified on its own; the void mirrors the original
+    ok 3 - void and replace: the replacement is classified on its own; the void mirrors the original
+      ---
+      duration_ms: 554.209148
+      type: 'test'
+      ...
+    1..3
+ok 3 - cash flow — history is stable when a later correction is approved
+  ---
+  duration_ms: 2036.045113
+  type: 'suite'
+  ...
+# Subtest: cash flow — non-cash transactions
+    # Subtest: fixed asset bought on credit: no flow at purchase; partial and full payments are investing outflows
+    ok 1 - fixed asset bought on credit: no flow at purchase; partial and full payments are investing outflows
+      ---
+      duration_ms: 657.353636
+      type: 'test'
+      ...
+    # Subtest: asset financed directly by a loan: disclosed as non-cash; loan repayment is financing
+    ok 2 - asset financed directly by a loan: disclosed as non-cash; loan repayment is financing
+      ---
+      duration_ms: 317.332791
+      type: 'test'
+      ...
+    # Subtest: depreciation and disposals: proceeds are investing; depreciation, loss and gain adjust profit
+    ok 3 - depreciation and disposals: proceeds are investing; depreciation, loss and gain adjust profit
+      ---
+      duration_ms: 356.894027
+      type: 'test'
+      ...
+    # Subtest: internal cash transfers are not cash flows
+    ok 4 - internal cash transfers are not cash flows
+      ---
+      duration_ms: 321.619382
+      type: 'test'
+      ...
+    # Subtest: working capital and a mixed receipt are still reported correctly
+    ok 5 - working capital and a mixed receipt are still reported correctly
+      ---
+      duration_ms: 334.556304
+      type: 'test'
+      ...
+    1..5
+ok 4 - cash flow — non-cash transactions
+  ---
+  duration_ms: 1989.040969
+  type: 'suite'
+  ...
+# (node:15466) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: cash flow — supplier bill for a fixed asset
+    # Subtest: bill on credit is non-cash; bank payments matched to it are investing (net) and operating (VAT)
+    ok 1 - bill on credit is non-cash; bank payments matched to it are investing (net) and operating (VAT)
+      ---
+      duration_ms: 469.114927
+      type: 'test'
+      ...
+    1..1
+ok 5 - cash flow — supplier bill for a fixed asset
+  ---
+  duration_ms: 469.347935
+  type: 'suite'
+  ...
+# Subtest: statement for the year: hand-worked sections, opening entry treated as opening cash, identity holds
+ok 6 - statement for the year: hand-worked sections, opening entry treated as opening cash, identity holds
+  ---
+  duration_ms: 762.934566
+  type: 'test'
+  ...
+# Subtest: a later start date moves earlier flows into opening cash
+ok 7 - a later start date moves earlier flows into opening cash
+  ---
+  duration_ms: 428.812886
+  type: 'test'
+  ...
+# Subtest: classification: explicit change, default fallback listed, EXCLUDED breaks the check, bad value refused
+ok 8 - classification: explicit change, default fallback listed, EXCLUDED breaks the check, bad value refused
+  ---
+  duration_ms: 479.349781
+  type: 'test'
+  ...
+# Subtest: outbox
+    # Subtest: every commission movement produces exactly one event in the same transaction, whichever path wrote it
+    ok 1 - every commission movement produces exactly one event in the same transaction, whichever path wrote it
+      ---
+      duration_ms: 504.373012
+      type: 'test'
+      ...
+    1..1
+ok 9 - outbox
+  ---
+  duration_ms: 505.251773
+  type: 'suite'
+  ...
+# Subtest: posting gate
+    # Subtest: without approvals nothing posts: the event is BLOCKED with the reasons
+    ok 1 - without approvals nothing posts: the event is BLOCKED with the reasons
+      ---
+      duration_ms: 269.994158
+      type: 'test'
+      ...
+    # Subtest: in the isolated test database, provisional posting is allowed and labelled
+    ok 2 - in the isolated test database, provisional posting is allowed and labelled
+      ---
+      duration_ms: 278.919902
+      type: 'test'
+      ...
+    # Subtest: approvals are four-eyes: the preparer cannot approve the policy, the plan author cannot approve the plan
+    ok 3 - approvals are four-eyes: the preparer cannot approve the policy, the plan author cannot approve the plan
+      ---
+      duration_ms: 273.335565
+      type: 'test'
+      ...
+    # Subtest: once approved, blocked events post for real (not provisional) on the next run
+    ok 4 - once approved, blocked events post for real (not provisional) on the next run
+      ---
+      duration_ms: 306.243391
+      type: 'test'
+      ...
+    1..4
+ok 10 - posting gate
+  ---
+  duration_ms: 1129.023413
+  type: 'suite'
+  ...
+# Subtest: accounting effect
+    # Subtest: accrual, adjustment, payout, then a return after payment: every movement once, and the payable reconciles per employee
+    ok 1 - accrual, adjustment, payout, then a return after payment: every movement once, and the payable reconciles per employee
+      ---
+      duration_ms: 379.810665
+      type: 'test'
+      ...
+    # Subtest: replays and concurrent runs never post an event twice
+    ok 2 - replays and concurrent runs never post an event twice
+      ---
+      duration_ms: 340.053887
+      type: 'test'
+      ...
+    # Subtest: events for one person post in order: a blocked accrual holds the payout behind it
+    ok 3 - events for one person post in order: a blocked accrual holds the payout behind it
+      ---
+      duration_ms: 290.19259
+      type: 'test'
+      ...
+    # Subtest: movements before the cutover are skipped (the opening balance carries them); an unmapped role or a locked period blocks
+    ok 4 - movements before the cutover are skipped (the opening balance carries them); an unmapped role or a locked period blocks
+      ---
+      duration_ms: 332.692928
+      type: 'test'
+      ...
+    # Subtest: an automatic entry cannot be reversed by hand; the correction comes from the commission ledger
+    ok 5 - an automatic entry cannot be reversed by hand; the correction comes from the commission ledger
+      ---
+      duration_ms: 242.884576
+      type: 'test'
+      ...
+    1..5
+ok 11 - accounting effect
+  ---
+  duration_ms: 1586.345797
+  type: 'suite'
+  ...
+# Subtest: stage 4 — purchasing to production to sale
+    # Subtest: the whole chain, journals by hand, valuation equals the ledger at every month end
+    ok 1 - the whole chain, journals by hand, valuation equals the ledger at every month end
+      ---
+      duration_ms: 2123.6327
+      type: 'test'
+      ...
+    1..1
+ok 12 - stage 4 — purchasing to production to sale
+  ---
+  duration_ms: 2124.505625
+  type: 'suite'
+  ...
+# Subtest: stage 4 — historical GRNI
+    # Subtest: a bill reversed later still explains GRNI at earlier dates; the explanation agrees with the ledger at every cutoff
+    ok 1 - a bill reversed later still explains GRNI at earlier dates; the explanation agrees with the ledger at every cutoff
+      ---
+      duration_ms: 514.685593
+      type: 'test'
+      ...
+    1..1
+ok 13 - stage 4 — historical GRNI
+  ---
+  duration_ms: 514.925343
+  type: 'suite'
+  ...
+# Subtest: stage 4 — controls
+    # Subtest: FIFO: the oldest layer first, each at its own cost
+    ok 1 - FIFO: the oldest layer first, each at its own cost
+      ---
+      duration_ms: 558.353452
+      type: 'test'
+      ...
+    # Subtest: D-1 undecided: posting is refused; in an isolated test database it posts provisionally, journal included
+    ok 2 - D-1 undecided: posting is refused; in an isolated test database it posts provisionally, journal included
+      ---
+      duration_ms: 371.076081
+      type: 'test'
+      ...
+    # Subtest: a production that loses weight needs an approved loss band; a draft band is not enough
+    ok 3 - a production that loses weight needs an approved loss band; a draft band is not enough
+      ---
+      duration_ms: 462.288425
+      type: 'test'
+      ...
+    # Subtest: no negative stock, no back-dating over posted movements, no second posting
+    ok 4 - no negative stock, no back-dating over posted movements, no second posting
+      ---
+      duration_ms: 585.356646
+      type: 'test'
+      ...
+    # Subtest: two issues racing for the same stock: one posts, the other finds too little
+    ok 5 - two issues racing for the same stock: one posts, the other finds too little
+      ---
+      duration_ms: 463.384924
+      type: 'test'
+      ...
+    # Subtest: the database refuses tampering: posted documents, moves, layers, own approval
+    ok 6 - the database refuses tampering: posted documents, moves, layers, own approval
+      ---
+      duration_ms: 459.602164
+      type: 'test'
+      ...
+    # Subtest: drafts from operational records: a roasting batch and a green-coffee purchase, once each
+    ok 7 - drafts from operational records: a roasting batch and a green-coffee purchase, once each
+      ---
+      duration_ms: 379.657744
+      type: 'test'
+      ...
+    1..7
+ok 14 - stage 4 — controls
+  ---
+  duration_ms: 3280.909815
+  type: 'suite'
+  ...
+# Subtest: set-up
+    # Subtest: template loads once, into an empty chart, with control accounts closed to manual posting
+    ok 1 - template loads once, into an empty chart, with control accounts closed to manual posting
+      ---
+      duration_ms: 453.689718
+      type: 'test'
+      ...
+    # Subtest: a fiscal year is twelve months with no overlap; a second overlapping year is refused by the database
+    ok 2 - a fiscal year is twelve months with no overlap; a second overlapping year is refused by the database
+      ---
+      duration_ms: 125.286477
+      type: 'test'
+      ...
+    # Subtest: nothing posts before set-up is complete
+    ok 3 - nothing posts before set-up is complete
+      ---
+      duration_ms: 249.698802
+      type: 'test'
+      ...
+    1..3
+ok 15 - set-up
+  ---
+  duration_ms: 829.84374
+  type: 'suite'
+  ...
+# Subtest: manual journals
+    # Subtest: draft → submit → approve (by another person) → post, and the trial balance shows it
+    ok 1 - draft → submit → approve (by another person) → post, and the trial balance shows it
+      ---
+      duration_ms: 306.698208
+      type: 'test'
+      ...
+    # Subtest: refusals: unbalanced, a third decimal, a parent account, a control account, one line
+    ok 2 - refusals: unbalanced, a third decimal, a parent account, a control account, one line
+      ---
+      duration_ms: 238.873341
+      type: 'test'
+      ...
+    # Subtest: rejection returns the entry to draft with the reason; it can be edited, resubmitted and posted
+    ok 3 - rejection returns the entry to draft with the reason; it can be edited, resubmitted and posted
+      ---
+      duration_ms: 283.133169
+      type: 'test'
+      ...
+    # Subtest: only drafts can be discarded
+    ok 4 - only drafts can be discarded
+      ---
+      duration_ms: 285.202532
+      type: 'test'
+      ...
+    1..4
+ok 16 - manual journals
+  ---
+  duration_ms: 1114.494366
+  type: 'suite'
+  ...
+# Subtest: database guards (any writer, not just the service)
+    # Subtest: a posted entry and its lines cannot be edited or deleted; a draft cannot be inserted as posted
+    ok 1 - a posted entry and its lines cannot be edited or deleted; a draft cannot be inserted as posted
+      ---
+      duration_ms: 339.380495
+      type: 'test'
+      ...
+    # Subtest: self-approval and an unbalanced posting are refused by the database
+    ok 2 - self-approval and an unbalanced posting are refused by the database
+      ---
+      duration_ms: 254.039829
+      type: 'test'
+      ...
+    # Subtest: an account with postings cannot change type or become a parent
+    ok 3 - an account with postings cannot change type or become a parent
+      ---
+      duration_ms: 274.649152
+      type: 'test'
+      ...
+    # Subtest: provisional entries are refused in a database without the disposable marker
+    ok 4 - provisional entries are refused in a database without the disposable marker
+      ---
+      duration_ms: 229.130076
+      type: 'test'
+      ...
+    1..4
+ok 17 - database guards (any writer, not just the service)
+  ---
+  duration_ms: 1097.695384
+  type: 'suite'
+  ...
+# Subtest: reversal
+    # Subtest: a reversal is requested, approved by someone else, posted; the original becomes REVERSED and the accounts net to zero
+    ok 1 - a reversal is requested, approved by someone else, posted; the original becomes REVERSED and the accounts net to zero
+      ---
+      duration_ms: 318.614855
+      type: 'test'
+      ...
+    1..1
+ok 18 - reversal
+  ---
+  duration_ms: 318.780004
+  type: 'suite'
+  ...
+# Subtest: periods
+    # Subtest: locked periods refuse entries and postings; unlock needs a reason; close needs earlier periods closed and nothing pending
+    ok 1 - locked periods refuse entries and postings; unlock needs a reason; close needs earlier periods closed and nothing pending
+      ---
+      duration_ms: 325.798533
+      type: 'test'
+      ...
+    1..1
+ok 19 - periods
+  ---
+  duration_ms: 325.970267
+  type: 'suite'
+  ...
+# Subtest: concurrency
+    # Subtest: two simultaneous approvals and two simultaneous posts produce one of each
+    ok 1 - two simultaneous approvals and two simultaneous posts produce one of each
+      ---
+      duration_ms: 261.426571
+      type: 'test'
+      ...
+    1..1
+ok 20 - concurrency
+  ---
+  duration_ms: 261.575381
+  type: 'suite'
+  ...
+# Subtest: statements
+    # Subtest: income statement and balance sheet agree with each other and with the trial balance
+    ok 1 - income statement and balance sheet agree with each other and with the trial balance
+      ---
+      duration_ms: 328.124136
+      type: 'test'
+      ...
+    1..1
+ok 21 - statements
+  ---
+  duration_ms: 328.294422
+  type: 'suite'
+  ...
+# Subtest: stage 3 — sales invoices and credit notes
+    # Subtest: line arithmetic: discount then VAT, half-up at each step; VAT inside an inclusive advance
+    ok 1 - line arithmetic: discount then VAT, half-up at each step; VAT inside an inclusive advance
+      ---
+      duration_ms: 216.604758
+      type: 'test'
+      ...
+    # Subtest: create → submit → four-eyes approve → post: journal by hand; posted document immutable
+    ok 2 - create → submit → four-eyes approve → post: journal by hand; posted document immutable
+      ---
+      duration_ms: 707.519638
+      type: 'test'
+      ...
+    # Subtest: credit notes: against a posted invoice of the same customer, never beyond it; auto-settle the invoice; reversal blocked while allocated
+    ok 3 - credit notes: against a posted invoice of the same customer, never beyond it; auto-settle the invoice; reversal blocked while allocated
+      ---
+      duration_ms: 553.998052
+      type: 'test'
+      ...
+    # Subtest: an order is invoiced once while its invoice is live
+    ok 4 - an order is invoiced once while its invoice is live
+      ---
+      duration_ms: 353.504407
+      type: 'test'
+      ...
+    1..4
+ok 22 - stage 3 — sales invoices and credit notes
+  ---
+  duration_ms: 1832.871344
+  type: 'suite'
+  ...
+# (node:15584) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: stage 3 — receipts, advances, statements
+    # Subtest: the whole cycle, tied out: receipt with allocation and advance, advance applied, credit note, refund
+    ok 1 - the whole cycle, tied out: receipt with allocation and advance, advance applied, credit note, refund
+      ---
+      duration_ms: 790.904665
+      type: 'test'
+      ...
+    # Subtest: a posted receipt voided through a correction releases its allocations; the invoice is owed again; ties hold
+    ok 2 - a posted receipt voided through a correction releases its allocations; the invoice is owed again; ties hold
+      ---
+      duration_ms: 472.874632
+      type: 'test'
+      ...
+    # Subtest: policy gates: undecided D-2 or unapproved advances policy hold an advance, not a plain receipt; invoices wait for their policy
+    ok 3 - policy gates: undecided D-2 or unapproved advances policy hold an advance, not a plain receipt; invoices wait for their policy
+      ---
+      duration_ms: 422.992324
+      type: 'test'
+      ...
+    # Subtest: sales collections and commissions: the linked collection names the customer; one bank journal, commission journals unchanged
+    ok 4 - sales collections and commissions: the linked collection names the customer; one bank journal, commission journals unchanged
+      ---
+      duration_ms: 487.653624
+      type: 'test'
+      ...
+    # Subtest: concurrency: two receipts cannot over-settle one invoice; re-assigning a line keeps one set of allocations
+    ok 5 - concurrency: two receipts cannot over-settle one invoice; re-assigning a line keeps one set of allocations
+      ---
+      duration_ms: 412.541245
+      type: 'test'
+      ...
+    1..5
+ok 23 - stage 3 — receipts, advances, statements
+  ---
+  duration_ms: 2587.994008
+  type: 'suite'
+  ...
+# Subtest: stage 3 — credits
+    # Subtest: an unapplied credit is used on another invoice of the same customer: a net-zero move between open items
+    ok 1 - an unapplied credit is used on another invoice of the same customer: a net-zero move between open items
+      ---
+      duration_ms: 492.548945
+      type: 'test'
+      ...
+    1..1
+ok 24 - stage 3 — credits
+  ---
+  duration_ms: 492.743884
+  type: 'suite'
+  ...
+# Subtest: stage 2 — supplier bills
+    # Subtest: line arithmetic and VAT numbers
+    ok 1 - line arithmetic and VAT numbers
+      ---
+      duration_ms: 214.199256
+      type: 'test'
+      ...
+    # Subtest: create → submit → four-eyes approve → post: obligation, journal and aging tie out
+    ok 2 - create → submit → four-eyes approve → post: obligation, journal and aging tie out
+      ---
+      duration_ms: 684.576451
+      type: 'test'
+      ...
+    # Subtest: database guards: posted bills and their lines are frozen; four-eyes and totals enforced in SQL
+    ok 3 - database guards: posted bills and their lines are frozen; four-eyes and totals enforced in SQL
+      ---
+      duration_ms: 558.72116
+      type: 'test'
+      ...
+    # Subtest: input VAT needs the supplier's VAT number; zero-rated bill from an unregistered supplier is fine
+    ok 4 - input VAT needs the supplier's VAT number; zero-rated bill from an unregistered supplier is fine
+      ---
+      duration_ms: 453.531471
+      type: 'test'
+      ...
+    # Subtest: a bill line cannot debit a control account or a revenue account
+    ok 5 - a bill line cannot debit a control account or a revenue account
+      ---
+      duration_ms: 307.475096
+      type: 'test'
+      ...
+    # Subtest: posting refuses a locked period; the PO obligation is superseded
+    ok 6 - posting refuses a locked period; the PO obligation is superseded
+      ---
+      duration_ms: 513.713608
+      type: 'test'
+      ...
+    # Subtest: reversal: refused while a payment is matched; otherwise mirror journal and cancelled obligation
+    ok 7 - reversal: refused while a payment is matched; otherwise mirror journal and cancelled obligation
+      ---
+      duration_ms: 415.669432
+      type: 'test'
+      ...
+    # Subtest: policy gate: unapproved payables policy → BLOCKED; provisional only on a marked disposable DB with the switch
+    ok 8 - policy gate: unapproved payables policy → BLOCKED; provisional only on a marked disposable DB with the switch
+      ---
+      duration_ms: 369.245513
+      type: 'test'
+      ...
+    1..8
+ok 25 - stage 2 — supplier bills
+  ---
+  duration_ms: 3521.128696
+  type: 'suite'
+  ...
+# (node:15607) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: stage 2 — bank to ledger
+    # Subtest: supplier payment matched to a posted bill: Dr payables (supplier) / Cr bank; aging and statement settle
+    ok 1 - supplier payment matched to a posted bill: Dr payables (supplier) / Cr bank; aging and statement settle
+      ---
+      duration_ms: 489.421082
+      type: 'test'
+      ...
+    # Subtest: payables split without a matching posted bill → BLOCKED with the unmatched amount
+    ok 2 - payables split without a matching posted bill → BLOCKED with the unmatched amount
+      ---
+      duration_ms: 310.057603
+      type: 'test'
+      ...
+    # Subtest: expense line posts to the category account; unmapped category, unmapped cash account and unassigned customer receipts are BLOCKED
+    ok 3 - expense line posts to the category account; unmapped category, unmapped cash account and unassigned customer receipts are BLOCKED
+      ---
+      duration_ms: 423.299062
+      type: 'test'
+      ...
+    # Subtest: transfer between company accounts posts once; lines before the bank start date are SKIPPED; void mirrors
+    ok 4 - transfer between company accounts posts once; lines before the bank start date are SKIPPED; void mirrors
+      ---
+      duration_ms: 515.279714
+      type: 'test'
+      ...
+    # Subtest: bank ↔ ledger reconciliation ties per cash account; manual journals may no longer touch a mapped cash GL
+    ok 5 - bank ↔ ledger reconciliation ties per cash account; manual journals may no longer touch a mapped cash GL
+      ---
+      duration_ms: 431.33022
+      type: 'test'
+      ...
+    1..5
+ok 26 - stage 2 — bank to ledger
+  ---
+  duration_ms: 2170.151307
+  type: 'suite'
+  ...
+# (node:15636) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: period-end subledgers are reproducible and agree with the ledger
+    # Subtest: receivables: aging and statement for March unchanged by later voids and reversals
+    ok 1 - receivables: aging and statement for March unchanged by later voids and reversals
+      ---
+      duration_ms: 1423.438917
+      type: 'test'
+      ...
+    # Subtest: payables: aging and statement for March unchanged by a later void and bill reversal
+    ok 2 - payables: aging and statement for March unchanged by a later void and bill reversal
+      ---
+      duration_ms: 684.346741
+      type: 'test'
+      ...
+    1..2
+ok 27 - period-end subledgers are reproducible and agree with the ledger
+  ---
+  duration_ms: 2109.085165
+  type: 'suite'
+  ...
+1..27
+# tests 79
+# suites 24
+# pass 79
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 41028.457532

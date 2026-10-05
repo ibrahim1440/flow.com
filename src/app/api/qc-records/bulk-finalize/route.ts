@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordQcRejections, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { isValidTransition } from "@/lib/batch-transitions";
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
     // on nothing having moved underneath it.
     const expectedStatuses = [...new Set(batches.map((b) => b.status))];
 
+    let opsIds: string[] = [];
     const finalized = await prisma.$transaction(async (tx) => {
       // Conditional on those statuses. The batches were read and their transitions
       // checked before the transaction opened, so without this a batch finalised by
@@ -104,8 +106,12 @@ export async function POST(request: Request) {
         await recalcProductionOrderStatus(productionOrderId, tx);
       }
 
+      // Accounting: rejected batches' roasted coffee is written off (ops-integration.ts).
+      if (outcome === "Rejected") opsIds = await recordQcRejections(tx, batchIds, user.id);
+
       return updated.count;
     }, TX_OPTS);
+    await integrateNow(opsIds);
 
     // The real number, not the number asked for. Reporting the requested count would tell
     // the operator that a batch somebody else had already decided was finalised by them.

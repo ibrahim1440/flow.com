@@ -36,18 +36,18 @@ model Employee {
 
   // Sales CRM & commissions (additive). Relation fields only — no columns are added to
   // this table, so the deployed build reads it unchanged.
-  leadsOwned           Lead[]                  @relation("LeadOwner")
-  opportunitiesOwned   Opportunity[]           @relation("OpportunityOwner")
-  opportunitySplits    OpportunityOwner[]      @relation("OpportunitySplitOwner")
-  activitiesOwned      Activity[]              @relation("ActivityOwner")
-  commissionAssignments CommissionAssignment[] @relation("CommissionAssignee")
-  commissionAccruals   CommissionAccrual[]     @relation("CommissionEarner")
-  commissionLedger     CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
-  salesTargets         SalesTarget[]           @relation("SalesTargetOwner")
-  collectionsSubmitted SalesCollection[]       @relation("CollectionSubmitter")
-  collectionsDecided   SalesCollection[]       @relation("CollectionDecider")
-  collectionsReversed  SalesCollection[]       @relation("CollectionReverser")
-  evidenceUploaded     CollectionEvidence[]    @relation("EvidenceUploader")
+  leadsOwned            Lead[]                  @relation("LeadOwner")
+  opportunitiesOwned    Opportunity[]           @relation("OpportunityOwner")
+  opportunitySplits     OpportunityOwner[]      @relation("OpportunitySplitOwner")
+  activitiesOwned       Activity[]              @relation("ActivityOwner")
+  commissionAssignments CommissionAssignment[]  @relation("CommissionAssignee")
+  commissionAccruals    CommissionAccrual[]     @relation("CommissionEarner")
+  commissionLedger      CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
+  salesTargets          SalesTarget[]           @relation("SalesTargetOwner")
+  collectionsSubmitted  SalesCollection[]       @relation("CollectionSubmitter")
+  collectionsDecided    SalesCollection[]       @relation("CollectionDecider")
+  collectionsReversed   SalesCollection[]       @relation("CollectionReverser")
+  evidenceUploaded      CollectionEvidence[]    @relation("EvidenceUploader")
 }
 
 model Customer {
@@ -63,12 +63,22 @@ model Customer {
   roastPreferences CustomerRoastPreference[]
 
   // Sales CRM (additive, relation fields only).
-  leadConversions  LeadConversion[]
-  opportunities    Opportunity[]
-  quotes           Quote[]
-  activities       Activity[]
-  collectionEvents CollectionEvent[]
-  salesCollections SalesCollection[]
+  leadConversions     LeadConversion[]
+  opportunities       Opportunity[]
+  quotes              Quote[]
+  activities          Activity[]
+  collectionEvents    CollectionEvent[]
+  salesCollections    SalesCollection[]
+  // Accounting receivables (stage 3, additive).
+  vatNumber           String?
+  crNumber            String?
+  /// Structured national address for e-invoicing: {street, buildingNo, district, city, postalCode, countryCode}.
+  nationalAddress     Json?
+  paymentTermsDays    Int                  @default(30)
+  creditLimit         Decimal?             @db.Decimal(18, 2)
+  salesInvoices       SalesInvoice[]
+  customerReceipts    CustomerReceipt[]
+  advanceApplications AdvanceApplication[]
 }
 
 model GreenBean {
@@ -133,12 +143,12 @@ model Order {
   // Sales CRM (additive, relation fields only).
   opportunityLinks OpportunityOrder[]
   collectionEvents CollectionEvent[]
+  salesCollections SalesCollection[]
 
   @@index([createdAt])
   @@index([customerId, createdAt])
   @@index([status])
   @@index([ownerId])
-  salesCollections SalesCollection[]
 }
 
 model OrderItem {
@@ -329,10 +339,10 @@ model Delivery {
   /// previous application version, which sends none, keeps inserting deliveries while this
   /// column already exists; unique so two concurrent retries of one dispatch collapse to a
   /// single shipment.
-  requestKey    String? @unique
+  requestKey String? @unique
   /// SHA-256 over a fixed-position array of the normalized dispatch intent. The same key
   /// carrying a different intent is a client error, not a second shipment.
-  intentHash    String?
+  intentHash String?
 
   @@index([date])
 }
@@ -470,6 +480,15 @@ model Supplier {
   contact   String?
   createdAt DateTime         @default(now())
   purchases PurchaseRecord[]
+
+  // Accounting (stage 2). A KSA VAT registration number is 15 digits, starting and ending in 3;
+  // input VAT on a bill is claimable only when it is present.
+  vatNumber        String?
+  crNumber         String?
+  address          String?
+  paymentTermsDays Int            @default(30)
+  active           Boolean        @default(true)
+  bills            SupplierBill[]
 }
 
 model PurchaseRecord {
@@ -729,19 +748,16 @@ enum PackagingMethod {
 
 /**
  * One packaging SUBMIT, recorded so that a retry can be recognised instead of re-executed.
- *
  * Packaging is not naturally idempotent and never can be. Packing a roast in several goes
  * is ordinary operational reality, so "the same request twice" and "two genuine partial
  * packs" are indistinguishable from the payload alone — the two are separated only by the
  * key the client chose. That is why identity lives here, on the operation, and not as a
  * single request key on RoastingBatch: one key per batch would make the second partial pack
  * look like a replay of the first.
- *
  * Scoped to (batchId, requestKey) rather than requestKey alone. A key is meaningful only
  * against the batch it was submitted for; a global unique would make two unrelated roasts
  * collide if a client ever reused a key, and would turn a local mistake into a cross-batch
  * failure.
- *
  * The row is written in the SAME transaction as the stock it describes, so a failed
  * packaging leaves no operation behind and the same key may legitimately be retried.
  */
@@ -889,18 +905,18 @@ model BomComponent {
 // it is made from is `product` (CoffeeProduct); the pack size is `weightGrams`.
 // Sales orders reference ONLY this model — never a green bean, never a CoffeeProduct.
 model ProductSKU {
-  id                String             @id @default(cuid())
-  productId         String
-  product           CoffeeProduct      @relation(fields: [productId], references: [id])
-  skuCode           String             @unique
-  weightGrams       Float // net weight of one sellable unit; master data for BOM/production maths
-  isBulk            Boolean            @default(false)
-  price             Float              @default(0)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  orderItems        OrderItem[]
-  finishedGoodsLots FinishedGoodsLot[]
-  productionOrders  ProductionOrder[]
+  id                  String               @id @default(cuid())
+  productId           String
+  product             CoffeeProduct        @relation(fields: [productId], references: [id])
+  skuCode             String               @unique
+  weightGrams         Float // net weight of one sellable unit; master data for BOM/production maths
+  isBulk              Boolean              @default(false)
+  price               Float                @default(0)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  orderItems          OrderItem[]
+  finishedGoodsLots   FinishedGoodsLot[]
+  productionOrders    ProductionOrder[]
   packagingOperations PackagingOperation[]
 
   // ─── Finished Products catalog (additive) ────────────────────────────────
@@ -1167,6 +1183,41 @@ enum AccountingEventStatus {
   PENDING
   TRANSLATED
   FAILED
+  /// Held by a rule, not broken: the governing policy or plan is not approved, an earlier
+  /// event for the same party is still unposted, or the period for its date is not open.
+  /// Retried by the processor once the cause is removed.
+  BLOCKED
+  /// Deliberately not posted (e.g. dated before the ledger cutover — opening balances
+  /// carry it). Terminal, with the reason recorded.
+  SKIPPED
+}
+
+/// What subledger an account is the control account for. Manual journals cannot post to a
+/// control account unless `allowManualPosting` is set, so a subledger and its control
+/// account cannot drift apart through a hand-typed entry.
+enum AccountControlKind {
+  NONE
+  RECEIVABLE
+  PAYABLE
+  INVENTORY
+  TAX
+  COMMISSION_PAYABLE
+  CUSTOMER_ADVANCES
+  CASH
+  CLEARING
+}
+
+enum AccountingPolicyStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+/// Accounting approval of a commission plan version, separate from the plan itself: the
+/// sales engine may calculate on a provisional plan, the ledger may not post from one.
+enum CommissionAccountingApproval {
+  PROVISIONAL
+  APPROVED
 }
 
 enum QoyodExportStatus {
@@ -1189,6 +1240,35 @@ model AccountingSettings {
 
   exportToQoyod Boolean @default(false)
 
+  /// Accounting date from which operational events post to this ledger. Events dated
+  /// earlier are SKIPPED: the opening balance at cutover carries them. Null = no cutover
+  /// decided yet, and automatic events stay PENDING rather than guess.
+  ledgerCutoverDate DateTime?
+
+  /// First bank date whose confirmed, reviewed transactions post to the ledger. Earlier bank
+  /// lines are SKIPPED (carried by opening balances or manual journals). From this date manual
+  /// journals may no longer touch a cash account's mapped GL account. Null = bank posting off.
+  bankPostingFrom DateTime? @db.Date
+
+  /// Decision D-2: VAT on customer advances. AT_RECEIPT = output VAT when the advance is received
+  /// (a prepayment tax invoice), reversed when the advance is applied to the final invoice;
+  /// NOT_AT_RECEIPT = no VAT until the invoice. Null = undecided: receipts with an advance part
+  /// post only provisionally (isolated test database) and otherwise wait.
+  advanceVatTreatment AdvanceVatTreatment?
+
+  /// Decision D-1 (stage 4): inventory costing method. Null = undecided: inventory documents post
+  /// only provisionally in an isolated test database (weighted average, the recommendation) and
+  /// otherwise wait. Cannot change once a document has posted. (The older costingMethod /
+  /// cogsPolicy strings above are unused placeholders, not decisions.)
+  inventoryCostMethod      InvCostMethod?
+  /// Decision D-1: supplier bill price differing from the goods receipt. Null = undecided.
+  inventoryPriceDifference InvPriceDifference?
+  /// Revenue and cost-of-sales timing (DECISION_PACK §4). Null = undecided: cost of sales waits
+  /// (except provisionally in an isolated test database). WITH_REVENUE: goods leave stock when
+  /// dispatched (into "delivered, not invoiced"); cost of sales is recognised when the invoice
+  /// that recognises the revenue posts, matched to those goods.
+  salesCostTiming          String?
+
   // Posting is blocked everywhere except setup routes while this is false. Must not
   // default to true — there is no setup wizard in S0, so setup is never complete by default.
   setupComplete Boolean @default(false)
@@ -1199,23 +1279,33 @@ model AccountingSettings {
 }
 
 model Account {
-  id             String      @id @default(cuid())
-  code           String      @unique
-  nameAr         String?
-  nameEn         String
-  parentId       String?
-  parent         Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children       Account[]   @relation("AccountHierarchy")
-  type           AccountType
-  allowPosting   Boolean     @default(true)
-  isActive       Boolean     @default(true)
-  qoyodAccountId String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  createdBy      String?
-  updatedBy      String?
+  id                 String             @id @default(cuid())
+  code               String             @unique
+  nameAr             String?
+  nameEn             String
+  parentId           String?
+  parent             Account?           @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children           Account[]          @relation("AccountHierarchy")
+  type               AccountType
+  allowPosting       Boolean            @default(true)
+  isActive           Boolean            @default(true)
+  controlKind        AccountControlKind @default(NONE)
+  /// Only meaningful on a control account: whether a manual journal may post to it.
+  allowManualPosting Boolean            @default(true)
+  /// Cash-flow statement class for balance-sheet accounts (indirect method). Template default,
+  /// reviewed by the accountant; null falls back by account type and is reported as defaulted.
+  cashFlowClass      CashFlowClass?
+  qoyodAccountId     String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  createdBy          String?
+  updatedBy          String?
 
   journalEntryLines JournalEntryLine[]
+  mappings          AccountMapping[]
+  finCategories     FinCategory[]
+  billLines         SupplierBillLine[]
+  salesInvoiceLines SalesInvoiceLine[] @relation("SalesInvoiceLineAccount")
 
   @@index([type])
   @@index([parentId])
@@ -1234,6 +1324,9 @@ model TaxCategory {
   requiresReason       Boolean         @default(false)
   requiresApproval     Boolean         @default(false)
   zatcaTaxCategoryCode String?
+  /// Exemption / zero-rating reason code and text carried on e-invoices for Z, E and O lines (stage 6).
+  zatcaExemptionCode   String?
+  zatcaExemptionReason String?
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   createdBy            String?
@@ -1301,6 +1394,22 @@ model JournalEntry {
   // Set only on the reversal entry itself (explanation for why the original was reversed).
   reversalReason String?
 
+  /// Rejection returns an entry to DRAFT; the last rejection is kept on the entry and every
+  /// decision is in FinAuditLog.
+  rejectedAt      DateTime?
+  rejectedBy      String?
+  rejectionReason String?
+
+  /// Posted from a policy or plan that is not yet approved, in an isolated test database
+  /// only (a database trigger refuses it anywhere else). Reports label these entries.
+  isProvisional Boolean @default(false)
+  policyKey     String?
+  policyVersion Int?
+
+  /// The AccountingEvent this entry was translated from. Unique: one event, one entry —
+  /// the database, not the processor, is what makes a replay a no-op.
+  originEventId String? @unique
+
   lines              JournalEntryLine[]
   accountingEvents   AccountingEvent[]
   qoyodExportRecords QoyodExportRecord[]
@@ -1327,11 +1436,70 @@ model JournalEntryLine {
   description         String?
   taxCategorySnapshot Json?
 
+  lineNo Int @default(0)
+
+  /// Dimensions reuse the Finance masters rather than duplicating them.
+  branchId     String?
+  branch       FinBranch?     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  costCenterId String?
+  costCenter   FinCostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+
+  /// Subledger party: CUSTOMER | SUPPLIER | EMPLOYEE, with that record's id. Required on
+  /// lines hitting a control account from an automatic posting.
+  partyType String?
+  partyId   String?
+
+  /// Open item this control-account line opens or settles (SUPPLIER_BILL | SALES_INVOICE |
+  /// CREDIT_NOTE, with that document's id). Written at posting; immutable like the line; copied
+  /// by reversals. Aging, statements and cash-flow attribution read it (migration open_items).
+  openItemType String?
+  openItemId   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([accountId, openItemId])
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([partyType, partyId])
+}
+
+/// Which account the posting engine uses for a role (COMMISSION_EXPENSE, AR_CONTROL, …).
+/// Translators never hard-code account codes; an unmapped role blocks the event.
+model AccountMapping {
+  id        String   @id @default(cuid())
+  role      String   @unique
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+/// A versioned accounting policy (commission recognition, inventory costing, revenue
+/// recognition, …). Posting that depends on a policy requires its APPROVED version;
+/// approval is four-eyes, enforced by a database trigger, and an approved version is
+/// immutable except for retirement.
+model AccountingPolicy {
+  id         String                 @id @default(cuid())
+  key        String
+  version    Int
+  status     AccountingPolicyStatus @default(DRAFT)
+  titleEn    String
+  titleAr    String?
+  /// The policy text an accountant approves, and the machine-read parameters.
+  statement  String
+  parameters Json?
+  preparedBy String
+  preparedAt DateTime               @default(now())
+  approvedBy String?
+  approvedAt DateTime?
+  retiredBy  String?
+  retiredAt  DateTime?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  @@unique([key, version])
+  @@index([key, status])
 }
 
 model AccountingEvent {
@@ -1354,12 +1522,19 @@ model AccountingEvent {
   journalEntry   JournalEntry?         @relation(fields: [journalEntryId], references: [id])
   errorMessage   String?
 
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+  /// Party the event concerns (e.g. EMPLOYEE:<id>). Events for one party post in order, so
+  /// a blocked earlier event holds later ones instead of letting a balance go negative.
+  partyKey      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([sourceModule, sourceDocumentId])
   @@index([status])
   @@index([eventType])
+  @@index([partyKey, occurredAt])
 }
 
 model QoyodExportRecord {
@@ -1417,29 +1592,29 @@ enum LeadSource {
 }
 
 model Lead {
-  id           String     @id @default(cuid())
+  id            String     @id @default(cuid())
   /// Business name. The person is a contact ON this lead, because a café has many
   /// people and none of them is the customer.
-  companyName  String
+  companyName   String
   companyNameAr String?
-  contactName  String
-  phone        String?
-  email        String?
-  city         String?
-  address      String?
-  source       LeadSource @default(OTHER)
-  sourceNote   String?
-  status       LeadStatus @default(NEW)
+  contactName   String
+  phone         String?
+  email         String?
+  city          String?
+  address       String?
+  source        LeadSource @default(OTHER)
+  sourceNote    String?
+  status        LeadStatus @default(NEW)
 
   /// Who is responsible. Ownership is the scoping key for every read and write.
-  ownerId      String
-  owner        Employee   @relation("LeadOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("LeadOwner", fields: [ownerId], references: [id])
 
   /// The next commitment. A lead with no next step is the thing this screen exists
   /// to make visible, so it is a first-class column rather than a derived guess.
   nextFollowUpAt DateTime?
 
-  notes        String?
+  notes String?
 
   /// Normalised duplicate-detection keys. Written by the service, never by a client.
   /// Deliberately NOT unique: two genuine contacts can share a company, and merging
@@ -1447,12 +1622,12 @@ model Lead {
   normalizedCompany String?
   normalizedPhone   String?
 
-  conversion   LeadConversion?
-  activities   Activity[]
+  conversion LeadConversion?
+  activities Activity[]
 
-  createdById  String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([ownerId, status])
   @@index([status, nextFollowUpAt])
@@ -1467,21 +1642,21 @@ model Lead {
 /// rows — never from counting leads and opportunities in a period and dividing,
 /// which measures nothing when the two sets are unrelated.
 model LeadConversion {
-  id            String      @id @default(cuid())
-  leadId        String      @unique
-  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  id     String @id @default(cuid())
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Restrict)
 
-  customerId    String
-  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   opportunityId String      @unique
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
 
   /// True when this conversion created the customer rather than linking an existing one.
-  customerCreated Boolean   @default(false)
+  customerCreated Boolean @default(false)
 
   convertedById String?
-  convertedAt   DateTime    @default(now())
+  convertedAt   DateTime @default(now())
 
   @@index([customerId])
   @@index([convertedAt])
@@ -1505,24 +1680,24 @@ enum PipelineStagePurpose {
 }
 
 model PipelineStage {
-  id          String        @id @default(cuid())
+  id          String                @id @default(cuid())
   /// Stable identity. The label may be translated; this may not change.
-  code        String        @unique
+  code        String                @unique
   nameEn      String
   nameAr      String
   position    Int
   /// Default probability offered when a deal enters this stage. Advisory only.
-  probability Int           @default(0)
+  probability Int                   @default(0)
   /// At most one stage may hold each purpose — the unique index is what stops two columns
   /// both claiming to be where quotations land.
   purpose     PipelineStagePurpose? @unique
-  isActive    Boolean       @default(true)
+  isActive    Boolean               @default(true)
 
   opportunities Opportunity[]
   stageEvents   OpportunityStageEvent[]
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([position])
 }
@@ -1537,46 +1712,46 @@ enum OpportunityOutcome {
 }
 
 model Opportunity {
-  id             String             @id @default(cuid())
-  title          String
-  customerId     String?
-  customer       Customer?          @relation(fields: [customerId], references: [id])
+  id         String    @id @default(cuid())
+  title      String
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  stageId        String
-  stage          PipelineStage      @relation(fields: [stageId], references: [id])
+  stageId String
+  stage   PipelineStage @relation(fields: [stageId], references: [id])
 
-  outcome        OpportunityOutcome @default(OPEN)
+  outcome    OpportunityOutcome @default(OPEN)
   /// Required by the service whenever outcome becomes LOST.
-  lostReason     String?
-  closedAt       DateTime?
+  lostReason String?
+  closedAt   DateTime?
 
   /// Expected value. Currency is explicit so a future multi-currency policy has
   /// somewhere to land; the commission engine refuses anything but SAR today.
-  amount         Decimal            @default(0) @db.Decimal(18, 2)
-  currency       String             @default("SAR")
-  probability    Int                @default(0)
+  amount          Decimal   @default(0) @db.Decimal(18, 2)
+  currency        String    @default("SAR")
+  probability     Int       @default(0)
   expectedCloseAt DateTime?
-  nextFollowUpAt DateTime?
+  nextFollowUpAt  DateTime?
 
-  ownerId        String
-  owner          Employee           @relation("OpportunityOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("OpportunityOwner", fields: [ownerId], references: [id])
 
-  conversion     LeadConversion?
-  owners         OpportunityOwner[]
-  stageEvents    OpportunityStageEvent[]
-  quotes         Quote[]
-  samples        SampleShipment[]
-  activities     Activity[]
-  orderLinks     OpportunityOrder[]
+  conversion  LeadConversion?
+  owners      OpportunityOwner[]
+  stageEvents OpportunityStageEvent[]
+  quotes      Quote[]
+  samples     SampleShipment[]
+  activities  Activity[]
+  orderLinks  OpportunityOrder[]
 
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  salesCollections SalesCollection[]
 
   @@index([ownerId, outcome])
   @@index([stageId, outcome])
   @@index([outcome, closedAt])
   @@index([nextFollowUpAt])
-  salesCollections SalesCollection[]
 }
 
 /// Split attribution. Percentages are stored, not inferred, and the service requires
@@ -1602,20 +1777,20 @@ model OpportunityOwner {
 /// Every stage move, owner change and value change, kept for the pipeline-duration
 /// report and for answering "who moved this and when".
 model OpportunityStageEvent {
-  id            String        @id @default(cuid())
+  id            String      @id @default(cuid())
   opportunityId String
-  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
-  fromStageId   String?
-  toStageId     String?
-  toStage       PipelineStage? @relation(fields: [toStageId], references: [id])
+  fromStageId String?
+  toStageId   String?
+  toStage     PipelineStage? @relation(fields: [toStageId], references: [id])
 
-  fromOutcome   OpportunityOutcome?
-  toOutcome     OpportunityOutcome?
+  fromOutcome OpportunityOutcome?
+  toOutcome   OpportunityOutcome?
 
-  reason        String?
-  actorId       String?
-  createdAt     DateTime      @default(now())
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
 
   @@index([opportunityId, createdAt])
 }
@@ -1633,15 +1808,15 @@ enum SampleStatus {
 /// path with its own guards, and a CRM screen must not become a second way to
 /// decrement a shelf.
 model SampleShipment {
-  id            String       @id @default(cuid())
+  id            String      @id @default(cuid())
   opportunityId String
-  opportunity   Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
-  productSkuId  String?
-  productSku    ProductSKU?  @relation(fields: [productSkuId], references: [id])
-  description   String?
-  quantity      Decimal      @default(0) @db.Decimal(12, 3)
-  unit          String       @default("KG")
+  productSkuId String?
+  productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
+  description  String?
+  quantity     Decimal     @default(0) @db.Decimal(12, 3)
+  unit         String      @default("KG")
 
   status        SampleStatus @default(PREPARING)
   sentAt        DateTime?
@@ -1649,9 +1824,9 @@ model SampleShipment {
   feedbackScore Int?
   feedbackNotes String?
 
-  createdById   String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([opportunityId, status])
 }
@@ -1695,10 +1870,10 @@ enum ActivityOutcome {
 /// Recording that contact happened is NOT sending a message. Nothing here dispatches
 /// email, SMS or WhatsApp, and no screen implies it does.
 model Activity {
-  id            String       @id @default(cuid())
-  type          ActivityType
-  subject       String
-  body          String?
+  id      String       @id @default(cuid())
+  type    ActivityType
+  subject String
+  body    String?
 
   leadId        String?
   lead          Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -1709,16 +1884,16 @@ model Activity {
 
   /// Nullable: every activity written before this existed has no recorded outcome, and
   /// inventing one for them would be a claim about conversations nobody witnessed.
-  outcome       ActivityOutcome?
+  outcome ActivityOutcome?
 
-  dueAt         DateTime?
-  completedAt   DateTime?
+  dueAt       DateTime?
+  completedAt DateTime?
 
-  ownerId       String
-  owner         Employee     @relation("ActivityOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("ActivityOwner", fields: [ownerId], references: [id])
 
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ownerId, completedAt, dueAt])
   @@index([leadId])
@@ -1735,58 +1910,58 @@ enum QuoteStatus {
 }
 
 model Quote {
-  id            String      @id @default(cuid())
+  id           String  @id @default(cuid())
   /// Human reference, unique per revision chain.
-  quoteNumber   String      @unique
-  revision      Int         @default(1)
+  quoteNumber  String  @unique
+  revision     Int     @default(1)
   /// Points at the quote this one revises, so a chain is walkable in both directions.
-  supersedesId  String?     @unique
-  supersedes    Quote?      @relation("QuoteRevision", fields: [supersedesId], references: [id])
-  supersededBy  Quote?      @relation("QuoteRevision")
+  supersedesId String? @unique
+  supersedes   Quote?  @relation("QuoteRevision", fields: [supersedesId], references: [id])
+  supersededBy Quote?  @relation("QuoteRevision")
 
   opportunityId String
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
   customerId    String?
   customer      Customer?   @relation(fields: [customerId], references: [id])
 
-  status        QuoteStatus @default(DRAFT)
-  currency      String      @default("SAR")
-  validUntil    DateTime?
+  status     QuoteStatus @default(DRAFT)
+  currency   String      @default("SAR")
+  validUntil DateTime?
 
   /// Totals computed on the server from the lines. Stored so an issued quote is a
   /// fixed document: recomputing it later from live prices would change history.
-  subtotal      Decimal     @default(0) @db.Decimal(18, 2)
-  discountTotal Decimal     @default(0) @db.Decimal(18, 2)
-  taxTotal      Decimal     @default(0) @db.Decimal(18, 2)
-  grandTotal    Decimal     @default(0) @db.Decimal(18, 2)
+  subtotal      Decimal @default(0) @db.Decimal(18, 2)
+  discountTotal Decimal @default(0) @db.Decimal(18, 2)
+  taxTotal      Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal    Decimal @default(0) @db.Decimal(18, 2)
 
   /// Frozen copy of the lines and prices at the moment of issue.
   issuedSnapshot Json?
-  issuedAt      DateTime?
-  acceptedAt    DateTime?
-  rejectedAt    DateTime?
-  rejectionNote String?
+  issuedAt       DateTime?
+  acceptedAt     DateTime?
+  rejectedAt     DateTime?
+  rejectionNote  String?
 
   /// Set when a discount above the configured threshold was authorised.
   discountApprovedById String?
   discountApprovedAt   DateTime?
 
-  lines         QuoteLine[]
-  orderLinks    OpportunityOrder[]
+  lines      QuoteLine[]
+  orderLinks OpportunityOrder[]
 
-  createdById   String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  salesCollections SalesCollection[]
 
   @@index([opportunityId, status])
   @@index([customerId])
-  salesCollections SalesCollection[]
 }
 
 model QuoteLine {
-  id           String     @id @default(cuid())
-  quoteId      String
-  quote        Quote      @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 
   productSkuId String?
   productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
@@ -1796,18 +1971,18 @@ model QuoteLine {
   /// Decimal(12,3) carries kilogram fractions honestly. Whether fractions are ALLOWED
   /// is a product question the service asks the SKU, not something the column decides:
   /// 1.5 kg of beans is ordinary, 1.5 retail bags is not.
-  quantity     Decimal    @db.Decimal(12, 3)
-  unit         String     @default("KG")
+  quantity Decimal @db.Decimal(12, 3)
+  unit     String  @default("KG")
 
-  unitPrice    Decimal    @db.Decimal(18, 2)
+  unitPrice       Decimal @db.Decimal(18, 2)
   discountPercent Decimal @default(0) @db.Decimal(5, 2)
   taxRatePercent  Decimal @default(0) @db.Decimal(5, 2)
 
-  lineSubtotal Decimal    @default(0) @db.Decimal(18, 2)
-  lineTax      Decimal    @default(0) @db.Decimal(18, 2)
-  lineTotal    Decimal    @default(0) @db.Decimal(18, 2)
+  lineSubtotal Decimal @default(0) @db.Decimal(18, 2)
+  lineTax      Decimal @default(0) @db.Decimal(18, 2)
+  lineTotal    Decimal @default(0) @db.Decimal(18, 2)
 
-  position     Int        @default(0)
+  position Int @default(0)
 
   @@index([quoteId, position])
 }
@@ -1829,11 +2004,11 @@ model OpportunityOrder {
 
   /// Distinguishes the first order won from the repeat orders that follow it, which
   /// the attribution policy may treat differently.
-  isFirstOrder  Boolean     @default(false)
-  requestKey    String      @unique
+  isFirstOrder Boolean @default(false)
+  requestKey   String  @unique
 
-  createdById   String?
-  createdAt     DateTime    @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@unique([quoteId, orderId])
   @@index([opportunityId])
@@ -1857,46 +2032,52 @@ enum CommissionTierMode {
 }
 
 model CommissionPlan {
-  id          String                  @id @default(cuid())
-  code        String                  @unique
+  id          String  @id @default(cuid())
+  code        String  @unique
   name        String
   nameAr      String?
   description String?
-  isActive    Boolean                 @default(true)
+  isActive    Boolean @default(true)
 
   versions    CommissionPlanVersion[]
   assignments CommissionAssignment[]
 
   createdById String?
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 /// A plan is versioned, and a version is immutable once anything has accrued against
 /// it. Editing a live rule in place would silently restate commissions people have
 /// already been told they earned.
 model CommissionPlanVersion {
-  id            String             @id @default(cuid())
-  planId        String
-  plan          CommissionPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
-  version       Int
+  id      String         @id @default(cuid())
+  planId  String
+  plan    CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  version Int
 
-  basis         CommissionBasis    @default(NET_COLLECTION)
-  tierMode      CommissionTierMode @default(INCREMENTAL)
+  basis           CommissionBasis    @default(NET_COLLECTION)
+  tierMode        CommissionTierMode @default(INCREMENTAL)
   /// The flat rate applied when no tier matches, as a percentage: 1.500000 = 1.5%.
-  baseRatePercent Decimal          @db.Decimal(9, 6)
-  currency      String             @default("SAR")
+  baseRatePercent Decimal            @db.Decimal(9, 6)
+  currency        String             @default("SAR")
 
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
-  tiers         CommissionTier[]
-  assignments   CommissionAssignment[]
-  accruals      CommissionAccrual[]
+  /// Ledger posting gate (docs/accounting/POLICIES.md). Four-eyes: the approver is not the
+  /// version's creator (database trigger).
+  accountingApproval   CommissionAccountingApproval @default(PROVISIONAL)
+  accountingApprovedBy String?
+  accountingApprovedAt DateTime?
 
-  ledgerEntries  CommissionLedgerEntry[]
+  tiers       CommissionTier[]
+  assignments CommissionAssignment[]
+  accruals    CommissionAccrual[]
+
+  ledgerEntries CommissionLedgerEntry[]
   createdById   String?
-  createdAt     DateTime           @default(now())
+  createdAt     DateTime                @default(now())
 
   @@unique([planId, version])
   @@index([effectiveFrom])
@@ -1904,15 +2085,15 @@ model CommissionPlanVersion {
 
 /// One band. `fromAmount` inclusive, `toAmount` exclusive; a null `toAmount` is "and above".
 model CommissionTier {
-  id              String                @id @default(cuid())
-  planVersionId   String
-  planVersion     CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
-  fromAmount      Decimal               @db.Decimal(18, 2)
-  toAmount        Decimal?              @db.Decimal(18, 2)
+  id            String                @id @default(cuid())
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fromAmount    Decimal               @db.Decimal(18, 2)
+  toAmount      Decimal?              @db.Decimal(18, 2)
   /// Added to the base rate for the portion inside this band, in percentage points:
   /// 0.500000 means "half a point more on this slice".
-  ratePercent     Decimal               @db.Decimal(9, 6)
-  position        Int                   @default(0)
+  ratePercent   Decimal               @db.Decimal(9, 6)
+  position      Int                   @default(0)
 
   @@index([planVersionId, position])
 }
@@ -1929,8 +2110,8 @@ model CommissionAssignment {
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
-  createdById   String?
-  createdAt     DateTime              @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@index([employeeId, effectiveFrom])
 }
@@ -1951,39 +2132,39 @@ enum CollectionEventStatus {
 /// told apart from sandbox data without guessing. The UI states that the source is a
 /// sandbox; nothing here is described as a working financial integration.
 model CollectionEvent {
-  id            String                @id @default(cuid())
-  sourceSystem  String                @default("SANDBOX")
+  id           String                @id @default(cuid())
+  sourceSystem String                @default("SANDBOX")
   /// The source's own identifier, so a re-delivered webhook is recognised, not re-accrued.
-  externalRef   String
-  status        CollectionEventStatus @default(RECORDED)
+  externalRef  String
+  status       CollectionEventStatus @default(RECORDED)
 
   customerId    String?
-  customer      Customer?             @relation(fields: [customerId], references: [id])
+  customer      Customer? @relation(fields: [customerId], references: [id])
   opportunityId String?
   orderId       String?
-  order         Order?                @relation(fields: [orderId], references: [id])
+  order         Order?    @relation(fields: [orderId], references: [id])
 
   /// Gross cash received, and the split that makes the qualifying base computable.
-  amountGross   Decimal               @db.Decimal(18, 2)
-  amountTax     Decimal               @default(0) @db.Decimal(18, 2)
+  amountGross         Decimal @db.Decimal(18, 2)
+  amountTax           Decimal @default(0) @db.Decimal(18, 2)
   /// Portion of the net that does not qualify (excluded products, freight, …).
-  amountNonQualifying Decimal         @default(0) @db.Decimal(18, 2)
-  currency      String                @default("SAR")
+  amountNonQualifying Decimal @default(0) @db.Decimal(18, 2)
+  currency            String  @default("SAR")
 
-  collectedAt   DateTime
-  reversedAt    DateTime?
-  reversalOfId  String?
-  note          String?
+  collectedAt  DateTime
+  reversedAt   DateTime?
+  reversalOfId String?
+  note         String?
 
-  accruals      CommissionAccrual[]
+  accruals CommissionAccrual[]
 
-  ledgerEntries  CommissionLedgerEntry[]
+  ledgerEntries   CommissionLedgerEntry[]
   /// The finance-verified receipt that produced this event, when one did. Sandbox events
   /// have none, which is how the two sources stay tellable apart.
-  salesCollection SalesCollection?    @relation("CollectionCommissionEvent")
+  salesCollection SalesCollection?        @relation("CollectionCommissionEvent")
 
-  createdById   String?
-  createdAt     DateTime              @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@unique([sourceSystem, externalRef])
   @@index([customerId, collectedAt])
@@ -2004,37 +2185,37 @@ enum AccrualStatus {
 /// event cannot accrue a second time for the same person on the same rules. Corrections
 /// are new rows, never edits to an approved one.
 model CommissionAccrual {
-  id                String                @id @default(cuid())
+  id                String          @id @default(cuid())
   collectionEventId String
-  collectionEvent   CollectionEvent       @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
+  collectionEvent   CollectionEvent @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
 
-  employeeId        String
-  employee          Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
-  planVersionId     String
-  planVersion       CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
+  employeeId    String
+  employee      Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
 
   /// Period the accrual belongs to, as an Asia/Riyadh month, stored as the UTC instant
   /// of that month's first moment in Riyadh.
-  periodStart       DateTime
-  periodEnd         DateTime
+  periodStart DateTime
+  periodEnd   DateTime
 
   /// The qualifying base this row was computed from, and the share applied to it.
-  qualifyingBase    Decimal               @db.Decimal(18, 2)
-  sharePercent      Decimal               @default(100) @db.Decimal(5, 2)
+  qualifyingBase       Decimal @db.Decimal(18, 2)
+  sharePercent         Decimal @default(100) @db.Decimal(5, 2)
   /// Effective rate actually applied, after tiers — recorded so the figure can be
   /// explained to the person who earned it without recomputing anything.
-  effectiveRatePercent Decimal            @db.Decimal(9, 6)
-  amount            Decimal               @db.Decimal(18, 2)
-  currency          String                @default("SAR")
+  effectiveRatePercent Decimal @db.Decimal(9, 6)
+  amount               Decimal @db.Decimal(18, 2)
+  currency             String  @default("SAR")
 
-  status            AccrualStatus         @default(ACCRUED)
-  approvedById      String?
-  approvedAt        DateTime?
+  status       AccrualStatus @default(ACCRUED)
+  approvedById String?
+  approvedAt   DateTime?
 
-  ledgerEntries     CommissionLedgerEntry[]
+  ledgerEntries CommissionLedgerEntry[]
 
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([collectionEventId, employeeId, planVersionId])
   @@index([employeeId, periodStart])
@@ -2051,21 +2232,21 @@ enum LedgerEntryType {
 /// Append-only commission ledger. An approved figure is never rewritten; a correction
 /// is a new entry that references what it corrects and says who made it and why.
 model CommissionLedgerEntry {
-  id          String            @id @default(cuid())
-  type        LedgerEntryType
-  employeeId  String
-  employee    Employee          @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
+  id         String          @id @default(cuid())
+  type       LedgerEntryType
+  employeeId String
+  employee   Employee        @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
 
-  accrualId   String?
-  accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
+  accrualId  String?
+  accrual    CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
   /// A single entry this one corrects. Kept for the manual `adjust` path, which targets at
   /// most one. Engine reversals use `corrects` below, because one negative movement can
   /// compensate several earlier ones once tiers or splits are involved.
-  correctsId  String?
+  correctsId String?
 
   periodStart DateTime
-  amount      Decimal           @db.Decimal(18, 2)
-  currency    String            @default("SAR")
+  amount      Decimal  @db.Decimal(18, 2)
+  currency    String   @default("SAR")
   reason      String?
 
   /// ── Durable provenance ───────────────────────────────────────────────────────────
@@ -2097,8 +2278,8 @@ model CommissionLedgerEntry {
   corrects    CommissionLedgerCorrection[] @relation("CorrectingEntry")
   correctedBy CommissionLedgerCorrection[] @relation("CorrectedEntry")
 
-  actorId     String?
-  createdAt   DateTime          @default(now())
+  actorId   String?
+  createdAt DateTime @default(now())
 
   @@index([employeeId, periodStart])
   @@index([type, createdAt])
@@ -2117,11 +2298,11 @@ model CommissionLedgerEntry {
 /// Allocation is decided at write time from the append-only log, never reconstructed later
 /// by matching amounts or timestamps.
 model CommissionLedgerCorrection {
-  id        String @id @default(cuid())
+  id String @id @default(cuid())
 
   /// The negative movement doing the compensating.
-  entryId   String
-  entry     CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
+  entryId String
+  entry   CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
 
   /// The earlier movement being compensated.
   correctsEntryId String
@@ -2129,7 +2310,7 @@ model CommissionLedgerCorrection {
 
   /// A positive figure: how much of `entry` is applied against `corrects`. The rows for one
   /// entry sum to at most the absolute value of that entry's amount.
-  amount    Decimal @db.Decimal(18, 2)
+  amount    Decimal  @db.Decimal(18, 2)
   createdAt DateTime @default(now())
 
   @@unique([entryId, correctsEntryId])
@@ -2150,9 +2331,9 @@ model SalesTarget {
   bonusAmount  Decimal  @default(0) @db.Decimal(18, 2)
   note         String?
 
-  createdById  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([employeeId, periodStart])
   @@index([periodStart])
@@ -2543,6 +2724,8 @@ model FinBranch {
   createdBy String?
 
   access FinBranchAccess[]
+
+  journalLines JournalEntryLine[]
 }
 
 /// Which branches a finance user without `all_branches` may read and write.
@@ -2567,6 +2750,8 @@ model FinCostCenter {
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   createdBy String?
+
+  journalLines JournalEntryLine[]
 }
 
 /// Receipt / payment categories of the CASH budget, also used to classify bank lines.
@@ -2582,6 +2767,10 @@ model FinCategory {
   sortOrder   Int             @default(0)
   createdAt   DateTime        @default(now())
   createdBy   String?
+  /// Ledger account a bank split in this category posts to (stage 2 bank-to-ledger). A category
+  /// mapped to a control account (payables) posts only when backed by matches to posted bills.
+  glAccountId String?
+  glAccount   Account?        @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
 }
 
 model CashAccount {
@@ -2657,8 +2846,13 @@ model BankTransaction {
   createdBy             String?
   updatedAt             DateTime            @updatedAt
 
-  splits  BankTransactionSplit[]
-  matches BankTransactionMatch[]
+  splits                BankTransactionSplit[]
+  matches               BankTransactionMatch[]
+  /// Accounting correction: the posted line this one replaces (reversal-and-replacement).
+  replacesTransactionId String?                @unique
+  replacesTransaction   BankTransaction?       @relation("BankReplacement", fields: [replacesTransactionId], references: [id], onDelete: Restrict)
+  replacedBy            BankTransaction?       @relation("BankReplacement")
+  corrections           BankCorrection[]
 
   @@unique([cashAccountId, sourceFingerprint])
   @@unique([createdBy, idempotencyKey])
@@ -3091,4 +3285,1138 @@ model FinAuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ─── Accounting stage 2: payables ─────────────────────────────────────────────
+
+enum SupplierBillStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+  REVERSED
+}
+
+enum BillLineKind {
+  /// An expense or asset account chosen on the line.
+  EXPENSE
+  /// Goods received: posts to the GRNI posting role until stage 4 values receipts.
+  STOCK_RECEIPT
+  /// Credit note: goods returned to the supplier (settles a posted supplier return).
+  STOCK_RETURN
+  /// Credit note: price reduction on goods received (traced through production and sales).
+  STOCK_PRICE_ADJUSTMENT
+}
+
+enum SupplierDocKind {
+  BILL
+  CREDIT_NOTE
+}
+
+model SupplierBill {
+  id                   String             @id @default(cuid())
+  billNo               Int                @unique @default(autoincrement())
+  supplierId           String
+  supplier             Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplierInvoiceNo    String
+  billDate             DateTime           @db.Date
+  dueDate              DateTime           @db.Date
+  branchId             String?
+  description          String?
+  currency             String             @default("SAR")
+  status               SupplierBillStatus @default(DRAFT)
+  totalNet             Decimal            @default(0) @db.Decimal(18, 2)
+  totalVat             Decimal            @default(0) @db.Decimal(18, 2)
+  totalGross           Decimal            @default(0) @db.Decimal(18, 2)
+  /// PO obligation this bill replaces in cash planning (superseded on posting).
+  purchaseObligationId String?
+  /// The FinObligation created for this bill when it posts (one liability in cash planning).
+  obligationId         String?            @unique
+  createdBy            String
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  submittedBy          String?
+  submittedAt          DateTime?
+  approvedBy           String?
+  approvedAt           DateTime?
+  postedBy             String?
+  postedAt             DateTime?
+  rejectedBy           String?
+  rejectedAt           DateTime?
+  rejectedReason       String?
+  reversedBy           String?
+  reversedAt           DateTime?
+  reversalReason       String?
+
+  /// BILL, or a CREDIT_NOTE from the supplier (credits the bill named by originalBillId).
+  kind           SupplierDocKind @default(BILL)
+  originalBillId String?
+  reason         String?
+
+  lines SupplierBillLine[]
+
+  @@unique([supplierId, supplierInvoiceNo])
+  @@index([status])
+  @@index([supplierId, billDate])
+}
+
+model SupplierBillLine {
+  id            String       @id @default(cuid())
+  billId        String
+  bill          SupplierBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  lineNo        Int
+  kind          BillLineKind @default(EXPENSE)
+  accountId     String
+  account       Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  description   String?
+  quantity      Decimal      @db.Decimal(18, 4)
+  unitPrice     Decimal      @db.Decimal(18, 4)
+  net           Decimal      @db.Decimal(18, 2)
+  taxCategoryId String?
+  vatRate       Decimal      @default(0) @db.Decimal(5, 2)
+  vat           Decimal      @default(0) @db.Decimal(18, 2)
+  gross         Decimal      @db.Decimal(18, 2)
+  costCenterId  String?
+  /// Credit note STOCK_RETURN: the posted supplier-return inventory document it settles.
+  invDocumentId String?
+  /// Credit note STOCK_PRICE_ADJUSTMENT: the posted receipt line whose price it reduces.
+  invDocLineId  String?
+
+  @@unique([billId, lineNo])
+}
+
+enum CashFlowClass {
+  CASH
+  OPERATING
+  INVESTING
+  FINANCING
+  /// Moves only through opening or closing entries (retained earnings, opening-balance equity).
+  EXCLUDED
+}
+
+enum BankCorrectionKind {
+  VOID
+  REPLACE
+}
+
+enum BankCorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+/// Correction of a bank line that has posted to the ledger. Posted lines are immutable in the
+/// database; the only way to change one is an approved correction: the original is voided (its
+/// journal mirrored) and, for REPLACE, a new line carrying the corrected data is created and posts.
+/// Append-only: status moves PENDING → APPROVED → APPLIED or PENDING → REJECTED (DB trigger).
+model BankCorrection {
+  id                       String               @id @default(cuid())
+  correctionNo             Int                  @unique @default(autoincrement())
+  transactionId            String
+  transaction              BankTransaction      @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  kind                     BankCorrectionKind
+  reason                   String
+  /// REPLACE: { txnDate, amount, classification, description, splits[], matches[] } — validated by the service.
+  replacement              Json?
+  status                   BankCorrectionStatus @default(PENDING)
+  requestedBy              String
+  requestedAt              DateTime             @default(now())
+  approvedBy               String?
+  approvedAt               DateTime?
+  rejectedBy               String?
+  rejectedAt               DateTime?
+  rejectReason             String?
+  appliedAt                DateTime?
+  replacementTransactionId String?              @unique
+  updatedAt                DateTime             @updatedAt
+
+  @@index([transactionId])
+  @@index([status])
+}
+
+enum AdvanceVatTreatment {
+  AT_RECEIPT
+  NOT_AT_RECEIPT
+}
+
+enum SalesDocKind {
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum SalesInvoiceStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+  REVERSED
+}
+
+/// Sales invoice or credit note (stage 3). Four-eyes; immutable once posted (DB trigger); a
+/// posted document is corrected by reversal (invoice) or by a credit note.
+model SalesInvoice {
+  id                   String             @id @default(cuid())
+  invoiceNo            Int                @unique @default(autoincrement())
+  kind                 SalesDocKind       @default(INVOICE)
+  customerId           String
+  customer             Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  orderId              String?
+  /// Credit note: the invoice it credits.
+  originalInvoiceId    String?
+  originalInvoice      SalesInvoice?      @relation("CreditNoteOf", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  creditNotes          SalesInvoice[]     @relation("CreditNoteOf")
+  issueDate            DateTime           @db.Date
+  supplyDate           DateTime?          @db.Date
+  dueDate              DateTime           @db.Date
+  branchId             String?
+  description          String?
+  reason               String?
+  currency             String             @default("SAR")
+  status               SalesInvoiceStatus @default(DRAFT)
+  totalNet             Decimal            @default(0) @db.Decimal(18, 2)
+  totalVat             Decimal            @default(0) @db.Decimal(18, 2)
+  totalGross           Decimal            @default(0) @db.Decimal(18, 2)
+  createdBy            String
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  submittedBy          String?
+  submittedAt          DateTime?
+  approvedBy           String?
+  approvedAt           DateTime?
+  postedBy             String?
+  postedAt             DateTime?
+  rejectedBy           String?
+  rejectedAt           DateTime?
+  rejectedReason       String?
+  reversedBy           String?
+  reversedAt           DateTime?
+  reversalReason       String?
+  /// Goods lines leave stock from this location (default: the sales location).
+  fulfilmentLocationId String?
+  /// Credit note: what it credits (a physical return, or a price adjustment with no goods).
+  creditType           SalesCreditType?
+  /// Credit note of type RETURN_OF_GOODS: the posted customer return it credits.
+  customerReturnId     String?
+  /// A corrected invoice issued after reversing this one's predecessor (no stock movement).
+  replacesInvoiceId    String?
+  /// Debit note (stage 6): an INVOICE that raises the amount of the posted invoice it names.
+  debitNoteOfId        String?
+  debitNoteOf          SalesInvoice?      @relation("DebitNoteOf", fields: [debitNoteOfId], references: [id], onDelete: Restrict)
+  debitNotes           SalesInvoice[]     @relation("DebitNoteOf")
+
+  lines        SalesInvoiceLine[]
+  allocations  ArAllocation[]       @relation("AllocatedTo")
+  creditUsed   ArAllocation[]       @relation("AllocatedFromCredit")
+  applications AdvanceApplication[]
+
+  @@index([status])
+  @@index([customerId, issueDate])
+  @@index([orderId])
+}
+
+model SalesInvoiceLine {
+  id              String          @id @default(cuid())
+  invoiceId       String
+  invoice         SalesInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNo          Int
+  productSkuId    String?
+  orderItemId     String?
+  accountId       String
+  account         Account         @relation("SalesInvoiceLineAccount", fields: [accountId], references: [id], onDelete: Restrict)
+  description     String?
+  quantity        Decimal         @db.Decimal(18, 4)
+  unitPrice       Decimal         @db.Decimal(18, 4)
+  discountPercent Decimal         @default(0) @db.Decimal(5, 2)
+  net             Decimal         @db.Decimal(18, 2)
+  taxCategoryId   String?
+  vatRate         Decimal         @default(0) @db.Decimal(5, 2)
+  vat             Decimal         @default(0) @db.Decimal(18, 2)
+  gross           Decimal         @db.Decimal(18, 2)
+  costCenterId    String?
+  /// GOODS lines must be costed (they name an inventory item directly or through productSkuId);
+  /// NON_STOCK lines (services, fees) are declared explicitly. Null on documents drafted before
+  /// stage 4b: treated as GOODS when a product is named, otherwise as unclassified (an exception).
+  stockTreatment  SalesLineStock?
+  invItemId       String?
+  /// Unit of the quantity, when it is not the item's base unit (converted by the item's units).
+  unit            String?
+
+  @@unique([invoiceId, lineNo])
+}
+
+enum SalesLineStock {
+  GOODS
+  NON_STOCK
+}
+
+enum SalesCreditType {
+  /// Goods came back: requires a posted, warehouse-confirmed customer return.
+  RETURN_OF_GOODS
+  /// Price reduction, discount or refund with no goods returned: no stock movement.
+  PRICE_ADJUSTMENT
+}
+
+/// Assignment of a customer bank receipt (or refund) to a customer: the only source of cash
+/// postings for customers (the bank line posts; this says how). Fixed once the line posts.
+model CustomerReceipt {
+  id                String         @id @default(cuid())
+  receiptNo         Int            @unique @default(autoincrement())
+  bankTransactionId String         @unique
+  customerId        String
+  customer          Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  salesCollectionId String?        @unique
+  /// Signed like the bank line: positive receipt, negative refund. amount = arAmount + advanceAmount.
+  amount            Decimal        @db.Decimal(18, 2)
+  arAmount          Decimal        @db.Decimal(18, 2)
+  advanceAmount     Decimal        @db.Decimal(18, 2)
+  /// VAT inside advanceAmount when advance VAT is charged at receipt (D-2).
+  advanceVat        Decimal        @default(0) @db.Decimal(18, 2)
+  voided            Boolean        @default(false)
+  createdBy         String
+  createdAt         DateTime       @default(now())
+  allocations       ArAllocation[]
+
+  @@index([customerId])
+}
+
+/// Subledger matching of a receivable to an invoice: from a receipt's AR part, a credit note or
+/// an advance application. Deactivated (never deleted) when its source is voided or reversed.
+model ArAllocation {
+  id             String              @id @default(cuid())
+  invoiceId      String
+  invoice        SalesInvoice        @relation("AllocatedTo", fields: [invoiceId], references: [id], onDelete: Restrict)
+  receiptId      String?
+  receipt        CustomerReceipt?    @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  creditNoteId   String?
+  creditNote     SalesInvoice?       @relation("AllocatedFromCredit", fields: [creditNoteId], references: [id], onDelete: Restrict)
+  applicationId  String?             @unique
+  application    AdvanceApplication? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  amount         Decimal             @db.Decimal(18, 2)
+  allocatedOn    DateTime            @db.Date
+  active         Boolean             @default(true)
+  removedAt      DateTime?
+  /// A credit note's unapplied balance re-applied to another invoice (posts a reclassification).
+  isReallocation Boolean             @default(false)
+  createdBy      String
+  createdAt      DateTime            @default(now())
+
+  @@index([invoiceId])
+  @@index([receiptId])
+  @@index([creditNoteId])
+}
+
+enum AdvanceApplicationStatus {
+  POSTED
+  REVERSED
+}
+
+/// Applying a customer's advance to an invoice: moves the balance from customer advances (and the
+/// advance VAT, if charged at receipt) to receivables.
+model AdvanceApplication {
+  id             String                   @id @default(cuid())
+  applicationNo  Int                      @unique @default(autoincrement())
+  customerId     String
+  customer       Customer                 @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  invoiceId      String
+  invoice        SalesInvoice             @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount         Decimal                  @db.Decimal(18, 2)
+  vatPortion     Decimal                  @default(0) @db.Decimal(18, 2)
+  appliedOn      DateTime                 @db.Date
+  status         AdvanceApplicationStatus @default(POSTED)
+  createdBy      String
+  createdAt      DateTime                 @default(now())
+  reversedBy     String?
+  reversedAt     DateTime?
+  reversalReason String?
+  allocation     ArAllocation?
+
+  @@index([customerId])
+}
+
+// ─── Accounting: inventory valuation and manufacturing costing (stage 4) ────────────────────────
+// A cost subledger owned by accounting, in Decimal, beside the operational quantity records
+// (GreenBean.quantityKg, MaterialItem.quantityOnHand, FinishedGoodsLot…), which it links to but
+// never writes. Documents move stock between cost layers; every posted document writes immutable
+// cost moves and one journal (event inv.document.posted). Decision D-1 (method, loss bands,
+// price differences) is configurable and approval-gated: nothing posts until it is decided.
+
+enum InvItemKind {
+  GREEN_COFFEE
+  ROASTED_COFFEE // roasted, not yet packed (work in progress)
+  PACKAGING // bags, labels, cartons, cups
+  MILK
+  BAKERY_INGREDIENT
+  FINISHED_GOOD // packed coffee, baked goods
+  RESALE_GOOD
+  CONSUMABLE
+}
+
+enum InvCostMethod {
+  WEIGHTED_AVERAGE
+  FIFO
+}
+
+/// How a supplier bill's price differing from the goods receipt is treated (part of D-1).
+enum InvPriceDifference {
+  CAPITALISE // into the stock still on hand from that receipt; the part already used goes to cost of sales
+  EXPENSE // entirely to inventory variance
+}
+
+enum InvDocType {
+  RECEIPT // goods received from a supplier: Dr inventory / Cr goods received not invoiced
+  SUPPLIER_RETURN
+  ISSUE // waste, internal use (café consumption), spoilage
+  TRANSFER
+  PRODUCTION // roasting, packing, baking: inputs consumed, outputs made, loss per band
+  SALE_ISSUE // cost of sales for a posted sales invoice
+  CUSTOMER_RETURN
+  LANDED_COST // freight, customs… added to received stock
+  BILL_MATCH // supplier bill line matched to a receipt line; posts the price difference
+  COUNT // physical count
+  SUPPLIER_CREDIT // supplier credit note settling a return or reducing the price of received goods (traced)
+  SALE_REVERSAL // invoice reversed: its cost of sales moves back to "delivered, not invoiced" (no goods come back)
+  ADJUSTMENT // stock corrected by a known quantity (operational adjustment): out at cost / in at average cost
+}
+
+enum InvDocStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  POSTED
+}
+
+enum InvLineRole {
+  LINE
+  INPUT
+  OUTPUT
+}
+
+enum InvIssueReason {
+  INTERNAL_USE // e.g. milk used in café drinks → cost of sales
+  CALIBRATION
+  QC
+  TRAINING
+  SPOILAGE
+}
+
+enum InvLossBandStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+model InvItem {
+  id              String       @id @default(cuid())
+  code            String       @unique
+  name            String
+  nameAr          String?
+  kind            InvItemKind
+  /// Base unit every quantity is kept in (kg, l, piece, unit…).
+  baseUnit        String
+  /// Weight or volume of one base unit in the unit production yields are measured in (kg for
+  /// coffee; e.g. 0.08 for a croissant). Used for production loss; 1 for kg items.
+  yieldPerUnit    Decimal      @default(1) @db.Decimal(18, 6)
+  // Links to the operational masters (optional, one accounting item each).
+  greenBeanId     String?      @unique
+  coffeeProductId String?      @unique
+  materialItemId  String?      @unique
+  productSkuId    String?      @unique
+  isActive        Boolean      @default(true)
+  createdBy       String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  units           InvUnit[]
+  lines           InvDocLine[]
+  layers          InvLayer[]
+  moves           InvMove[]
+
+  @@index([kind, isActive])
+}
+
+/// Conversion of a purchase or handling unit into the item's base unit (sack of 60 kg, carton of 12 l).
+model InvUnit {
+  id     String  @id @default(cuid())
+  itemId String
+  item   InvItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  unit   String
+  /// Base units in one of this unit.
+  factor Decimal @db.Decimal(18, 6)
+
+  @@unique([itemId, unit])
+}
+
+model InvLocation {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           String
+  nameAr         String?
+  isActive       Boolean  @default(true)
+  /// The location cost of sales is taken from for posted sales invoices (at most one).
+  isSalesDefault Boolean  @default(false)
+  /// Posting role that replaces the item's inventory account at this location (GDNI for the
+  /// "delivered, not invoiced" location, which holds the cost of goods dispatched until invoiced).
+  accountRole    String?
+  /// The single location holding goods dispatched to customers and not yet recognised as sold.
+  isDelivered    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+/// Normal-loss band for a production process (D-1). Approved by someone other than its author;
+/// the percentage is copied onto each production document when it posts.
+model InvLossBand {
+  id             String            @id @default(cuid())
+  code           String            @unique
+  name           String
+  nameAr         String?
+  process        String // ROASTING, PACKING, BAKING, OTHER
+  maxLossPercent Decimal           @db.Decimal(5, 2)
+  status         InvLossBandStatus @default(DRAFT)
+  createdBy      String
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+model InvDocument {
+  id              String              @id @default(cuid())
+  docNo           Int                 @unique @default(autoincrement())
+  type            InvDocType
+  status          InvDocStatus        @default(DRAFT)
+  docDate         DateTime            @db.Date
+  locationId      String
+  toLocationId    String?
+  supplierId      String?
+  customerId      String?
+  description     String?
+  reason          String?
+  issueReason     InvIssueReason?
+  lossBandId      String?
+  /// Snapshots taken when the document posts (history does not follow later setting changes).
+  lossBandPercent Decimal?            @db.Decimal(5, 2)
+  costMethod      InvCostMethod?
+  priceDifference InvPriceDifference?
+  provisional     Boolean             @default(false)
+  /// LANDED_COST: amount to spread, by VALUE or QUANTITY; BILL_MATCH: the bill line.
+  amount          Decimal?            @db.Decimal(18, 2)
+  allocationBasis String?
+  billLineId      String?             @unique
+  /// The operational or accounting record this document was made from (unique per source).
+  sourceType      String?
+  sourceId        String?
+  requestKey      String?             @unique
+  createdBy       String
+  submittedBy     String?
+  submittedAt     DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  postedBy        String?
+  postedAt        DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectedReason  String?
+  /// Set once the cost moves of a posted document are complete; no move can be added after.
+  movesSealed     Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  /// PRODUCTION: ROASTING, PACKING, BAKING, BLENDING or OTHER (selects loss band and cost pools).
+  process         String?
+  labourHours     Decimal?            @db.Decimal(10, 2)
+  machineHours    Decimal?            @db.Decimal(10, 2)
+  /// Set when a system document (costing, operations) could not be dated when it happened because
+  /// later movements already posted: docDate is when it was booked, originalDate when it happened.
+  originalDate    DateTime?           @db.Date
+  lateReason      String?
+  /// Sales costing documents: the invoice they cost.
+  salesInvoiceId  String?
+  lines           InvDocLine[]
+  moves           InvMove[]
+
+  @@unique([sourceType, sourceId])
+  @@index([status, docDate])
+  @@index([type, status])
+}
+
+model InvDocLine {
+  id                 String      @id @default(cuid())
+  documentId         String
+  document           InvDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  lineNo             Int
+  role               InvLineRole @default(LINE)
+  itemId             String
+  item               InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  quantity           Decimal     @db.Decimal(18, 4)
+  unit               String
+  factor             Decimal     @db.Decimal(18, 6)
+  baseQty            Decimal     @db.Decimal(18, 4)
+  /// RECEIPT (and a count surplus): cost per base unit.
+  unitCost           Decimal?    @db.Decimal(18, 4)
+  /// COUNT: quantity counted (base units).
+  countedQty         Decimal?    @db.Decimal(18, 4)
+  /// SUPPLIER_RETURN / LANDED_COST / BILL_MATCH: the receipt line; CUSTOMER_RETURN: the sale-issue line.
+  targetLineId       String?
+  description        String?
+  /// Links to the business record the line comes from (sales costing, dispatch, returns).
+  salesInvoiceLineId String?
+  orderItemId        String?
+  lotId              String?
+
+  @@unique([documentId, lineNo])
+  @@index([targetLineId])
+}
+
+/// A quantity of an item at a location received at one cost. Issues draw layers down (FIFO or in
+/// proportion for weighted average); landed costs and price differences revalue what is left.
+model InvLayer {
+  id         String   @id @default(cuid())
+  itemId     String
+  item       InvItem  @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  locationId String
+  moveId     String   @unique
+  date       DateTime @db.Date
+  qtyIn      Decimal  @db.Decimal(18, 4)
+  valueIn    Decimal  @db.Decimal(18, 2)
+  qtyLeft    Decimal  @db.Decimal(18, 4)
+  valueLeft  Decimal  @db.Decimal(18, 2)
+  createdAt  DateTime @default(now())
+
+  @@index([itemId, locationId, date])
+}
+
+/// Immutable cost movement: signed quantity and value of an item at a location, from one posted
+/// document. The valuation on any date is the sum of moves dated on or before it.
+model InvMove {
+  id              String      @id @default(cuid())
+  seq             Int         @unique @default(autoincrement())
+  documentId      String
+  document        InvDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  lineId          String?
+  itemId          String
+  item            InvItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  locationId      String
+  date            DateTime    @db.Date
+  /// IN, OUT, REVALUE (value only), EXPENSED (value of a revaluation on stock already used; no stock effect)
+  kind            String
+  qty             Decimal     @db.Decimal(18, 4)
+  value           Decimal     @db.Decimal(18, 2)
+  layerId         String?
+  /// EXPENSED / ABSORBED: the posting role the value goes to (COGS, a waste account, GRNI, the
+  /// labour or overhead absorbed account…); traceDocumentId: the document whose consumption the
+  /// traced share belongs to (a sale, an issue); poolId: the cost pool of an ABSORBED move.
+  role            String?
+  traceDocumentId String?
+  poolId          String?
+  createdAt       DateTime    @default(now())
+
+  @@index([itemId, locationId, date])
+  @@index([documentId])
+}
+
+// ─── Stage 4b: costing status, operational integration, conversion cost, returns ──────────
+
+enum InvCostingStatus {
+  PENDING
+  AWAITING_POLICY
+  AWAITING_DISPATCH
+  COSTED
+  NOT_REQUIRED
+  BLOCKED
+  FAILED
+  CANCELLED
+  UNCOSTED
+}
+
+/// Cost of sales state of one posted sales invoice. Created by the database when the invoice
+/// posts (so it survives a crash between posting and costing), driven by the costing processor
+/// (retries with back-off and a lease), and visible in the exception queue until COSTED.
+model InvCosting {
+  id            String           @id @default(cuid())
+  invoiceId     String           @unique
+  status        InvCostingStatus @default(PENDING)
+  attempts      Int              @default(0)
+  lastError     String?
+  nextAttemptAt DateTime         @default(now())
+  leaseUntil    DateTime?
+  costedAt      DateTime?
+  cost          Decimal          @default(0) @db.Decimal(18, 2)
+  late          Boolean          @default(false)
+  /// Per-line state: [{ lineId, treatment, status, reason, qty, cost }].
+  detail        Json?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([status, nextAttemptAt])
+}
+
+enum InvOpsStatus {
+  PENDING
+  PROCESSING
+  POSTED
+  HELD
+  BLOCKED
+  FAILED
+  IGNORED
+}
+
+/// One operational stock event (purchase, roast, blend, pack, dispatch, adjustment…), written by
+/// the operational service in the same transaction as its stock change, with the authoritative
+/// quantities. The processor turns it into one inventory document (sourceType OPS, sourceId = id).
+/// A database trigger adds an UNINTEGRATED event for any InventoryMovement written by a
+/// transaction that recorded none, so an unknown stock writer is an exception, not a silent gap.
+model InvOpsEvent {
+  id            String       @id @default(cuid())
+  kind          String
+  sourceId      String
+  seq           Int          @default(0)
+  occurredOn    DateTime     @db.Date
+  payload       Json
+  userId        String?
+  txid          BigInt?
+  status        InvOpsStatus @default(PENDING)
+  attempts      Int          @default(0)
+  lastError     String?
+  nextAttemptAt DateTime     @default(now())
+  leaseUntil    DateTime?
+  documentId    String?
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  resolution    String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([kind, sourceId, seq])
+  @@index([status, nextAttemptAt])
+  @@index([txid])
+}
+
+enum InvCostPoolKind {
+  DIRECT_LABOUR
+  PRODUCTION_OVERHEAD
+}
+
+enum InvCostBasis {
+  PER_KG_INPUT
+  PER_KG_OUTPUT
+  PER_UNIT_OUTPUT
+  PER_BATCH
+  PER_LABOUR_HOUR
+  PER_MACHINE_HOUR
+}
+
+/// Conversion cost pool (direct labour or production overhead) of a process. The rate is the
+/// budgeted pool over normal capacity, so under-absorption stays in the period's expense. Approved
+/// by someone other than its author; never changed once approved (retire it and approve another).
+model InvCostPool {
+  id               String            @id @default(cuid())
+  code             String            @unique
+  name             String
+  nameAr           String?
+  kind             InvCostPoolKind
+  process          String
+  basis            InvCostBasis
+  budgetAmount     Decimal           @db.Decimal(18, 2)
+  normalCapacity   Decimal           @db.Decimal(18, 4)
+  rate             Decimal           @db.Decimal(18, 4)
+  /// Where the pool's actual costs are booked (for the absorption report).
+  expenseAccountId String
+  status           InvLossBandStatus @default(DRAFT)
+  createdBy        String
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+enum CustomerReturnStatus {
+  DRAFT
+  RECEIVED
+  APPROVED
+  POSTED
+}
+
+/// Goods physically returned by a customer: recorded, received and evidenced by the warehouse,
+/// approved by someone else, then posted (stock back at the cost it left at). An invoice reversal
+/// or a credit note does not move stock by itself.
+model CustomerReturn {
+  id          String               @id @default(cuid())
+  returnNo    Int                  @unique @default(autoincrement())
+  customerId  String
+  invoiceId   String
+  locationId  String
+  status      CustomerReturnStatus @default(DRAFT)
+  reason      String
+  createdBy   String
+  createdAt   DateTime             @default(now())
+  receivedBy  String?
+  receivedAt  DateTime?
+  receivedOn  DateTime?            @db.Date
+  evidenceRef String?
+  approvedBy  String?
+  approvedAt  DateTime?
+  postedBy    String?
+  postedAt    DateTime?
+  documentId  String?
+  updatedAt   DateTime             @updatedAt
+  lines       CustomerReturnLine[]
+}
+
+model CustomerReturnLine {
+  id            String         @id @default(cuid())
+  returnId      String
+  return        CustomerReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  invoiceLineId String
+  itemId        String
+  quantity      Decimal        @db.Decimal(18, 4)
+  condition     String         @default("RESALABLE")
+
+  @@unique([returnId, invoiceLineId, condition])
+}
+
+/// A supplier credit note's balance applied to one of the supplier's bills: a net-zero move
+/// between the two AP open items (posted as ap.credit.allocated; released → mirrored).
+model ApCreditAllocation {
+  id           String    @id @default(cuid())
+  creditNoteId String
+  billId       String
+  amount       Decimal   @db.Decimal(18, 2)
+  allocatedOn  DateTime  @db.Date
+  active       Boolean   @default(true)
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  removedAt    DateTime?
+
+  @@index([creditNoteId])
+  @@index([billId])
+}
+
+// ─── Accounting: fixed assets, depreciation and year-end close (stage 5) ──────────────────────
+// Accounts are referenced by id (validated by the service), as in InvCostPool. Every approval is
+// by someone other than the preparer (service + database triggers). STAGE_5_DESIGN.md.
+
+enum FaMethod {
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+}
+
+enum FaStartConvention {
+  /// Depreciate from the month the asset is placed in service.
+  IN_SERVICE_MONTH
+  /// Depreciate from the month after.
+  NEXT_MONTH
+}
+
+enum FaDisposalConvention {
+  /// No depreciation in the month of disposal.
+  NONE
+  /// A full month of depreciation in the month of disposal.
+  FULL_MONTH
+}
+
+enum FaPolicyStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+enum FaAssetStatus {
+  DRAFT
+  SUBMITTED
+  CAPITALISED
+  DISPOSED
+  CANCELLED
+}
+
+enum FaSourceKind {
+  /// A posted supplier-bill line; its net amount is (part of) the cost.
+  BILL_LINE
+  /// An amount against a named counter account (Dr cost / Cr counter).
+  ACCOUNT
+  /// Already in the class's cost account (e.g. the opening trial balance); no journal.
+  IN_LEDGER
+}
+
+/// Depreciation runs, disposals and year-end closes share this lifecycle.
+enum FaDocStatus {
+  DRAFT
+  POSTED
+  REVERSAL_REQUESTED
+  REVERSED
+  CANCELLED
+}
+
+model FaClass {
+  id               String          @id @default(cuid())
+  code             String          @unique
+  name             String
+  nameAr           String?
+  costAccountId    String
+  accumAccountId   String
+  expenseAccountId String
+  isActive         Boolean         @default(true)
+  createdBy        String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  policies         FaClassPolicy[]
+  assets           FaAsset[]
+}
+
+/// Versioned depreciation settings of a class. An APPROVED version never changes (trigger);
+/// a change is a new version approved by someone other than its preparer.
+model FaClassPolicy {
+  id                      String               @id @default(cuid())
+  classId                 String
+  class                   FaClass              @relation(fields: [classId], references: [id], onDelete: Restrict)
+  version                 Int
+  status                  FaPolicyStatus       @default(DRAFT)
+  method                  FaMethod
+  usefulLifeMonths        Int
+  residualPercent         Decimal              @db.Decimal(5, 2)
+  decliningFactor         Decimal?             @db.Decimal(5, 2)
+  startConvention         FaStartConvention
+  disposalConvention      FaDisposalConvention
+  capitalisationThreshold Decimal              @default(0) @db.Decimal(18, 2)
+  note                    String?
+  preparedBy              String
+  preparedAt              DateTime             @default(now())
+  approvedBy              String?
+  approvedAt              DateTime?
+  assets                  FaAsset[]
+
+  @@unique([classId, version])
+}
+
+model FaAsset {
+  id                           String               @id @default(cuid())
+  assetNo                      Int                  @unique @default(autoincrement())
+  name                         String
+  classId                      String
+  class                        FaClass              @relation(fields: [classId], references: [id], onDelete: Restrict)
+  /// The approved class policy version the asset was capitalised under.
+  classPolicyId                String?
+  classPolicy                  FaClassPolicy?       @relation(fields: [classPolicyId], references: [id], onDelete: Restrict)
+  branchId                     String?
+  costCenterId                 String?
+  inServiceDate                DateTime             @db.Date
+  cost                         Decimal              @default(0) @db.Decimal(18, 2)
+  residualValue                Decimal              @default(0) @db.Decimal(18, 2)
+  method                       FaMethod
+  usefulLifeMonths             Int
+  decliningFactor              Decimal?             @db.Decimal(5, 2)
+  startConvention              FaStartConvention
+  disposalConvention           FaDisposalConvention
+  /// Why the asset departs from its class policy (shown to the approver).
+  deviationReason              String?
+  /// An asset brought in at cutover: depreciation already charged, and over how many months.
+  openingAccumulated           Decimal              @default(0) @db.Decimal(18, 2)
+  openingMonths                Int                  @default(0)
+  /// Counter account for the opening accumulated depreciation; null = already in the ledger.
+  openingAccumCounterAccountId String?
+  status                       FaAssetStatus        @default(DRAFT)
+  preparedBy                   String
+  submittedAt                  DateTime?
+  approvedBy                   String?
+  capitalisedAt                DateTime?            @db.Date
+  cancelledBy                  String?
+  cancelledAt                  DateTime?
+  cancelReason                 String?
+  createdAt                    DateTime             @default(now())
+  updatedAt                    DateTime             @updatedAt
+  sources                      FaAssetSource[]
+  depLines                     FaDepLine[]
+  disposals                    FaDisposal[]
+
+  @@index([status])
+}
+
+model FaAssetSource {
+  id               String       @id @default(cuid())
+  assetId          String
+  asset            FaAsset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  lineNo           Int
+  kind             FaSourceKind
+  billLineId       String?
+  counterAccountId String?
+  amount           Decimal      @db.Decimal(18, 2)
+  description      String?
+
+  @@unique([assetId, lineNo])
+  @@index([billLineId])
+}
+
+model FaDepRun {
+  id                  String      @id @default(cuid())
+  runNo               Int         @unique @default(autoincrement())
+  fiscalPeriodId      String
+  periodEnd           DateTime    @db.Date
+  status              FaDocStatus @default(DRAFT)
+  total               Decimal     @db.Decimal(18, 2)
+  preparedBy          String
+  preparedAt          DateTime    @default(now())
+  approvedBy          String?
+  postedAt            DateTime?
+  reversalRequestedBy String?
+  reversalReason      String?
+  reversedBy          String?
+  reversedAt          DateTime?
+  lines               FaDepLine[]
+
+  @@index([fiscalPeriodId])
+}
+
+model FaDepLine {
+  id               String   @id @default(cuid())
+  runId            String
+  run              FaDepRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  assetId          String
+  asset            FaAsset  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  amount           Decimal  @db.Decimal(18, 2)
+  /// Depreciable months this line covers (more than one = catch-up).
+  months           Int
+  accumulatedAfter Decimal  @db.Decimal(18, 2)
+  nbvAfter         Decimal  @db.Decimal(18, 2)
+  note             String?
+
+  @@unique([runId, assetId])
+  @@index([assetId])
+}
+
+model FaDisposal {
+  id                  String      @id @default(cuid())
+  assetId             String
+  asset               FaAsset     @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  disposalDate        DateTime    @db.Date
+  kind                String
+  proceeds            Decimal     @default(0) @db.Decimal(18, 2)
+  proceedsAccountId   String?
+  reason              String
+  status              FaDocStatus @default(DRAFT)
+  cost                Decimal?    @db.Decimal(18, 2)
+  accumulated         Decimal?    @db.Decimal(18, 2)
+  nbv                 Decimal?    @db.Decimal(18, 2)
+  gainLoss            Decimal?    @db.Decimal(18, 2)
+  preparedBy          String
+  preparedAt          DateTime    @default(now())
+  approvedBy          String?
+  postedAt            DateTime?
+  reversalRequestedBy String?
+  reversalReason      String?
+  reversedBy          String?
+  reversedAt          DateTime?
+
+  @@index([assetId])
+}
+
+model YearEndClose {
+  id                  String      @id @default(cuid())
+  year                Int
+  status              FaDocStatus @default(DRAFT)
+  yearStart           DateTime    @db.Date
+  yearEnd             DateTime    @db.Date
+  /// Lines of the closing entry as computed when prepared: [{accountId, branchId, costCenterId, net}].
+  snapshot            Json
+  netIncome           Decimal     @db.Decimal(18, 2)
+  preparedBy          String
+  preparedAt          DateTime    @default(now())
+  approvedBy          String?
+  postedAt            DateTime?
+  reversalRequestedBy String?
+  reversalReason      String?
+  reversedBy          String?
+  reversedAt          DateTime?
+
+  @@index([year])
+}
+
+// ─── Accounting: e-invoicing, LOCAL validation only (stage 6) ────────────────────────────────
+// Nothing here sends a document to ZATCA. Generation, hashing, the QR code and the rules are
+// local; the signature uses a local test key, not a ZATCA-issued CSID. STAGE_6_DESIGN.md.
+
+enum EInvoiceProfileStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
+/// Seller data and the e-invoice generation unit (EGS). Entered by one person, approved by another;
+/// an approved version never changes. Values in the local fixture are synthetic.
+model EInvoiceProfile {
+  id           String                @id @default(cuid())
+  version      Int                   @unique
+  status       EInvoiceProfileStatus @default(DRAFT)
+  sellerName   String
+  sellerNameEn String?
+  vatNumber    String
+  crNumber     String
+  street       String
+  buildingNo   String
+  district     String
+  city         String
+  postalCode   String
+  countryCode  String                @default("SA")
+  egsSerial    String
+  /// LOCAL_ONLY (nothing is sent) or SANDBOX (only to a configured non-production host). Production is not an option.
+  environment  String                @default("LOCAL_ONLY")
+  preparedBy   String
+  preparedAt   DateTime              @default(now())
+  approvedBy   String?
+  approvedAt   DateTime?
+}
+
+/// One per posted sales document: generation state and its retries. An invalid document does not
+/// consume the ICV chain; it waits here with its errors until fixed and retried.
+model EInvoiceJob {
+  id             String    @id @default(cuid())
+  salesInvoiceId String    @unique
+  status         String
+  errors         Json?
+  attempts       Int       @default(0)
+  lastAttemptAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+/// The generated e-invoice: immutable (trigger); chained per EGS by ICV and the previous hash.
+model EInvoice {
+  id             String               @id @default(cuid())
+  salesInvoiceId String               @unique
+  profileId      String
+  egsSerial      String
+  icv            Int
+  uuid           String               @unique
+  typeCode       String
+  subtype        String
+  issueAt        DateTime
+  xml            String
+  invoiceHash    String
+  previousHash   String
+  qr             String?
+  signature      String?
+  publicKey      String?
+  signer         String
+  validation     Json
+  createdAt      DateTime             @default(now())
+  createdBy      String
+  submissions    EInvoiceSubmission[]
+
+  @@unique([egsSerial, icv])
+}
+
+/// Append-only record of each submission attempt (or refusal to submit), with its outcome.
+model EInvoiceSubmission {
+  id            String    @id @default(cuid())
+  eInvoiceId    String
+  eInvoice      EInvoice  @relation(fields: [eInvoiceId], references: [id], onDelete: Restrict)
+  attempt       Int
+  environment   String
+  endpoint      String?
+  requestHash   String
+  outcome       String
+  httpStatus    Int?
+  response      Json?
+  nextAttemptAt DateTime?
+  createdAt     DateTime  @default(now())
+  createdBy     String
+
+  @@unique([eInvoiceId, attempt])
 }

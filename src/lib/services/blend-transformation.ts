@@ -2,6 +2,7 @@
 // FOR UPDATE query, and Prisma.InventoryMovementCreateManyInput is used as a type from the
 // same namespace.
 import { Prisma } from "@/generated/prisma/client";
+import { recordStockEvent } from "@/lib/accounting/ops-integration";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -278,8 +279,9 @@ export async function recordBlendMovements(
     consumed: { sourceId: string; before: number; after: number; taken: number }[];
     totalKg: number;
     userId: string | null;
+    productId?: string | null;
   },
-): Promise<void> {
+): Promise<string> {
   const rows: Prisma.InventoryMovementCreateManyInput[] = params.consumed.map((c) => ({
     type: "OUT" as const,
     category: "ROASTED_COFFEE" as const,
@@ -309,4 +311,12 @@ export async function recordBlendMovements(
   });
 
   await tx.inventoryMovement.createMany({ data: rows });
+
+  // Accounting: roasted coffee taken from each source batch, the blend made (ops-integration.ts).
+  const ev = await recordStockEvent(tx, {
+    kind: "BLEND", sourceId: params.blendBatchId, userId: params.userId,
+    payload: { batchId: params.blendBatchId, batchNumber: params.blendBatchNumber, productId: params.productId ?? null, totalKg: params.totalKg,
+      sources: params.consumed.map((c) => ({ batchId: c.sourceId, kg: c.taken })) },
+  });
+  return ev.id;
 }

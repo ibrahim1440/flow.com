@@ -1,0 +1,52 @@
+Regression: tests/accounting/integration/inventory.test.ts › stage 4 — historical GRNI
+Run against src/lib/accounting/inventory-reports.ts at fde4632 (before the fix: bill lines filtered by current status POSTED).
+
+TAP version 13
+# Subtest: stage 4 — historical GRNI
+    # Subtest: a bill reversed later still explains GRNI at earlier dates; the explanation agrees with the ledger at every cutoff
+    not ok 1 - a bill reversed later still explains GRNI at earlier dates; the explanation agrees with the ledger at every cutoff
+      ---
+      duration_ms: 1018.038657
+      type: 'test'
+      location: '/home/user/flow.com/tests/accounting/integration/inventory.test.ts:2:17947'
+      failureType: 'testCodeFailure'
+      error: |-
+        explanation = ledger at 2026-01-31
+        + actual - expected
+        
+        + '-3000.00'
+        - '-2800.00'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: '-2800.00'
+      actual: '-3000.00'
+      operator: 'strictEqual'
+      stack: |-
+        explain (/home/user/flow.com/tests/accounting/integration/inventory.test.ts:222:14)
+        process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+        async TestContext.<anonymous> (/home/user/flow.com/tests/accounting/integration/inventory.test.ts:230:22)
+        async Test.run (node:internal/test_runner/test:1054:7)
+        async Promise.all (index 0)
+        async Suite.run (node:internal/test_runner/test:1442:7)
+        async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+      ...
+    1..1
+not ok 1 - stage 4 — historical GRNI
+  ---
+  duration_ms: 1019.192558
+  type: 'suite'
+  location: '/home/user/flow.com/tests/accounting/integration/inventory.test.ts:2:17883'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 1
+# suites 1
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1720.06328

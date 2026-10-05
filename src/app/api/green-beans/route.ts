@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordStockEvent, integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
 
   try {
     let bean;
+    let opsEventId: string | undefined;
     if (quantityKg > 0) {
       bean = await prisma.$transaction(async (tx) => {
         const created = await tx.greenBean.create({ data });
@@ -75,11 +77,14 @@ export async function POST(request: Request) {
             notes:             "Opening balance",
           },
         });
+        // Accounting: an opening quantity has no cost here; an accountant completes it.
+        opsEventId = (await recordStockEvent(tx, { kind: "OPENING", sourceId: `green:${created.id}`, userId: user.id, payload: { greenBeanId: created.id, quantity: quantityKg } })).id;
         return created;
       });
     } else {
       bean = await prisma.greenBean.create({ data });
     }
+    await integrateNow([opsEventId]);
     return NextResponse.json(bean, { status: 201 });
   } catch (err) {
     return handlePrismaError(err);

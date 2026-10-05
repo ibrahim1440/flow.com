@@ -1,0 +1,306 @@
+TAP version 13
+# Subtest: D1 exactly-once cash protection
+    # Subtest: request → recorded payment → pending bank line → settled line → duplicate import: available falls once
+    ok 1 - request → recorded payment → pending bank line → settled line → duplicate import: available falls once
+      ---
+      duration_ms: 723.42081
+      type: 'test'
+      ...
+    # Subtest: bank feed first: an imported pending line for the request's amount counts once before it is linked
+    ok 2 - bank feed first: an imported pending line for the request's amount counts once before it is linked
+      ---
+      duration_ms: 338.639765
+      type: 'test'
+      ...
+    # Subtest: cancellation and failure restore availability only when the commitment is actually released
+    ok 3 - cancellation and failure restore availability only when the commitment is actually released
+      ---
+      duration_ms: 452.118935
+      type: 'test'
+      ...
+    # Subtest: an unmatched imported pending outflow is routed for review, then counted once
+    ok 4 - an unmatched imported pending outflow is routed for review, then counted once
+      ---
+      duration_ms: 295.745928
+      type: 'test'
+      ...
+    # Subtest: concurrent requests: one line pays one request, a request is paid once, allocations never exceed what is available
+    ok 5 - concurrent requests: one line pays one request, a request is paid once, allocations never exceed what is available
+      ---
+      duration_ms: 416.784123
+      type: 'test'
+      ...
+    1..5
+ok 1 - D1 exactly-once cash protection
+  ---
+  duration_ms: 2228.192954
+  type: 'suite'
+  ...
+# Subtest: finance — database integration
+    # Subtest: ACCEPTANCE 1 end-to-end: 10,000 via approved rules → 6,500/500/1,800/700/500
+    ok 1 - ACCEPTANCE 1 end-to-end: 10,000 via approved rules → 6,500/500/1,800/700/500
+      ---
+      duration_ms: 572.996501
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 2 — reimporting a statement and retrying an allocation duplicate nothing
+    ok 2 - ACCEPTANCE 2 — reimporting a statement and retrying an allocation duplicate nothing
+      ---
+      duration_ms: 312.072079
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 3 — concurrent allocation requests cannot spend the same cash twice
+    ok 3 - ACCEPTANCE 3 — concurrent allocation requests cannot spend the same cash twice
+      ---
+      duration_ms: 334.078962
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 4 — a transfer between company accounts adds no revenue and no consolidated cash
+    ok 4 - ACCEPTANCE 4 — a transfer between company accounts adds no revenue and no consolidated cash
+      ---
+      duration_ms: 263.243584
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 5 — reaching a monthly funding target stops further funding
+    ok 5 - ACCEPTANCE 5 — reaching a monthly funding target stops further funding
+      ---
+      duration_ms: 408.639646
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 6 — a replenishable reserve refills after spending; a monthly cap does not
+    ok 6 - ACCEPTANCE 6 — a replenishable reserve refills after spending; a monthly cap does not
+      ---
+      duration_ms: 402.857694
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 7 — an expected but unreceived payment does not increase available cash
+    ok 7 - ACCEPTANCE 7 — an expected but unreceived payment does not increase available cash
+      ---
+      duration_ms: 183.431544
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 8 — reserve then execute: no double deduction
+    ok 8 - ACCEPTANCE 8 — reserve then execute: no double deduction
+      ---
+      duration_ms: 264.636945
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 9 — cancellations, refunds, partial receipts and gateway fees
+    ok 9 - ACCEPTANCE 9 — cancellations, refunds, partial receipts and gateway fees
+      ---
+      duration_ms: 439.563083
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 13 — forecasts and revisions never change the approved budget
+    ok 10 - ACCEPTANCE 13 — forecasts and revisions never change the approved budget
+      ---
+      duration_ms: 267.354868
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 15 — PO → bill → payment counts the obligation once
+    ok 11 - ACCEPTANCE 15 — PO → bill → payment counts the obligation once
+      ---
+      duration_ms: 267.412089
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 16 (service layer) — duties are enforced regardless of the UI
+    ok 12 - ACCEPTANCE 16 (service layer) — duties are enforced regardless of the UI
+      ---
+      duration_ms: 231.344877
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 17 — branch isolation on reads and writes
+    ok 13 - ACCEPTANCE 17 — branch isolation on reads and writes
+      ---
+      duration_ms: 186.897166
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 18 — allocated + unallocated = eligible cash; restricted and pending explained
+    ok 14 - ACCEPTANCE 18 — allocated + unallocated = eligible cash; restricted and pending explained
+      ---
+      duration_ms: 220.033228
+      type: 'test'
+      ...
+    # Subtest: ACCEPTANCE 19 — accounting net profit is never inferred from receipts minus payments
+    ok 15 - ACCEPTANCE 19 — accounting net profit is never inferred from receipts minus payments
+      ---
+      duration_ms: 236.008661
+      type: 'test'
+      ...
+    # Subtest: WORKFLOW — budget → approve → import → match & classify → allocate → reserve & pay → actuals & variance
+    ok 16 - WORKFLOW — budget → approve → import → match & classify → allocate → reserve & pay → actuals & variance
+      ---
+      duration_ms: 473.433563
+      type: 'test'
+      ...
+    1..16
+ok 2 - finance — database integration
+  ---
+  duration_ms: 5066.511024
+  type: 'suite'
+  ...
+# Subtest: financial lifecycle
+    # Subtest: receipt → confirm → allocate → approve & reserve → pay outside → statement import confirms the same lines (no second outflow or actual)
+    ok 1 - receipt → confirm → allocate → approve & reserve → pay outside → statement import confirms the same lines (no second outflow or actual)
+      ---
+      duration_ms: 837.69401
+      type: 'test'
+      ...
+    # Subtest: ambiguous statement line is flagged, then merged by a reviewer without a second outflow
+    ok 2 - ambiguous statement line is flagged, then merged by a reviewer without a second outflow
+      ---
+      duration_ms: 237.506822
+      type: 'test'
+      ...
+    # Subtest: opening balances are not receipts and cannot be allocated twice
+    ok 3 - opening balances are not receipts and cannot be allocated twice
+      ---
+      duration_ms: 325.931147
+      type: 'test'
+      ...
+    1..3
+ok 3 - financial lifecycle
+  ---
+  duration_ms: 1402.370653
+  type: 'suite'
+  ...
+# Subtest: database controls under the application role (finance_app)
+    # Subtest: role is not superuser/owner and cannot truncate or disable triggers
+    ok 1 - role is not superuser/owner and cannot truncate or disable triggers
+      ---
+      duration_ms: 86.640162
+      type: 'test'
+      ...
+    # Subtest: append-only ledgers, protected approved budgets and four-eyes approvals hold in SQL
+    ok 2 - append-only ledgers, protected approved budgets and four-eyes approvals hold in SQL
+      ---
+      duration_ms: 239.609367
+      type: 'test'
+      ...
+    # Subtest: no self-approval bypass: the application role cannot enable one, forge one, or skip the request
+    ok 3 - no self-approval bypass: the application role cannot enable one, forge one, or skip the request
+      ---
+      duration_ms: 268.706316
+      type: 'test'
+      ...
+    # Subtest: a category's named approver cannot be the person raising the request
+    ok 4 - a category's named approver cannot be the person raising the request
+      ---
+      duration_ms: 173.937875
+      type: 'test'
+      ...
+    1..4
+ok 4 - database controls under the application role (finance_app)
+  ---
+  duration_ms: 769.595752
+  type: 'suite'
+  ...
+# Subtest: sales collection ↔ bank receipt (integration branch)
+    # Subtest: approving a collection moves no finance cash, allocation or actual
+    ok 1 - approving a collection moves no finance cash, allocation or actual
+      ---
+      duration_ms: 571.211643
+      type: 'test'
+      ...
+    # Subtest: statement receipt is the only cash; allocation and actual counted once, even when retried or raced
+    ok 2 - statement receipt is the only cash; allocation and actual counted once, even when retried or raced
+      ---
+      duration_ms: 437.161613
+      type: 'test'
+      ...
+    # Subtest: one collection ↔ one bank line: a second link either way is refused (service and database)
+    ok 3 - one collection ↔ one bank line: a second link either way is refused (service and database)
+      ---
+      duration_ms: 329.170167
+      type: 'test'
+      ...
+    # Subtest: a reversed collection flags the link and changes no cash until a refund line exists
+    ok 4 - a reversed collection flags the link and changes no cash until a refund line exists
+      ---
+      duration_ms: 427.728146
+      type: 'test'
+      ...
+    # Subtest: re-import after linking inserts nothing and keeps the link
+    ok 5 - re-import after linking inserts nothing and keeps the link
+      ---
+      duration_ms: 244.235935
+      type: 'test'
+      ...
+    # Subtest: the review panel suggestion: an approved collection is offered with its details, linking shows it as linked
+    ok 6 - the review panel suggestion: an approved collection is offered with its details, linking shows it as linked
+      ---
+      duration_ms: 270.359527
+      type: 'test'
+      ...
+    1..6
+ok 5 - sales collection ↔ bank receipt (integration branch)
+  ---
+  duration_ms: 2281.19196
+  type: 'suite'
+  ...
+# Subtest: D5 cancelling an obligation
+    # Subtest: a reason is required
+    ok 1 - a reason is required
+      ---
+      duration_ms: 246.672298
+      type: 'test'
+      ...
+    # Subtest: open payment requests are released with their own audit entry; without the allocate duty it is refused
+    ok 2 - open payment requests are released with their own audit entry; without the allocate duty it is refused
+      ---
+      duration_ms: 246.198402
+      type: 'test'
+      ...
+    # Subtest: a partly paid obligation: the payment stays recorded, only the remainder is cancelled
+    ok 3 - a partly paid obligation: the payment stays recorded, only the remainder is cancelled
+      ---
+      duration_ms: 145.861545
+      type: 'test'
+      ...
+    1..3
+ok 6 - D5 cancelling an obligation
+  ---
+  duration_ms: 640.020748
+  type: 'suite'
+  ...
+# Subtest: D6 branch access and optional suggestions
+    # Subtest: only an administrator who may edit employees changes branch access; never their own; every change audited
+    ok 1 - only an administrator who may edit employees changes branch access; never their own; every change audited
+      ---
+      duration_ms: 90.263198
+      type: 'test'
+      ...
+    # Subtest: finance works without the suggested categories
+    ok 2 - finance works without the suggested categories
+      ---
+      duration_ms: 124.193049
+      type: 'test'
+      ...
+    1..2
+ok 7 - D6 branch access and optional suggestions
+  ---
+  duration_ms: 214.812823
+  type: 'suite'
+  ...
+# Subtest: D4a budget rows: verified zero vs not yet verified
+    # Subtest: indicators are per row: direction, category and reconciliation
+    ok 1 - indicators are per row: direction, category and reconciliation
+      ---
+      duration_ms: 270.136222
+      type: 'test'
+      ...
+    1..1
+ok 8 - D4a budget rows: verified zero vs not yet verified
+  ---
+  duration_ms: 270.521193
+  type: 'suite'
+  ...
+1..8
+# tests 40
+# suites 8
+# pass 40
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 14857.64315

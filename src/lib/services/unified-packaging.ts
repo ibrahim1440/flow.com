@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { explodeBom, roundKg } from "./finished-products";
+import { recordStockEvent } from "@/lib/accounting/ops-integration";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -405,6 +406,8 @@ export type CommitResult = {
   // order line's SKU without re-reading the rows it just wrote.
   lots: { id: string; productSkuId: string; skuCode: string; classification: "STANDARD" | "PARTIAL"; units: number; actualGrams: number }[];
   materialsConsumed: { materialItemId: string; label: string; quantity: number }[];
+  /** The accounting integration event recorded with this packing (ops-integration.ts). */
+  opsEventId: string;
 };
 
 /**
@@ -434,6 +437,7 @@ export async function commitPackaging(
   }
 
   const consumedKg = kgFromGrams(preview.totalConsumedGrams);
+  const opsTaken = new Set<string>();
 
   // ── Draw the coffee, atomically ───────────────────────────────────────────
   // Conditional UPDATE rather than read-then-write even though the row is already locked:
@@ -724,6 +728,19 @@ export async function commitPackaging(
     select: { roastedAvailableKg: true },
   });
 
+  // Accounting: roasted grams drawn (packed and lost), materials drawn, and what was made —
+  // whole units per standard lot; a partial package and each top-up by the grams it holds.
+  const opsLots = preview.lines.filter((l) => l.kind !== "loss").flatMap((l): Record<string, unknown>[] => {
+    if (l.kind === "topUp" && l.lotId) return [{ lotId: l.lotId, productSkuId: l.productSkuId, kind: "TOP_UP", units: l.becomesStandard ? 1 : 0, actualGrams: l.actualGramsEach, nominalGrams: l.nominalGrams, gramsAdded: l.gramsConsumed, becomesStandard: !!l.becomesStandard }];
+    return lots.filter((x) => x.productSkuId === l.productSkuId && x.classification === l.classification && !opsTaken.has(x.id) && (opsTaken.add(x.id), true))
+      .map((x) => ({ lotId: x.id, productSkuId: x.productSkuId, kind: x.classification, units: x.units, actualGrams: x.actualGrams, nominalGrams: l.nominalGrams }));
+  });
+  const ev = await recordStockEvent(tx, {
+    kind: "PACK", sourceId: operationId ?? `${batch.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, userId,
+    payload: { batchId: batch.id, batchNumber: batch.batchNumber, productId: batch.productId, gramsConsumed: preview.totalConsumedGrams, lossGrams: preview.lossGrams,
+      materials: materialsConsumed.map((m) => ({ materialItemId: m.materialItemId, quantity: m.quantity })), lots: opsLots },
+  });
+
   return {
     standardUnitsCreated,
     partialPackagesCreated,
@@ -733,5 +750,6 @@ export async function commitPackaging(
     remainingGrams: gramsFromKg(after.roastedAvailableKg),
     lots,
     materialsConsumed,
+    opsEventId: ev.id,
   };
 }

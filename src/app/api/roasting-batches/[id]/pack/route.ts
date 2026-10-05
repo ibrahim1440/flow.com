@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { integrateNow } from "@/lib/accounting/ops-integration";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -131,6 +132,7 @@ export async function POST(request: Request, { params }: Params) {
   const requestHash = packagingRequestHash({ method: "PACK", batchId: id, lines: intentLines });
 
   try {
+    let opsEventId: string | undefined;
     const result = await prisma.$transaction(async (tx) => {
       // The roast row is the single point of serialisation for packaging, and may be locked
       // ahead of every stock and order lock, so taking it here costs no ordering guarantee.
@@ -180,6 +182,7 @@ export async function POST(request: Request, { params }: Params) {
         userId: user.id,
         operationId: null,
       });
+      opsEventId = committed.opsEventId;
 
       // ── Claim the new units for the order they were roasted for ───────────
       // Packing to fulfil a specific order used to land free-to-promise on this path:
@@ -317,6 +320,7 @@ export async function POST(request: Request, { params }: Params) {
       return responseBody;
     }, TX_OPTS);
 
+    await integrateNow([opsEventId]);
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     if (isReplaySignal(err)) {

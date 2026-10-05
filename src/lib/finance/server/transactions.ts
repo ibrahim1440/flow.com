@@ -14,6 +14,8 @@ import {
 import { recomputeObligationStatus } from "./obligations";
 import { reversePaymentsForTxn, reverseReceiptAllocations, runAllocation } from "./allocation";
 import { receiptUnallocated } from "./ledger";
+import { POSTED_BANK_LINE_MESSAGE, postedBankLines } from "@/lib/accounting/bank-posted";
+import { releaseCustomerReceipt } from "@/lib/accounting/receivables-service";
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
@@ -263,7 +265,8 @@ export async function commitImport(actor: FinanceActor, scope: FinanceScope, bod
           sourceFingerprint: r.fingerprint, statementBatchId: batch.id, statementConfirmedAt: new Date(),
           bankReference: before.bankReference ?? r.reference,
           ...(confirm && before.status === "PENDING" ? { status: "CONFIRMED" as const } : {}),
-          ...(before.reconciliationId ? {} : { txnDate: dbDate(r.txnDate) }),
+          // A reconciled or ledger-posted line keeps its date (the statement date is in the audit).
+          ...(before.reconciliationId || (await postedBankLines(tx, [before.id])).size ? {} : { txnDate: dbDate(r.txnDate) }),
         },
       });
       if (res.count === 1) {
@@ -393,6 +396,7 @@ export async function reviewTransaction(actor: FinanceActor, scope: FinanceScope
     const t = await tx.bankTransaction.findUnique({ where: { id }, include: { splits: true } });
     if (!t) throw new FinanceError("Not found", 404);
     assertScope(scope, t.branchKey);
+    if ((await postedBankLines(tx, [t.id])).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
     if (t.status === "VOID") throw new FinanceError("A void line cannot be classified.", 409);
     const amount = toMinor(t.amount);
     const dir = classDirection(classification);
@@ -440,6 +444,7 @@ export async function reviewTransaction(actor: FinanceActor, scope: FinanceScope
         data: splits.map((s) => ({ transactionId: id, finCategoryId: s.finCategoryId, costCenterId: s.costCenterId, amount: fromMinor(s.amount), note: s.note })),
       });
     }
+    if (!["CUSTOMER_RECEIPT", "CUSTOMER_REFUND"].includes(classification)) await releaseCustomerReceipt(tx, id);   // no longer a customer line
     const after = await tx.bankTransaction.update({
       where: { id },
       data: {
@@ -499,6 +504,7 @@ export async function voidTransaction(actor: FinanceActor, scope: FinanceScope, 
     if (t.status === "VOID") return { transaction: t, reversal: null };
     if (t.reconciliationId) throw new FinanceError("This line is part of a completed reconciliation. Record a correcting line instead.", 409);
     const ids = [t.id, ...(t.transferPeerId ? [t.transferPeerId] : [])];
+    if ((await postedBankLines(tx, ids)).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
     let reversal = null;
     for (const lineId of ids) {
       const line = await tx.bankTransaction.findUniqueOrThrow({ where: { id: lineId } });
@@ -509,6 +515,7 @@ export async function voidTransaction(actor: FinanceActor, scope: FinanceScope, 
       await tx.bankTransactionMatch.updateMany({ where: { transactionId: lineId, active: true }, data: { active: false, removedAt: new Date(), removedBy: actor.id } });
       await tx.bankTransaction.update({ where: { id: lineId }, data: { status: "VOID", voidedAt: new Date(), voidedBy: actor.id, voidReason: reason } });
       for (const m of matches.filter((x) => x.targetType === "OBLIGATION")) await recomputeObligationStatus(tx, m.targetId);
+      await releaseCustomerReceipt(tx, lineId);   // accounting: the customer assignment of an unposted line
       await audit(tx, { action: "bank_txn.voided", entityType: "BankTransaction", entityId: lineId, branchKey: line.branchKey, before: { status: line.status }, after: { status: "VOID" }, reason, refs: reversal ? { reversal } : undefined, userId: actor.id });
     }
     return { transaction: await tx.bankTransaction.findUniqueOrThrow({ where: { id } }), reversal };
@@ -584,6 +591,7 @@ export async function linkTransfer(actor: FinanceActor, scope: FinanceScope, idA
     const [a, b] = await Promise.all([tx.bankTransaction.findUnique({ where: { id: idA } }), tx.bankTransaction.findUnique({ where: { id: idB } })]);
     if (!a || !b) throw new FinanceError("Not found", 404);
     assertScope(scope, a.branchKey); assertScope(scope, b.branchKey);
+    if ((await postedBankLines(tx, [a.id, b.id])).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
     if (a.cashAccountId === b.cashAccountId) throw new FinanceError("Transfer legs must be in different accounts.", 400);
     if (toMinor(a.amount) !== -toMinor(b.amount)) throw new FinanceError("Transfer legs must be equal and opposite.", 400);
     if (a.transferPeerId || b.transferPeerId) throw new FinanceError("One of the lines is already paired.", 409);
@@ -619,6 +627,7 @@ export async function addMatch(actor: FinanceActor, scope: FinanceScope, txnId: 
     if (!t) throw new FinanceError("Not found", 404);
     assertScope(scope, t.branchKey);
     if (t.status === "VOID") throw new FinanceError("A void line cannot be matched.", 409);
+    if ((await postedBankLines(tx, [t.id])).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
     const lineAmount = toMinor(t.amount);
     if (targetType === "ORDER") {
       if (lineAmount < 0 && t.classification !== "CUSTOMER_REFUND") throw new FinanceError("Orders are matched to money received (or to customer refunds).", 400);
@@ -664,6 +673,7 @@ export async function linkSalesCollection(actor: FinanceActor, scope: FinanceSco
     const t = await tx.bankTransaction.findUnique({ where: { id: txnId } });
     if (!t) throw new FinanceError("Not found", 404);
     assertScope(scope, t.branchKey);
+    if ((await postedBankLines(tx, [t.id])).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
     const c = await tx.salesCollection.findUnique({ where: { id: collectionId } });
     if (!c) throw new FinanceError("Sales collection not found.", 404);
     const existing = await tx.bankTransactionMatch.findFirst({ where: { targetType: "SALES_COLLECTION", targetId: collectionId, active: true } });
@@ -718,6 +728,7 @@ export async function removeMatch(actor: FinanceActor, scope: FinanceScope, matc
     const m = await tx.bankTransactionMatch.findUnique({ where: { id: matchId }, include: { transaction: true } });
     if (!m || !m.active) throw new FinanceError("Not found", 404);
     assertScope(scope, m.transaction.branchKey);
+    if ((await postedBankLines(tx, [m.transactionId])).size) throw new FinanceError(POSTED_BANK_LINE_MESSAGE, 409);
     const run = await tx.allocationRun.findUnique({ where: { sourceTxnId: m.transactionId } });
     if (run && toMinor(m.taxAmount) > 0) throw new FinanceError("This match's VAT has already been reserved by an allocation run.", 409);
     const upd = await tx.bankTransactionMatch.update({ where: { id: matchId }, data: { active: false, removedAt: new Date(), removedBy: actor.id } });

@@ -1,0 +1,16 @@
+# Stale-evidence demonstration on the OLD harness (f7fbb37), stub SDK, direct runner, harness test
+## run 1 (normal runner)
+fatal: not a git repository (or any of the parent directories): .git
+gate PASS (exit 0) — <scratch>/out/SUMMARY.md
+exit 0
+## run 2, same --out, run-one.sh replaced by a runner that fails immediately (exit 1, writes nothing)
+fatal: not a git repository (or any of the parent directories): .git
+gate PASS (exit 0) — <scratch>/out/SUMMARY.md
+exit 0
+## run 2 document results:
+standard-invoice PASS 1 PASS
+standard-credit-note PASS 1 PASS
+standard-debit-note PASS 1 PASS
+simplified-invoice PASS 1 PASS
+simplified-credit-note PASS 1 PASS
+simplified-debit-note PASS 1 PASS

@@ -1,0 +1,246 @@
+TAP version 13
+# Subtest: editor line maths equals the server's for 5,000 generated lines, including half-halala cases
+ok 1 - editor line maths equals the server's for 5,000 generated lines, including half-halala cases
+  ---
+  duration_ms: 148.010914
+  type: 'test'
+  ...
+# Subtest: allocate splits to the cent and always sums exactly
+ok 2 - allocate splits to the cent and always sums exactly
+  ---
+  duration_ms: 3.388058
+  type: 'test'
+  ...
+# Subtest: partly-cash asset purchase: cash part investing, credit part disclosed
+ok 3 - partly-cash asset purchase: cash part investing, credit part disclosed
+  ---
+  duration_ms: 2.69578
+  type: 'test'
+  ...
+# Subtest: disposal at a gain: all proceeds investing, gain removed from profit
+ok 4 - disposal at a gain: all proceeds investing, gain removed from profit
+  ---
+  duration_ms: 8.95566
+  type: 'test'
+  ...
+# Subtest: debt converted to equity is non-cash; nothing moves in any section
+ok 5 - debt converted to equity is non-cash; nothing moves in any section
+  ---
+  duration_ms: 0.35176
+  type: 'test'
+  ...
+# Subtest: ordinary operating entries give no non-cash disclosure and indirect = direct
+ok 6 - ordinary operating entries give no non-cash disclosure and indirect = direct
+  ---
+  duration_ms: 1.079672
+  type: 'test'
+  ...
+# Subtest: an unbalanced classification is reported, not hidden: cash into an EXCLUDED account
+ok 7 - an unbalanced classification is reported, not hidden: cash into an EXCLUDED account
+  ---
+  duration_ms: 0.237011
+  type: 'test'
+  ...
+# Subtest: every postable balance-sheet template account gets a class; P&L accounts none
+ok 8 - every postable balance-sheet template account gets a class; P&L accounts none
+  ---
+  duration_ms: 1.094391
+  type: 'test'
+  ...
+# Subtest: specific defaults
+ok 9 - specific defaults
+  ---
+  duration_ms: 0.551457
+  type: 'test'
+  ...
+# Subtest: preview target
+    # Subtest: URL guard needs the preview endpoint, database and explicit env confirmation
+    ok 1 - URL guard needs the preview endpoint, database and explicit env confirmation
+      ---
+      duration_ms: 0.962888
+      type: 'test'
+      ...
+    # Subtest: server identity: every id must match; production project is named explicitly
+    ok 2 - server identity: every id must match; production project is named explicitly
+      ---
+      duration_ms: 0.844472
+      type: 'test'
+      ...
+    1..2
+ok 10 - preview target
+  ---
+  duration_ms: 2.744135
+  type: 'suite'
+  ...
+# Subtest: URL classifier (credential incident)
+    # Subtest: classifies by endpoint id, flags the production owner credential, never returns the password
+    ok 1 - classifies by endpoint id, flags the production owner credential, never returns the password
+      ---
+      duration_ms: 0.604568
+      type: 'test'
+      ...
+    1..1
+ok 11 - URL classifier (credential incident)
+  ---
+  duration_ms: 0.705702
+  type: 'suite'
+  ...
+# Subtest: Neon control-plane cross-check (authoritative identity)
+    # Subtest: pure check: every id, host and the database must match the allowlist
+    ok 1 - pure check: every id, host and the database must match the allowlist
+      ---
+      duration_ms: 0.277902
+      type: 'test'
+      ...
+    # Subtest: fails closed: no key, unreachable API, error status, or mismatching metadata
+    ok 2 - fails closed: no key, unreachable API, error status, or mismatching metadata
+      ---
+      duration_ms: 73.347949
+      type: 'test'
+      ...
+    1..2
+ok 12 - Neon control-plane cross-check (authoritative identity)
+  ---
+  duration_ms: 73.886223
+  type: 'suite'
+  ...
+# Subtest: DECISION_PACK §3 example: 100 kg @ 30 + 50 kg @ 36 → average 32.00; issue 60 kg = 1,920.00
+ok 13 - DECISION_PACK §3 example: 100 kg @ 30 + 50 kg @ 36 → average 32.00; issue 60 kg = 1,920.00
+  ---
+  duration_ms: 3.401142
+  type: 'test'
+  ...
+# Subtest: DECISION_PACK §3 example: band 18% (synthetic), 60 kg in, 47 kg out → 1,834.15 to output, 85.85 abnormal (5300)
+ok 14 - DECISION_PACK §3 example: band 18% (synthetic), 60 kg in, 47 kg out → 1,834.15 to output, 85.85 abnormal (5300)
+  ---
+  duration_ms: 0.981882
+  type: 'test'
+  ...
+# Subtest: packing: roasted coffee yields, bags and labels do not; output split by yield weight
+ok 15 - packing: roasted coffee yields, bags and labels do not; output split by yield weight
+  ---
+  duration_ms: 0.307329
+  type: 'test'
+  ...
+# Subtest: FIFO takes the oldest layers at their own cost; running out is refused
+ok 16 - FIFO takes the oldest layers at their own cost; running out is refused
+  ---
+  duration_ms: 0.67265
+  type: 'test'
+  ...
+# Subtest: conservation: 3,000 random sequences — no value created or lost, no layer below zero, last issue empties exactly
+ok 17 - conservation: 3,000 random sequences — no value created or lost, no layer below zero, last issue empties exactly
+  ---
+  duration_ms: 494.0352
+  type: 'test'
+  ...
+# Subtest: landed cost / price difference: exact allocation by weight; on-hand vs consumed split
+ok 18 - landed cost / price difference: exact allocation by weight; on-hand vs consumed split
+  ---
+  duration_ms: 0.818734
+  type: 'test'
+  ...
+# Subtest: units: a 12-litre carton is 12 L; a 60 kg sack is 60 kg; factors must be positive
+ok 19 - units: a 12-litre carton is 12 L; a 60 kg sack is 60 kg; factors must be positive
+  ---
+  duration_ms: 0.200114
+  type: 'test'
+  ...
+# Subtest: money
+    # Subtest: amounts are exact to the halala; a third decimal, a negative or text is refused
+    ok 1 - amounts are exact to the halala; a third decimal, a negative or text is refused
+      ---
+      duration_ms: 1.904191
+      type: 'test'
+      ...
+    # Subtest: rounding is half-up at two places, and 0.1 + 0.2 is exactly 0.30 in Decimal
+    ok 2 - rounding is half-up at two places, and 0.1 + 0.2 is exactly 0.30 in Decimal
+      ---
+      duration_ms: 0.526583
+      type: 'test'
+      ...
+    1..2
+ok 20 - money
+  ---
+  duration_ms: 2.996224
+  type: 'suite'
+  ...
+# Subtest: dates
+    # Subtest: calendar dates only; an instant maps to its Riyadh day
+    ok 1 - calendar dates only; an instant maps to its Riyadh day
+      ---
+      duration_ms: 0.79339
+      type: 'test'
+      ...
+    1..1
+ok 21 - dates
+  ---
+  duration_ms: 0.914053
+  type: 'suite'
+  ...
+# Subtest: database guard messages
+    # Subtest: found wherever the driver adapter nests them; other errors are not mistaken for guards
+    ok 1 - found wherever the driver adapter nests them; other errors are not mistaken for guards
+      ---
+      duration_ms: 0.450475
+      type: 'test'
+      ...
+    1..1
+ok 22 - database guard messages
+  ---
+  duration_ms: 0.523667
+  type: 'suite'
+  ...
+# Subtest: chart template
+    # Subtest: codes are unique, parents come first and share the child's type
+    ok 1 - codes are unique, parents come first and share the child's type
+      ---
+      duration_ms: 0.368893
+      type: 'test'
+      ...
+    # Subtest: every posting role has a default mapping to a postable, non-header template account
+    ok 2 - every posting role has a default mapping to a postable, non-header template account
+      ---
+      duration_ms: 0.214689
+      type: 'test'
+      ...
+    # Subtest: receivable, payable, inventory and commission control accounts are closed to manual journals
+    ok 3 - receivable, payable, inventory and commission control accounts are closed to manual journals
+      ---
+      duration_ms: 0.140454
+      type: 'test'
+      ...
+    1..3
+ok 23 - chart template
+  ---
+  duration_ms: 1.064935
+  type: 'suite'
+  ...
+# Subtest: policies
+    # Subtest: every commission event type is governed by exactly one policy
+    ok 1 - every commission event type is governed by exactly one policy
+      ---
+      duration_ms: 0.174375
+      type: 'test'
+      ...
+    1..1
+ok 24 - policies
+  ---
+  duration_ms: 0.242703
+  type: 'suite'
+  ...
+# Subtest: editor sales-line maths equals the server's for 5,000 generated lines
+ok 25 - editor sales-line maths equals the server's for 5,000 generated lines
+  ---
+  duration_ms: 98.509189
+  type: 'test'
+  ...
+1..25
+# tests 30
+# suites 8
+# pass 30
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1191.964553

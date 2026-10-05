@@ -1,0 +1,4 @@
+ok 1 - without the isolated-test switch an unapproved plan version cannot post
+# tests 1
+# pass 1
+# fail 0

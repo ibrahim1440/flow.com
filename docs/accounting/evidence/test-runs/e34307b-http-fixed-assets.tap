@@ -1,0 +1,28 @@
+TAP version 13
+# Subtest: duties: a viewer and an operations user can read but not act; the preparer cannot approve and the approver cannot prepare
+ok 1 - duties: a viewer and an operations user can read but not act; the preparer cannot approve and the approver cannot prepare
+  ---
+  duration_ms: 529.686453
+  type: 'test'
+  ...
+# Subtest: a run for this month: concurrent requests make one; the preparer cannot approve it; the approver posts it once; a second approval is refused
+ok 2 - a run for this month: concurrent requests make one; the preparer cannot approve it; the approver posts it once; a second approval is refused
+  ---
+  duration_ms: 383.189344
+  type: 'test'
+  ...
+# Subtest: database guards hold for the runtime role: a posted run and a capitalised asset cannot be edited, policies cannot be self-approved
+ok 3 - database guards hold for the runtime role: a posted run and a capitalised asset cannot be edited, policies cannot be self-approved
+  ---
+  duration_ms: 9.57834
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1028.206432

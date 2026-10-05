@@ -1,0 +1,31 @@
+{
+  "key": "standard-invoice",
+  "commit": "031daaf44c572662945f9a74a52929701e0084d9",
+  "workingTreeDirty": false,
+  "untrackedFiles": 1,
+  "fixture": "zatca-matrix-v1",
+  "salesInvoiceId": "cmupa12gv003k4v7dvif75qa6",
+  "eInvoiceId": "cmupa12l400414v7dqxk2cdxf",
+  "typeCode": "388",
+  "subtype": "0100000",
+  "icv": 1,
+  "uuid": "52c54b88-6483-4878-956c-6a4bd5cd7cdb",
+  "invoiceHash": "yQWe7vcoejPNNI5G9h8BItXEfsKZXMjL2C9Yc8OTb3w=",
+  "previousHash": "NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==",
+  "signer": "LOCAL_TEST_KEY",
+  "qrEncoding": "OFFICIAL_DOCS",
+  "signingCurve": "secp256k1",
+  "sha256": {
+    "xml": "3c62385e73e8469d9c3faffe4d2d4ae3143da665a642d624b1866e3c02e0578f",
+    "qrBase64": "7ac043ff42587642e1a4d14d5f844456f9e2f5ae1ccd3ff85cbdd7eb71bd9a87",
+    "qrBinary": "491e28da4e95c501004b32eafc1bd7836a1ee6a95a4eb412f92bd13dce7c8001"
+  },
+  "localRules": {
+    "total": 23,
+    "failed": []
+  },
+  "standardsGaps": [
+    "NOT-SDK-VALIDATED"
+  ],
+  "officialValidation": "NOT RUN — see ZATCA_REQUIREMENTS.md"
+}

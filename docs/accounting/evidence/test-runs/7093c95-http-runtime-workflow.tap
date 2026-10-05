@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: the server's database sessions are the runtime role, which has no elevated rights
+ok 1 - the server's database sessions are the runtime role, which has no elevated rights
+  ---
+  duration_ms: 186.434826
+  type: 'test'
+  ...
+# Subtest: runtime role cannot bypass ledger controls directly in SQL
+ok 2 - runtime role cannot bypass ledger controls directly in SQL
+  ---
+  duration_ms: 8.982611
+  type: 'test'
+  ...
+# Subtest: journal workflow as the runtime role: create → submit → approve (four-eyes) → post, then reversal
+ok 3 - journal workflow as the runtime role: create → submit → approve (four-eyes) → post, then reversal
+  ---
+  duration_ms: 478.157326
+  type: 'test'
+  ...
+# Subtest: period controls: no posting into a locked or closed period; unlock needs a reason
+ok 4 - period controls: no posting into a locked or closed period; unlock needs a reason
+  ---
+  duration_ms: 246.875536
+  type: 'test'
+  ...
+# Subtest: commission integration as the runtime role: accrual → one journal; duplicate processing adds nothing; subledger ties
+ok 5 - commission integration as the runtime role: accrual → one journal; duplicate processing adds nothing; subledger ties
+  ---
+  duration_ms: 260.418926
+  type: 'test'
+  ...
+# Subtest: provisional plan version: posts only because this is a marked disposable database with the isolated-test switch, and is labelled
+ok 6 - provisional plan version: posts only because this is a marked disposable database with the isolated-test switch, and is labelled
+  ---
+  duration_ms: 124.496139
+  type: 'test'
+  ...
+# Subtest: reports stay consistent after all of the above
+ok 7 - reports stay consistent after all of the above
+  ---
+  duration_ms: 141.364847
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1577.729839
