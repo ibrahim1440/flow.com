@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box, Truck, History,
   TrendingUp, Tag, Users, Settings, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
   ClipboardList, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3,
-  ScrollText, Briefcase, Landmark, Boxes,
+  ScrollText, Briefcase, Landmark, Boxes, Workflow, Zap, MessageSquareText, QrCode,
 } from "lucide-react";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 
@@ -417,6 +417,37 @@ export const NAV: NavNode[] = [
     href: "/dashboard/customers",
     anyOf: [{ module: "customers" }],
     unlessAny: [sales()],
+  },
+  {
+    // WhatsApp messages sent by rules on ERP events. Its own module, because who may decide
+    // what customers are sent is not a sales, orders or settings question alone.
+    id: "automation",
+    ar: "الأتمتة", en: "Automation",
+    icon: Workflow,
+    children: [
+      {
+        id: "automation.rules",
+        ar: "قواعد الأتمتة", en: "Automation rules",
+        icon: Zap,
+        href: "/dashboard/automation",
+        alsoMatches: ["/dashboard/automation/rules"],
+        anyOf: [{ module: "automation" }],
+      },
+      {
+        id: "automation.messages",
+        ar: "سجل الرسائل", en: "Message log",
+        icon: MessageSquareText,
+        href: "/dashboard/automation/messages",
+        anyOf: [{ module: "automation" }],
+      },
+      {
+        id: "automation.whatsapp",
+        ar: "ربط الواتساب", en: "WhatsApp connection",
+        icon: QrCode,
+        href: "/dashboard/automation/whatsapp",
+        anyOf: [{ module: "automation" }],
+      },
+    ],
   },
   {
     id: "employees",

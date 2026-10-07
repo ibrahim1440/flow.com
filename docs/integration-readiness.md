@@ -305,6 +305,13 @@ Tolerance and calibration:
 - **Must log send attempts and delivery receipts** in `IntegrationLog`.
 - **No inbound message parsing** into ERP records. Inbound WhatsApp messages are not parsed into ERP state without a separate business decision and NLP design review.
 
+> **Implemented as a scoped exception (2026-10):** outbound WhatsApp through rule-based automation,
+> requested by the owner ahead of the Tenant model. It follows the rules above — outbound only,
+> asynchronous through an outbox written in the business transaction, every message and send attempt
+> logged, credentials in the environment only — and its tables are tenant-owned without `tenantId`
+> yet. See [docs/automation/WHATSAPP_AUTOMATION.md](automation/WHATSAPP_AUTOMATION.md). The generic
+> `IntegrationJob` / `IntegrationLog` design below remains deferred.
+
 ---
 
 ## 11. Suggested Future Models

@@ -33,6 +33,7 @@
     "preview:nav-fixtures": "tsx scripts/sales-preview/nav-fixtures.ts",
     "preview:nav-fixtures:remove": "tsx scripts/sales-preview/nav-fixtures.ts --remove",
     "test:finance:unit": "tsx --test tests/finance/unit/*.test.ts",
+    "test:automation:unit": "tsx --test tests/automation/*.test.ts",
     "test:finance:db": "tsx --env-file=.env.test --test --test-concurrency=1 --test-force-exit tests/finance/integration/*.test.ts",
     "db:local": "node scripts/finance/local-postgres.mjs start",
     "test:finance:http": "node --test tests/finance/http/*.test.mjs",

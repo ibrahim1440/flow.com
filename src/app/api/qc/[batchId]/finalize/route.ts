@@ -5,6 +5,7 @@ import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ batchId: string }> };
 
@@ -87,6 +88,14 @@ export async function POST(request: Request, { params }: Params) {
       if (batch.productionOrderId) {
         await recalcProductionOrderStatus(batch.productionOrderId, tx);
       }
+
+      await emitAutomationEvent(tx, {
+        eventType: "qc.batch_finalized",
+        subjectType: "RoastingBatch",
+        subjectId: batchId,
+        payload: { outcome, reason: finalDecisionReason?.trim() || null },
+        actorId: user.id,
+      });
     });
 
     const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;

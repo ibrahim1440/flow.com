@@ -72,7 +72,7 @@ Test identifiers:
 | 3.8 | Sample lifecycle; feedback only after it was sent | — | `PATCH /api/sales/samples/[id]` | Deal detail | flow B2 | **DONE** |
 | 3.9 | A sent sample schedules its own follow-up | — | both sample routes | — | flow B2 | **DONE** |
 | 3.10 | **Recording a sample does not move stock** | — | response `notice` | screen notice | flow B2 (asserts no `InventoryMovement`) | **DONE** |
-| 3.11 | Send email / SMS / WhatsApp from the CRM | — | — | — | — | **REFUSED** — nothing here dispatches a message, and no screen implies it does. A CRM that logs "sent" without sending is worse than one that logs nothing. |
+| 3.11 | Send email / SMS / WhatsApp from the CRM | — | — | — | — | **REFUSED here; superseded for WhatsApp** — recording an activity still sends nothing. WhatsApp is sent by the automation module (`sales.quote_status_changed`, `sales.task_due`), where every message has a real recorded outcome: see `docs/automation/WHATSAPP_AUTOMATION.md`. |
 
 ---
 

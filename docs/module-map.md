@@ -230,6 +230,19 @@ The ERP is a Next.js App Router monolith. All API routes live under `src/app/api
 
 ---
 
+### 18. `automation` (WhatsApp)
+
+| | |
+|---|---|
+| **Pages** | `src/app/dashboard/automation/page.tsx` (rules), `rules/new`, `rules/[id]`, `messages`, `whatsapp` |
+| **API routes** | `GET/POST /api/automation/rules`, `GET/PUT/PATCH/DELETE /api/automation/rules/[id]`, `GET /api/automation/messages`, `POST /api/automation/messages/[id]`, `GET/POST /api/automation/whatsapp`, `PUT /api/automation/settings`, `GET /api/automation/recipients`, `GET/POST /api/automation/dispatch` (also `CRON_SECRET`) |
+| **Guard** | `requireModule("automation")` to read; `requireSub` for every write |
+| **Sub-privileges** | `manage_rules`, `manage_connection`, `manage_messages` |
+| **Description** | Rules that send WhatsApp messages on ERP events, through an outbox written in the business transaction. Hooked into orders, deliveries, roasting, QC, packaging, production orders, quotations and finance approvals. See `docs/automation/WHATSAPP_AUTOMATION.md`. |
+| **Known gaps** | No delivery receipts (the instance webhook is not used). Waits and retries need a scheduler calling `/api/automation/dispatch`; without one they run on the next request. |
+
+---
+
 ## Permission Sub-Privilege Reference
 
 | Module | Sub-privilege | Enforced by route? |

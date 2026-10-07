@@ -69,6 +69,10 @@ model Customer {
   activities       Activity[]
   collectionEvents CollectionEvent[]
   salesCollections SalesCollection[]
+
+  /// WhatsApp automation (additive, defaulted): the customer asked not to receive WhatsApp
+  /// messages. Every automated message to this customer is recorded as SKIPPED instead.
+  whatsappOptOut   Boolean                   @default(false)
 }
 
 model GreenBean {
@@ -3091,4 +3095,176 @@ model FinAuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  WhatsApp automation (additive)
+//
+//  Rules of the form "when <event> happens, if <conditions>, do <steps>", where a step is
+//  a WhatsApp message rendered from a template, or a wait. Outbound only: nothing here
+//  reads incoming messages. See docs/automation/WHATSAPP_AUTOMATION.md.
+//
+//  Single-tenant, like every other table today: no tenantId until the Tenant model exists
+//  (docs/saas-readiness.md). Every model below is tenant-owned when that day comes.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum AutomationEventStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum WhatsAppMessageStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+/// OFF records what would have been sent without sending it; TEST sends every message to
+/// the single test number; LIVE sends to the real recipients, and only on a deployment
+/// that explicitly allows it (WHATSAPP_LIVE_ENABLED).
+enum WhatsAppSendMode {
+  OFF
+  TEST
+  LIVE
+}
+
+/// A user-built automation. `conditions` and `steps` are validated JSON
+/// (src/lib/automation/rules.ts) rather than child tables: a rule is edited and saved as
+/// one unit, and nothing queries inside a step.
+model AutomationRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  /// A key from the event catalogue (src/lib/automation/catalog.ts).
+  eventType   String
+  isActive    Boolean  @default(false)
+  /// Language used when an enumerated value (an order status, a QC outcome) is written
+  /// into a message. "ar" or "en".
+  locale      String   @default("ar")
+  conditions  Json     @default("[]")
+  steps       Json     @default("[]")
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  runs        AutomationRun[]
+
+  @@index([eventType, isActive])
+}
+
+/// The outbox. Written in the SAME transaction as the business change it describes, so an
+/// event exists if and only if the change committed. Processed after the response by the
+/// dispatcher, never inline — a slow or absent WhatsApp server can never fail or delay an
+/// order, a delivery or a QC decision.
+///
+/// `payload` carries only the facts of the moment (the status moved from/to, the units
+/// delivered). Names, numbers and phones are read when the event is processed.
+model AutomationEvent {
+  id          String                @id @default(cuid())
+  eventType   String
+  subjectType String
+  subjectId   String
+  payload     Json
+  actorId     String?
+  /// Set for events the dispatcher derives on a schedule (a task falling due), so the same
+  /// moment is never raised twice.
+  dedupeKey   String?               @unique
+  status      AutomationEventStatus @default(PENDING)
+  attempts    Int                   @default(0)
+  lastError   String?
+  occurredAt  DateTime              @default(now())
+  processedAt DateTime?
+  runs        AutomationRun[]
+
+  @@index([status, occurredAt])
+  @@index([subjectType, subjectId])
+}
+
+/// One rule considered against one event — matched or not, and why not. The unique pair is
+/// what makes reprocessing an event safe: a rule can never act twice on the same event.
+model AutomationRun {
+  id        String          @id @default(cuid())
+  ruleId    String
+  rule      AutomationRule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  eventId   String
+  event     AutomationEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  matched   Boolean
+  note      String?
+  createdAt DateTime        @default(now())
+
+  @@unique([ruleId, eventId])
+  @@index([createdAt])
+}
+
+/// One outbound WhatsApp message: the job and its log in one row. The rule's name and the
+/// event are copied rather than related, so the record of what was sent survives the rule
+/// being edited or deleted.
+model WhatsAppMessage {
+  id                String                @id @default(cuid())
+  /// `${runId}:${stepIndex}:${recipient}` for automated messages; unique so a retried
+  /// dispatch can never queue the same message twice.
+  dedupeKey         String                @unique
+  ruleId            String?
+  ruleName          String?
+  eventId           String?
+  eventType         String?
+  subjectType       String?
+  subjectId         String?
+  stepIndex         Int?
+  recipientKind     String
+  recipientName     String?
+  /// Normalised international digits (9665XXXXXXXX). Null when there was no usable number.
+  phone             String?
+  /// The real recipient's number when TEST mode redirected the message.
+  intendedPhone     String?
+  body              String
+  status            WhatsAppMessageStatus @default(QUEUED)
+  /// Why a message was skipped, failed or cancelled. Never contains a credential.
+  statusNote        String?
+  scheduledAt       DateTime              @default(now())
+  nextAttemptAt     DateTime?
+  attempts          Int                   @default(0)
+  lockedAt          DateTime?
+  providerMessageId String?
+  sentAt            DateTime?
+  createdById       String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  sendAttempts      WhatsAppSendAttempt[]
+
+  @@index([status, scheduledAt])
+  @@index([createdAt])
+  @@index([subjectType, subjectId])
+}
+
+/// Append-only: one row per call to the WhatsApp server.
+model WhatsAppSendAttempt {
+  id         String          @id @default(cuid())
+  messageId  String
+  message    WhatsAppMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  attemptNo  Int
+  ok         Boolean
+  httpStatus Int?
+  error      String?
+  durationMs Int?
+  createdAt  DateTime        @default(now())
+
+  @@index([messageId])
+}
+
+/// Singleton (id "singleton"), like SystemConfig.
+model AutomationSettings {
+  id          String           @id @default("singleton")
+  sendMode    WhatsAppSendMode @default(OFF)
+  /// Where every message goes in TEST mode.
+  testPhone   String?
+  /// Last time the dispatcher looked for tasks falling due. Doubles as the guard that
+  /// stops two dispatchers sweeping at once.
+  lastSweepAt DateTime?
+  updatedById String?
+  updatedAt   DateTime         @updatedAt
 }

@@ -5,6 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 // One implementation of "make an order", shared with the quotation-to-order path. A
 // second copy here is exactly the shape of defect the packaging rework was spent closing.
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -62,7 +63,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireSub("orders", "create");
+  const { user, error } = await requireSub("orders", "create");
   if (error) return error;
 
   try {
@@ -98,8 +99,8 @@ export async function POST(request: Request) {
     // the quotation-to-order path held the lock properly. Two writers, two different
     // schemes, and a lock that only looked like it covered both.
     const order = await prisma.$transaction(
-      (tx) =>
-        createOrderWithNumber(
+      async (tx) => {
+        const created = await createOrderWithNumber(
           tx,
           {
             customerId: body.customerId as string,
@@ -108,7 +109,10 @@ export async function POST(request: Request) {
             notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
           },
           resolvedItems,
-        ),
+        );
+        await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.id, actorId: user.id });
+        return created;
+      },
       TX_OPTS,
     );
 

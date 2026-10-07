@@ -2,6 +2,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { hasSubPrivilege, parsePermissions, buildDefaultPermissions } from "@/lib/auth-shared";
 import { audit, can, FinanceError, inScope, type Db, type FinanceActor, type FinanceScope, type FinanceSub } from "./context";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 export type ApprovalType = "BUDGET_APPROVAL" | "ALLOCATION_RULES" | "CATEGORY_TRANSFER" | "SPEND_OVERRIDE" | "PERIOD_REOPEN";
 
@@ -62,6 +63,12 @@ export async function createApproval(
     after: { type: input.type, entityType: input.entityType, entityId: input.entityId, summary: input.summary, assignedToId: input.assignedToId ?? null },
     reason: input.reason,
     userId: actor.id,
+  });
+  await emitAutomationEvent(tx, {
+    eventType: "finance.approval_requested",
+    subjectType: "FinApprovalRequest",
+    subjectId: req.id,
+    actorId: actor.id,
   });
   return req;
 }

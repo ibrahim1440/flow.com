@@ -35,6 +35,7 @@ type Customer = {
   phone: string | null;
   email: string | null;
   address: string | null;
+  whatsappOptOut?: boolean;
   _count: { orders: number; roastPreferences: number };
   roastPreferences: RoastPreference[];
 };
@@ -60,7 +61,7 @@ export default function CustomersPage() {
   // Customer add/edit form
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [customerForm, setCustomerForm] = useState({ name: "", nameAr: "", phone: "", email: "", address: "" });
+  const [customerForm, setCustomerForm] = useState({ name: "", nameAr: "", phone: "", email: "", address: "", whatsappOptOut: false });
   const [savingCustomer, setSavingCustomer] = useState(false);
 
   // Profile form
@@ -103,13 +104,13 @@ export default function CustomersPage() {
   // ── Customer CRUD ──────────────────────────────────────────────────────────
   function openAddCustomer() {
     setEditingCustomer(null);
-    setCustomerForm({ name: "", nameAr: "", phone: "", email: "", address: "" });
+    setCustomerForm({ name: "", nameAr: "", phone: "", email: "", address: "", whatsappOptOut: false });
     setShowCustomerForm(true);
   }
 
   function openEditCustomer(c: Customer) {
     setEditingCustomer(c);
-    setCustomerForm({ name: c.name, nameAr: c.nameAr ?? "", phone: c.phone ?? "", email: c.email ?? "", address: c.address ?? "" });
+    setCustomerForm({ name: c.name, nameAr: c.nameAr ?? "", phone: c.phone ?? "", email: c.email ?? "", address: c.address ?? "", whatsappOptOut: c.whatsappOptOut ?? false });
     setShowCustomerForm(true);
   }
 
@@ -498,6 +499,19 @@ export default function CustomersPage() {
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1">{t("customerAddress")}</label>
                 <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} rows={2} className={INPUT_CLS} />
+              </div>
+              <div>
+                {/* Respected by every automated WhatsApp message: the message is recorded as not
+                    sent, with the reason, instead of being sent. */}
+                <label className="flex items-center gap-2 text-sm text-charcoal cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={customerForm.whatsappOptOut}
+                    onChange={(e) => setCustomerForm({ ...customerForm, whatsappOptOut: e.target.checked })}
+                    data-testid="customer-whatsapp-optout"
+                  />
+                  {t("customerWhatsappOptOut")}
+                </label>
               </div>
               <div className="flex gap-3 pt-1">
                 <button type="submit" disabled={savingCustomer}

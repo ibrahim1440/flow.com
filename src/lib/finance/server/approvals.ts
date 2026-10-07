@@ -7,6 +7,7 @@ import { audit, FinanceError, str, type Db, type FinanceActor, type FinanceScope
 import { assertMayDecide } from "./approval-core";
 import { activateRuleVersion, executeCategoryTransfer } from "./allocation";
 import { decideRevision } from "./budgets";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 export async function approvalQueue(db: Db, actor: FinanceActor, scope: FinanceScope) {
   const subs = ["budget_approve", "transfer_approve", "spend_override_approve", "period_close"].filter((s) => hasSubPrivilege(actor.permissions, "finance", s));
@@ -42,6 +43,13 @@ export async function decideApproval(actor: FinanceActor, scope: FinanceScope, i
     const upd = await tx.finApprovalRequest.update({
       where: { id },
       data: { status: approve ? "APPROVED" : "REJECTED", decidedBy: actor.id, decidedAt: new Date(), decisionNote: note },
+    });
+    await emitAutomationEvent(tx, {
+      eventType: "finance.approval_decided",
+      subjectType: "FinApprovalRequest",
+      subjectId: id,
+      payload: { decision: approve ? "APPROVED" : "REJECTED" },
+      actorId: actor.id,
     });
 
     switch (req.type) {
@@ -92,6 +100,13 @@ export async function cancelApproval(actor: FinanceActor, id: string) {
     if (req.type === "ALLOCATION_RULES") await tx.allocationRuleVersion.updateMany({ where: { id: req.entityId, status: "PENDING_APPROVAL" }, data: { status: "DRAFT" } });
     if (req.type === "SPEND_OVERRIDE") await tx.paymentReservation.updateMany({ where: { id: req.entityId, status: "PENDING_APPROVAL" }, data: { status: "RELEASED", releasedAt: new Date(), releasedBy: actor.id, releaseReason: "Request withdrawn" } });
     const upd = await tx.finApprovalRequest.update({ where: { id }, data: { status: "CANCELLED", decidedAt: new Date(), decidedBy: actor.id, decisionNote: "Withdrawn by requester" } });
+    await emitAutomationEvent(tx, {
+      eventType: "finance.approval_decided",
+      subjectType: "FinApprovalRequest",
+      subjectId: id,
+      payload: { decision: "CANCELLED" },
+      actorId: actor.id,
+    });
     await audit(tx, { action: "approval.withdrawn", entityType: "FinApprovalRequest", entityId: id, branchKey: req.branchKey, userId: actor.id });
     return upd;
   });

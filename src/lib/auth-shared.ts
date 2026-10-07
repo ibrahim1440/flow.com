@@ -39,6 +39,8 @@ export const ALL_MODULES = [
   "commissions",
   // Finance — cash management, receipt allocation and the monthly cash budget.
   "finance",
+  // Automation — WhatsApp messages sent by rules on ERP events.
+  "automation",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -62,6 +64,7 @@ export const MODULE_LABELS: Record<string, string> = {
   customers: "Customers / CRM",
   accounting: "Accounting",
   finance: "Finance (Cash & Budget)",
+  automation: "Automation / WhatsApp",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -174,6 +177,14 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "period_close", label: "Close or reopen budget periods" },
     { key: "all_branches", label: "Company-wide access (all branches and company-level records)" },
     { key: "settings_manage", label: "Manage finance settings, accounts, categories and branch access" },
+  ],
+  // Viewing the module shows the rules and the message log. Each key below changes what is
+  // sent, or to whom: building a rule decides who gets messaged; the connection key decides
+  // which phone they are messaged from and whether anything is sent at all.
+  automation: [
+    { key: "manage_rules", label: "Create / edit / switch on automation rules" },
+    { key: "manage_connection", label: "Link or unlink the WhatsApp number, set the sending mode, send a test" },
+    { key: "manage_messages", label: "Retry or cancel individual messages" },
   ],
 };
 

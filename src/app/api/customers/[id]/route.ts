@@ -30,9 +30,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   try {
     const body = await request.json() as {
       name?: string; nameAr?: string; phone?: string; email?: string; address?: string;
+      whatsappOptOut?: boolean;
     };
     if (body.name !== undefined && !body.name?.trim()) {
       return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
+    }
+    if (body.whatsappOptOut !== undefined && typeof body.whatsappOptOut !== "boolean") {
+      return NextResponse.json({ error: "whatsappOptOut must be true or false" }, { status: 400 });
     }
 
     const customer = await prisma.customer.update({
@@ -43,6 +47,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...(body.phone !== undefined && { phone: body.phone.trim() || null }),
         ...(body.email !== undefined && { email: body.email.trim() || null }),
         ...(body.address !== undefined && { address: body.address.trim() || null }),
+        ...(body.whatsappOptOut !== undefined && { whatsappOptOut: body.whatsappOptOut }),
       },
     });
     return NextResponse.json(customer);

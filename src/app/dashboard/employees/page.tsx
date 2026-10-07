@@ -17,6 +17,7 @@ type Employee = {
   permissions: string | Permissions;
   defaultRoute: string;
   active: boolean; createdAt: string;
+  phoneNumber?: string | null;
 };
 
 function parsePerms(raw: string | Permissions): Permissions {
@@ -60,7 +61,7 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true });
+  const [form, setForm] = useState({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true, phoneNumber: "" });
   const [permissions, setPermissions] = useState<Permissions>(buildDefaultPermissions("custom"));
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -80,7 +81,7 @@ export default function EmployeesPage() {
 
   function openNew() {
     setEditingId(null);
-    setForm({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true });
+    setForm({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true, phoneNumber: "" });
     setPermissions(buildDefaultPermissions("custom"));
     setDeleteConfirm(false);
     setShowForm(true);
@@ -88,7 +89,7 @@ export default function EmployeesPage() {
 
   function openEdit(emp: Employee) {
     setEditingId(emp.id);
-    setForm({ name: emp.name, username: emp.username || "", pin: "", password: "", role: emp.role, defaultRoute: emp.defaultRoute || "/dashboard", active: emp.active });
+    setForm({ name: emp.name, username: emp.username || "", pin: "", password: "", role: emp.role, defaultRoute: emp.defaultRoute || "/dashboard", active: emp.active, phoneNumber: emp.phoneNumber ?? "" });
     setPermissions(parsePerms(emp.permissions));
     setDeleteConfirm(false);
     setShowForm(true);
@@ -141,6 +142,7 @@ export default function EmployeesPage() {
     const body: Record<string, unknown> = {
       name: form.name, username: form.username.trim().toLowerCase(),
       role: form.role, permissions, defaultRoute: form.defaultRoute, active: form.active,
+      phoneNumber: form.phoneNumber.trim(),
     };
     if (!editingId) {
       body.pin = form.pin;
@@ -313,6 +315,14 @@ export default function EmployeesPage() {
                       placeholder="e.g. ahmed" required />
                   </div>
                 </div>
+              </div>
+
+              {/* The number automated WhatsApp messages reach this employee on. */}
+              <div>
+                <label className="block text-sm font-bold text-charcoal mb-1.5">{t("phoneNumber")} <span className="text-brown/50 font-normal">(WhatsApp)</span></label>
+                <input type="tel" dir="ltr" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
+                  className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+                  placeholder="05XXXXXXXX" data-testid="employee-phone" />
               </div>
 
               {/* Row 2: PIN + Password */}

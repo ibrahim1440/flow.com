@@ -18,6 +18,7 @@ import {
   assertOrderStillAcceptsDelivery,
   type OrderStatus,
 } from "@/lib/services/order-operations";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 export async function GET() {
   const { error } = await requireModule("dispatch");
@@ -272,6 +273,13 @@ export async function POST(request: Request) {
         // Late lifecycle barrier for the unit path — same reasoning as the kilogram path
         // below. Both branches return their own delivery, so both need the check.
         await assertOrderStillAcceptsDelivery(tx, orderItemId);
+        await emitAutomationEvent(tx, {
+          eventType: "delivery.recorded",
+          subjectType: "Delivery",
+          subjectId: newDelivery.id,
+          payload: { orderItemId, units, deliveryType },
+          actorId: user.id,
+        });
         return { delivery: newDelivery, replayed: false };
       }
 
@@ -414,6 +422,14 @@ export async function POST(request: Request) {
       // here and the rollback takes the delivery row, the delivered units, the allocation
       // consumption and the lot decrement with it.
       await assertOrderStillAcceptsDelivery(tx, orderItemId);
+
+      await emitAutomationEvent(tx, {
+        eventType: "delivery.recorded",
+        subjectType: "Delivery",
+        subjectId: newDelivery.id,
+        payload: { orderItemId, kg: qty, deliveryType },
+        actorId: user.id,
+      });
 
       return { delivery: newDelivery, replayed: false };
     }, TX_OPTS);

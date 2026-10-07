@@ -17,6 +17,7 @@ import {
   appendOrderActivity,
   REASON_MAX_LENGTH,
 } from "@/lib/services/order-operations";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -602,6 +603,13 @@ export async function POST(request: Request) {
         },
       });
     }
+
+    await emitAutomationEvent(tx, {
+      eventType: "production.batch_roasted",
+      subjectType: "RoastingBatch",
+      subjectId: newBatch.id,
+      actorId: user.id,
+    });
 
     return newBatch;
   }, TX_OPTS);

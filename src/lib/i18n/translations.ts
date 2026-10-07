@@ -682,6 +682,7 @@ export const translations = {
   customerName:          { en: "Customer Name",              ar: "اسم العميل" },
   customerNameAr:        { en: "Arabic Name (opt.)",         ar: "الاسم بالعربية (اختياري)" },
   customerPhone:         { en: "Phone",                      ar: "الهاتف" },
+  customerWhatsappOptOut: { en: "Does not want WhatsApp messages from the system", ar: "لا يرغب برسائل واتساب من النظام" },
   customerEmail:         { en: "Email",                      ar: "البريد الإلكتروني" },
   customerAddress:       { en: "Address",                    ar: "العنوان" },
   customerOrdersLabel:   { en: "orders",                     ar: "طلب" },
