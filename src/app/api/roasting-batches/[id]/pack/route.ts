@@ -31,6 +31,7 @@ import {
 } from "@/lib/services/order-operations";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -313,6 +314,19 @@ export async function POST(request: Request, { params }: Params) {
           metadata: { orderItemId: reservedToOrderItemId, batchId: batch.id, units: reservedUnits },
         });
       }
+
+      await emitAutomationEvent(tx, {
+        eventType: "packaging.completed",
+        subjectType: "RoastingBatch",
+        subjectId: batch.id,
+        payload: {
+          standardUnits: committed.standardUnitsCreated,
+          partialUnits: committed.partialPackagesCreated,
+          reservedUnits: reservedUnits ?? 0,
+          reservedOrderId: reservedOrderId ?? null,
+        },
+        actorId: user.id,
+      });
 
       return responseBody;
     }, TX_OPTS);

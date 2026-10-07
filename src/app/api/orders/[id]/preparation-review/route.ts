@@ -21,6 +21,7 @@ import {
   roundKg,
 } from "@/lib/services/shelf-allocation";
 import { kgForUnits, releaseFinishedUnits, reserveFinishedUnits } from "@/lib/services/finished-products";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -439,6 +440,17 @@ export async function POST(request: Request, { params }: Params) {
           department: "Preparation",
           authorId: user.id,
           authorName: user.name,
+        });
+      }
+
+      // A re-review that lands on the same status is not news to anyone outside.
+      if (newStatus !== order.status) {
+        await emitAutomationEvent(tx, {
+          eventType: "order.status_changed",
+          subjectType: "Order",
+          subjectId: id,
+          payload: { from: order.status, to: newStatus },
+          actorId: user.id,
         });
       }
 

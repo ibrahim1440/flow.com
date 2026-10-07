@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { appendOrderActivity, APPROVAL_ENTRY_STATUSES, type OrderStatus } from "@/lib/services/order-operations";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 const APPROVAL_ENTRY_SET = new Set<string>(APPROVAL_ENTRY_STATUSES);
 
@@ -179,6 +180,16 @@ export async function POST(request: Request, { params }: Params) {
           message: `Approval decision reverted to Pending by ${user.name}. Status set to Waiting Approval.`,
           authorId: user.id,
           authorName: user.name,
+        });
+      }
+
+      if (updated && updated.status !== existing.status) {
+        await emitAutomationEvent(tx, {
+          eventType: "order.status_changed",
+          subjectType: "Order",
+          subjectId: id,
+          payload: { from: existing.status, to: updated.status, reason: decision === "No" ? trimmedReason : null },
+          actorId: user.id,
         });
       }
 

@@ -112,6 +112,8 @@ const NOT_IN_MENU = [
   "/dashboard/sales/deals/[id]",
   "/dashboard/cupping/[id]",
   "/dashboard/production-orders/[id]",
+  "/dashboard/automation/rules/new",
+  "/dashboard/automation/rules/[id]",
 ];
 
 sub("B1. no page on disk is orphaned");
@@ -132,6 +134,7 @@ sub("B3. detail routes resolve to the list they came from");
 {
   const cases: [string, string][] = [
     ["/dashboard/sales/deals/abc", "sales.pipeline.board"],
+    ["/dashboard/automation/rules/abc", "automation.rules"],
     ["/dashboard/sales/leads/abc", "sales.customers.leads"],
     ["/dashboard/sales/quotes/abc", "sales.quotes.list"],
     ["/dashboard/sales/quotes/new", "sales.quotes.list"],
@@ -325,6 +328,11 @@ const BEFORE: [string, string | null, string | null, string?][] = [
   ["/dashboard/customers", "customers", null],
   ["/dashboard/accounting", "accounting", null],
   ["/dashboard/settings", "settings", null],
+  // Added with the automation module, after the restructuring. Gated by that module alone,
+  // so only someone granted it gains them.
+  ["/dashboard/automation", "automation", null],
+  ["/dashboard/automation/messages", "automation", null],
+  ["/dashboard/automation/whatsapp", "automation", null],
 ];
 
 function couldSeeBefore(v: Viewer, [, module, subKey, extra]: [string, string | null, string | null, string?]): boolean {

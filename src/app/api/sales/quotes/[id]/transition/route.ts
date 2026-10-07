@@ -6,6 +6,7 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sales/lifecycle";
 import { issueQuote, decideQuote } from "@/lib/services/sales/quotes";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -57,6 +58,13 @@ export async function POST(request: Request, { params }: Params) {
         // Issuing a quotation IS the deal reaching the quotation stage. Leaving the board to
         // be updated by hand is how a pipeline stops describing the work.
         const advance = await advanceToQuotationStage(tx, visible.opportunityId, user.id);
+        await emitAutomationEvent(tx, {
+          eventType: "sales.quote_status_changed",
+          subjectType: "Quote",
+          subjectId: id,
+          payload: { to: "ISSUED" },
+          actorId: user.id,
+        });
         return {
           status: "ISSUED",
           quoteNumber: issued.quoteNumber,
@@ -99,6 +107,14 @@ export async function POST(request: Request, { params }: Params) {
         });
         wonNow = await winOnAcceptedQuote(tx, visible.opportunityId, user.id);
       }
+
+      await emitAutomationEvent(tx, {
+        eventType: "sales.quote_status_changed",
+        subjectType: "Quote",
+        subjectId: id,
+        payload: { to: decided.status },
+        actorId: user.id,
+      });
 
       return { status: decided.status, dealWon: wonNow };
     }, TX_OPTS);

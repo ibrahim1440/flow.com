@@ -10,6 +10,7 @@ import {
 } from "@/lib/services/production-planning";
 import { appendOrderActivity, productionGateRefusal, assertOrderStillAcceptsProduction } from "@/lib/services/order-operations";
 import { explodeBom, kgForUnits } from "@/lib/services/finished-products";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -257,6 +258,13 @@ export async function POST(_request: Request, { params }: Params) {
           reservedUnits: live.reservedUnits,
           scheduledUnits: live.scheduledUnits,
         },
+      });
+
+      await emitAutomationEvent(tx, {
+        eventType: "production.order_created",
+        subjectType: "ProductionOrder",
+        subjectId: order.id,
+        actorId: user.id,
       });
 
       return { order, live, liveKg };

@@ -5,6 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { createOrderFromQuote } from "@/lib/services/sales/quote-to-order";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -54,13 +55,18 @@ export async function POST(request: Request, { params }: Params) {
     if (!visible) return NextResponse.json({ error: NOT_FOUND_MESSAGE }, { status: 404 });
 
     const result = await prisma.$transaction(
-      (tx) =>
-        createOrderFromQuote(tx, {
+      async (tx) => {
+        const created = await createOrderFromQuote(tx, {
           quoteId: id,
           actorId: user.id,
           requestKey: typeof b.requestKey === "string" ? b.requestKey : null,
           notes: typeof b.notes === "string" ? b.notes : null,
-        }),
+        });
+        if (!created.replayed) {
+          await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.orderId, actorId: user.id });
+        }
+        return created;
+      },
       TX_OPTS,
     );
 

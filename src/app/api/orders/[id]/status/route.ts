@@ -18,6 +18,7 @@ import {
   type OrderStatus,
   type StatusAction,
 } from "@/lib/services/order-operations";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -218,6 +219,16 @@ export async function POST(request: Request, { params }: Params) {
         authorId: user.id,
         authorName: user.name,
       });
+
+      if (newStatus !== currentStatus) {
+        await emitAutomationEvent(tx, {
+          eventType: "order.status_changed",
+          subjectType: "Order",
+          subjectId: id,
+          payload: { from: currentStatus, to: newStatus, reason: trimmedReason || null },
+          actorId: user.id,
+        });
+      }
 
       return tx.order.findUnique({
         where: { id },

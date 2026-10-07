@@ -9,6 +9,7 @@ import {
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 import { validatePin } from "@/lib/pin-policy";
 import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
+import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 
 /** Actor plus a hashed address — the same treatment login attempts already give one. */
 function auditContext(request: Request, actorId: string) {
@@ -19,9 +20,18 @@ function auditContext(request: Request, actorId: string) {
   };
 }
 
+/** The number automated WhatsApp messages reach this employee on. Stored as typed; refused
+ *  only when no WhatsApp number could ever be read from it. */
+function phoneNumberError(phoneNumber: unknown): string | null {
+  if (phoneNumber === undefined || phoneNumber === null || phoneNumber === "") return null;
+  if (typeof phoneNumber !== "string" || phoneNumber.length > 30) return "Invalid phone number.";
+  const p = normalizePhoneForWhatsApp(phoneNumber);
+  return p.ok ? null : `Phone number: ${p.reason}`;
+}
+
 const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
-  defaultRoute: true, active: true, createdAt: true,
+  defaultRoute: true, active: true, createdAt: true, phoneNumber: true,
 } as const;
 
 const ALLOWED_DEFAULT_ROUTES = new Set([
@@ -59,7 +69,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (error) return error;
 
   const { id } = await params;
-  const { name, username, role, permissions, pin, password, defaultRoute, active } = await request.json();
+  const { name, username, role, permissions, pin, password, defaultRoute, active, phoneNumber } = await request.json();
+  const phoneError = phoneNumberError(phoneNumber);
+  if (phoneError) return NextResponse.json({ error: phoneError }, { status: 400 });
 
   // One PIN shape, enforced identically on every path that sets one.
   let newPin: string | null = null;
@@ -107,6 +119,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
   if (password) data.password = await hash(password, 10);
   if (active !== undefined) data.active = active;
+  if (phoneNumber !== undefined) data.phoneNumber = typeof phoneNumber === "string" && phoneNumber.trim() ? phoneNumber.trim() : null;
 
   try {
     // The change and the record of it commit together — and both are derived from a row

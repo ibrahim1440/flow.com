@@ -7,6 +7,7 @@ import { validatePin } from "@/lib/pin-policy";
 import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
+import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 
 /** Actor plus a hashed address â the same treatment login attempts already give one. */
 function auditContext(request: Request, actorId: string) {
@@ -17,9 +18,18 @@ function auditContext(request: Request, actorId: string) {
   };
 }
 
+/** The number automated WhatsApp messages reach this employee on. Stored as typed; refused
+ *  only when no WhatsApp number could ever be read from it. */
+function phoneNumberError(phoneNumber: unknown): string | null {
+  if (phoneNumber === undefined || phoneNumber === null || phoneNumber === "") return null;
+  if (typeof phoneNumber !== "string" || phoneNumber.length > 30) return "Invalid phone number.";
+  const p = normalizePhoneForWhatsApp(phoneNumber);
+  return p.ok ? null : `Phone number: ${p.reason}`;
+}
+
 const SELECT_FULL = {
   id: true, name: true, username: true, role: true, permissions: true,
-  defaultRoute: true, active: true, createdAt: true,
+  defaultRoute: true, active: true, createdAt: true, phoneNumber: true,
 } as const;
 
 const SELECT_ROSTER = {
@@ -82,9 +92,11 @@ export async function POST(request: Request) {
   const { user, error } = await requireSub("employees", "create");
   if (error) return error;
 
-  const { name, username, pin, password, role, permissions, defaultRoute } = await request.json();
+  const { name, username, pin, password, role, permissions, defaultRoute, phoneNumber } = await request.json();
 
   if (!username) return NextResponse.json({ error: "Username is required" }, { status: 400 });
+  const phoneError = phoneNumberError(phoneNumber);
+  if (phoneError) return NextResponse.json({ error: phoneError }, { status: 400 });
   const pinShape = validatePin(pin);
   if (!pinShape.ok) return NextResponse.json({ error: pinShape.message }, { status: 400 });
   if (defaultRoute !== undefined && defaultRoute !== null && defaultRoute !== "") {
@@ -121,6 +133,7 @@ export async function POST(request: Request) {
           role,
           permissions: typeof permissions === "string" ? permissions : JSON.stringify(permissions || {}),
           defaultRoute: defaultRoute || "/dashboard",
+          phoneNumber: typeof phoneNumber === "string" && phoneNumber.trim() ? phoneNumber.trim() : null,
           ...(hashedPassword ? { password: hashedPassword } : {}),
         },
         select: SELECT_FULL,

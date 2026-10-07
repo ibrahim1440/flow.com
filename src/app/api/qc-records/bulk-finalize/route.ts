@@ -5,6 +5,7 @@ import { isValidTransition } from "@/lib/batch-transitions";
 import { handlePrismaError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import { automationListens, emitAutomationEvent } from "@/lib/automation/emit";
 
 export async function POST(request: Request) {
   const { user, error } = await requireSub("qc", "manage");
@@ -102,6 +103,23 @@ export async function POST(request: Request) {
 
       for (const productionOrderId of productionOrderIds) {
         await recalcProductionOrderStatus(productionOrderId, tx);
+      }
+
+      // Only the batches this request actually decided — not any that moved underneath it.
+      if (await automationListens("qc.batch_finalized")) {
+        const decided = await tx.roastingBatch.findMany({
+          where: { id: { in: batchIds }, status: outcome, qcClosedById: user.id },
+          select: { id: true },
+        });
+        for (const b of decided) {
+          await emitAutomationEvent(tx, {
+            eventType: "qc.batch_finalized",
+            subjectType: "RoastingBatch",
+            subjectId: b.id,
+            payload: { outcome, reason: finalDecisionReason?.trim() || null },
+            actorId: user.id,
+          });
+        }
       }
 
       return updated.count;

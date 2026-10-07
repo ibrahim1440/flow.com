@@ -28,6 +28,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as {
       name: string; nameAr?: string; phone?: string; email?: string; address?: string;
+      whatsappOptOut?: boolean;
     };
     if (!body.name?.trim()) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
         phone: body.phone?.trim() || null,
         email: body.email?.trim() || null,
         address: body.address?.trim() || null,
+        whatsappOptOut: body.whatsappOptOut === true,
       },
     });
     return NextResponse.json(customer, { status: 201 });
