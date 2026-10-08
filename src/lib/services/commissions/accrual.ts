@@ -4,6 +4,7 @@ import {
   selectPlanVersion, riyadhMonthStart, riyadhMonthEnd,
   type PlanRules,
 } from "./engine";
+import { payoutLockKey } from "./lock";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -504,6 +505,10 @@ export async function accrueForCollection(
   const outcomes: AccrualOutcome[] = [];
 
   for (const share of shares) {
+    // The same consistency boundary a payout takes. An approval or a reversal changes the
+    // balance a payout is about to spend, so the two must serialise on the employee and
+    // period rather than each reading a figure the other is midway through changing.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutLockKey(share.employeeId, riyadhMonthStart(event.collectedAt))}))`;
     const outcome = await recomputeEmployeePeriod(
       tx, share.employeeId, event.collectedAt, actorId, collectionEventId,
     );
@@ -519,6 +524,12 @@ export async function accrueForCollection(
  *
  * Deliberately no "un-approve". Once somebody has been told what they earned, changing it
  * is a correction with a reason attached, not an edit — see `adjust` below.
+ *
+ * **Must be called inside a transaction.** Approving moves entitlement from unapproved to
+ * approved, which is exactly the quantity `availableToPay` is computed from, so it takes
+ * the same employee-and-period lock a payout takes. Without it, an approval landing
+ * between a payout's balance read and its write would let the payout spend money it never
+ * saw — Prisma runs at Read Committed, so the payout's snapshot does not protect it.
  */
 export async function approvePeriod(
   tx: Tx,
@@ -526,6 +537,7 @@ export async function approvePeriod(
   periodStart: Date,
   approverId: string,
 ): Promise<number> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutLockKey(employeeId, periodStart)}))`;
   const res = await tx.commissionAccrual.updateMany({
     where: { employeeId, periodStart, status: "ACCRUED" },
     data: { status: "APPROVED", approvedById: approverId, approvedAt: new Date() },
@@ -539,6 +551,12 @@ export async function approvePeriod(
  * Never an edit. The original stays exactly as approved and this adds a referenced entry
  * carrying the actor and the reason, so the history reads as what happened rather than as
  * what someone later wished had happened.
+ *
+ * **Must be called inside a transaction.** An adjustment is period-level and counts towards
+ * payability immediately, so it moves `availableToPay` and takes the same lock as a payout.
+ * A negative adjustment racing a payout is the case that matters: without the shared lock
+ * both read the same balance, the adjustment removes part of it and the payout spends all
+ * of it, and the period ends up overpaid with no record of the moment it happened.
  */
 export async function adjust(
   tx: Tx,
@@ -557,6 +575,7 @@ export async function adjust(
   if (input.amount.isZero()) {
     throw { _appCode: 400, message: "A zero adjustment records nothing; it is refused rather than stored." };
   }
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${payoutLockKey(input.employeeId, input.periodStart)}))`;
   const entry = await tx.commissionLedgerEntry.create({
     data: {
       type: "ADJUSTMENT",

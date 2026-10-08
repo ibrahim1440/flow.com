@@ -1185,22 +1185,59 @@ async function main() {
     check("carrying the reason", entry.reason === "agreed goodwill", S(entry));
     check("and who made it", entry.actorId === `${P}_fin`, S(entry));
 
+    // A payout now REQUIRES an idempotency key, so a retry can be told from a second
+    // payment. These are two different intended payments, so two different keys.
+    const noKey = await api("/api/commissions/review/actions", {
+      method: "POST", body: { action: "payout", employeeId: `${P}_rep`, month: riyadhMonth(), amount: "60" },
+    });
+    check("a payout with no idempotency key is refused outright", noKey.status === 400, S(noKey.json).slice(0, 220));
+
     const over = await api("/api/commissions/review/actions", {
-      method: "POST", body: { action: "payout", employeeId: `${P}_rep`, month: riyadhMonth(), amount: "500" },
+      method: "POST",
+      body: {
+        action: "payout", employeeId: `${P}_rep`, month: riyadhMonth(), amount: "500",
+        idempotencyKey: `${P}-pay-over-${Date.now()}`,
+      },
     });
     check("paying more than is owed is refused", over.status === 409, S(over.json).slice(0, 220));
 
+    const payKey = `${P}-pay-${Date.now()}`;
     const pay = await api("/api/commissions/review/actions", {
-      method: "POST", body: { action: "payout", employeeId: `${P}_rep`, month: riyadhMonth(), amount: "60" },
+      method: "POST",
+      body: {
+        action: "payout", employeeId: `${P}_rep`, month: riyadhMonth(), amount: "60",
+        idempotencyKey: payKey,
+      },
     });
     check("paying exactly what is owed is recorded", pay.status === 201, S(pay.json).slice(0, 220));
     check("and nothing remains outstanding", pay.json?.statement?.outstanding === "0.00", S(pay.json?.statement));
+    // The figure that now governs whether another payment may be made.
+    check("and nothing remains available to pay", pay.json?.balances?.availableToPay === "0.00", S(pay.json?.balances));
+    check("with no recovery owed", pay.json?.balances?.recoveryBalance === "0.00", S(pay.json?.balances));
     check("the response says plainly that no money moved",
       /does not move money/i.test(pay.json?.notice ?? ""), S(pay.json?.notice));
 
     const paid = await q(`SELECT status FROM "CommissionAccrual" WHERE "employeeId"=$1`, [`${P}_rep`]);
     check("the approved accruals now read PAID",
       paid.filter((x) => x.status === "PAID").length >= 1, S(paid));
+
+    // The same key again is the same payment, not a second one — even though the period is
+    // settled and the amount would now be refused on its own merits.
+    const replay = await api("/api/commissions/review/actions", {
+      method: "POST",
+      body: {
+        action: "payout", employeeId: `${P}_rep`, month: riyadhMonth(), amount: "60",
+        idempotencyKey: payKey,
+      },
+    });
+    check("retrying the same payment replays rather than paying again",
+      replay.status === 200 && replay.json?.replayed === true, S(replay.json).slice(0, 220));
+    check("and names the same entry", replay.json?.entryId === pay.json?.entryId,
+      `${pay.json?.entryId} vs ${replay.json?.entryId}`);
+    const payCount = await q(
+      `SELECT count(*)::int n FROM "CommissionLedgerEntry" WHERE "employeeId"=$1 AND type='PAYOUT'`,
+      [`${P}_rep`]);
+    check("exactly one payout was recorded", payCount[0].n === 1, S(payCount[0]));
   }
 
   sub("E10. the rep sees their own figure, and the same figure");
