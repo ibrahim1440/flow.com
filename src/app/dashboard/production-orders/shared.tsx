@@ -36,22 +36,20 @@ export type ProductionOrderRow = {
   progress: ProductionProgress | null;
 };
 
-// Reuses the Order Operations status palette rather than introducing a second one:
-// PLANNED reads as waiting, IN_PRODUCTION as in-progress, and the two terminal states
-// take the success and cancelled tones already used on order rows.
-const STATUS_STYLE: Record<string, string> = {
-  PENDING: "text-oo-status-waiting bg-oo-status-waiting-bg border-oo-status-waiting/30",
-  IN_PRODUCTION: "text-oo-status-preparing bg-oo-status-preparing-bg border-oo-status-preparing/30",
-  COMPLETED: "text-oo-status-success bg-oo-status-success-bg border-oo-status-success/30",
-  CANCELLED: "text-oo-status-cancelled bg-oo-status-cancelled-bg border-oo-status-cancelled/30",
+// Direction 2.1 status dots. PLANNED reads as waiting, IN_PRODUCTION as in progress, and
+// the two terminal states take the success and cancelled tones used on order rows.
+const STATUS_TONE: Record<string, "warning" | "info" | "success" | "cancelled"> = {
+  PENDING: "warning",
+  IN_PRODUCTION: "info",
+  COMPLETED: "success",
+  CANCELLED: "cancelled",
 };
 
 export function ProductionStatusBadge({ status }: { status: string }) {
   const { t } = useI18n();
-  const style = STATUS_STYLE[status] ?? STATUS_STYLE.PENDING;
   return (
-    <span className={`inline-block px-2.5 py-1 rounded-lg text-[11px] font-bold border whitespace-nowrap ${style}`}>
-      {t(`status${status}` as never)}
+    <span className={`hr-dot tone-${STATUS_TONE[status] ?? "warning"}`} data-status={status}>
+      <span>{t(`status${status}` as never)}</span>
     </span>
   );
 }
@@ -62,14 +60,11 @@ export function ProgressBar({ produced, target }: { produced: number; target: nu
   const pct = target > 0 ? Math.min(100, Math.round((produced / target) * 100)) : 0;
   const complete = produced >= target && target > 0;
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 bg-muted rounded-full h-1.5 min-w-[60px]">
-        <div
-          className={`h-1.5 rounded-full transition-all ${complete ? "bg-success" : "bg-orange"}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-[11px] tabular-nums text-brown/70 w-9 text-end">{pct}%</span>
-    </div>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <span className={`ops-bar${complete ? " tone-success" : ""}`} role="img" aria-label={`${pct}%`}>
+        <span style={{ width: `${pct}%` }} />
+      </span>
+      <span className="hr-num hr-caption" style={{ margin: 0, minWidth: 36 }}>{pct}%</span>
+    </span>
   );
 }

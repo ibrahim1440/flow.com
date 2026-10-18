@@ -1,0 +1,478 @@
+/*
+ * Native HR — content styles for Direction 2.1 ("quiet ledger"), scoped to [data-hr-root].
+ *
+ * HR pages render inside the shared Direction 2.1 application shell
+ * (src/components/shell/AppShell.tsx), which owns the canvas, sidebar, sheet, top bar,
+ * font loading and the token values (src/components/shell/direction-2.1.css, copied from
+ * the approved reference build and Figma file 1JbZgpMqmPkUVne8ms9Ozz). The --hr-* names
+ * below are aliases of those shared tokens, kept so the HR stylesheet stays readable; no
+ * colour value is defined twice.
+ */
+[data-hr-root] {
+  --hr-canvas: var(--canvas);
+  --hr-surface: var(--surface);
+  --hr-subtle: var(--surface-subtle);
+  --hr-hover: var(--surface-hover);
+  --hr-selected: var(--surface-selected);
+  --hr-disabled-bg: var(--surface-disabled);
+  --hr-border-subtle: var(--border-subtle);
+  --hr-border-strong: var(--border-strong);
+  --hr-border-control: var(--border-control);
+  --hr-text: var(--text-primary);
+  --hr-text-2: var(--text-secondary);
+  --hr-muted: var(--text-muted);
+  --hr-disabled: var(--text-disabled);
+  --hr-inverse: var(--text-inverse);
+  --hr-link: var(--text-link);
+  --hr-primary: var(--action-primary);
+  --hr-primary-hover: var(--action-primary-hover);
+  --hr-primary-tint: var(--action-primary-tint);
+  --hr-danger: var(--action-danger);
+  --hr-danger-hover: var(--action-danger-hover);
+  --hr-success: var(--status-success);
+  --hr-success-tint: var(--status-success-tint);
+  --hr-warning: var(--status-warning);
+  --hr-warning-tint: var(--status-warning-tint);
+  --hr-danger-tint: var(--status-danger-tint);
+  --hr-info: var(--status-info);
+  --hr-info-tint: var(--status-info-tint);
+  --hr-scrim: rgb(40 36 26 / 0.32); /* Figma C-01 Scrim: Deep Black 32 % */
+  --hr-r-xs: 4px;
+  --hr-r-sm: 7px;
+  --hr-r-md: 9px;
+  --hr-r-lg: 14px;
+  --hr-row: 46px;
+  --hr-row-dense: 40px;
+  --hr-header-row: 36px;
+  --hr-control: 34px;
+  --hr-control-sm: 28px;
+  --hr-preview: 404px;
+  --hr-font: var(--f-ui);
+  --hr-num: var(--f-num);
+  --hr-mono: var(--f-mono);
+
+  font-family: var(--hr-font);
+  color: var(--hr-text);
+  font-size: 14px;
+  /* Figma UI/Body 14/22, UI/Caption 13/22, UI/Body S 13.5/22: one 22 px line for running text. */
+  line-height: 22px;
+  min-height: 100%;
+}
+[data-hr-root] *, [data-hr-root] *::before, [data-hr-root] *::after { box-sizing: border-box; }
+[data-hr-root] :focus-visible { outline: 2px solid var(--hr-primary); outline-offset: 2px; border-radius: var(--hr-r-xs); }
+
+/* ── Typography ───────────────────────────────────────────────────────────────── */
+.hr-title { font-size: 28px; font-weight: 600; line-height: 35px; margin: 0; letter-spacing: 0; } /* UI/Page title 28/35 */
+.hr-mobile-title { font-size: 22px; font-weight: 600; line-height: 28.6px; margin: 0; } /* UI/Mobile title 22/28.6 */
+.hr-section { font-size: 16px; font-weight: 600; line-height: 20.8px; margin: 0; } /* UI/Section 16/20.8 */
+.hr-body-s { font-size: 13.5px; }
+.hr-caption { font-size: 13px; color: var(--hr-muted); }
+.hr-label { font-size: 12.5px; font-weight: 500; line-height: 18px; color: var(--hr-text-2); } /* UI/Label 12.5/18 */
+.hr-muted { color: var(--hr-muted); }
+.hr-num { font-family: var(--hr-num); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.hr-id { font-family: var(--hr-mono); font-size: 12.5px; color: var(--hr-text-2); direction: ltr; unicode-bidi: isolate; }
+.hr-metric { font-family: var(--hr-num); font-size: 20px; font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.hr-num.is-medium { font-weight: 500; } /* Number/Body Medium (e.g. HR-03 451:6287) */
+.hr-iso { unicode-bidi: isolate; }
+
+/* ── Page layout ──────────────────────────────────────────────────────────────── */
+.hr-page { padding: 16px 32px 32px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.hr-pagehead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hr-pagehead .hr-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hr-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+/* M-02 R3 phone: title · meta · actions (the wrapper is transparent above 767). */
+.hr-headstack { display: contents; }
+@media (max-width: 767px) {
+  .hr-headstack { display: flex; flex-direction: column; gap: 6px; }
+  .hr-headstack > .hr-pagehead { display: contents; }
+  .hr-headstack > .hr-pagehead > .hr-title { order: 1; }
+  .hr-headstack > .hr-meta { order: 2; gap: 4px 10px; }
+  .hr-headstack > .hr-pagehead > .hr-actions { order: 3; margin-top: 2px; }
+}
+.hr-split { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 640px; }
+.hr-split.has-preview { grid-template-columns: minmax(0, 1fr) var(--hr-preview); }
+.hr-preview { border-inline-start: 1px solid var(--hr-border-subtle); display: flex; flex-direction: column; background: var(--hr-surface); min-width: 0; }
+.hr-preview-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; min-height: 57px; box-sizing: border-box; border-bottom: 1px solid var(--hr-border-subtle); } /* HR-01 449:918: 57 px */
+.hr-preview-identity { display: flex; align-items: flex-start; gap: 12px; }
+.hr-preview-identity > div { min-width: 0; }
+/* Avatar (HR-01 449:937): 28 px initials on the inline-start of the name. */
+.hr-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--hr-primary-tint); color: var(--hr-primary); font-size: 12px; font-weight: 600; line-height: 1; display: inline-flex; align-items: center; justify-content: center; flex: none; margin-top: 2px; }
+.hr-preview-body { padding: 24px; display: flex; flex-direction: column; gap: 18px; flex: 1; min-height: 0; overflow: auto; }
+.hr-preview-foot { padding: 16px 24px; border-top: 1px solid var(--hr-border-subtle); display: flex; gap: 8px; flex-wrap: wrap; }
+.hr-cols { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 32px; }
+.hr-cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+/* C-09 / M-09 R3: below 1280 the versions list comes first, the selected version below it. */
+@media (max-width: 1279px) { .hr-policy-cols { grid-template-columns: minmax(0, 1fr); } .hr-policy-cols > .hr-policy-detail { order: 2; } }
+.hr-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Shown only between 768 and 1279 (approved C-03 columns and metrics). */
+.hr-only-compact { display: none; }
+/* Compact (1024): the preview becomes an overlay drawer; the secondary column stacks. */
+@media (max-width: 1279px) {
+  .hr-split.has-preview { grid-template-columns: minmax(0, 1fr); }
+  /* rc.css `.app.rail .split>.pane-d`: the preview drawer sits inside the sheet, under its
+     top bar, and the scrim covers only the list it sits over. */
+  .hr-split.has-preview .hr-preview { position: absolute; top: var(--d21-top, 52px); bottom: 0; inset-inline-end: 0; width: min(400px, 100%); z-index: 30; box-shadow: var(--shadow-pop); border: 0; border-start-start-radius: 14px; }
+  .hr-scrim { position: absolute; inset: var(--d21-top, 52px) 0 0 0; background: var(--hr-scrim); z-index: 25; }
+  .hr-cols { grid-template-columns: minmax(0, 1fr); }
+  .hr-hide-compact { display: none !important; }
+  /* C-03: compact payroll rows are the dense 42 px variant. */
+  .hr-table.is-dense-compact td { height: 42px; }
+  .hr-only-compact { display: revert; }
+  .hr-metrics > .hr-only-compact { display: flex; }
+}
+@media (min-width: 1280px) {
+  .hr-scrim { display: none; }
+  /* Approved HR-01/04/06/08: the preview pane is the sheet's height below the top bar, scrolls
+     on its own and keeps its actions visible; it does not grow with its content. */
+  .hr-split.has-preview .hr-preview { position: sticky; top: 0; align-self: start; height: calc(100dvh - 16px - var(--d21-top, 52px)); }
+}
+/* Mobile (390) */
+@media (max-width: 767px) {
+  .hr-page { padding: 12px 16px 24px; gap: 12px; } /* M-01 / M-08: 12 px between blocks */
+  .hr-title { font-size: 22px; line-height: 28.6px; } /* UI/Mobile title */
+  .hr-cols-2 { grid-template-columns: minmax(0, 1fr); gap: 12px; } /* M-07b: stacked, no 32 px row gap */
+  .hr-hide-mobile { display: none !important; }
+  /* M-01/M-03/M-08: page-header actions use the small button size so they sit beside the title. */
+  .hr-pagehead .hr-actions .hr-btn { height: var(--hr-control-sm); padding: 0 10px; font-size: 13px; }
+  .hr-split.has-preview .hr-preview { position: fixed; top: 0; width: 100vw; z-index: 85; border-radius: 0; }
+  .hr-scrim { position: fixed; inset: 0; z-index: 84; }
+}
+
+/* ── Saved views (tabs) ───────────────────────────────────────────────────────── */
+.hr-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--hr-border-subtle); overflow-x: auto; scrollbar-width: none; }
+.hr-tab { appearance: none; background: none; border: 0; margin-bottom: -1px; padding: 0 12px 12.5px; font: inherit; font-size: 14px; line-height: 22px; color: var(--hr-muted); cursor: pointer; white-space: nowrap; display: inline-flex; gap: 7px; align-items: baseline; } /* Tab 10:74: 22 + 12.5 = 34.5; the 1.5 px underline is an inset shadow (a 1.5 px border snaps to 1 px) */
+.hr-tab:hover { color: var(--hr-text); }
+.hr-tab[aria-selected="true"] { color: var(--hr-text); font-weight: 500; box-shadow: inset 0 -1.5px 0 var(--hr-primary); }
+.hr-tab .hr-count { font-family: var(--hr-num); font-size: 12px; font-weight: 500; line-height: 12px; color: var(--hr-muted); }
+.hr-tab.is-danger, .hr-tab.is-danger .hr-count { color: var(--hr-danger); }
+/* Phone: saved views become the approved pill chips (rc.css .segs, Figma MobileChip). */
+@media (max-width: 767px) {
+  .hr-tabs { gap: 6px; border-bottom: 0; padding-bottom: 2px; }
+  .hr-tab { border: 0; border-radius: 999px; padding: 6px 12px; font-size: 13px; line-height: 20px; color: var(--hr-text-2); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-strong); }
+  .hr-tab[aria-selected="true"] { background: var(--hr-text); color: var(--hr-inverse); font-weight: 500; box-shadow: none; }
+  .hr-tab[aria-selected="true"] .hr-count { color: inherit; }
+}
+
+/* ── Buttons & controls ───────────────────────────────────────────────────────── */
+.hr-btn { appearance: none; height: var(--hr-control); padding: 0 14px; border-radius: var(--hr-r-md); border: 1px solid var(--hr-border-strong); background: var(--hr-surface); color: var(--hr-text); font: inherit; font-size: 13.5px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; white-space: nowrap; } /* Button 7:114: md 34, radius/md 9, gap 7 */
+.hr-btn > svg { width: 16px; height: 16px; flex: none; } /* Icon/plus etc.: 16 px in buttons, on the inline-start */
+/* IconButton (32 × 32, radius/md) — the preview header close, the «…» more. */
+.hr-btn.hr-iconbtn { width: 32px; height: 32px; padding: 0; }
+.hr-btn:hover { background: var(--hr-hover); }
+.hr-btn:disabled { background: var(--hr-disabled-bg); color: var(--hr-disabled); border-color: var(--hr-border-subtle); cursor: not-allowed; }
+.hr-btn.is-primary { background: var(--hr-primary); border-color: var(--hr-primary); color: var(--hr-inverse); }
+.hr-btn.is-primary:hover:not(:disabled) { background: var(--hr-primary-hover); }
+.hr-btn.is-primary:disabled { background: var(--hr-disabled-bg); color: var(--hr-disabled); border-color: var(--hr-border-subtle); }
+.hr-btn.is-ghost { border-color: transparent; background: transparent; }
+.hr-btn.is-ghost:hover:not(:disabled) { background: var(--hr-hover); }
+.hr-btn.is-danger { border-color: var(--hr-danger); color: var(--hr-danger); background: var(--hr-surface); }
+.hr-btn.is-danger:hover:not(:disabled) { background: var(--hr-danger-tint); }
+.hr-btn.is-sm { height: var(--hr-control-sm); padding: 0 10px; font-size: 13px; }
+.hr-input, .hr-select, .hr-textarea { width: 100%; height: var(--hr-control); border: 1px solid var(--hr-border-control); border-radius: var(--hr-r-sm); background: var(--hr-surface); color: var(--hr-text); font: inherit; font-size: 14px; padding: 0 10px; }
+.hr-textarea { height: auto; min-height: 72px; padding: 8px 10px; resize: vertical; }
+/* One line that grows with its text (M-04 R3 reason); browsers without field-sizing scroll. */
+.hr-textarea.is-compact { min-height: var(--hr-control); max-height: 120px; field-sizing: content; resize: none; }
+.hr-input[aria-invalid="true"] { border-color: var(--hr-danger); }
+.hr-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hr-field .hr-help { font-size: 12.5px; color: var(--hr-muted); }
+.hr-field .hr-err { font-size: 12.5px; color: var(--hr-danger); }
+.hr-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.hr-form .is-wide { grid-column: 1 / -1; }
+@media (max-width: 767px) { .hr-form { grid-template-columns: minmax(0, 1fr); } }
+/* HR-09 R3 / C-09 / M-09 policy form: one fact per row — label on the inline-start, the control
+   (200 px) on the inline-end, a subtle rule between rows; two columns of rows at 1024; stacked
+   label-over-control on the phone. */
+.hr-form.is-rows { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.hr-form.is-rows .hr-field { display: grid; grid-template-columns: minmax(0, 1fr) var(--hr-row-control, 240px); column-gap: 16px; row-gap: 2px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--hr-border-subtle); }
+.hr-form.is-rows .hr-field > .hr-help, .hr-form.is-rows .hr-field > .hr-err { grid-column: 1 / -1; }
+.hr-form.is-rows .hr-field.is-tall { grid-template-columns: minmax(0, 1fr); }
+.hr-form.is-rows .hr-field.is-tall > .hr-label { margin-bottom: 4px; }
+@media (min-width: 768px) and (max-width: 1279px) { .hr-form.is-rows { --hr-row-control: 170px; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; } .hr-form.is-rows .hr-field.is-tall, .hr-form.is-rows .is-wide { grid-column: 1 / -1; } }
+/* C-09 / M-09: the policy form's frame fields, then its actions, then the extra rows. */
+.hr-form.is-rows .hr-field.is-checks { grid-template-columns: minmax(0, 1fr); }
+.hr-form.is-rows .hr-field.is-checks > .hr-label { margin-bottom: 4px; }
+.hr-policy-actions { display: flex; gap: 8px; padding: 12px 0 4px; }
+@media (min-width: 768px) and (max-width: 1279px) {
+  /* Column by column as drawn: four rows in the first column, three in the second. */
+  .hr-form.is-rows.is-policy-main { grid-auto-flow: column; grid-template-rows: repeat(4, auto); }
+  .hr-form.is-rows.is-policy-main .hr-field.is-checks { grid-column: auto; }
+}
+@media (max-width: 767px) {
+  /* M-09 548:3762: the draft's actions stay reachable — a sticky bar above the tab bar. */
+  /* The page scroller already ends at the tab bar, so the bar sits flush at bottom: 0 (an offset
+     of the tab-bar height was applied twice). 44 px targets (shell rule), 5 px padding → 54 px. */
+  .hr-policy-actions { position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 5px 16px; background: var(--hr-surface); border-top: 1px solid var(--hr-border-subtle); }
+  .hr-policy-actions > .hr-btn { flex: 1 1 0; height: 44px; }
+  /* Sticky only holds the bar down until its own place in the flow scrolls into view, so it is
+     placed last in the draft editor: after the extra rows and the caption, nothing scrolls
+     beneath it at the end of the form. Its negative margin takes up the page's 24 px bottom
+     padding (.hr-page on the phone), so at the end of the scroll it is flush on the tab bar too. */
+  .hr-draft-editor > .hr-policy-actions { order: 1; margin-bottom: -24px; }
+}
+@media (max-width: 767px) { .hr-form.is-rows .hr-field { grid-template-columns: minmax(0, 1fr); row-gap: 6px; } }
+.hr-filterbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hr-search { flex: 1 1 260px; min-width: 200px; }
+/* SearchField 12:27: radius/md 9, 13.5/22, Icon/search 16 px at the inline-end. */
+.hr-input.hr-search { border-radius: var(--hr-r-md); font-size: 13.5px; padding-inline-end: 36px; padding-inline-start: 11px; background-repeat: no-repeat; background-size: 16px 16px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236e6a61' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E"); }
+[dir="rtl"] .hr-input.hr-search { background-position: left 11px center; }
+[dir="ltr"] .hr-input.hr-search { background-position: right 11px center; }
+.hr-input.hr-search::-webkit-search-cancel-button { margin-inline-end: 0; }
+/* FilterChip (12:16): 30 px, r 8, surface/subtle, 1 px border; label regular, value medium. */
+.hr-fchip { position: relative; display: inline-flex; align-items: center; height: 30px; border: 1px solid var(--hr-border-subtle); border-radius: 8px; background: var(--hr-subtle); font-size: 13px; line-height: 22px; color: var(--hr-text-2); } /* FilterChip 12:16 */
+.hr-fchip:focus-within { outline: 2px solid var(--hr-focus, var(--hr-primary)); outline-offset: 1px; }
+.hr-fchip-main { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 10px; }
+.hr-fchip-value { font-weight: 500; color: var(--hr-text); }
+.hr-fchip-main select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font: inherit; }
+.hr-fchip-main svg { color: var(--hr-muted); }
+.hr-fchip.is-active .hr-fchip-main { padding-inline-end: 4px; }
+.hr-fchip-clear { appearance: none; border: 0; background: none; height: 100%; min-width: 28px; padding: 0 8px 0 6px; font: inherit; font-size: 15px; line-height: 1; color: var(--hr-muted); cursor: pointer; border-start-end-radius: 8px; border-end-end-radius: 8px; }
+.hr-fchip-clear:hover { color: var(--hr-text); background: var(--hr-hover, transparent); }
+.hr-fchip-clear:focus-visible { outline: 2px solid var(--hr-focus, var(--hr-primary)); outline-offset: -2px; }
+@media (max-width: 767px) { .hr-fchip { height: 34px; } .hr-fchip-clear { min-width: 34px; } }
+.hr-chip { height: 30px; border: 1px solid var(--hr-border-strong); border-radius: 999px; padding: 0 12px; display: inline-flex; gap: 6px; align-items: center; font-size: 13px; background: var(--hr-surface); color: var(--hr-text-2); }
+.hr-chip select { border: 0; background: transparent; font: inherit; font-weight: 600; color: var(--hr-text); }
+
+/* ── Status ───────────────────────────────────────────────────────────────────── */
+/* StatusDot (Figma component 11:6): UI/Caption 13/22 Regular for every tone; Success is UI/Caption Strong (SemiBold). */
+.hr-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 22px; font-weight: 400; white-space: nowrap; }
+.hr-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.hr-dot.tone-neutral { color: var(--hr-muted); }
+.hr-dot.tone-success { color: var(--hr-success); font-weight: 600; }
+.hr-dot.tone-info { color: var(--hr-info); }
+.hr-dot.tone-warning { color: var(--hr-warning); }
+.hr-dot.tone-danger { color: var(--hr-danger); }
+.hr-dot.tone-cancelled { color: var(--hr-disabled); text-decoration: line-through; }
+.hr-dot > span { color: var(--hr-text); }
+.hr-dot.tone-warning > span, .hr-dot.tone-danger > span, .hr-dot.tone-cancelled > span { color: inherit; }
+.hr-flag { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: var(--hr-r-xs); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.hr-flag.tone-warning { background: var(--hr-warning-tint); color: var(--hr-warning); }
+.hr-flag.tone-danger { background: var(--hr-danger-tint); color: var(--hr-danger); }
+.hr-flag.tone-info { background: var(--hr-info-tint); color: var(--hr-info); }
+.hr-notice { border-radius: var(--hr-r-sm); padding: 10px 12px; font-size: 13.5px; }
+.hr-notice.tone-warning { background: var(--hr-warning-tint); }
+.hr-notice.tone-info { background: var(--hr-info-tint); color: var(--hr-text-2); }
+.hr-notice.tone-danger { background: var(--hr-danger-tint); }
+.hr-notice.tone-success { background: var(--hr-success-tint); }
+@media (max-width: 767px) { .hr-notice.is-plain-mobile { background: none; padding: 0; font-size: 13px; line-height: 22px; color: var(--hr-text-2); } }
+/* Payroll day counts: the note under «28 من 30» (unpaid leave, part-month service). */
+.hr-days-note { font-size: 12px; }
+.hr-days-note.tone-warning { color: var(--hr-warning); }
+
+/* ── Tables (dense, hairline) ─────────────────────────────────────────────────── */
+.hr-tablewrap { overflow-x: auto; min-width: 0; }
+.hr-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.hr-table th { height: var(--hr-header-row); padding: 0 12px; text-align: start; font-size: 12.5px; font-weight: 500; line-height: 18px; color: var(--hr-muted); border-bottom: 1px solid var(--hr-border-strong); white-space: nowrap; background: var(--hr-surface); position: sticky; top: 0; }
+.hr-table td { height: var(--hr-row); padding: 0 12px; border-bottom: 1px solid var(--hr-border-subtle); vertical-align: middle; }
+.hr-table.is-dense td { height: var(--hr-row-dense); }
+.hr-table tbody tr.is-clickable { cursor: pointer; }
+.hr-table tbody tr.is-clickable:hover { background: var(--hr-hover); }
+.hr-table tbody tr[aria-selected="true"] { background: var(--hr-selected); }
+.hr-table td.num, .hr-table th.num { text-align: end; font-family: var(--hr-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hr-table td.strong { font-weight: 500; }
+.hr-table tfoot td { border-bottom: 1px solid var(--hr-border-strong); font-weight: 600; }
+.hr-table.hr-run-lines tfoot td.num { font-weight: 500; } /* payroll run totals: Number/Body Medium 14/22 (HR-03 451:6287) */
+.hr-table .sub { color: var(--hr-muted); font-size: 13px; margin: 0 6px; }
+.hr-table td .sub.hr-id { font-size: 12.5px; font-weight: 400; } /* Code/ID 12.5/22 Regular (477:2617), not the cell's Medium */
+/* Codes, dates and amounts never break inside a cell; names do not break mid-name. */
+.hr-table td.num, .hr-table .hr-id, .hr-table .hr-num, .hr-table td.strong, .hr-table .hr-nowrap { white-space: nowrap; }
+/* A secondary line that must stay on one line (C-04 ledger reason in the 352 px drawer). */
+.hr-table .hr-sub-clip { display: block; margin: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hr-kv dd .hr-num, .hr-kv dd .hr-id { white-space: nowrap; }
+/* EN-VARIANTS F1/F3: English labels run longer than Arabic. In English, column headers wrap onto
+   a second line instead of pushing the last column out of view; names and status chips stay whole.
+   Codes, dates and amounts (.num, .hr-id, .hr-num, .hr-nowrap) still never break. */
+[dir="ltr"] .hr-table th { white-space: normal; }
+/* A subtitle beside a value («Production», an employee no.) moves under it when the column is tight. */
+[dir="ltr"] .hr-table td .sub { display: inline-block; }
+[dir="ltr"] .hr-table td.hr-wrap-en { white-space: normal; }
+/* Beside the preview drawer and in half-width panels, English cells sit a little closer. */
+[dir="ltr"] :is(.hr-split.has-preview, .hr-cols-2) .hr-table :is(th, td) { padding-inline: 10px; }
+/* A cell whose title may wrap, with its secondary facts on their own line under it. */
+.hr-table td.hr-wrap { white-space: normal; }
+@media (min-width: 768px) { .hr-table td .sub.is-line { display: block; margin: 2px 0 0; font-weight: 400; } }
+/* C-01 (1024): with the preview drawer open the table loses its secondary columns. HR-01
+   (1440, frame 449:767) keeps all seven columns beside the pane, so this applies below 1280 only. */
+@media (max-width: 1279px) { .hr-split.has-preview .hr-hide-preview { display: none; } }
+.hr-tablefoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 4px; font-size: 13px; color: var(--hr-muted); flex-wrap: wrap; }
+/* Phones: rows become stacked cards; each cell names its column. */
+@media (max-width: 767px) {
+  .hr-table.is-stack thead { display: none; }
+  .hr-table.is-stack tr { display: block; border-bottom: 1px solid var(--hr-border-subtle); padding: 10px 0; }
+  .hr-table.is-stack td { display: flex; justify-content: space-between; gap: 12px; height: auto; border: 0; padding: 3px 0; }
+  .hr-table.is-stack td[data-label]::before { content: attr(data-label); color: var(--hr-muted); font-size: 12.5px; }
+  .hr-table.is-stack td.num { text-align: start; }
+  /* Direction 2.1 phone list row (rc.css .mrow): title, a muted secondary line, and the
+     row's status or amount at the end. Cells without m-title / m-end stay on the desktop
+     table only; their facts are repeated in .hr-msub or in the preview. */
+  .hr-table.is-mrow thead { display: none; }
+  .hr-table.is-mrow, .hr-table.is-mrow tbody { display: block; }
+  .hr-table.is-mrow tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--hr-border-subtle); } /* MobileListRow: py 11, gap 2 */
+  .hr-table.is-mrow td { display: none; height: auto; border: 0; padding: 0; background: none; }
+  .hr-table.is-mrow td.m-title { display: block; font-weight: 500; white-space: normal; min-width: 0; }
+  .hr-table.is-mrow td.m-end { display: flex; justify-content: flex-end; white-space: nowrap; min-width: 0; }
+  /* M-08: a tight phone row whose detail opens elsewhere (recruitment) keeps its secondary line
+     on ONE line and clips it. Opt-in only (.is-clip-sub): every other phone row wraps, since its
+     secondary line is the only place those facts are shown (pay history, contract notice, leave
+     employee number, payroll status). */
+  .hr-table.is-mrow.is-clip-sub .hr-msub { display: block !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hr-table.is-mrow tr[aria-selected="true"] td { background: none; }
+  .hr-msub { display: flex !important; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: 13px; font-weight: 400; color: var(--hr-muted); margin-top: 2px; line-height: 22px; } /* MobileListRow secondary 13/22 */
+  .hr-msub .hr-id { font-size: 12px; color: var(--hr-muted); }
+}
+.hr-msub { display: none; }
+.hr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Shown only in a phone list row's trailing cell (the desktop row has its own column). */
+.hr-mobile-only { display: none; }
+.hr-mlisthead { display: none; }
+@media (max-width: 767px) { .hr-mlisthead { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 4px; border-bottom: 1px solid var(--hr-border-subtle); } }
+@media (max-width: 767px) {
+  .hr-table.is-mrow td.m-end { gap: 8px; align-items: center; }
+  .hr-mobile-only { display: inline-flex; align-items: center; }
+  /* M-05 CP: a figure over its status (attendance hours), both at the row's end. */
+  .hr-table.is-mrow td.m-end.is-stack { flex-direction: column; align-items: flex-end; gap: 2px; } /* 22 + 2 + 22 = 46 → 69 px rows */
+  .hr-desktop-only { display: none; }
+}
+
+/* ── Key/value list ───────────────────────────────────────────────────────────── */
+.hr-kv { display: flex; flex-direction: column; }
+.hr-kv > div { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--hr-border-subtle); }
+.hr-kv dt { color: var(--hr-muted); }
+.hr-kv dd { margin: 0; text-align: end; }
+
+/* ── Metrics ──────────────────────────────────────────────────────────────────── */
+.hr-metrics { display: flex; gap: 40px; flex-wrap: wrap; padding: 4px 0; }
+.hr-metrics > div { display: flex; flex-direction: column; gap: 2px; }
+
+/* ── Process track ────────────────────────────────────────────────────────────── */
+.hr-track { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0; }
+.hr-track > div { padding: 10px 0; border-top: 2px solid var(--hr-border-subtle); display: flex; flex-direction: column; gap: 2px; }
+.hr-track > div.is-done { border-top-color: var(--hr-primary); }
+.hr-track > div.is-current { border-top: 3px solid var(--hr-primary); font-weight: 600; }
+/* Phone: the approved compact ProcessTrack — one row of step labels; the step captions
+   live in the run's meta and timeline. Metrics fall into two columns. */
+@media (max-width: 767px) {
+  .hr-track { gap: 8px; }
+  .hr-track > div { font-size: 12.5px; line-height: 18px; padding-top: 8px; min-width: 0; overflow-wrap: anywhere; }
+  .hr-track > div .hr-caption { display: none; }
+  .hr-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; } /* M-03 / M-07 R3 */
+  /* M-03 / M-07 R3: metric labels are UI/Meta 12/18 directly above the value (40 px per metric). */
+  .hr-metrics { padding: 0; }
+  .hr-metrics > div { gap: 0; }
+  .hr-metrics > div > .hr-caption { font-size: 12px; line-height: 18px; }
+  /* M-03c / M-07 R3: the payroll run and self-service bodies stack their blocks 10 px apart. */
+  .hr-page.is-tight-mobile { gap: 10px; }
+}
+
+/* ── States, dialog ───────────────────────────────────────────────────────────── */
+.hr-state { border: 1px dashed var(--hr-border-strong); border-radius: var(--hr-r-lg); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; color: var(--hr-text-2); }
+.hr-state h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--hr-text); }
+.hr-skel { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--hr-subtle), var(--hr-border-subtle), var(--hr-subtle)); background-size: 200% 100%; animation: hr-shimmer 1.4s infinite; }
+@keyframes hr-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .hr-skel { animation: none; } }
+.hr-dialog-backdrop { position: fixed; inset: 0; background: var(--hr-scrim); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 16px; }
+/* Header, scrolling body, footer: the actions never scroll out of reach. */
+.hr-dialog { min-height: 0; background: var(--hr-surface); border-radius: var(--hr-r-lg); width: min(560px, 100%); max-height: calc(100dvh - 32px); overflow: hidden; display: flex; flex-direction: column; font-family: var(--hr-font); color: var(--hr-text); }
+.hr-dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 20px 24px 0; flex: none; }
+.hr-dialog-body { display: flex; flex-direction: column; gap: 14px; padding: 14px 24px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.hr-dialog-actions { display: flex; gap: 8px; justify-content: flex-start; flex-direction: row-reverse; padding: 0 24px 20px; flex: none; }
+@media (max-width: 767px) {
+  /* M-04 R3: a bottom sheet on the visible part of the screen. --hr-kb / --hr-vvh come from the
+     Dialog's visualViewport listener (keyboard height, visible height); 0 / 100dvh without it. */
+  .hr-dialog-backdrop { align-items: flex-end; padding: 0 0 var(--hr-kb, 0px); }
+  .hr-dialog { width: 100%; border-radius: 20px 20px 0 0; max-height: calc(var(--hr-vvh, 100dvh) - 24px); }
+  .hr-dialog::before { content: ""; width: 36px; height: 4px; border-radius: 2px; background: var(--hr-border-strong); margin: 8px auto 0; flex: none; }
+  .hr-dialog-head { padding: 8px 16px 0; }
+  .hr-dialog-body { gap: 12px; padding: 12px 16px; }
+  /* M-04: the sheet's actions are two equal full-width buttons, clear of the home indicator. */
+  .hr-dialog-actions { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--hr-border-subtle); background: var(--hr-surface); }
+  .hr-dialog-actions > * { flex: 1 1 0; }
+  /* M-04 R3 / M-04e / M-04k: the primary action sits at the inline start (the right in Arabic),
+     cancel beside it — callers pass primary first, so the sheet lays them out in that order. */
+  .hr-dialog-actions { flex-direction: row; }
+  /* Two dates share a row in the sheet (M-04 R3). */
+  .hr-form .is-half-mobile { grid-column: auto; }
+  .hr-form.has-date-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hr-form.has-date-pair > :not(.is-half-mobile) { grid-column: 1 / -1; }
+}
+.hr-divider { height: 1px; background: var(--hr-border-subtle); border: 0; margin: 4px 0; }
+
+/* ── Follow-up (QA 15:11Z) ── */
+/* M-03c: the phone payroll row names its amount («الصافي» under the net). */
+.hr-net-cap { display: none; }
+@media (max-width: 767px) { .hr-table.is-mrow td.m-end.is-stack .hr-net-cap { display: block !important; font-size: 12.5px; line-height: 18px; margin: 0; white-space: nowrap; } }
+/* C-03: at 1024 the day note sits under the days («20 من 30» / «خدمة جزئية»). */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .hr-table td .sub.hr-days-note { display: block; margin: 0; line-height: 14px; }
+  /* C-03: the dense 42 px row keeps its height with the note under the days. */
+  .hr-table.is-dense-compact td { padding-block: 3px; line-height: 20px; }
+}
+/* C-02: at 1024 private data and reminders sit side by side; documents follow full width. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .hr-ov-aside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; align-items: start; }
+  .hr-ov-aside > .hr-ov-private { order: 1; }
+  .hr-ov-aside > .hr-ov-reminders { order: 2; }
+  .hr-ov-aside > .hr-ov-docs { order: 3; grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+  /* M-02 R3 phone: the number and job line first, then the status and flags. */
+  .hr-headstack > .hr-meta > .hr-id { order: -2; }
+  .hr-headstack > .hr-meta > .hr-muted { order: -1; }
+  .hr-headstack > .hr-meta > .hr-caption.hr-iso { display: none; }
+  /* …and the status line starts on its own line, as drawn. */
+  .hr-headstack > .hr-meta::before { content: ""; flex-basis: 100%; height: 0; order: 0; }
+  /* Advances / list headers: the small «+» of the phone frames (button 91 px). */
+  .hr-pagehead .hr-actions .hr-btn > svg { width: 11px; height: 11px; }
+  .hr-pagehead .hr-actions .hr-btn { gap: 3px; padding-inline: 8px; }
+}
+
+/* ── Phone findings (P-1 emulation, 16 Oct) ── */
+/* «Phone» = a narrow viewport, or a short one on a touch screen (a phone in landscape,
+   750–932 × 340–430). Desktop and tablet layouts are untouched. */
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
+  /* D-P1-4: iOS Safari zooms the page when a focused field's text is under 16 px. Every HR field
+     — including the native selects laid over filter chips and inline-styled date inputs — is
+     16 px on phones. */
+  [data-hr-root] input:not([type="checkbox"]):not([type="radio"]), [data-hr-root] select, [data-hr-root] textarea { font-size: 16px !important; }
+  /* D-P1-2: the split page's 640 px minimum (list + preview on desktop) left ~370 px of empty
+     sheet at the end of the scroll in phone landscape; phones size it to its content. */
+  .hr-split { min-height: 0; }
+  /* D-P1-6: the sheet's actions are 44 px touch targets (shell rule). */
+  .hr-dialog-actions > .hr-btn { height: 44px; }
+}
+/* D-P1-5: phone landscape with the keyboard open leaves ~140 px. The whole sheet scrolls as one,
+   its actions sticky at the bottom, so the field being typed in is always scrolled clear of them
+   (scroll-margin ≥ the action bar) and nothing overruns the visible area. Portrait keeps the
+   scrolling body and fixed actions (M-04 R3). */
+@media (max-height: 500px) and (pointer: coarse) {
+  .hr-dialog-backdrop { align-items: flex-end; padding: 0 0 var(--hr-kb, 0px); }
+  .hr-dialog { width: 100%; max-height: var(--hr-vvh, 100dvh); overflow-y: auto; overscroll-behavior: contain; border-radius: 16px 16px 0 0; }
+  .hr-dialog::before { display: none; }
+  .hr-dialog-head { padding: 8px 16px 0; }
+  .hr-dialog-body { overflow: visible; min-height: auto; padding: 8px 16px; }
+  .hr-dialog-actions { position: sticky; bottom: 0; flex-direction: row; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--hr-border-subtle); background: var(--hr-surface); }
+  .hr-dialog-actions > * { flex: 1 1 0; }
+  .hr-dialog :is(input, select, textarea) { scroll-margin-block: 8px 72px; }
+  /* With the keyboard open little height is left above the action bar: a note starts one line
+     high (44 px) and grows with its text. */
+  .hr-dialog .hr-textarea { min-height: 44px; max-height: 120px; field-sizing: content; }
+}
+
+/* ── Parity sweep (16 Oct) ── */
+/* N-11 (C-04 582:3976): the balance ledger fits the 352 px drawer with its four columns — the
+   entry label stays on one line (HR-D12) and its note takes the spare width, ellipsized. */
+.hr-preview .hr-table td:has(> .hr-ledger-entry) { width: 100%; max-width: 0; } /* takes the spare width; its note ellipsizes */
+.hr-preview .hr-table { table-layout: auto; width: 100%; }
+.hr-preview .hr-table th, .hr-preview .hr-table td { padding-inline: 6px; }
+/* N-13 (HR-03 451:5844 / C-03 455:2729): the net column is regular weight from 768 (the phone
+   row keeps its bold amount, M-03c); the unpaid-days note is clay at every width. */
+@media (min-width: 768px) { .hr-table td.hr-net { font-weight: 400; } }
+@media (max-width: 767px) { .hr-table td.hr-net { font-weight: 600; } }
+.hr-table td .sub.hr-days-note.tone-warning, .hr-table td .hr-days-note.tone-warning .hr-only-compact { color: var(--hr-warning); }
+/* N-15 (M-09 R3 548:3762): settings sections stay underline tabs on the phone, scrolling sideways. */
+@media (max-width: 767px) {
+  .hr-tabs.is-underline { gap: 4px; border-bottom: 1px solid var(--hr-border-subtle); padding-bottom: 0; }
+  .hr-tabs.is-underline .hr-tab { border-radius: 0; padding: 0 10px 10px; font-size: 14px; line-height: 22px; color: var(--hr-muted); background: none; box-shadow: none; }
+  .hr-tabs.is-underline .hr-tab[aria-selected="true"] { background: none; color: var(--hr-text); box-shadow: inset 0 -1.5px 0 var(--hr-primary); }
+  .hr-tabs.is-underline .hr-tab[aria-selected="true"] .hr-count { color: var(--hr-muted); }
+}

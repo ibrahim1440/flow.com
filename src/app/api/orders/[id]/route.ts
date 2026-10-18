@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { appendOrderActivity, lockOrderLifecycleResources } from "@/lib/services/order-operations";
 import {
   assertStructuralEditAllowed,
@@ -231,9 +232,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         await tx.order.update({ where: { id }, data: orderData });
       }
 
+      // Review D-1: orders:edit is not the contact right. Without the customers module the
+      // edited order comes back with the customer's name only, as GET /api/orders does.
       return tx.order.findUnique({
         where: { id },
-        include: { customer: true, items: true },
+        include: {
+          customer: canSeeCustomerContact(user.permissions) ? true : { select: CUSTOMER_NAME_SELECT },
+          items: true,
+        },
       });
     }, TX_OPTS);
 

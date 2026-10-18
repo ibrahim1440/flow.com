@@ -1,10 +1,42 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Hammer, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { useUser } from "@/app/dashboard/user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/translations";
+import { LocalizedName } from "@/components/LocalizedName";
+
+// E7: a requirement line is labelled from master data in the interface language — the
+// Arabic name (CoffeeProduct.productNameAr / MaterialItem.nameAr) in Arabic, the English
+// name in English, with the fallback of pickLocalizedName (English isolated in <bdi dir=ltr>,
+// no marker). The kind is composed here («بن محمّص …» / «Roasted …»); the material code stays
+// beside the name as its stable identifier. `label` (English, built by the server) is only
+// used if a response predates the name fields.
+function ComponentLabel({ c, lang }: { c: BomLine; lang: "ar" | "en" }) {
+  if (c.nameEn === undefined) {
+    const roasted = /^Roasted (.+)$/.exec(c.label);
+    if (roasted) return <>{lang === "ar" ? "بن محمّص " : "Roasted "}<bdi>{roasted[1]}</bdi></>;
+    return <bdi>{c.label}</bdi>;
+  }
+  if (c.type === "ROASTED_COFFEE")
+    return <>{lang === "ar" ? "بن محمّص " : "Roasted "}<LocalizedName lang={lang} en={c.nameEn} ar={c.nameAr} lastResort={lang === "ar" ? "قهوة" : "coffee"} /></>;
+  return (
+    <>
+      <LocalizedName lang={lang} en={c.nameEn} ar={c.nameAr} lastResort={c.code ?? undefined} />
+      {c.code ? <> (<bdi dir="ltr">{c.code}</bdi>)</> : null}
+    </>
+  );
+}
+
+// A production order's status in the viewer's language (the raw enum read «IN PRODUCTION»).
+const PO_STATUS_KEY: Record<string, TranslationKey> = {
+  PENDING: "statusPENDING",
+  IN_PRODUCTION: "statusIN_PRODUCTION",
+  COMPLETED: "statusCOMPLETED",
+  CANCELLED: "statusCANCELLED",
+};
 
 // Step 9 of the flow: turn the part of an order line the shelf could not cover into a
 // production order — and only that part. The arithmetic lives on the server
@@ -12,7 +44,12 @@ import { useI18n } from "@/lib/i18n/context";
 // offers the button.
 
 type BomLine = {
+  type?: "ROASTED_COFFEE" | "MATERIAL";
   label: string;
+  // E7 (additive in the response): master-data names and the material code.
+  nameEn?: string | null;
+  nameAr?: string | null;
+  code?: string | null;
   unitOfMeasure: string;
   quantityRequired: number;
   quantityAvailable: number;
@@ -22,6 +59,9 @@ type BomLine = {
 type Requirement = {
   orderItemId: string;
   skuCode: string;
+  productId?: string;
+  productNameEn?: string | null;
+  productNameAr?: string | null;
   orderedUnits: number;
   deliveredUnits: number;
   reservedUnits: number;
@@ -35,7 +75,7 @@ type Requirement = {
 };
 
 export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const user = useUser();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "production", "start_batch");
 
@@ -123,9 +163,18 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
 
       {rows.map((row) => {
         return (
-          <div key={row.orderItemId} className="rounded-xl border border-oo-border-default p-2.5">
+          <div key={row.orderItemId} className="ops-panel" style={{ marginTop: 0 }}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="font-mono text-xs font-bold text-oo-text-primary">{row.skuCode}</span>
+              {/* E7: the product's name in the interface language is the line's primary
+                  label; the SKU code beside it is the stable identifier. */}
+              <span className="flex items-baseline gap-2 flex-wrap" data-testid={`prodreq-product-${row.orderItemId}`}>
+                {row.productNameEn !== undefined ? (
+                  <b className="text-sm text-oo-text-primary">
+                    <LocalizedName lang={lang} en={row.productNameEn} ar={row.productNameAr} lastResort={row.skuCode} />
+                  </b>
+                ) : null}
+                <span className="ops-serial">{row.skuCode}</span>
+              </span>
               <span className="text-xs text-oo-text-secondary">
                 {t("orderedLabel")}: <b>{row.orderedUnits}</b> · {t("reservedLabel")}:{" "}
                 <b className="text-oo-status-success">{row.reservedUnits}</b> ·{" "}
@@ -151,10 +200,10 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                 </p>
                 <ul className="mt-0.5 space-y-0.5">
                   {row.components.map((c, i) => (
-                    <li key={i} className="text-xs text-oo-text-secondary flex items-center gap-1.5 flex-wrap">
+                    <li key={i} data-testid="prodreq-component" className="text-xs text-oo-text-secondary flex items-center gap-1.5 flex-wrap">
                       <span>
-                        {c.label}: <b>{c.quantityRequired}</b>{" "}
-                        {c.unitOfMeasure === "KG" ? "kg" : "pcs"}
+                        <ComponentLabel c={c} lang={lang} />: <b>{c.quantityRequired}</b>{" "}
+                        {c.unitOfMeasure === "KG" ? (lang === "ar" ? "كغ" : "kg") : (lang === "ar" ? "قطعة" : "pcs")}
                       </span>
                       {c.shortfall > 0 && (
                         <span className="text-oo-status-blocked font-semibold">
@@ -174,13 +223,11 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                     type="button"
                     disabled={busy === row.orderItemId}
                     onClick={() => create(row)}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-oo-action-primary text-white text-xs font-bold hover:bg-oo-action-primary-hover disabled:opacity-50 transition-colors"
+                    className="hr-btn is-primary is-sm"
+                    style={{ marginTop: 8 }}
+                    aria-busy={busy === row.orderItemId || undefined}
                   >
-                    {busy === row.orderItemId ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <Hammer size={13} />
-                    )}
+                    {busy === row.orderItemId ? "…" : null}
                     {t("productionReqCreate")} ({row.shortfallUnits})
                   </button>
                 ) : null}
@@ -202,8 +249,8 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
                     <span className="text-oo-text-muted">
                       {p.producedUnits}/{p.targetUnits}
                     </span>
-                    <span className="uppercase tracking-wide font-semibold text-oo-text-muted">
-                      {p.status.replace("_", " ")}
+                    <span className="font-semibold text-oo-text-muted">
+                      {PO_STATUS_KEY[p.status] ? t(PO_STATUS_KEY[p.status]) : p.status.replace("_", " ")}
                     </span>
                   </li>
                 ))}

@@ -1,0 +1,42 @@
+Hiqbah ERP — third-party fonts
+==============================
+
+This directory redistributes the WOFF2 font files that Google Fonts serves for the families
+below, exactly as Google serves them (same bytes; source URL and sha256 of every file in
+README.md, checksums in SHA256SUMS). They are Google's own builds of the upstream fonts: subset by
+unicode-range, converted to WOFF2 and, for IBM Plex Sans, built as a variable font. They are
+therefore Modified Versions of the original font software in the sense of the SIL Open Font
+License, made by Google; this project has not changed, renamed or re-subset them.
+
+Each family is licensed under the SIL Open Font License, Version 1.1. The full licence text is
+included next to the files of each family. The fonts are not sold by themselves.
+
+Copyright notices as stated in the bundled files (name table, name ID 0):
+
+IBM Plex Sans Arabic   "Copyright 2019 IBM Corp. All rights reserved."
+                       Reserved Font Name "Plex". Version 1.101.
+                       Licence: ibm-plex-sans-arabic/OFL.txt
+                       Upstream: https://github.com/IBM/plex
+IBM Plex Sans          "Copyright 2019 IBM Corp. All rights reserved."
+                       Reserved Font Name "Plex". Version 3.201 (variable, wght 100–700).
+                       Licence: ibm-plex-sans/OFL.txt
+                       Upstream: https://github.com/IBM/plex
+IBM Plex Mono          "Copyright 2017 IBM Corp. All rights reserved."
+                       Reserved Font Name "Plex". Version 2.3.
+                       Licence: ibm-plex-mono/OFL.txt
+                       Upstream: https://github.com/IBM/plex
+Tajawal                "(c) 2017 by Boutros International. All rights reserved."
+                       Version 1.700.
+                       Licence: tajawal/OFL.txt
+                       Upstream: https://github.com/google/fonts/tree/main/ofl/tajawal
+Amiri                  "Copyright 2010-2022 The Amiri Project Authors (https://github.com/aliftype/amiri)."
+                       Version 1.002. Bold (700) only.
+                       Licence: amiri/OFL.txt
+                       Upstream: https://github.com/aliftype/amiri
+
+Distributed via Google Fonts (https://fonts.google.com); OFL sources:
+https://github.com/google/fonts/tree/main/ofl/{ibmplexsansarabic,ibmplexsans,ibmplexmono,tajawal,amiri}
+
+"IBM Plex" is a trademark of IBM Corp. The IBM Plex files keep the Reserved Font Name "Plex" in
+their family names as Google publishes them; whether that redistribution needs IBM's written
+permission under OFL condition 3 is an open owner decision (see README.md).

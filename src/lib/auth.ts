@@ -1,6 +1,7 @@
 import "server-only";
 import { SignJWT, jwtVerify } from "jose";
 import type { UserPayload } from "./auth-shared";
+import { tokenExpSeconds } from "./auth/session-policy";
 
 export * from "./auth-shared";
 
@@ -35,10 +36,16 @@ if (BLOCKED_SECRETS.has(rawSecret.toLowerCase().trim())) {
 
 const secret = new TextEncoder().encode(rawSecret);
 
-export async function signToken(payload: UserPayload): Promise<string> {
+/**
+ * The token of a server-side session. Its `exp` is the session's absolute deadline
+ * (auth/session-policy.ts), never a fixed lifetime: a fixed "8h" ended every active session
+ * before the 12-hour limit, and a longer one would let the token outlive it.
+ */
+export async function signToken(payload: UserPayload, sessionExpiresAt: Date): Promise<string> {
   return new SignJWT(payload as unknown as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("8h")
+    .setIssuedAt()
+    .setExpirationTime(tokenExpSeconds(sessionExpiresAt))
     .sign(secret);
 }
 

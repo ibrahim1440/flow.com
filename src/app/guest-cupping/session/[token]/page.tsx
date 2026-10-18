@@ -284,6 +284,7 @@ export default function GuestSessionPage({ params }: { params: Promise<{ token: 
         )}
 
         <CuppingForm
+          lang="en"
           onSubmit={handleSubmitScore}
           submitting={submitting}
           submitLabel={`Submit Cup ${activeCupIndex + 1} Score →`}

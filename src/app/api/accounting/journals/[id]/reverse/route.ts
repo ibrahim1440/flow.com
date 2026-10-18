@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { requireSub } from "@/lib/auth-server";
+import { requireAdminAction, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { reverseJournalEntry } from "@/lib/accounting/journal-service";
-import { AccountingError } from "@/lib/accounting/errors";
+import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 
 type Params = { params: Promise<{ id: string }> };
 const REASON_MAX_LENGTH = 500;
@@ -13,9 +13,9 @@ export async function PATCH(request: Request, { params }: Params) {
   // Defense in depth: there is no role hierarchy above "admin" yet (see saas-readiness.md).
   // The spec requires reversal to be gated by explicit permission + mandatory reason; admin-only
   // is the strictest interpretation available without a dedicated Role model.
-  if (user.role !== "admin") {
-    return NextResponse.json({ error: "Insufficient permissions." }, { status: 403 });
-  }
+  // The admin role is privileged: the same verified-individual gate, with a recent step-up.
+  const refused = await requireAdminAction(user, "accounting.journal_reverse", { stepUp: true, message: "Insufficient permissions." });
+  if (refused) return refused;
 
   const { id } = await params;
 
@@ -39,7 +39,7 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json(reversal, { status: 201 });
   } catch (err) {
     if (err instanceof AccountingError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json(accountingErrorJson(err), { status: err.status });
     }
     return handlePrismaError(err);
   }

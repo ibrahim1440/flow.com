@@ -15,19 +15,29 @@
  *   thing that works until the day it does not, and a missing DIRECT_URL previously just
  *   sent the migration down DATABASE_URL — the pooled runtime URL — without comment.
  *
- * Usage:  DATABASE_URL=… DIRECT_URL=… npm run db:migrate:deploy
+ * Usage:  DIRECT_URL=… npm run db:migrate:deploy
+ *
+ * P-4 retest P1-1: Prisma 7.8 IGNORES `directUrl` in prisma.config.ts — the CLI migrates whatever
+ * DATABASE_URL names. This script used to validate DIRECT_URL and print its host while Prisma
+ * migrated DATABASE_URL: in the retest, the database named by DATABASE_URL got the 152 tables
+ * and the one named by DIRECT_URL (the one printed) got none. So the Prisma child process now
+ * receives DIRECT_URL AS its DATABASE_URL, and the host printed is the host it is given. Every
+ * other Prisma CLI command (status, resolve, diff) needs the same prefix: RUNBOOK §6 / §10.
  */
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { requireDatabaseUrl, requireDirectUrl } from "../src/lib/db-config.ts";
 
-// Both throw a message naming the problem and never the URL.
-requireDatabaseUrl(process.env);
+// Throws a message naming the problem and never the URL: DIRECT_URL is required.
 const direct = requireDirectUrl(process.env);
+// The child migrates exactly this database (dotenv in prisma.config.ts never overrides a set variable).
+const childEnv = { ...process.env, DATABASE_URL: direct };
+requireDatabaseUrl(childEnv);
 
-// Host only — the confirmation an operator needs before answering "yes, that one", with no
-// credential in it.
-console.log(`Applying migrations to ${new URL(direct).hostname}`);
+// Host and database only — the confirmation an operator needs before answering "yes, that one",
+// with no credential in it. It is the database the child is given, and nothing else.
+const target = new URL(direct);
+console.log(`Applying migrations to ${target.hostname}${target.port ? `:${target.port}` : ""} database ${target.pathname.replace(/^\//, "") || "(default)"} (from DIRECT_URL)`);
 
 // Prisma's own JS entrypoint, run under this Node, rather than the shim in .bin.
 //
@@ -42,6 +52,7 @@ const prismaCli = require_.resolve("prisma/build/index.js");
 const result = spawnSync(process.execPath, [prismaCli, "migrate", "deploy"], {
   stdio: "inherit",
   shell: false,
+  env: childEnv,
 });
 
 if (result.error) {

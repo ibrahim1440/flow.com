@@ -6,6 +6,8 @@ import { ArrowLeft, Printer } from "lucide-react";
 import {
   useLang, Alert, Spinner, Button, api, moneyText, num, formatDay,
 } from "../../../_components/ui";
+import { usePrintCertified } from "@/components/print/Certification";
+import { PRINT_PHASE1_NOTE, QUOTATION_PDF_WHEN_PRINT_OFF } from "@/lib/print/certification";
 
 /**
  * The quotation as a document.
@@ -96,6 +98,12 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Owner decision D1: printing is out of Phase 1 (PRINT_CERTIFIED gate, unknown counts as off).
+  // D1-Q (decided: strict): «Save as PDF» opens the print dialog, so with QUOTATION_PDF_WHEN_PRINT_OFF
+  // false it is disabled like every other print action while printing is off; the document stays.
+  const printing = usePrintCertified();
+  const pdfOnly = printing !== true && QUOTATION_PDF_WHEN_PRINT_OFF;
+  const actionOn = printing === true || pdfOnly;
 
   useEffect(() => {
     api<{ quote: Quote }>(`/api/sales/quotes/${id}`).then((res) => {
@@ -124,11 +132,24 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
           {quote.quoteNumber}
         </Link>
         {snap && (
-          <Button onClick={() => window.print()} testId="print-quote">
-            <Printer size={15} aria-hidden /> {ar ? "طباعة / حفظ PDF" : "Print / save as PDF"}
+          <Button onClick={() => { if (actionOn) window.print(); }} testId={printing === true ? "print-quote" : "save-quote-pdf"} disabled={!actionOn}>
+            <Printer size={15} aria-hidden /> {printing === true ? (ar ? "طباعة / حفظ PDF" : "Print / save as PDF") : (ar ? "حفظ كملف PDF" : "Save as PDF")}
           </Button>
         )}
       </div>
+      {snap && printing === false && (
+        <div className="print:hidden" data-testid="print-phase1-note">
+          <Alert kind="info">
+            {ar ? PRINT_PHASE1_NOTE.ar : PRINT_PHASE1_NOTE.en}
+            {" — "}
+            {pdfOnly
+              ? (ar
+                ? "لإرسال العرض إلى العميل: «حفظ كملف PDF» ثم اختر «حفظ كـ PDF» وجهةً في النافذة."
+                : "To send the quotation to the customer: «Save as PDF», then choose «Save as PDF» as the destination in the dialog.")
+              : (ar ? "يعود الزر بعد اعتماد الطباعة." : "The action returns once printing is approved.")}
+          </Alert>
+        </div>
+      )}
 
       {!snap ? (
         <div className="print:hidden">

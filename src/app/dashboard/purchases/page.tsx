@@ -9,6 +9,10 @@ import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 
+/** A stored quantity for display: "—" when it is not a finite number (Infinity arrives as JSON null), so one bad row cannot crash the screen. */
+const fmtQty = (v: number | null | undefined, digits: number): string =>
+  typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "—";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Supplier = { id: string; name: string; contact: string | null };
@@ -384,7 +388,8 @@ function AddPurchaseModal({
 export default function PurchasesPage() {
   const { t, lang } = useI18n();
   const user = useUser();
-  const canCreate = hasSubPrivilege(user?.permissions ?? {}, "inventory", "adjust");
+  // Recording a purchase is the receiving duty, as the API requires (POST /api/purchases: inventory › receive).
+  const canCreate = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
 
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -581,14 +586,13 @@ export default function PurchasesPage() {
                       <span className="text-brown/50 text-xs"> كغ</span>
                     </td>
                     <td className="px-4 py-3 text-end text-brown">
-                      {p.costPerUnit.toFixed(2)}
+                      {fmtQty(p.costPerUnit, 2)}
                     </td>
                     <td className="px-4 py-3 text-end">
                       <span className="font-bold text-charcoal">
-                        {p.totalCost.toLocaleString("ar-SA", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                        {typeof p.totalCost === "number" && Number.isFinite(p.totalCost)
+                          ? p.totalCost.toLocaleString("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                          : "—"}
                       </span>
                       <span className="text-brown/50 text-xs"> ر.س</span>
                     </td>

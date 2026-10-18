@@ -1,560 +1,298 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import {
-  Factory, TrendingDown, CheckCircle2, Package,
-  RefreshCw, AlertTriangle, Clock, Layers,
-  ArrowUp, ArrowDown, Minus, BarChart2,
-} from "lucide-react";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell,
-} from "recharts";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useI18n } from "@/lib/i18n/context";
+import { routeAllowed, type Viewer } from "@/lib/nav/registry";
+import { createActions } from "@/components/shell/creates";
+import { Ico } from "@/components/shell/icons";
+import { useD21Phone } from "@/components/shell/page-context";
+import { OrderStatusBadge } from "@/components/OrderLifecyclePanel";
+import { OpsRoot, OpsError, OpsLoading, OpsEmpty, countNoun, ORDER_FORMS, BATCH_FORMS } from "@/components/ops/ui";
+import type { TodayData } from "@/lib/services/dashboard/today";
+import { useUser } from "./user-context";
+import "./home.css";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+/**
+ * «اليوم» — the operations dashboard, rebuilt to the approved Direction 2.1 frames
+ * (Figma 1JbZgpMqmPkUVne8ms9Ozz: Desktop 1440 `20:236`, Compact 1024 `24:842`,
+ * Mobile 390 `34:1405` / `37:1376`).
+ *
+ * Every figure comes from GET /api/dashboard/today (src/lib/services/dashboard/today.ts), which
+ * is read-only and gated by the «dashboard» module like the previous /api/analytics. Blocks of
+ * the frame the application has no source for — sales and collections money, the priority line
+ * (supplier lead time), the roaster timeline (no roaster schedule), the delivery date and value
+ * of an order — are not drawn: no placeholder figures (owner decision, Login/Dashboard parity).
+ */
 
-type InventoryAlert = {
-  id: string; beanType: string; beanTypeAr: string | null;
-  country: string; countryAr: string | null; quantityKg: number;
-};
+type Lang = "ar" | "en";
+const DAY_FORMS: [string, string, string, string, string, string] = ["يوم واحد", "يومان", "أيام", "يومًا", "day", "days"];
+const HOUR_FORMS: [string, string, string, string, string, string] = ["ساعة واحدة", "ساعتان", "ساعات", "ساعة", "hour", "hours"];
 
-type ActiveOrder = {
-  id: string; orderNumber: number;
-  customer: { name: string; nameAr: string | null };
-  items: { productionStatus: string; deliveryStatus: string; quantityKg: number; beanTypeName: string }[];
-};
+const TX = {
+  ar: {
+    title: "اليوم", updated: "آخر تحديث", newOrder: "طلب جديد",
+    roasted: "مُحمّص اليوم", kg: "كغ", loss: "الفاقد",
+    pipeline: "مسار الطلبات", open: "مفتوحًا", onHold: "معلّق",
+    stApproval: "بانتظار الاعتماد", stRoasting: "قيد التحميص", stQc: "بانتظار الجودة", stPacking: "قيد التعبئة", stReady: "جاهز للشحن", stDelivered: "سُلّم اليوم",
+    longest: "أطول انتظار",
+    action: "تحتاج إجراء", oldest: "الأقدم أولًا", allOrders: "كل الطلبات",
+    colOrder: "الطلب", colOrders: "الطلبات", colCustomer: "العميل", colKg: "كغ", colStatus: "الحالة",
+    open1: "فتح", ship: "تأكيد الشحن", review: "مراجعة",
+    noAction: "لا توجد طلبات تنتظر إجراءً الآن.",
+    green: "استمرارية البن الأخضر", greenM: "البن الأخضر", cover: "أيام التغطية بمعدل الاستهلاك", coverM: "أيام التغطية",
+    scale: (d: number, w: number) => `المقياس حتى ${d} يومًا · الاستهلاك بمتوسط آخر ${w} يومًا`,
+    noGreen: "لا يوجد بن أخضر نشط استُهلك في آخر 28 يومًا.",
+    loadFailed: "تعذّر تحميل لوحة اليوم.",
+  },
+  en: {
+    title: "Today", updated: "Updated", newOrder: "New order",
+    roasted: "Roasted today", kg: "kg", loss: "loss",
+    pipeline: "Order pipeline", open: "open", onHold: "on hold",
+    stApproval: "Awaiting approval", stRoasting: "Roasting", stQc: "Awaiting QC", stPacking: "Packing", stReady: "Ready to ship", stDelivered: "Delivered today",
+    longest: "Longest wait",
+    action: "Needs action", oldest: "Oldest first", allOrders: "All orders",
+    colOrder: "Order", colOrders: "Orders", colCustomer: "Customer", colKg: "kg", colStatus: "Status",
+    open1: "Open", ship: "Confirm shipping", review: "Review",
+    noAction: "No orders are waiting on an action right now.",
+    green: "Green coffee continuity", greenM: "Green coffee", cover: "Days of cover at the current usage", coverM: "Days of cover",
+    scale: (d: number, w: number) => `Scale up to ${d} days · usage averaged over the last ${w} days`,
+    noGreen: "No active green coffee was used in the last 28 days.",
+    loadFailed: "Could not load today's dashboard.",
+  },
+} as const;
 
-type QcAlert = {
-  id: string; batchNumber: string; origin: string;
-  testerCount: number; deadline: string | null; isOverdue: boolean; isUrgent: boolean;
-};
+const fmt = (n: number, d = 1) => n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 
-type WeekPoint = { label: string; roastedKg: number; greenKg: number };
-
-type AnalyticsData = {
-  kpi: {
-    currentMonthKg: number; prevMonthKg: number; productionTrend: number | null; batchCount: number;
-    avgLossPct: number | null;
-    qcPassRate: number | null; qcPassCount: number; qcTotalCount: number;
-    rawMaterialKg: number; finishedGoodsKg: number;
-  };
-  weeklyProduction: WeekPoint[];
-  qcBreakdown: { decision: string; count: number }[];
-  pipeline: { pending: number; inProduction: number; readyToDispatch: number };
-  inventoryAlerts: InventoryAlert[];
-  recentActiveOrders: ActiveOrder[];
-  qcBatchAlerts: QcAlert[];
-};
-
-// ─── Brand colors (for Recharts — must use hex) ───────────────────────────────
-
-const C_ORANGE   = "#7C3AED";
-const C_BROWN    = "#6B7280";
-const C_GREEN    = "#22c55e";
-const C_RED      = "#ef4444";
-const C_CREAM    = "#EDE9FE";
-
-// ─── Custom bar tooltip ───────────────────────────────────────────────────────
-
-function BarTooltip({
-  active, payload, label,
-}: {
-  active?: boolean;
-  payload?: { name: string; value: number; color: string }[];
-  label?: string;
-}) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-white border border-border rounded-xl px-3 py-2 shadow-lg text-xs">
-      <p className="font-bold text-charcoal mb-1">{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ color: p.color }} className="font-medium">
-          {p.name}: {p.value} كغ
-        </p>
-      ))}
-    </div>
-  );
+/** Riyadh date and time, Latin digits, Gregorian (the shell's rule). */
+function stamp(iso: string, lang: Lang) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-latn-ca-gregory" : "en-GB", { timeZone: "Asia/Riyadh", weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const time = d.toLocaleTimeString("en-GB", { timeZone: "Asia/Riyadh", hour: "2-digit", minute: "2-digit", hour12: false });
+  return { date, time };
 }
-
-// ─── KPI card ─────────────────────────────────────────────────────────────────
-
-function KpiCard({
-  icon: Icon, iconBg, label, value, unit, sub, trend, trendLabel, children,
-}: {
-  icon: React.ElementType; iconBg: string;
-  label: string; value: string | number; unit?: string;
-  sub?: string; trend?: number | null; trendLabel?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="bg-white rounded-2xl p-5 border border-border hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300 group flex flex-col gap-3">
-      <div className="flex items-start justify-between">
-        <div className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform shrink-0`}>
-          <Icon size={18} className="text-white" />
-        </div>
-        {trend !== undefined && trend !== null && (
-          <div className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
-            trend > 0 ? "bg-green-100 text-green-700" : trend < 0 ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-500"
-          }`}>
-            {trend > 0 ? <ArrowUp size={11} /> : trend < 0 ? <ArrowDown size={11} /> : <Minus size={11} />}
-            {Math.abs(trend)}%
-          </div>
-        )}
-      </div>
-      <div>
-        <p className="text-3xl font-extrabold text-charcoal leading-none tabular-nums">
-          {value}
-          {unit && <span className="text-sm font-semibold text-brown/50 ltr:ml-1 rtl:mr-1">{unit}</span>}
-        </p>
-        <p className="text-xs font-bold text-brown/60 mt-1.5 uppercase tracking-wide">{label}</p>
-        {sub && <p className="text-[11px] text-brown/40 mt-0.5">{sub}</p>}
-        {trendLabel && trend !== null && trend !== undefined && (
-          <p className={`text-[11px] mt-0.5 font-medium ${trend > 0 ? "text-green-600" : trend < 0 ? "text-red-500" : "text-brown/40"}`}>
-            {trendLabel}
-          </p>
-        )}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-// ─── Pipeline pill ────────────────────────────────────────────────────────────
-
-function PipelinePill({ count, label, cls }: { count: number; label: string; cls: string }) {
-  return (
-    <div className={`flex-1 flex flex-col items-center gap-1 py-4 rounded-xl border ${cls}`}>
-      <span className="text-2xl font-extrabold tabular-nums">{count}</span>
-      <span className="text-xs font-semibold text-center leading-tight px-2">{label}</span>
-    </div>
-  );
-}
-
-// ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { t, lang } = useI18n();
+  const { lang: rawLang } = useI18n();
+  const lang: Lang = rawLang === "en" ? "en" : "ar";
+  const t = TX[lang];
+  const user = useUser();
+  const viewer: Viewer | null = user ? { permissions: user.permissions, role: user.role } : null;
+  const can = (href: string) => !!viewer && routeAllowed(viewer, href);
+  const newOrder = viewer ? createActions(viewer, "operations").find((a) => a.id === "orders.order.new") ?? null : null;
 
-  const [data,        setData]        = useState<AnalyticsData | null>(null);
-  const [loading,     setLoading]     = useState(true);
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [mounted,     setMounted]     = useState(false); // defer Recharts until client
+  const [data, setData] = useState<TodayData | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "denied" | "error">("loading");
 
-  useEffect(() => { setMounted(true); }, []);
-
-  const fetchData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true); else setLoading(true);
+  const load = useCallback(async () => {
+    setState("loading");
     try {
-      const res = await fetch("/api/analytics");
-      if (res.ok) {
-        setData(await res.json());
-        setLastUpdated(new Date());
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      const res = await fetch("/api/dashboard/today", { cache: "no-store" });
+      if (res.status === 401 || res.status === 403) { setState("denied"); return; }
+      if (!res.ok) { setState("error"); return; }
+      setData(await res.json());
+      setState("ready");
+    } catch {
+      setState("error");
     }
   }, []);
+  useEffect(() => { load(); }, [load]); // eslint-disable-line react-hooks/set-state-in-effect -- the first load is the page's own fetch
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const when = data ? stamp(data.generatedAt, lang) : null;
+  useD21Phone(when ? { title: t.title, sub: `${when.date} · ${lang === "ar" ? "محدّث" : "updated"} ${when.time}` } : { title: t.title });
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
-  function disp(en: string | null | undefined, ar: string | null | undefined) {
-    return lang === "ar" && ar ? ar : (en ?? "—");
-  }
-
-  function statusColor(s: string) {
-    if (s === "Pending")       return "bg-amber-100 text-amber-700";
-    if (s === "In Production") return "bg-orange/10 text-orange";
-    if (s === "Completed")     return "bg-green-100 text-green-700";
-    return "bg-cream text-brown";
-  }
-
-  function statusLabel(s: string) {
-    if (s === "Pending")       return t("pending");
-    if (s === "In Production") return t("statusInProd");
-    return t("statusCompleted");
-  }
-
-  const kpi          = data?.kpi;
-  const hasChartData = (data?.weeklyProduction?.length ?? 0) > 0;
-  const hasQcData    = (kpi?.qcTotalCount ?? 0) > 0;
-
-  const lossColor =
-    !kpi?.avgLossPct ? "text-charcoal" :
-    kpi.avgLossPct > 20 ? "text-red-600" :
-    kpi.avgLossPct > 14 ? "text-amber-600" : "text-green-600";
-
-  const qcColor =
-    !kpi?.qcPassRate ? "text-charcoal" :
-    kpi.qcPassRate >= 90 ? "text-green-600" :
-    kpi.qcPassRate >= 70 ? "text-amber-600" : "text-red-500";
-
-  const donutData = [
-    { name: t("passLabel"), value: kpi?.qcPassCount ?? 0,                              color: C_GREEN },
-    { name: t("failLabel"), value: (kpi?.qcTotalCount ?? 0) - (kpi?.qcPassCount ?? 0), color: C_RED  },
-  ].filter((d) => d.value > 0);
-
-  if (!loading && !data) {
+  if (state === "denied") {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-center">
-        <Package size={40} className="text-brown/30 mb-3" />
-        <p className="text-lg font-bold text-charcoal">{t("noDashboardAccess")}</p>
-        <p className="text-sm text-brown/60 mt-1">{t("useSidebar")}</p>
-      </div>
+      <OpsRoot>
+        <div className="dh-page" data-testid="dashboard-denied">
+          <OpsEmpty title={lang === "ar" ? "لا يوجد وصول للوحة التحكم" : "No dashboard access"} body={lang === "ar" ? "استخدم القائمة الجانبية للتنقل إلى الوحدات المخصصة لك." : "Use the sidebar to navigate to your assigned modules."} />
+        </div>
+      </OpsRoot>
     );
   }
 
-  return (
-    <div className="space-y-6">
-
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("execDashTitle")}</h1>
-          <p className="text-brown text-sm font-medium">{t("execDashSubtitle")}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {lastUpdated && (
-            <p className="text-xs text-brown/50 hidden sm:block">
-              {t("lastUpdated")}: {lastUpdated.toLocaleTimeString(lang === "ar" ? "ar-SA" : "en-US", { timeStyle: "short" })}
-            </p>
-          )}
-          <button
-            onClick={() => fetchData(true)}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2 bg-white border-2 border-border rounded-xl text-sm font-bold text-brown hover:border-orange hover:text-orange transition-all disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-            {t("refreshData")}
-          </button>
+  const head = (
+    <div className="dh-head">
+      <div>
+        <h1>{t.title}</h1>
+        <div className="dh-meta" data-testid="dash-meta">
+          {/* PageHeader meta (I101:7003;41:242): date • branch • last updated. The branch segment is
+              left out: the application has no configured site / branch to name (no fabrication). */}
+          {when ? <><span>{when.date}</span><i aria-hidden /><span>{t.updated} <span className="hr-num">{when.time}</span></span></> : <span>&nbsp;</span>}
         </div>
       </div>
-
-      {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-
-        {/* Production This Month */}
-        <KpiCard
-          icon={Factory} iconBg="bg-orange"
-          label={t("productionThisMonth")}
-          value={loading ? "—" : (kpi?.currentMonthKg.toFixed(1) ?? "0")}
-          unit={t("kgUnit")}
-          sub={loading ? "" : `${kpi?.batchCount ?? 0} ${t("batchesCount")}`}
-          trend={kpi?.productionTrend}
-          trendLabel={t("vsLastMonth")}
-        />
-
-        {/* Avg Roast Loss */}
-        <KpiCard
-          icon={TrendingDown} iconBg="bg-brown"
-          label={t("avgRoastLoss")}
-          value={loading ? "—" : (kpi?.avgLossPct != null ? kpi.avgLossPct.toFixed(1) : "—")}
-          unit={kpi?.avgLossPct != null ? "%" : ""}
-          sub={t("last30Days")}
-        >
-          {!loading && kpi?.avgLossPct != null && (
-            <div className="mt-auto space-y-1">
-              <div className="w-full bg-cream rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-1.5 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${Math.min(kpi.avgLossPct * 3.5, 100)}%`,
-                    backgroundColor: kpi.avgLossPct > 20 ? C_RED : kpi.avgLossPct > 14 ? "#f59e0b" : C_GREEN,
-                  }}
-                />
-              </div>
-              <p className={`text-[11px] font-bold ${lossColor}`}>
-                {kpi.avgLossPct <= 14 ? "ضمن الحد المقبول" : kpi.avgLossPct <= 20 ? "مرتفع قليلاً" : "مرتفع — مراجعة مطلوبة"}
-              </p>
-            </div>
-          )}
-        </KpiCard>
-
-        {/* QC Pass Rate */}
-        <KpiCard
-          icon={CheckCircle2} iconBg="bg-green-600"
-          label={t("qcPassRateLabel")}
-          value={loading ? "—" : (kpi?.qcPassRate != null ? kpi.qcPassRate.toFixed(0) : "—")}
-          unit={kpi?.qcPassRate != null ? "%" : ""}
-          sub={loading ? "" : `${kpi?.qcPassCount ?? 0} / ${kpi?.qcTotalCount ?? 0} ${t("qcRecordsCount")}`}
-        >
-          {!loading && kpi?.qcPassRate != null && (
-            <div className="mt-auto space-y-1">
-              <div className="w-full bg-cream rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-1.5 rounded-full transition-all duration-700"
-                  style={{
-                    width: `${kpi.qcPassRate}%`,
-                    backgroundColor: kpi.qcPassRate >= 90 ? C_GREEN : kpi.qcPassRate >= 70 ? "#f59e0b" : C_RED,
-                  }}
-                />
-              </div>
-              <p className={`text-[11px] font-bold ${qcColor}`}>
-                {kpi.qcPassRate >= 90 ? "ممتاز" : kpi.qcPassRate >= 70 ? "مقبول" : "يحتاج تحسين"}
-              </p>
-            </div>
-          )}
-        </KpiCard>
-
-        {/* Inventory Weight */}
-        <KpiCard
-          icon={Layers} iconBg="bg-charcoal"
-          label={t("inventoryWeightLabel")}
-          value={loading ? "—" : ((kpi?.rawMaterialKg ?? 0) + (kpi?.finishedGoodsKg ?? 0)).toFixed(1)}
-          unit={t("kgUnit")}
-        >
-          {!loading && kpi && (
-            <div className="mt-auto space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-brown/60 font-medium">{t("rawLabel")}</span>
-                <span className="font-bold text-charcoal font-mono">{kpi.rawMaterialKg.toFixed(1)} {t("kgUnit")}</span>
-              </div>
-              <div className="w-full bg-cream rounded-full h-1.5 overflow-hidden">
-                {kpi.rawMaterialKg + kpi.finishedGoodsKg > 0 && (
-                  <div
-                    className="h-1.5 rounded-full bg-brown transition-all duration-700"
-                    style={{ width: `${(kpi.rawMaterialKg / (kpi.rawMaterialKg + kpi.finishedGoodsKg)) * 100}%` }}
-                  />
-                )}
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-brown/60 font-medium">{t("finishedLabel")}</span>
-                <span className="font-bold text-green-600 font-mono">{kpi.finishedGoodsKg.toFixed(1)} {t("kgUnit")}</span>
-              </div>
-            </div>
-          )}
-        </KpiCard>
-      </div>
-
-      {/* ── Charts ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Bar chart — weekly production */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-border p-5">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="font-extrabold text-charcoal">{t("weeklyProdChart")}</h3>
-              <p className="text-xs text-brown/50 mt-0.5">
-                {t("greenInput")} vs {t("roastedInput")}
-              </p>
-            </div>
-            <BarChart2 size={18} className="text-brown/30" />
-          </div>
-
-          {loading ? (
-            <div className="h-52 bg-cream/60 rounded-xl animate-pulse" />
-          ) : !hasChartData ? (
-            <div className="h-52 flex flex-col items-center justify-center text-brown/40">
-              <BarChart2 size={36} className="mb-2" />
-              <p className="text-sm">{t("noChartData")}</p>
-            </div>
-          ) : mounted ? (
-            <>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={data!.weeklyProduction} barGap={2} barSize={12} margin={{ left: -10, right: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={C_CREAM} vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: C_BROWN }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: C_BROWN }} axisLine={false} tickLine={false} width={36} />
-                  <Tooltip content={<BarTooltip />} cursor={{ fill: C_CREAM }} />
-                  <Bar dataKey="greenKg"   name={t("greenInput")}   fill={C_BROWN}  radius={[4, 4, 0, 0]} opacity={0.55} />
-                  <Bar dataKey="roastedKg" name={t("roastedInput")} fill={C_ORANGE} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="flex items-center gap-5 justify-center mt-2">
-                <span className="flex items-center gap-1.5 text-xs text-brown/70">
-                  <span className="w-3 h-3 rounded-sm inline-block opacity-55" style={{ backgroundColor: C_BROWN }} />
-                  {t("greenInput")}
-                </span>
-                <span className="flex items-center gap-1.5 text-xs text-brown/70">
-                  <span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: C_ORANGE }} />
-                  {t("roastedInput")}
-                </span>
-              </div>
-            </>
-          ) : (
-            <div className="h-52 bg-cream/30 rounded-xl" />
-          )}
+      {newOrder ? (
+        <div className="dh-actions">
+          <Link href={newOrder.href} className="hr-btn is-primary" data-testid="dash-new-order"><Ico name="plus" small />{t.newOrder}</Link>
         </div>
-
-        {/* Donut — QC breakdown */}
-        <div className="bg-white rounded-2xl border border-border p-5 flex flex-col">
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="font-extrabold text-charcoal">{t("qcBreakdownChart")}</h3>
-            <CheckCircle2 size={18} className="text-brown/30" />
-          </div>
-
-          {loading ? (
-            <div className="flex-1 min-h-[180px] bg-cream/60 rounded-xl animate-pulse" />
-          ) : !hasQcData ? (
-            <div className="flex-1 min-h-[180px] flex flex-col items-center justify-center text-brown/40">
-              <CheckCircle2 size={36} className="mb-2" />
-              <p className="text-sm text-center">{t("noChartData")}</p>
-            </div>
-          ) : mounted ? (
-            <>
-              <div className="relative">
-                <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
-                    <Pie
-                      data={donutData}
-                      cx="50%" cy="50%"
-                      innerRadius={50} outerRadius={76}
-                      paddingAngle={donutData.length > 1 ? 3 : 0}
-                      dataKey="value"
-                      strokeWidth={0}
-                    >
-                      {donutData.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(val, name) => [`${val} ${t("qcRecordsCount")}`, name]}
-                      contentStyle={{ borderRadius: "12px", border: "1px solid #e5e7eb", fontSize: 12 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                {/* Center label overlay */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <p className={`text-2xl font-extrabold ${qcColor}`}>
-                    {kpi?.qcPassRate?.toFixed(0)}%
-                  </p>
-                  <p className="text-[10px] text-brown/50 font-semibold">{t("passLabel")}</p>
-                </div>
-              </div>
-              <div className="flex justify-center gap-5 mt-3">
-                {donutData.map((d) => (
-                  <div key={d.name} className="flex items-center gap-1.5 text-xs text-brown/70">
-                    <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: d.color }} />
-                    <span className="font-medium">{d.name}</span>
-                    <span className="font-bold text-charcoal">{d.value}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 min-h-[180px] bg-cream/30 rounded-xl" />
-          )}
-        </div>
-      </div>
-
-      {/* ── Pipeline strip ── */}
-      {data?.pipeline && (
-        <div className="bg-white rounded-2xl border border-border p-5">
-          <h3 className="font-extrabold text-charcoal mb-4">{t("pipelineTitle")}</h3>
-          <div className="flex gap-3">
-            <PipelinePill count={data.pipeline.pending}         label={t("pendingProd")}   cls="bg-amber-50 text-amber-800 border-amber-200" />
-            <PipelinePill count={data.pipeline.inProduction}    label={t("statusInProd")}  cls="bg-orange/8 text-orange border-orange/20" />
-            <PipelinePill count={data.pipeline.readyToDispatch} label={t("readyDispatch")} cls="bg-green-50 text-green-800 border-green-200" />
-          </div>
-        </div>
-      )}
-
-      {/* ── Bottom: Active orders + alerts ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-        {/* Active Orders */}
-        <div className="bg-white rounded-2xl border border-border p-5">
-          <h3 className="font-extrabold text-charcoal mb-4">{t("activeOrdersTitle")}</h3>
-          {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => <div key={i} className="h-14 bg-cream/60 animate-pulse rounded-xl" />)}
-            </div>
-          ) : !data?.recentActiveOrders.length ? (
-            <div className="flex flex-col items-center py-8 text-center">
-              <CheckCircle2 size={28} className="text-green-400 mb-2" />
-              <p className="text-sm font-semibold text-brown/60">{t("noActiveOrders")}</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {data.recentActiveOrders.map((order) => {
-                const totalKg  = order.items.reduce((s, i) => s + i.quantityKg, 0);
-                const counts   = order.items.reduce<Record<string, number>>((acc, i) => {
-                  acc[i.productionStatus] = (acc[i.productionStatus] ?? 0) + 1; return acc;
-                }, {});
-                const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Pending";
-                return (
-                  <div key={order.id} className="flex items-center justify-between p-3 bg-cream/50 rounded-xl border border-border">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-charcoal truncate">
-                        #{order.orderNumber} — {disp(order.customer.name, order.customer.nameAr)}
-                      </p>
-                      <p className="text-xs text-brown/50 font-medium">
-                        {totalKg} {t("kgUnit")} · {order.items.length} {t("itemsTotal")}
-                      </p>
-                    </div>
-                    <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-lg ltr:ml-2 rtl:mr-2 ${statusColor(dominant)}`}>
-                      {statusLabel(dominant)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Right column: low stock + QC alerts */}
-        <div className="space-y-4">
-
-          {/* Low stock alerts */}
-          {(data?.inventoryAlerts?.length ?? 0) > 0 && (
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle size={16} className="text-amber-500" />
-                <h3 className="font-extrabold text-charcoal">{t("inventoryAlertsTitle")}</h3>
-                <span className="ltr:ml-auto rtl:mr-auto text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                  {data!.inventoryAlerts.length}
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {data!.inventoryAlerts.slice(0, 5).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between text-sm px-3 py-2 bg-amber-50/50 rounded-xl">
-                    <span className="font-medium truncate">{disp(a.beanType, a.beanTypeAr)}</span>
-                    <span className={`font-bold font-mono shrink-0 ltr:ml-2 rtl:mr-2 ${a.quantityKg < 20 ? "text-red-600" : "text-amber-600"}`}>
-                      {a.quantityKg.toFixed(1)} {t("kgUnit")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* QC batch alerts */}
-          {(data?.qcBatchAlerts?.length ?? 0) > 0 && (
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Clock size={16} className="text-orange" />
-                <h3 className="font-extrabold text-charcoal">{t("openQcBatches")}</h3>
-                <span className="ltr:ml-auto rtl:mr-auto text-xs font-bold bg-orange/10 text-orange px-2 py-0.5 rounded-full">
-                  {data!.qcBatchAlerts.length}
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {data!.qcBatchAlerts.slice(0, 5).map((b) => (
-                  <div key={b.id} className={`flex items-center justify-between text-sm px-3 py-2 rounded-xl border ${
-                    b.isOverdue ? "bg-red-50 border-red-200" : b.isUrgent ? "bg-amber-50 border-amber-200" : "bg-cream/50 border-border"
-                  }`}>
-                    <div className="min-w-0">
-                      <p className="font-bold text-charcoal font-mono">{b.batchNumber}</p>
-                      <p className="text-xs text-brown/50">
-                        {b.origin} · {b.testerCount} {b.testerCount !== 1 ? t("testers") : t("tester")}
-                      </p>
-                    </div>
-                    <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-lg ltr:ml-2 rtl:mr-2 ${
-                      b.isOverdue ? "bg-red-100 text-red-700" : b.isUrgent ? "bg-amber-100 text-amber-700" : "bg-cream text-brown"
-                    }`}>
-                      {b.isOverdue ? t("overdue") : b.isUrgent ? t("dueSoon") : t("pending")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      ) : null}
     </div>
+  );
+
+  if (state === "error") {
+    return <OpsRoot><div className="dh-page">{head}<div style={{ marginTop: 24 }}><OpsError message={t.loadFailed} onRetry={load} /></div></div></OpsRoot>;
+  }
+  if (state === "loading" || !data) {
+    return <OpsRoot><div className="dh-page">{head}<div style={{ marginTop: 24 }}><OpsLoading rows={8} /></div></div></OpsRoot>;
+  }
+
+  const p = data.pipeline;
+  const stages: { key: string; n: number; label: string; warn?: boolean; sub?: string }[] = [
+    { key: "approval", n: p.approval, label: t.stApproval },
+    { key: "roasting", n: p.roasting, label: t.stRoasting },
+    { key: "qc", n: p.qc, label: t.stQc, warn: p.qcOverdue, sub: p.qcLongestHours !== null ? `${t.longest} ${countNoun(p.qcLongestHours, lang, HOUR_FORMS)}` : undefined },
+    { key: "packing", n: p.packing, label: t.stPacking },
+    { key: "ready", n: p.ready, label: t.stReady },
+    { key: "delivered", n: p.deliveredToday, label: t.stDelivered },
+  ];
+  const openText = lang === "ar" ? `${countNoun(p.open, "ar", ORDER_FORMS)} ${p.open === 1 ? "مفتوح" : p.open === 2 ? "مفتوحان" : t.open}` : `${p.open} ${t.open}`;
+  const holdText = p.onHold > 0 ? ` · ${p.onHold} ${t.onHold}` : "";
+
+  const actionFor = (stage: string): { label: string; href: string } => {
+    if (stage === "ready") return { label: t.ship, href: "/dashboard/dispatch" };
+    if (stage === "approval") return { label: t.review, href: "/dashboard/orders" };
+    return { label: t.open1, href: "/dashboard/orders" };
+  };
+  const na = data.needsAction;
+  const name = (c: { name: string; nameAr: string | null }) => (lang === "ar" && c.nameAr ? c.nameAr : c.name);
+  const r = data.roasted;
+
+  return (
+    <OpsRoot>
+      <div className="dh-page" data-testid="dashboard-today">
+        {head}
+
+        {/* MetricStrip 101:6845 — only the metric with a source: roasted today (42:8). */}
+        <div className="dh-metrics" data-testid="dash-metrics">
+          <div className="dh-metric" data-testid="metric-roasted">
+            <span className="dh-mlabel">{t.roasted}</span>
+            <span className="dh-mvalue"><b>{fmt(r.kg)}</b><small>{t.kg}</small></span>
+            <span className="dh-mcap">
+              {countNoun(r.batches, lang, BATCH_FORMS)}{r.lossPct !== null ? <> · {t.loss} <span className="hr-num">{fmt(r.lossPct)}%</span></> : null}
+            </span>
+          </div>
+        </div>
+
+        {/* Order pipeline 20:300 / 20:303. */}
+        <div className="dh-block dh-pipehead">
+          <h2>{t.pipeline}</h2>
+          <p data-testid="pipe-open">{openText}{holdText}</p>
+        </div>
+        <ol className="dh-pipe" data-testid="dash-pipeline">
+          {stages.map((s) => (
+            <li key={s.key} className={`dh-stage${s.warn ? " is-warning" : ""}`} data-testid={`stage-${s.key}`}>
+              <b>{s.n}</b>
+              <span>{s.label}{s.sub ? <small>{s.sub}</small> : null}</span>
+            </li>
+          ))}
+        </ol>
+
+        <hr className="dh-divider" />
+
+        <div className="dh-cols">
+          {/* «تحتاج إجراء» 20:460 (desktop table) / 37:1376 (phone list). */}
+          <section className="dh-col" aria-labelledby="dh-action-h" data-testid="dash-actions">
+            <div className="dh-block">
+              <h2 id="dh-action-h">{t.action}</h2>
+              <p data-testid="action-total">{`${data.needsAction.total} · ${t.oldest}`}</p>
+              {can("/dashboard/orders") ? <Link href="/dashboard/orders" className="dh-lk">{t.allOrders}<Ico name="chev" small /></Link> : null}
+            </div>
+            {na.rows.length === 0 ? <p className="dh-empty">{t.noAction}</p> : na.detail ? (
+              <>
+                <table className="dh-table" data-detail="customer">
+                  <thead>
+                    <tr><th>{t.colOrder}</th><th>{t.colCustomer}</th><th className="num">{t.colKg}</th><th>{t.colStatus}</th><th aria-label={lang === "ar" ? "إجراء" : "Action"} /></tr>
+                  </thead>
+                  <tbody>
+                    {na.rows.map((o) => {
+                      const a = actionFor(o.stage);
+                      return (
+                        <tr key={o.id} data-testid={`action-row-${o.orderNumber}`}>
+                          <td className="id">#{o.orderNumber}</td>
+                          <td className="who">{name(o.customer)}</td>
+                          <td className="num">{fmt(o.kg, o.kg % 1 ? 1 : 0)}</td>
+                          <td><OrderStatusBadge status={o.status} /></td>
+                          <td>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <ul className="dh-list" data-detail="customer">
+                  {na.rows.map((o) => {
+                    const a = actionFor(o.stage);
+                    return (
+                      <li key={o.id}>
+                        <div className="l1"><span><span className="id">#{o.orderNumber}</span><span className="who">{name(o.customer)}</span></span><OrderStatusBadge status={o.status} /></div>
+                        <div className="l2"><span><span className="hr-num">{fmt(o.kg, o.kg % 1 ? 1 : 0)}</span> {t.kg}</span>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : (
+              /* Owner decision F4: without a customer-detail right the server sends one
+                 aggregate row per status (orders, kg) — no order numbers, no customers.
+                 Figma 20:460 has no masked state, so the customer column is omitted and
+                 the order column carries the order count. */
+              <>
+                <table className="dh-table" data-detail="aggregate">
+                  <thead>
+                    <tr><th>{t.colOrders}</th><th className="num">{t.colKg}</th><th>{t.colStatus}</th><th aria-label={lang === "ar" ? "إجراء" : "Action"} /></tr>
+                  </thead>
+                  <tbody>
+                    {na.rows.map((g) => {
+                      const a = actionFor(g.stage);
+                      return (
+                        <tr key={g.status} data-testid={`action-group-${g.status}`}>
+                          <td className="cnt">{countNoun(g.orders, lang, ORDER_FORMS)}</td>
+                          <td className="num">{fmt(g.kg, g.kg % 1 ? 1 : 0)}</td>
+                          <td><OrderStatusBadge status={g.status} /></td>
+                          <td>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <ul className="dh-list" data-detail="aggregate">
+                  {na.rows.map((g) => {
+                    const a = actionFor(g.stage);
+                    return (
+                      <li key={g.status}>
+                        <div className="l1"><span><span className="cnt">{countNoun(g.orders, lang, ORDER_FORMS)}</span></span><OrderStatusBadge status={g.status} /></div>
+                        <div className="l2"><span><span className="hr-num">{fmt(g.kg, g.kg % 1 ? 1 : 0)}</span> {t.kg}</span>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+          </section>
+
+          {/* «استمرارية البن الأخضر» 20:416 — days of cover; the supplier lead-time marker has no source. */}
+          <section className="dh-col" aria-labelledby="dh-green-h" data-testid="dash-green">
+            <div className="dh-block">
+              <h2 id="dh-green-h">{t.green}</h2>
+              <p>{t.cover}</p>
+            </div>
+            {data.green.rows.length === 0 ? <p className="dh-empty">{t.noGreen}</p> : (
+              <>
+                <ul className="dh-green">
+                  {data.green.rows.map((g) => (
+                    <li key={g.id} data-testid="green-row">
+                      <span className="dh-gname" title={lang === "ar" && g.nameAr ? g.nameAr : g.name}>{lang === "ar" && g.nameAr ? g.nameAr : g.name}</span>
+                      <span className="dh-gkg"><bdi dir="ltr"><span className="hr-num">{fmt(g.kg, g.kg % 1 ? 1 : 0)}</span></bdi> {t.kg}</span>
+                      <span className="dh-track" role="img" aria-label={countNoun(g.days, lang, DAY_FORMS)}><i style={{ width: `${Math.min(100, (g.days / data.green.scaleDays) * 100)}%` }} /></span>
+                      <span className="dh-gdays">{countNoun(g.days, lang, DAY_FORMS)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="dh-legend">{t.scale(data.green.scaleDays, data.green.windowDays)}</p>
+              </>
+            )}
+          </section>
+        </div>
+      </div>
+    </OpsRoot>
   );
 }

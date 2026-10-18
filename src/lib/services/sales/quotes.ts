@@ -1,5 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
-import { Decimal, ZERO, roundMoney } from "../commissions/engine";
+import { Decimal, ZERO, roundMoney, parseFiniteDecimal } from "../commissions/engine";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
 
 type Tx = PrismaNS.TransactionClient;
@@ -137,11 +137,10 @@ export function parseLineInputs(raw: unknown[]): LineInput[] {
         if (fallback !== undefined) return new Decimal(fallback);
         throw { _appCode: 400, message: `Line ${i + 1}: ${field} is required.` };
       }
-      try {
-        return new Decimal(String(v));
-      } catch {
-        throw { _appCode: 400, message: `Line ${i + 1}: ${field} is not a number.` };
-      }
+      // Finite decimals only: a NaN line passed every range check below and persisted NaN totals.
+      const d = parseFiniteDecimal(v);
+      if (!d) throw { _appCode: 400, message: `Line ${i + 1}: ${field} is not a number.` };
+      return d;
     };
 
     return {
@@ -424,7 +423,7 @@ export async function saveQuoteLines(
  */
 export async function issueQuote(
   tx: Tx,
-  input: { quoteId: string; actorId: string; canApproveDiscount: boolean; at?: Date },
+  input: { quoteId: string; actorId: string; canApproveDiscount: boolean; at?: Date; onDiscountApproval?: () => Promise<void> },
 ): Promise<{ quoteNumber: string; grandTotal: Decimal; discountApproved: boolean }> {
   const at = input.at ?? new Date();
 
@@ -486,6 +485,9 @@ export async function issueQuote(
           "A manager with discount approval must issue it.",
       };
     }
+    // The approval is the exercise of a privileged permission: the caller's gate (verified
+    // individual + step-up, SOD.md §19) runs exactly here, and only when it is needed.
+    if (input.onDiscountApproval) await input.onDiscountApproval();
     discountApproved = true;
   }
 

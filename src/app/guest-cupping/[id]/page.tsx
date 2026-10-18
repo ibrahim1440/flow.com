@@ -46,8 +46,11 @@ export default function GuestCuppingPage({ params }: { params: Promise<{ id: str
       body: JSON.stringify({ ...data, externalName: name }),
     });
     if (!res.ok) {
-      const j = await res.json();
-      setSubmitError(j.error || "Failed to submit score");
+      const j = await res.json().catch(() => ({}));
+      // E6 / C-3: one score per guest name per session (server-side guard).
+      setSubmitError(j.code === "CUPPING_ALREADY_SCORED"
+        ? "قيّمت هذه الجلسة مسبقًا بهذا الاسم — You have already scored this session under this name."
+        : j.error || "Failed to submit score");
       setSubmitting(false);
       return;
     }
@@ -168,6 +171,7 @@ export default function GuestCuppingPage({ params }: { params: Promise<{ id: str
           </div>
         )}
         <CuppingForm
+          lang="en"
           onSubmit={handleSubmit}
           submitting={submitting}
           submitLabel="Submit My Score"

@@ -1,0 +1,149 @@
+/*
+ * Sign-in (AU-01) — Direction 2.1, Figma 1JbZgpMqmPkUVne8ms9Ozz:
+ *   AU-01 · 1440 `517:2745`, AU-01 · 1024 `517:2806`, M-01 · 390 `519:3063`;
+ *   states AU-01b `517:2861` (wrong credentials), AU-10 `517:2977` (attempts paused),
+ *   AU-11 `518:2841` (no connection), AU-01s `518:2973` (password shown), AU-01p `518:3085`
+ *   (verifying); PIN pad TD-13b `555:4495` (dots 555:4524, keys 555:4531).
+ * Tokens are the shared Direction 2.1 ones (`components/shell/direction-2.1.css`, `.d21`);
+ * nothing here defines a colour. Physical left/right in the RTL frames are written as logical
+ * properties so the English (LTR) page mirrors.
+ */
+.d21-login { position: relative; background: var(--surface); min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 792fr) minmax(0, 648fr); }
+
+/* ── Brand panel (517:2793 / 517:2848): 16 px inset, Olive, radius/lg 14 ── */
+.lg-brand { padding: 16px; height: 100dvh; position: sticky; top: 0; }
+.lg-panel { position: relative; height: 100%; border-radius: 14px; background: var(--brand-surface); overflow: hidden; }
+.lg-ring { position: absolute; border: 1px solid var(--brand-line); border-radius: 50%; }
+.lg-ring.r1 { width: 640px; height: 640px; inset-inline-end: -200px; top: 240px; }
+.lg-ring.r2 { width: 400px; height: 400px; inset-inline-end: -80px; top: 360px; }
+.lg-node { position: absolute; width: 12px; height: 12px; border-radius: 6px; background: var(--brand-surface); border: 2px solid var(--brand-signature); inset-inline-end: 340px; top: 328px; }
+/* The official mark slot (517:2799, «official mark pending»): dashed Sand Beige frame and ring,
+   or the logo configured in Settings when there is one. */
+.lg-mark { position: absolute; inset-inline-start: 56px; top: 56px; width: 72px; height: 72px; border-radius: 18px; border: 1px dashed var(--brand-on-surface-soft); display: grid; place-items: center; overflow: hidden; }
+.lg-mark::after { content: ""; width: 16px; height: 16px; border-radius: 8px; border: 1px solid var(--brand-on-surface-soft); box-sizing: border-box; }
+.lg-mark.has-logo { border: 0; background: var(--surface); }
+.lg-mark.has-logo::after { display: none; }
+.lg-mark img { width: 100%; height: 100%; object-fit: contain; padding: 6px; }
+.lg-moment { position: absolute; inset-inline-start: 56px; bottom: 56px; width: 440px; max-width: calc(100% - 112px); text-align: start; }
+/* Brand/Moment: Amiri Bold 44/63.8 (517:2803); the rule 40×1 Sand Beige, then UI/Body. */
+.lg-moment p.q { margin: 0 0 19.6px; font: 700 44px/63.8px "Amiri", var(--f-ui); color: var(--brand-on-surface); }
+.lg-moment i { display: block; width: 40px; height: 1px; background: var(--brand-on-surface-soft); margin-bottom: 12px; }
+.lg-moment span { display: block; font: 400 14px/22px var(--f-ui); color: var(--brand-on-surface-soft); }
+
+/* ── Form column (517:2746): the 360 px form centred between 48 px and the 868 px footer line ── */
+.lg-col { position: relative; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px 32px; }
+.lg-col > .desk-notice { width: 360px; max-width: 100%; }
+/* With the narrow-screen notice in the stack, keep the absolutely placed footer clear of the form
+   (it is static on the phone). Only while the notice is shown — never at ≥ 1280 px. */
+@media (min-width: 768px) { .lg-col:has(> .desk-notice) { padding-bottom: 96px; } }
+.lg-form { width: 360px; max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.lg-form > * { width: 100%; }
+.lg-head { display: flex; flex-direction: column; gap: 6px; text-align: start; }
+.lg-head h1 { margin: 0; font: 600 28px/35px var(--f-ui); color: var(--text-primary); }  /* UI/Page title */
+.lg-head p { margin: 0; font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); } /* UI/Body S */
+.lg-foot { position: absolute; bottom: 32px; inset-inline: 0; margin: 0 auto; width: 360px; max-width: calc(100% - 48px); min-height: 40px; font: 400 12.5px/20px var(--f-ui); color: var(--text-muted); text-align: center; }
+.lg-langbar { position: absolute; top: 16px; inset-inline-end: 16px; z-index: 3; }
+
+/* Segmented (direction.css .seg): the three ways in. */
+.lg-seg { display: flex; padding: 3px; border-radius: 10px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.lg-seg button { flex: 1 1 auto; min-width: 0; appearance: none; border: 0; background: none; cursor: pointer; padding: 5px 8px; border-radius: 7px; font: 400 13px/22px var(--f-ui); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-seg button:hover { color: var(--text-primary); }
+.lg-seg button[aria-selected="true"] { background: var(--surface); color: var(--text-primary); font-weight: 500; box-shadow: var(--shadow-sheet); }
+
+/* Fields (517:2752): 14 px between fields, label UI/Caption Medium 13/22, 6 px to the Input. */
+.lg-fields { display: flex; flex-direction: column; gap: 14px; }
+.lg-field { display: flex; flex-direction: column; gap: 6px; }
+.lg-field > label { font: 500 13px/22px var(--f-ui); color: var(--text-primary); text-align: start; }
+/* Input 12:83: 36 px, 1 px control border, radius/md 9, 11 px inset; value Number/Body 14/22. */
+.lg-input { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; border: 1px solid var(--border-control); border-radius: 9px; background: var(--surface); }
+.lg-input:focus-within { border: 1.5px solid var(--focus-ring); padding: 0 10.5px; box-shadow: 0 0 0 3px var(--surface-selected); }
+.lg-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; padding: 0; height: 100%; font: 400 14px/22px var(--f-num); color: var(--text-primary); }
+.lg-input input::placeholder { color: var(--text-disabled); }
+.d21-login[dir="rtl"] .lg-input input[dir="ltr"] { text-align: right; }
+.lg-input .lg-show { appearance: none; border: 0; background: none; padding: 0; cursor: pointer; font: 400 13px/22px var(--f-ui); color: var(--text-muted); flex: none; }
+.lg-input .lg-show:hover { color: var(--text-primary); }
+/* Disabled (AU-10 517:2989): neutral surface, disabled border, disabled text. */
+.lg-input.is-disabled { background: var(--surface-disabled); border-color: var(--border-disabled); }
+.lg-input.is-disabled input { color: var(--text-disabled); }
+.lg-input :focus-visible { outline: none; }
+
+/* Button 7:114 at 40 px (517:2777) and Button/Small 7:227 (517:2784). */
+.lg-btn { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 14px; border-radius: 9px; border: 0; background: var(--brand-surface); color: var(--text-inverse); font: 500 13.5px/22px var(--f-ui); cursor: pointer; transition: transform 0.12s var(--ease), background-color 0.15s var(--ease); white-space: nowrap; }
+.lg-btn:hover:not(:disabled) { background: var(--action-primary-hover); }
+.lg-btn:active:not(:disabled) { transform: scale(0.97); }
+.lg-btn:disabled { background: var(--surface-disabled); color: var(--text-disabled); box-shadow: inset 0 0 0 1px var(--border-disabled); cursor: not-allowed; }
+.lg-btn:focus-visible, .lg-sbtn:focus-visible, .lg-key:focus-visible, .lg-seg button:focus-visible, .lg-show:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.lg-sbtn { appearance: none; align-self: center; width: auto !important; display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px; border-radius: 7px; border: 0; background: none; font: 500 12.5px/18px var(--f-ui); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.lg-sbtn:hover { background: var(--surface-hover); }
+.lg-langbar .lg-sbtn { color: var(--text-secondary); }
+/* AU-01p: the Sukun spinner beside the disabled button (22 px, 2 px track, Clay arc). */
+.lg-busyrow { display: flex; align-items: center; gap: 5.5px; }
+.lg-busyrow .lg-btn { flex: 1; }
+.lg-sukun { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-subtle); border-top-color: var(--brand-signature); flex: none; animation: lg-spin 0.9s linear infinite; }
+@keyframes lg-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lg-sukun { animation: none; } .lg-btn { transition: none; } }
+
+/* Notices (517:2861 / 517:2977 / 518:2841): radius 10, 12×14 inset, title UI/Body Strong 14/22,
+   body UI/Body S 13.5/22 secondary. Danger titles are danger; warning titles stay primary. */
+.lg-note { border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2.5px; text-align: start; }
+.lg-note-txt { display: flex; flex-direction: column; gap: 2.5px; min-width: 0; }
+/* AU-11 (518:2841): an 18 px danger glyph on the inline-start, 10 px from the text. */
+.lg-note.has-icon { flex-direction: row; align-items: flex-start; gap: 10px; }
+.lg-note-ico { width: 18px; height: 18px; flex: none; color: var(--status-danger); stroke-width: 1.5; margin-top: 2px; }
+.lg-note b { font: 600 14px/22px var(--f-ui); }
+.lg-note span { font: 400 13.5px/22px var(--f-ui); color: var(--text-secondary); }
+.lg-note.tone-danger { background: var(--status-danger-tint); }
+.lg-note.tone-danger b { color: var(--status-danger); }
+.lg-note.tone-warning { background: var(--status-warning-tint); }
+.lg-note.tone-warning b { color: var(--text-primary); }
+.lg-note.tone-info { background: var(--surface-subtle); }
+.lg-note.tone-info b { color: var(--text-primary); }
+
+/* PIN pad (TD-13b 555:4522): label, six 14 px dots 14 apart, 88×56 keys 12 apart, «حذف». */
+.lg-pin { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+/* TD-13b 555:4523: UI/Body S 13.5/22 secondary, centred over the dots. */
+.lg-pinlabel { width: 100%; text-align: center; font: 400 13.5px/22px var(--f-ui); color: var(--text-secondary); }
+.lg-dots { display: flex; gap: 14px; height: 14px; }
+.lg-dots i { width: 14px; height: 14px; border-radius: 7px; box-sizing: border-box; border: 1.5px solid var(--border-control); }
+.lg-dots i.on { background: var(--action-primary); border-color: var(--action-primary); }
+.lg-keypad { display: grid; grid-template-columns: repeat(3, 88px); gap: 12px; }
+.lg-key { appearance: none; width: 88px; height: 56px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-primary); font: 400 22px/22px var(--f-num); cursor: pointer; display: grid; place-items: center; transition: transform 0.12s var(--ease), background-color 0.15s var(--ease); }
+.lg-key:hover:not(:disabled) { background: var(--surface-hover); }
+.lg-key:active:not(:disabled) { transform: scale(0.97); }
+.lg-key.is-text { border: 0; background: none; font: 400 13.5px/22px var(--f-ui); color: var(--text-secondary); place-items: start center; padding-top: 0; }
+.lg-key:disabled { cursor: default; }
+.lg-key.is-text:disabled { color: var(--text-disabled); }
+.lg-key-gap { width: 88px; height: 56px; }
+
+/* ── Compact (517:2806): 480 / 544 columns; the panel's art at the 1024 positions ── */
+@media (max-width: 1279px) {
+  .d21-login { grid-template-columns: minmax(0, 544fr) minmax(0, 480fr); }
+  .lg-ring.r1 { width: 520px; height: 520px; inset-inline-end: -220px; top: 340px; }
+  .lg-ring.r2 { width: 320px; height: 320px; inset-inline-end: -120px; top: 440px; }
+  .lg-node { width: 10px; height: 10px; border-radius: 5px; inset-inline-end: 219px; top: 411px; }
+  .lg-mark { inset-inline-start: 40px; top: 40px; width: 64px; height: 64px; }
+  .lg-moment { inset-inline-start: 40px; bottom: 40px; width: 360px; max-width: calc(100% - 80px); }
+  .lg-moment p.q { font-size: 36px; line-height: 52.2px; margin-bottom: 20px; }
+}
+
+/* ── Phone (M-01 519:3063): Olive header with the mark and the system name, then the sheet ── */
+@media (max-width: 767px) {
+  .d21-login { display: flex; flex-direction: column; background: var(--brand-surface); }
+  .lg-brand { order: 0; position: relative; height: auto; padding: 8px 24px 28px; }
+  .lg-panel { height: 48px; border-radius: 0; background: none; overflow: visible; display: flex; align-items: center; gap: 12px; }
+  .lg-ring, .lg-node, .lg-moment p.q, .lg-moment i { display: none; }
+  .lg-mark { position: static; width: 48px; height: 48px; border-radius: 12px; flex: none; }
+  .lg-mark img { padding: 4px; }
+  .lg-moment { position: static; width: auto; max-width: none; }
+  .lg-moment span { font: 600 16px/24px var(--f-ui); color: var(--brand-on-surface); }
+  .lg-col { order: 1; flex: 1; min-height: 0; justify-content: flex-start; background: var(--surface); border-radius: 20px 20px 0 0; box-shadow: var(--shadow-sheet); padding: 12px 16px 96px; }
+  .lg-form { width: 100%; gap: 16px; padding-top: 12px; }
+  .lg-head { gap: 4px; }
+  .lg-head h1 { font-size: 22px; line-height: 28.6px; } /* UI/Mobile title */
+  .lg-input { height: 44px; }
+  .lg-btn { height: 44px; }
+  .lg-foot { position: static; width: 100%; max-width: none; min-height: 0; margin-top: 16px; font-size: 12px; line-height: 19px; }
+  .lg-langbar { top: 18px; inset-inline-end: 16px; z-index: 2; }
+  .lg-langbar .lg-sbtn { color: var(--brand-on-surface); }
+  .lg-langbar .lg-sbtn:hover { background: rgb(255 253 247 / 0.12); }
+}

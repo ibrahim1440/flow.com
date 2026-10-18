@@ -11,6 +11,26 @@ import {
   assertTaxCategoryActive,
 } from "./validation";
 import { buildTaxCategorySnapshot } from "./tax-snapshot";
+import { isPayrollLive, payrollAccountIds, payrollLockedRefusal } from "@/lib/hr/payroll-lock";
+import { assertManualJournalsEnabled } from "./manual-journals";
+
+/**
+ * Phase 1 payroll lock (owner A-7 / A-8; independent review F1): while live payroll is off, no
+ * journal touching a PAYROLL ACCOUNT (the HR posting map, PAYROLL_CASH excepted) and no journal of
+ * the HR module is created, submitted, approved, posted or reversed here — for every account,
+ * administrators included (409 PAYROLL_LOCKED). Ordinary journals are untouched. The database
+ * refuses the posting too (hr_payroll_lock_guard on JournalEntry / JournalEntryLine).
+ */
+/** The HR module, however its name is cased or padded (the database compares lower(btrim(…)) too). */
+const isHrModule = (sourceModule: string | null) => (sourceModule ?? "").trim().toLowerCase() === "hr";
+
+async function assertNotPayrollJournal(tx: Prisma.TransactionClient, accountIds: string[], sourceModule: string | null) {
+  if (await isPayrollLive(tx)) return;
+  if (isHrModule(sourceModule) || (await payrollAccountIds(tx, accountIds)).length) {
+    const r = payrollLockedRefusal("GL_PAYROLL_JOURNAL");
+    throw new AccountingError(r.errorEn, 409, r.code, r.message);
+  }
+}
 
 export type ManualJournalLineInput = {
   accountId: string;
@@ -29,6 +49,8 @@ export type CreateManualJournalEntryInput = {
 // Manual entries only in S0 — Auto/Opening/Closing entries have no producer yet, and
 // Reversal entries are created exclusively by reverseJournalEntry below.
 export async function createManualJournalEntry(input: CreateManualJournalEntryInput, userId: string) {
+  // Phase 1 (owner decision D1): manual journals are disabled for everyone (./manual-journals).
+  await assertManualJournalsEnabled();
   await assertSetupComplete();
 
   if (!input.lines || input.lines.length < 2) {
@@ -44,6 +66,7 @@ export async function createManualJournalEntry(input: CreateManualJournalEntryIn
   assertDebitEqualsCredit(decimalLines);
 
   return prisma.$transaction(async (tx) => {
+    await assertManualJournalsEnabled(tx);
     const period = await tx.fiscalPeriod.findFirst({
       where: { startDate: { lte: input.entryDate }, endDate: { gte: input.entryDate } },
     });
@@ -51,6 +74,7 @@ export async function createManualJournalEntry(input: CreateManualJournalEntryIn
     assertPeriodOpen(period);
 
     const accountIds = [...new Set(decimalLines.map((l) => l.accountId))];
+    await assertNotPayrollJournal(tx, accountIds, "manual");
     const accounts = await tx.account.findMany({ where: { id: { in: accountIds } } });
     if (accounts.length !== accountIds.length) {
       throw new AccountingError("One or more accounts were not found.", 400);
@@ -119,12 +143,16 @@ async function transitionStatus(
   to: JournalEntryStatus,
   stamp: Record<string, unknown>,
 ) {
+  await assertManualJournalsEnabled();
   return prisma.$transaction(async (tx) => {
+    await assertManualJournalsEnabled(tx);
     const entry = await tx.journalEntry.findUnique({ where: { id } });
     if (!entry) throw new AccountingError("Journal entry not found.", 404);
     if (!from.includes(entry.status)) {
       throw new AccountingError(`Cannot transition from ${entry.status} to ${to}.`, 409);
     }
+    const lines = await tx.journalEntryLine.findMany({ where: { journalEntryId: id }, select: { accountId: true } });
+    await assertNotPayrollJournal(tx, lines.map((l) => l.accountId), entry.sourceModule);
     return tx.journalEntry.update({ where: { id }, data: { status: to, ...stamp } });
   });
 }
@@ -138,8 +166,10 @@ export async function approveJournalEntry(id: string, userId: string) {
 }
 
 export async function postJournalEntry(id: string, userId: string) {
+  await assertManualJournalsEnabled();
   await assertSetupComplete();
   return prisma.$transaction(async (tx) => {
+    await assertManualJournalsEnabled(tx);
     const entry = await tx.journalEntry.findUnique({
       where: { id },
       include: { lines: true, fiscalPeriod: true },
@@ -150,6 +180,7 @@ export async function postJournalEntry(id: string, userId: string) {
     }
     assertPeriodOpen(entry.fiscalPeriod);
     assertDebitEqualsCredit(entry.lines);
+    await assertNotPayrollJournal(tx, entry.lines.map((l) => l.accountId), entry.sourceModule);
     return tx.journalEntry.update({
       where: { id },
       data: { status: "POSTED", postedAt: new Date(), postedBy: userId },
@@ -163,12 +194,14 @@ export async function postJournalEntry(id: string, userId: string) {
 // operation by the route guard. A separate approval queue for reversals is deferred to a
 // future ApprovalRule engine (out of S0 scope).
 export async function reverseJournalEntry(id: string, userId: string, reason: string) {
+  await assertManualJournalsEnabled();
   const trimmedReason = reason?.trim();
   if (!trimmedReason) {
     throw new AccountingError("A reason is required to reverse a journal entry.", 400);
   }
 
   return prisma.$transaction(async (tx) => {
+    await assertManualJournalsEnabled(tx);
     const original = await tx.journalEntry.findUnique({
       where: { id },
       include: { lines: true, reversedByEntry: true },
@@ -179,6 +212,13 @@ export async function reverseJournalEntry(id: string, userId: string, reason: st
     }
     if (original.reversedByEntry) {
       throw new AccountingError("This journal entry has already been reversed.", 409);
+    }
+    // A journal of the HR module is reversed only through HR (its linked reversal; the database
+    // refuses anything else) — a refusal, never a 500 (independent review F7). While payroll is
+    // locked it is PAYROLL_LOCKED, as is any journal on a payroll account.
+    await assertNotPayrollJournal(tx, original.lines.map((l) => l.accountId), original.sourceModule);
+    if (isHrModule(original.sourceModule)) {
+      throw new AccountingError("A journal posted by HR is reversed only through HR.", 409, "HR_JOURNAL", "قيد الموارد البشرية لا يُعكس إلا من خلال الموارد البشرية.");
     }
 
     // The reversal always posts in the period covering today, never retroactively into the

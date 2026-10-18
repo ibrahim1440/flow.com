@@ -2,7 +2,7 @@
 // outside Next.js, e.g. by the integration tests).
 import { NextResponse } from "next/server";
 import { hasModuleAccess } from "@/lib/auth-shared";
-import { requireAuth } from "@/lib/auth-server";
+import { requireAuth, requirePrivilegedAction, STEP_UP_KEYS } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { can, FinanceError, narrowScope, resolveScope, type FinanceActor, type FinanceScope, type FinanceSub } from "./context";
 
@@ -10,7 +10,7 @@ import { can, FinanceError, narrowScope, resolveScope, type FinanceActor, type F
 export async function financeRoute(sub?: FinanceSub) {
   const { user, error } = await requireAuth();
   if (error) return { actor: null as never, error };
-  const actor: FinanceActor = { id: user.id, role: user.role, permissions: user.permissions };
+  const actor: FinanceActor & { authTime?: Date } = { id: user.id, role: user.role, permissions: user.permissions, authTime: user.authTime };
   if (!hasModuleAccess(actor.permissions, "finance")) {
     return { actor: null as never, error: NextResponse.json({ error: "Insufficient permissions" }, { status: 403 }) };
   }
@@ -55,6 +55,15 @@ export function financeHandler(sub: FinanceSub | undefined, fn: (a: HandlerArgs)
   return async (request: Request, ctx: RouteCtx) => {
     const { actor, error } = await financeRoute(sub);
     if (error) return error;
+    // Owner decision (SOD.md §19): finance access is privileged as a whole, so every finance
+    // CHANGE is made by a verified individual; approvals, payments and period close also need a
+    // recent step-up.
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      const path = new URL(request.url).pathname;
+      const payment = /\/approvals\/[^/]+\/decide$|\/payments$|\/reservations\/[^/]+\/execute$/.test(path);
+      const refused = await requirePrivilegedAction({ ...actor, authTime: (actor as { authTime?: Date }).authTime }, payment ? "finance.payment" : `finance.${sub ?? "change"}`, { stepUp: payment || (!!sub && STEP_UP_KEYS.has(`finance.${sub}`)) });
+      if (refused) return refused;
+    }
     try {
       const query = new URL(request.url).searchParams;
       const scope = narrowScope(await resolveScope(actor), query.get("branch"));

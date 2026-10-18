@@ -1,11 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import {
-  PackageCheck, Clock, ChevronDown, ChevronUp, ClipboardList, MessageSquare,
-  ShoppingCart, RefreshCw, PauseCircle, CheckCircle2, Hammer,
-} from "lucide-react";
-import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
 import {
@@ -13,6 +8,7 @@ import {
   StatusActionsBar, PreparationReviewTable, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
 import { ProductionRequirementPanel } from "@/components/ProductionRequirementPanel";
+import { ITEM_FORMS, Metrics, ORDER_FORMS, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, countNoun, opsDate } from "@/components/ops/ui";
 
 // Orders currently relevant to Preparation — live or paused, not finished.
 //
@@ -37,6 +33,8 @@ const VISIBLE_STATUSES = new Set([
 type WorkstationOrderItem = {
   id: string;
   beanTypeName: string;
+  // E7: master-data names, shown in the interface language by the review table.
+  product?: { productNameEn: string; productNameAr: string | null } | null;
   quantityKg: number;
   preparationDecision: string | null;
   availableQuantity: number | null;
@@ -67,10 +65,22 @@ function isToday(isoDate: string): boolean {
 }
 
 export default function PreparationWorkstationPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [orders, setOrders] = useState<WorkstationOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  // G-7: a failed list read is an error with retry, never «no orders».
+  const [loadError, setLoadError] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  // N-03: 768+ pins the pane actions in its footer; the commit button is portalled into it.
+  const [commitSlot, setCommitSlot] = useState<HTMLDivElement | null>(null);
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -80,7 +90,11 @@ export default function PreparationWorkstationPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/orders");
-      setOrders(res.ok ? await res.json() : []);
+      if (!res.ok) { await res.text(); setLoadError(true); return; }
+      setOrders(await res.json());
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -123,142 +137,117 @@ export default function PreparationWorkstationPage() {
     };
   }, [orders]);
 
+  const open = visible.find((o) => o.id === openId) ?? null;
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-2">
-          <PackageCheck size={24} className="text-orange" /> {t("workstationPreparation")}
-        </h1>
-        <p className="text-brown text-sm font-medium">{t("workstationSubtitle")}</p>
+    <OpsRoot>
+      <div className={`hr-split${open ? " has-preview" : ""}`}>
+      <div className="hr-page">
+        <PageHeader title={t("workstationPreparation")}>
+          <span>{t("workstationSubtitle")}</span>
+        </PageHeader>
+
+        <Metrics items={[
+          [t("summaryCreatedToday"), <span key="a" className="hr-num">{summary.createdToday}</span>],
+          [t("summaryPreparing"), <span key="b" className="hr-num">{summary.preparing}</span>],
+          [t("summaryReadyForShipping"), <span key="c" className="hr-num">{summary.readyForShipping}</span>],
+          [t("summaryOnHold"), <span key="d" className="hr-num">{summary.onHold}</span>],
+          [t("summaryCompletedToday"), <span key="e" className="hr-num">{summary.completedToday}</span>],
+        ]} />
+
+        {loadError && !loading ? (
+          <OpsError message={t("prepLoadFailed")} onRetry={loadData} />
+        ) : loading ? (
+          <OpsLoading rows={4} />
+        ) : visible.length === 0 ? (
+          <OpsEmpty title={t("workstationEmpty")} />
+        ) : (
+          <>
+            {/* N-24 (OG-P1, G-10): one head string, «قائمة التجهيز · 5 طلبات». */}
+            <SecHead title={<>{t("prepQueueTitle")} · {countNoun(visible.length, lang, ORDER_FORMS)}</>} />
+            {/* OG-P1/P3/P5: the queue; a row opens the order in the pane (1440), the drawer
+                (1024) or the full-height detail on the phone (P6). */}
+            <ul className="ops-queue ops-prepq" aria-label={t("workstationPreparation")}>
+              {visible.map((order) => {
+                const attention = orderNeedsAttention(order);
+                const isOpen = openId === order.id;
+                return (
+                  <li
+                    key={order.id}
+                    data-testid={`ws-row-${order.orderNumber}`}
+                    className={`ops-qrow${isOpen ? " is-open" : ""}${attention ? " is-attn" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="ops-qhead"
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenId(isOpen ? null : order.id)}
+                    >
+                      <span className="ops-qmain">
+                        <span className="ops-qtitle">{order.customer.name} · <span className="hr-id">#{order.orderNumber}</span></span>
+                        <span className="ops-sub">
+                          {countNoun(order.items.length, lang, ITEM_FORMS)} · {t("lastActivityLabel")} {opsDate(lastActivityTime(order), lang, true)}
+                        </span>
+                      </span>
+                      <span className="ops-qend">
+                        {attention && <NeedsAttentionBadge />}
+                        <OrderStatusBadge status={order.status} />
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </div>
 
-      {loading ? (
-        <div className="text-center py-16">
-          <div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-brown text-sm font-medium">{t("loading")}</p>
-        </div>
-      ) : visible.length === 0 ? (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            {[
-              { label: t("summaryCreatedToday"), value: summary.createdToday, Icon: ShoppingCart },
-              { label: t("summaryPreparing"), value: summary.preparing, Icon: RefreshCw },
-              { label: t("summaryReadyForShipping"), value: summary.readyForShipping, Icon: PackageCheck },
-              { label: t("summaryOnHold"), value: summary.onHold, Icon: PauseCircle },
-              { label: t("summaryCompletedToday"), value: summary.completedToday, Icon: CheckCircle2 },
-            ].map((card) => (
-              <div key={card.label} className="bg-white rounded-xl border border-oo-border-default p-3 sm:p-3.5 flex flex-col items-center text-center gap-1">
-                <card.Icon size={16} className="text-oo-text-secondary" aria-hidden="true" />
-                <span className="text-xl font-extrabold text-oo-text-primary">{card.value}</span>
-                <span className="text-[11px] font-semibold text-oo-text-muted">{card.label}</span>
-              </div>
-            ))}
+      {open ? (
+        <OpsPane
+          testId={`ws-order-${open.orderNumber}`}
+          phone="page"
+          label={`#${open.orderNumber}`}
+          title={<><span className="hr-id">#{open.orderNumber}</span> <span>{open.customer.name}</span></>}
+          sub={<OrderStatusBadge status={open.status} />}
+          onClose={() => setOpenId(null)}
+          // N-05 (OG-P3, G-5): at 768–1279 the drawer leaves the queue visible and usable.
+          drawer="open"
+          // N-03 (OG-P1 / OG-P3): commit · hold · cancel pinned in the pane footer (768+). The
+          // phone keeps the OG-P6 layout (hold / cancel in the body, the commit bar at the bottom).
+          footer={wide ? (
+            <div className="ops-prepfoot">
+              <div className="ops-commitslot" ref={setCommitSlot} />
+              <StatusActionsBar orderId={open.id} status={open.status} ownerId={open.ownerId} onSuccess={loadData} itemIds={open.items.map((i) => i.id)} large />
+            </div>
+          ) : undefined}
+        >
+          <OrderProgressStepper status={open.status} items={open.items} />
+          <div className="ops-panel" style={{ borderTop: 0, marginTop: 0, paddingTop: 0 }}>
+            <h3>{t("preparationReviewLabel")}</h3>
+            <PreparationReviewTable orderId={open.id} items={open.items} onSuccess={loadData} commitSlot={wide ? commitSlot : null} />
           </div>
-          <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
-            <PackageCheck size={40} className="mx-auto mb-2" />
-            <p>{t("workstationEmpty")}</p>
+          {/* What the shelf could not cover, and the button that turns exactly that into a
+              production order. */}
+          <div className="ops-panel">
+            <h3>{t("productionReqTitle")}</h3>
+            <ProductionRequirementPanel itemIds={open.items.map((i) => i.id)} />
           </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {visible.map((order) => {
-            const attention = orderNeedsAttention(order);
-            const isOpen = openId === order.id;
-            return (
-              <div
-                key={order.id}
-                data-testid={`ws-order-${order.orderNumber}`}
-                className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-colors ${
-                  attention ? "border-red-300" : "border-border"
-                } ${isOpen ? "xl:col-span-3 md:col-span-2" : ""}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setOpenId(isOpen ? null : order.id)}
-                  className="w-full text-start p-5 hover:bg-cream/50 active:bg-cream transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-lg font-extrabold text-charcoal">#{order.orderNumber}</p>
-                      <p className="text-sm text-brown font-medium">{order.customer.name}</p>
-                    </div>
-                    {isOpen ? (
-                      <ChevronUp size={22} className="text-brown/50 flex-shrink-0" />
-                    ) : (
-                      <ChevronDown size={22} className="text-brown/50 flex-shrink-0" />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap mt-3">
-                    <OrderStatusBadge status={order.status} />
-                    {attention && <NeedsAttentionBadge />}
-                  </div>
-                  <div className="flex items-center justify-between mt-3 text-xs text-brown/60 font-medium">
-                    <span>{order.items.length} {t("itemCountLabel")}</span>
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} /> {formatDate(lastActivityTime(order))}
-                    </span>
-                  </div>
-                </button>
-
-                {isOpen && (
-                  <div className="border-t border-border p-4 bg-cream space-y-3">
-                    {/* Progress Stepper — lifecycle milestones, not the activity log */}
-                    <div className="bg-white rounded-xl border border-border px-4 py-3">
-                      <OrderProgressStepper status={order.status} items={order.items} />
-                    </div>
-
-                    {/* Desktop: two-column (main content + right rail). Tablet and below:
-                        single column, timeline/status actions fall below preparation. */}
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-                      <div className="xl:col-span-2 space-y-3">
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
-                            <ClipboardList size={16} /> {t("preparationReviewLabel")}
-                          </p>
-                          <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
-                        </div>
-
-                        {/* Step 9: what the shelf could not cover, and the button that
-                            turns exactly that into a production order. */}
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
-                            <Hammer size={16} /> {t("productionReqTitle")}
-                          </p>
-                          <ProductionRequirementPanel itemIds={order.items.map((i) => i.id)} />
-                        </div>
-
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
-                            <MessageSquare size={16} /> {t("addNoteLabel")}
-                          </p>
-                          <AddNoteForm orderId={order.id} onSuccess={loadData} />
-                        </div>
-                      </div>
-
-                      <div className="xl:col-span-1 space-y-3">
-                        <StatusActionsBar
-                          orderId={order.id}
-                          status={order.status}
-                          ownerId={order.ownerId}
-                          onSuccess={loadData}
-                          large
-                        />
-
-                        <div className="bg-white rounded-xl border border-border p-3.5">
-                          <p className="text-sm font-bold text-brown mb-2 flex items-center gap-1.5">
-                            <Clock size={16} /> {t("activityTimelineLabel")}
-                          </p>
-                          <ActivityTimeline activities={order.activities} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+          {wide ? null : (
+            <div className="ops-panel">
+              <StatusActionsBar orderId={open.id} status={open.status} ownerId={open.ownerId} onSuccess={loadData} itemIds={open.items.map((i) => i.id)} large />
+            </div>
+          )}
+          <div className="ops-panel">
+            <h3>{t("addNoteLabel")}</h3>
+            <AddNoteForm orderId={open.id} onSuccess={loadData} />
+          </div>
+          <div className="ops-panel">
+            <h3>{t("activityTimelineLabel")}</h3>
+            <ActivityTimeline activities={open.activities} />
+          </div>
+        </OpsPane>
+      ) : null}
+      </div>
+    </OpsRoot>
   );
 }

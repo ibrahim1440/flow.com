@@ -580,7 +580,16 @@ export const PACKABLE_BATCH_STATUSES: readonly string[] = ["Passed", "Partially 
 
 export type BomRequirement = {
   type: "ROASTED_COFFEE" | "MATERIAL";
+  /** English, built here («Roasted <product>», «<material> (<code>)»). Kept for every
+   *  existing caller (blockedBy, packaging errors); screens localize from the fields below. */
   label: string;
+  // E7, additive: the master-data names behind `label`, so a screen can show the Arabic name
+  // in the Arabic interface (src/lib/i18n/localized-name.ts). The coffee product's name for a
+  // ROASTED_COFFEE line, the material's for a MATERIAL line; null when the relation is absent.
+  nameEn: string | null;
+  nameAr: string | null;
+  /** The material's stable code (MATERIAL lines); null for roasted coffee. */
+  code: string | null;
   coffeeProductId: string | null;
   materialItemId: string | null;
   unitOfMeasure: string;
@@ -610,8 +619,8 @@ export async function explodeBom(
   const components = await tx.bomComponent.findMany({
     where: { productSkuId },
     include: {
-      coffeeProduct: { select: { id: true, productNameEn: true } },
-      materialItem: { select: { id: true, code: true, name: true, quantityOnHand: true } },
+      coffeeProduct: { select: { id: true, productNameEn: true, productNameAr: true } },
+      materialItem: { select: { id: true, code: true, name: true, nameAr: true, quantityOnHand: true } },
     },
     orderBy: [{ type: "asc" }, { createdAt: "asc" }],
   });
@@ -667,6 +676,9 @@ export async function explodeBom(
     return {
       type: c.type,
       label,
+      nameEn: c.type === "ROASTED_COFFEE" ? c.coffeeProduct?.productNameEn ?? null : c.materialItem?.name ?? null,
+      nameAr: c.type === "ROASTED_COFFEE" ? c.coffeeProduct?.productNameAr ?? null : c.materialItem?.nameAr ?? null,
+      code: c.type === "ROASTED_COFFEE" ? null : c.materialItem?.code ?? null,
       coffeeProductId: c.coffeeProductId,
       materialItemId: c.materialItemId,
       unitOfMeasure: c.unitOfMeasure,

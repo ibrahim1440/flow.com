@@ -34,21 +34,48 @@ export async function GET() {
           expectedCloseAt: true, nextFollowUpAt: true, closedAt: true,
           customer: { select: { id: true, name: true, nameAr: true } },
           owner: { select: { id: true, name: true } },
-          _count: { select: { quotes: true, samples: true, activities: true } },
-          quotes: { where: { status: "ACCEPTED" }, select: { id: true }, take: 1 },
+          _count: { select: { quotes: true, samples: true, activities: true, orderLinks: true } },
+          // The live quotations (newest revision first): the card names the latest, a won row
+          // names the accepted one. Superseded revisions are history, not the deal's paperwork.
+          quotes: {
+            where: { status: { not: "SUPERSEDED" } },
+            orderBy: [{ revision: "desc" }, { createdAt: "desc" }],
+            take: 5,
+            select: { id: true, quoteNumber: true, revision: true, status: true, acceptedAt: true },
+          },
+          // The next open activity, for the card's «مكالمة · 4 أكتوبر» line.
+          activities: {
+            where: { completedAt: null },
+            orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
+            take: 1,
+            select: { type: true, subject: true, dueAt: true },
+          },
         },
       }),
     ]);
 
     return NextResponse.json({
       stages,
-      deals,
+      deals: deals.map(({ quotes, activities, ...d }) => {
+        const accepted = quotes.find((q) => q.status === "ACCEPTED") ?? null;
+        return {
+          ...d,
+          // Unchanged shape for existing readers: the accepted quotation, if any.
+          quotes: accepted ? [{ id: accepted.id }] : [],
+          latestQuote: quotes[0] ?? null,
+          acceptedQuote: accepted,
+          nextActivity: activities[0] ?? null,
+        };
+      }),
       scope: seesAll ? "all" : "own",
       can: {
         // Reported so the client can show the right controls, while the server re-checks
         // every one of them anyway. The client's copy is a convenience, not the gate.
         close: hasSubPrivilege(user.permissions, "sales", "deal_close"),
         reopen: hasSubPrivilege(user.permissions, "sales", "deal_reopen"),
+        // Orders are made from an accepted quotation (`quotes/[id]/create-order`).
+        createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
+        createLead: hasSubPrivilege(user.permissions, "sales", "lead_write"),
       },
     });
   } catch (err) {

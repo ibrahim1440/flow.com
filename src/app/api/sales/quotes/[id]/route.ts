@@ -70,6 +70,8 @@ export async function GET(_request: Request, { params }: Params) {
       can: {
         write: hasSubPrivilege(user.permissions, "sales", "quote_write"),
         approveDiscount: hasSubPrivilege(user.permissions, "sales", "quote_approve_discount"),
+        // Accepting closes the deal Won, so the accept control follows the deal-close privilege.
+        close: hasSubPrivilege(user.permissions, "sales", "deal_close"),
         createOrder: hasSubPrivilege(user.permissions, "orders", "create"),
       },
       discountThresholdPercent: DISCOUNT_APPROVAL_THRESHOLD_PERCENT.toString(),

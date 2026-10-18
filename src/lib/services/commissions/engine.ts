@@ -36,6 +36,25 @@ const D = (v: DecimalInput) => new Decimal(v);
 export const ZERO = D(0);
 const HUNDRED = D(100);
 
+/**
+ * A request amount as a Decimal, or null when it is not a finite decimal number.
+ *
+ * decimal.js also reads "NaN", "Infinity" (JSON 1e9999 arrives as Infinity) and hex/binary/octal
+ * ("0x10"). NaN passes every range check — each comparison is false — and PostgreSQL numeric
+ * stores it, so it would persist as an amount. Nothing else is restricted: precision and size
+ * stay whatever the caller already allowed.
+ */
+export function parseFiniteDecimal(v: unknown): Decimal | null {
+  if (typeof v === "string" && /^[+-]?0[xbo]/i.test(v)) return null;
+  let d: Decimal;
+  try {
+    d = new Decimal(String(v));
+  } catch {
+    return null;
+  }
+  return d.isFinite() ? d : null;
+}
+
 /** Half-up to two decimal places — the smallest unit of Saudi currency in practice. */
 export function roundMoney(v: Decimal): Decimal {
   return v.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);

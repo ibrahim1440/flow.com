@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { Decimal } from "@/lib/services/commissions/engine";
+import { Decimal, parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import { addPlanVersion, type TierInput, type VersionInput } from "@/lib/services/commissions/plans";
 
 type Params = { params: Promise<{ id: string }> };
@@ -17,12 +17,11 @@ type Params = { params: Promise<{ id: string }> };
  * `selectPlanVersion` picks by the date the cash arrived.
  */
 function parseVersion(b: Record<string, unknown>): VersionInput {
+  // Finite decimals only: a NaN rate or bound passes every range check and is stored as NaN.
   const dec = (v: unknown, field: string): Decimal => {
-    try {
-      return new Decimal(String(v));
-    } catch {
-      throw { _appCode: 400, message: `${field} is not a number.` };
-    }
+    const d = parseFiniteDecimal(v);
+    if (!d) throw { _appCode: 400, message: `${field} is not a number.` };
+    return d;
   };
 
   const effectiveFrom = new Date(String(b.effectiveFrom ?? ""));

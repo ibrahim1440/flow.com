@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAnyModule, requireEdit } from "@/lib/auth-server";
+import { requireAnyModule, requireEdit, stockChangeGate } from "@/lib/auth-server";
+import { auditPrivilegedInventory } from "@/lib/services/inventory-privileged-audit";
 import { handlePrismaError } from "@/lib/api-error";
 import { normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
 
@@ -99,22 +100,39 @@ export async function PATCH(request: Request, { params }: Params) {
       );
   }
 
+  // A counted adjustment changes the on-hand quantity and writes an ADJUSTMENT movement: it is an
+  // inventory adjustment (orchestrator ruling within the owner's Option A, SOD.md §20), so it needs
+  // inventory › adjust, a verified individual and a recent step-up. Judged before any lookup.
+  // Editing the material's name, category, reorder point or notes stays on inventory edit access.
+  // Owner decision 4: also a username + PIN credential and a fresh step-up, admins included.
+  if (adjusting) {
+    const refused = await stockChangeGate(user, "inventory", "adjust");
+    if (refused) return refused;
+  }
+
   if (!adjusting && Object.keys(data).length === 0)
     return NextResponse.json({ error: "No editable fields supplied." }, { status: 400 });
 
   // Counting packaging material is the same act as counting coffee, and carries the same
   // obligation. Only when a quantity is actually being booked: editing a material's name
   // is not an adjustment and needs no justification.
-  const explained = adjusting ? normalizeAdjustmentReason(b.notes) : null;
+  // The count's reason is `reason`. Older clients sent it as `notes`; that is still accepted as the
+  // reason, but then it is NOT also written over the material's own notes (review P3-4).
+  const reasonFromNotes = adjusting && b.reason === undefined;
+  const explained = adjusting ? normalizeAdjustmentReason(reasonFromNotes ? b.notes : b.reason) : null;
   if (explained && !explained.ok)
     return NextResponse.json({ error: explained.message }, { status: 400 });
+  if (reasonFromNotes) delete data.notes;
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const item = await tx.materialItem.findUnique({
-        where: { id },
-        select: { id: true, quantityOnHand: true },
-      });
+      // Re-review P3-A: lock the row before reading the balance. A receipt (POST …/receive) or a
+      // packaging draw committing between the read and the write would otherwise vanish inside the
+      // count, and the audited delta would be wrong. Every writer of quantityOnHand serialises on
+      // this row lock (receive and count take it explicitly; packaging draws update atomically).
+      const locked = await tx.$queryRaw<{ id: string; quantityOnHand: number; unitOfMeasure: string }[]>`
+        SELECT "id", "quantityOnHand", "unitOfMeasure"::text AS "unitOfMeasure" FROM "MaterialItem" WHERE "id" = ${id} FOR UPDATE`;
+      const item = locked[0];
       if (!item) throw { _appCode: 404, message: "Material not found." };
 
       if (adjusting) {
@@ -123,7 +141,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
         // 0.001 no-op threshold, matching the green-bean adjust route.
         if (Math.abs(quantityChanged) >= 0.001) {
-          await tx.inventoryMovement.create({
+          const movement = await tx.inventoryMovement.create({
             data: {
               type: "ADJUSTMENT",
               category: "PACKAGING_MATERIAL",
@@ -138,6 +156,11 @@ export async function PATCH(request: Request, { params }: Params) {
             },
           });
           data.quantityOnHand = newActualQuantity;
+          await auditPrivilegedInventory(tx, user, {
+            action: "INVENTORY_ADJUSTED", entityType: "MaterialItem", entityId: id, reason: explained && explained.ok ? explained.reason : "",
+            beforeQuantity: previousQuantity, afterQuantity: newActualQuantity, unit: item.unitOfMeasure,
+            details: { movementId: movement.id, previousQuantity, newQuantity: newActualQuantity, quantityChanged },
+          });
         }
       }
 

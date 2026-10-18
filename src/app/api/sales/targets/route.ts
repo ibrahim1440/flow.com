@@ -4,7 +4,7 @@ import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import {
-  Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, qualifyingBase,
+  Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, qualifyingBase, parseFiniteDecimal,
 } from "@/lib/services/commissions/engine";
 
 /**
@@ -163,12 +163,9 @@ export async function PUT(request: Request) {
   const period = periodFrom(typeof b.month === "string" ? b.month : null);
   if (!period) return NextResponse.json({ error: "month must look like 2026-09." }, { status: 400 });
 
-  let targetAmount: Decimal;
-  let bonusAmount: Decimal;
-  try {
-    targetAmount = new Decimal(String(b.targetAmount ?? "0"));
-    bonusAmount = new Decimal(String(b.bonusAmount ?? "0"));
-  } catch {
+  const targetAmount = parseFiniteDecimal(b.targetAmount ?? "0");
+  const bonusAmount = parseFiniteDecimal(b.bonusAmount ?? "0");
+  if (!targetAmount || !bonusAmount) {
     return NextResponse.json({ error: "The amounts must be numbers." }, { status: 400 });
   }
   if (targetAmount.isNegative() || bonusAmount.isNegative()) {

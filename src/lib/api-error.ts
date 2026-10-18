@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_DISABLED_EN } from "@/lib/accounting/manual-journals-messages";
 
 /**
  * A refusal the domain raised deliberately, mapped to the status it asked for.
@@ -13,14 +14,32 @@ import { NextResponse } from "next/server";
  */
 export function handleDomainError(err: unknown): NextResponse {
   if (err && typeof err === "object" && "_appCode" in err) {
-    const e = err as { _appCode: number; message?: string };
+    const e = err as { _appCode: number; message?: string; errorEn?: string; code?: string };
     const status = Number.isInteger(e._appCode) && e._appCode >= 400 && e._appCode < 600 ? e._appCode : 400;
-    return NextResponse.json({ error: e.message ?? "Refused." }, { status });
+    // A coded refusal (e.g. REAUTH_REQUIRED, IDENTITY_NOT_VERIFIED) keeps its code, so the client can act on it.
+    return NextResponse.json({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status });
   }
   return handlePrismaError(err);
 }
 
 export function handlePrismaError(err: unknown): NextResponse {
+  // Phase 1 payroll lock (independent review F7): a refusal by the database's payroll guards is a
+  // refusal, never a crash — 409 with its code, whatever route the write came through.
+  const msg = err instanceof Error ? err.message : "";
+  if (/HR: payroll is locked \(live payroll is off\)/.test(msg)) {
+    return NextResponse.json({ error: "الرواتب مقفلة: لم يُفعَّل تشغيل الرواتب الفعلي بعد، لذلك رُفض هذا الإجراء.", errorEn: "Payroll is locked: live payroll has not been switched on, so this action is refused.", code: "PAYROLL_LOCKED" }, { status: 409 });
+  }
+  // The commission payout freeze (commission_payout_freeze_trg; owner decision 17 Oct, docs/hr/COMMISSION-PAYOUT-FREEZE.md):
+  // a refusal by the database, never a crash — 409 with its code. Nothing was written.
+  if (/Commission payout recording is frozen at the database/.test(msg)) {
+    return NextResponse.json({ error: "تسجيل صرف العمولات موقوف في قاعدة البيانات؛ لا يُسجَّل أي صرف حتى يُرفع الإيقاف.", errorEn: "Commission payout recording is frozen at the database. No payout can be recorded until the freeze is lifted.", code: "COMMISSION_PAYOUT_FROZEN" }, { status: 409 });
+  }
+  if (/LEDGER: manual journals are disabled \(Phase 1\)/.test(msg)) {
+    return NextResponse.json({ error: MANUAL_JOURNALS_DISABLED_AR, errorEn: MANUAL_JOURNALS_DISABLED_EN, code: MANUAL_JOURNALS_DISABLED }, { status: 409 });
+  }
+  if (/a journal posted by HR is (reversed|changed)|journal posted by HR/i.test(msg)) {
+    return NextResponse.json({ error: "قيد الموارد البشرية لا يُعكس ولا يُعدّل إلا من خلال الموارد البشرية.", errorEn: "A journal posted by HR is reversed or changed only through HR.", code: "HR_JOURNAL" }, { status: 409 });
+  }
   if (err && typeof err === "object" && "code" in err) {
     const code = (err as { code: string }).code;
     if (code === "P2002") {

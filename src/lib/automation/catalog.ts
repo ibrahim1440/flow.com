@@ -110,7 +110,7 @@ const v = (key: string, ar: string, en: string, sample: string, kind: VarKind = 
 
 const COMMON_VARS: VarDef[] = [
   v("event.time", "وقت الحدث", "Event time", "2026-10-06 14:30"),
-  v("actor.name", "من نفذ الإجراء", "Done by", "سارة"),
+  v("actor.name", "من نفذ الإجراء", "Done by", "مشرف الفرع"),
 ];
 
 const ORDER_VARS: VarDef[] = [
@@ -120,7 +120,7 @@ const ORDER_VARS: VarDef[] = [
   v("order.itemCount", "عدد الأصناف", "Number of lines", "2", "number"),
   v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
   v("customer.phone", "جوال العميل", "Customer phone", "966500000000"),
-  v("owner.name", "مسؤول الطلب", "Order owner", "أحمد"),
+  v("owner.name", "مسؤول الطلب", "Order owner", "مسؤول الطلبات"),
 ];
 
 const BATCH_VARS: VarDef[] = [
@@ -130,7 +130,7 @@ const BATCH_VARS: VarDef[] = [
   v("batch.toStock", "تحميص للمخزون", "Roasted to stock", "no", "enum", YES_NO),
   v("order.number", "رقم الطلب", "Order number", "1042", "number"),
   v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
-  v("owner.name", "مسؤول الطلب", "Order owner", "أحمد"),
+  v("owner.name", "مسؤول الطلب", "Order owner", "مسؤول الطلبات"),
 ];
 
 // ─── The catalogue ─────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ export const EVENTS: EventDef[] = [
       v("production.greenKg", "البن الأخضر المتوقع (كغ)", "Expected green coffee (kg)", "12", "number"),
       v("order.number", "رقم الطلب", "Order number", "1042", "number"),
       v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
-      v("owner.name", "مسؤول الطلب", "Order owner", "أحمد"),
+      v("owner.name", "مسؤول الطلب", "Order owner", "مسؤول الطلبات"),
       ...COMMON_VARS,
     ],
     recipients: ["order_owner", "actor"],
@@ -255,7 +255,7 @@ export const EVENTS: EventDef[] = [
       v("quote.reason", "سبب الرفض", "Rejection reason", ""),
       v("deal.title", "الصفقة", "Deal", "توريد شهري"),
       v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
-      v("owner.name", "مسؤول الصفقة", "Deal owner", "خالد"),
+      v("owner.name", "مسؤول الصفقة", "Deal owner", "مندوب المبيعات"),
       ...COMMON_VARS,
     ],
     recipients: ["customer", "deal_owner", "actor"],
@@ -270,7 +270,7 @@ export const EVENTS: EventDef[] = [
       v("task.subject", "المهمة", "Task", "الاتصال لتأكيد الطلبية"),
       v("task.dueAt", "موعد المهمة", "Due at", "2026-10-06 10:00"),
       v("task.related", "مرتبطة بـ", "Related to", "مقهى الركن"),
-      v("owner.name", "صاحب المهمة", "Task owner", "خالد"),
+      v("owner.name", "صاحب المهمة", "Task owner", "مندوب المبيعات"),
       v("event.time", "وقت الحدث", "Event time", "2026-10-06 10:00"),
     ],
     recipients: ["task_owner"],
@@ -287,7 +287,7 @@ export const EVENTS: EventDef[] = [
       v("approval.type", "نوع الطلب", "Request type", "SPEND_OVERRIDE", "enum", APPROVAL_TYPE_OPTIONS),
       v("approval.summary", "ملخص الطلب", "Summary", "صرف 5,000 من بند التسويق"),
       v("approval.reason", "سبب الطلب", "Reason", ""),
-      v("approval.requester", "مقدم الطلب", "Requested by", "نورة"),
+      v("approval.requester", "مقدم الطلب", "Requested by", "محاسب الفرع"),
       ...COMMON_VARS,
     ],
     recipients: ["approver", "requester"],
@@ -303,7 +303,7 @@ export const EVENTS: EventDef[] = [
       v("approval.summary", "ملخص الطلب", "Summary", "صرف 5,000 من بند التسويق"),
       v("approval.decision", "القرار", "Decision", "APPROVED", "enum", APPROVAL_DECISION_OPTIONS),
       v("approval.note", "ملاحظة القرار", "Decision note", ""),
-      v("approval.requester", "مقدم الطلب", "Requested by", "نورة"),
+      v("approval.requester", "مقدم الطلب", "Requested by", "محاسب الفرع"),
       ...COMMON_VARS,
     ],
     recipients: ["requester", "approver"],

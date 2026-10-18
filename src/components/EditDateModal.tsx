@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarDays, X, AlertTriangle, Merge, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 
@@ -32,6 +32,15 @@ type Props = {
 };
 
 export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
+  // D-1: a modal layer of its own — Esc closes it (and only it: the QC pane yields to any
+  // aria-modal layer above it).
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const { t, lang } = useI18n();
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -122,6 +131,9 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
     >
       <div
         className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("editBatchDate")}
         onClick={(e) => e.stopPropagation()}
       >
         {step === "form" && (

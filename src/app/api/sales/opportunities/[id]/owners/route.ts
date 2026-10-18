@@ -3,7 +3,7 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
-import { Decimal, validateSplits } from "@/lib/services/commissions/engine";
+import { Decimal, validateSplits, parseFiniteDecimal } from "@/lib/services/commissions/engine";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -66,12 +66,8 @@ export async function PUT(request: Request, { params }: Params) {
       if (typeof s.employeeId !== "string" || !s.employeeId) {
         throw { _appCode: 400, message: "Each split needs an employeeId." };
       }
-      let pct: Decimal;
-      try {
-        pct = new Decimal(String(s.sharePercent));
-      } catch {
-        throw { _appCode: 400, message: "Each split needs a numeric sharePercent." };
-      }
+      const pct = parseFiniteDecimal(s.sharePercent);
+      if (!pct) throw { _appCode: 400, message: "Each split needs a numeric sharePercent." };
       splits.push({ employeeId: s.employeeId, sharePercent: pct });
     }
 

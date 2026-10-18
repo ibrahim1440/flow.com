@@ -1,5 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { kgForUnits } from "@/lib/services/finished-products";
+import { CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 
 type Client = PrismaNS.TransactionClient;
 
@@ -146,6 +147,9 @@ export async function createOrderWithNumber(
   db: Client,
   header: NewOrderHeader,
   lines: ResolvedOrderLine[],
+  // Review D-1: whether the caller holds the customer contact right (canSeeCustomerContact).
+  // Defaults to no, so a caller that does not say gets the name-only customer, never the record.
+  customerContact = false,
 ) {
   if (lines.length === 0) {
     // An order with no lines is not a smaller order, it is a stuck one: it consumes an
@@ -176,7 +180,10 @@ export async function createOrderWithNumber(
           status: "Waiting Preparation Review",
           items: { create: lines },
         },
-        include: { customer: true, items: true },
+        include: {
+          customer: customerContact ? true : { select: CUSTOMER_NAME_SELECT },
+          items: true,
+        },
       });
     } catch (e: unknown) {
       const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : null;

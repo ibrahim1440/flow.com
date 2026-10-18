@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireAnyModule, requireSub } from "@/lib/auth-server";
+import { adminRoleGate, assertAdminRoleGate, requireAnyModule, requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { handlePrismaError } from "@/lib/api-error";
+import { handleDomainError } from "@/lib/api-error";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import {
   recalcProductionOrderStatus,
@@ -18,6 +18,7 @@ import {
   REASON_MAX_LENGTH,
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -141,8 +142,11 @@ async function generateBatchNumber(tx: Prisma.TransactionClient): Promise<string
 
 export async function GET(request: Request) {
   // QC and Packaging workers need to read batches for their own workflow stages
-  const { error } = await requireAnyModule("production", "qc", "packaging");
+  const { user, error } = await requireAnyModule("production", "qc", "packaging");
   if (error) return error;
+  // F4 / review F-1: the batch screens draw the customer's name and roast targets; the contact
+  // fields go only to holders of the customer contact right (customers module).
+  const customerContact = canSeeCustomerContact(user.permissions);
 
   const { searchParams } = new URL(request.url);
   const statusParam = searchParams.get("statuses");
@@ -155,7 +159,11 @@ export async function GET(request: Request) {
     include: {
       orderItem: {
         include: {
-          order: { include: { customer: { include: { roastPreferences: true } } } },
+          order: {
+            include: {
+              customer: customerContact ? { include: { roastPreferences: true } } : { select: CUSTOMER_OPERATIONS_SELECT },
+            },
+          },
           // Which coffee an order-backed batch is. A stock batch carries productId
           // directly; a batch roasted against an order carries nothing and has to be
           // identified through its line's SKU. Without this the production-order screen
@@ -312,6 +320,12 @@ export async function POST(request: Request) {
         (covered ? ` — ${covered}, out of ${d!.orderedUnits} unit(s) ordered.` : ".") + " ";
     return NextResponse.json({ error: prefix + surplus.message }, { status: surplus.status });
   }
+  // An authorized surplus is the admin role exercised: a verified individual, after a recent
+  // step-up (as the override of a batch is, inventory.override).
+  if (surplus?.ok) {
+    const refused = await adminRoleGate(user, "production.surplus_override", { stepUp: true });
+    if (refused) return refused;
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   try {
@@ -371,6 +385,8 @@ export async function POST(request: Request) {
               liveDecision.message,
           };
         }
+        // Surplus that appeared in flight was not gated above: gate it here.
+        if (!surplus?.ok) await assertAdminRoleGate(user, "production.surplus_override", { stepUp: true });
         overrideEvidence = {
           ceilingKg: live.ceilingKg,
           requestedKg: roastedQty,
@@ -621,10 +637,7 @@ export async function POST(request: Request) {
     }
     // The production-planning guards throw the `{ _appCode, message }` shape the newer
     // routes use, rather than this file's older AppError class.
-    if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
-    }
-    return handlePrismaError(err);
+    // (handleDomainError keeps a refusal's code, e.g. REAUTH_REQUIRED, for the client.)
+    return handleDomainError(err);
   }
 }

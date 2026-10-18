@@ -35,7 +35,15 @@ async function shortfallFor(orderItemId: string, opts: { withProgress?: boolean 
       productSkuId: true,
       // preparationDecision and approvalStatus feed the production entry gate.
       preparationDecision: true,
-      productSku: { select: { id: true, skuCode: true, weightGrams: true } },
+      // product: E7 — the master-data names the panel shows as the line's label (read only).
+      productSku: {
+        select: {
+          id: true,
+          skuCode: true,
+          weightGrams: true,
+          product: { select: { id: true, productNameEn: true, productNameAr: true } },
+        },
+      },
       order: { select: { id: true, status: true, orderNumber: true, approvalStatus: true } },
       productionOrders: {
         select: { id: true, productionNumber: true, status: true, targetUnits: true, targetWeightKg: true },
@@ -101,6 +109,11 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({
       orderItemId: item.id,
       skuCode: item.productSku!.skuCode,
+      // E7, additive: the coffee product behind the SKU, from master data, so the panel can
+      // label the line in the interface language. IDs and the SKU code above are unchanged.
+      productId: item.productSku!.product.id,
+      productNameEn: item.productSku!.product.productNameEn,
+      productNameAr: item.productSku!.product.productNameAr,
       orderedUnits: demand.orderedUnits,
       deliveredUnits: demand.deliveredUnits,
       reservedUnits: demand.reservedUnits,

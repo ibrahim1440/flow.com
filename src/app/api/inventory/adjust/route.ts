@@ -1,18 +1,24 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireAuth, stockChangeGate } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
+import { auditPrivilegedInventory } from "@/lib/services/inventory-privileged-audit";
 
 /**
  * Book a counted adjustment against green coffee.
  *
  * The reason is required — see inventory-adjustment.ts for why a manual adjustment is
  * the one movement that cannot be left unexplained.
+ *
+ * Privileged stock change (owner decision 4): inventory › adjust, a verified individual, a username +
+ * PIN credential and a fresh step-up — admins included (stockChangeGate). Judged before any lookup.
  */
 export async function POST(request: Request) {
-  const { error, user } = await requireSub("inventory", "adjust");
+  const { error, user } = await requireAuth();
   if (error) return error;
+  const refused = await stockChangeGate(user, "inventory", "adjust");
+  if (refused) return refused;
 
   const body = await request.json();
   const { entityId, newActualQuantity, notes } = body;
@@ -20,6 +26,14 @@ export async function POST(request: Request) {
   if (!entityId || newActualQuantity === undefined || newActualQuantity === null) {
     return NextResponse.json(
       { error: "entityId and newActualQuantity are required." },
+      { status: 400 }
+    );
+  }
+  // JSON 1e309 parses to Infinity, which passes `< 0` and is stored as the coffee's stock; a
+  // string is not a count. The UI sends parseFloat(...), a number.
+  if (typeof newActualQuantity !== "number" || !Number.isFinite(newActualQuantity)) {
+    return NextResponse.json(
+      { error: "newActualQuantity must be a finite number." },
       { status: 400 }
     );
   }
@@ -66,7 +80,7 @@ export async function POST(request: Request) {
         return { noChange: true as const, currentQuantity: previousQuantity };
       }
 
-      await tx.inventoryMovement.create({
+      const movement = await tx.inventoryMovement.create({
         data: {
           type: "ADJUSTMENT",
           category: "RAW_MATERIAL",
@@ -84,6 +98,12 @@ export async function POST(request: Request) {
       const updatedBean = await tx.greenBean.update({
         where: { id: entityId },
         data: { quantityKg: newActualQuantity },
+      });
+      // The responsible person, not only the login (owner decision, inventory Option A).
+      await auditPrivilegedInventory(tx, user, {
+        action: "INVENTORY_ADJUSTED", entityType: "GreenBean", entityId, reason: explained.reason,
+        beforeQuantity: previousQuantity, afterQuantity: newActualQuantity, unit: "kg",
+        details: { movementId: movement.id, previousQuantity, newQuantity: newActualQuantity, quantityChanged },
       });
 
       return { noChange: false as const, updatedBean, quantityChanged };

@@ -6,11 +6,15 @@ import { handleDomainError } from "@/lib/api-error";
 // second copy here is exactly the shape of defect the packaging rework was spent closing.
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
-  const { error } = await requireAnyModule("orders", "production", "dispatch");
+  const { user, error } = await requireAnyModule("orders", "production", "dispatch");
   if (error) return error;
+  // F4 / review F-1: without the customers module (production, dispatch, QC) the order comes
+  // with the customer's name and roast targets only, selected in the query: no contact field.
+  const customerContact = canSeeCustomerContact(user.permissions);
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
@@ -28,7 +32,7 @@ export async function GET(request: Request) {
     orderBy: { createdAt: "desc" },
     take: 500,
     include: {
-      customer: { include: { roastPreferences: true } },
+      customer: customerContact ? { include: { roastPreferences: true } } : { select: CUSTOMER_OPERATIONS_SELECT },
       items: {
         include: {
           // Batches without their QC records. This list is loaded by four screens —
@@ -45,6 +49,9 @@ export async function GET(request: Request) {
           // was never sent. Every unit order therefore rendered as kilograms with
           // "Available: 0kg" and an unusable delivery form, even with stock reserved to it.
           productSku: true,
+          // E7: the coffee product's names from master data, so Order Preparation can label
+          // a line in the interface language. Three scalars, read only — additive.
+          product: { select: { id: true, productNameEn: true, productNameAr: true } },
           // Which production plans this line has open. The production screen needs it to
           // attribute a roast to the plan it is being made for; without it every roast
           // started from a plan was stored with no link back to it. productionNumber is the
@@ -109,6 +116,7 @@ export async function POST(request: Request) {
             notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
           },
           resolvedItems,
+          canSeeCustomerContact(user.permissions),
         );
         await emitAutomationEvent(tx, { eventType: "order.created", subjectType: "Order", subjectId: created.id, actorId: user.id });
         return created;

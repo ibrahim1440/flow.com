@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { requireModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { getCuppingSettings, policyView, scorerCounts } from "@/lib/cupping/close-policy";
 
 const SESSION_INCLUDE = {
   _count: { select: { scores: true } },
@@ -36,7 +37,10 @@ export async function GET() {
     include: SESSION_INCLUDE,
   });
 
-  return NextResponse.json(sessions);
+  // E6: counts only (distinct staff scorers, distinct guest names, the applicable minimum),
+  // never who scored or what, so an open session stays blind.
+  const [counts, settings] = await Promise.all([scorerCounts(sessions.map((s) => s.id)), getCuppingSettings()]);
+  return NextResponse.json(sessions.map((s) => ({ ...s, ...policyView(s, counts.get(s.id), settings.minScorers) })));
 }
 
 export async function POST(request: Request) {

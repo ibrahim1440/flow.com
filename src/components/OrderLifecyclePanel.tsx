@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
-import {
-  AlertTriangle, Clock, ClipboardClock, MessageSquare, PauseCircle, RotateCcw, Ban, CheckCircle2,
-  ClipboardList, UserCircle2, Loader2, Send, RefreshCw, PackageCheck, XCircle, Hammer,
-  CircleDashed, CircleDotDashed, Check, Flame,
-} from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { opsDate, countNoun, UNIT_FORMS, Kg } from "@/components/ops/ui";
+import { activityTextAr } from "@/components/ops/activity-text";
+import { createPortal } from "react-dom";
 import { useUser } from "@/app/dashboard/user-context";
 import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import { Dialog } from "@/components/hr/ui";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import { LocalizedName } from "@/components/LocalizedName";
 import {
   describeApiError,
   submitOrderNote,
@@ -33,11 +32,16 @@ export type LifecycleActivity = {
   department: string | null;
   authorName: string;
   createdAt: string;
+  /** The event's structured fields (GET /api/orders already returns them); N-04 reads them. */
+  metadata?: unknown;
 };
 
 export type PreparationOrderItem = {
   id: string;
   beanTypeName: string;
+  // E7: the coffee product from master data (GET /api/orders, additive). Absent or null on a
+  // line without a product — that line keeps showing beanTypeName as stored.
+  product?: { productNameEn: string; productNameAr: string | null } | null;
   quantityKg: number;
   preparationDecision: string | null;
   availableQuantity: number | null;
@@ -69,37 +73,28 @@ const ORDER_STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
 // bug to "fix": Blocked is an item-level decision at #dc2626 with AlertTriangle,
 // Rejected is an order-level status one step darker at #b91c1c with Ban, so they
 // stay separable by foreground, icon, label and level.
-const ORDER_STATUS_ICON: Record<string, React.ElementType> = {
-  "Waiting Approval": Clock,
-  "Waiting Preparation Review": ClipboardClock,
-  "Preparing": RefreshCw,
-  "Ready for Shipping": PackageCheck,
-  "Completed": CheckCircle2,
-  "On Hold": PauseCircle,
-  "Cancelled": XCircle,
-  "Rejected": Ban,
+
+// Direction 2.1 status dot tone per lifecycle status (the label always carries the meaning;
+// the tone only reinforces it). Cancelled stays neutral and Rejected destructive, as above.
+const ORDER_STATUS_TONE: Record<string, "neutral" | "success" | "info" | "warning" | "danger" | "cancelled"> = {
+  "Waiting Approval": "warning",
+  "Waiting Preparation Review": "warning",
+  "Preparing": "info",
+  "Ready for Shipping": "success",
+  "Completed": "success",
+  "On Hold": "warning",
+  "Cancelled": "cancelled",
+  "Rejected": "danger",
 };
 
-const ORDER_STATUS_TOKEN: Record<string, { fg: string; bg: string; border: string }> = {
-  "Waiting Approval":           { fg: "text-oo-status-waiting",   bg: "bg-oo-status-waiting-bg",   border: "border-oo-status-waiting/30" },
-  "Waiting Preparation Review": { fg: "text-oo-status-waiting",   bg: "bg-oo-status-waiting-bg",   border: "border-oo-status-waiting/30" },
-  "Preparing":                  { fg: "text-oo-status-preparing", bg: "bg-oo-status-preparing-bg", border: "border-oo-status-preparing/30" },
-  "Ready for Shipping":         { fg: "text-oo-status-ready",     bg: "bg-oo-status-ready-bg",     border: "border-oo-status-ready/30" },
-  "Completed":                  { fg: "text-oo-status-success",   bg: "bg-oo-status-success-bg",   border: "border-oo-status-success/30" },
-  "On Hold":                    { fg: "text-oo-status-hold",      bg: "bg-oo-status-hold-bg",      border: "border-oo-status-hold/30" },
-  "Cancelled":                  { fg: "text-oo-status-cancelled", bg: "bg-oo-status-cancelled-bg", border: "border-oo-status-cancelled/30" },
-  "Rejected":                   { fg: "text-oo-status-rejected",  bg: "bg-oo-status-rejected-bg",  border: "border-oo-status-rejected/30" },
-};
 
 export function OrderStatusBadge({ status }: { status: string }) {
   const { t } = useI18n();
   const labelKey = ORDER_STATUS_LABEL_KEYS[status];
-  const token = ORDER_STATUS_TOKEN[status] ?? ORDER_STATUS_TOKEN["Waiting Approval"];
-  const Icon = ORDER_STATUS_ICON[status] ?? Clock;
+  const tone = ORDER_STATUS_TONE[status] ?? "neutral";
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${token.fg} ${token.bg} ${token.border}`}>
-      <Icon size={13} aria-hidden="true" />
-      {labelKey ? t(labelKey) : status}
+    <span className={`hr-dot tone-${tone}`} data-status={status}>
+      <span>{labelKey ? t(labelKey) : status}</span>
     </span>
   );
 }
@@ -107,9 +102,7 @@ export function OrderStatusBadge({ status }: { status: string }) {
 export function NeedsAttentionBadge() {
   const { t } = useI18n();
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-oo-status-blocked bg-oo-status-blocked-bg border border-oo-status-blocked/30">
-      <AlertTriangle size={11} aria-hidden="true" /> {t("needsAttention")}
-    </span>
+    <span className="hr-flag tone-danger"><span>{t("needsAttention")}</span></span>
   );
 }
 
@@ -219,27 +212,6 @@ function stageStateLabelKey(state: StageState, negativeKind?: "cancelled" | "rej
   }
 }
 
-function stageVisual(state: StageState, negativeKind?: "cancelled" | "rejected") {
-  switch (state) {
-    case "complete":
-      return { Icon: Check, fg: "text-oo-status-success", ring: "border-oo-status-success bg-oo-status-success-bg", line: "bg-oo-status-success/40" };
-    case "paused":
-      return { Icon: PauseCircle, fg: "text-oo-status-hold", ring: "border-oo-status-hold bg-oo-status-hold-bg", line: "bg-oo-border-default" };
-    case "negative":
-      return negativeKind === "rejected"
-        ? { Icon: Ban, fg: "text-oo-status-rejected", ring: "border-oo-status-rejected bg-oo-status-rejected-bg", line: "bg-oo-border-default" }
-        : { Icon: XCircle, fg: "text-oo-status-cancelled", ring: "border-oo-status-cancelled bg-oo-status-cancelled-bg", line: "bg-oo-border-default" };
-    case "active":
-      return { Icon: null, fg: "text-oo-action-primary", ring: "border-oo-action-primary bg-oo-bg-default", line: "bg-oo-border-default" };
-    case "pending":
-      // Deliberately identical to "future" (hollow, muted ring, no fill/icon) — this
-      // is an undecided yes/no gate, not work in progress. Slightly less-muted text
-      // than "future" so it still reads as "next up" without implying completion.
-      return { Icon: null, fg: "text-oo-text-secondary", ring: "border-oo-border-default bg-oo-bg-subtle", line: "bg-oo-border-default" };
-    default: // future
-      return { Icon: null, fg: "text-oo-text-muted", ring: "border-oo-border-default bg-oo-bg-subtle", line: "bg-oo-border-default" };
-  }
-}
 
 export function OrderProgressStepper({
   status,
@@ -254,35 +226,18 @@ export function OrderProgressStepper({
   const { states, negativeKind } = computeProgressStages({ status, approvalStatus, items });
 
   return (
-    <ol className="flex items-start w-full" aria-label={t("stepperLabel")}>
+    <ol className="ops-steps" aria-label={t("stepperLabel")}>
       {STEPPER_STAGES.map((stage, i) => {
         const state = states[i];
-        const visual = stageVisual(state, negativeKind);
         // The stage the order is actually sitting at — "active" while work is in
         // progress, "paused" while held. A terminal/negative stage is where the
         // order stopped, so it is the current step too.
         const isCurrent = state === "active" || state === "paused" || state === "negative";
+        const cls = state === "complete" ? "is-done" : state === "paused" ? "is-paused" : state === "negative" ? "is-negative" : "";
         return (
-          <li
-            key={stage}
-            {...(isCurrent ? { "aria-current": "step" as const } : {})}
-            className="flex-1 flex flex-col items-center min-w-0"
-          >
-            <div className="flex items-center w-full">
-              <div className={`flex-1 h-0.5 ${i === 0 ? "opacity-0" : visual.line}`} />
-              <div className={`flex items-center justify-center w-6 h-6 rounded-full border-2 flex-shrink-0 ${visual.ring}`}>
-                {visual.Icon ? (
-                  <visual.Icon size={12} className={visual.fg} aria-hidden="true" />
-                ) : (
-                  <span className={`w-1.5 h-1.5 rounded-full ${state === "active" ? "bg-oo-action-primary" : ""}`} aria-hidden="true" />
-                )}
-              </div>
-              <div className={`flex-1 h-0.5 ${i === STEPPER_STAGES.length - 1 ? "opacity-0" : visual.line}`} />
-            </div>
-            <span className={`mt-1 text-[11px] font-semibold text-center leading-tight px-0.5 ${visual.fg}`}>
-              {t(STAGE_LABEL_KEY[stage])}
-            </span>
-            <span className="sr-only">{t(stageStateLabelKey(state, negativeKind))}</span>
+          <li key={stage} className={cls} {...(isCurrent ? { "aria-current": "step" as const } : {})}>
+            {t(STAGE_LABEL_KEY[stage])}
+            <span className="hr-sr">{t(stageStateLabelKey(state, negativeKind))}</span>
           </li>
         );
       })}
@@ -309,57 +264,47 @@ const ACTIVITY_LABEL_KEYS: Record<string, TranslationKey> = {
   PRODUCTION_ORDER_CANCELLED: "activityProductionOrderCancelled",
   PRODUCTION_BATCH_LINKED: "activityProductionBatchLinked",
   PRODUCTION_BATCH_UNLINKED: "activityProductionBatchUnlinked",
+  PRODUCTION_SURPLUS_OVERRIDDEN: "activityProductionSurplusOverridden",
+  STOCK_RESERVED_FROM_PACKAGING: "activityStockReservedFromPackaging",
+  ORDER_ITEMS_EDITED: "activityOrderItemsEdited",
 };
 
-const ACTIVITY_ICON: Record<string, React.ElementType> = {
-  ORDER_APPROVED: CheckCircle2,
-  ORDER_REJECTED: Ban,
-  PREPARATION_REVIEWED: ClipboardList,
-  MANUAL_NOTE: MessageSquare,
-  ORDER_HELD: PauseCircle,
-  ORDER_RESUMED: RotateCcw,
-  ORDER_CANCELLED: Ban,
-  ORDER_COMPLETED: CheckCircle2,
-  PRODUCTION_ORDER_CREATED: Hammer,
-  PRODUCTION_ORDER_RELEASED: Hammer,
-  PRODUCTION_ORDER_COMPLETED: CheckCircle2,
-  PRODUCTION_ORDER_CANCELLED: Ban,
-  PRODUCTION_BATCH_LINKED: Flame,
-  PRODUCTION_BATCH_UNLINKED: Flame,
-};
+
+/** The department a note or event was filed under, in the viewer's language (stored as its English value). */
+function departmentLabel(dept: string, t: (k: TranslationKey) => string): string {
+  const opt = DEPARTMENT_OPTIONS.find((o) => o.value === dept);
+  return opt ? t(opt.labelKey) : dept;
+}
 
 export function ActivityTimeline({ activities }: { activities: LifecycleActivity[] }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
 
   if (activities.length === 0) {
-    return <p className="text-xs text-brown/50 italic">{t("noActivityYet")}</p>;
+    return <p className="hr-caption" style={{ margin: 0 }}>{t("noActivityYet")}</p>;
   }
 
+  const statusLabel = (s: string) => (ORDER_STATUS_LABEL_KEYS[s] ? t(ORDER_STATUS_LABEL_KEYS[s]) : s);
   return (
-    <ol className="space-y-2">
+    <ol className="ops-list ops-activity">
       {activities.map((a) => {
-        const Icon = ACTIVITY_ICON[a.type] ?? Clock;
         const label = ACTIVITY_LABEL_KEYS[a.type] ? t(ACTIVITY_LABEL_KEYS[a.type]) : a.type;
+        // N-04 (OG-P1 «الجدول الزمني للنشاط»): in Arabic the English server sentence is replaced
+        // by the event's details in Arabic, from its structured fields; typed text stays as typed.
+        const ar = lang === "ar" ? activityTextAr(a, statusLabel) : null;
         return (
-          <li key={a.id} className="flex gap-2.5 bg-white border border-border rounded-xl p-2.5">
-            <div className="w-7 h-7 rounded-lg bg-cream flex items-center justify-center flex-shrink-0">
-              <Icon size={14} className="text-brown" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-charcoal">{label}</span>
-                {a.department && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-light text-brown font-semibold">
-                    {a.department}
-                  </span>
-                )}
-                <span className="text-[10px] text-brown/50 ltr:ml-auto rtl:mr-auto">
-                  {a.authorName} — {formatDate(a.createdAt)}
-                </span>
-              </div>
+          <li key={a.id} data-activity={a.type}>
+            <span style={{ minWidth: 0 }}>
+              <strong style={{ fontWeight: 500 }}>
+                {label}
+                {ar?.ref ? <> <bdi className="ops-serial">{ar.ref}</bdi></> : null}
+              </strong>
+              {a.department ? <span className="hr-caption"> · {departmentLabel(a.department, t)}</span> : null}
               {/* Rendered as plain text only — never dangerouslySetInnerHTML. */}
-              <p className="text-xs text-charcoal/80 mt-1 whitespace-pre-wrap break-words">{a.message}</p>
-            </div>
+              {ar ? (
+                ar.userText ? <span className="ops-sub" dir="auto" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{ar.userText}</span> : null
+              ) : a.message ? <span className="ops-sub" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{a.message}</span> : null}
+              <span className="ops-sub">{ar?.detail ? <>{ar.detail} · </> : null}{a.authorName} · {opsDate(a.createdAt, lang, true)}</span>
+            </span>
           </li>
         );
       })}
@@ -414,38 +359,44 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
-          <AlertTriangle size={13} /> {error}
-        </div>
+        <div className="hr-notice tone-danger" role="alert">{error}</div>
       )}
-      <div className="flex flex-col sm:flex-row gap-2">
-        <select
-          value={department}
-          onChange={(e) => setDepartment(e.target.value as OrderNoteDepartment)}
-          className="sm:w-44 px-3 py-2 border-2 border-border rounded-xl text-sm bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-        >
-          {DEPARTMENT_OPTIONS.map((d) => (
-            <option key={d.value} value={d.value}>{t(d.labelKey)}</option>
-          ))}
-        </select>
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder={t("notePlaceholder")}
-          rows={2}
-          className="flex-1 px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors resize-none"
-        />
+      {/* G-10: visible field labels «القسم» / «الملاحظة» (OG-P1). */}
+      <div className="hr-stack" style={{ gap: 8 }}>
+        <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="hr-label">{t("departmentLabel")}</span>
+          <select
+            value={department}
+            onChange={(e) => setDepartment(e.target.value as OrderNoteDepartment)}
+            className="hr-input"
+          >
+            {DEPARTMENT_OPTIONS.map((d) => (
+              <option key={d.value} value={d.value}>{t(d.labelKey)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="hr-label">{t("noteFieldLabel")}</span>
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder={t("notePlaceholder")}
+            rows={2}
+            className="hr-input hr-textarea"
+          />
+        </label>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className={`text-[11px] font-semibold ${overLimit ? "text-red-600" : "text-brown/40"}`}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span className="hr-caption" style={overLimit ? { color: "var(--status-danger)" } : undefined}>
           {message.length}/{NOTE_MAX_LENGTH}
         </span>
         <button
           type="submit"
           disabled={submitting || !message.trim() || overLimit}
-          className="flex items-center gap-1.5 px-4 py-2 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
+          className="hr-btn is-sm ops-note-submit"
+          aria-busy={submitting || undefined}
         >
-          {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          {submitting ? "…" : null}
           {t("submitNoteBtn")}
         </button>
       </div>
@@ -461,6 +412,7 @@ export function StatusActionsBar({
   ownerId,
   onSuccess,
   large = false,
+  itemIds,
 }: {
   orderId: string;
   status: string;
@@ -468,20 +420,26 @@ export function StatusActionsBar({
   onSuccess: () => void;
   /** Larger touch targets — used on the Preparation Workstation page. */
   large?: boolean;
+  /** The order's lines, so the cancel dialog can state the reserved units it releases (G-6). */
+  itemIds?: string[];
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const user = useUser();
   const canManageStatus = hasSubPrivilege(user?.permissions ?? {}, "orders", "manage_status");
   const isOwnerOrAdmin = !!user && (user.role === "admin" || (ownerId !== null && ownerId === user.id));
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // G-6: hold and cancel ask for their reason in an in-page dialog (no window.prompt/confirm).
+  const [ask, setAsk] = useState<null | "hold" | "cancel">(null);
+  const [reason, setReason] = useState("");
+  const [reserved, setReserved] = useState<number | null>(null);
 
   if (!canManageStatus || !isOwnerOrAdmin) return null;
   if (!canHold(status) && !canResume(status) && !canCancel(status) && !canComplete(status)) return null;
 
-  async function run(action: OrderStatusAction, reason?: string) {
-    if (submitting) return; // prevent double submission
+  async function run(action: OrderStatusAction, reason?: string): Promise<boolean> {
+    if (submitting) return false; // prevent double submission
     setSubmitting(true);
     setError(null);
     const result = await submitOrderStatusAction(orderId, action, reason);
@@ -490,60 +448,86 @@ export function StatusActionsBar({
       setError(describeApiError(result.error));
       // 409 means our view of the order is stale — refresh so the UI self-heals.
       if (result.error.status === 409) onSuccess();
-      return;
+      return false;
     }
     onSuccess();
+    return true;
   }
 
-  function handleHold() {
-    const reason = window.prompt(t("holdReasonPrompt"))?.trim();
-    if (!reason) {
-      if (reason === "") setError(t("reasonRequiredGeneric"));
-      return;
-    }
-    run("hold", reason);
+  function handleHold() { setReason(""); setError(null); setAsk("hold"); }
+
+  async function handleCancel() {
+    setReason(""); setError(null); setReserved(null); setAsk("cancel");
+    // The reserved units this cancellation releases, read from the line requirements the
+    // preparation screen already uses. If any read fails no number is shown (never a guess).
+    if (!itemIds || itemIds.length === 0) return;
+    try {
+      const rows = await Promise.all(itemIds.map(async (id) => {
+        const r = await fetch(`/api/order-items/${id}/production-requirement`);
+        if (!r.ok) throw new Error("unavailable");
+        return (await r.json()) as { reservedUnits?: number };
+      }));
+      setReserved(rows.reduce((s, x) => s + (x.reservedUnits ?? 0), 0));
+    } catch { setReserved(null); }
   }
 
-  function handleCancel() {
-    if (!window.confirm(t("confirmCancelOrder"))) return;
-    const reason = window.prompt(t("cancelReasonPrompt"))?.trim();
-    if (!reason) {
-      if (reason === "") setError(t("reasonRequiredGeneric"));
-      return;
-    }
-    run("cancel", reason);
+  async function confirmAsk() {
+    const r = reason.trim();
+    if (!ask || !r) return;
+    // The dialog stays open on a refusal, with the server's message and the reason kept.
+    if (await run(ask, r)) setAsk(null);
   }
 
   return (
-    <div className="space-y-2">
-      {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
-          <AlertTriangle size={13} /> {error}
-        </div>
+    <div className="hr-stack" style={{ gap: 8 }}>
+      {error && !ask && (
+        <div className="hr-notice tone-danger" role="alert">{error}</div>
       )}
-      <div className={`flex gap-2 flex-wrap ${large ? "gap-3" : ""}`}>
+      <Dialog
+        open={ask !== null}
+        title={ask === "cancel" ? t("cancelOrderTitle") : t("holdOrderTitle")}
+        onClose={() => { if (!submitting) setAsk(null); }}
+        actions={<>
+          <button type="button" className={`hr-btn ${ask === "cancel" ? "is-danger" : "is-primary"}`} disabled={submitting || !reason.trim()} onClick={confirmAsk}>
+            {ask === "cancel" ? t("cancelOrderBtnLong") : t("holdOrderBtn")}
+          </button>
+          <button type="button" className="hr-btn" disabled={submitting} onClick={() => setAsk(null)}>{t("backBtn")}</button>
+        </>}
+      >
+        {error ? <div className="hr-notice tone-danger" role="alert">{error}</div> : null}
+        <p className="hr-caption" style={{ margin: 0 }}>
+          {ask === "cancel"
+            ? <>{t("cancelOrderCantUndo")} {reserved !== null && reserved > 0 ? t("cancelOrderReleases").replace("{units}", countNoun(reserved, lang, UNIT_FORMS)) : t("reasonGoesToTimeline")}</>
+            : t("holdOrderExplain")}
+        </p>
+        <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span className="hr-label">{ask === "cancel" ? t("cancelReasonLabel") : t("holdReasonLabel")} *</span>
+          <textarea className="hr-textarea" rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} aria-required="true" />
+        </label>
+      </Dialog>
+      <div className="ops-statusbar" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {canHold(status) && (
           <button disabled={submitting} onClick={handleHold}
-            className={`flex items-center gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-50 active:scale-[0.98] transition-all ${large ? "px-5 py-3.5 text-base font-bold flex-1 min-w-[130px] justify-center" : "px-3 py-2 text-sm"}`}>
-            <PauseCircle size={large ? 20 : 15} /> {t("holdOrderBtn")}
+            className={`hr-btn${large ? "" : " is-sm"}`}>
+            {t("holdOrderBtn")}
           </button>
         )}
         {canResume(status) && (
           <button disabled={submitting} onClick={() => run("resume")}
-            className={`flex items-center gap-1.5 text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 active:scale-[0.98] transition-all ${large ? "px-5 py-3.5 text-base font-bold flex-1 min-w-[130px] justify-center" : "px-3 py-2 text-sm"}`}>
-            <RotateCcw size={large ? 20 : 15} /> {t("resumeOrderBtn")}
+            className={`hr-btn${large ? "" : " is-sm"}`}>
+            {t("resumeOrderBtn")}
           </button>
         )}
         {canCancel(status) && (
           <button disabled={submitting} onClick={handleCancel}
-            className={`flex items-center gap-1.5 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 active:scale-[0.98] transition-all ${large ? "px-5 py-3.5 text-base font-bold flex-1 min-w-[130px] justify-center" : "px-3 py-2 text-sm"}`}>
-            <Ban size={large ? 20 : 15} /> {t("cancelOrderBtn")}
+            className={`hr-btn is-danger${large ? "" : " is-sm"}`}>
+            {t("cancelOrderBtnLong")}
           </button>
         )}
         {canComplete(status) && (
           <button disabled={submitting} onClick={() => run("complete")}
-            className={`flex items-center gap-1.5 text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 disabled:opacity-50 active:scale-[0.98] transition-all ${large ? "px-5 py-3.5 text-base font-bold flex-1 min-w-[130px] justify-center" : "px-3 py-2 text-sm"}`}>
-            {submitting ? <Loader2 size={large ? 20 : 15} className="animate-spin" /> : <CheckCircle2 size={large ? 20 : 15} />} {t("completeOrderBtn")}
+            className={`hr-btn${large ? "" : " is-sm"}`}>
+            {submitting ? "…" : null}{t("completeOrderBtn")}
           </button>
         )}
       </div>
@@ -580,32 +564,23 @@ const DECISION_OPTIONS: { value: string; labelKey: TranslationKey }[] = [
 // Read-only decision-badge icon/token pairing. The editable <select> this once sat
 // beside is gone: the outcome is derived by the server and the only manual exception is
 // the Block toggle. "" represents Not Reviewed.
-const DECISION_ICON: Record<string, React.ElementType> = {
-  "": CircleDashed,
-  "Available on Shelf": CheckCircle2,
-  "Needs Production": Hammer,
-  "Partially Available": CircleDotDashed,
-  "Blocked": AlertTriangle,
-};
 
-const DECISION_TOKEN: Record<string, { fg: string; bg: string; border: string }> = {
-  "":                    { fg: "text-oo-text-muted",       bg: "bg-oo-bg-subtle",           border: "border-oo-border-default" },
-  "Available on Shelf":  { fg: "text-oo-status-success",   bg: "bg-oo-status-success-bg",   border: "border-oo-status-success/30" },
-  "Needs Production":    { fg: "text-oo-status-waiting",   bg: "bg-oo-status-waiting-bg",   border: "border-oo-status-waiting/30" },
-  "Partially Available": { fg: "text-oo-status-preparing", bg: "bg-oo-status-preparing-bg", border: "border-oo-status-preparing/30" },
-  "Blocked":             { fg: "text-oo-status-blocked",   bg: "bg-oo-status-blocked-bg",   border: "border-oo-status-blocked/30" },
+
+const DECISION_TONE: Record<string, "neutral" | "success" | "info" | "warning" | "danger"> = {
+  "": "neutral",
+  "Available on Shelf": "success",
+  "Needs Production": "warning",
+  "Partially Available": "info",
+  "Blocked": "danger",
 };
 
 function DecisionBadge({ decision }: { decision: string }) {
   const { t } = useI18n();
   const key = decision || "";
-  const Icon = DECISION_ICON[key] ?? CircleDashed;
-  const token = DECISION_TOKEN[key] ?? DECISION_TOKEN[""];
   const label = t(DECISION_OPTIONS.find((o) => o.value === key)?.labelKey ?? "prepDecisionNotReviewed");
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${token.fg} ${token.bg} ${token.border}`}>
-      <Icon size={13} aria-hidden="true" />
-      {label}
+    <span className={`hr-dot tone-${DECISION_TONE[key] ?? "neutral"}`} data-decision={key || "none"}>
+      <span>{label}</span>
     </span>
   );
 }
@@ -614,12 +589,16 @@ export function PreparationReviewTable({
   orderId,
   items,
   onSuccess,
+  commitSlot,
 }: {
   orderId: string;
   items: PreparationOrderItem[];
   onSuccess: () => void;
+  /** N-03 (OG-P1 / OG-P3): where «تثبيت التخصيص» goes — the preparation pane's pinned footer.
+   *  Without it the button stays under the summary (the Orders screen, the phone view). */
+  commitSlot?: HTMLElement | null;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const user = useUser();
   const canEdit = hasSubPrivilege(user?.permissions ?? {}, "orders", "prepare_review");
 
@@ -688,6 +667,25 @@ export function PreparationReviewTable({
     };
   }
 
+  /**
+   * N-03: the same four figures in whole units for a SKU line («40 وحدة»), from the unit fields
+   * the fulfillment-options route already sends. The arithmetic mirrors viewFor exactly (it is
+   * the same picture counted in units instead of its kilogram projection). null = a legacy
+   * kilogram line, or the stock picture has not loaded: the kilogram figures are shown.
+   */
+  function unitViewFor(itemId: string): { required: number; available: number; toAllocate: number; production: number } | null {
+    const s = stock[itemId];
+    if (!s || !s.isUnitLine) return null;
+    const reserved = s.reservedUnits ?? 0, outstanding = s.outstandingUnits ?? 0, coverable = s.coverableFromShelfUnits ?? 0;
+    const selection = draft[itemId] ?? "";
+    const base = { required: s.orderedUnits ?? reserved + outstanding, available: s.freeToPromiseUnits ?? 0 };
+    if (selection === "") return { ...base, toAllocate: 0, production: 0 };
+    if (selection === "Blocked") return { ...base, toAllocate: 0, production: reserved + outstanding };
+    return { ...base, toAllocate: reserved + coverable, production: Math.max(0, outstanding - coverable) };
+  }
+  // QA P3: built like <Kg> — the number isolated, the unit beside it — so it reads «24 وحدة» as the frame.
+  const unitsText = (n: number) => <span className="ops-kg"><span className="hr-num">{n}</span> {t("unitsLabel")}</span>;
+
   // Every line already carries a stored decision, i.e. this order has been committed at
   // least once. Drives the third column's heading: intention before, ownership after.
   const allCommitted = items.length > 0 && items.every((i) => i.preparationDecision !== null);
@@ -722,6 +720,8 @@ export function PreparationReviewTable({
   // between — which is exactly why the caption below says so.
   const commitSummary = useMemo(() => {
     let toReserve = 0, productionNeeded = 0, fullyCovered = 0, blocked = 0;
+    // N-03: the same two totals in units when every counted line is a SKU line («23 وحدة»).
+    let unitsToReserve = 0, unitsProduction = 0, allUnits = true;
     for (const item of items) {
       const selection = draft[item.id] ?? "";
       if (selection === "") continue;
@@ -730,8 +730,11 @@ export function PreparationReviewTable({
       toReserve += Number(v.available || 0);
       productionNeeded += Number(v.required || 0);
       if (v.decision === "Available on Shelf") fullyCovered++;
+      const u = unitViewFor(item.id);
+      if (u) { unitsToReserve += u.toAllocate; unitsProduction += u.production; } else allUnits = false;
     }
     return {
+      units: allUnits ? { toReserve: unitsToReserve, production: unitsProduction } : null,
       toReserve: roundKg(toReserve),
       productionNeeded: roundKg(productionNeeded),
       fullyCovered,
@@ -787,41 +790,37 @@ export function PreparationReviewTable({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="hr-stack" style={{ gap: 10 }}>
       {!canEdit && (
-        <p className="text-xs text-brown/50 italic">{t("readOnlyPrepNotice")}</p>
+        <p className="hr-caption" style={{ margin: 0 }}>{t("readOnlyPrepNotice")}</p>
       )}
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
-          <AlertTriangle size={13} /> {error}
-        </div>
+        <div className="hr-notice tone-danger" role="alert">{error}</div>
       )}
       {savedMsg && (
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-2 rounded-xl">
-          <CheckCircle2 size={13} /> {savedMsg}
-        </div>
+        <div className="hr-notice tone-success">{savedMsg}</div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm stack-table">
+      <div className="hr-tablewrap">
+        <table className="hr-table is-compact ops-prep">
           <thead>
-            <tr className="text-xs text-brown/60">
-              <th className="text-start px-2 py-1 font-semibold">{t("beanType")}</th>
-              <th className="text-end px-2 py-1 font-semibold">{t("prepColRequired")}</th>
-              <th className="text-end px-2 py-1 font-semibold">{t("prepColAvailableNow")}</th>
+            <tr>
+              <th>{t("beanType")}</th>
+              <th className="num">{t("prepColRequired")}</th>
+              <th className="num">{t("prepColAvailableNow")}</th>
               {/* Flips once every line has been committed: before the commit this column is
                   an intention ("To Allocate"), after it the quantity genuinely belongs to
                   this order ("Allocated to this Order"). Committed stock is never called
                   "available" — that word is reserved for the shared pool in the column to
                   its left. */}
-              <th className="text-end px-2 py-1 font-semibold">
+              <th className="num">
                 {allCommitted ? t("allocatedToThisOrder") : t("prepColToAllocate")}
               </th>
-              <th className="text-end px-2 py-1 font-semibold">{t("prepColRequiredForProduction")}</th>
-              <th className="text-center px-2 py-1 font-semibold">{t("prepColDerivedResult")}</th>
+              <th className="num">{t("prepColRequiredForProduction")}</th>
+              <th>{t("prepColDerivedResult")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody>
             {(() => {
               // Backend only stores one note per submission (not per item), so when
               // multiple items are Blocked they all share the single inline field —
@@ -835,59 +834,65 @@ export function PreparationReviewTable({
                 const d = viewFor(item.id);
                 const isBlocked = d.decision === "Blocked";
                 const s = stock[item.id];
+                // N-03: a SKU line counts in units («40 وحدة»); a kilogram line in kg, 2 dp.
+                const u = unitViewFor(item.id);
                 return (
                   <Fragment key={item.id}>
                     <tr>
-                      <td className="px-2 py-1.5" data-label={t("beanType")}>{item.beanTypeName}</td>
-                      <td className="px-2 py-1.5 text-end font-medium" data-label={t("prepColRequired")}>{item.quantityKg}</td>
-                      <td className="px-2 py-1.5 text-end tabular-nums" data-label={t("prepColAvailableNow")}>
+                      <td data-label={t("beanType")} data-testid={`prep-product-${item.id}`}>
+                        {/* E7: the product's master-data name in the interface language
+                            (pickLocalizedName); a line without a product keeps its stored name. */}
+                        {item.product ? (
+                          <LocalizedName lang={lang} en={item.product.productNameEn} ar={item.product.productNameAr} lastResort={item.beanTypeName} />
+                        ) : (
+                          <bdi>{item.beanTypeName}</bdi>
+                        )}
+                      </td>
+                      <td className="num" data-label={t("prepColRequired")}>{u ? unitsText(u.required) : <Kg v={item.quantityKg} />}</td>
+                      <td className="num" data-label={t("prepColAvailableNow")}>
                         {stockLoading && !s ? (
-                          <span className="text-brown/40">…</span>
+                          <span className="hr-muted">…</span>
                         ) : s ? (
-                          <span className={s.freeToPromiseQty > 0 ? "text-green-600 font-semibold" : "text-brown/40"}>
-                            {s.freeToPromiseQty}
+                          <span className="hr-num" style={s.freeToPromiseQty > 0 ? { color: "var(--status-success)" } : { color: "var(--text-muted)" }}>
+                            {u ? u.available : roundKg(s.freeToPromiseQty).toFixed(2)}
                           </span>
                         ) : (
-                          <span className="text-brown/40">—</span>
+                          <span className="hr-muted">—</span>
                         )}
                       </td>
                       {/* A committed, unblocked line shows stock this order actually holds,
                           so it is styled as owned rather than as a projection. */}
-                      <td className="px-2 py-1.5 text-end tabular-nums" data-label={allCommitted ? t("allocatedToThisOrder") : t("prepColToAllocate")}>
+                      <td className="num" data-label={allCommitted ? t("allocatedToThisOrder") : t("prepColToAllocate")}>
                         <span
-                          className={
+                          style={
                             isBlocked
-                              ? "text-brown/40"
+                              ? { color: "var(--text-muted)" }
                               : item.preparationDecision
-                                ? "font-bold text-oo-status-ready"
+                                ? { color: "var(--status-success)", fontWeight: 600 }
                                 : undefined
                           }
                           title={!isBlocked && item.preparationDecision ? t("allocatedToThisOrder") : undefined}
                         >
-                          {isBlocked ? "0" : d.available || "0"}
+                          {u ? u.toAllocate : isBlocked ? "0.00" : Number(d.available || 0).toFixed(2)}
                         </span>
                       </td>
-                      <td className="px-2 py-1.5 text-end tabular-nums" data-label={t("prepColRequiredForProduction")}>
-                        <span>{d.required || "0"}</span>
+                      <td className="num" data-label={t("prepColRequiredForProduction")}>
+                        <span className="hr-num">{u ? u.production : Number(d.required || 0).toFixed(2)}</span>
                       </td>
                       {/* Derived Result is read-only: Available / Partially Available /
                           Needs Production are computed by the server from what the shelf can
                           actually cover, never chosen by the operator. The one human
                           exception is blocking the item, which is a button, not an option in
                           a list of outcomes. */}
-                      <td className="px-2 py-1.5 text-center stack-action" data-label={t("prepColDerivedResult")}>
-                        <div className="flex items-center justify-center gap-2 flex-wrap">
+                      <td data-label={t("prepColDerivedResult")}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <DecisionBadge decision={d.decision} />
                           {canEdit && (
                             <button
                               type="button"
                               onClick={() => setItemDecision(item.id, isBlocked ? "auto" : "Blocked")}
                               aria-pressed={isBlocked}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-                                isBlocked
-                                  ? "text-oo-text-muted bg-white border-oo-border-default hover:bg-cream"
-                                  : "text-oo-status-blocked bg-oo-status-blocked-bg border-oo-status-blocked/30 hover:bg-oo-status-blocked/10"
-                              }`}
+                              className={`hr-btn is-sm${isBlocked ? "" : " is-danger"}`}
                             >
                               {isBlocked ? t("prepUnblockItem") : t("prepBlockItem")}
                             </button>
@@ -897,11 +902,10 @@ export function PreparationReviewTable({
                     </tr>
                     {canEdit && isBlocked && item.id === noteAnchorId && (
                       <tr>
-                        <td colSpan={6} className="px-2 pb-2.5 pt-0.5 bg-oo-status-blocked-bg/40">
-                          <div className="flex items-start gap-2">
-                            <AlertTriangle size={14} className="text-oo-status-blocked mt-2 flex-shrink-0" aria-hidden="true" />
-                            <div className="flex-1 min-w-0">
-                              <label htmlFor={`blocked-reason-${orderId}`} className="block text-xs font-bold text-oo-status-blocked mb-1">
+                        <td colSpan={6}>
+                          <div>
+                            <div className="hr-field">
+                              <label htmlFor={`blocked-reason-${orderId}`} className="hr-label">
                                 {t("prepBlockedReasonLabel")} <span aria-hidden="true">*</span>
                               </label>
                               <textarea
@@ -912,17 +916,14 @@ export function PreparationReviewTable({
                                 rows={2}
                                 required
                                 aria-required="true"
-                                className={`w-full px-3 py-2 border-2 rounded-xl text-sm focus:ring-2 outline-none transition-colors resize-none ${
-                                  blockedWithoutNote
-                                    ? "border-oo-status-blocked focus:border-oo-status-blocked focus:ring-oo-status-blocked/20"
-                                    : "border-oo-border-default focus:border-oo-action-primary focus:ring-oo-action-primary/20"
-                                }`}
+                                className="hr-input hr-textarea"
+                                aria-invalid={blockedWithoutNote || undefined}
                               />
                               {blockedWithoutNote && (
-                                <p className="text-xs font-bold text-oo-status-blocked mt-1">{t("prepNoteRequiredForBlocked")}</p>
+                                <span className="hr-err">{t("prepNoteRequiredForBlocked")}</span>
                               )}
                               {blockedIds.length > 1 && (
-                                <p className="text-[11px] text-oo-text-muted mt-1">{t("prepBlockedReasonAppliesAll")}</p>
+                                <span className="hr-help">{t("prepBlockedReasonAppliesAll")}</span>
                               )}
                             </div>
                           </div>
@@ -944,52 +945,41 @@ export function PreparationReviewTable({
               already-reviewed order flashes a red "could not load stock" that is simply
               describing the loading state. */}
           {!stockLoading && (stockError || missingStock) && (
-            <p className="text-xs font-bold text-red-600">{t("stockPreviewUnavailable")}</p>
+            <p className="hr-err" style={{ margin: 0 }}>{t("stockPreviewUnavailable")}</p>
           )}
           {/* Order-level summary of what committing will do. Everything above is a PREVIEW
               read from the shelf a moment ago: nothing is reserved until this button is
               pressed, and another order may take the stock in between. */}
-          <div className="rounded-xl border border-oo-border-default bg-white px-3 py-2.5 space-y-1.5">
-            <p className="text-xs font-bold text-oo-text-muted uppercase tracking-wide">
-              {t("prepSummaryTitle")}
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryToReserve")}</span>
-                <span className="font-bold tabular-nums">{commitSummary.toReserve}</span>
-              </div>
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryProductionNeeded")}</span>
-                <span className="font-bold tabular-nums">{commitSummary.productionNeeded}</span>
-              </div>
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryFullyCovered")}</span>
-                <span className="font-bold tabular-nums">{commitSummary.fullyCovered}</span>
-              </div>
-              <div>
-                <span className="block text-[11px] text-oo-text-muted">{t("prepSummaryBlocked")}</span>
-                <span className={`font-bold tabular-nums ${commitSummary.blocked > 0 ? "text-oo-status-blocked" : ""}`}>
-                  {commitSummary.blocked}
-                </span>
-              </div>
-            </div>
-            <p className="text-[11px] text-oo-text-muted">
-              {t("prepSummaryExpectedState")}:{" "}
-              <span className="font-semibold">
-                {commitSummary.expectedReady ? t("orderStatusReadyForShipping") : t("orderStatusPreparing")}
-              </span>
-            </p>
-            <p className="text-[11px] text-oo-text-muted italic">{t("prepPreviewNotReserved")}</p>
+          <div className="hr-stack" style={{ gap: 6 }}>
+            <p className="hr-label" style={{ margin: 0 }}>{t("prepSummaryTitle")}</p>
+            <dl className="hr-kv">
+              <div><dt>{t("prepSummaryToReserve")}</dt><dd>{commitSummary.units ? unitsText(commitSummary.units.toReserve) : <Kg v={commitSummary.toReserve} />}</dd></div>
+              <div><dt>{t("prepSummaryProductionNeeded")}</dt><dd>{commitSummary.units ? unitsText(commitSummary.units.production) : <Kg v={commitSummary.productionNeeded} />}</dd></div>
+              <div><dt>{t("prepSummaryFullyCovered")}</dt><dd className="hr-num">{commitSummary.fullyCovered}</dd></div>
+              <div><dt>{t("prepSummaryBlocked")}</dt><dd className="hr-num" style={commitSummary.blocked > 0 ? { color: "var(--status-danger)" } : undefined}>{commitSummary.blocked}</dd></div>
+              <div><dt>{t("prepSummaryExpectedState")}</dt><dd>{commitSummary.expectedReady ? t("orderStatusReadyForShipping") : t("orderStatusPreparing")}</dd></div>
+            </dl>
+            <p className="hr-caption" style={{ margin: 0 }}>{t("prepPreviewNotReserved")}</p>
           </div>
 
-          <button
-            onClick={handleSave}
-            disabled={submitting || !canSave}
-            className="w-full xl:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 bg-orange text-white rounded-lg text-sm font-bold hover:bg-orange-dark disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200"
-          >
-            {submitting ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
-            {t("commitAllocation")}
-          </button>
+          {/* OG-P6: on the phone the commit is a sticky 44 px bar while the review is in view.
+              N-03 (OG-P1 / OG-P3): in the 768+ preparation pane it sits in the pinned footer. */}
+          {(() => {
+            const commit = (
+              <div className="ops-commit">
+                <button
+                  onClick={handleSave}
+                  disabled={submitting || !canSave}
+                  className="hr-btn is-primary"
+                  aria-busy={submitting || undefined}
+                >
+                  {submitting ? "…" : null}
+                  {t("commitAllocation")}
+                </button>
+              </div>
+            );
+            return commitSlot ? createPortal(commit, commitSlot) : commit;
+          })()}
         </>
       )}
     </div>
@@ -999,9 +989,6 @@ export function PreparationReviewTable({
 export function OwnerDisplay({ owner }: { owner: { name: string } | null }) {
   const { t } = useI18n();
   return (
-    <span className="inline-flex items-center gap-1.5 text-sm text-charcoal">
-      <UserCircle2 size={15} className="text-brown/50" />
-      {owner ? owner.name : <span className="text-brown/40 italic">{t("unassignedOwner")}</span>}
-    </span>
+    <span>{owner ? owner.name : <span className="hr-muted">{t("unassignedOwner")}</span>}</span>
   );
 }

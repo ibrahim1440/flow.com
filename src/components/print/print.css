@@ -1,0 +1,291 @@
+/*
+ * G-20 / G-21 print subsystem. Labels are laid out in mm and type in pt (never screen px), so the
+ * preview and the print output are the same geometry. Black only (thermal direct prints no colour);
+ * rules 0.25 mm (≥ 2 dots at 203 dpi). Fonts: IBM Plex Sans Arabic / IBM Plex Sans (Direction 2.1).
+ */
+
+/* ── Label ─────────────────────────────────────────────────────────────────── */
+.pl-label {
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  color: #000;
+  font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", "Noto Sans Arabic", sans-serif;
+  font-size: var(--pl-value);
+  line-height: 1.22;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.pl-label *, .pl-label *::before, .pl-label *::after { box-sizing: border-box; }
+.pl-inner { height: 100%; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+/* Vertical rhythm: one gap between header, rule, score, fields, rule and footer, fields with no gap.
+   The gap is the variant's own Figma auto-layout gap (--pl-gap, set by LabelView from labelGapMm):
+   0.5 mm on the fullest bilingual Final (1646:5656) and on compact labels, 0.75 mm on the other
+   bilingual variants, 1.0 mm on single-language and Coffee Origin labels, 0.375 mm on the bilingual
+   closed-before-policy label. */
+.pl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 2mm; padding-bottom: var(--pl-gap, 0.5mm); margin-bottom: var(--pl-gap, 0.5mm); border-bottom: 0.25mm solid #000; flex: none; }
+.pl-lang-ar .pl-head { flex-direction: row; }
+.pl-logo { display: block; width: auto; flex: none; margin: 0; object-fit: contain; }
+.pl-names { min-width: 0; text-align: end; margin-inline-start: auto; }
+/* Names (G-20 1646:6432): every label text is IBM Plex Sans Arabic at 125 %. The English name is Bold;
+   the Arabic name is Medium beside an English one and Bold on an Arabic-only label. */
+.pl-name-en { font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", sans-serif; font-size: var(--pl-name-en); font-weight: 700; line-height: 1.25; }
+.pl-name-ar { font-size: var(--pl-name-ar); font-weight: 500; line-height: 1.25; }
+.pl-lang-ar .pl-name-ar { font-weight: 700; }
+/* Single language: names at the start, logo at the end (1646:6082 / 1646:5882 / 1646:5655). */
+.pl-lang-ar .pl-names, .pl-lang-en .pl-names { text-align: start; margin-inline-start: 0; }
+
+/* Rows never shrink: content that does not fit overflows the label box and is caught by the
+   dialog's measurement («does not fit»), instead of sliding under the footer. */
+.pl-rows { display: flex; flex-direction: column; gap: 0; flex: none; }
+/* ISO dates never break inside (B-7): «Session ·» wraps before «2026-10-06», as in 1646:5656. */
+.pl-date { white-space: nowrap; }
+.pl-headtext { min-width: 0; margin-inline-start: auto; display: flex; flex-direction: column; }
+/* Template kicker (1646:6432). Type minimums hold: 6 pt Latin, 7 pt Arabic. */
+.pl-kicker { font-size: 6pt; font-weight: 600; letter-spacing: 0.04em; text-align: end; line-height: 1.15; }
+.pl-kicker [lang="ar"] { font-size: 7pt; letter-spacing: 0; }
+.pl-lang-ar .pl-headtext, .pl-lang-en .pl-headtext { margin-inline-start: 0; }
+.pl-lang-ar .pl-kicker, .pl-lang-en .pl-kicker { text-align: start; }
+.pl-row { display: grid; grid-template-columns: var(--pl-labelcol) minmax(0, 1fr); gap: 1.5mm; align-items: baseline; }
+.pl-row.is-bi { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3mm; }
+.pl-half { display: grid; grid-template-columns: var(--pl-labelcol) minmax(0, 1fr); gap: 1mm; align-items: baseline; min-width: 0; }
+.pl-k { font-size: var(--pl-label-en); font-weight: 600; letter-spacing: 0.02em; font-family: "IBM Plex Sans", "IBM Plex Sans Arabic", sans-serif; }
+[dir="rtl"] > .pl-k, [lang="ar"] > .pl-k { font-size: var(--pl-label-ar); letter-spacing: 0; font-family: "IBM Plex Sans Arabic", sans-serif; font-weight: 500; }
+/* Whole words only (B-6): a word is broken only when it is longer than the line itself. */
+.pl-v { min-width: 0; overflow-wrap: break-word; }
+[dir="rtl"] > .pl-v, [lang="ar"] > .pl-v { font-size: var(--pl-value-ar); }
+.is-notes .pl-v { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--pl-notes-lines); line-clamp: var(--pl-notes-lines); overflow: hidden; }
+.pl-footer { margin-top: auto; padding-top: var(--pl-gap, 0.5mm); border-top: 0.25mm solid #000; text-align: center; flex: none; white-space: nowrap; }
+.pl-f-en { font-family: "IBM Plex Sans", sans-serif; font-size: var(--pl-footer-en); letter-spacing: 0.04em; font-weight: 500; }
+.pl-f-sep { font-size: var(--pl-footer-en); }
+.pl-f-ar { font-size: var(--pl-footer-ar); }
+
+/* Score row (1646:6432): no rule under it; the header rule is the only one above the fields. */
+.pl-score { display: flex; align-items: center; justify-content: space-between; gap: 2mm; margin: 0 0 var(--pl-gap, 0.5mm); flex: none; }
+.pl-score.is-single { justify-content: flex-start; }
+/* Bilingual: the meta sits right beside the score at the end (1646:5656). */
+.pl-score.is-bi:not(.pl-legacy) { justify-content: flex-end; }
+.pl-score-meta { display: flex; flex-direction: column; gap: 0.3mm; font-size: var(--pl-label-en); font-weight: 600; line-height: 1.25; min-width: 0; }
+.pl-score-meta[lang="ar"] { font-size: 7pt; }
+.pl-outof { font-variant-numeric: tabular-nums; }
+.pl-compact .pl-score { justify-content: center; border: 0; padding: 0; }
+/* Final score (G-20 1646:6432): IBM Plex Sans Arabic Bold, 125 %. */
+.pl-score-num { font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", sans-serif; font-size: var(--pl-score); font-weight: 700; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.pl-score-state { font-size: var(--pl-label-ar); font-weight: 500; }
+/* Not-final marker: a large state word and a small meta line (1646:5776 / 1646:6186 / 1655:10336). */
+.pl-marker { display: flex; align-items: baseline; gap: 2mm; margin: 0 0 var(--pl-gap, 0.5mm); line-height: 1.2; flex: none; }
+.pl-marker.is-bi { justify-content: space-between; }
+.pl-marker-word { font-size: 12pt; font-weight: 700; line-height: 1.25; white-space: nowrap; } /* «Score withheld» Bold 125 % (1646:6432) */
+.pl-marker-meta { font-size: var(--pl-label-en); font-weight: 500; min-width: 0; }
+.pl-marker-meta [lang="ar"], .pl-marker-meta[lang="ar"] { font-size: 7pt; }
+.pl-counts { font-variant-numeric: tabular-nums; }
+/* Pre-policy result (decision 2.3, design §P2-7): the exact disclosure in a boxed rule beside the
+   score (where a COMPLETE label has its «completed every cup» meta), «recorded score» under it. */
+/* Pre-policy (decision 2.3, §P2-7): the exact disclosure in a one-rule box spanning the row, Arabic
+   first when bilingual; «/ 100 · SCA» (and on single language «3 scorers · recorded score") after it. */
+.pl-legacy-caveat { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; border: 0.26mm solid #000; padding: 0.3mm 1mm; font-size: 7pt; font-weight: 600; line-height: 1.15; }
+.pl-cv { display: block; text-align: start; }
+.pl-cv-tail { font-weight: 500; }
+.pl-cv[lang="en"] { font-family: "IBM Plex Sans", "IBM Plex Sans Arabic", sans-serif; font-size: 6.5pt; }
+.pl-cv[lang="en"] .pl-cv-tail { font-size: 6pt; }
+.pl-legacy.is-single .pl-cv-tail { display: block; }
+.pl-legacy.is-noscore .pl-noscore { flex: none; }
+.pl-noscore { font-size: 9pt; font-weight: 700; line-height: 1.25; display: flex; flex-direction: column; } /* «No final score» Bold 125 % (1646:6432) */
+.pl-noscore.is-inline { display: block; font-size: 7pt; }
+.pl-compact:not(.pl-lang-bi) .pl-noscore.is-inline { font-size: 9pt; }
+.pl-legacy.is-compact > .pl-score-num { text-align: left; }
+.pl-compact.pl-lang-bi .pl-legacy.is-compact > .pl-score-num { text-align: center; }
+.pl-compact.pl-lang-ar .pl-legacy.is-compact > .pl-score-num { text-align: right; }
+.pl-legacy.is-bi .pl-noscore { text-align: end; }
+.pl-legacy.is-compact { display: flex; flex-direction: column; align-items: stretch; gap: 0.4mm; margin: 0; }
+.pl-compact .pl-legacy-caveat { padding: 0.6mm 1.2mm; flex: none; line-height: 1.3; }
+.pl-compact .pl-cv[lang="en"] { font-size: 7pt; }
+
+/* Compact (50 × 30 class): no field labels, centred priority lines (A-4 / P2-1). */
+/* Bilingual 50 × 30 is centred; single language reads from the start edge (1646:6402 / 6422 / 5655). */
+.pl-compact .pl-inner { justify-content: flex-start; align-items: stretch; gap: 0.5mm; text-align: start; }
+.pl-compact.pl-lang-bi .pl-inner { text-align: center; }
+.pl-compact .pl-names { text-align: inherit; margin: 0; }
+.pl-compact .pl-score.is-single, .pl-compact .pl-score { justify-content: flex-start; }
+.pl-compact.pl-lang-bi .pl-score { justify-content: center; }
+/* Compact (1646:6432 Compact 50×30): English name Bold; Arabic name SemiBold beside it, Bold when alone. */
+.pl-compact .pl-name-en { font-weight: 700; }
+.pl-compact .pl-name-ar { font-weight: 600; }
+.pl-compact.pl-lang-ar .pl-name-ar { font-weight: 700; }
+.pl-compact .pl-score { margin: 0; }
+.pl-compact .pl-marker { margin: 0; display: block; font-size: 8pt; font-weight: 700; line-height: 1.25; }
+.pl-c-notes { font-size: var(--pl-value-ar); line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--pl-notes-lines); line-clamp: var(--pl-notes-lines); overflow: hidden; }
+.pl-c-line { font-size: var(--pl-value); line-height: 1.2; white-space: nowrap; overflow: hidden; }
+
+/* Large (A4 full page) */
+.pl-large .pl-head { padding-bottom: 3mm; margin-bottom: 3mm; }
+.pl-large .pl-rows { gap: 1.5mm; }
+
+/* ── Pages ─────────────────────────────────────────────────────────────────── */
+.pl-page { position: relative; background: #fff; overflow: hidden; flex: none; }
+.pl-slot { position: absolute; overflow: hidden; }
+.pl-page.is-preview { box-shadow: 0 0 0 1px rgb(40 36 26 / 0.12), 0 1px 3px rgb(40 36 26 / 0.12); }
+.pl-page.is-preview .pl-slot { outline: 0.2mm dashed #8a8578; outline-offset: 0; } /* cut edge — screen only */
+.pl-page.is-preview .pl-slot.is-empty { background: #f0f0e9; display: flex; align-items: center; justify-content: center; }
+.pl-empty { font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", sans-serif; font-size: 9pt; color: #6e6a61; }
+
+.pl-print-root { display: none; }
+@media print {
+  .pl-print-root { display: block; }
+  .pl-print-root .pl-page { break-after: page; page-break-after: always; box-shadow: none; }
+  .pl-print-root .pl-page:last-child { break-after: auto; page-break-after: auto; }
+}
+
+/* Labels list: the selection box leads the row on desktop and trails it on the phone. */
+.lbl-table td.lbl-check label, .lbl-table td.lbl-check input { cursor: pointer; }
+/* Labels list name cell (G-20 1228:115820): the name is Medium 14/22 (1228:115821, Number/Body Medium);
+   the second-language line is Small Regular 12.5/18 (1228:115822, UI/Small), its Latin in IBM Plex Sans. */
+.lbl-table td.m-title .lbl-name { font-weight: 500; font-size: 14px; line-height: 22px; }
+.lbl-table td.m-title .lbl-name-alt { display: block; font-size: 12.5px; line-height: 18px; font-weight: 400; font-family: var(--f-num); }
+@media (max-width: 767px) {
+  .lbl-table td.m-title { order: 1; }
+  .lbl-table td.lbl-check { order: 2; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+}
+
+/* ── Print settings · Paper & printer profiles (A-3, Figma 1652:10127 / 1652:9690) ───── */
+.pp-main { display: grid; grid-template-columns: 320px minmax(0, 1fr) 260px; gap: 20px; align-items: start; }
+.pp-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pp-list-head { display: flex; align-items: center; gap: 8px; }
+.pp-list-head h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.pp-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--hr-surface); border: 1px solid var(--hr-border-subtle); border-radius: 8px; min-width: 0; }
+.pp-card.is-selected { background: var(--hr-success-tint); border-color: var(--hr-success); }
+.pp-card.is-plain { background: transparent; gap: 2px; }
+.pp-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.pp-card-title strong { font-size: 14px; font-weight: 600; line-height: 1.5; }
+.pp-cap-title { font-size: 13px; font-weight: 600; }
+.pp-chip { font-size: 11px; font-weight: 500; line-height: 1.5; padding: 1px 6px; border-radius: 4px; background: var(--hr-subtle); color: var(--hr-muted); white-space: nowrap; }
+.pp-chip.is-warn { background: var(--hr-warning-tint); color: var(--hr-warning); }
+.pp-card-meta { font-size: 12px; color: var(--hr-muted); line-height: 1.5; }
+.pp-card-links { display: flex; gap: 16px; }
+.pp-card-links button { appearance: none; background: none; border: 0; padding: 0; font: inherit; font-size: 12px; font-weight: 500; color: var(--hr-link); cursor: pointer; line-height: 1.5; }
+.pp-card-links button:hover { text-decoration: underline; }
+.pp-cap-edit { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.pp-cap-edit .pp-input { width: 140px; flex: none; }
+.pp-form { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; background: var(--hr-surface); border: 1px solid var(--hr-border-subtle); border-radius: 8px; min-width: 0; }
+.pp-form h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.pp-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pp-label { font-size: 12px; font-weight: 600; line-height: 1.5; }
+.pp-pairs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.pp-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.pp-quad { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.pp-triple { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.pp-input { display: flex; align-items: center; gap: 4px; height: var(--hr-control); padding: 0 10px; background: var(--hr-surface); border: 1px solid var(--hr-border-control); border-radius: 6px; min-width: 0; }
+.pp-input:focus-within { outline: 2px solid var(--focus-ring, #5c5c38); outline-offset: 1px; }
+.pp-input.is-invalid { border-color: var(--hr-danger); }
+.pp-input.is-disabled { background: var(--hr-disabled-bg); }
+.pp-input input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 13px; font-family: var(--hr-num); color: var(--hr-text); height: 100%; padding: 0; -moz-appearance: textfield; outline: none; }
+.pp-input input::-webkit-outer-spin-button, .pp-input input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pp-input input:disabled { background: transparent; color: var(--hr-muted); -webkit-text-fill-color: var(--hr-muted); opacity: 1; }
+.pp-unit { font-size: 11px; color: var(--hr-muted); white-space: nowrap; }
+.pp-seg { padding: 4px; }
+.pp-seg button { height: 26px; font-size: 13px; }
+.pp-dim { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; background: var(--hr-success-tint); color: var(--hr-success); font-size: 12px; font-weight: 500; line-height: 1.5; }
+.pp-dim.is-bad { background: var(--hr-danger-tint); color: var(--hr-danger); }
+.pp-dim.is-bad .is-ok { color: var(--hr-success); }
+.pp-a8 { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 6px; background: var(--hr-warning-tint); font-size: 12px; line-height: 1.5; }
+.pp-a8 strong { font-size: 13px; font-weight: 600; }
+.pp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pp-actions .pp-delete { margin-inline-start: auto; }
+.pp-scale { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px; background: var(--hr-subtle); border-radius: 8px; position: sticky; top: 16px; }
+.pp-scale h3 { margin: 0; font-size: 13px; font-weight: 600; line-height: 1.5; text-align: center; }
+.pp-sheet { position: relative; background: #fff; border: 1px solid var(--hr-border-control); overflow: hidden; flex: none; }
+.pp-sheet-margin { position: absolute; left: 0; right: 0; top: 0; background: #f2d9cc; opacity: 0.5; }
+.pp-sheet-slot { position: absolute; background: var(--hr-success-tint); border: 1px solid var(--hr-success); }
+@media (max-width: 1279px) {
+  .pp-main { grid-template-columns: 280px minmax(0, 1fr); }
+  .pp-scale { grid-column: 1; position: static; }
+}
+@media (max-width: 767px) {
+  .pp-main { grid-template-columns: minmax(0, 1fr); }
+  .pp-pairs, .pp-triple { grid-template-columns: minmax(0, 1fr); }
+  .pp-quad { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pp-input { height: 44px; }
+  .pp-card-links button { min-height: 44px; }
+}
+
+/* ── Dialog (G-21 + B-1 additions, Figma 1647:5816 / 1649:7798 / 1650:8106) ─────── */
+.hr-dialog.pd-dialog { width: min(1184px, 100%); }
+.pd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.pd-opts { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.pd-sec { display: flex; flex-direction: column; gap: 8px; }
+.pd-sec > h3 { font-size: 14px; font-weight: 600; margin: 0; line-height: 20px; }
+.pd-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--hr-subtle); border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); padding: 3px; gap: 3px; }
+.pd-seg button { appearance: none; border: 1px solid transparent; background: transparent; border-radius: var(--hr-r-sm); height: 34px; font: inherit; font-size: 13.5px; color: var(--hr-muted); cursor: pointer; }
+.pd-seg button[aria-pressed="true"] { background: var(--hr-surface); border-color: var(--hr-text); color: var(--hr-text); font-weight: 600; }
+.pd-seg button:disabled { cursor: not-allowed; color: var(--hr-disabled); }
+.pd-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
+.pd-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.pd-stepper { display: inline-flex; align-items: center; border: 1px solid var(--hr-border-control); border-radius: var(--hr-r-sm); height: 34px; flex: none; }
+.pd-stepper button { appearance: none; border: 0; background: transparent; width: 34px; height: 32px; font: inherit; cursor: pointer; color: var(--hr-text); }
+.pd-stepper button:disabled { color: var(--hr-disabled); cursor: not-allowed; }
+.pd-stepper input { width: 48px; height: 32px; border: 0; text-align: center; font: inherit; font-family: var(--hr-num); font-variant-numeric: tabular-nums; background: transparent; color: var(--hr-text); -moz-appearance: textfield; }
+.pd-stepper input::-webkit-outer-spin-button, .pd-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pd-total { background: var(--hr-subtle); border-radius: var(--hr-r-sm); padding: 8px 12px; font-weight: 500; }
+.pd-slots { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-sm); width: fit-content; direction: ltr; }
+.pd-slots button { appearance: none; width: 64px; height: 30px; border: 1px dashed var(--hr-border-control); background: var(--hr-surface); border-radius: 4px; font: inherit; font-size: 13px; font-family: var(--hr-num); cursor: pointer; color: var(--hr-text); }
+.pd-slots button.is-used { background: var(--hr-selected); border-style: solid; border-color: var(--hr-border-strong); color: var(--hr-muted); font-family: var(--hr-font); }
+.pd-slots button[aria-pressed="true"] { border: 2px solid var(--hr-primary); background: var(--hr-primary-tint); font-weight: 600; }
+.pd-switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.pd-switch input { appearance: none; width: 36px; height: 20px; border-radius: 10px; background: var(--hr-border-control); position: relative; cursor: pointer; flex: none; margin: 0; }
+.pd-switch input::after { content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: inset-inline-start 0.15s; }
+.pd-switch input:checked { background: var(--hr-primary); }
+.pd-switch input:checked::after { inset-inline-start: 18px; }
+.pd-switch input:focus-visible, .pd-seg button:focus-visible, .pd-slots button:focus-visible, .pd-stepper button:focus-visible { outline: 2px solid var(--focus-ring, #5c5c38); outline-offset: 2px; }
+.pd-kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+.pd-kv dt { color: var(--hr-muted); }
+.pd-kv dd { margin: 0; overflow-wrap: anywhere; }
+.pd-guide { background: var(--hr-subtle); border-radius: var(--hr-r-sm); padding: 12px 14px; font-size: 13px; }
+.pd-guide h4 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
+.pd-guide ul { margin: 0; padding-inline-start: 16px; }
+.pd-fields { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pd-fields li { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.pd-fields li label { flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.pd-fields li .is-off { color: var(--hr-muted); }
+.pd-preview { position: sticky; top: 0; background: #e9e8df; border-radius: var(--hr-r-md); padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pd-preview-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
+.pd-preview-stage { overflow: hidden; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.pd-preview-scale { transform-origin: top left; }
+.pd-preview-cap { text-align: center; font-size: 12.5px; color: var(--hr-muted); }
+.pd-pager { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.pd-sel { display: flex; flex-direction: column; gap: 4px; }
+.pd-sel-list { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-sm); max-height: 180px; overflow-y: auto; }
+.pd-sel-list button { appearance: none; width: 100%; text-align: start; background: transparent; border: 0; padding: 6px 8px; border-radius: 4px; font: inherit; font-size: 13px; cursor: pointer; color: var(--hr-text); }
+.pd-sel-list button[aria-pressed="true"] { background: var(--hr-primary-tint); font-weight: 600; }
+.pd-sel-list button:hover { background: var(--hr-hover); }
+/* 1664:182033 additions: guest note, notes-mode override, per-cup traceability rows, audit cue. */
+.pd-note { background: var(--hr-subtle); border-radius: var(--hr-r-sm); padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.pd-warn { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; background: var(--hr-warning-tint); border-radius: var(--hr-r-sm); padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.pd-linkbtn { appearance: none; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500; text-align: start; }
+.hr-select.pd-changed { border-color: var(--hr-warning); }
+.pd-changed-note { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: 13px; }
+.pd-changed-mark { display: inline-flex; align-items: center; gap: 6px; color: var(--hr-warning); font-weight: 500; }
+.pd-changed-mark::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--hr-warning); flex: none; }
+.pd-trace-rows { display: flex; flex-direction: column; gap: 6px; }
+.pd-trace-row { background: var(--hr-subtle); border-radius: var(--hr-r-sm); padding: 6px 10px; font-size: 13px; line-height: 1.5; }
+.pd-trace-row.is-missing { background: var(--hr-warning-tint); }
+.pd-audit { font-size: 12px; color: var(--hr-muted); align-self: center; margin-inline-end: auto; }
+.pd-guide-mobile { display: none; }
+.pd-stack-item .pl-page.is-preview { box-shadow: 0 0 0 1px rgb(40 36 26 / 0.12), 0 1px 3px rgb(40 36 26 / 0.12); }
+.pd-expanded { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.pd-expanded figure { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.pd-expanded figcaption { font-size: 12.5px; color: var(--hr-muted); }
+@media (max-width: 1279px) {
+  .hr-dialog.pd-dialog { width: min(872px, 100%); }
+}
+@media (max-width: 767px) {
+  .hr-dialog.pd-dialog { width: 100%; }
+  .pd-grid { grid-template-columns: minmax(0, 1fr); }
+  .pd-preview { position: static; order: -1; }
+  .pd-seg button, .pd-stepper, .pd-stepper button, .pd-stepper input { height: 44px; min-width: 44px; }
+  .pd-slots button { width: 64px; height: 44px; }
+  .pd-fields li { min-height: 44px; }
+  .pd-expanded { grid-template-columns: minmax(0, 1fr); }
+  .pd-audit { display: none; }
+  .pd-guide-mobile { display: list-item; }
+}

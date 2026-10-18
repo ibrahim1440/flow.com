@@ -13,10 +13,15 @@ import { validatePin } from "../src/lib/pin-policy.js";
 //   • ERP_SEED_ENABLED must be exactly "true", so the seed never runs by accident;
 //   • Production and Demo are refused by name, even if the flag is set against them.
 // It is a demo/training seed and nothing else.
-// Verified against the Neon control plane on 2026-09-16: these are the real endpoint IDs of
-// the "production" and "hiqbah-demo-training-20260529" branches of project dark-lab-61530722.
-// An earlier list named ep-icy-field-aq4upc3z as Production; that endpoint exists in no
-// project of this organization, so the guard was protecting nothing.
+// The two entries below are the real database host identifiers of the Production and
+// Demo/Training environments, verified against the hosting control plane rather than
+// assumed from a branch name. They are hostnames, not credentials, and they are listed
+// here ON PURPOSE: the guard works by refusing these hosts BY NAME, so removing them to
+// tidy the file would silently turn the protection off.
+//
+// A previous version of this list named a host that exists in no environment at all, so
+// the guard was protecting nothing. Verify an identifier against the control plane before
+// trusting it here.
 const PROTECTED_ENDPOINTS = [
   "ep-jolly-feather-aqne6cp1", // Production branch (production-primary) — never
   "ep-dawn-dust-aqn1u1uf", // Demo / training — never from this path
@@ -51,7 +56,8 @@ function createClient() {
 const prisma = createClient();
 
 async function main() {
-  // Employees — Secure Version B credentials, PINs supplied by the environment.
+  // Employees — Secure Version B credentials, PINs supplied by the environment. Display names
+  // are role descriptions, not people's names (this file ships in the public build).
   //
   // No PIN is hard-coded: each comes from an explicitly named six-digit seed variable and is
   // validated by the same policy the application enforces. Each row stores bcrypt over the
@@ -59,11 +65,12 @@ async function main() {
   // pinHash (inert under Version B, removed by migration #19).
   const secret = requirePinLookupSecret(); // fail closed if PIN_LOOKUP_SECRET is missing/weak
   const seedEmployees = [
-    { name: "Admin", role: "admin", pinEnv: "SEED_PIN_ADMIN" },
-    { name: "Ibrahim (Inventory)", role: "inventory", pinEnv: "SEED_PIN_INVENTORY" },
-    { name: "Ahmed (Roaster)", role: "roasting", pinEnv: "SEED_PIN_ROASTING" },
-    { name: "Khalid (QC)", role: "qc", pinEnv: "SEED_PIN_QC" },
-    { name: "Omar (Dispatch)", role: "dispatch", pinEnv: "SEED_PIN_DISPATCH" },
+    // The admin role is privileged: it signs in with username + PIN (impl/hr-sod), so it has one.
+    { name: "Admin", role: "admin", pinEnv: "SEED_PIN_ADMIN", username: "admin" },
+    { name: "Inventory Clerk", role: "inventory", pinEnv: "SEED_PIN_INVENTORY" },
+    { name: "Roaster", role: "roasting", pinEnv: "SEED_PIN_ROASTING" },
+    { name: "QC Inspector", role: "qc", pinEnv: "SEED_PIN_QC" },
+    { name: "Dispatch Clerk", role: "dispatch", pinEnv: "SEED_PIN_DISPATCH" },
   ];
   for (const emp of seedEmployees) {
     const shape = validatePin(process.env[emp.pinEnv]);
@@ -78,31 +85,33 @@ async function main() {
         role: emp.role,
         pin: hashSync(pinVerifierInput(shape.pin, secret), 10),
         pinLookup: pinLookup(shape.pin, secret),
+        ...("username" in emp ? { username: emp.username } : {}),
       },
     });
   }
 
-  // Customers (from B2B tracking)
+  // Customers — synthetic demo labels only ("عميل فردي n", "مقهى تجريبي n", …): never a real
+  // customer's or person's name. This file ships in the public build.
   const customerNames = [
-    { name: "منصور عبدالله الشمري" },
-    { name: "مقهى ذهب", nameAr: "مقهى ذهب" },
-    { name: "تقاطع ١٠", nameAr: "تقاطع ١٠" },
-    { name: "Allan 100 Street Coffee" },
-    { name: "مقهى اورب", nameAr: "مقهى اورب" },
-    { name: "سعد مشعان العتيبي" },
-    { name: "مقهى مرفأ", nameAr: "مقهى مرفأ" },
-    { name: "غصين البن", nameAr: "غصين البن" },
-    { name: "عبدالاله ظافر العمري" },
-    { name: "مقهى رواية", nameAr: "مقهى رواية" },
-    { name: "عبدالعزيز ذياب" },
-    { name: "مطعم قلعة الزعفران" },
-    { name: "قطفة الربيع", nameAr: "قطفة الربيع" },
-    { name: "أسس المخبوزات (كوي)" },
-    { name: "حمد الشيخ (لوفت)" },
-    { name: "مخرج ٢٠", nameAr: "مخرج ٢٠" },
-    { name: "مختبر القهوة", nameAr: "مختبر القهوة" },
-    { name: "مقهى براوني", nameAr: "مقهى براوني" },
-    { name: "روززيت", nameAr: "روززيت" },
+    { name: "عميل فردي ١", nameAr: "عميل فردي ١" },
+    { name: "مقهى تجريبي ١", nameAr: "مقهى تجريبي ١" },
+    { name: "مقهى تجريبي ٢", nameAr: "مقهى تجريبي ٢" },
+    { name: "مقهى تجريبي ٣", nameAr: "مقهى تجريبي ٣" },
+    { name: "مقهى تجريبي ٤", nameAr: "مقهى تجريبي ٤" },
+    { name: "عميل فردي ٢", nameAr: "عميل فردي ٢" },
+    { name: "مقهى تجريبي ٥", nameAr: "مقهى تجريبي ٥" },
+    { name: "مقهى تجريبي ٦", nameAr: "مقهى تجريبي ٦" },
+    { name: "عميل فردي ٣", nameAr: "عميل فردي ٣" },
+    { name: "مقهى تجريبي ٧", nameAr: "مقهى تجريبي ٧" },
+    { name: "عميل فردي ٤", nameAr: "عميل فردي ٤" },
+    { name: "مطعم تجريبي ١", nameAr: "مطعم تجريبي ١" },
+    { name: "مقهى تجريبي ٨", nameAr: "مقهى تجريبي ٨" },
+    { name: "مخبز تجريبي ١", nameAr: "مخبز تجريبي ١" },
+    { name: "مقهى تجريبي ٩", nameAr: "مقهى تجريبي ٩" },
+    { name: "مقهى تجريبي ١٠", nameAr: "مقهى تجريبي ١٠" },
+    { name: "مقهى تجريبي ١١", nameAr: "مقهى تجريبي ١١" },
+    { name: "مقهى تجريبي ١٢", nameAr: "مقهى تجريبي ١٢" },
+    { name: "مقهى تجريبي ١٣", nameAr: "مقهى تجريبي ١٣" },
   ];
   const customers: Record<string, string> = {};
   for (const c of customerNames) {
@@ -142,112 +151,112 @@ async function main() {
     return undefined;
   }
 
-  // Orders from B2B 2025 data
+  // Demo orders (synthetic: neutral customers, DEMO-Q quotation numbers, round quantities)
   const ordersData = [
-    { num: 1, customer: "منصور عبدالله الشمري", qNum: "QU-0028", qDate: "2025-01-01", items: [
-      { bean: "كولمبيا ويلا", qty: 3, prodStatus: "Completed", delStatus: "Delivered", delQty: 3 },
-      { bean: "اثيوبي قوجي", qty: 3, prodStatus: "Completed", delStatus: "Delivered", delQty: 3 },
-      { bean: "برازيل موجيانا", qty: 4, prodStatus: "Completed", delStatus: "Delivered", delQty: 4 },
+    { num: 1, customer: "عميل فردي ١", qNum: "DEMO-Q-0001", qDate: "2025-01-01", items: [
+      { bean: "كولمبيا ويلا", qty: 5, prodStatus: "Completed", delStatus: "Delivered", delQty: 5 },
+      { bean: "اثيوبي قوجي", qty: 5, prodStatus: "Completed", delStatus: "Delivered", delQty: 5 },
+      { bean: "برازيل موجيانا", qty: 5, prodStatus: "Completed", delStatus: "Delivered", delQty: 5 },
     ], payment: "Paid" },
-    { num: 2, customer: "مقهى ذهب", qNum: "QU-0029", qDate: "2025-01-01", items: [
+    { num: 2, customer: "مقهى تجريبي ١", qNum: "DEMO-Q-0002", qDate: "2025-01-01", items: [
       { bean: "اثيوبي قوجي", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
       { bean: "برازيل موجيانا", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
     ], payment: "Not Paid" },
-    { num: 3, customer: "تقاطع ١٠", qNum: "QU-0030", qDate: "2025-01-02", items: [
+    { num: 3, customer: "مقهى تجريبي ٢", qNum: "DEMO-Q-0003", qDate: "2025-01-02", items: [
       { bean: "كولمبيا ويلا", qty: 50, prodStatus: "Completed", delStatus: "Delivered", delQty: 50 },
     ], payment: "Paid" },
-    { num: 4, customer: "Allan 100 Street Coffee", qNum: "QU-0032", qDate: "2025-01-02", items: [
+    { num: 4, customer: "مقهى تجريبي ٣", qNum: "DEMO-Q-0004", qDate: "2025-01-02", items: [
       { bean: "برازيل موجيانا", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
     ], payment: "Paid" },
-    { num: 5, customer: "مقهى اورب", qNum: "QU-0031", qDate: "2025-01-02", items: [
-      { bean: "غواتيمالا انتيجوا", qty: 39, prodStatus: "Completed", delStatus: "Delivered", delQty: 39 },
+    { num: 5, customer: "مقهى تجريبي ٤", qNum: "DEMO-Q-0005", qDate: "2025-01-02", items: [
+      { bean: "غواتيمالا انتيجوا", qty: 40, prodStatus: "Completed", delStatus: "Delivered", delQty: 40 },
     ], payment: "Not Paid" },
-    { num: 6, customer: "سعد مشعان العتيبي", qNum: "QU-0034", qDate: "2025-01-02", items: [
+    { num: 6, customer: "عميل فردي ٢", qNum: "DEMO-Q-0006", qDate: "2025-01-02", items: [
       { bean: "كولمبيا ويلا", qty: 30, prodStatus: "Completed", delStatus: "Delivered", delQty: 30 },
-      { bean: "غواتيمالا انتيجوا", qty: 18, prodStatus: "Completed", delStatus: "Delivered", delQty: 18 },
+      { bean: "غواتيمالا انتيجوا", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
     ], payment: "Paid" },
-    { num: 7, customer: "مقهى مرفأ", qNum: "QU-0035", qDate: "2025-01-04", items: [
+    { num: 7, customer: "مقهى تجريبي ٥", qNum: "DEMO-Q-0007", qDate: "2025-01-04", items: [
       { bean: "كولمبيا ويلا", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
       { bean: "اثيوبي قوجي", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
     ], payment: "Paid" },
-    { num: 8, customer: "تقاطع ١٠", qNum: "QU-0033", qDate: "2025-01-06", items: [
-      { bean: "كولمبيا ويلا", qty: 4, prodStatus: "Completed", delStatus: "Delivered", delQty: 4 },
+    { num: 8, customer: "مقهى تجريبي ٢", qNum: "DEMO-Q-0008", qDate: "2025-01-06", items: [
+      { bean: "كولمبيا ويلا", qty: 5, prodStatus: "Completed", delStatus: "Delivered", delQty: 5 },
     ], payment: "Paid" },
-    { num: 9, customer: "تقاطع ١٠", qNum: "QU-0038", qDate: "2025-01-16", items: [
+    { num: 9, customer: "مقهى تجريبي ٢", qNum: "DEMO-Q-0009", qDate: "2025-01-16", items: [
       { bean: "كولمبيا ويلا", qty: 50, prodStatus: "Completed", delStatus: "Delivered", delQty: 50 },
     ], payment: "Paid" },
-    { num: 10, customer: "غصين البن", qNum: "QU-0039", qDate: "2025-01-19", items: [
+    { num: 10, customer: "مقهى تجريبي ٦", qNum: "DEMO-Q-0010", qDate: "2025-01-19", items: [
       { bean: "كولمبيا ويلا", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
     ], payment: "Paid" },
-    { num: 11, customer: "سعد مشعان العتيبي", qNum: "QU-0040", qDate: "2025-01-20", items: [
-      { bean: "رواندا باهو", qty: 14, prodStatus: "Completed", delStatus: "Delivered", delQty: 14 },
+    { num: 11, customer: "عميل فردي ٢", qNum: "DEMO-Q-0011", qDate: "2025-01-20", items: [
+      { bean: "رواندا باهو", qty: 15, prodStatus: "Completed", delStatus: "Delivered", delQty: 15 },
       { bean: "غواتيمالا انتيجوا", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
       { bean: "اثيوبي قوجي", qty: 30, prodStatus: "Completed", delStatus: "Delivered", delQty: 30 },
       { bean: "اثيوبي قوجي", qty: 5, prodStatus: "Completed", delStatus: "Delivered", delQty: 5 },
     ], payment: "Paid" },
-    { num: 12, customer: "غصين البن", qNum: "QU-0041", qDate: "2025-01-21", items: [
+    { num: 12, customer: "مقهى تجريبي ٦", qNum: "DEMO-Q-0012", qDate: "2025-01-21", items: [
       { bean: "كولمبيا ويلا", qty: 60, prodStatus: "Completed", delStatus: "Delivered", delQty: 60 },
     ], payment: "Paid" },
-    { num: 13, customer: "تقاطع ١٠", qNum: "QU-0043", qDate: "2025-01-26", items: [
+    { num: 13, customer: "مقهى تجريبي ٢", qNum: "DEMO-Q-0013", qDate: "2025-01-26", items: [
       { bean: "كولمبيا ويلا", qty: 50, prodStatus: "Completed", delStatus: "Delivered", delQty: 50 },
     ], payment: "Paid" },
-    { num: 14, customer: "سعد مشعان العتيبي", qNum: "QU-0045", qDate: "2025-01-27", items: [
+    { num: 14, customer: "عميل فردي ٢", qNum: "DEMO-Q-0014", qDate: "2025-01-27", items: [
       { bean: "اثيوبي قوجي", qty: 50, prodStatus: "Completed", delStatus: "Delivered", delQty: 50 },
     ], payment: "Partial Paid" },
-    { num: 15, customer: "عبدالاله ظافر العمري", qNum: "QU-0046", qDate: "2025-01-28", items: [
+    { num: 15, customer: "عميل فردي ٣", qNum: "DEMO-Q-0015", qDate: "2025-01-28", items: [
       { bean: "رواندا باهو", qty: 15, prodStatus: "Completed", delStatus: "Delivered", delQty: 15 },
     ], payment: "Paid" },
-    { num: 16, customer: "عبدالاله ظافر العمري", qNum: "QU-0047", qDate: "2025-01-31", items: [
-      { bean: "رواندا باهو", qty: 2, prodStatus: "Completed", delStatus: "Delivered", delQty: 2 },
+    { num: 16, customer: "عميل فردي ٣", qNum: "DEMO-Q-0016", qDate: "2025-01-31", items: [
+      { bean: "رواندا باهو", qty: 5, prodStatus: "Completed", delStatus: "Delivered", delQty: 5 },
     ], payment: "Not Paid" },
-    { num: 17, customer: "مقهى رواية", qNum: "QTE16", qDate: "2025-08-14", items: [
+    { num: 17, customer: "مقهى تجريبي ٧", qNum: "DEMO-Q-0017", qDate: "2025-08-14", items: [
       { bean: "اثيوبي قوجي", qty: 30, prodStatus: "Completed", delStatus: "Delivered", delQty: 30 },
       { bean: "اندونيسيا", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
       { bean: "نيكارجو", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
     ], payment: "Not Paid" },
-    { num: 18, customer: "مقهى اورب", qNum: "QTE17", qDate: "2025-08-14", items: [
+    { num: 18, customer: "مقهى تجريبي ٤", qNum: "DEMO-Q-0018", qDate: "2025-08-14", items: [
       { bean: "قواتيمالا", qty: 200, prodStatus: "Completed", delStatus: "Partial Delivered", delQty: 60, remaining: 140 },
     ], payment: "Paid" },
   ];
 
-  // 2024 orders
+  // Demo orders, earlier year
   const orders2024 = [
-    { num: 100, customer: "عبدالعزيز ذياب", qNum: "QU24-001", qDate: "2024-11-30", items: [
+    { num: 100, customer: "عميل فردي ٤", qNum: "DEMO-Q-0019", qDate: "2024-11-30", items: [
       { bean: "رواندا باهو", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
       { bean: "برازيل فالكاو", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
       { bean: "كولمبيا ويلا", qty: 10, prodStatus: "Completed", delStatus: "Delivered", delQty: 10 },
     ], payment: "Paid" },
-    { num: 101, customer: "مقهى ذهب", qNum: "QU24-002", qDate: "2024-11-27", items: [
+    { num: 101, customer: "مقهى تجريبي ١", qNum: "DEMO-Q-0020", qDate: "2024-11-27", items: [
       { bean: "اثيوبي قوجي", qty: 30, prodStatus: "Completed", delStatus: "Delivered", delQty: 30 },
     ], payment: "Paid" },
-    { num: 102, customer: "مقهى اورب", qNum: "QU24-004", qDate: "2024-11-23", items: [
+    { num: 102, customer: "مقهى تجريبي ٤", qNum: "DEMO-Q-0021", qDate: "2024-11-23", items: [
       { bean: "اثيوبي قوجي", qty: 100, prodStatus: "Completed", delStatus: "Delivered", delQty: 100 },
       { bean: "غواتيمالا انتيجوا", qty: 100, prodStatus: "Completed", delStatus: "Delivered", delQty: 100 },
     ], payment: "Paid" },
-    { num: 103, customer: "تقاطع ١٠", qNum: "QU24-009", qDate: "2024-11-25", items: [
+    { num: 103, customer: "مقهى تجريبي ٢", qNum: "DEMO-Q-0022", qDate: "2024-11-25", items: [
       { bean: "كولمبيا ويلا", qty: 30, prodStatus: "Completed", delStatus: "Delivered", delQty: 30 },
     ], payment: "Paid" },
-    { num: 104, customer: "مقهى مرفأ", qNum: "QU24-006", qDate: "2024-11-27", items: [
+    { num: 104, customer: "مقهى تجريبي ٥", qNum: "DEMO-Q-0023", qDate: "2024-11-27", items: [
       { bean: "برازيل موجيانا", qty: 50, prodStatus: "Completed", delStatus: "Delivered", delQty: 50 },
       { bean: "اثيوبي قوجي", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
       { bean: "كولمبيا ويلا", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
     ], payment: "Paid" },
-    { num: 105, customer: "غصين البن", qNum: "QU24-012", qDate: "2024-09-30", items: [
-      { bean: "كولمبيا ويلا", qty: 59, prodStatus: "Completed", delStatus: "Delivered", delQty: 59 },
-    ], payment: "Paid" },
-    { num: 106, customer: "تقاطع ١٠", qNum: "QU24-013", qDate: "2024-12-09", items: [
-      { bean: "كولمبيا ويلا", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
-    ], payment: "Paid" },
-    { num: 107, customer: "غصين البن", qNum: "QU24-014", qDate: "2024-12-09", items: [
+    { num: 105, customer: "مقهى تجريبي ٦", qNum: "DEMO-Q-0024", qDate: "2024-09-30", items: [
       { bean: "كولمبيا ويلا", qty: 60, prodStatus: "Completed", delStatus: "Delivered", delQty: 60 },
     ], payment: "Paid" },
-    { num: 108, customer: "سعد مشعان العتيبي", qNum: "QU24-018", qDate: "2024-12-17", items: [
+    { num: 106, customer: "مقهى تجريبي ٢", qNum: "DEMO-Q-0025", qDate: "2024-12-09", items: [
+      { bean: "كولمبيا ويلا", qty: 20, prodStatus: "Completed", delStatus: "Delivered", delQty: 20 },
+    ], payment: "Paid" },
+    { num: 107, customer: "مقهى تجريبي ٦", qNum: "DEMO-Q-0026", qDate: "2024-12-09", items: [
+      { bean: "كولمبيا ويلا", qty: 60, prodStatus: "Completed", delStatus: "Delivered", delQty: 60 },
+    ], payment: "Paid" },
+    { num: 108, customer: "عميل فردي ٢", qNum: "DEMO-Q-0027", qDate: "2024-12-17", items: [
       { bean: "اثيوبي قوجي", qty: 50, prodStatus: "Completed", delStatus: "Delivered", delQty: 50 },
     ], payment: "Paid" },
-    { num: 109, customer: "مقهى براوني", qNum: "QU24-021", qDate: "2024-12-24", items: [
+    { num: 109, customer: "مقهى تجريبي ١٢", qNum: "DEMO-Q-0028", qDate: "2024-12-24", items: [
       { bean: "برازيل موجيانا", qty: 40, prodStatus: "Completed", delStatus: "Delivered", delQty: 40 },
     ], payment: "Paid" },
-    { num: 110, customer: "أسس المخبوزات (كوي)", qNum: "QU24-007", qDate: "2024-12-05", items: [
+    { num: 110, customer: "مخبز تجريبي ١", qNum: "DEMO-Q-0029", qDate: "2024-12-05", items: [
       { bean: "برازيل موجيانا", qty: 200, prodStatus: "Completed", delStatus: "Delivered", delQty: 200 },
     ], payment: "Paid" },
   ];

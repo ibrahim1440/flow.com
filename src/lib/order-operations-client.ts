@@ -75,6 +75,14 @@ export type FulfillmentOptions = {
   freeToPromiseQty: number;
   coverableFromShelfQty: number;
   shortageQty: number;
+  // The same picture in whole sellable units, sent for a SKU line (the route already returns
+  // them; the preparation pane shows units, N-03). Absent on a legacy kilogram line.
+  isUnitLine?: boolean;
+  orderedUnits?: number | null;
+  reservedUnits?: number;
+  outstandingUnits?: number;
+  freeToPromiseUnits?: number;
+  coverableFromShelfUnits?: number;
   matchingLots: {
     id: string;
     batchNumber: string;

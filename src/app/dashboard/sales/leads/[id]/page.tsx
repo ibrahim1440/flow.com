@@ -16,6 +16,7 @@ import {
   ROW_ACTION, formatWhen, formatDay, num,
 } from "../../_components/ui";
 import { useUnsavedGuard, isDirtyAgainst } from "../../../_components/useUnsavedGuard";
+import { SectionPages } from "@/components/shell/page-context";
 import { ACTIVITY_OUTCOMES, QUALIFYING_OUTCOMES as QUALIFYING } from "@/lib/services/sales/qualification";
 
 /**
@@ -315,11 +316,17 @@ export default function LeadDetailPage() {
     } finally { setBusy(""); }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
+  // This page has no frame of its own (record: gap). It keeps its existing content inside the
+  // shared shell, with the page padding the shell's body no longer adds, and the section's pages
+  // («العملاء المحتملون | العملاء») as the Segmented control at its head.
+  const PAD = "px-4 pt-3 pb-10 lg:px-8 lg:pt-3 lg:pb-9 xl:px-12 xl:pt-4 xl:pb-12";
+
+  if (loading) return <div className={PAD}><div className="flex items-center justify-center h-64"><Spinner /></div></div>;
 
   if (!lead) {
     return (
-      <div className="space-y-6">
+      <div className={`${PAD} space-y-6`}>
+        <SectionPages />
         <ProvisionalBanner />
         <Alert kind="error">{error}</Alert>
         <Button variant="secondary" onClick={() => router.push("/dashboard/sales/leads")}>
@@ -332,12 +339,14 @@ export default function LeadDetailPage() {
   const overdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
 
   return (
-    <div className="space-y-6">
+    <div className={`${PAD} space-y-6`}>
+      <SectionPages />
       <ProvisionalBanner />
 
       <Link
         href="/dashboard/sales/leads"
-        className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
+        data-testid="back-to-leads"
+        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-oo-text-secondary hover:text-oo-text-primary hover:underline"
       >
         <ArrowRight size={15} className="rtl:rotate-0 rotate-180" aria-hidden />
         {ar ? "العملاء المحتملون" : "Leads"}
@@ -361,7 +370,7 @@ export default function LeadDetailPage() {
             )}
             {canConvert && !converted && lead.status !== "UNQUALIFIED" && (
               <Button onClick={convert} disabled={busy === "convert"} testId="convert-lead">
-                {busy === "convert" ? "…" : (ar ? "تحويل إلى عميل" : "Convert to customer")}
+                {busy === "convert" ? (ar ? "جارٍ التحويل…" : "Converting…") : (ar ? "تحويل إلى عميل" : "Convert to customer")}
               </Button>
             )}
           </>
@@ -465,7 +474,7 @@ export default function LeadDetailPage() {
                 </div>
                 <div className="sm:col-span-2 flex gap-2">
                   <Button onClick={saveEdits} disabled={busy === "save"} testId="save-lead">
-                    {busy === "save" ? "…" : (ar ? "حفظ" : "Save")}
+                    {busy === "save" ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "حفظ" : "Save")}
                   </Button>
                   <Button variant="secondary" onClick={() => { setEditing(false); load(); }}>
                     {ar ? "إلغاء" : "Cancel"}
@@ -473,7 +482,7 @@ export default function LeadDetailPage() {
                 </div>
               </div>
             ) : (
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 mt-3 text-sm">
+              <dl className="mt-3 grid grid-cols-[118px_minmax(0,1fr)] gap-x-3 gap-y-[11px] text-[13.5px]">
                 <Row label={ar ? "جهة الاتصال" : "Contact"} value={lead.contactName} />
                 <Row label={ar ? "الجوال" : "Phone"} value={lead.phone} ltr icon={<Phone size={13} />} />
                 <Row label={ar ? "البريد" : "Email"} value={lead.email} ltr icon={<Mail size={13} />} />
@@ -483,10 +492,10 @@ export default function LeadDetailPage() {
                 <Row label={ar ? "أُنشئ" : "Created"} value={formatDay(lead.createdAt, lang)} />
                 <Row label={ar ? "آخر تعديل" : "Updated"} value={formatDay(lead.updatedAt, lang)} />
                 {lead.notes && (
-                  <div className="sm:col-span-2">
-                    <dt className="text-[11px] text-oo-text-muted font-bold">{ar ? "ملاحظات" : "Notes"}</dt>
-                    <dd className="whitespace-pre-wrap">{lead.notes}</dd>
-                  </div>
+                  <>
+                    <dt className="text-oo-text-muted">{ar ? "ملاحظات" : "Notes"}</dt>
+                    <dd className="whitespace-pre-wrap text-oo-text-primary">{lead.notes}</dd>
+                  </>
                 )}
               </dl>
             )}
@@ -503,26 +512,38 @@ export default function LeadDetailPage() {
                   : "No activity yet. Every call or visit recorded here stays here."}
               </EmptyState>
             ) : (
-              <ul className="mt-3 space-y-2" data-testid="activity-list">
-                {lead.activities.map((a) => (
-                  <li key={a.id} className="border border-oo-border-default rounded-xl px-3 py-2.5" data-testid={`activity-${a.id}`}>
-                    <div className="flex items-start justify-between gap-2 flex-wrap">
-                      <span className="font-bold text-sm">{a.subject}</span>
-                      <span className="text-[11px] text-oo-text-muted">
-                        {label(TYPE_LABELS, a.type)} · {formatDay(a.createdAt, lang)}
-                        {a.owner ? ` · ${a.owner.name}` : ""}
-                      </span>
-                    </div>
-                    {a.body && <p className="text-xs text-oo-text-secondary mt-1 whitespace-pre-wrap">{a.body}</p>}
-                    {a.dueAt && (
-                      <p className="text-[11px] text-oo-text-muted mt-1 flex items-center gap-1">
-                        <CalendarClock size={12} aria-hidden />
-                        {ar ? "مستحق" : "Due"} {formatWhen(a.dueAt, lang)}
-                        {a.completedAt ? ` · ${ar ? "اكتمل" : "completed"}` : ""}
+              // A timeline, newest first, as in the design: a marker per event joined by a rule.
+              // An open scheduled task is the filled marker — it is the one thing still owed.
+              <ul className="mt-4" data-testid="activity-list">
+                {lead.activities.map((a, i) => {
+                  const open = !!a.dueAt && !a.completedAt;
+                  return (
+                    <li key={a.id} className="relative ps-7 pb-5 last:pb-0" data-testid={`activity-${a.id}`}>
+                      {i < lead.activities.length - 1 && (
+                        <span aria-hidden className="absolute start-[7px] top-[22px] bottom-0 w-px bg-[var(--d-border-strong)]" />
+                      )}
+                      <span aria-hidden className={`absolute start-[2px] top-[6px] size-[11px] rounded-full ${
+                        open ? "bg-oo-action-primary" : "bg-oo-bg-default shadow-[inset_0_0_0_1.5px_var(--d-border-control)]"
+                      }`} />
+                      <p className="font-medium text-[14px] text-oo-text-primary">
+                        {a.subject}
+                        <span className="font-normal text-oo-text-muted"> · {label(TYPE_LABELS, a.type)}</span>
                       </p>
-                    )}
-                  </li>
-                ))}
+                      <p className="text-[12.5px] text-oo-text-muted">
+                        <span className="tabular-nums">{formatDay(a.createdAt, lang)}</span>
+                        {a.owner ? ` · ${a.owner.name}` : ""}
+                      </p>
+                      {a.body && <p className="text-[13px] text-oo-text-secondary mt-1 whitespace-pre-wrap">{a.body}</p>}
+                      {a.dueAt && (
+                        <p className="text-[12.5px] text-oo-text-muted mt-1 flex items-center gap-1">
+                          <CalendarClock size={13} aria-hidden />
+                          {ar ? "مستحق" : "Due"} <span className="tabular-nums">{formatWhen(a.dueAt, lang)}</span>
+                          {a.completedAt ? ` · ${ar ? "اكتمل" : "completed"}` : ""}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>
@@ -531,10 +552,21 @@ export default function LeadDetailPage() {
         <div className="space-y-4">
           <Card>
             <SectionTitle>{ar ? "الالتزام القادم" : "Next commitment"}</SectionTitle>
-            <p className={`mt-2 text-sm font-bold ${overdue ? "text-oo-status-rejected" : lead.nextFollowUpAt ? "text-oo-text-primary" : "text-oo-status-hold"}`} data-testid="next-followup">
-              {lead.nextFollowUpAt
-                ? `${formatWhen(lead.nextFollowUpAt, lang)}${overdue ? ` · ${t("leadOverdue")}` : ""}`
-                : (ar ? "لا التزام قادم" : "No next step")}
+            <p
+              data-testid="next-followup"
+              className={`mt-2 flex flex-wrap items-center gap-2 rounded-[10px] px-3.5 py-3 text-[14px] font-medium ${
+                overdue ? "bg-oo-status-blocked-bg text-oo-status-blocked" : "bg-oo-bg-subtle text-oo-text-primary"
+              }`}
+            >
+              <CalendarClock size={16} aria-hidden className="flex-none" />
+              {lead.nextFollowUpAt ? (
+                <>
+                  <span className="tabular-nums">{formatWhen(lead.nextFollowUpAt, lang)}</span>
+                  {overdue && <span data-ui="pill" data-tone="bad" className="bg-oo-bg-default text-oo-status-blocked">{t("leadOverdue")}</span>}
+                </>
+              ) : (
+                <span className="text-oo-text-secondary">{ar ? "لا التزام قادم" : "No next step"}</span>
+              )}
             </p>
             {!readOnly && (
               <div className="mt-3 space-y-2">
@@ -546,7 +578,7 @@ export default function LeadDetailPage() {
                     placeholder={ar ? "متابعة مجدولة" : "Scheduled follow-up"} />
                 </Field>
                 <Button onClick={scheduleFollowUp} disabled={busy === "schedule" || !scheduleAt} testId="schedule-followup">
-                  {busy === "schedule" ? "…" : (ar ? "جدولة المتابعة" : "Schedule follow-up")}
+                  {busy === "schedule" ? (ar ? "جارٍ الجدولة…" : "Scheduling…") : (ar ? "جدولة المتابعة" : "Schedule follow-up")}
                 </Button>
                 <p className="text-[11px] text-oo-text-muted">
                   {ar
@@ -592,7 +624,7 @@ export default function LeadDetailPage() {
                   <TextArea id="logBody" value={logBody} onChange={setLogBody} rows={3} />
                 </Field>
                 <Button onClick={logActivity} disabled={busy === "log"} testId="log-activity">
-                  {busy === "log" ? "…" : (ar ? "تسجيل" : "Record")}
+                  {busy === "log" ? (ar ? "جارٍ التسجيل…" : "Recording…") : (ar ? "تسجيل" : "Record")}
                 </Button>
               </div>
             </Card>
@@ -603,15 +635,17 @@ export default function LeadDetailPage() {
   );
 }
 
+/** One property line: label column, value column (Direction 2.1 `.props`). Empty values are
+    left out rather than shown as a dash, so the list only holds what is known. */
 function Row({ label, value, ltr, icon }: { label: string; value: string | null; ltr?: boolean; icon?: React.ReactNode }) {
   if (!value) return null;
   return (
-    <div>
-      <dt className="text-[11px] text-oo-text-muted font-bold flex items-center gap-1">{icon}{label}</dt>
+    <>
+      <dt className="text-oo-text-muted flex items-center gap-1.5"><span aria-hidden className="contents">{icon}</span>{label}</dt>
       {/* Latin digits inside Arabic text render reversed unless the run is marked LTR. */}
-      <dd className="font-semibold" dir={ltr ? "ltr" : undefined} style={ltr ? { textAlign: "start" } : undefined}>
-        {value}
+      <dd className="min-w-0 break-words text-oo-text-primary">
+        {ltr ? <bdi dir="ltr" className="tabular-nums">{value}</bdi> : value}
       </dd>
-    </div>
+    </>
   );
 }

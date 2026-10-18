@@ -11,6 +11,10 @@ import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 
+/** A stored quantity for display: "—" when it is not a finite number (Infinity arrives as JSON null), so one bad row cannot crash the screen. */
+const fmtQty = (v: number | null | undefined, digits: number): string =>
+  typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "—";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type GreenBean = {
@@ -382,7 +386,7 @@ function AdjustmentModal({
               {t("systemQtyLabel")}
             </label>
             <div className="px-3 py-2.5 bg-gray-50 border-2 border-border rounded-xl text-sm font-bold text-charcoal font-mono">
-              {bean.quantityKg.toFixed(3)} kg
+              {fmtQty(bean.quantityKg, 3)} kg
             </div>
           </div>
 
@@ -464,6 +468,8 @@ const SRC_LABELS_AR: Record<string, string> = {
   PACKING:           "تعبئة",
   MANUAL_ADJUSTMENT: "جرد يدوي",
   BLEND:             "خلط",
+  OPENING_BALANCE:   "رصيد افتتاحي (استلام)",
+  RECEIVING:         "استلام توريد",
 };
 
 const TYPE_LABELS_AR: Record<string, string> = {
@@ -486,6 +492,9 @@ export default function InventoryPage() {
   const { t, lang } = useI18n();
   const canReceive = !!user && hasSubPrivilege(user.permissions, "inventory", "receive");
   const canAdjust  = !!user && hasSubPrivilege(user.permissions, "inventory", "adjust");
+  // Bean record edit / (de)activate / delete is catalogue maintenance: the receiving duty or adjust
+  // (owner decision, inventory Option A). The count (a stock adjustment) stays adjust-only.
+  const canMaintain = canReceive || canAdjust;
 
   // Tab state
   const [activeTab, setActiveTab] = useState<Tab>("raw");
@@ -826,7 +835,7 @@ export default function InventoryPage() {
                       <td className="px-4 py-3 text-brown/70">{bean.altitude || "—"}</td>
                       <td className="px-4 py-3 text-end">
                         <span className={`font-bold tabular-nums ${bean.quantityKg < 20 ? "text-red-600" : "text-green-600"}`}>
-                          {bean.quantityKg.toFixed(1)}
+                          {fmtQty(bean.quantityKg, 1)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-brown">{formatDate(bean.receivedDate)}</td>
@@ -841,7 +850,7 @@ export default function InventoryPage() {
                               <Scale size={14} />
                             </button>
                           )}
-                          {canAdjust && (
+                          {canMaintain && (
                             <button
                               title={t("edit")}
                               onClick={() => setEditTarget(bean)}
@@ -850,7 +859,7 @@ export default function InventoryPage() {
                               <Pencil size={14} />
                             </button>
                           )}
-                          {canAdjust && (
+                          {canMaintain && (
                             <button
                               title={bean.isActive ? t("deactivate") : t("activate")}
                               onClick={() => handleToggleActive(bean)}
@@ -863,7 +872,7 @@ export default function InventoryPage() {
                               {bean.isActive ? <PowerOff size={14} /> : <Power size={14} />}
                             </button>
                           )}
-                          {canAdjust && (
+                          {canMaintain && (
                             <button
                               title={t("delete")}
                               onClick={() => setDeleteTarget(bean)}
@@ -930,17 +939,17 @@ export default function InventoryPage() {
                         <td className="px-4 py-3">
                           <p className="font-medium">{disp(lot.product.productNameEn, lot.product.productNameAr)}</p>
                         </td>
-                        <td className="px-4 py-3 text-end font-mono text-brown">{lot.quantityKg.toFixed(1)}</td>
+                        <td className="px-4 py-3 text-end font-mono text-brown">{fmtQty(lot.quantityKg, 1)}</td>
                         <td className="px-4 py-3 text-end">
                           <span className={`font-bold tabular-nums font-mono ${
                             availRatio > 0.5 ? "text-green-600" : availRatio > 0 ? "text-amber-600" : "text-red-500"
                           }`}>
-                            {lot.availableQty.toFixed(1)}
+                            {fmtQty(lot.availableQty, 1)}
                           </span>
                           <span className="text-brown/40 text-xs ml-1">({(availRatio * 100).toFixed(0)}%)</span>
                         </td>
                         <td className="px-4 py-3 text-end font-mono tabular-nums text-brown">
-                          {(lot.reservedQty ?? 0).toFixed(1)}
+                          {fmtQty(lot.reservedQty ?? 0, 1)}
                         </td>
                         <td className="px-4 py-3 text-end">
                           <span className={`font-bold tabular-nums font-mono ${
@@ -1024,16 +1033,16 @@ export default function InventoryPage() {
                           </p>
                         </td>
                         <td className="px-4 py-3 text-end font-mono text-brown/70 tabular-nums">
-                          {m.previousQuantity.toFixed(3)}
+                          {fmtQty(m.previousQuantity, 3)}
                         </td>
                         <td className="px-4 py-3 text-end font-mono text-charcoal font-semibold tabular-nums">
-                          {m.newQuantity.toFixed(3)}
+                          {fmtQty(m.newQuantity, 3)}
                         </td>
                         <td className="px-4 py-3 text-end">
                           <span className={`font-bold tabular-nums font-mono ${
                             isZero ? "text-brown/40" : isGain ? "text-green-600" : isLoss ? "text-red-500" : ""
                           }`}>
-                            {isZero ? "—" : `${isGain ? "+" : ""}${m.quantityChanged.toFixed(3)}`}
+                            {isZero ? "—" : `${isGain ? "+" : ""}${fmtQty(m.quantityChanged, 3)}`}
                           </span>
                         </td>
                         <td className="px-4 py-3">

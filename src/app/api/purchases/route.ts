@@ -28,8 +28,13 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (quantity <= 0) {
-    return NextResponse.json({ error: "quantity must be greater than zero." }, { status: 400 });
+  // JSON 1e9999 parses to Infinity, which passes `<= 0` and is stored in the double precision
+  // stock and cost columns; a negative cost writes a negative totalCost. A string is no amount.
+  if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0) {
+    return NextResponse.json({ error: "quantity must be a finite number greater than zero." }, { status: 400 });
+  }
+  if (typeof costPerUnit !== "number" || !Number.isFinite(costPerUnit) || costPerUnit <= 0) {
+    return NextResponse.json({ error: "costPerUnit must be a finite number greater than zero." }, { status: 400 });
   }
 
   try {

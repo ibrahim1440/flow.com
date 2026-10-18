@@ -34,7 +34,9 @@ export async function GET(request: Request) {
     const rows = await prisma.lead.findMany({
       where: {
         ...(scopeAll ? {} : { ownerId: user.id }),
-        ...(status ? { status: status as never } : {}),
+        ...(status === "OPEN" ? { status: { in: ["NEW", "CONTACTED", "QUALIFIED"] as never } }
+          : status === "CLOSED" ? { status: { in: ["UNQUALIFIED", "CONVERTED"] as never } }
+          : status ? { status: status as never } : {}),
       },
       orderBy: { createdAt: "desc" },
       // A bound rather than everything. An unbounded export of a growing table is a request

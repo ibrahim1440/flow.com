@@ -17,6 +17,10 @@ export type UserPayload = {
   role: string;
   permissions: Permissions;
   preferredLanguage: "ar" | "en";
+  /** Credential version: a digest of the account's credentials when the token was issued. */
+  cv?: string;
+  /** The server-side session this token belongs to (AuthSession.id); no session, no access. */
+  sid?: string;
 };
 
 export const ALL_MODULES = [
@@ -41,6 +45,9 @@ export const ALL_MODULES = [
   "finance",
   // Automation — WhatsApp messages sent by rules on ERP events.
   "automation",
+  // Native HR — people, contracts, time, leave, payroll, advances. Self-service is not a
+  // module: every login reaches its own HR record at /dashboard/me, scoped server-side.
+  "hr",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -65,6 +72,7 @@ export const MODULE_LABELS: Record<string, string> = {
   accounting: "Accounting",
   finance: "Finance (Cash & Budget)",
   automation: "Automation / WhatsApp",
+  hr: "Human Resources",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -138,6 +146,13 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   ],
   labels: [
     { key: "print", label: "Generate / print labels" },
+    // G-20/G-21 printing system (B-9): configuring what everyone prints on is a separate duty
+    // from printing. Administrators (role) may always manage them.
+    { key: "profile_manage", label: "Create / edit / delete paper and printer profiles" },
+    { key: "template_manage", label: "Create / edit / delete saved label presets" },
+    // Owner decision 2.1: cupping labels are anonymous; printing scorer names is a separate,
+    // administrator-granted permission, and also needs a privacy-confirmed preset.
+    { key: "cupping_named_scorers", label: "Print scorer names on cupping labels (privacy-confirmed presets only)" },
   ],
   employees: [
     { key: "create", label: "Add employees" },
@@ -186,6 +201,34 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "manage_connection", label: "Link or unlink the WhatsApp number, set the sending mode, send a test" },
     { key: "manage_messages", label: "Retry or cancel individual messages" },
   ],
+  // Viewing the module alone shows nothing sensitive. Each key is one duty, and the
+  // approving keys never let anyone approve their own request or their own pay (enforced in
+  // the services and again by database triggers).
+  hr: [
+    { key: "directory", label: "See the employee directory (no pay, identity or bank data)" },
+    { key: "people_manage", label: "Create and edit people, departments, status and reporting lines" },
+    { key: "private_view", label: "See identity, bank and emergency data (every view is audited)" },
+    { key: "documents_view", label: "Download employee documents (audited)" },
+    { key: "documents_manage", label: "Upload and remove employee documents" },
+    { key: "contracts_manage", label: "See and change contracts and pay" },
+    { key: "attendance_manage", label: "Record attendance, shifts and manual entries" },
+    { key: "attendance_approve", label: "Approve attendance corrections and overtime" },
+    { key: "leave_manage", label: "Record leave, opening balances and grants" },
+    { key: "leave_approve", label: "Approve or reject leave" },
+    { key: "payroll_prepare", label: "Prepare payroll runs and adjustments" },
+    { key: "payroll_approve", label: "Approve payroll lines and runs" },
+    { key: "payroll_pay", label: "Record payroll payment (does not move money)" },
+    { key: "payroll_cancel_approved", label: "Cancel an approved, unpaid payroll run (independent of preparing and approving it)" },
+    { key: "advances_manage", label: "Record advance requests and repayments" },
+    { key: "advances_approve", label: "Approve or reject advances" },
+    { key: "advances_disburse", label: "Record advance disbursement (does not move money)" },
+    { key: "recruit", label: "Openings, applicants, interviews, offers and hiring" },
+    { key: "assets_manage", label: "Assign and receive company assets" },
+    { key: "performance_manage", label: "Training, reviews and HR incidents" },
+    { key: "offboard", label: "Separation, clearance and final settlement" },
+    { key: "policy_manage", label: "Payroll policy, leave types, contribution rules, account map" },
+    { key: "all_branches", label: "Act on people of every branch" },
+  ],
 };
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -195,6 +238,16 @@ export const ROLE_LABELS: Record<string, string> = {
   qc: "Quality Control",
   dispatch: "Dispatch / Logistics",
   custom: "Custom Role",
+};
+
+/** Arabic role names for an Arabic interface (same keys as ROLE_LABELS). */
+export const ROLE_LABELS_AR: Record<string, string> = {
+  admin: "المدير / المسؤول",
+  inventory: "مسؤول المخزون",
+  roasting: "رئيس التحميص والإنتاج",
+  qc: "مراقبة الجودة",
+  dispatch: "التسليم والشحن",
+  custom: "دور مخصص",
 };
 
 function makeModulePermission(access: AccessLevel, subKeys?: string[]): ModulePermission {
@@ -219,8 +272,13 @@ export function buildDefaultPermissions(role: string): Permissions {
     case "admin":
       return Object.fromEntries(ALL_MODULES.map((m) => [m, allEdit(m)]));
     case "inventory":
+      // Owner decision (16 Oct, inventory privileges Option A): stock adjustment and inventory
+      // override are privileged (src/lib/auth/privileged.ts) and are NOT part of the role. An
+      // ordinary inventory account keeps receiving, the bean and supplier catalogue, materials
+      // and every view, and signs in with its PIN alone. adjust / override are granted only
+      // individually, to an authorised supervisor, through the second-person permission flow.
       return {
-        dashboard: allEdit("dashboard"), inventory: allEdit("inventory"),
+        dashboard: allEdit("dashboard"), inventory: allEdit("inventory", ["adjust", "override"]),
         orders: none(), production: none(), qc: none(),
         packaging: none(), dispatch: none(), history: none(),
         analytics: none(), labels: none(), employees: none(), cupping: none(), settings: none(),
@@ -252,7 +310,9 @@ export function buildDefaultPermissions(role: string): Permissions {
         dashboard: allEdit("dashboard"), inventory: none(), orders: allView("orders"),
         production: none(), qc: none(), packaging: none(),
         dispatch: allEdit("dispatch"), history: none(), analytics: none(),
-        labels: allEdit("labels"), employees: none(), cupping: none(), settings: none(),
+        // Printing is the dispatch duty; print configuration (profiles, templates) and named scorers are
+        // separate duties — administrators by default, granted explicitly otherwise (QA P3-6).
+        labels: allEdit("labels", ["cupping_named_scorers", "profile_manage", "template_manage"]), employees: none(), cupping: none(), settings: none(),
         customers: none(),
       };
     default:
@@ -260,9 +320,16 @@ export function buildDefaultPermissions(role: string): Permissions {
   }
 }
 
+/**
+ * Review N-1 (F4): a malformed entry fails closed. `{}`, `{access: ""}` or a non-string level
+ * used to count as access because only "none" was refused. A module is held only when its entry
+ * states a level. Every role default and every permission the employees screen writes states
+ * one ("view" / "edit" / "none"), so no valid permission set changes meaning.
+ */
 export function hasModuleAccess(permissions: Permissions, module: string): boolean {
-  const perm = permissions[module];
-  return !!perm && perm.access !== "none";
+  // Stored JSON, so the declared AccessLevel type is not a guarantee: checked as unknown.
+  const level: unknown = permissions[module]?.access;
+  return typeof level === "string" && level !== "" && level !== "none";
 }
 
 export function canEdit(permissions: Permissions, module: string): boolean {
@@ -277,7 +344,7 @@ export function canViewOnly(permissions: Permissions, module: string): boolean {
 
 export function hasSubPrivilege(permissions: Permissions, module: string, subKey: string): boolean {
   const perm = permissions[module];
-  if (!perm || perm.access === "none") return false;
+  if (!perm || !hasModuleAccess(permissions, module)) return false;
   if (!perm.sub || !(subKey in perm.sub)) return false;
   return perm.sub[subKey] === true;
 }

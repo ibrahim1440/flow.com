@@ -1,0 +1,29 @@
+/* Self-service («خدماتي») — page-local layout on top of the HR kit (hr.css). */
+[data-hr-root] .me-today { border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+[data-hr-root] .me-today-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+[data-hr-root] .me-today-title { font-weight: 600; }
+[data-hr-root] .me-today-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+[data-hr-root] .me-mobilebar { display: none; }
+[data-hr-root] .me-titleline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+@media (max-width: 767px) {
+  [data-hr-root] .me-today { flex-direction: column; align-items: stretch; padding: 16px; }
+  [data-hr-root] .me-today-actions { flex-direction: column; align-items: stretch; }
+  [data-hr-root] .me-today-actions .hr-btn { width: 100%; }
+  [data-hr-root] .me-mobilebar { display: flex; gap: 12px; position: sticky; bottom: 0; z-index: 20; background: var(--hr-surface); border-top: 1px solid var(--hr-border-subtle); padding: 12px 16px; margin: 0 -16px -24px; }
+  [data-hr-root] .me-mobilebar .hr-btn { flex: 1; }
+  [data-hr-root] .me-metrics .hr-metrics { gap: 16px 28px; justify-content: space-between; }
+}
+
+/* Payslip printing: only the slip prints (scoped by :has, so other pages are unaffected). */
+@media print {
+  body:has(.me-print) * { visibility: hidden; }
+  body:has(.me-print) .me-print, body:has(.me-print) .me-print * { visibility: visible; }
+  body:has(.me-print) .me-print { position: absolute; inset: 0 0 auto 0; padding: 0; }
+  .me-noprint { display: none !important; }
+}
+
+/* D-P1-6 (P-1 emulation): the phone action bar's buttons are 44 px touch targets (shell rule). */
+@media (max-width: 767px) {
+  [data-hr-root] .me-mobilebar .hr-btn { height: 44px; }
+}

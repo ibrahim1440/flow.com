@@ -1,19 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  ClipboardCheck, Plus, Search, CheckCircle2, XCircle, Eye, Merge,
-  Users, Link2, AlertTriangle, Clock, Loader2, Trash2, CalendarDays, CheckSquare,
-} from "lucide-react";
+import { Plus, Coffee, CheckCircle2, XCircle, Link2, AlertTriangle, Loader2, Trash2, CalendarDays } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
-import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import Link from "next/link";
+import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import toast from "react-hot-toast";
+import { Btn, KV, Notice, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, Kg, kg, opsDate, countNoun, BATCH_FORMS, CUP_FORMS, SCORE_FORMS } from "@/components/ops/ui";
 
+import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
 type CustomerPref = {
   id: string;
   greenBeanId: string;
@@ -115,34 +114,34 @@ function AgtronTable({
   };
 
   return (
-    <div className="mt-2 border border-orange/20 rounded-xl overflow-hidden">
-      <p className="text-[10px] font-extrabold text-orange/70 uppercase tracking-widest px-3 py-1.5 bg-orange/5">
+    <div className="hr-tablewrap" style={{ marginTop: 8 }}>
+      <p className="hr-label" style={{ margin: "0 0 4px" }}>
         {t("agtronResults")}{pref ? ` · ${pref.profileName}` : ""}
       </p>
-      <table className="w-full text-[11px]">
-        <thead className="bg-cream">
+      <table className="hr-table ops-prep" aria-label={t("agtronResults")}>
+        <thead>
           <tr>
-            <th className="text-start px-2.5 py-1.5 font-bold text-charcoal">{t("tester")}</th>
-            <th className="text-center px-2.5 py-1.5 font-bold text-charcoal">{t("colorWholeLabel")}</th>
-            <th className="text-center px-2.5 py-1.5 font-bold text-charcoal">{t("colorGroundLabel")}</th>
-            <th className="text-center px-2.5 py-1.5 font-bold text-charcoal">{t("colorDeltaLabel")}</th>
+            <th>{t("tester")}</th>
+            <th className="num">{t("colorWholeLabel")}</th>
+            <th className="num">{t("colorGroundLabel")}</th>
+            <th className="num">{t("colorDeltaLabel")}</th>
           </tr>
+        </thead>
+        <tbody>
           {pref && (pref.targetColorWhole != null || pref.targetColorGround != null) && (
-            <tr className="bg-orange/5">
-              <td className="px-2.5 py-1 text-orange/70 font-bold">{t("targetHint")}</td>
-              <td className="text-center px-2.5 py-1 text-orange/70 font-mono">
+            <tr>
+              <td className="hr-muted" data-label={t("tester")}>{t("targetHint")}</td>
+              <td className="num hr-num hr-muted" data-label={t("colorWholeLabel")}>
                 {pref.targetColorWhole ?? "—"}{pref.targetToleranceWhole != null ? ` ±${pref.targetToleranceWhole}` : ""}
               </td>
-              <td className="text-center px-2.5 py-1 text-orange/70 font-mono">
+              <td className="num hr-num hr-muted" data-label={t("colorGroundLabel")}>
                 {pref.targetColorGround ?? "—"}{pref.targetToleranceGround != null ? ` ±${pref.targetToleranceGround}` : ""}
               </td>
-              <td className="text-center px-2.5 py-1 text-orange/70 font-mono">
+              <td className="num hr-num hr-muted" data-label={t("colorDeltaLabel")}>
                 {(pref.targetDeltaMin != null && pref.targetDeltaMax != null) ? `${pref.targetDeltaMin}–${pref.targetDeltaMax}` : "—"}
               </td>
             </tr>
           )}
-        </thead>
-        <tbody className="divide-y divide-border">
           {records.map((r) => {
             const delta = (r.colorWhole != null && r.colorGround != null)
               ? Math.abs(r.colorGround - r.colorWhole) : null;
@@ -152,27 +151,16 @@ function AgtronTable({
               ? (delta >= pref.targetDeltaMin && delta <= pref.targetDeltaMax) : null;
             if (r.colorWhole == null && r.colorGround == null) return null;
             const badge = (pass: boolean | null) => pass === true
-              ? <span className="text-[9px] font-bold text-green-600 bg-green-50 px-1 rounded-full">{t("passLabel")}</span>
+              ? <span className="hr-dot tone-success"><span>{t("passLabel")}</span></span>
               : pass === false
-              ? <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1 rounded-full">{t("failLabel")}</span>
+              ? <span className="hr-dot tone-danger"><span>{t("failLabel")}</span></span>
               : null;
             return (
-              <tr key={r.id} className="bg-white/60">
-                <td className="px-2.5 py-1.5 font-semibold text-charcoal truncate max-w-[80px]">
-                  {r.testerName || r.employee?.name || "—"}
-                </td>
-                <td className="text-center px-2.5 py-1.5">
-                  <span className="font-mono">{r.colorWhole ?? "—"}</span>
-                  <span className="ltr:ml-1 rtl:mr-1">{badge(wholePass)}</span>
-                </td>
-                <td className="text-center px-2.5 py-1.5">
-                  <span className="font-mono">{r.colorGround ?? "—"}</span>
-                  <span className="ltr:ml-1 rtl:mr-1">{badge(groundPass)}</span>
-                </td>
-                <td className="text-center px-2.5 py-1.5">
-                  <span className="font-mono font-bold text-orange">{delta != null ? delta.toFixed(1) : "—"}</span>
-                  <span className="ltr:ml-1 rtl:mr-1">{badge(deltaPass)}</span>
-                </td>
+              <tr key={r.id}>
+                <td data-label={t("tester")}>{r.testerName || r.employee?.name || "—"}</td>
+                <td className="num" data-label={t("colorWholeLabel")}><span className="hr-num">{r.colorWhole ?? "—"}</span> {badge(wholePass)}</td>
+                <td className="num" data-label={t("colorGroundLabel")}><span className="hr-num">{r.colorGround ?? "—"}</span> {badge(groundPass)}</td>
+                <td className="num" data-label={t("colorDeltaLabel")}><strong className="hr-num">{delta != null ? delta.toFixed(1) : "—"}</strong> {badge(deltaPass)}</td>
               </tr>
             );
           })}
@@ -217,6 +205,13 @@ function formatFieldValue(raw: string | null): string {
   }
 }
 
+type QcCuppingSession = {
+  id: string; name: string; status: string;
+  batch: { batchNumber: string } | null;
+  sessionBatches: { id: string }[];
+  _count: { scores: number };
+};
+
 export default function QCPage() {
   const user = useUser();
   const { t, lang } = useI18n();
@@ -232,7 +227,7 @@ export default function QCPage() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [records, setRecords] = useState<LegacyRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"backlog" | "history">("backlog");
+  const [tab, setTab] = useState<"backlog" | "history" | "records">("backlog");
 
   // Backlog filter state
   const [backlogSearch, setBacklogSearch] = useState("");
@@ -270,6 +265,10 @@ export default function QCPage() {
   const [generatingInvite, setGeneratingInvite] = useState<string | null>(null);
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // The restock reason belongs to the batch being cancelled: opening another batch starts empty.
+  const [restockDraft, setRestockDraft] = useState<{ batchId: string; text: string }>({ batchId: "", text: "" });
+  const restockReason = cancelBatch && restockDraft.batchId === cancelBatch.id ? restockDraft.text : "";
+  const setRestockReason = (text: string) => setRestockDraft({ batchId: cancelBatch?.id ?? "", text });
   const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
 
   // Bulk finalize
@@ -280,13 +279,31 @@ export default function QCPage() {
   const [bulkFinalizeReason, setBulkFinalizeReason] = useState("");
   const [isBulkFinalizing, setIsBulkFinalizing] = useState(false);
 
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  // N-10: the latest cupping sessions under the queue (GET /api/cupping/sessions, unchanged).
+  const canCuppingRead = hasModuleAccess(user?.permissions ?? {}, "cupping");
+  const [sessions, setSessions] = useState<QcCuppingSession[] | null>(null);
+  useEffect(() => {
+    if (!canCuppingRead) return;
+    let live = true;
+    fetch("/api/cupping/sessions")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (live && Array.isArray(j)) setSessions(j); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [canCuppingRead]);
   const loadBacklog = useCallback(async () => {
     const [batchRes, qcRes] = await Promise.all([
       fetch("/api/roasting-batches?statuses=Pending+QC"),
       fetch("/api/qc-records"),
     ]);
-    if (batchRes.ok) setBacklogBatches(await batchRes.json());
-    if (qcRes.ok) setRecords(await qcRes.json());
+    const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
+    const [batchJ, qcJ] = await Promise.all([batchRes, qcRes].map(take));
+    setLoadError(batchJ === null);
+    if (batchJ) setBacklogBatches(batchJ);
+    if (qcJ) setRecords(qcJ);
+    setLoaded(true);
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -436,7 +453,10 @@ export default function QCPage() {
   async function handleCancelBatch(restock: boolean) {
     if (!cancelBatch) return;
     setCancelling(true);
-    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, { method: "DELETE" });
+    // A restock is an inventory override: it carries its reason (owner decision, inventory Option A).
+    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, restock
+      ? { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: restockReason.trim() }) }
+      : { method: "DELETE" });
     setCancelling(false);
     if (!res.ok) {
       try { const d = await res.json(); toast.error(d.error || "Failed to cancel batch"); }
@@ -547,8 +567,8 @@ export default function QCPage() {
     toast.success(t("copyLink"));
   }
 
-  const onProfileCount = records.filter((r) => r.decision === "Accept" || r.onProfile).length;
-  const offProfileCount = records.filter((r) => r.decision === "Reject" || (!r.decision && !r.onProfile)).length;
+  // N-10 (prd-qc-closed-1024): the page meta is the queue — «4 دفعات بانتظار القرار · 17.03 كغ».
+  const backlogKg = backlogBatches.reduce((a, b) => a + (Number(b.roastedBeanQuantity) || 0), 0);
   const filtered = records.filter((r) =>
     `${r.coffeeOrigin} ${r.processing} ${r.serialNumber} ${r.remarks || ""} ${r.testerName || ""}`.toLowerCase().includes(search.toLowerCase())
   );
@@ -594,7 +614,7 @@ export default function QCPage() {
     const isOverdue = d < now;
     const isUrgent = !isOverdue && d < new Date(now.getTime() + 6 * 60 * 60 * 1000);
     return {
-      label: isOverdue ? t("overdue") : isUrgent ? t("dueSoon") : formatDate(deadline),
+      label: isOverdue ? t("overdue") : isUrgent ? t("dueSoon") : opsDate(deadline, lang),
       isOverdue,
       isUrgent,
     };
@@ -610,526 +630,466 @@ export default function QCPage() {
     return map[status] ? t(map[status]) : status;
   }
 
+  const tone = (d: string) => (d === "Accept" ? "success" : "danger");
+  const allSelected = filteredBacklog.length > 0 && filteredBacklog.every((b) => selectedIds.has(b.id));
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("qc")}</h1>
-          <p className="text-brown text-sm font-medium">
-            {t("panelCupping")} — {onProfileCount} {t("accepted")}, {offProfileCount} {t("rejected")}
-          </p>
-        </div>
-        {canCreate && tab === "backlog" && (
-          <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold">
-            <Plus size={18} /> {t("newQcRecord")}
-          </button>
-        )}
-      </div>
+    <OpsRoot>
+    <div className={`hr-split${finalizeBatch ? " has-preview" : ""}`}>
+    <div className="hr-page">
+      <PageHeader
+        title={t("opsQcTitle")}
+        // N-10: the reference's one header action is «جلسة تذوق» (to the cupping sessions). The
+        // «سجل جودة جديد» create action stays beside it as a secondary button: no decision
+        // removed it, and it is the way to record against a batch chosen in the form.
+        actions={(canCuppingRead || (canCreate && tab === "backlog")) ? (
+          <>
+            {canCuppingRead ? (
+              <Link href="/dashboard/cupping" className="hr-btn"><Coffee size={16} aria-hidden="true" /> {t("opsQcCuppingSession")}</Link>
+            ) : null}
+            {canCreate && tab === "backlog" ? (
+              <Btn onClick={() => setShowForm(true)}>
+                <Plus size={16} aria-hidden="true" /> {t("newQcRecord")}
+              </Btn>
+            ) : null}
+          </>
+        ) : null}
+      >
+        <span>{countNoun(backlogBatches.length, lang, BATCH_FORMS)} {t("opsQcAwaiting")}</span>
+        <span aria-hidden="true">·</span>
+        <Kg v={backlogKg} />
+      </PageHeader>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl border p-4 text-center hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-          <p className="text-3xl font-bold text-brown">{records.length}</p>
-          <p className="text-xs text-brown">{t("totalRecords")}</p>
-        </div>
-        <div className="bg-green-50 rounded-2xl border border-green-200 p-4 text-center hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-          <p className="text-3xl font-bold text-green-600">{onProfileCount}</p>
-          <p className="text-xs text-green-700">{t("acceptedLabel")}</p>
-        </div>
-        <div className="bg-red-50 rounded-2xl border border-red-200 p-4 text-center hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-          <p className="text-3xl font-bold text-red-600">{offProfileCount}</p>
-          <p className="text-xs text-red-700">{t("rejectedLabel")}</p>
-        </div>
-      </div>
+      <Tabs
+        label={t("qc")}
+        value={tab}
+        onChange={(k) => setTab(k)}
+        items={[
+          { key: "backlog", label: t("qcBacklog"), count: backlogBatches.length },
+          { key: "history", label: t("qcHistory"), count: historyBatches.length },
+          { key: "records", label: t("opsTesterRecordsTab"), count: records.length },
+        ]}
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-2">
-        <button onClick={() => setTab("backlog")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${tab === "backlog" ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:border-slate"}`}>
-          {t("qcBacklog")} ({backlogBatches.length})
-        </button>
-        <button onClick={() => setTab("history")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${tab === "history" ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:border-slate"}`}>
-          {t("qcHistory")} ({historyBatches.length})
-        </button>
-      </div>
+      {loadError ? <OpsError message={t("opsLoadFailed")} onRetry={loadBacklog} /> : null}
+      {!loaded && !loadError ? <OpsLoading /> : null}
 
       {/* Tab 1: QC Backlog */}
-      {tab === "backlog" && (
-        <div className="space-y-4">
+      {loaded && tab === "backlog" && (
+        <>
           {backlogBatches.length > 0 && (
-            <div className="space-y-2">
-              <WorkflowFilterBar
-                searchQuery={backlogSearch} onSearchChange={setBacklogSearch}
-                beanOptions={backlogBeanOptions} selectedBean={backlogBean} onBeanChange={setBacklogBean}
-                orderOptions={backlogOrderOptions} selectedOrder={backlogOrder} onOrderChange={setBacklogOrder}
-                resultCount={filteredBacklog.length} totalCount={backlogBatches.length}
-              />
-              {/* Select All + Bulk Finalize row */}
-              {canManage && filteredBacklog.length > 0 && (
-                <div className="flex items-center justify-between px-1">
-                  <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-medium text-brown">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 accent-orange rounded"
-                      checked={filteredBacklog.length > 0 && filteredBacklog.every((b) => selectedIds.has(b.id))}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedIds(new Set(filteredBacklog.map((b) => b.id)));
-                        else setSelectedIds(new Set());
-                      }}
-                    />
-                    {filteredBacklog.every((b) => selectedIds.has(b.id)) && filteredBacklog.length > 0
-                      ? t("deselectAll") : t("selectAll")}
-                  </label>
-                  {selectedIds.size > 0 && (
-                    <button
-                      onClick={handleBulkFinalizeClick}
-                      className="flex items-center gap-2 px-4 py-2 bg-charcoal text-white rounded-xl text-sm font-bold hover:bg-charcoal/80 shadow-md active:scale-[0.98] transition-all"
-                    >
-                      <CheckSquare size={15} />
-                      {t("bulkFinalize")} ({selectedIds.size})
-                    </button>
-                  )}
-                </div>
+            <WorkflowFilterBar
+              searchQuery={backlogSearch} onSearchChange={setBacklogSearch}
+              beanOptions={backlogBeanOptions} selectedBean={backlogBean} onBeanChange={setBacklogBean}
+              orderOptions={backlogOrderOptions} selectedOrder={backlogOrder} onOrderChange={setBacklogOrder}
+              resultCount={filteredBacklog.length} totalCount={backlogBatches.length}
+            />
+          )}
+          {/* Select All + Bulk Finalize row */}
+          {canManage && filteredBacklog.length > 0 && (
+            // Q-3: beside the decision pane the row checkboxes are hidden, so «تحديد الكل» is too.
+            <div className="hr-filterbar hr-hide-preview" style={{ justifyContent: "space-between" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13.5 }}>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => {
+                    if (e.target.checked) setSelectedIds(new Set(filteredBacklog.map((b) => b.id)));
+                    else setSelectedIds(new Set());
+                  }}
+                />
+                {allSelected ? t("deselectAll") : t("selectAll")}
+              </label>
+              {selectedIds.size > 0 && (
+                <Btn onClick={handleBulkFinalizeClick}>{t("bulkFinalize")} ({selectedIds.size})</Btn>
               )}
             </div>
           )}
           {serialLookup?.query === backlogSearch.trim() && serialLookup.superseded.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-              <p className="flex items-center gap-1.5 text-amber-800 text-xs font-bold uppercase tracking-wide">
-                <AlertTriangle size={12} />
-                {lang === "ar" ? "الرقم التسلسلي تم استبداله" : "Batch serial superseded"}
-              </p>
+            <Notice tone="warning">
+              <strong style={{ fontWeight: 600 }}>{lang === "ar" ? "الرقم التسلسلي تم استبداله" : "Batch serial superseded"}</strong>
               {serialLookup.superseded.map((s, i) => (
-                <p key={i} className="text-xs text-amber-800 leading-relaxed">
+                <div key={i}>
                   {lang === "ar" ? (
                     <>
-                      الرقم <span className="font-mono font-bold">{s.oldBatchNumber}</span> تم استبداله بـ{" "}
-                      <span className="font-mono font-bold">{s.newBatchNumber}</span>
-                      {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
+                      الرقم <span className="ops-serial">{s.oldBatchNumber}</span> تم استبداله بـ{" "}
+                      <span className="ops-serial">{s.newBatchNumber}</span>
+                      {s.beanType && <> · {s.beanType}</>}
                       {s.reason && <> · {s.reason}</>}
                     </>
                   ) : (
                     <>
-                      Batch serial <span className="font-mono font-bold">{s.oldBatchNumber}</span> has been superseded by{" "}
-                      <span className="font-mono font-bold">{s.newBatchNumber}</span>
-                      {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
-                      {s.reason && <> · <span className="italic">{s.reason}</span></>}
+                      Batch serial <span className="ops-serial">{s.oldBatchNumber}</span> has been superseded by{" "}
+                      <span className="ops-serial">{s.newBatchNumber}</span>
+                      {s.beanType && <> · {s.beanType}</>}
+                      {s.reason && <> · <em>{s.reason}</em></>}
                     </>
                   )}
-                </p>
+                </div>
               ))}
-            </div>
+            </Notice>
           )}
           {filteredBacklog.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-2xl border border-border text-brown/40">
-              <ClipboardCheck size={40} className="mx-auto mb-3 opacity-50" />
-              <p className="font-semibold text-lg">{t("noBatchesAwaitingQc")}</p>
-              <p className="text-sm mt-1">{t("batchesAfterRoasting")}</p>
-            </div>
+            <OpsEmpty title={t("noBatchesAwaitingQc")} body={t("batchesAfterRoasting")} />
           ) : (
-            <div className="space-y-3">
-              {filteredBacklog.map((batch) => {
-                const dl = deadlineDisplay(batch.qcDeadline);
-                const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
-                const rejectCount = batch.qcRecords.filter((r) => r.decision === "Reject").length;
-                const total = batch.qcRecords.length;
-                const alreadySubmitted = batch.qcRecords.some((r) => !r.isExternal && r.employee?.id === user?.id);
-                const isExpanded = expandedId === batch.id;
-
-                return (
-                  <div key={batch.id} data-testid={`qc-batch-${batch.batchNumber}`} className={`rounded-xl border p-4 transition-all duration-300 hover:shadow-md ${dl?.isOverdue ? "bg-red-50 border-red-200" : dl?.isUrgent ? "bg-amber-50 border-amber-200" : "bg-amber-50 border-amber-200"}`}>
-                    {/* Batch header */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {canManage && (
-                            <input
-                              type="checkbox"
-                              className="w-4 h-4 accent-orange rounded flex-shrink-0 cursor-pointer"
-                              checked={selectedIds.has(batch.id)}
-                              onChange={() => toggleBatch(batch.id)}
-                            />
-                          )}
-                          <p className="font-bold text-charcoal font-mono text-sm">{batch.batchNumber}</p>
-                          {canEditDate && (
-                            <button
-                              onClick={() => setEditDateBatch(batch)}
-                              className="p-1 rounded-lg text-brown/40 hover:text-orange hover:bg-orange/10 transition-colors"
-                              title={t("editDateBtn")}
-                            >
-                              <CalendarDays size={12} />
-                            </button>
-                          )}
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-warning-bg text-yellow-800">
-                            {t("statusPendingQc")}
-                          </span>
-                          {dl && (
-                            <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${dl.isOverdue ? "bg-red-200 text-red-800" : dl.isUrgent ? "bg-amber-200 text-amber-800" : "bg-gray-100 text-gray-600"}`}>
-                              <Clock size={9} />
-                              {dl.label}
-                            </span>
-                          )}
-                          {batch.blendTiming && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-800">
-                              {t("statusBlended")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-brown mt-0.5">
-                          {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} — #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} ({(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))})
-                        </p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {batch.roastedBeanQuantity}kg {t("roastedLabel")}{batch.roastProfile ? ` · ${batch.roastProfile}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        {canCancelBatch && (
-                          <button onClick={() => setCancelBatch(batch)}
-                            className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                        <button onClick={() => setExpandedId(isExpanded ? null : batch.id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isExpanded ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:bg-cream"}`}>
-                          <Eye size={12} /> {isExpanded ? t("collapse") : t("panel")}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Tester summary bar */}
-                    <div className="flex items-center gap-3 mt-3 pt-3 border-t border-amber-200/60">
-                      <div className="flex items-center gap-1.5">
-                        <Users size={13} className="text-brown/60" />
-                        <span className="text-xs font-semibold text-brown">
-                          {total} {total !== 1 ? t("testers") : t("tester")}
-                        </span>
-                      </div>
-                      {total > 0 && (
-                        <>
-                          <span className="flex items-center gap-1 text-xs font-bold text-green-600">
-                            <CheckCircle2 size={11} /> {acceptCount}
-                          </span>
-                          <span className="flex items-center gap-1 text-xs font-bold text-red-600">
-                            <XCircle size={11} /> {rejectCount}
-                          </span>
-                        </>
-                      )}
-                      <div className="ltr:ml-auto rtl:mr-auto flex items-center gap-2">
-                        {canManage && (
-                          <button
-                            onClick={() => handleGenerateInvite(batch.id)}
-                            disabled={generatingInvite === batch.id}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-white border border-border text-brown hover:bg-cream transition-all"
-                          >
-                            {generatingInvite === batch.id ? <Loader2 size={11} className="animate-spin" /> : <Link2 size={11} />}
-                            {t("guestLink")}
-                          </button>
-                        )}
-                        {canCreate && !alreadySubmitted && (
-                          <button onClick={() => startQcForBatch(batch)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-orange text-white rounded-lg text-xs hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all font-bold">
-                            <ClipboardCheck size={12} /> {t("addMyRecord")}
-                          </button>
-                        )}
-                        {canCreate && alreadySubmitted && (
-                          <span className="flex items-center gap-1 text-xs font-bold text-green-600 bg-green-50 px-2.5 py-1 rounded-lg border border-green-200">
-                            <CheckCircle2 size={11} /> {t("submitted")}
-                          </span>
-                        )}
-                        {canManage && total > 0 && (
-                          <button
-                            onClick={() => { setFinalizeBatch(batch); setFinalizeOutcome(""); setFinalizeReason(""); }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-charcoal text-white rounded-lg text-xs hover:bg-charcoal/80 shadow-md active:scale-[0.98] transition-all font-bold"
-                          >
-                            {t("finalizeQc")}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Expanded tester list */}
-                    {isExpanded && total > 0 && (() => {
-                      const batchGbId = (batch.orderItem?.greenBeanId ?? null);
-                      const batchPref = (batch.orderItem?.order.customer.roastPreferences ?? []).find(
-                        (p) => p.greenBeanId === batchGbId
-                      ) ?? null;
-                      const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
-                      return (
-                        <div className="mt-3 pt-3 border-t border-amber-200/60 space-y-1.5">
-                          <p className="text-xs font-bold text-charcoal mb-2">{t("testerRecords")}</p>
-                          {batch.qcRecords.map((r) => {
-                            const corrCount = r._count?.correctionHistory ?? 0;
-                            const isCorrExpanded = expandedCorrectionId === r.id;
-                            const cachedCorrs = correctionsCache[r.id];
-                            const isLoadingCorr = loadingCorrectionId === r.id;
-                            return (
-                              <div key={r.id} className="rounded-lg overflow-hidden">
-                                <div className="flex items-center justify-between bg-white/70 px-3 py-2">
-                                  <div>
-                                    <span className="text-xs font-semibold text-charcoal">
-                                      {r.testerName || r.employee?.name || "—"}
-                                      {r.isExternal && (
-                                        <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full">
-                                          {t("guestBadge")}
-                                        </span>
-                                      )}
-                                      {corrCount > 0 && (
-                                        <span className="ltr:ml-1.5 rtl:mr-1.5 text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
-                                          Edited
-                                        </span>
-                                      )}
-                                    </span>
-                                    {r.color && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50">{t("colorLabel")} {r.color}</span>}
-                                    {r.remarks && <span className="ltr:ml-2 rtl:mr-2 text-[10px] text-brown/50 truncate max-w-[120px] inline-block">{r.remarks}</span>}
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {corrCount > 0 && (
-                                      <button
-                                        onClick={() => toggleCorrectionHistory(r.id)}
-                                        className="text-[10px] font-bold text-brown/50 hover:text-brown px-1.5 py-0.5 rounded hover:bg-cream transition-colors"
-                                      >
-                                        {isCorrExpanded ? "Hide history" : `History (${corrCount})`}
-                                      </button>
-                                    )}
-                                    {canEditRecord && (r.employee?.id === user?.id || canManage) && (
-                                      <button
-                                        onClick={() => startEditRecord(r, batch)}
-                                        className="text-[10px] font-bold text-orange hover:text-orange-dark px-1.5 py-0.5 rounded hover:bg-orange/10 transition-colors"
-                                      >
-                                        Correct
-                                      </button>
-                                    )}
-                                    <span className={`flex items-center gap-1 text-xs font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
-                                      {r.decision === "Accept" ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                                      {r.decision === "Accept" ? t("accept") : t("reject")}
-                                    </span>
-                                  </div>
-                                </div>
-                                {isCorrExpanded && (
-                                  <div className="bg-amber-50/60 border-t border-amber-100 px-3 py-2">
-                                    {isLoadingCorr && (
-                                      <p className="text-[10px] text-brown/50 flex items-center gap-1">
-                                        <Loader2 size={10} className="animate-spin" /> Loading history…
-                                      </p>
-                                    )}
-                                    {!isLoadingCorr && cachedCorrs && cachedCorrs.length === 0 && (
-                                      <p className="text-[10px] text-brown/50">No corrections recorded.</p>
-                                    )}
-                                    {!isLoadingCorr && cachedCorrs && cachedCorrs.length > 0 && (
-                                      <div className="space-y-2">
-                                        {cachedCorrs.map((ev) => (
-                                          <div key={ev.id} className="text-[10px] border border-amber-200 rounded-lg overflow-hidden">
-                                            <div className="bg-amber-100/70 px-2 py-1 flex items-center justify-between gap-2 flex-wrap">
-                                              <span className="font-bold text-charcoal">{ev.changedByName}</span>
-                                              <span className="text-brown/60">{new Date(ev.changedAt).toLocaleString()}</span>
-                                              <span className="text-brown/80 italic truncate max-w-[200px]">"{ev.correctionReason}"</span>
-                                            </div>
-                                            {ev.fieldChanges.length > 0 ? (
-                                              <table className="w-full text-[10px]">
-                                                <thead>
-                                                  <tr className="bg-white/50">
-                                                    <th className="text-start px-2 py-1 font-semibold text-brown/70">Field</th>
-                                                    <th className="text-start px-2 py-1 font-semibold text-brown/70">From</th>
-                                                    <th className="text-start px-2 py-1 font-semibold text-brown/70">To</th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-amber-100">
-                                                  {ev.fieldChanges.map((fc) => (
-                                                    <tr key={fc.id} className="bg-white/30">
-                                                      <td className="px-2 py-1 font-medium text-charcoal">{FIELD_LABELS[fc.fieldName] ?? fc.fieldName}</td>
-                                                      <td className="px-2 py-1 text-red-700 font-mono">{formatFieldValue(fc.oldValue)}</td>
-                                                      <td className="px-2 py-1 text-green-700 font-mono">{formatFieldValue(fc.newValue)}</td>
-                                                    </tr>
-                                                  ))}
-                                                </tbody>
-                                              </table>
-                                            ) : (
-                                              <p className="px-2 py-1 text-brown/50 italic">No field changes — acknowledged correction.</p>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                          {hasAgtron && (
-                            <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {isExpanded && total === 0 && (
-                      <div className="mt-3 pt-3 border-t border-amber-200/60 text-center text-xs text-brown/50 py-2">
-                        {t("noTesterRecords")}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* QC Records search + table */}
-          <div className="relative">
-            <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" placeholder={t("searchQcRecords")} value={search} onChange={(e) => setSearch(e.target.value)}
-              className="w-full ltr:pl-10 rtl:pr-10 px-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
-          </div>
-
-          <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-cream">
+            <div className="hr-tablewrap is-bleed">
+              <table className="hr-table is-mrow ops-qc ops-qcq" aria-label={t("qcBacklog")}>
+                <thead>
                   <tr>
-                    <th className="text-start px-4 py-3 font-semibold">{t("date")}</th>
-                    <th className="text-start px-4 py-3 font-semibold">{t("tester")}</th>
-                    <th className="text-start px-4 py-3 font-semibold">{t("origin")}</th>
-                    <th className="text-start px-4 py-3 font-semibold">{t("serialNumberShort")}</th>
-                    <th className="text-center px-4 py-3 font-semibold">{t("decision")}</th>
-                    <th className="text-center px-4 py-3 font-semibold">{t("colorLabel")}</th>
-                    <th className="text-start px-4 py-3 font-semibold">{t("remarks")}</th>
+                    {canManage ? <th className="hr-hide-preview" aria-label={t("selectAll")} /> : null}
+                    <th>{t("opsBatchCol")}</th>
+                    <th>{t("opsProductOrderCol")}</th>
+                    <th className="num">{t("opsRoastedOutCol")}</th>
+                    <th>{t("opsDeadlineCol")}</th>
+                    <th>{t("opsRecordsCol")}</th>
+                    <th className="hr-hide-preview" aria-label={t("opsActions")} />
                   </tr>
                 </thead>
-                <tbody className="divide-y">
-                  {filtered.map((r) => (
-                    <tr key={r.id} className="hover:bg-cream/50">
-                      <td className="px-4 py-3 text-brown">{formatDate(r.date)}</td>
-                      <td className="px-4 py-3 text-charcoal font-medium">
-                        {r.testerName || r.employee?.name || "—"}
-                        {r.isExternal && (
-                          <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 rounded-full">
-                            {t("guestBadge")}
+                {filteredBacklog.map((batch) => {
+                  const dl = deadlineDisplay(batch.qcDeadline);
+                  const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
+                  const rejectCount = batch.qcRecords.filter((r) => r.decision === "Reject").length;
+                  const total = batch.qcRecords.length;
+                  const alreadySubmitted = batch.qcRecords.some((r) => !r.isExternal && r.employee?.id === user?.id);
+                  const isExpanded = expandedId === batch.id;
+                  const cols = canManage ? 7 : 6;
+                  // prd-qc: with the decision pane open, choosing another row moves the pane to it —
+                  // by mouse, or by keyboard (Q-2: the row takes focus, Enter / Space pick it).
+                  const pickable = !!finalizeBatch && canManage && total > 0 && finalizeBatch.id !== batch.id && !finalizing;
+                  const pick = () => { setFinalizeBatch(batch); setFinalizeOutcome(""); setFinalizeReason(""); };
+                  return (
+                    <tbody key={batch.id} data-testid={`qc-batch-${batch.batchNumber}`}>
+                      <tr aria-selected={isExpanded || finalizeBatch?.id === batch.id} className={`${dl?.isOverdue ? "is-overdue" : ""}${finalizeBatch && canManage && total > 0 ? " ops-rowpick" : ""}`}
+                        tabIndex={pickable ? 0 : undefined}
+                        onKeyDown={pickable ? (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pick(); } } : undefined}
+                        onClick={pickable ? pick : undefined}>
+                        {canManage ? (
+                          <td className="hr-hide-preview">
+                            <input type="checkbox" aria-label={batch.batchNumber} checked={selectedIds.has(batch.id)} onChange={() => toggleBatch(batch.id)} />
+                          </td>
+                        ) : null}
+                        <td>
+                          <span className="ops-serial">{batch.batchNumber}</span>
+                          {canEditDate && (
+                            <button type="button" className="hr-btn is-ghost is-sm" style={{ height: 24, padding: "0 4px", marginInlineStart: 4 }} onClick={(e) => { e.stopPropagation(); setEditDateBatch(batch); }} title={t("editDateBtn")} aria-label={t("editDateBtn")}>
+                              <CalendarDays size={13} aria-hidden="true" />
+                            </button>
+                          )}
+                        </td>
+                        <td className="m-title">
+                          <span className="strong">{batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}</span>
+                          {/* Beside the pane the product cell is one line, «product · #order» (prd-qc-1440). */}
+                          {finalizeBatch ? <span className="hr-caption ops-split-only"> · {batch.orderItem ? <span className="hr-id">#{batch.orderItem.order.orderNumber}</span> : t("stockBatchLabel")}</span> : null}
+                          <span className="ops-line hr-hide-preview">
+                            <span className="hr-mobile-only"><span className="ops-serial">{batch.batchNumber}</span> · </span>
+                            {batch.orderItem ? <><span className="hr-id">#{batch.orderItem.order.orderNumber}</span> · {batch.orderItem.order.customer.name}</> : t("stockBatchLabel")}
+                            {batch.roastProfile ? <> · {batch.roastProfile}</> : null}
+                            {batch.blendTiming ? <> · {t("statusBlended")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}</> : null}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-medium">{r.coffeeOrigin}</td>
-                      <td className="px-4 py-3 font-mono text-xs">{r.serialNumber}</td>
-                      <td className="px-4 py-3 text-center">
-                        {(r.decision === "Accept" || (!r.decision && r.onProfile))
-                          ? <span className="inline-flex items-center gap-1 text-green-600 font-bold"><CheckCircle2 size={14} />{t("accept")}</span>
-                          : <span className="inline-flex items-center gap-1 text-red-600 font-bold"><XCircle size={14} />{t("reject")}</span>}
-                      </td>
-                      <td className="px-4 py-3 text-center">{r.color || "—"}</td>
-                      <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate">{r.remarks || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                          <span className="hr-msub">
+                            {dl ? <>{dl.label} · </> : null}<span className="hr-num">{total}</span> {total !== 1 ? t("testers") : t("tester")}
+                          </span>
+                        </td>
+                        <td className="num"><span className="hr-num">{kg(batch.roastedBeanQuantity)}</span></td>
+                        <td>
+                          {dl ? (
+                            dl.isOverdue ? <span className="hr-flag tone-danger"><span>{dl.label}</span></span>
+                              : dl.isUrgent ? <span className="hr-flag tone-warning"><span>{dl.label}</span></span>
+                              : <span>{dl.label}</span>
+                          ) : <span className="hr-muted">—</span>}
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <span className="hr-num">{total}</span> {total !== 1 ? t("testers") : t("tester")}
+                          {total > 0 ? <span className="hr-caption hr-hide-preview"> · <span style={{ color: "var(--status-success)" }}>{acceptCount} {t("accept")}</span> · <span style={{ color: rejectCount ? "var(--status-danger)" : undefined }}>{rejectCount} {t("reject")}</span></span> : null}
+                        </td>
+                        <td className="m-end ops-actions hr-hide-preview">
+                          {canCreate && !alreadySubmitted && (
+                            <Btn size="sm" variant="primary" onClick={() => startQcForBatch(batch)}>{t("addMyRecord")}</Btn>
+                          )}
+                          {canCreate && alreadySubmitted && (
+                            <span className="hr-dot tone-success"><span>{t("submitted")}</span></span>
+                          )}
+                          {canManage && total > 0 && (
+                            <Btn size="sm" onClick={() => { setFinalizeBatch(batch); setFinalizeOutcome(""); setFinalizeReason(""); }}>{t("finalizeQc")}</Btn>
+                          )}
+                          {canManage && (
+                            <Btn size="sm" variant="ghost" onClick={() => handleGenerateInvite(batch.id)} busy={generatingInvite === batch.id}>{t("guestLink")}</Btn>
+                          )}
+                          <Btn size="sm" variant="ghost" aria-expanded={isExpanded} onClick={() => setExpandedId(isExpanded ? null : batch.id)}>
+                            {isExpanded ? t("collapse") : t("panel")}
+                          </Btn>
+                          {canCancelBatch && (
+                            <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setCancelBatch(batch)} title={t("cancelBatchTitle")} aria-label={t("cancelBatchTitle")}>
+                              <Trash2 size={15} aria-hidden="true" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="ops-detailrow">
+                          <td colSpan={cols}>
+                            {total === 0 ? (
+                              <p className="hr-caption" style={{ margin: 0 }}>{t("noTesterRecords")}</p>
+                            ) : (() => {
+                              const batchGbId = (batch.orderItem?.greenBeanId ?? null);
+                              const batchPref = (batch.orderItem?.order.customer.roastPreferences ?? []).find(
+                                (p) => p.greenBeanId === batchGbId
+                              ) ?? null;
+                              const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
+                              return (
+                                <div className="hr-stack" style={{ gap: 8 }}>
+                                  <p className="hr-label" style={{ margin: 0 }}>{t("testerRecords")}</p>
+                                  <ul className="ops-list">
+                                    {batch.qcRecords.map((r) => {
+                                      const corrCount = r._count?.correctionHistory ?? 0;
+                                      const isCorrExpanded = expandedCorrectionId === r.id;
+                                      const cachedCorrs = correctionsCache[r.id];
+                                      const isLoadingCorr = loadingCorrectionId === r.id;
+                                      return (
+                                        <li key={r.id} style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+                                          <span style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "baseline" }}>
+                                            <span>
+                                              {r.testerName || r.employee?.name || "—"}
+                                              {r.isExternal ? <> <span className="hr-flag tone-info"><span>{t("guestBadge")}</span></span></> : null}
+                                              {corrCount > 0 ? <> <span className="hr-flag tone-warning"><span>{t("opsEdited")}</span></span></> : null}
+                                              {r.color ? <span className="hr-caption"> · {t("colorLabel")} <span className="hr-num">{r.color}</span></span> : null}
+                                              {r.remarks ? <span className="ops-sub">{r.remarks}</span> : null}
+                                            </span>
+                                            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                                              {corrCount > 0 && (
+                                                <button type="button" className="hr-btn is-ghost is-sm" onClick={() => toggleCorrectionHistory(r.id)}>
+                                                  {isCorrExpanded ? t("opsHideHistory") : `${t("opsHistory")} (${corrCount})`}
+                                                </button>
+                                              )}
+                                              {canEditRecord && (r.employee?.id === user?.id || canManage) && (
+                                                <button type="button" className="hr-btn is-sm" onClick={() => startEditRecord(r, batch)}>{t("opsCorrect")}</button>
+                                              )}
+                                              <span className={`hr-dot tone-${tone(r.decision)}`}><span>{r.decision === "Accept" ? t("accept") : t("reject")}</span></span>
+                                            </span>
+                                          </span>
+                                          {isCorrExpanded && (
+                                            <div className="ops-panel" style={{ marginTop: 0 }}>
+                                              {isLoadingCorr && <p className="hr-caption" style={{ margin: 0 }}>{t("loading")}</p>}
+                                              {!isLoadingCorr && cachedCorrs && cachedCorrs.length === 0 && (
+                                                <p className="hr-caption" style={{ margin: 0 }}>{t("opsNoCorrections")}</p>
+                                              )}
+                                              {!isLoadingCorr && cachedCorrs && cachedCorrs.length > 0 && cachedCorrs.map((ev) => (
+                                                <div key={ev.id} className="hr-stack" style={{ gap: 4, marginBottom: 8 }}>
+                                                  <span className="hr-caption" style={{ margin: 0 }}>
+                                                    <strong style={{ fontWeight: 500, color: "var(--text-primary)" }}>{ev.changedByName}</strong> · {new Date(ev.changedAt).toLocaleString()} · “{ev.correctionReason}”
+                                                  </span>
+                                                  {ev.fieldChanges.length > 0 ? (
+                                                    <table className="hr-table ops-prep">
+                                                      <thead>
+                                                        <tr><th>{t("opsField")}</th><th>{t("opsFrom")}</th><th>{t("opsTo")}</th></tr>
+                                                      </thead>
+                                                      <tbody>
+                                                        {ev.fieldChanges.map((fc) => (
+                                                          <tr key={fc.id}>
+                                                            <td data-label={t("opsField")}>{FIELD_LABELS[fc.fieldName] ?? fc.fieldName}</td>
+                                                            <td data-label={t("opsFrom")} className="hr-num">{formatFieldValue(fc.oldValue)}</td>
+                                                            <td data-label={t("opsTo")} className="hr-num">{formatFieldValue(fc.newValue)}</td>
+                                                          </tr>
+                                                        ))}
+                                                      </tbody>
+                                                    </table>
+                                                  ) : (
+                                                    <p className="hr-caption" style={{ margin: 0 }}>{t("opsNoFieldChanges")}</p>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                  {hasAgtron && <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />}
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  );
+                })}
               </table>
             </div>
-            {filtered.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <ClipboardCheck size={40} className="mx-auto mb-2" /><p>{t("noQcRecordsFound")}</p>
+          )}
+          <p className="hr-caption" style={{ margin: 0 }}>{t("opsQcFoot")}</p>
+          {/* N-10 (prd-qc-closed-1024 «جلسات التذوق»): the latest cupping sessions, read from the
+              existing sessions list, for viewers who may open cupping. */}
+          {canCuppingRead && sessions && sessions.length > 0 ? (
+            <section className="hr-stack hr-hide-preview" style={{ gap: 8, marginTop: 24 }} aria-label={t("opsQcSessionsTitle")}>
+              <SecHead title={t("opsQcSessionsTitle")} caption={t("opsQcSessionsSub")} action={<Link href="/dashboard/cupping" className="ops-link ops-lk">{t("opsQcAllSessions")}</Link>} />
+              <div className="hr-tablewrap">
+                <table className="hr-table is-mrow ops-rows" aria-label={t("opsQcSessionsTitle")}>
+                  <thead>
+                    <tr>
+                      <th>{t("opsQcSessionCol")}</th>
+                      <th className="hr-hide-compact">{t("opsQcCupsCol")}</th>
+                      <th>{t("opsStatusCol")}</th>
+                      <th style={{ textAlign: "end" }}>{t("opsQcResultCol")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.slice(0, 5).map((ss) => (
+                      <tr key={ss.id}>
+                        <td className="m-title">
+                          <Link href={`/dashboard/cupping/${ss.id}`} className="ops-link">{ss.name}</Link>
+                          {/* QA P3: the phone row keeps the open / closed status. */}
+                          <span className="hr-msub"><StatusDot map={{ Open: [t("opsQcSessionOpen"), "info"], Closed: [t("opsQcSessionClosed"), "success"] }} value={ss.status} /></span>
+                        </td>
+                        <td className="hr-hide-compact hr-hide-mobile">{ss.sessionBatches.length > 0 ? countNoun(ss.sessionBatches.length, lang, CUP_FORMS) : ss.batch ? <span className="ops-serial">{ss.batch.batchNumber}</span> : <span className="hr-muted">—</span>}</td>
+                        <td><StatusDot map={{ Open: [t("opsQcSessionOpen"), "info"], Closed: [t("opsQcSessionClosed"), "success"] }} value={ss.status} /></td>
+                        <td className="m-end" style={{ textAlign: "end" }}><span className="hr-caption">{countNoun(ss._count.scores, lang, SCORE_FORMS)}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </div>
-        </div>
+            </section>
+          ) : null}
+        </>
       )}
 
       {/* Tab 2: QC History */}
       {tab === "history" && (
-        <div className="space-y-2">
-          {historyBatches.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-2xl border border-border text-brown/40">
-              <ClipboardCheck size={40} className="mx-auto mb-3 opacity-50" />
-              <p className="font-semibold text-lg">{t("noQcHistoryYet")}</p>
-              <p className="text-sm mt-1">{t("finalizedBatchesHere")}</p>
-            </div>
-          ) : (
-            historyBatches.map((batch) => {
-              const isPassed = batch.status === "Passed";
-              const isRejected = batch.status === "Rejected";
-              const isBlended = batch.status === "Blended";
-              const isExpanded = expandedId === batch.id;
-              const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
-              const rejectCount = batch.qcRecords.filter((r) => r.decision === "Reject").length;
-              return (
-                <div key={batch.id} className={`rounded-xl border p-4 transition-all duration-300 hover:shadow-md ${isRejected ? "bg-red-50 border-red-200" : isBlended ? "bg-purple-50 border-purple-200" : "bg-green-50 border-green-200"}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-bold text-charcoal font-mono text-sm">{batch.batchNumber}</p>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isRejected ? "bg-red-200 text-red-800" : isBlended ? "bg-purple-200 text-purple-800" : "bg-green-200 text-green-800"}`}>
-                          {statusBadgeLabel(batch.status)}
+        historyBatches.length === 0 ? (
+          <OpsEmpty title={t("noQcHistoryYet")} body={t("finalizedBatchesHere")} />
+        ) : (
+          <div className="hr-tablewrap is-bleed">
+            <table className="hr-table is-mrow ops-qc" aria-label={t("qcHistory")}>
+              <thead>
+                <tr>
+                  <th>{t("opsBatchCol")}</th>
+                  <th>{t("opsProductOrderCol")}</th>
+                  <th>{t("opsStatusCol")}</th>
+                  <th>{t("opsRecordsCol")}</th>
+                  <th>{t("date")}</th>
+                  <th aria-label={t("opsActions")} />
+                </tr>
+              </thead>
+              {historyBatches.map((batch) => {
+                const isBlended = batch.status === "Blended";
+                const isExpanded = expandedId === batch.id;
+                const acceptCount = batch.qcRecords.filter((r) => r.decision === "Accept").length;
+                const rejectCount = batch.qcRecords.filter((r) => r.decision === "Reject").length;
+                return (
+                  <tbody key={batch.id} data-testid={`qc-history-${batch.batchNumber}`}>
+                    <tr aria-selected={isExpanded}>
+                      <td><span className="ops-serial">{batch.batchNumber}</span></td>
+                      <td className="m-title">
+                        <span className="strong">{batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}</span>
+                        <span className="ops-line">
+                          <span className="hr-mobile-only"><span className="ops-serial">{batch.batchNumber}</span> · </span>
+                          {batch.orderItem ? <><span className="hr-id">#{batch.orderItem.order.orderNumber}</span> · {batch.orderItem.order.customer.name}</> : t("stockBatchLabel")}
+                          {batch.blendTiming ? <> · {t("statusBlended")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}</> : null}
+                          {isBlended && batch.parentBatch ? <> · {t("mergedInto")} <span className="ops-serial">{batch.parentBatch.batchNumber}</span></> : null}
                         </span>
-                        {batch.blendTiming && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            {t("statusBlended")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}
-                          </span>
-                        )}
-                        {isBlended && batch.parentBatch && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-200 text-purple-800 flex items-center gap-1">
-                            <Merge size={10} /> {t("mergedInto")} {batch.parentBatch.batchNumber}
-                          </span>
-                        )}
-                        {batch.qcRecords.length > 0 && (
-                          <span className="text-[10px] text-brown/50 font-medium">
-                            {t("panel")}: {acceptCount}✓ {rejectCount}✗
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-brown mt-0.5">
-                        {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} — #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} ({(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))})
-                      </p>
-                    </div>
-                    <button onClick={() => setExpandedId(isExpanded ? null : batch.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isExpanded ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:bg-cream"}`}>
-                      <Eye size={12} /> {isExpanded ? t("collapse") : t("details")}
-                    </button>
-                  </div>
-                  {isExpanded && (
-                    <div className="mt-3 pt-3 border-t border-current/10 space-y-1">
-                      <p className="text-xs text-brown">
-                        <span className="font-bold">{t("roastedLabel")}:</span> {batch.roastedBeanQuantity}kg |{" "}
-                        <span className="font-bold">{t("date")}:</span> {formatDate(batch.date)}
-                        {batch.roastProfile && <> | <span className="font-bold">{t("roastProfileLabel")}:</span> {batch.roastProfile}</>}
-                      </p>
-                      {batch.childBatches.length > 0 && (
-                        <p className="text-xs text-brown">
-                          <span className="font-bold">{t("sourceBatches")}:</span> {batch.childBatches.map((c) => c.batchNumber).join(", ")}
-                        </p>
-                      )}
-                      {batch.qcRecords.length > 0 && (() => {
-                        const batchGbId = (batch.orderItem?.greenBeanId ?? null);
-                        const batchPref = (batch.orderItem?.order.customer.roastPreferences ?? []).find(
-                          (p) => p.greenBeanId === batchGbId
-                        ) ?? null;
-                        const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
-                        return (
-                          <div className="mt-2">
-                            <p className="text-xs font-bold text-charcoal mb-1">{t("testerRecords")}:</p>
-                            {batch.qcRecords.map((r) => (
-                              <div key={r.id} className="text-xs text-brown bg-white/50 rounded-lg px-2 py-1.5 mb-1 flex items-center justify-between">
-                                <span className="font-semibold">
-                                  {r.testerName || r.employee?.name || "—"}
-                                  {r.isExternal && (
-                                    <span className="ltr:ml-1 rtl:mr-1 text-[10px] font-bold text-purple-600">
-                                      ({t("guestBadge")})
-                                    </span>
-                                  )}
-                                </span>
-                                <span className={`font-bold ${r.decision === "Accept" ? "text-green-600" : "text-red-600"}`}>
-                                  {r.decision === "Accept" ? t("accept") : t("reject")}
-                                </span>
-                              </div>
-                            ))}
-                            {hasAgtron && <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />}
+                      </td>
+                      <td className="m-end is-stack">
+                        <StatusDot map={{ Passed: [statusBadgeLabel("Passed"), "success"], Rejected: [statusBadgeLabel("Rejected"), "danger"], Blended: [statusBadgeLabel("Blended"), "neutral"] }} value={batch.status} />
+                      </td>
+                      <td>{batch.qcRecords.length > 0 ? <span className="hr-caption">{t("panel")}: <span className="hr-num">{acceptCount}</span> {t("accept")} · <span className="hr-num">{rejectCount}</span> {t("reject")}</span> : <span className="hr-muted">—</span>}</td>
+                      <td>{opsDate(batch.date, lang)}</td>
+                      <td>
+                        <Btn size="sm" variant="ghost" aria-expanded={isExpanded} onClick={() => setExpandedId(isExpanded ? null : batch.id)}>
+                          {isExpanded ? t("collapse") : t("details")}
+                        </Btn>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="ops-detailrow">
+                        <td colSpan={6}>
+                          <div className="hr-stack" style={{ gap: 8 }}>
+                            <KV rows={[
+                              [t("roastedLabel"), <Kg key="r" v={batch.roastedBeanQuantity} />],
+                              [t("date"), opsDate(batch.date, lang)],
+                              ...(batch.roastProfile ? [[t("roastProfileLabel"), batch.roastProfile] as [string, string]] : []),
+                              ...(batch.childBatches.length > 0 ? [[t("sourceBatches"), batch.childBatches.map((c) => c.batchNumber).join(", ")] as [string, string]] : []),
+                            ]} />
+                            {batch.qcRecords.length > 0 && (() => {
+                              const batchGbId = (batch.orderItem?.greenBeanId ?? null);
+                              const batchPref = (batch.orderItem?.order.customer.roastPreferences ?? []).find(
+                                (p) => p.greenBeanId === batchGbId
+                              ) ?? null;
+                              const hasAgtron = batch.qcRecords.some((r) => r.colorWhole != null || r.colorGround != null);
+                              return (
+                                <>
+                                  <p className="hr-label" style={{ margin: 0 }}>{t("testerRecords")}</p>
+                                  <ul className="ops-list">
+                                    {batch.qcRecords.map((r) => (
+                                      <li key={r.id}>
+                                        <span>{r.testerName || r.employee?.name || "—"}{r.isExternal ? <span className="hr-caption"> ({t("guestBadge")})</span> : null}</span>
+                                        <span className={`hr-dot tone-${tone(r.decision)}`}><span>{r.decision === "Accept" ? t("accept") : t("reject")}</span></span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {hasAgtron && <AgtronTable records={batch.qcRecords} pref={batchPref} t={t} />}
+                                </>
+                              );
+                            })()}
+                            {isBlended && <p className="hr-caption" style={{ margin: 0 }}>{t("blendedNoQcNeeded")}</p>}
                           </div>
-                        );
-                      })()}
-                      {isBlended && (
-                        <p className="text-xs text-purple-700 font-bold mt-1">{t("blendedNoQcNeeded")}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                );
+              })}
+            </table>
+          </div>
+        )
+      )}
+
+      {/* Tab 3: every tester record (the flat register) */}
+      {tab === "records" && (
+        <>
+          <div className="hr-filterbar">
+            <input type="text" placeholder={t("searchQcRecords")} aria-label={t("searchQcRecords")} value={search} onChange={(e) => setSearch(e.target.value)} className="hr-input hr-search" />
+          </div>
+          {filtered.length === 0 ? (
+            <OpsEmpty title={t("noQcRecordsFound")} />
+          ) : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow" aria-label={t("opsTesterRecordsTab")}>
+                <thead>
+                  <tr>
+                    <th>{t("date")}</th>
+                    <th>{t("tester")}</th>
+                    <th>{t("origin")}</th>
+                    <th>{t("serialNumberShort")}</th>
+                    <th>{t("decision")}</th>
+                    <th className="num">{t("colorLabel")}</th>
+                    <th>{t("remarks")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r) => {
+                    const ok = r.decision === "Accept" || (!r.decision && r.onProfile);
+                    return (
+                      <tr key={r.id}>
+                        <td>{opsDate(r.date, lang)}</td>
+                        <td className="m-title">
+                          <span className="strong">{r.testerName || r.employee?.name || "—"}</span>
+                          {r.isExternal ? <span className="hr-caption"> · {t("guestBadge")}</span> : null}
+                          <span className="hr-msub">{r.coffeeOrigin} · <span className="ops-serial">{r.serialNumber}</span> · {opsDate(r.date, lang)}</span>
+                        </td>
+                        <td>{r.coffeeOrigin}</td>
+                        <td><span className="ops-serial">{r.serialNumber}</span></td>
+                        <td className="m-end"><span className={`hr-dot tone-${ok ? "success" : "danger"}`}><span>{ok ? t("accept") : t("reject")}</span></span></td>
+                        <td className="num"><span className="hr-num">{r.color || "—"}</span></td>
+                        <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>{r.remarks || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {/* QC Submission Form Modal */}
@@ -1323,87 +1283,6 @@ export default function QCPage() {
         </div>
       )}
 
-      {/* Single-batch finalize modal */}
-      {finalizeBatch && (() => {
-        const fb = finalizeBatch;
-        const fbAccept = fb.qcRecords.filter((r) => r.decision === "Accept").length;
-        const fbReject = fb.qcRecords.filter((r) => r.decision === "Reject").length;
-        const fbTotal = fb.qcRecords.length;
-        const reasonRequired = finalizeOutcome === "Passed" && fbReject > 0;
-        const canConfirm = finalizeOutcome !== "" && !(reasonRequired && !finalizeReason.trim());
-        return (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !finalizing && setFinalizeBatch(null)}>
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("finalizeQc")}</h2>
-              <p className="text-xs text-brown/60 mb-4 font-mono">{fb.batchNumber}</p>
-
-              {fbTotal === 1 && (
-                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
-                  <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
-                  <p className="text-xs text-amber-700 font-medium">{t("oneTesterWarning")}</p>
-                </div>
-              )}
-
-              <div className="flex items-center gap-4 bg-cream rounded-xl px-4 py-2.5 mb-4 text-sm">
-                <span className="text-brown font-semibold">{fbTotal} {fbTotal !== 1 ? t("testers") : t("tester")}</span>
-                <span className="flex items-center gap-1 font-bold text-green-600"><CheckCircle2 size={13} /> {fbAccept} {t("accept")}</span>
-                <span className="flex items-center gap-1 font-bold text-red-600"><XCircle size={13} /> {fbReject} {t("reject")}</span>
-              </div>
-
-              <p className="text-sm font-semibold text-charcoal mb-3">{t("bulkOutcomeLabel")}</p>
-              <div className="flex gap-3 mb-4">
-                <button
-                  onClick={() => setFinalizeOutcome("Passed")}
-                  className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all text-sm ${finalizeOutcome === "Passed" ? "bg-green-600 text-white border-green-600" : "bg-white text-green-700 border-green-300 hover:bg-green-50"}`}
-                >
-                  <CheckCircle2 size={15} className="inline ltr:mr-1.5 rtl:ml-1.5" />
-                  {t("statusPassed")}
-                </button>
-                <button
-                  onClick={() => setFinalizeOutcome("Rejected")}
-                  className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all text-sm ${finalizeOutcome === "Rejected" ? "bg-red-600 text-white border-red-600" : "bg-white text-red-600 border-red-300 hover:bg-red-50"}`}
-                >
-                  <XCircle size={15} className="inline ltr:mr-1.5 rtl:ml-1.5" />
-                  {t("rejectedLabel")}
-                </button>
-              </div>
-
-              {finalizeOutcome === "Passed" && (
-                <div className="mb-4">
-                  <label className="block text-sm font-semibold text-charcoal mb-1">
-                    {reasonRequired ? "Override reason (required)" : "Decision notes (optional)"}
-                  </label>
-                  <textarea
-                    value={finalizeReason}
-                    onChange={(e) => setFinalizeReason(e.target.value)}
-                    rows={2}
-                    placeholder={reasonRequired ? "State reason for passing despite rejected records…" : "Optional notes…"}
-                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm resize-none"
-                  />
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => handleFinalize(fb, finalizeOutcome as "Passed" | "Rejected", finalizeReason)}
-                  disabled={!canConfirm || finalizing}
-                  className="flex-1 py-2.5 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm"
-                >
-                  {finalizing ? <><Loader2 size={14} className="animate-spin" /> {t("finalizing")}</> : t("confirm")}
-                </button>
-                <button
-                  onClick={() => setFinalizeBatch(null)}
-                  disabled={finalizing}
-                  className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors text-sm"
-                >
-                  {t("cancel")}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Invite link modal */}
       {inviteLink && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setInviteLink(null)}>
@@ -1448,8 +1327,9 @@ export default function QCPage() {
               {isPendingQc ? (
                 <>
                   <p className="text-sm text-brown mb-5">{t("cancelBatchMsgPre")}</p>
+                  <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />
                   <div className="flex gap-3">
-                    <button onClick={() => handleCancelBatch(true)} disabled={cancelling}
+                    <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !restockReasonOk(restockReason)}
                       className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 active:scale-[0.98] transition-all">
                       {cancelling ? "…" : t("cancelConfirmRestock")}
                     </button>
@@ -1467,8 +1347,9 @@ export default function QCPage() {
                       className="w-full py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all">
                       {cancelling ? "…" : t("cancelMarkWasted")}
                     </button>
+                    {hasBean && canOverrideInventory && <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />}
                     {hasBean && (
-                      <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory}
+                      <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory || !restockReasonOk(restockReason)}
                         title={!canOverrideInventory ? t("noOverridePermission") : undefined}
                         className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
                         {cancelling ? "…" : t("cancelRestock")}
@@ -1602,5 +1483,86 @@ export default function QCPage() {
         />
       )}
     </div>
+
+    {/* prd-qc 315:2095 / 318:2258 / 347:3558: the final decision is a pane beside the queue
+        at 1440, a drawer at 1024 and a bottom sheet on the phone. Same state, validation and
+        request as the dialog it replaces. */}
+    {finalizeBatch && (() => {
+      const fb = finalizeBatch;
+      const fbAccept = fb.qcRecords.filter((r) => r.decision === "Accept").length;
+      const fbReject = fb.qcRecords.filter((r) => r.decision === "Reject").length;
+      const fbTotal = fb.qcRecords.length;
+      const reasonRequired = finalizeOutcome === "Passed" && fbReject > 0;
+      const canConfirm = finalizeOutcome !== "" && !(reasonRequired && !finalizeReason.trim());
+      const product = fb.greenBean?.beanType || fb.orderItem?.beanTypeName || "";
+      const outcomeLabel = finalizeOutcome === "Passed" ? t("accept") : finalizeOutcome === "Rejected" ? t("reject") : null;
+      return (
+        <OpsPane
+          testId="qc-finalize-pane"
+          label={t("finalizeQc")}
+          title={<><span className="ops-serial">{fb.batchNumber}</span> <span>{product}</span></>}
+          sub={t("finalizeQc")}
+          busy={finalizing}
+          onClose={() => setFinalizeBatch(null)}
+          footer={
+            <>
+              <Btn variant="primary" onClick={() => handleFinalize(fb, finalizeOutcome as "Passed" | "Rejected", finalizeReason)} disabled={!canConfirm} busy={finalizing}>
+                {finalizing ? t("finalizing") : outcomeLabel ? `${t("qcFinishInspection")} · ${outcomeLabel}` : t("qcFinishInspection")}
+              </Btn>
+              <Btn onClick={() => setFinalizeBatch(null)} disabled={finalizing}>{t("cancel")}</Btn>
+            </>
+          }
+        >
+          <dl className="ops-props ops-qc-props" style={{ gridTemplateColumns: "110px minmax(0, 1fr)" }}>
+            <dt>{t("opsOrderCol")}</dt>
+            <dd>{fb.orderItem ? <><span className="hr-id">#{fb.orderItem.order.orderNumber}</span> · {fb.orderItem.order.customer.name}</> : t("stockBatchLabel")}</dd>
+            <dt>{t("opsRoastedOutCol")}</dt>
+            <dd><Kg v={fb.roastedBeanQuantity} /></dd>
+            <dt>{t("opsDeadlineCol")}</dt>
+            <dd>{fb.qcDeadline ? <span className="hr-num">{opsDate(fb.qcDeadline, lang, true)}</span> : <span className="hr-muted">—</span>}</dd>
+          </dl>
+
+          <div>
+            <p className="ops-lbl">{t("opsRecordsCol")} · <span className="hr-num">{fbTotal}</span> · <span style={{ color: "var(--status-success)" }}><span className="hr-num">{fbAccept}</span> {t("accept")}</span> · <span style={{ color: fbReject ? "var(--status-danger)" : undefined }}><span className="hr-num">{fbReject}</span> {t("reject")}</span></p>
+            <ul className="ops-recs">
+              {fb.qcRecords.map((r) => (
+                <li key={r.id}>
+                  <span>{r.employee?.name ?? r.testerName ?? "—"}</span>
+                  <span className="hr-num">{r.colorWhole ?? r.color ?? "—"}{r.colorGround != null ? <> / {r.colorGround}</> : null}</span>
+                  <span className={`hr-dot tone-${r.decision === "Accept" ? "success" : "danger"}`}><span>{r.decision === "Accept" ? t("accept") : t("reject")}</span></span>
+                  <span className="ops-recs-sub">{r.isExternal ? t("guestLink") : null}{r.isExternal ? " · " : null}{opsDate(r.date, lang, true)}</span>
+                </li>
+              ))}
+            </ul>
+            {fbTotal === 1 ? <p className="ops-hint ops-onetester">{t("oneTesterWarning")}</p> : null}
+          </div>
+
+          <div>
+            <p className="ops-lbl" id="qc-final-decision">{t("qcFinalDecision")}</p>
+            <div className="ops-seg" role="group" aria-labelledby="qc-final-decision">
+              <button type="button" aria-pressed={finalizeOutcome === "Passed"} onClick={() => setFinalizeOutcome("Passed")} data-autofocus="">{t("accept")}</button>
+              <button type="button" aria-pressed={finalizeOutcome === "Rejected"} className="is-negative" onClick={() => setFinalizeOutcome("Rejected")}>{t("reject")}</button>
+            </div>
+            <p className="ops-hint">{t("qcFinalizeHint")}</p>
+          </div>
+
+          {finalizeOutcome === "Passed" && (
+            <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span className="hr-caption">{reasonRequired ? t("qcOverrideReasonRequired") : t("qcDecisionNotesOptional")}</span>
+              <textarea
+                value={finalizeReason}
+                onChange={(e) => setFinalizeReason(e.target.value)}
+                rows={2}
+                placeholder={reasonRequired ? t("qcOverrideReasonPlaceholder") : t("qcDecisionNotesPlaceholder")}
+                className="hr-input"
+                style={{ height: "auto", padding: "8px 10px", resize: "none" }}
+              />
+            </label>
+          )}
+        </OpsPane>
+      );
+    })()}
+    </div>
+    </OpsRoot>
   );
 }

@@ -12,6 +12,7 @@ import {
   consumeBlendSources,
   recordBlendMovements,
 } from "@/lib/services/blend-transformation";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 
 /**
  * Blend several roasted batches into one.
@@ -199,7 +200,9 @@ export async function POST(request: Request) {
         include: {
           childBatches: { select: { id: true, batchNumber: true, roastedBeanQuantity: true } },
           blendInputs: { select: { id: true, sourceBatchId: true, quantityUsed: true } },
-          orderItem: { include: { order: { include: { customer: true } } } },
+          // F4 / review F-1: the customer's name only, unless the caller holds the
+          // customer contact right (the production screen does not read this body at all).
+          orderItem: { include: { order: { include: { customer: canSeeCustomerContact(user.permissions) ? true : { select: CUSTOMER_NAME_SELECT } } } } },
         },
       });
     }, TX_OPTS);

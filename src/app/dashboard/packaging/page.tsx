@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { AlertTriangle, Box, Package, Trash2, CalendarDays, X, Plus } from "lucide-react";
+import { AlertTriangle, Trash2, CalendarDays, X, Plus } from "lucide-react";
+import { Bar, Btn, Grams, Notice, OpsBanner, OpsEmpty, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Kg, gUnit, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
-import { formatDate } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { createRequestKeyHolder } from "@/lib/request-key";
 
+import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
   productId: string | null;
@@ -19,6 +20,8 @@ type Batch = {
   greenBeanQuantity: number; roastedBeanQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
+  /** Last change (the packing time, for the history block); every scalar is in the payload. */
+  updatedAt?: string;
   parentBatchId: string | null;
   parentBatch: { id: string; batchNumber: string } | null;
   greenBean: { beanType: string } | null;
@@ -156,6 +159,10 @@ export default function PackagingPage() {
   const [success, setSuccess] = useState("");
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // The restock reason belongs to the batch being cancelled: opening another batch starts empty.
+  const [restockDraft, setRestockDraft] = useState<{ batchId: string; text: string }>({ batchId: "", text: "" });
+  const restockReason = cancelBatch && restockDraft.batchId === cancelBatch.id ? restockDraft.text : "";
+  const setRestockReason = (text: string) => setRestockDraft({ batchId: cancelBatch?.id ?? "", text });
   const [editDateBatch, setEditDateBatch] = useState<EditableBatch | null>(null);
 
   // Filter state
@@ -245,7 +252,10 @@ export default function PackagingPage() {
   async function handleCancelBatch(restock: boolean) {
     if (!cancelBatch) return;
     setCancelling(true);
-    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, { method: "DELETE" });
+    // A restock is an inventory override: it carries its reason (owner decision, inventory Option A).
+    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, restock
+      ? { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: restockReason.trim() }) }
+      : { method: "DELETE" });
     setCancelling(false);
     if (!res.ok) {
       try { const d = await res.json(); setError(d.error || t("cancelFailed")); }
@@ -334,7 +344,7 @@ export default function PackagingPage() {
       const parts = [`${data.standardUnitsCreated} ${t("pkgSellableUnits")}`];
       if (data.partialPackagesCreated > 0) parts.push(`${data.partialPackagesCreated} ${t("pkgPartialPackage")}`);
       if (data.partialPackagesCompleted > 0) parts.push(`${data.partialPackagesCompleted} ${t("pkgWillComplete")}`);
-      if (data.lossGrams > 0) parts.push(`${data.lossGrams} g ${t("pkgReconLoss")}`);
+      if (data.lossGrams > 0) parts.push(`${data.lossGrams} ${gUnit(lang)} ${t("pkgReconLoss")}`);
       setSuccess(`${t("pkgDone")}: ${parts.join(" · ")}`);
       closePacking();
       loadData();
@@ -390,26 +400,19 @@ export default function PackagingPage() {
   const sellable = useMemo(() => catalog.filter((c) => c.isActive && c.hasBom), [catalog]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin" /></div>;
+    return <OpsRoot><div className="hr-page"><OpsLoading rows={5} /></div></OpsRoot>;
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-extrabold text-charcoal">{t("packaging")}</h1>
-        <p className="text-brown text-sm font-medium">{batches.length} {t("batchesReadyPackage")}</p>
-      </div>
+    <OpsRoot>
+    <div className={`hr-split${packBatch ? " has-preview" : ""}`}>
+    <div className="hr-page">
+      <PageHeader title={t("packaging")}>
+        <span><span className="hr-num">{batches.length}</span> {t("batchesReadyPackage")}</span>
+      </PageHeader>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2 text-sm font-bold">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="bg-success-bg border border-green-200 text-green-700 px-4 py-3 rounded-xl flex items-center gap-2 text-sm font-bold">
-          {success}
-        </div>
-      )}
+      {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
+      {success && <OpsBanner tone="success" onClose={() => setSuccess("")}>{success}</OpsBanner>}
 
       {batches.length > 0 && (
         <WorkflowFilterBar
@@ -421,161 +424,215 @@ export default function PackagingPage() {
       )}
 
       {serialLookup?.query === filterSearch.trim() && serialLookup.superseded.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-          <p className="flex items-center gap-1.5 text-amber-800 text-xs font-bold uppercase tracking-wide">
-            <AlertTriangle size={12} />
-            {lang === "ar" ? "الرقم التسلسلي تم استبداله" : "Batch serial superseded"}
-          </p>
+        <Notice tone="warning">
+          <strong style={{ fontWeight: 600 }}>{lang === "ar" ? "الرقم التسلسلي تم استبداله" : "Batch serial superseded"}</strong>
           {serialLookup.superseded.map((s, i) => (
-            <p key={i} className="text-xs text-amber-800 leading-relaxed">
+            <div key={i}>
               {lang === "ar" ? (
                 <>
-                  الرقم <span className="font-mono font-bold">{s.oldBatchNumber}</span> تم استبداله بـ{" "}
-                  <span className="font-mono font-bold">{s.newBatchNumber}</span>
-                  {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
+                  الرقم <span className="ops-serial">{s.oldBatchNumber}</span> تم استبداله بـ{" "}
+                  <span className="ops-serial">{s.newBatchNumber}</span>
+                  {s.beanType && <> · {s.beanType}</>}
                   {s.reason && <> · {s.reason}</>}
                 </>
               ) : (
                 <>
-                  Batch serial <span className="font-mono font-bold">{s.oldBatchNumber}</span> has been superseded by{" "}
-                  <span className="font-mono font-bold">{s.newBatchNumber}</span>
-                  {s.beanType && <> · <span className="text-amber-600">{s.beanType}</span></>}
-                  {s.reason && <> · <span className="italic">{s.reason}</span></>}
+                  Batch serial <span className="ops-serial">{s.oldBatchNumber}</span> has been superseded by{" "}
+                  <span className="ops-serial">{s.newBatchNumber}</span>
+                  {s.beanType && <> · {s.beanType}</>}
+                  {s.reason && <> · <em>{s.reason}</em></>}
                 </>
               )}
-            </p>
+            </div>
           ))}
-        </div>
+        </Notice>
       )}
       {filteredBatches.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-border text-brown/40">
-          <Box size={40} className="mx-auto mb-3 opacity-50" />
-          <p className="font-semibold text-lg">{t("noBatchesToPackage")}</p>
-          <p className="text-sm mt-1">{t("batchesAfterQc")}</p>
-        </div>
+        <OpsEmpty title={t("noBatchesToPackage")} body={t("batchesAfterQc")} />
       ) : (
-        <div className="space-y-3">
-          {filteredBatches.map((batch) => {
-            const total = batch.roastedBeanQuantity;
-            // What the roast has actually given up, from the one column that knows. The
-            // legacy bag counters only ever described one of the old paths, and a roast
-            // packed through the unified operation does not touch them at all.
-            const packed = +Math.max(0, total - batch.roastedAvailableKg).toFixed(3);
-            const pct = total > 0 ? Math.min((packed / total) * 100, 100) : 0;
-            const remaining = +batch.roastedAvailableKg.toFixed(3);
-            const legacyBags = packagedKg(batch);
-            return (
-              <div key={batch.id} data-testid={`pack-batch-${batch.batchNumber}`} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-                <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
+        <div className="hr-tablewrap">
+          <table className="hr-table is-mrow" aria-label={t("packaging")}>
+            <thead>
+              <tr>
+                <th>{t("opsBatchCol")}</th>
+                <th>{t("opsProductOrderCol")}</th>
+                <th className="num">{t("opsRoastedOutCol")}</th>
+                <th>{t("opsPackedCol")}</th>
+                <th className="num">{t("opsLeftCol")}</th>
+                <th>{t("opsStatusCol")}</th>
+                <th aria-label={t("opsActions")} />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredBatches.map((batch) => {
+                const total = batch.roastedBeanQuantity;
+                // What the roast has actually given up, from the one column that knows. The
+                // legacy bag counters only ever described one of the old paths, and a roast
+                // packed through the unified operation does not touch them at all.
+                const packed = +Math.max(0, total - batch.roastedAvailableKg).toFixed(3);
+                const pct = total > 0 ? Math.min((packed / total) * 100, 100) : 0;
+                const remaining = +batch.roastedAvailableKg.toFixed(3);
+                const legacyBags = packagedKg(batch);
+                const bags = legacyBags > 0 ? [
+                  batch.bags3kg > 0 ? `${batch.bags3kg}× 3kg` : null,
+                  batch.bags1kg > 0 ? `${batch.bags1kg}× 1kg` : null,
+                  batch.bags250g > 0 ? `${batch.bags250g}× 250g` : null,
+                  batch.bags150g > 0 ? `${batch.bags150g}× 150g` : null,
+                  batch.samplesGrams > 0 ? `${batch.samplesGrams} ${gUnit(lang)} ${t("samplesGramsLabel")}` : null,
+                ].filter(Boolean) : [];
+                return (
+                  <tr key={batch.id} data-testid={`pack-batch-${batch.batchNumber}`}>
+                    <td>
+                      <span className="ops-serial">{batch.batchNumber}</span>
                       {canEditDate && (
-                        <button
-                          onClick={() => setEditDateBatch(batch)}
-                          className="p-1 rounded-lg text-brown/40 hover:text-orange hover:bg-orange/10 transition-colors"
-                          title={t("editDateBtn")}
-                        >
-                          <CalendarDays size={13} />
+                        <button type="button" className="hr-btn is-ghost is-sm" style={{ height: 24, padding: "0 4px", marginInlineStart: 4 }} onClick={() => setEditDateBatch(batch)} title={t("editDateBtn")} aria-label={t("editDateBtn")}>
+                          <CalendarDays size={13} aria-hidden="true" />
                         </button>
                       )}
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${batch.status === "Partially Packaged" ? "bg-amber-100 text-amber-800" : "bg-info-bg text-slate"}`}>
-                        {batch.status === "Partially Packaged" ? t("statusPartiallyPkg") : t("statusPassed")}
+                    </td>
+                    <td className="m-title">
+                      <span className="strong">{batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}</span>
+                      <span className="ops-line">
+                        {batch.orderItem ? <><span className="hr-id">#{batch.orderItem.order.orderNumber}</span> · {batch.orderItem.order.customer.name}</> : t("stockBatchLabel")}
+                        <span className="hr-mobile-only"> · <span className="ops-serial">{batch.batchNumber}</span> · <bdi dir="ltr"><span className="hr-num">{packed}</span> / <span className="hr-num">{total}</span></bdi> {t("opsKgUnit")}</span>
+                        {" · "}<Kg v={batch.greenBeanQuantity} /> {t("greenLabel")} · {opsDate(batch.date, lang)}
+                        {batch.roastProfile ? <> · {batch.roastProfile}</> : null}
+                        {batch.blendTiming ? <> · {t("blendedLabel")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}</> : null}
                       </span>
-                      {batch.blendTiming && (
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-                          {t("blendedLabel")} {batch.blendTiming}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-brown font-medium">
-                      #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} — {(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))} — {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}
-                    </p>
-                    <p className="text-xs text-brown/50 mt-0.5">
-                      {batch.roastedBeanQuantity}kg {t("roastedLabel")} | {batch.greenBeanQuantity}kg {t("greenLabel")} | {formatDate(batch.date)}
-                      {batch.roastProfile && ` | ${batch.roastProfile}`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {canCancelBatch && (
-                      <button onClick={() => setCancelBatch(batch)}
-                        className="p-2 rounded-xl text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                    {/* ONE packaging action. Not one of two, and not one derived from a
-                        method the operator had to understand: there is a single operation,
-                        named for whether this roast has been touched yet. */}
-                    <button
-                      onClick={() => openPacking(batch)}
-                      className="flex items-center justify-center gap-1.5 w-full xl:w-auto px-4 py-2.5 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
-                    >
-                      <Package size={16} />
-                      {batch.status === "Partially Packaged" ? t("continuePackaging") : t("startPackaging")}
-                    </button>
-                  </div>
-                </div>
-                {/* Progress bar */}
-                <div className="mt-2">
-                  <div className="flex justify-between text-xs font-bold mb-1">
-                    <span className="text-brown">{packed}kg / {total}kg {t("statusPackaged")}</span>
-                    {remaining > 0 && <span className="text-brown/50">{remaining}kg {t("remainingKg")}</span>}
-                  </div>
-                  <div className="w-full bg-muted rounded-full h-2.5">
-                    <div
-                      className={`h-2.5 rounded-full transition-all duration-500 ${pct >= 99.5 ? "bg-green-500" : pct > 0 ? "bg-orange" : "bg-gray-300"}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-                {/* Bags recorded before the unified workflow. Historical, and shown only
-                    where they exist so an old batch's record stays readable. */}
-                {legacyBags > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-border">
-                    {batch.bags3kg > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags3kg}x 3kg</span>}
-                    {batch.bags1kg > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags1kg}x 1kg</span>}
-                    {batch.bags250g > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags250g}x 250g</span>}
-                    {batch.bags150g > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags150g}x 150g</span>}
-                    {batch.samplesGrams > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.samplesGrams}g {t("samplesGramsLabel")}</span>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                      {/* Bags recorded before the unified workflow: historical, shown only where
+                          they exist so an old batch's record stays readable. */}
+                      {bags.length > 0 ? <span className="ops-line">{bags.join(" · ")}</span> : null}
+                    </td>
+                    <td className="num"><span className="hr-num">{total}</span></td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <Bar pct={pct} tone={pct >= 99.5 ? "success" : undefined} label={`${packed} / ${total} ${t("opsKgUnit")}`} />{" "}
+                      <span className="hr-caption"><bdi dir="ltr"><span className="hr-num">{packed}</span> / <span className="hr-num">{total}</span></bdi> {t("opsKgUnit")} {t("statusPackaged")}</span>
+                    </td>
+                    <td className="num">{remaining > 0 ? <Kg v={remaining} /> : <span className="hr-muted">—</span>}</td>
+                    <td><StatusDot map={{ "Partially Packaged": [t("statusPartiallyPkg"), "info"], "Passed": [t("statusPassed"), "success"] }} value={batch.status} /></td>
+                    <td className="m-end">
+                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                        {canCancelBatch && (
+                          <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setCancelBatch(batch)} title={t("cancelBatchTitle")} aria-label={t("cancelBatchTitle")}>
+                            <Trash2 size={15} aria-hidden="true" />
+                          </button>
+                        )}
+                        {/* ONE packaging action, named for whether this roast has been touched yet. */}
+                        <Btn size="sm" variant={batch.status === "Partially Packaged" ? "secondary" : "primary"} onClick={() => openPacking(batch)}>
+                          {batch.status === "Partially Packaged" ? t("continuePackaging") : t("startPackaging")}
+                        </Btn>
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* ── The unified packaging operation ──────────────────────────────── */}
-      {packBatch && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-2xl my-8 shadow-xl" data-testid="packaging-dialog">
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <div>
-                <h2 className="font-extrabold text-charcoal">
-                  {packBatch.status === "Partially Packaged" ? t("continuePackaging") : t("startPackaging")}
-                </h2>
-                <p className="text-xs text-brown/60 font-mono">
-                  {packBatch.batchNumber} — {packBatch.greenBean?.beanType || (packBatch.orderItem?.beanTypeName ?? "")}
-                </p>
-              </div>
-              <button type="button" onClick={closePacking} aria-label="Close" disabled={packing}>
-                <X size={20} className="text-brown/60" />
-              </button>
-            </div>
+      {/* prd-pack «آخر عمليات التعبئة» lists packaging OPERATIONS (output × SKU, loss, who). The
+          operations are not readable by this screen yet (no list endpoint in this phase), so the
+          block shows the approved «not available yet» pattern rather than a list of batches. */}
+      <section className="hr-stack" style={{ gap: 8, marginTop: 8 }} aria-label={t("opsPackHistory")}>
+        <SecHead title={t("opsPackHistory")} />
+        <p className="hr-caption" style={{ margin: 0 }}>{t("opsNotAvailableYet")} · {t("opsPackHistoryLater")}</p>
+      </section>
 
-            <div className="p-4 space-y-3">
+      {/* ── The unified packaging operation ──────────────────────────────── */}
+
+      {/* Cancel Batch Modal */}
+      {cancelBatch && (() => {
+        const hasBean = !!cancelBatch.greenBean;
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !cancelling && setCancelBatch(null)}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={20} className="text-red-600" /></div>
+                <div>
+                  <h2 className="font-extrabold text-charcoal">{t("cancelBatchTitle")}</h2>
+                  <p className="text-sm text-brown font-mono">{cancelBatch.batchNumber}</p>
+                </div>
+              </div>
+              <p className="text-sm text-brown mb-5">{t("cancelBatchMsgPost")}</p>
+              <div className="flex flex-col gap-2">
+                <button onClick={() => handleCancelBatch(false)} disabled={cancelling}
+                  className="w-full py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all">
+                  {cancelling ? "…" : t("cancelMarkWasted")}
+                </button>
+                {hasBean && canOverrideInventory && <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />}
+                {hasBean && (
+                  <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory || !restockReasonOk(restockReason)}
+                    title={!canOverrideInventory ? t("noOverridePermission") : undefined}
+                    className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
+                    {cancelling ? "…" : t("cancelRestock")}
+                  </button>
+                )}
+                <button onClick={() => setCancelBatch(null)} disabled={cancelling}
+                  className="w-full py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
+                  {t("cancel")}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Edit Date Modal */}
+      {editDateBatch && (
+        <EditDateModal
+          batch={editDateBatch}
+          onClose={() => setEditDateBatch(null)}
+          onSuccess={({ newBatchNumber, parentBatchId, newParentBatchNumber }) => {
+            setBatches((prev) =>
+              prev.map((b) => {
+                if (b.id === editDateBatch.id) return { ...b, batchNumber: newBatchNumber };
+                if (parentBatchId && b.id === parentBatchId && newParentBatchNumber)
+                  return { ...b, batchNumber: newParentBatchNumber };
+                return b;
+              })
+            );
+            const msg = newParentBatchNumber
+              ? `${t("dateUpdatedMsg")} ${newBatchNumber}. ${t("blendAlsoUpdated")}`
+              : `${t("dateUpdatedMsg")} ${newBatchNumber}`;
+            setSuccess(msg);
+            setEditDateBatch(null);
+          }}
+        />
+      )}
+    </div>
+    {/* prd-pack 328:2742 / 332:2917 / 348:3593: packaging is a pane beside the list at 1440, a
+        drawer at 1024 and a full-screen view with a sticky action bar on the phone. Same lines,
+        preview, validation and request as the dialog it replaces. */}
+    {packBatch && (
+      <OpsPane
+        testId="packaging-dialog"
+        phone="page"
+        label={packBatch.status === "Partially Packaged" ? t("continuePackaging") : t("startPackaging")}
+        title={<><span>{packBatch.status === "Partially Packaged" ? t("continuePackaging") : t("startPackaging")}</span> <span className="ops-serial">{packBatch.batchNumber}</span></>}
+        sub={packBatch.greenBean?.beanType || (packBatch.orderItem?.beanTypeName ?? "")}
+        busy={packing}
+        onClose={closePacking}
+        footer={
+          <>
+            <Btn variant="primary" onClick={submitPackaging} disabled={blocked}>{packing ? "…" : t("pkgConfirmBtn")}</Btn>
+            <Btn onClick={closePacking} disabled={packing}>{t("cancel")}</Btn>
+          </>
+        }
+      >
+        <div className="space-y-3 ops-pack-body">
               {/* What this roast still holds, before anything is entered. */}
               <div className="rounded-xl bg-cream px-3 py-2 text-sm space-y-0.5">
                 {packBatch.roastedBeanQuantity - packBatch.roastedAvailableKg > 0.001 && (
                   <p>
                     <span className="text-brown">{t("pkgAlreadyPackedLabel")}: </span>
-                    <b className="text-charcoal">{+(packBatch.roastedBeanQuantity - packBatch.roastedAvailableKg).toFixed(3)} kg</b>
+                    <b className="text-charcoal"><Kg v={(+(packBatch.roastedBeanQuantity - packBatch.roastedAvailableKg)).toFixed(3)} /></b>
                   </p>
                 )}
                 <p>
                   <span className="text-brown">{t("pkgReconAvailable")}: </span>
                   <b className="text-charcoal tabular-nums">
-                    {packState ? `${packState.availableGrams} g` : `${packBatch.roastedAvailableKg} kg`}
+                    {packState ? <Grams v={packState.availableGrams} /> : <Kg v={packBatch.roastedAvailableKg} />}
                   </b>
                 </p>
               </div>
@@ -668,7 +725,7 @@ export default function PackagingPage() {
                               <div className="flex flex-col justify-end pb-2">
                                 {sku && (
                                   <span className="text-[11px] text-brown/60">
-                                    {t("pkgNominalWeight")}: <b className="tabular-nums">{Math.round(sku.weightGrams)} g</b>
+                                    {t("pkgNominalWeight")}: <Grams strong v={Math.round(sku.weightGrams)} />
                                   </span>
                                 )}
                               </div>
@@ -699,7 +756,7 @@ export default function PackagingPage() {
                                     <option value="">—</option>
                                     {(packState?.openPartials ?? []).map((p) => (
                                       <option key={p.lotId} value={p.lotId}>
-                                        {p.skuCode} · {p.actualGrams}/{p.nominalGrams} g · {t("pkgFromBatch")} {p.fromThisBatch ? t("pkgThisBatch") : p.batchNumber}
+                                        {p.skuCode} · {p.actualGrams}/{p.nominalGrams} {gUnit(lang)} · {t("pkgFromBatch")} {p.fromThisBatch ? t("pkgThisBatch") : p.batchNumber}
                                       </option>
                                     ))}
                                   </select>
@@ -714,8 +771,8 @@ export default function PackagingPage() {
                                 </label>
                                 {partial && (
                                   <p className="sm:col-span-3 text-[11px] text-brown/60">
-                                    {t("pkgActualWeight")}: <b className="tabular-nums">{partial.actualGrams} g</b> ·{" "}
-                                    {t("pkgNominalWeight")}: <b className="tabular-nums">{partial.nominalGrams} g</b>
+                                    {t("pkgActualWeight")}: <Grams strong v={partial.actualGrams} /> ·{" "}
+                                    {t("pkgNominalWeight")}: <Grams strong v={partial.nominalGrams} />
                                   </p>
                                 )}
                               </div>
@@ -760,9 +817,9 @@ export default function PackagingPage() {
                                 <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800">{t("pkgReconLoss")}</span>
                               )}
                               <span className="text-brown/60 tabular-nums">
-                                {outcome.gramsConsumed} g
+                                <Grams v={outcome.gramsConsumed} />
                                 {outcome.kind !== "loss" && outcome.nominalGrams > 0 && (
-                                  <> · {t("pkgActualWeight")} {outcome.actualGramsEach} / {outcome.nominalGrams} g</>
+                                  <> · {t("pkgActualWeight")} <bdi dir="ltr"><span className="hr-num">{outcome.actualGramsEach} / {outcome.nominalGrams}</span></bdi> {gUnit(lang)}</>
                                 )}
                               </span>
                             </div>
@@ -791,7 +848,7 @@ export default function PackagingPage() {
                       <>
                         <span className="text-[11px] text-brown/70">{label}</span>
                         <span className={`text-xs font-bold tabular-nums text-end ${tone}`}>
-                          {grams} g{extra ? ` · ${extra}` : ""}
+                          <Grams v={grams} />{extra ? ` · ${extra}` : ""}
                         </span>
                       </>
                     );
@@ -803,7 +860,7 @@ export default function PackagingPage() {
                           {row(t("pkgReconStandard"), p.standardGrams, `${p.standardUnits} ${t("pkgSellableUnits")}`, "text-green-800")}
                           {row(t("pkgReconPartial"), p.partialGrams, `${p.partialPackages} ${t("pkgPackagesWord")}`, "text-amber-800")}
                           {row(t("pkgReconLoss"), p.lossGrams, undefined, p.lossGrams > 0 ? "text-red-700" : "text-charcoal")}
-                          {row(t("pkgReconRemaining"), p.remainingGrams, `${gToKg(p.remainingGrams)} kg`)}
+                          {row(t("pkgReconRemaining"), p.remainingGrams, `${gToKg(p.remainingGrams)} ${t("opsKgUnit")}`)}
                         </div>
                         <p className={`mt-2 text-[11px] font-bold ${balanced ? "text-green-700" : "text-red-700"}`}>
                           {balanced ? t("pkgReconBalanced") : t("pkgReconUnbalanced")}
@@ -889,84 +946,10 @@ export default function PackagingPage() {
                   )}
                 </>
               )}
-            </div>
-
-            <div className="flex gap-3 p-4 border-t border-border">
-              <button
-                type="button"
-                onClick={submitPackaging}
-                disabled={blocked}
-                className="flex-1 py-2.5 rounded-xl bg-orange text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {packing ? "…" : t("pkgConfirmBtn")}
-              </button>
-              <button type="button" onClick={closePacking} disabled={packing}
-                className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-sm text-brown hover:bg-cream transition-colors">
-                {t("cancel")}
-              </button>
-            </div>
-          </div>
         </div>
-      )}
-
-      {/* Cancel Batch Modal */}
-      {cancelBatch && (() => {
-        const hasBean = !!cancelBatch.greenBean;
-        return (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !cancelling && setCancelBatch(null)}>
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={20} className="text-red-600" /></div>
-                <div>
-                  <h2 className="font-extrabold text-charcoal">{t("cancelBatchTitle")}</h2>
-                  <p className="text-sm text-brown font-mono">{cancelBatch.batchNumber}</p>
-                </div>
-              </div>
-              <p className="text-sm text-brown mb-5">{t("cancelBatchMsgPost")}</p>
-              <div className="flex flex-col gap-2">
-                <button onClick={() => handleCancelBatch(false)} disabled={cancelling}
-                  className="w-full py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all">
-                  {cancelling ? "…" : t("cancelMarkWasted")}
-                </button>
-                {hasBean && (
-                  <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory}
-                    title={!canOverrideInventory ? t("noOverridePermission") : undefined}
-                    className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
-                    {cancelling ? "…" : t("cancelRestock")}
-                  </button>
-                )}
-                <button onClick={() => setCancelBatch(null)} disabled={cancelling}
-                  className="w-full py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Edit Date Modal */}
-      {editDateBatch && (
-        <EditDateModal
-          batch={editDateBatch}
-          onClose={() => setEditDateBatch(null)}
-          onSuccess={({ newBatchNumber, parentBatchId, newParentBatchNumber }) => {
-            setBatches((prev) =>
-              prev.map((b) => {
-                if (b.id === editDateBatch.id) return { ...b, batchNumber: newBatchNumber };
-                if (parentBatchId && b.id === parentBatchId && newParentBatchNumber)
-                  return { ...b, batchNumber: newParentBatchNumber };
-                return b;
-              })
-            );
-            const msg = newParentBatchNumber
-              ? `${t("dateUpdatedMsg")} ${newBatchNumber}. ${t("blendAlsoUpdated")}`
-              : `${t("dateUpdatedMsg")} ${newBatchNumber}`;
-            setSuccess(msg);
-            setEditDateBatch(null);
-          }}
-        />
-      )}
+      </OpsPane>
+    )}
     </div>
+    </OpsRoot>
   );
 }

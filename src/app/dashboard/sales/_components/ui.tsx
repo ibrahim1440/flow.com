@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, FlaskConical, Ban, Check, ChevronDown, Circle, CircleDashed, Clock, FileText,
   MessageSquare, PackageCheck, RotateCcw, Save, Search, XCircle, type LucideIcon,
@@ -159,7 +159,7 @@ export function pick(
 export function ProvisionalBanner() {
   const { t } = useI18n();
   return (
-    <div className="flex items-center gap-2.5 rounded-[10px] border border-oo-status-waiting bg-oo-status-waiting-bg px-4 py-[9px]">
+    <div data-ui="provisional" className="flex items-center gap-2.5 rounded-[10px] border border-oo-status-waiting bg-oo-status-waiting-bg px-4 py-[9px]">
       <p className="flex-1 text-[12px] font-medium leading-[18px] text-oo-status-hold">{t("provisionalUiBanner")}</p>
       <AlertTriangle size={16} className="shrink-0 text-oo-status-hold" aria-hidden />
     </div>
@@ -200,11 +200,11 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 flex-wrap">
+    <div data-ui="page-header" className="flex items-start justify-between gap-3 flex-wrap">
       <div className="min-w-0">
         <h1 className="text-[24px] font-bold leading-[34px] text-oo-text-primary">{title}</h1>
         {subtitle && (
-          <div className="mt-[3px] text-[12px] leading-[18px] text-oo-text-secondary">{subtitle}</div>
+          <div data-ui="page-header-sub" className="mt-[3px] text-[12px] leading-[18px] text-oo-text-secondary">{subtitle}</div>
         )}
       </div>
       {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
@@ -235,6 +235,7 @@ export function Alert({
       // that waits to be read.
       role={kind === "error" ? "alert" : "status"}
       data-testid={`alert-${kind}`}
+      data-ui="alert"
     >
       <span className="flex-1">{children}</span>
       {onDismiss && (
@@ -248,13 +249,13 @@ export function Alert({
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl border border-oo-border-default bg-oo-bg-default p-5 ${className}`}>{children}</div>
+    <div data-ui="card" className={`rounded-2xl border border-oo-border-default bg-oo-bg-default p-5 ${className}`}>{children}</div>
   );
 }
 
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-2 mb-3">
+    <div data-ui="section-title" className="flex items-center justify-between gap-2 mb-3">
       <h2 className="text-[18px] font-semibold leading-[28px] text-oo-text-primary">{children}</h2>
       {right}
     </div>
@@ -263,13 +264,13 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="py-10 text-center text-[14px] leading-[22px] text-oo-text-muted">{children}</div>
+    <div data-ui="empty" className="py-10 text-center text-[14px] leading-[22px] text-oo-text-muted">{children}</div>
   );
 }
 
 export function Spinner() {
   return (
-    <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
+    <div data-ui="spinner" className="flex items-center justify-center h-64" role="status" aria-live="polite">
       <div className="h-10 w-10 animate-spin rounded-full border-4 border-oo-action-primary border-t-transparent" />
       <span className="sr-only">Loading</span>
     </div>
@@ -313,6 +314,8 @@ export function Button({
       disabled={disabled}
       title={title}
       data-testid={testId}
+      data-ui="btn"
+      data-variant={variant}
       className={`${BTN_BASE} ${tone}`}
     >
       {children}
@@ -350,15 +353,15 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-1">
+    <div data-ui="field" className="space-y-1">
       <label htmlFor={id} className="block text-xs font-bold text-oo-text-secondary">
         {label}
         {required && <span className="text-oo-status-rejected ps-0.5" aria-hidden>*</span>}
       </label>
       {children}
-      {hint && !error && <p className="text-[11px] text-oo-text-muted font-medium">{hint}</p>}
+      {hint && !error && <p data-ui="field-hint" className="text-[11px] text-oo-text-muted font-medium">{hint}</p>}
       {error && (
-        <p id={`${id}-error`} className="text-[11px] text-oo-status-rejected font-bold" role="alert">
+        <p id={`${id}-error`} data-ui="field-error" className="text-[11px] text-oo-status-rejected font-bold" role="alert">
           {error}
         </p>
       )}
@@ -396,6 +399,7 @@ export function TextInput({
       aria-invalid={invalid || undefined}
       aria-describedby={invalid ? `${id}-error` : undefined}
       onChange={(e) => onChange(e.target.value)}
+      data-ui="input"
       className={`${FIELD_BASE} ${invalid ? "border-red-400" : ""}`}
     />
   );
@@ -420,6 +424,7 @@ export function Select({
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
+      data-ui="input"
       className={FIELD_BASE}
     >
       {children}
@@ -450,6 +455,7 @@ export function TextArea({
       disabled={disabled}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
+      data-ui="input"
       className={FIELD_BASE}
     />
   );
@@ -573,6 +579,8 @@ export function Pill({
   return (
     <span
       data-testid={testId}
+      data-ui="pill"
+      data-tone={tone}
       className={`inline-block whitespace-nowrap rounded-lg px-2 py-[3px] text-[12px] font-medium leading-[18px] ${tones[tone]}`}
     >
       {children}
@@ -633,6 +641,8 @@ function StatusBadge({ spec, testId }: { spec: Spec | undefined; fallback?: stri
   return (
     <span
       data-testid={testId}
+      data-ui="status"
+      data-tone={spec.tone}
       className={`inline-flex h-7 items-center gap-2 rounded-md border px-2.5 py-1 text-[12px] font-medium leading-[18px] whitespace-nowrap ${PILL_TONES[spec.tone]}`}
     >
       <Icon size={16} aria-hidden className="flex-shrink-0" />
@@ -724,6 +734,79 @@ export function DealOutcomeBadge({ outcome, testId }: { outcome: string; testId?
  * ×. `aria-modal` and a labelled heading are what make it a dialog to a screen reader
  * rather than a div that happens to be on top.
  */
+/**
+ * Focus, the way a modal dialog is expected to behave (IMD-13).
+ *
+ * Opening used to leave focus on the button behind the scrim, so an Escape handled on the
+ * scrim never reached the dialog unless the user had first clicked into a field, Tab walked
+ * through the page underneath, and closing dropped focus at the top of the document. With
+ * this hook: focus moves in on open (to an autofocused control, else the first field, else
+ * the dialog itself), Escape closes from anywhere, Tab stays inside, and focus returns to the
+ * control that opened it. Hang the returned ref on the element with role="dialog" and give
+ * it tabIndex={-1}.
+ */
+export function useModalFocus(onClose: () => void) {
+  const box = useRef<HTMLDivElement | null>(null);
+  // Read during the first render, before any autoFocus inside the dialog has moved focus.
+  const [opener] = useState<HTMLElement | null>(() =>
+    typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null));
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const el = box.current;
+    const focusables = () =>
+      Array.from(el?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? []).filter((n) => n.offsetParent !== null || n === document.activeElement);
+    if (el && !el.contains(document.activeElement)) {
+      const field = el.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled])");
+      (field ?? el).focus();
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); close.current(); return; }
+      if (e.key !== "Tab" || !el) return;
+      const list = focusables();
+      if (list.length === 0) { e.preventDefault(); el.focus(); return; }
+      const first = list[0], last = list[list.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === el)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (opener && document.contains(opener)) opener.focus();
+    };
+  }, [opener]);
+  return box;
+}
+
+/** The dialog box itself, for screens that draw their own scrim and layout but need the same
+    focus behaviour as `Modal` (see `useModalFocus`). */
+export function FocusDialog({
+  onClose, children, className = "", testId, labelledBy, label,
+}: {
+  onClose: () => void; children: ReactNode; className?: string; testId?: string;
+  labelledBy?: string; label?: string;
+}) {
+  const box = useModalFocus(onClose);
+  return (
+    <div
+      ref={box}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={labelledBy}
+      aria-label={labelledBy ? undefined : label}
+      data-testid={testId}
+      data-ui="dialog"
+      onClick={(e) => e.stopPropagation()}
+      className={`outline-none ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function Modal({
   title,
   onClose,
@@ -739,22 +822,25 @@ export function Modal({
   testId?: string;
   wide?: boolean;
 }) {
+  const box = useModalFocus(onClose);
+
   return (
     <div
+      data-ui="dialog-scrim"
       className="fixed inset-0 bg-black/40 z-[60] flex items-start sm:items-center justify-center p-3 overflow-y-auto"
       onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
       role="presentation"
     >
       <div
+        ref={box}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         data-testid={testId}
+        data-ui="dialog"
         onClick={(e) => e.stopPropagation()}
-        className={`bg-oo-bg-default rounded-2xl shadow-2xl w-full ${wide ? "max-w-3xl" : "max-w-lg"} my-4`}
+        className={`bg-oo-bg-default rounded-2xl shadow-2xl w-full outline-none ${wide ? "max-w-3xl" : "max-w-lg"} my-4`}
       >
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-oo-border-default">
           <h2 className="text-lg font-extrabold text-oo-text-primary">{title}</h2>
@@ -818,7 +904,7 @@ export function SearchField({
   testId?: string;
 }) {
   return (
-    <div className="relative min-w-[200px] flex-1">
+    <div data-ui="search" className="relative min-w-[200px] flex-1">
       <Search
         size={15}
         aria-hidden
@@ -852,7 +938,7 @@ export function FilterSelect({
   children: ReactNode;
 }) {
   return (
-    <div className={`relative ${width} shrink-0`}>
+    <div data-ui="filter" className={`relative ${width} shrink-0`}>
       <ChevronDown
         size={14}
         aria-hidden
@@ -899,7 +985,7 @@ export function DataTable({
   children: ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-bg-default">
+    <div data-ui="table" className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-bg-default">
       {/* The page body must never scroll sideways; the overflow lives on the one element
           that is genuinely too wide. */}
       <div className="overflow-x-auto">
@@ -970,7 +1056,7 @@ export function Td({
  */
 export function StatStrip({ children, cols = 4 }: { children: ReactNode; cols?: 3 | 4 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-border-default">
+    <div data-ui="stats" className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-border-default">
       <div className={`grid gap-px sm:grid-cols-2 ${cols === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
         {children}
       </div>
@@ -995,7 +1081,7 @@ export function Stat({
   testId?: string;
 }) {
   return (
-    <div className="bg-oo-bg-default px-5 py-4" data-testid={testId}>
+    <div data-ui="stat" className="bg-oo-bg-default px-5 py-4" data-testid={testId}>
       <p
         className={`text-[24px] font-bold leading-[34px] tabular-nums ${
           tone === "action" ? "text-oo-action-primary" : "text-oo-text-primary"
@@ -1051,7 +1137,7 @@ export function ProgressBar({
 /** The outlined control that sits in a table's action column. Smaller than `Button`, which
  *  is sized for page-level actions and would set the row height on its own. */
 export const ROW_ACTION =
-  "inline-flex items-center whitespace-nowrap rounded-[10px] border border-oo-border-strong " +
+  "ui-row-action inline-flex items-center whitespace-nowrap rounded-[10px] border border-oo-border-strong " +
   "bg-oo-bg-default px-3 py-[7px] text-[12px] leading-[18px] transition-colors";
 
 /** Fetch JSON and surface the server's own message, never a generic one. */

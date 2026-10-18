@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Settings, Trash2, AlertTriangle, CheckCircle, AlertCircle, X, ShieldOff, ImagePlus, Loader2 } from "lucide-react";
+import { Settings, Trash2, AlertTriangle, CheckCircle, AlertCircle, X, ShieldOff, ImagePlus, Loader2, Users } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/app/dashboard/user-context";
@@ -25,6 +25,47 @@ export default function SettingsPage() {
       .then((d) => setLogoBase64(d.logoBase64 ?? null))
       .catch(() => {});
   }, []);
+
+  // ── Cupping close policy (E6, admin only; the API enforces role and range) ──
+  const [minScorers, setMinScorers] = useState("");
+  const [cupSaving, setCupSaving] = useState(false);
+  const [cupMsg, setCupMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/settings/cupping")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && typeof d.minScorers === "number") setMinScorers(String(d.minScorers)); })
+      .catch(() => {});
+  }, []);
+
+  async function saveMinScorers(e: React.FormEvent) {
+    e.preventDefault();
+    const v = Number(minScorers);
+    if (!/^\d+$/.test(minScorers.trim()) || v < 2 || v > 20) {
+      setCupMsg({ ok: false, text: t("cuppingPolicyRange") });
+      return;
+    }
+    setCupSaving(true);
+    setCupMsg(null);
+    try {
+      const res = await fetch("/api/settings/cupping", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minScorers: v }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCupMsg({ ok: false, text: j.code === "CUPPING_MIN_SCORERS_OUT_OF_RANGE" ? t("cuppingPolicyRange") : t("cuppingPolicyError") });
+        return;
+      }
+      setMinScorers(String(j.minScorers));
+      setCupMsg({ ok: true, text: t("cuppingPolicySaved") });
+    } catch {
+      setCupMsg({ ok: false, text: t("cuppingPolicyError") });
+    } finally {
+      setCupSaving(false);
+    }
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -263,6 +304,47 @@ export default function SettingsPage() {
           }`}>
             {logoMsg.ok ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
             {logoMsg.text}
+          </div>
+        )}
+      </section>
+
+      {/* Cupping close policy (E6) */}
+      <section className="bg-white rounded-2xl shadow-sm border border-border p-6" data-testid="cupping-policy">
+        <h2 className="text-base font-bold text-charcoal mb-1 flex items-center gap-2">
+          <Users size={18} className="text-orange" aria-hidden="true" />
+          {t("cuppingPolicyTitle")}
+        </h2>
+        <p className="text-sm text-brown/60 mb-5">{t("cuppingPolicyDesc")}</p>
+        <form onSubmit={saveMinScorers} noValidate className="flex items-end gap-3 flex-wrap">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-bold text-charcoal">{t("cuppingPolicyLabel")}</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={2}
+              max={20}
+              step={1}
+              value={minScorers}
+              onChange={(e) => setMinScorers(e.target.value)}
+              className="w-28 px-3 py-2 rounded-xl border border-border text-sm text-charcoal"
+              data-testid="cupping-min-scorers"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={cupSaving || minScorers === ""}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50"
+          >
+            {cupSaving ? <Loader2 size={15} className="animate-spin" /> : null}
+            {t("cuppingPolicySave")}
+          </button>
+        </form>
+        {cupMsg && (
+          <div role={cupMsg.ok ? "status" : "alert"} className={`mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
+            cupMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
+          }`}>
+            {cupMsg.ok ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
+            {cupMsg.text}
           </div>
         )}
       </section>

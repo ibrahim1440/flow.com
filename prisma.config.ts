@@ -19,8 +19,10 @@ export default defineConfig({
   },
   datasource: {
     url: requireDatabaseUrl(process.env),
-    // DIRECT_URL: non-pooler Neon connection used by Prisma CLI for migrations.
-    // DATABASE_URL must remain the pooler URL for runtime (pg.Pool in db.ts).
+    // NOTE (P-4 retest P1-1): Prisma 7.8 ignores directUrl — the CLI uses `url` (DATABASE_URL).
+    // Migrations therefore run through scripts/migrate-deploy.mjs, which passes DIRECT_URL as the
+    // CLI's DATABASE_URL, and every other CLI command is run as DATABASE_URL="$DIRECT_URL" npx prisma …
+    // (RUNBOOK §6 / §10). DATABASE_URL stays the pooler URL for the runtime (pg.Pool in db.ts).
     ...(process.env.DIRECT_URL ? { directUrl: process.env.DIRECT_URL } : {}),
   },
 });

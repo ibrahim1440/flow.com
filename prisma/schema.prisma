@@ -36,18 +36,77 @@ model Employee {
 
   // Sales CRM & commissions (additive). Relation fields only — no columns are added to
   // this table, so the deployed build reads it unchanged.
-  leadsOwned           Lead[]                  @relation("LeadOwner")
-  opportunitiesOwned   Opportunity[]           @relation("OpportunityOwner")
-  opportunitySplits    OpportunityOwner[]      @relation("OpportunitySplitOwner")
-  activitiesOwned      Activity[]              @relation("ActivityOwner")
-  commissionAssignments CommissionAssignment[] @relation("CommissionAssignee")
-  commissionAccruals   CommissionAccrual[]     @relation("CommissionEarner")
-  commissionLedger     CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
-  salesTargets         SalesTarget[]           @relation("SalesTargetOwner")
-  collectionsSubmitted SalesCollection[]       @relation("CollectionSubmitter")
-  collectionsDecided   SalesCollection[]       @relation("CollectionDecider")
-  collectionsReversed  SalesCollection[]       @relation("CollectionReverser")
-  evidenceUploaded     CollectionEvidence[]    @relation("EvidenceUploader")
+  leadsOwned            Lead[]                  @relation("LeadOwner")
+  opportunitiesOwned    Opportunity[]           @relation("OpportunityOwner")
+  opportunitySplits     OpportunityOwner[]      @relation("OpportunitySplitOwner")
+  activitiesOwned       Activity[]              @relation("ActivityOwner")
+  commissionAssignments CommissionAssignment[]  @relation("CommissionAssignee")
+  commissionAccruals    CommissionAccrual[]     @relation("CommissionEarner")
+  commissionLedger      CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
+  salesTargets          SalesTarget[]           @relation("SalesTargetOwner")
+  collectionsSubmitted  SalesCollection[]       @relation("CollectionSubmitter")
+  collectionsDecided    SalesCollection[]       @relation("CollectionDecider")
+  collectionsReversed   SalesCollection[]       @relation("CollectionReverser")
+  evidenceUploaded      CollectionEvidence[]    @relation("EvidenceUploader")
+
+  // Native HR (additive). The HR person this login belongs to, if any. A login account is
+  // never required to be an HR person and an HR person never requires a login.
+  hrPerson       HrEmployee?       @relation("HrPersonAccount")
+  /// Owner decision 1 (Option A): or the verified external person (e.g. an outside accountant)
+  /// this login belongs to. Never both (DB trigger).
+  externalPerson HrExternalPerson? @relation("HrExternalPersonAccount")
+
+  // Owner security decision (username + PIN): server-side sessions and MFA (additive).
+  authSessions      AuthSession[]
+  authMfa           AuthMfa?
+  authRecoveryCodes AuthRecoveryCode[]
+}
+
+/// One signed-in session; the token names it (jti). Valid only while not revoked and within
+/// the idle and absolute deadlines. authTime is the last strong authentication (step-up).
+model AuthSession {
+  id            String    @id
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /// PIN | USERNAME_PIN | PASSWORD
+  method        String
+  mfa           Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  authTime      DateTime  @default(now())
+  /// PIN | PASSWORD — the secret of the last strong authentication (sign-in or step-up); null = not
+  /// recorded (before 20261017230000). A privileged stock change needs PIN (owner decision 4).
+  authFactor    String?
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  ipHash        String?
+  userAgent     String?
+
+  @@index([employeeId])
+  @@index([expiresAt])
+}
+
+/// TOTP (RFC 6238); the secret is AES-256-GCM encrypted with a key from the environment.
+model AuthMfa {
+  employeeId String    @id
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  secretEnc  String
+  enrolledAt DateTime?
+  lastStep   BigInt?
+  createdAt  DateTime  @default(now())
+}
+
+/// One-time recovery codes (keyed hashes only).
+model AuthRecoveryCode {
+  id         String    @id @default(cuid())
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  codeHash   String    @unique
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([employeeId])
 }
 
 model Customer {
@@ -72,7 +131,7 @@ model Customer {
 
   /// WhatsApp automation (additive, defaulted): the customer asked not to receive WhatsApp
   /// messages. Every automated message to this customer is recorded as SKIPPED instead.
-  whatsappOptOut   Boolean                   @default(false)
+  whatsappOptOut Boolean @default(false)
 }
 
 model GreenBean {
@@ -137,12 +196,12 @@ model Order {
   // Sales CRM (additive, relation fields only).
   opportunityLinks OpportunityOrder[]
   collectionEvents CollectionEvent[]
+  salesCollections SalesCollection[]
 
   @@index([createdAt])
   @@index([customerId, createdAt])
   @@index([status])
   @@index([ownerId])
-  salesCollections SalesCollection[]
 }
 
 model OrderItem {
@@ -333,10 +392,10 @@ model Delivery {
   /// previous application version, which sends none, keeps inserting deliveries while this
   /// column already exists; unique so two concurrent retries of one dispatch collapse to a
   /// single shipment.
-  requestKey    String? @unique
+  requestKey String? @unique
   /// SHA-256 over a fixed-position array of the normalized dispatch intent. The same key
   /// carrying a different intent is a client error, not a second shipment.
-  intentHash    String?
+  intentHash String?
 
   @@index([date])
 }
@@ -356,7 +415,53 @@ model CuppingSession {
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
 
+  // Closure record (E6 / C-1…C-5). All null on a session that is still open, and on every
+  // session closed before the close policy existed: those are not reclassified
+  // retroactively (C-4) and display as plain «مغلقة».
+  /// COMPLETE: closed with at least the minimum of distinct staff scorers.
+  /// INCOMPLETE: closed by an administrator below the minimum, with a mandatory reason.
+  closeKind         String?
+  closedAt          DateTime?
+  /// Employee.id, denormalized — no FK relation (the QcCorrectionHistory convention), so the
+  /// record survives the employee row.
+  closedById        String?
+  closedByName      String?
+  closeReason       String?   @db.Text
+  /// The minimum that applied to this session when it was closed (snapshot of CuppingSettings).
+  minScorersAtClose Int?
+  /// Distinct authenticated staff scorers when it was closed (guests never count, C-3).
+  scorersAtClose    Int?
+
   @@index([status])
+}
+
+/// Singleton. The administrator-configurable cupping close policy (E6, C-5): range 2–20,
+/// enforced by the API and by a CHECK constraint.
+model CuppingSettings {
+  id          String   @id @default("singleton")
+  minScorers  Int      @default(2)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Append-only (DB trigger): every cupping session closure and every change of the cupping
+/// settings. No FK to the session, so the history outlives a deleted session.
+model CuppingAuditLog {
+  id         String   @id @default(cuid())
+  /// SESSION_CLOSED | SETTINGS_UPDATED
+  action     String
+  /// CuppingSession | CuppingSettings
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  reason     String?  @db.Text
+  actorId    String?
+  actorName  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 model CuppingSessionBatch {
@@ -525,6 +630,8 @@ enum SourceDocType {
   PACKING
   BOM_CONSUMPTION // packaging drawing roasted coffee + materials per a SKU's BOM
   PRODUCTION_ORDER
+  OPENING_BALANCE // the stock a new green bean / packaging material is created with (IN)
+  RECEIVING // a packaging-material delivery received under inventory › receive (IN, audited)
 }
 
 model InventoryMovement {
@@ -733,19 +840,16 @@ enum PackagingMethod {
 
 /**
  * One packaging SUBMIT, recorded so that a retry can be recognised instead of re-executed.
- *
  * Packaging is not naturally idempotent and never can be. Packing a roast in several goes
  * is ordinary operational reality, so "the same request twice" and "two genuine partial
  * packs" are indistinguishable from the payload alone — the two are separated only by the
  * key the client chose. That is why identity lives here, on the operation, and not as a
  * single request key on RoastingBatch: one key per batch would make the second partial pack
  * look like a replay of the first.
- *
  * Scoped to (batchId, requestKey) rather than requestKey alone. A key is meaningful only
  * against the batch it was submitted for; a global unique would make two unrelated roasts
  * collide if a client ever reused a key, and would turn a local mistake into a cross-batch
  * failure.
- *
  * The row is written in the SAME transaction as the stock it describes, so a failed
  * packaging leaves no operation behind and the same key may legitimately be retried.
  */
@@ -893,18 +997,18 @@ model BomComponent {
 // it is made from is `product` (CoffeeProduct); the pack size is `weightGrams`.
 // Sales orders reference ONLY this model — never a green bean, never a CoffeeProduct.
 model ProductSKU {
-  id                String             @id @default(cuid())
-  productId         String
-  product           CoffeeProduct      @relation(fields: [productId], references: [id])
-  skuCode           String             @unique
-  weightGrams       Float // net weight of one sellable unit; master data for BOM/production maths
-  isBulk            Boolean            @default(false)
-  price             Float              @default(0)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  orderItems        OrderItem[]
-  finishedGoodsLots FinishedGoodsLot[]
-  productionOrders  ProductionOrder[]
+  id                  String               @id @default(cuid())
+  productId           String
+  product             CoffeeProduct        @relation(fields: [productId], references: [id])
+  skuCode             String               @unique
+  weightGrams         Float // net weight of one sellable unit; master data for BOM/production maths
+  isBulk              Boolean              @default(false)
+  price               Float                @default(0)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  orderItems          OrderItem[]
+  finishedGoodsLots   FinishedGoodsLot[]
+  productionOrders    ProductionOrder[]
   packagingOperations PackagingOperation[]
 
   // ─── Finished Products catalog (additive) ────────────────────────────────
@@ -1220,6 +1324,7 @@ model Account {
   updatedBy      String?
 
   journalEntryLines JournalEntryLine[]
+  hrAccountMaps     HrAccountMap[]
 
   @@index([type])
   @@index([parentId])
@@ -1308,6 +1413,7 @@ model JournalEntry {
   lines              JournalEntryLine[]
   accountingEvents   AccountingEvent[]
   qoyodExportRecords QoyodExportRecord[]
+  hrLinks            HrJournalLink[]
 
   @@index([status])
   @@index([fiscalPeriodId])
@@ -1421,29 +1527,29 @@ enum LeadSource {
 }
 
 model Lead {
-  id           String     @id @default(cuid())
+  id            String     @id @default(cuid())
   /// Business name. The person is a contact ON this lead, because a café has many
   /// people and none of them is the customer.
-  companyName  String
+  companyName   String
   companyNameAr String?
-  contactName  String
-  phone        String?
-  email        String?
-  city         String?
-  address      String?
-  source       LeadSource @default(OTHER)
-  sourceNote   String?
-  status       LeadStatus @default(NEW)
+  contactName   String
+  phone         String?
+  email         String?
+  city          String?
+  address       String?
+  source        LeadSource @default(OTHER)
+  sourceNote    String?
+  status        LeadStatus @default(NEW)
 
   /// Who is responsible. Ownership is the scoping key for every read and write.
-  ownerId      String
-  owner        Employee   @relation("LeadOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("LeadOwner", fields: [ownerId], references: [id])
 
   /// The next commitment. A lead with no next step is the thing this screen exists
   /// to make visible, so it is a first-class column rather than a derived guess.
   nextFollowUpAt DateTime?
 
-  notes        String?
+  notes String?
 
   /// Normalised duplicate-detection keys. Written by the service, never by a client.
   /// Deliberately NOT unique: two genuine contacts can share a company, and merging
@@ -1451,12 +1557,12 @@ model Lead {
   normalizedCompany String?
   normalizedPhone   String?
 
-  conversion   LeadConversion?
-  activities   Activity[]
+  conversion LeadConversion?
+  activities Activity[]
 
-  createdById  String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([ownerId, status])
   @@index([status, nextFollowUpAt])
@@ -1471,21 +1577,21 @@ model Lead {
 /// rows — never from counting leads and opportunities in a period and dividing,
 /// which measures nothing when the two sets are unrelated.
 model LeadConversion {
-  id            String      @id @default(cuid())
-  leadId        String      @unique
-  lead          Lead        @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  id     String @id @default(cuid())
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Restrict)
 
-  customerId    String
-  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   opportunityId String      @unique
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
 
   /// True when this conversion created the customer rather than linking an existing one.
-  customerCreated Boolean   @default(false)
+  customerCreated Boolean @default(false)
 
   convertedById String?
-  convertedAt   DateTime    @default(now())
+  convertedAt   DateTime @default(now())
 
   @@index([customerId])
   @@index([convertedAt])
@@ -1509,24 +1615,24 @@ enum PipelineStagePurpose {
 }
 
 model PipelineStage {
-  id          String        @id @default(cuid())
+  id          String                @id @default(cuid())
   /// Stable identity. The label may be translated; this may not change.
-  code        String        @unique
+  code        String                @unique
   nameEn      String
   nameAr      String
   position    Int
   /// Default probability offered when a deal enters this stage. Advisory only.
-  probability Int           @default(0)
+  probability Int                   @default(0)
   /// At most one stage may hold each purpose — the unique index is what stops two columns
   /// both claiming to be where quotations land.
   purpose     PipelineStagePurpose? @unique
-  isActive    Boolean       @default(true)
+  isActive    Boolean               @default(true)
 
   opportunities Opportunity[]
   stageEvents   OpportunityStageEvent[]
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([position])
 }
@@ -1541,46 +1647,46 @@ enum OpportunityOutcome {
 }
 
 model Opportunity {
-  id             String             @id @default(cuid())
-  title          String
-  customerId     String?
-  customer       Customer?          @relation(fields: [customerId], references: [id])
+  id         String    @id @default(cuid())
+  title      String
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  stageId        String
-  stage          PipelineStage      @relation(fields: [stageId], references: [id])
+  stageId String
+  stage   PipelineStage @relation(fields: [stageId], references: [id])
 
-  outcome        OpportunityOutcome @default(OPEN)
+  outcome    OpportunityOutcome @default(OPEN)
   /// Required by the service whenever outcome becomes LOST.
-  lostReason     String?
-  closedAt       DateTime?
+  lostReason String?
+  closedAt   DateTime?
 
   /// Expected value. Currency is explicit so a future multi-currency policy has
   /// somewhere to land; the commission engine refuses anything but SAR today.
-  amount         Decimal            @default(0) @db.Decimal(18, 2)
-  currency       String             @default("SAR")
-  probability    Int                @default(0)
+  amount          Decimal   @default(0) @db.Decimal(18, 2)
+  currency        String    @default("SAR")
+  probability     Int       @default(0)
   expectedCloseAt DateTime?
-  nextFollowUpAt DateTime?
+  nextFollowUpAt  DateTime?
 
-  ownerId        String
-  owner          Employee           @relation("OpportunityOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("OpportunityOwner", fields: [ownerId], references: [id])
 
-  conversion     LeadConversion?
-  owners         OpportunityOwner[]
-  stageEvents    OpportunityStageEvent[]
-  quotes         Quote[]
-  samples        SampleShipment[]
-  activities     Activity[]
-  orderLinks     OpportunityOrder[]
+  conversion  LeadConversion?
+  owners      OpportunityOwner[]
+  stageEvents OpportunityStageEvent[]
+  quotes      Quote[]
+  samples     SampleShipment[]
+  activities  Activity[]
+  orderLinks  OpportunityOrder[]
 
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  salesCollections SalesCollection[]
 
   @@index([ownerId, outcome])
   @@index([stageId, outcome])
   @@index([outcome, closedAt])
   @@index([nextFollowUpAt])
-  salesCollections SalesCollection[]
 }
 
 /// Split attribution. Percentages are stored, not inferred, and the service requires
@@ -1606,20 +1712,20 @@ model OpportunityOwner {
 /// Every stage move, owner change and value change, kept for the pipeline-duration
 /// report and for answering "who moved this and when".
 model OpportunityStageEvent {
-  id            String        @id @default(cuid())
+  id            String      @id @default(cuid())
   opportunityId String
-  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
-  fromStageId   String?
-  toStageId     String?
-  toStage       PipelineStage? @relation(fields: [toStageId], references: [id])
+  fromStageId String?
+  toStageId   String?
+  toStage     PipelineStage? @relation(fields: [toStageId], references: [id])
 
-  fromOutcome   OpportunityOutcome?
-  toOutcome     OpportunityOutcome?
+  fromOutcome OpportunityOutcome?
+  toOutcome   OpportunityOutcome?
 
-  reason        String?
-  actorId       String?
-  createdAt     DateTime      @default(now())
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
 
   @@index([opportunityId, createdAt])
 }
@@ -1637,15 +1743,15 @@ enum SampleStatus {
 /// path with its own guards, and a CRM screen must not become a second way to
 /// decrement a shelf.
 model SampleShipment {
-  id            String       @id @default(cuid())
+  id            String      @id @default(cuid())
   opportunityId String
-  opportunity   Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
 
-  productSkuId  String?
-  productSku    ProductSKU?  @relation(fields: [productSkuId], references: [id])
-  description   String?
-  quantity      Decimal      @default(0) @db.Decimal(12, 3)
-  unit          String       @default("KG")
+  productSkuId String?
+  productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
+  description  String?
+  quantity     Decimal     @default(0) @db.Decimal(12, 3)
+  unit         String      @default("KG")
 
   status        SampleStatus @default(PREPARING)
   sentAt        DateTime?
@@ -1653,9 +1759,9 @@ model SampleShipment {
   feedbackScore Int?
   feedbackNotes String?
 
-  createdById   String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([opportunityId, status])
 }
@@ -1699,10 +1805,10 @@ enum ActivityOutcome {
 /// Recording that contact happened is NOT sending a message. Nothing here dispatches
 /// email, SMS or WhatsApp, and no screen implies it does.
 model Activity {
-  id            String       @id @default(cuid())
-  type          ActivityType
-  subject       String
-  body          String?
+  id      String       @id @default(cuid())
+  type    ActivityType
+  subject String
+  body    String?
 
   leadId        String?
   lead          Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -1713,16 +1819,16 @@ model Activity {
 
   /// Nullable: every activity written before this existed has no recorded outcome, and
   /// inventing one for them would be a claim about conversations nobody witnessed.
-  outcome       ActivityOutcome?
+  outcome ActivityOutcome?
 
-  dueAt         DateTime?
-  completedAt   DateTime?
+  dueAt       DateTime?
+  completedAt DateTime?
 
-  ownerId       String
-  owner         Employee     @relation("ActivityOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   Employee @relation("ActivityOwner", fields: [ownerId], references: [id])
 
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ownerId, completedAt, dueAt])
   @@index([leadId])
@@ -1739,58 +1845,58 @@ enum QuoteStatus {
 }
 
 model Quote {
-  id            String      @id @default(cuid())
+  id           String  @id @default(cuid())
   /// Human reference, unique per revision chain.
-  quoteNumber   String      @unique
-  revision      Int         @default(1)
+  quoteNumber  String  @unique
+  revision     Int     @default(1)
   /// Points at the quote this one revises, so a chain is walkable in both directions.
-  supersedesId  String?     @unique
-  supersedes    Quote?      @relation("QuoteRevision", fields: [supersedesId], references: [id])
-  supersededBy  Quote?      @relation("QuoteRevision")
+  supersedesId String? @unique
+  supersedes   Quote?  @relation("QuoteRevision", fields: [supersedesId], references: [id])
+  supersededBy Quote?  @relation("QuoteRevision")
 
   opportunityId String
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
   customerId    String?
   customer      Customer?   @relation(fields: [customerId], references: [id])
 
-  status        QuoteStatus @default(DRAFT)
-  currency      String      @default("SAR")
-  validUntil    DateTime?
+  status     QuoteStatus @default(DRAFT)
+  currency   String      @default("SAR")
+  validUntil DateTime?
 
   /// Totals computed on the server from the lines. Stored so an issued quote is a
   /// fixed document: recomputing it later from live prices would change history.
-  subtotal      Decimal     @default(0) @db.Decimal(18, 2)
-  discountTotal Decimal     @default(0) @db.Decimal(18, 2)
-  taxTotal      Decimal     @default(0) @db.Decimal(18, 2)
-  grandTotal    Decimal     @default(0) @db.Decimal(18, 2)
+  subtotal      Decimal @default(0) @db.Decimal(18, 2)
+  discountTotal Decimal @default(0) @db.Decimal(18, 2)
+  taxTotal      Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal    Decimal @default(0) @db.Decimal(18, 2)
 
   /// Frozen copy of the lines and prices at the moment of issue.
   issuedSnapshot Json?
-  issuedAt      DateTime?
-  acceptedAt    DateTime?
-  rejectedAt    DateTime?
-  rejectionNote String?
+  issuedAt       DateTime?
+  acceptedAt     DateTime?
+  rejectedAt     DateTime?
+  rejectionNote  String?
 
   /// Set when a discount above the configured threshold was authorised.
   discountApprovedById String?
   discountApprovedAt   DateTime?
 
-  lines         QuoteLine[]
-  orderLinks    OpportunityOrder[]
+  lines      QuoteLine[]
+  orderLinks OpportunityOrder[]
 
-  createdById   String?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  salesCollections SalesCollection[]
 
   @@index([opportunityId, status])
   @@index([customerId])
-  salesCollections SalesCollection[]
 }
 
 model QuoteLine {
-  id           String     @id @default(cuid())
-  quoteId      String
-  quote        Quote      @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 
   productSkuId String?
   productSku   ProductSKU? @relation(fields: [productSkuId], references: [id])
@@ -1800,18 +1906,18 @@ model QuoteLine {
   /// Decimal(12,3) carries kilogram fractions honestly. Whether fractions are ALLOWED
   /// is a product question the service asks the SKU, not something the column decides:
   /// 1.5 kg of beans is ordinary, 1.5 retail bags is not.
-  quantity     Decimal    @db.Decimal(12, 3)
-  unit         String     @default("KG")
+  quantity Decimal @db.Decimal(12, 3)
+  unit     String  @default("KG")
 
-  unitPrice    Decimal    @db.Decimal(18, 2)
+  unitPrice       Decimal @db.Decimal(18, 2)
   discountPercent Decimal @default(0) @db.Decimal(5, 2)
   taxRatePercent  Decimal @default(0) @db.Decimal(5, 2)
 
-  lineSubtotal Decimal    @default(0) @db.Decimal(18, 2)
-  lineTax      Decimal    @default(0) @db.Decimal(18, 2)
-  lineTotal    Decimal    @default(0) @db.Decimal(18, 2)
+  lineSubtotal Decimal @default(0) @db.Decimal(18, 2)
+  lineTax      Decimal @default(0) @db.Decimal(18, 2)
+  lineTotal    Decimal @default(0) @db.Decimal(18, 2)
 
-  position     Int        @default(0)
+  position Int @default(0)
 
   @@index([quoteId, position])
 }
@@ -1833,11 +1939,11 @@ model OpportunityOrder {
 
   /// Distinguishes the first order won from the repeat orders that follow it, which
   /// the attribution policy may treat differently.
-  isFirstOrder  Boolean     @default(false)
-  requestKey    String      @unique
+  isFirstOrder Boolean @default(false)
+  requestKey   String  @unique
 
-  createdById   String?
-  createdAt     DateTime    @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@unique([quoteId, orderId])
   @@index([opportunityId])
@@ -1861,46 +1967,46 @@ enum CommissionTierMode {
 }
 
 model CommissionPlan {
-  id          String                  @id @default(cuid())
-  code        String                  @unique
+  id          String  @id @default(cuid())
+  code        String  @unique
   name        String
   nameAr      String?
   description String?
-  isActive    Boolean                 @default(true)
+  isActive    Boolean @default(true)
 
   versions    CommissionPlanVersion[]
   assignments CommissionAssignment[]
 
   createdById String?
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 /// A plan is versioned, and a version is immutable once anything has accrued against
 /// it. Editing a live rule in place would silently restate commissions people have
 /// already been told they earned.
 model CommissionPlanVersion {
-  id            String             @id @default(cuid())
-  planId        String
-  plan          CommissionPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
-  version       Int
+  id      String         @id @default(cuid())
+  planId  String
+  plan    CommissionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  version Int
 
-  basis         CommissionBasis    @default(NET_COLLECTION)
-  tierMode      CommissionTierMode @default(INCREMENTAL)
+  basis           CommissionBasis    @default(NET_COLLECTION)
+  tierMode        CommissionTierMode @default(INCREMENTAL)
   /// The flat rate applied when no tier matches, as a percentage: 1.500000 = 1.5%.
-  baseRatePercent Decimal          @db.Decimal(9, 6)
-  currency      String             @default("SAR")
+  baseRatePercent Decimal            @db.Decimal(9, 6)
+  currency        String             @default("SAR")
 
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
-  tiers         CommissionTier[]
-  assignments   CommissionAssignment[]
-  accruals      CommissionAccrual[]
+  tiers       CommissionTier[]
+  assignments CommissionAssignment[]
+  accruals    CommissionAccrual[]
 
-  ledgerEntries  CommissionLedgerEntry[]
+  ledgerEntries CommissionLedgerEntry[]
   createdById   String?
-  createdAt     DateTime           @default(now())
+  createdAt     DateTime                @default(now())
 
   @@unique([planId, version])
   @@index([effectiveFrom])
@@ -1908,15 +2014,15 @@ model CommissionPlanVersion {
 
 /// One band. `fromAmount` inclusive, `toAmount` exclusive; a null `toAmount` is "and above".
 model CommissionTier {
-  id              String                @id @default(cuid())
-  planVersionId   String
-  planVersion     CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
-  fromAmount      Decimal               @db.Decimal(18, 2)
-  toAmount        Decimal?              @db.Decimal(18, 2)
+  id            String                @id @default(cuid())
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  fromAmount    Decimal               @db.Decimal(18, 2)
+  toAmount      Decimal?              @db.Decimal(18, 2)
   /// Added to the base rate for the portion inside this band, in percentage points:
   /// 0.500000 means "half a point more on this slice".
-  ratePercent     Decimal               @db.Decimal(9, 6)
-  position        Int                   @default(0)
+  ratePercent   Decimal               @db.Decimal(9, 6)
+  position      Int                   @default(0)
 
   @@index([planVersionId, position])
 }
@@ -1933,8 +2039,8 @@ model CommissionAssignment {
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
-  createdById   String?
-  createdAt     DateTime              @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@index([employeeId, effectiveFrom])
 }
@@ -1955,39 +2061,39 @@ enum CollectionEventStatus {
 /// told apart from sandbox data without guessing. The UI states that the source is a
 /// sandbox; nothing here is described as a working financial integration.
 model CollectionEvent {
-  id            String                @id @default(cuid())
-  sourceSystem  String                @default("SANDBOX")
+  id           String                @id @default(cuid())
+  sourceSystem String                @default("SANDBOX")
   /// The source's own identifier, so a re-delivered webhook is recognised, not re-accrued.
-  externalRef   String
-  status        CollectionEventStatus @default(RECORDED)
+  externalRef  String
+  status       CollectionEventStatus @default(RECORDED)
 
   customerId    String?
-  customer      Customer?             @relation(fields: [customerId], references: [id])
+  customer      Customer? @relation(fields: [customerId], references: [id])
   opportunityId String?
   orderId       String?
-  order         Order?                @relation(fields: [orderId], references: [id])
+  order         Order?    @relation(fields: [orderId], references: [id])
 
   /// Gross cash received, and the split that makes the qualifying base computable.
-  amountGross   Decimal               @db.Decimal(18, 2)
-  amountTax     Decimal               @default(0) @db.Decimal(18, 2)
+  amountGross         Decimal @db.Decimal(18, 2)
+  amountTax           Decimal @default(0) @db.Decimal(18, 2)
   /// Portion of the net that does not qualify (excluded products, freight, …).
-  amountNonQualifying Decimal         @default(0) @db.Decimal(18, 2)
-  currency      String                @default("SAR")
+  amountNonQualifying Decimal @default(0) @db.Decimal(18, 2)
+  currency            String  @default("SAR")
 
-  collectedAt   DateTime
-  reversedAt    DateTime?
-  reversalOfId  String?
-  note          String?
+  collectedAt  DateTime
+  reversedAt   DateTime?
+  reversalOfId String?
+  note         String?
 
-  accruals      CommissionAccrual[]
+  accruals CommissionAccrual[]
 
-  ledgerEntries  CommissionLedgerEntry[]
+  ledgerEntries   CommissionLedgerEntry[]
   /// The finance-verified receipt that produced this event, when one did. Sandbox events
   /// have none, which is how the two sources stay tellable apart.
-  salesCollection SalesCollection?    @relation("CollectionCommissionEvent")
+  salesCollection SalesCollection?        @relation("CollectionCommissionEvent")
 
-  createdById   String?
-  createdAt     DateTime              @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
 
   @@unique([sourceSystem, externalRef])
   @@index([customerId, collectedAt])
@@ -2008,37 +2114,37 @@ enum AccrualStatus {
 /// event cannot accrue a second time for the same person on the same rules. Corrections
 /// are new rows, never edits to an approved one.
 model CommissionAccrual {
-  id                String                @id @default(cuid())
+  id                String          @id @default(cuid())
   collectionEventId String
-  collectionEvent   CollectionEvent       @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
+  collectionEvent   CollectionEvent @relation(fields: [collectionEventId], references: [id], onDelete: Restrict)
 
-  employeeId        String
-  employee          Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
-  planVersionId     String
-  planVersion       CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
+  employeeId    String
+  employee      Employee              @relation("CommissionEarner", fields: [employeeId], references: [id])
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id])
 
   /// Period the accrual belongs to, as an Asia/Riyadh month, stored as the UTC instant
   /// of that month's first moment in Riyadh.
-  periodStart       DateTime
-  periodEnd         DateTime
+  periodStart DateTime
+  periodEnd   DateTime
 
   /// The qualifying base this row was computed from, and the share applied to it.
-  qualifyingBase    Decimal               @db.Decimal(18, 2)
-  sharePercent      Decimal               @default(100) @db.Decimal(5, 2)
+  qualifyingBase       Decimal @db.Decimal(18, 2)
+  sharePercent         Decimal @default(100) @db.Decimal(5, 2)
   /// Effective rate actually applied, after tiers — recorded so the figure can be
   /// explained to the person who earned it without recomputing anything.
-  effectiveRatePercent Decimal            @db.Decimal(9, 6)
-  amount            Decimal               @db.Decimal(18, 2)
-  currency          String                @default("SAR")
+  effectiveRatePercent Decimal @db.Decimal(9, 6)
+  amount               Decimal @db.Decimal(18, 2)
+  currency             String  @default("SAR")
 
-  status            AccrualStatus         @default(ACCRUED)
-  approvedById      String?
-  approvedAt        DateTime?
+  status       AccrualStatus @default(ACCRUED)
+  approvedById String?
+  approvedAt   DateTime?
 
-  ledgerEntries     CommissionLedgerEntry[]
+  ledgerEntries CommissionLedgerEntry[]
 
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([collectionEventId, employeeId, planVersionId])
   @@index([employeeId, periodStart])
@@ -2055,21 +2161,21 @@ enum LedgerEntryType {
 /// Append-only commission ledger. An approved figure is never rewritten; a correction
 /// is a new entry that references what it corrects and says who made it and why.
 model CommissionLedgerEntry {
-  id          String            @id @default(cuid())
-  type        LedgerEntryType
-  employeeId  String
-  employee    Employee          @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
+  id         String          @id @default(cuid())
+  type       LedgerEntryType
+  employeeId String
+  employee   Employee        @relation("CommissionLedgerOwner", fields: [employeeId], references: [id])
 
-  accrualId   String?
-  accrual     CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
+  accrualId  String?
+  accrual    CommissionAccrual? @relation(fields: [accrualId], references: [id], onDelete: Restrict)
   /// A single entry this one corrects. Kept for the manual `adjust` path, which targets at
   /// most one. Engine reversals use `corrects` below, because one negative movement can
   /// compensate several earlier ones once tiers or splits are involved.
-  correctsId  String?
+  correctsId String?
 
   periodStart DateTime
-  amount      Decimal           @db.Decimal(18, 2)
-  currency    String            @default("SAR")
+  amount      Decimal  @db.Decimal(18, 2)
+  currency    String   @default("SAR")
   reason      String?
 
   /// ── Durable provenance ───────────────────────────────────────────────────────────
@@ -2101,8 +2207,8 @@ model CommissionLedgerEntry {
   corrects    CommissionLedgerCorrection[] @relation("CorrectingEntry")
   correctedBy CommissionLedgerCorrection[] @relation("CorrectedEntry")
 
-  actorId     String?
-  createdAt   DateTime          @default(now())
+  actorId   String?
+  createdAt DateTime @default(now())
 
   @@index([employeeId, periodStart])
   @@index([type, createdAt])
@@ -2121,11 +2227,11 @@ model CommissionLedgerEntry {
 /// Allocation is decided at write time from the append-only log, never reconstructed later
 /// by matching amounts or timestamps.
 model CommissionLedgerCorrection {
-  id        String @id @default(cuid())
+  id String @id @default(cuid())
 
   /// The negative movement doing the compensating.
-  entryId   String
-  entry     CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
+  entryId String
+  entry   CommissionLedgerEntry @relation("CorrectingEntry", fields: [entryId], references: [id], onDelete: Cascade)
 
   /// The earlier movement being compensated.
   correctsEntryId String
@@ -2133,7 +2239,7 @@ model CommissionLedgerCorrection {
 
   /// A positive figure: how much of `entry` is applied against `corrects`. The rows for one
   /// entry sum to at most the absolute value of that entry's amount.
-  amount    Decimal @db.Decimal(18, 2)
+  amount    Decimal  @db.Decimal(18, 2)
   createdAt DateTime @default(now())
 
   @@unique([entryId, correctsEntryId])
@@ -2154,9 +2260,9 @@ model SalesTarget {
   bonusAmount  Decimal  @default(0) @db.Decimal(18, 2)
   note         String?
 
-  createdById  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([employeeId, periodStart])
   @@index([periodStart])
@@ -2547,6 +2653,10 @@ model FinBranch {
   createdBy String?
 
   access FinBranchAccess[]
+
+  // Native HR (additive): people and job openings located at this branch.
+  hrEmployees   HrEmployee[]   @relation("HrEmployeeBranch")
+  hrJobOpenings HrJobOpening[] @relation("HrJobOpeningBranch")
 }
 
 /// Which branches a finance user without `all_branches` may read and write.
@@ -3136,21 +3246,21 @@ enum WhatsAppSendMode {
 /// (src/lib/automation/rules.ts) rather than child tables: a rule is edited and saved as
 /// one unit, and nothing queries inside a step.
 model AutomationRule {
-  id          String   @id @default(cuid())
+  id          String          @id @default(cuid())
   name        String
   description String?
   /// A key from the event catalogue (src/lib/automation/catalog.ts).
   eventType   String
-  isActive    Boolean  @default(false)
+  isActive    Boolean         @default(false)
   /// Language used when an enumerated value (an order status, a QC outcome) is written
   /// into a message. "ar" or "en".
-  locale      String   @default("ar")
-  conditions  Json     @default("[]")
-  steps       Json     @default("[]")
+  locale      String          @default("ar")
+  conditions  Json            @default("[]")
+  steps       Json            @default("[]")
   createdById String?
   updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   runs        AutomationRun[]
 
   @@index([eventType, isActive])
@@ -3267,4 +3377,1728 @@ model AutomationSettings {
   lastSweepAt DateTime?
   updatedById String?
   updatedAt   DateTime         @updatedAt
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+//  NATIVE HR (additive). See docs/hr/PLAN.md and docs/hr/DATA_MODEL.md.
+//
+//  Rules that hold across every model below:
+//  • An HR person (HrEmployee) is NOT a login. `accountId` optionally links one login.
+//  • Identity, bank and emergency data live only in HrEmployeePrivate.
+//  • Money is Decimal(18,2); dates that are calendar days are @db.Date (no time zone).
+//  • Ledgers and decided records are append-only; the migration adds the DB triggers.
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+enum HrEmploymentStatus {
+  PROBATION
+  ACTIVE
+  NOTICE
+  SUSPENDED
+  SEPARATED
+}
+
+enum HrEmploymentType {
+  FULL_TIME
+  PART_TIME
+  TEMPORARY
+}
+
+model HrDepartment {
+  id        String         @id @default(cuid())
+  code      String         @unique
+  nameAr    String
+  nameEn    String?
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  createdBy String?
+  employees HrEmployee[]
+  openings  HrJobOpening[]
+}
+
+model HrEmployee {
+  id               String             @id @default(cuid())
+  employeeNo       String             @unique
+  fullNameAr       String
+  fullNameEn       String?
+  jobTitle         String
+  departmentId     String?
+  department       HrDepartment?      @relation(fields: [departmentId], references: [id])
+  branchId         String?
+  branch           FinBranch?         @relation("HrEmployeeBranch", fields: [branchId], references: [id])
+  managerId        String?
+  manager          HrEmployee?        @relation("HrManager", fields: [managerId], references: [id])
+  reports          HrEmployee[]       @relation("HrManager")
+  status           HrEmploymentStatus @default(PROBATION)
+  employmentType   HrEmploymentType   @default(FULL_TIME)
+  hireDate         DateTime           @db.Date
+  probationEndDate DateTime?          @db.Date
+  separationDate   DateTime?          @db.Date
+  workPhone        String?
+  workEmail        String?
+  /// The login this person uses, if any. Unique: one login cannot be two people.
+  accountId        String?            @unique
+  account          Employee?          @relation("HrPersonAccount", fields: [accountId], references: [id], onDelete: SetNull)
+  /// Optimistic concurrency: every profile edit must send the version it read.
+  version          Int                @default(1)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  createdBy        String?
+
+  private            HrEmployeePrivate?
+  documents          HrDocument[]
+  contracts          HrContract[]
+  compensations      HrCompensation[]
+  shiftAssignments   HrShiftAssignment[]
+  attendance         HrAttendance[]
+  corrections        HrAttendanceCorrection[]
+  overtime           HrOvertime[]
+  leaveRequests      HrLeaveRequest[]
+  leaveLedger        HrLeaveLedger[]
+  payrollLines       HrPayrollLine[]
+  payrollAdjustments HrPayrollAdjustment[]
+  paymentAllocations HrPayrollPaymentAllocation[]
+  paymentReturns     HrPayrollPaymentReturn[]
+  provisionLedger    HrProvisionLedger[]
+  advances           HrAdvance[]
+  assetAssignments   HrAssetAssignment[]
+  trainings          HrTraining[]
+  reviews            HrReview[]               @relation("HrReviewSubject")
+  incidents          HrIncident[]
+  separations        HrSeparation[]
+  finalSettlements   HrFinalSettlement[]
+  gosiInvoiceLines   HrGosiInvoiceLine[]
+  gosiSettlements    HrGosiSettlement[]
+  gosiAdjustments    HrGosiAdjustment[]
+  hiredFrom         HrApplicant?             @relation("HrApplicantHire")
+
+  @@index([status])
+  @@index([branchId])
+  @@index([managerId])
+  @@index([departmentId])
+}
+
+/// Sensitive personal data, 1:1 with HrEmployee. Read only with hr.private_view (or by
+/// the person themself through self-service), and every read is audited.
+model HrEmployeePrivate {
+  employeeId        String     @id
+  employee          HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  idType            String? // NATIONAL_ID | IQAMA | PASSPORT
+  idNumber          String?
+  /// hr_norm_id(idNumber), written by the database guard only (unique; never an external person's).
+  idNumberNorm      String?
+  idExpiry          DateTime?  @db.Date
+  nationality       String?
+  /// Matches HrContributionRule.appliesToGroup. A business attribute, not a statutory claim.
+  contributionGroup String?
+  dateOfBirth       DateTime?  @db.Date
+  gender            String?
+  personalPhone     String?
+  personalEmail     String?
+  address           String?
+  bankName          String?
+  iban              String?
+  emergencyName     String?
+  emergencyRelation String?
+  emergencyPhone    String?
+  updatedAt         DateTime   @updatedAt
+  updatedBy         String?
+}
+
+model HrDocument {
+  id           String     @id @default(cuid())
+  employeeId   String
+  employee     HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  category     String // CONTRACT | IDENTITY | CERTIFICATE | MEDICAL | OTHER
+  title        String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  content      Bytes
+  confidential Boolean    @default(true)
+  expiresOn    DateTime?  @db.Date
+  uploadedBy   String
+  createdAt    DateTime   @default(now())
+  /// Soft delete: the bytes stay for audit; the document disappears from lists.
+  deletedAt    DateTime?
+  deletedBy    String?
+  settlementCalcs    HrFinalSettlement[] @relation("HrSettlementCalcDoc")
+  settlementPayments HrFinalSettlement[] @relation("HrSettlementProofDoc")
+
+  @@index([employeeId])
+  @@index([expiresOn])
+}
+
+enum HrContractType {
+  FIXED_TERM
+  OPEN_ENDED
+}
+
+enum HrContractStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+  ENDED
+}
+
+/// A versioned employment contract. Renewal creates the next version and, in the same
+/// transaction, marks the current one SUPERSEDED (`supersedesId` is unique: a contract
+/// is superseded once).
+model HrContract {
+  id            String           @id @default(cuid())
+  employeeId    String
+  employee      HrEmployee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  contractNo    String           @unique
+  version       Int
+  type          HrContractType
+  startDate     DateTime         @db.Date
+  endDate       DateTime?        @db.Date
+  probationDays Int?
+  noticeDays    Int
+  status        HrContractStatus @default(DRAFT)
+  supersedesId  String?          @unique
+  supersedes    HrContract?      @relation("HrContractSupersession", fields: [supersedesId], references: [id])
+  supersededBy  HrContract?      @relation("HrContractSupersession")
+  notes         String?
+  createdBy     String
+  createdAt     DateTime         @default(now())
+  activatedBy   String?
+  activatedAt   DateTime?
+  endedAt       DateTime?
+  endReason     String?
+
+  @@unique([employeeId, version])
+  @@index([status, endDate])
+}
+
+/// Effective-dated pay. Versions of one person never overlap (DB trigger). A new version
+/// closes the open one the day before it starts. Rows are never edited otherwise.
+model HrCompensation {
+  id             String     @id @default(cuid())
+  employeeId     String
+  employee       HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  effectiveFrom  DateTime   @db.Date
+  effectiveTo    DateTime?  @db.Date
+  basic          Decimal    @db.Decimal(18, 2)
+  housing        Decimal    @default(0) @db.Decimal(18, 2)
+  transport      Decimal    @default(0) @db.Decimal(18, 2)
+  otherAllowance Decimal    @default(0) @db.Decimal(18, 2)
+  reason         String
+  contractId     String?
+  createdBy      String
+  createdAt      DateTime   @default(now())
+
+  @@index([employeeId, effectiveFrom])
+}
+
+// ── Time & attendance ───────────────────────────────────────────────────────────────
+
+model HrShift {
+  id           String              @id @default(cuid())
+  code         String              @unique
+  name         String
+  /// Local wall-clock "HH:MM" in the HR policy time zone.
+  startTime    String
+  endTime      String
+  breakMinutes Int                 @default(0)
+  graceMinutes Int                 @default(0)
+  active       Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  assignments  HrShiftAssignment[]
+}
+
+model HrShiftAssignment {
+  id            String     @id @default(cuid())
+  employeeId    String
+  employee      HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  shiftId       String
+  shift         HrShift    @relation(fields: [shiftId], references: [id])
+  effectiveFrom DateTime   @db.Date
+  effectiveTo   DateTime?  @db.Date
+  /// 0 = Sunday … 6 = Saturday, working days for this assignment.
+  weekdays      Int[]
+  createdBy     String
+  createdAt     DateTime   @default(now())
+
+  @@index([employeeId, effectiveFrom])
+}
+
+enum HrAttendanceStatus {
+  OPEN
+  CLOSED
+  ABSENT
+}
+
+model HrAttendance {
+  id              String                   @id @default(cuid())
+  employeeId      String
+  employee        HrEmployee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// The local calendar day (policy time zone) the shift belongs to.
+  workDate        DateTime                 @db.Date
+  shiftId         String?
+  /// UTC instants.
+  checkInAt       DateTime?
+  checkOutAt      DateTime?
+  source          String // DEVICE | SELF | MANUAL | CORRECTION
+  workedMinutes   Int?
+  lateMinutes     Int?
+  overtimeMinutes Int?
+  status          HrAttendanceStatus       @default(OPEN)
+  notes           String?
+  createdBy       String
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  corrections     HrAttendanceCorrection[]
+  overtime        HrOvertime?
+
+  @@unique([employeeId, workDate])
+  @@index([workDate])
+}
+
+enum HrDecisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+/// A request to change a day's record. The original values are kept in `before`.
+model HrAttendanceCorrection {
+  id                String           @id @default(cuid())
+  employeeId        String
+  employee          HrEmployee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  attendanceId      String?
+  attendance        HrAttendance?    @relation(fields: [attendanceId], references: [id])
+  workDate          DateTime         @db.Date
+  requestedCheckIn  DateTime?
+  requestedCheckOut DateTime?
+  reason            String
+  status            HrDecisionStatus @default(PENDING)
+  requestedBy       String
+  createdAt         DateTime         @default(now())
+  decidedBy         String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  before            Json?
+
+  @@index([status])
+  @@index([employeeId, workDate])
+}
+
+/// Overtime counts for payroll only when APPROVED. `payrollRunId` is set while a
+/// non-cancelled run uses it, so the same minutes are never paid twice.
+model HrOvertime {
+  id           String           @id @default(cuid())
+  employeeId   String
+  employee     HrEmployee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  workDate     DateTime         @db.Date
+  minutes      Int
+  attendanceId String?          @unique
+  attendance   HrAttendance?    @relation(fields: [attendanceId], references: [id])
+  source       String // ATTENDANCE | MANUAL
+  /// Why it was recorded (manual entries); the decision note is separate.
+  reason       String?
+  status       HrDecisionStatus @default(PENDING)
+  requestedBy  String
+  createdAt    DateTime         @default(now())
+  decidedBy    String?
+  decidedAt    DateTime?
+  decisionNote String?
+  payrollRunId String?
+
+  @@index([status, workDate])
+  @@index([employeeId, workDate])
+}
+
+// ── Leave ───────────────────────────────────────────────────────────────────────────
+
+model HrLeaveType {
+  id                 String           @id @default(cuid())
+  code               String           @unique
+  nameAr             String
+  paid               Boolean          @default(true)
+  /// Whether taking it consumes a ledger balance.
+  tracksBalance      Boolean          @default(true)
+  /// Days accrued per year, credited monthly by the accrual job. Null = no accrual.
+  accrualDaysPerYear Decimal?         @db.Decimal(6, 2)
+  allowNegative      Boolean          @default(false)
+  active             Boolean          @default(true)
+  /// True while the entitlement is a proposal the owner has not confirmed.
+  isProposal         Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  requests           HrLeaveRequest[]
+  ledger             HrLeaveLedger[]
+}
+
+enum HrLeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  CANCELLED
+}
+
+model HrLeaveRequest {
+  id             String          @id @default(cuid())
+  employeeId     String
+  employee       HrEmployee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveTypeId    String
+  leaveType      HrLeaveType     @relation(fields: [leaveTypeId], references: [id])
+  startDate      DateTime        @db.Date
+  endDate        DateTime        @db.Date
+  days           Decimal         @db.Decimal(6, 2)
+  status         HrLeaveStatus   @default(PENDING)
+  reason         String?
+  requestedBy    String
+  idempotencyKey String?
+  createdAt      DateTime        @default(now())
+  decidedBy      String?
+  decidedAt      DateTime?
+  decisionNote   String?
+  cancelledBy    String?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  ledger         HrLeaveLedger[]
+
+  @@unique([requestedBy, idempotencyKey])
+  @@index([employeeId, startDate])
+  @@index([status])
+}
+
+enum HrLeaveEntryType {
+  OPENING
+  ACCRUAL
+  GRANT
+  TAKE
+  REVERSAL
+  ADJUSTMENT
+}
+
+/// Append-only. Balance = SUM(days) over all rows, future-dated TAKEs included, which is
+/// what makes overbooking impossible. Corrections are new rows.
+model HrLeaveLedger {
+  id            String           @id @default(cuid())
+  employeeId    String
+  employee      HrEmployee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveTypeId   String
+  leaveType     HrLeaveType      @relation(fields: [leaveTypeId], references: [id])
+  entryType     HrLeaveEntryType
+  days          Decimal          @db.Decimal(8, 2)
+  effectiveDate DateTime         @db.Date
+  requestId     String?
+  request       HrLeaveRequest?  @relation(fields: [requestId], references: [id])
+  /// Idempotency for the accrual job ("2026-09"); null for every other entry.
+  accrualKey    String?
+  reason        String?
+  actorId       String?
+  createdAt     DateTime         @default(now())
+
+  @@unique([employeeId, leaveTypeId, accrualKey])
+  @@index([employeeId, leaveTypeId])
+}
+
+// ── Payroll policy, settings and account map ────────────────────────────────────────
+
+enum HrDayBasis {
+  CALENDAR_DAYS
+  FIXED_30
+}
+
+enum HrPolicyStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+/// Effective-dated payroll policy. Activation needs a second person (four-eyes). A run
+/// records the policy it used, so later edits never restate a paid month.
+model HrPayrollPolicy {
+  id                    String               @id @default(cuid())
+  version               Int                  @unique
+  effectiveFrom         DateTime             @db.Date
+  status                HrPolicyStatus       @default(DRAFT)
+  dayBasis              HrDayBasis
+  standardDailyHours    Decimal              @db.Decimal(5, 2)
+  overtimeMultiplier    Decimal              @db.Decimal(5, 2)
+  /// Cap on deductions as a percentage of gross for one payslip.
+  maxDeductionPercent   Decimal              @db.Decimal(5, 2)
+  /// Components (BASIC, HOUSING, TRANSPORT, OTHER) used for unpaid-leave deduction and
+  /// for the overtime hourly rate.
+  unpaidLeaveComponents String[]
+  overtimeComponents    String[]
+  timezone              String               @default("Asia/Riyadh")
+  /// 0 = Sunday … 6 = Saturday.
+  weekendDays           Int[]
+  /// Values are an unconfirmed proposal until the owner/accountant says otherwise.
+  isProposal            Boolean              @default(true)
+  notes                 String?
+  createdBy             String
+  createdAt             DateTime             @default(now())
+  activatedBy           String?
+  activatedAt           DateTime?
+  // ── P-2 findings 2/3 (migration 20261017100000_hr_p2_settlements). Accountant decisions:
+  // every value below is NULL / empty until the accountant decides it, and payroll refuses to
+  // build a run under a version where any is unset. `maxDeductionPercent` above is the OVERALL
+  // cap; these add the per-category caps, which categories the overall cap covers, the order
+  // deductions apply in, what happens when a cap is exceeded, and the deferral escalation count.
+  /// false (default): the cap base is guaranteed pay only — commission, overtime and one-off
+  /// earning adjustments are excluded. true only when the policy explicitly says so.
+  capBaseIncludesVariable      Boolean  @default(false)
+  /// Per-category caps, % of the cap base. NULL = not decided (payroll refuses to run).
+  deductionCapUnearnedPercent  Decimal? @db.Decimal(5, 2)
+  deductionCapLoanPercent      Decimal? @db.Decimal(5, 2)
+  deductionCapStatutoryPercent Decimal? @db.Decimal(5, 2)
+  deductionCapOtherPercent     Decimal? @db.Decimal(5, 2)
+  /// Categories the overall cap (maxDeductionPercent) covers. Empty = not decided.
+  deductionOverallCovers       String[] @default([])
+  /// All four categories in the order they apply. Empty = not decided.
+  deductionPriority            String[] @default([])
+  /// WARN | BLOCK when a non-deferrable category exceeds its cap. NULL = not decided.
+  deductionCapAction           String?
+  /// CONSECUTIVE deferrals of one advance (approved runs) after which a review item is raised. NULL = not decided.
+  advanceDeferralEscalateAfter Int?
+  /// P-2 review P2-B7 (migration 20261017130000): the cap base is the wage due AFTER unearned pay
+  /// (true) or before it (false). NULL = not decided (payroll refuses to run).
+  capBaseAfterUnearned         Boolean?
+  contributionRules     HrContributionRule[]
+  runs                  HrPayrollRun[]
+
+  @@index([status, effectiveFrom])
+}
+
+/// A configurable contribution (e.g. social insurance). NOTHING is seeded: rates must come
+/// from an official source and be reviewed by the accountant before activation.
+model HrContributionRule {
+  id                  String          @id @default(cuid())
+  policyId            String
+  policy              HrPayrollPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  code                String
+  nameAr              String
+  employeeRatePercent Decimal         @db.Decimal(6, 3)
+  employerRatePercent Decimal         @db.Decimal(6, 3)
+  baseComponents      String[]
+  /// Applies to people whose private contributionGroup equals this value.
+  appliesToGroup      String
+  monthlyBaseCap      Decimal?        @db.Decimal(18, 2)
+  sourceNote          String
+  createdAt           DateTime        @default(now())
+
+  @@unique([policyId, code])
+}
+
+model HrSettings {
+  id                String   @id @default("singleton")
+  /// When false, HR money events are recorded without journals and say so on every record.
+  accountingEnabled Boolean  @default(true)
+  /// Phase 1 payroll lock (decision C GAP-9): live payroll. Off by default and in every seed /
+  /// fixture end state; while off the payroll money actions are refused (application and DB). Turned
+  /// on only by an applied two-person PAYROLL_LIVE_SET change while the readiness check is clean.
+  payrollLive         Boolean @default(false)
+  payrollLiveChangeId String?
+  /// Phase 1 (owner decision D1, Option B): manual journals disabled — off by default, fail-closed;
+  /// while off only the automatic HR posting workflow writes the ledger. Not writable by the runtime
+  /// role (grant-hr-runtime.sql); enabled only by an owner-run Phase 2 migration.
+  manualJournalsEnabled Boolean @default(false)
+  updatedBy         String?
+  updatedAt         DateTime @updatedAt
+}
+
+enum HrConfigChangeKind {
+  ACCOUNT_MAP_SET
+  ACCOUNTING_TOGGLE
+  LEAVE_TYPE_CREATE
+  /// Owner decision 1b: a grant of payroll-sensitive duties (or the admin role) to an account.
+  PERMISSION_CHANGE
+  /// An immediate revocation, acknowledged afterwards by another person (never blocks it).
+  PERMISSION_REVIEW
+  /// Owner decision 1 (Option A): a second person verifies a person's identity.
+  PERSON_VERIFY
+  /// Create / edit / link / unlink / deactivate an external person.
+  EXTERNAL_PERSON_CHANGE
+  /// An identifying change (name, identity document) of a verified or duty-holding employee.
+  EMPLOYEE_IDENTITY_CHANGE
+  /// A second-person, attested MFA reset (recovery codes lost).
+  MFA_RESET
+  /// P-2 / E-1: a second policy manager confirms a leave type that is still a proposal.
+  LEAVE_TYPE_CONFIRM
+  /// P-2: a second-person, attested payroll control decision (a correction under a proposal
+  /// policy; accepting a full-period unpaid-leave remainder). Nothing is computed from it.
+  PAYROLL_CONTROL_ATTEST
+  /// P-2 rev3 item 3: enable / disable one case of the D-4h GOSI difference matrix (keys + decision).
+  GOSI_TREATMENT_SET
+  /// Phase 1 payroll lock: turn live payroll on / off (on only while the readiness check is clean).
+  PAYROLL_LIVE_SET
+}
+
+enum HrConfigChangeStatus {
+  PENDING
+  APPLIED
+  REJECTED
+  WITHDRAWN
+}
+
+/// A requested change to HR accounting / leave configuration (owner decision F2) or a grant of
+/// payroll-sensitive permissions to an account (owner decision 1b). Nothing is
+/// applied when requested: a SECOND policy manager approves the exact fingerprint and the change
+/// is applied in the same transaction. DB: decidedBy <> requestedBy; one PENDING per target
+/// (partial unique index); a decided row never changes and no row is deleted (trigger).
+model HrConfigChange {
+  id              String               @id @default(cuid())
+  kind            HrConfigChangeKind
+  /// What it changes, e.g. "ACCOUNT_MAP:SALARY_EXPENSE", "SETTINGS:accountingEnabled", "LEAVE_TYPE:ANNUAL", "ACCOUNT:<employee id>".
+  targetKey       String
+  payload         Json
+  /// The value in force when requested; approval is refused if it changed since (stale).
+  before          Json?
+  fingerprint     String
+  reason          String
+  status          HrConfigChangeStatus @default(PENDING)
+  requestedBy     String
+  requestedAt     DateTime             @default(now())
+  /// Approver or rejecter: never the requester. Null while PENDING and for WITHDRAWN.
+  decidedBy       String?
+  decidedAt       DateTime?
+  decisionNote    String?
+  credentialStage HrCredentialStage?
+
+  @@index([status, requestedAt])
+  @@index([targetKey])
+}
+
+/// Owner decision 1 (Option A): a verified non-employee identity, e.g. an external accountant.
+/// Never on payroll, never a payee, never a dummy employee record. Never deleted (trigger).
+model HrExternalPerson {
+  id           String    @id @default(cuid())
+  fullName     String
+  /// National ID / iqama / passport. Optional; unique in normal form when present.
+  idNumber     String?
+  /// hr_norm_id(idNumber), written by the database guard only.
+  idNumberNorm String?
+  organization String?
+  roleNote     String?
+  accountId    String?   @unique
+  account      Employee? @relation("HrExternalPersonAccount", fields: [accountId], references: [id], onDelete: SetNull)
+  active       Boolean   @default(true)
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([active])
+}
+
+/// A second person's verification of a person's identity (EMPLOYEE = HrEmployee id, EXTERNAL =
+/// HrExternalPerson id). One live row per person; revoked, never edited or deleted (trigger).
+model HrIdentityVerification {
+  id             String                @id @default(cuid())
+  subjectType    String
+  subjectId      String
+  requestedBy    String
+  /// Never the requester (CHECK).
+  verifiedBy     String
+  verifiedAt     DateTime              @default(now())
+  configChangeId String?
+  /// The login this verification attests; a login linked later is not verified until attested.
+  accountId      String?
+  note           String?
+  revokedAt      DateTime?
+  revokedBy      String?
+  revokeReason   String?
+  bootstraps     HrIdentityBootstrap[]
+
+  @@index([subjectType, subjectId])
+}
+
+/// The one-time bootstrap of the verification register (never repeated, never changed).
+model HrIdentityBootstrap {
+  id             String                 @id @default("singleton")
+  verificationId String
+  verification   HrIdentityVerification @relation(fields: [verificationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  requestedBy    String
+  approvedBy     String
+  completedAt    DateTime               @default(now())
+}
+
+/// Review item 4: the hashes of a pending credential change (never in the immutable request
+/// payload). Deleted when the request is applied, rejected or withdrawn.
+model HrCredentialStage {
+  configChangeId String         @id
+  configChange   HrConfigChange @relation(fields: [configChangeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  username       String?
+  pin            String?
+  pinLookup      String?
+  password       String?
+  createdAt      DateTime       @default(now())
+}
+
+/// Which chart-of-accounts account each HR posting key uses. No defaults: every key a
+/// journal needs must be mapped explicitly or the posting is refused.
+model HrAccountMap {
+  key       String   @id
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id])
+  updatedBy String
+  updatedAt DateTime @updatedAt
+}
+
+/// Phase 1 payroll lock (re-review R1): every (account, key) the HR posting map has EVER held —
+/// written by the database (trigger on HrAccountMap), append-only. An account once mapped under a
+/// payroll key stays a payroll account for the ledger lock (hr_is_payroll_account / payrollAccountIds).
+model HrPayrollAccount {
+  accountId   String
+  key         String
+  firstSeenAt DateTime @default(now())
+
+  @@id([accountId, key])
+}
+
+/// Idempotency for every journal HR posts: one journal per (source, purpose).
+model HrJournalLink {
+  id             String       @id @default(cuid())
+  sourceType     String // PAYROLL_RUN | ADVANCE | ADVANCE_REPAYMENT
+  sourceId       String
+  purpose        String // ACCRUAL | PAYMENT | REVERSAL | DISBURSEMENT | REPAYMENT
+  journalEntryId String       @unique
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
+  /// P-2 / E-3: what the journal posted, per posting key and account, frozen with the link
+  /// (null on links written before 20261017090000). Verified before the journal is relied on.
+  postedLines    Json?
+  createdAt      DateTime     @default(now())
+  /// P-2 review P2-A4: the migration-time baseline of a link written before posted lines existed.
+  baseline       HrJournalLinkBaseline?
+
+  @@unique([sourceType, sourceId, purpose])
+}
+
+/// P-2 review P2-A4 (migration 20261017120000): for each HR journal link written BEFORE posted
+/// lines were frozen, a one-time, append-only baseline captured at migration — the journal's lines
+/// per account and side as they stood (with the posting key the account map resolved them to) and
+/// the account map as it stood. Such links are verified against it. A snapshot, not an approval:
+/// the accountant reviews it before production.
+model HrJournalLinkBaseline {
+  id             String        @id @default(cuid())
+  linkId         String        @unique
+  link           HrJournalLink @relation(fields: [linkId], references: [id], onDelete: Restrict)
+  journalEntryId String
+  /// [{ key, accountId, side: "D" | "C", amount }] — key "AMBIGUOUS:K1|K2" / "UNMAPPED" when the map did not name one key.
+  lines          Json
+  /// { key: accountId } as it stood when captured.
+  accountMap     Json
+  source         String
+  capturedAt     DateTime      @default(now())
+}
+
+// ── Payroll runs ────────────────────────────────────────────────────────────────────
+
+enum HrPayrollRunStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+model HrPayrollRun {
+  id                     String                    @id @default(cuid())
+  runNo                  Int                       @unique @default(autoincrement())
+  /// "YYYY-MM"
+  periodMonth            String
+  periodStart            DateTime                  @db.Date
+  periodEnd              DateTime                  @db.Date
+  kind                   String                    @default("REGULAR") // REGULAR | CORRECTION
+  correctsRunId          String?
+  /// Branch scope of the run; "COMPANY" = every person regardless of branch.
+  branchKey              String                    @default("COMPANY")
+  status                 HrPayrollRunStatus        @default(DRAFT)
+  policyId               String
+  policy                 HrPayrollPolicy           @relation(fields: [policyId], references: [id])
+  preparedBy             String
+  preparedAt             DateTime                  @default(now())
+  submittedBy            String?
+  submittedAt            DateTime?
+  approvedAt             DateTime?
+  paidAt                 DateTime?
+  cancelledBy            String?
+  cancelledAt            DateTime?
+  cancelReason           String?
+  totalGross             Decimal                   @default(0) @db.Decimal(18, 2)
+  totalDeductions        Decimal                   @default(0) @db.Decimal(18, 2)
+  totalNet               Decimal                   @default(0) @db.Decimal(18, 2)
+  totalEmployer          Decimal                   @default(0) @db.Decimal(18, 2)
+  accountingSkipped      Boolean                   @default(false)
+  /// P-2 review P1-A1: the PAYROLL_CONTROL_ATTEST (proposal correction) this run relies on. Unique:
+  /// an attestation serves one run and expires with it (a cancelled run spends it).
+  controlAttestationId   String?                   @unique
+  version                Int                       @default(1)
+  lines                  HrPayrollLine[]
+  payments               HrPayrollPayment[]
+  paymentAllocations     HrPayrollPaymentAllocation[]
+  paymentReturns         HrPayrollPaymentReturn[]
+  bankImports            HrPayrollBankImport[]
+  adjustments            HrPayrollAdjustment[]
+  commissionReservations HrCommissionReservation[]
+  reconNotes             HrPayrollReconNote[]
+
+  @@index([periodMonth, status])
+}
+
+model HrPayrollLine {
+  id          String          @id @default(cuid())
+  runId       String
+  run         HrPayrollRun    @relation(fields: [runId], references: [id], onDelete: Restrict)
+  employeeId  String
+  employee    HrEmployee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// Every input the calculation used (compensation versions, days, policy, rates), so a
+  /// payslip can be explained years later without recomputing anything.
+  snapshot    Json
+  payableDays Decimal         @db.Decimal(6, 2)
+  gross       Decimal         @db.Decimal(18, 2)
+  deductions  Decimal         @db.Decimal(18, 2)
+  net         Decimal         @db.Decimal(18, 2)
+  employer    Decimal         @default(0) @db.Decimal(18, 2)
+  exceptions  Json
+  blocking    Boolean         @default(false)
+  approvedBy  String?
+  approvedAt  DateTime?
+  items       HrPayrollItem[]
+  payments    HrPayrollPayment[]
+  allocations HrPayrollPaymentAllocation[]
+  returns     HrPayrollPaymentReturn[]
+
+  @@unique([runId, employeeId])
+}
+
+model HrPayrollItem {
+  id          String        @id @default(cuid())
+  lineId      String
+  line        HrPayrollLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  code        String
+  kind        String // EARNING | DEDUCTION | EMPLOYER
+  amount      Decimal       @db.Decimal(18, 2)
+  quantity    Decimal?      @db.Decimal(12, 4)
+  rate        Decimal?      @db.Decimal(18, 6)
+  sourceType  String?
+  sourceId    String?
+  description String
+  /// P-2 finding 3: the deduction category (UNEARNED_PAY | LOAN_RECOVERY | STATUTORY | OTHER) of a
+  /// DEDUCTION item, and its position in the order deductions were applied. NULL on older items.
+  category    String?
+  applyOrder  Int?
+
+  @@index([lineId])
+}
+
+/// One-off earning or deduction for a person in a DRAFT run (bonus, penalty, correction).
+model HrPayrollAdjustment {
+  id         String       @id @default(cuid())
+  runId      String
+  run        HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  employeeId String
+  employee   HrEmployee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  kind       String // EARNING | DEDUCTION
+  amount     Decimal      @db.Decimal(18, 2)
+  reason     String
+  /// P-2 review P1-B2: a category from a CLOSED list (DB CHECK, src/lib/hr/adjustment-categories.ts).
+  /// Never end of service / leave encashment / final settlement. Rows from before: OTHER_WITH_MEMO.
+  category   String
+  /// P-2 rev3 item 5 (migration 20261017190000): PRIOR_PERIOD_ARREARS / COMMISSION_TRUE_UP only — the
+  /// document the amount rests on and the earlier period (YYYY-MM) it is owed for (DB CHECK).
+  documentReference String?
+  relatedPeriod     String?
+  createdBy  String
+  createdAt  DateTime     @default(now())
+
+  @@index([runId])
+}
+
+/// Recorded payment of a run. The system never moves money.
+model HrPayrollPayment {
+  id         String       @id @default(cuid())
+  runId      String
+  run        HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  amount     Decimal      @db.Decimal(18, 2)
+  paidOn     DateTime     @db.Date
+  method     String // BANK_TRANSFER | CASH | CHEQUE
+  reference  String
+  recordedBy String
+  /// P-2: a retried request with the same key returns the payment already recorded.
+  idempotencyKey String?
+  /// P-2: the payslip line this payment settles (per-employee settlement), or null for a whole-run
+  /// payment. A run is paid one way or the other, never both (DB trigger).
+  lineId     String?
+  line       HrPayrollLine? @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  createdAt  DateTime     @default(now())
+  allocations HrPayrollPaymentAllocation[]
+  returns     HrPayrollPaymentReturn[]
+  bankImports HrPayrollBankImport[]
+
+  @@unique([runId, idempotencyKey])
+  @@index([lineId])
+}
+
+/// P-2 rev3 item 4 (migration 20261017180000, D-7g): the per-employee subledger of the EOS and leave
+/// provisions. RECOGNITION (part of a POSTED journal's credit to the mapped provision account,
+/// attributed to one employee) and ADJUSTMENT are requested by one person and APPROVED by another;
+/// USAGE is written when a final settlement posts (one per settlement and provision). The employee's
+/// balance (Σ APPROVED) never goes below zero (DB, under a per-employee lock). Append-only.
+model HrProvisionLedger {
+  id             String     @id @default(cuid())
+  employeeId     String
+  employee       HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// EOS_PROVISION | LEAVE_PROVISION
+  provisionKey   String
+  /// RECOGNITION | ADJUSTMENT | USAGE
+  kind           String
+  /// Signed: + adds to the employee's provision, − uses it.
+  amount         Decimal    @db.Decimal(18, 2)
+  /// PENDING | APPROVED | REJECTED
+  status         String
+  /// JOURNAL | MANUAL | FINAL_SETTLEMENT
+  sourceType     String
+  sourceId       String?
+  journalEntryId String?
+  reference      String
+  reason         String?
+  requestedBy    String
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime   @default(now())
+
+  @@index([employeeId, provisionKey], map: "HrProvisionLedger_employee_key_idx")
+}
+
+/// P-2 rev3 item 4 (D-7g): a settlement due more than the provision it uses is NOT expensed
+/// automatically. Its shortfall blocks posting until a second person records the accountant's
+/// decision for exactly that amount. Decided once; never deleted.
+model HrProvisionShortfall {
+  id                String            @id @default(cuid())
+  settlementId      String
+  settlement        HrFinalSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  employeeId        String
+  provisionKey      String
+  amount            Decimal           @db.Decimal(18, 2)
+  /// The employee's approved provision balance when the shortfall was requested.
+  employeeBalance   Decimal           @db.Decimal(18, 2)
+  decisionReference String
+  reason            String
+  /// PENDING | APPROVED | REJECTED
+  status            String            @default("PENDING")
+  requestedBy       String
+  decidedBy         String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime          @default(now())
+}
+
+/// P-2 rev3 item 2 (migration 20261017160000): proof that ONE employee line was credited from a
+/// recorded payment — the line, the run, the payee and the bank reference of that credit. Entered
+/// by hand, implied by a per-line payment, or read from an imported bank result file. Append-only;
+/// Σ per payment ≤ the payment, Σ per line (net of returns) ≤ the line's net (DB). The bank reference
+/// is unique (case-insensitive, DB expression index) so a retry or a re-import never records a second credit.
+model HrPayrollPaymentAllocation {
+  id                String                   @id @default(cuid())
+  paymentId         String
+  payment           HrPayrollPayment         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  runId             String
+  run               HrPayrollRun             @relation(fields: [runId], references: [id], onDelete: Restrict)
+  lineId            String
+  line              HrPayrollLine            @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  employeeId        String
+  employee          HrEmployee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  amount            Decimal                  @db.Decimal(18, 2)
+  bankReference     String
+  /// The last four characters of the payee's account at the time of the credit (never the full IBAN).
+  payeeAccountLast4 String?
+  source            String // LINE_PAYMENT | MANUAL | BANK_IMPORT
+  importId          String?
+  bankImport        HrPayrollBankImport?     @relation(fields: [importId], references: [id], onDelete: Restrict)
+  idempotencyKey    String?
+  confirmedOn       DateTime                 @db.Date
+  confirmedBy       String
+  createdAt         DateTime                 @default(now())
+  returns           HrPayrollPaymentReturn[]
+
+  @@unique([runId, idempotencyKey])
+  @@index([lineId])
+  @@index([paymentId])
+}
+
+/// P-2 rev3 item 2: a credit the bank RETURNED (names the allocation; reopens the line) or a part of a
+/// bulk payment the bank REJECTED before crediting the employee. Its journal is RETURN:<id>
+/// (Dr PAYROLL_CASH / Cr SALARIES_PAYABLE). Append-only.
+model HrPayrollPaymentReturn {
+  id             String                      @id @default(cuid())
+  runId          String
+  run            HrPayrollRun                @relation(fields: [runId], references: [id], onDelete: Restrict)
+  paymentId      String
+  payment        HrPayrollPayment            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  allocationId   String?                     @unique
+  allocation     HrPayrollPaymentAllocation? @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  lineId         String
+  line           HrPayrollLine               @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  employeeId     String
+  employee       HrEmployee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  kind           String // RETURNED | REJECTED
+  amount         Decimal                     @db.Decimal(18, 2)
+  bankReference  String
+  reason         String
+  returnedOn     DateTime                    @db.Date
+  importId       String?
+  bankImport     HrPayrollBankImport?        @relation(fields: [importId], references: [id], onDelete: Restrict)
+  idempotencyKey String?
+  recordedBy     String
+  createdAt      DateTime                    @default(now())
+
+  @@unique([runId, idempotencyKey])
+  @@index([lineId])
+}
+
+/// P-2 rev3 item 2: a bank RESULT file imported against one payment (never the file the system
+/// exported). The same file (SHA-256) is imported once per run; a retry returns the first import.
+model HrPayrollBankImport {
+  id           String                       @id @default(cuid())
+  runId        String
+  run          HrPayrollRun                 @relation(fields: [runId], references: [id], onDelete: Restrict)
+  paymentId    String
+  payment      HrPayrollPayment             @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  fileName     String
+  sha256       String
+  content      String
+  rowCount     Int
+  paidRows     Int
+  returnedRows Int
+  recordedBy   String
+  createdAt    DateTime                     @default(now())
+  allocations  HrPayrollPaymentAllocation[]
+  returns      HrPayrollPaymentReturn[]
+
+  @@unique([runId, sha256])
+}
+
+/// P-2 / E-4: why a reconciliation difference exists. Append-only; never changes an amount.
+model HrPayrollReconNote {
+  id                String       @id @default(cuid())
+  runId             String
+  run               HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  lineId            String?
+  check             String
+  differenceHalalas Int
+  explanation       String
+  recordedBy        String
+  createdAt         DateTime     @default(now())
+
+  @@index([runId])
+}
+
+/// A commission period (login account + Riyadh month) reserved for payment by a run.
+/// At most one RESERVED row per (accountEmployeeId, periodStart) — partial unique index.
+model HrCommissionReservation {
+  id                String       @id @default(cuid())
+  runId             String
+  run               HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  lineId            String?
+  accountEmployeeId String
+  periodStart       DateTime
+  amount            Decimal      @db.Decimal(18, 2)
+  status            String       @default("RESERVED") // RESERVED | SETTLED | RELEASED
+  ledgerEntryId     String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([accountEmployeeId, periodStart])
+}
+
+// ── Advances ────────────────────────────────────────────────────────────────────────
+
+enum HrAdvanceStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  DISBURSED
+  CLOSED
+  CANCELLED
+}
+
+model HrAdvance {
+  id                    String                 @id @default(cuid())
+  advanceNo             String                 @unique
+  employeeId            String
+  employee              HrEmployee             @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  amount                Decimal                @db.Decimal(18, 2)
+  installmentCount      Int
+  firstInstallmentMonth String
+  reason                String
+  status                HrAdvanceStatus        @default(REQUESTED)
+  requestedBy           String
+  createdAt             DateTime               @default(now())
+  decidedBy             String?
+  decidedAt             DateTime?
+  decisionNote          String?
+  disbursedBy           String?
+  disbursedAt           DateTime?
+  disbursedOn           DateTime?              @db.Date
+  disbursementRef       String?
+  closedBy              String?
+  closedAt              DateTime?
+  cancelReason          String?
+  installments          HrAdvanceInstallment[]
+  repayments            HrAdvanceRepayment[]
+  recoveryRequests      HrAdvanceRecoveryRequest[]
+  reviewItems           HrAdvanceReviewItem[]
+
+  @@index([employeeId, status])
+}
+
+/// SCHEDULED → RESERVED (by exactly one run) → SETTLED (when that run is paid).
+/// A cancelled run returns it to SCHEDULED. COVERED = paid off by a manual repayment.
+/// P-2: RESCHEDULED = replaced by an approved reschedule (history, never changes);
+/// HELD = taken out of payroll by an approved collection procedure (still owed; a repayment covers it).
+model HrAdvanceInstallment {
+  id                String    @id @default(cuid())
+  advanceId         String
+  advance           HrAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+  seq               Int
+  dueMonth          String
+  amount            Decimal   @db.Decimal(18, 2)
+  status            String    @default("SCHEDULED") // SCHEDULED | RESERVED | SETTLED | COVERED | RESCHEDULED | HELD
+  /// The approved recovery request that created, replaced or held this installment.
+  recoveryRequestId String?
+  payrollRunId  String?
+  payrollLineId String?
+  settledAt     DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([advanceId, seq])
+  @@index([status, dueMonth])
+}
+
+model HrAdvanceRepayment {
+  id         String    @id @default(cuid())
+  advanceId  String
+  advance    HrAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+  amount     Decimal   @db.Decimal(18, 2)
+  paidOn     DateTime  @db.Date
+  method     String
+  reference  String
+  recordedBy String
+  createdAt  DateTime  @default(now())
+}
+
+// ── P-2 settlements (migration 20261017100000_hr_p2_settlements) ───────────────────────────
+// Controls only: no compensation formula, cap value or statutory rate is defined here.
+
+/// A second-person procedure for an advance that payroll keeps deferring (P-2 finding 2):
+/// RESCHEDULE the remaining installments, or COLLECTION (take them out of payroll and collect
+/// them by an agreed method). Never a write-off. PENDING → APPLIED | REJECTED (another person)
+/// | WITHDRAWN (requester). DB: four eyes; one PENDING per advance; content immutable; no delete.
+model HrAdvanceRecoveryRequest {
+  id           String    @id @default(cuid())
+  advanceId    String
+  advance      HrAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+  /// RESCHEDULE | COLLECTION
+  kind         String
+  payload      Json
+  /// Outstanding balance and remaining schedule when requested; approval is refused if they changed.
+  before       Json
+  fingerprint  String
+  reason       String
+  status       String    @default("PENDING") // PENDING | APPLIED | REJECTED | WITHDRAWN
+  requestedBy  String
+  requestedAt  DateTime  @default(now())
+  decidedBy    String?
+  decidedAt    DateTime?
+  decisionNote String?
+
+  @@index([advanceId, status])
+}
+
+/// Raised when an advance's installments have been deferred by payroll N times (N =
+/// policy advanceDeferralEscalateAfter). OPEN until a recovery request is applied or a
+/// reviewer records why none is needed. One OPEN item per advance; never deleted.
+model HrAdvanceReviewItem {
+  id                String    @id @default(cuid())
+  advanceId         String
+  advance           HrAdvance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+  reason            String // DEFERRAL_ESCALATION
+  deferralCount     Int
+  threshold         Int
+  outstanding       Decimal   @db.Decimal(18, 2)
+  status            String    @default("OPEN") // OPEN | RESOLVED
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  resolvedBy        String?
+  resolvedAt        DateTime?
+  resolutionNote    String?
+  recoveryRequestId String?
+
+  @@index([advanceId, status])
+}
+
+/// A GOSI invoice as received, per period (P-2 finding 4). Entered by hand or imported from
+/// CSV; never edited — a wrong one is VOIDed (with a reason) and entered again.
+model HrGosiInvoice {
+  id            String              @id @default(cuid())
+  periodMonth   String
+  /// GOSI invoice number. Unique among live invoices; never reused for another month (DB).
+  reference     String
+  source        String // MANUAL | CSV
+  status        String              @default("ACTIVE") // ACTIVE | VOID
+  totalEmployee Decimal             @db.Decimal(18, 2)
+  totalEmployer Decimal             @db.Decimal(18, 2)
+  notes         String?
+  enteredBy     String
+  enteredAt     DateTime            @default(now())
+  voidedBy      String?
+  voidedAt      DateTime?
+  voidReason    String?
+  // ── P-2 review P2-B4 (migration 20261017130000): lifecycle and source file ──
+  /// ENTERED → RECONCILED (every difference explained) → APPROVED (second person) → PAID (bank
+  /// reference + payment journal) → CLOSED (every decision resolved). VOID only before APPROVED.
+  stage                 String    @default("ENTERED")
+  reconciledBy          String?
+  reconciledAt          DateTime?
+  reconcileDigest       String?
+  approvedBy            String?
+  approvedAt            DateTime?
+  approvalNote          String?
+  paidBy                String?
+  paidAt                DateTime?
+  paidOn                DateTime? @db.Date
+  paidAmount            Decimal?  @db.Decimal(18, 2)
+  paymentReference      String?
+  paymentJournalEntryId String?   @unique
+  closedBy              String?
+  closedAt              DateTime?
+  /// A void is requested by one person and decided by another.
+  voidRequestedBy       String?
+  voidRequestedAt       DateTime?
+  voidRequestReason     String?
+  /// The source as received: file name, SHA-256 and (CSV text) content.
+  sourceFileName        String?
+  sourceFileSha256      String?
+  sourceContent         String?
+  lines         HrGosiInvoiceLine[]
+  settlements   HrGosiSettlement[]
+  /// P-2 rev3 item 3: what was actually paid to GOSI (bank reality), one row per transfer.
+  payments      HrGosiInvoicePayment[]
+
+  @@index([periodMonth, status])
+}
+
+/// P-2 rev3 item 3 (migration 20261017170000): an amount actually paid to GOSI for an invoice, with
+/// its bank reference (unique) and its journal PAYMENT:<id>. Σ never above the invoice total; the
+/// invoice is PAID when Σ = total — whatever the state of its differences. Append-only.
+model HrGosiInvoicePayment {
+  id             String        @id @default(cuid())
+  invoiceId      String
+  invoice        HrGosiInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount         Decimal       @db.Decimal(18, 2)
+  paidOn         DateTime      @db.Date
+  bankReference  String
+  idempotencyKey String
+  recordedBy     String
+  createdAt      DateTime      @default(now())
+
+  @@unique([invoiceId, idempotencyKey])
+}
+
+/// P-2 rev3 item 3: the D-4h matrix — one row per case (nine, seeded DISABLED with no keys). A case is
+/// enabled only by an applied two-person GOSI_TREATMENT_SET change naming both keys and the
+/// accountant's decision reference (DB CHECK + guard). Rows are never added or removed.
+model HrGosiTreatment {
+  caseCode          String    @id
+  /// Whether the case ever books an entry (5 and 6 never do).
+  posting           Boolean
+  enabled           Boolean   @default(false)
+  debitKey          String?
+  creditKey         String?
+  decisionReference String?
+  requestedBy       String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  configChangeId    String?
+  updatedAt         DateTime  @default(now())
+}
+
+/// One person's share on the invoice. Append-only.
+model HrGosiInvoiceLine {
+  id               String        @id @default(cuid())
+  invoiceId        String
+  invoice          HrGosiInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  employeeId       String
+  employee         HrEmployee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// EMPLOYEE | EMPLOYER
+  share            String
+  /// P-2 review P2-B4: subscriber scheme / category (matched to the person's contribution group)
+  /// and branch (matched to the contribution rule code). "UNSPECIFIED" on lines from before.
+  scheme           String
+  branch           String
+  amount           Decimal       @db.Decimal(18, 2)
+  contributoryWage Decimal?      @db.Decimal(18, 2)
+  days             Int?
+  sourceRow        Int?
+
+  @@unique([invoiceId, employeeId, scheme, branch, share])
+}
+
+/// A difference between the invoice and payroll for one person and share, with its
+/// explanation and settlement action. Proposed by one person, decided by another. Approval
+/// creates an HrGosiAdjustment; approved payroll is never edited.
+model HrGosiSettlement {
+  id               String            @id @default(cuid())
+  invoiceId        String
+  invoice          HrGosiInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  periodMonth      String
+  employeeId       String
+  employee         HrEmployee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  share            String
+  /// P-2 review P2-B4: part of the matching key.
+  scheme           String
+  branch           String
+  /// MISSING_IN_PAYROLL | MISSING_IN_INVOICE | WAGE_MISMATCH | DAYS_MISMATCH | RATE_MISMATCH | CATEGORY_MISMATCH | ROUNDING | AMOUNT_MISMATCH
+  differenceType   String?
+  invoiceAmount    Decimal           @db.Decimal(18, 2)
+  payrollAmount    Decimal           @db.Decimal(18, 2)
+  priorAdjustments Decimal           @db.Decimal(18, 2)
+  difference       Decimal           @db.Decimal(18, 2)
+  explanation      String
+  /// EMPLOYER_EXPENSE | PAYROLL_CORRECTION | INVOICE_DISPUTE | NO_ADJUSTMENT | EMPLOYEE_RECEIVABLE | EMPLOYEE_REFUND
+  action           String
+  /// P-2 rev3 item 3: the D-4h case (src/lib/hr/gosi-treatments.ts). Null on decisions from before.
+  treatmentCase    String?
+  fingerprint      String
+  status           String            @default("PENDING") // PENDING | APPROVED | REJECTED | WITHDRAWN
+  proposedBy       String
+  proposedAt       DateTime          @default(now())
+  decidedBy        String?
+  decidedAt        DateTime?
+  decisionNote     String?
+  adjustment       HrGosiAdjustment?
+  resolution       HrGosiResolution?
+
+  @@index([periodMonth, employeeId, share])
+}
+
+/// P-2 review P2-B4: how an APPROVED settlement that is not borne by the employer was resolved.
+/// PAYROLL_CORRECTION → the correction run; INVOICE_DISPUTE / NO_ADJUSTMENT → the outcome and its
+/// reference. Until then the decision stays OPEN and the difference is NOT zeroed. Append-only.
+model HrGosiResolution {
+  id              String           @id @default(cuid())
+  settlementId    String           @unique
+  settlement      HrGosiSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  outcome         String
+  correctionRunId String?
+  reference       String
+  note            String?
+  resolvedBy      String
+  createdAt       DateTime         @default(now())
+}
+
+/// The explicit record an approved GOSI settlement creates. Append-only.
+model HrGosiAdjustment {
+  id             String           @id @default(cuid())
+  settlementId   String           @unique
+  settlement     HrGosiSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  periodMonth    String
+  employeeId     String
+  employee       HrEmployee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  share          String
+  scheme         String
+  branch         String
+  amount         Decimal          @db.Decimal(18, 2)
+  action         String
+  journalEntryId String?
+  /// P-2 rev3 item 3: the enabled case it was booked under and the keys it posted with (null before).
+  treatmentCase  String?
+  debitKey       String?
+  creditKey      String?
+  createdBy      String
+  createdAt      DateTime         @default(now())
+
+  @@index([periodMonth, employeeId])
+}
+
+// ── Assets, training, performance, incidents ────────────────────────────────────────
+
+model HrAsset {
+  id          String              @id @default(cuid())
+  tag         String              @unique
+  name        String
+  category    String
+  serialNo    String?
+  status      String              @default("AVAILABLE") // AVAILABLE | ASSIGNED | RETIRED
+  notes       String?
+  createdAt   DateTime            @default(now())
+  createdBy   String?
+  assignments HrAssetAssignment[]
+}
+
+/// At most one open assignment per asset (partial unique index on returnedOn IS NULL).
+model HrAssetAssignment {
+  id           String     @id @default(cuid())
+  assetId      String
+  asset        HrAsset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  employeeId   String
+  employee     HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  assignedOn   DateTime   @db.Date
+  conditionOut String?
+  assignedBy   String
+  returnedOn   DateTime?  @db.Date
+  conditionIn  String?
+  returnedBy   String?
+  createdAt    DateTime   @default(now())
+
+  @@index([employeeId])
+}
+
+model HrTraining {
+  id         String     @id @default(cuid())
+  employeeId String
+  employee   HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  title      String
+  provider   String?
+  startDate  DateTime   @db.Date
+  endDate    DateTime?  @db.Date
+  status     String     @default("PLANNED") // PLANNED | COMPLETED | CANCELLED
+  notes      String?
+  createdBy  String
+  createdAt  DateTime   @default(now())
+}
+
+model HrReview {
+  id                String     @id @default(cuid())
+  employeeId        String
+  employee          HrEmployee @relation("HrReviewSubject", fields: [employeeId], references: [id], onDelete: Restrict)
+  periodLabel       String
+  /// Login account of the reviewer; never the subject's own login.
+  reviewerAccountId String
+  rating            Int
+  strengths         String?
+  improvements      String?
+  status            String     @default("DRAFT") // DRAFT | SUBMITTED | ACKNOWLEDGED
+  createdAt         DateTime   @default(now())
+  submittedAt       DateTime?
+  acknowledgedAt    DateTime?
+}
+
+model HrIncident {
+  id           String     @id @default(cuid())
+  employeeId   String
+  employee     HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  occurredOn   DateTime   @db.Date
+  category     String // WARNING | MISCONDUCT | SAFETY | ATTENDANCE | OTHER
+  description  String
+  actionTaken  String?
+  confidential Boolean    @default(true)
+  recordedBy   String
+  createdAt    DateTime   @default(now())
+}
+
+// ── Recruitment ─────────────────────────────────────────────────────────────────────
+
+model HrJobOpening {
+  id           String        @id @default(cuid())
+  code         String        @unique
+  title        String
+  departmentId String?
+  department   HrDepartment? @relation(fields: [departmentId], references: [id])
+  branchId     String?
+  branch       FinBranch?    @relation("HrJobOpeningBranch", fields: [branchId], references: [id])
+  openings     Int           @default(1)
+  status       String        @default("OPEN") // OPEN | ON_HOLD | CLOSED
+  createdBy    String
+  createdAt    DateTime      @default(now())
+  applicants   HrApplicant[]
+}
+
+enum HrApplicantStage {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+model HrApplicant {
+  id              String           @id @default(cuid())
+  applicantNo     String           @unique
+  openingId       String?
+  opening         HrJobOpening?    @relation(fields: [openingId], references: [id])
+  fullName        String
+  email           String?
+  phone           String?
+  source          String?
+  stage           HrApplicantStage @default(APPLIED)
+  notes           String?
+  /// Set once by conversion. Unique: an applicant becomes at most one person.
+  hiredEmployeeId String?          @unique
+  hiredEmployee   HrEmployee?      @relation("HrApplicantHire", fields: [hiredEmployeeId], references: [id])
+  createdBy       String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  interviews      HrInterview[]
+  offers          HrOffer[]
+}
+
+model HrInterview {
+  id                   String      @id @default(cuid())
+  applicantId          String
+  applicant            HrApplicant @relation(fields: [applicantId], references: [id], onDelete: Restrict)
+  scheduledAt          DateTime
+  kind                 String
+  interviewerAccountId String?
+  outcome              String      @default("PENDING") // PENDING | PASS | FAIL | NO_SHOW
+  notes                String?
+  createdBy            String
+  createdAt            DateTime    @default(now())
+}
+
+model HrOffer {
+  id             String         @id @default(cuid())
+  applicantId    String
+  applicant      HrApplicant    @relation(fields: [applicantId], references: [id], onDelete: Restrict)
+  jobTitle       String
+  basic          Decimal        @db.Decimal(18, 2)
+  housing        Decimal        @default(0) @db.Decimal(18, 2)
+  transport      Decimal        @default(0) @db.Decimal(18, 2)
+  otherAllowance Decimal        @default(0) @db.Decimal(18, 2)
+  startDate      DateTime       @db.Date
+  contractType   HrContractType
+  contractMonths Int?
+  probationDays  Int?
+  noticeDays     Int            @default(30)
+  status         String         @default("DRAFT") // DRAFT | SENT | ACCEPTED | DECLINED | WITHDRAWN
+  createdBy      String
+  createdAt      DateTime       @default(now())
+  decidedAt      DateTime?
+}
+
+// ── Offboarding ─────────────────────────────────────────────────────────────────────
+
+model HrSeparation {
+  id                  String     @id @default(cuid())
+  employeeId          String
+  employee            HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  type                String // RESIGNATION | TERMINATION | END_OF_CONTRACT | OTHER
+  noticeDate          DateTime   @db.Date
+  lastWorkingDay      DateTime   @db.Date
+  reason              String
+  status              String     @default("INITIATED") // INITIATED | COMPLETED | CANCELLED
+  /// Entered, never computed: no end-of-service formula ships until it is approved.
+  eosAmount           Decimal?   @db.Decimal(18, 2)
+  eosBasisNote        String?
+  leaveEncashmentDays Decimal?   @db.Decimal(6, 2)
+  otherSettlement     Decimal?   @db.Decimal(18, 2)
+  settlementNotes     String?
+  finalSettlements    HrFinalSettlement[]
+  deactivateAccount   Boolean    @default(true)
+  initiatedBy         String
+  createdAt           DateTime   @default(now())
+  completedBy         String?
+  completedAt         DateTime?
+  cancelledBy         String?
+  cancelledAt         DateTime?
+
+  @@index([employeeId, status])
+}
+
+/// End-of-service and leave-encashment FINANCIAL settlement (P-2 finding 8, E-7). Interim
+/// manual procedure: the amounts are calculated by hand outside the system and evidenced here;
+/// no formula is automated. Separate from ending the employment (HrSeparation).
+///   DRAFT → CALCULATED (inputs, method, worksheet document) → REVIEWED (independent person,
+///   attested) → APPROVED → POSTED (journal entry) → PAID (proof document) → CLOSED;
+///   DRAFT…APPROVED → CANCELLED. CALCULATED → DRAFT when the reviewer returns it.
+/// DB: evidence per status (CHECKs), forward-only transitions, evidence frozen once reviewed, no delete.
+model HrFinalSettlement {
+  id                     String       @id @default(cuid())
+  settlementNo           String       @unique
+  separationId           String
+  separation             HrSeparation @relation(fields: [separationId], references: [id], onDelete: Restrict)
+  employeeId             String
+  employee               HrEmployee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  status                 String       @default("DRAFT")
+  preparedBy             String
+  createdAt              DateTime     @default(now())
+  // CALCULATED (manual)
+  eosAmount              Decimal?     @db.Decimal(18, 2)
+  leaveEncashmentDays    Decimal?     @db.Decimal(6, 2)
+  leaveEncashmentAmount  Decimal?     @db.Decimal(18, 2)
+  totalAmount            Decimal?     @db.Decimal(18, 2)
+  /// Service dates, wage used, separation type, days… exactly as the preparer used them.
+  calcInputs             Json?
+  calcMethodNote         String?
+  calcReference          String?
+  calcDocumentId         String?
+  calcDocument           HrDocument?  @relation("HrSettlementCalcDoc", fields: [calcDocumentId], references: [id], onDelete: Restrict)
+  /// A recognised liability (provision) the settlement is booked against, if one exists.
+  eosProvisionAmount     Decimal?     @db.Decimal(18, 2)
+  leaveProvisionAmount   Decimal?     @db.Decimal(18, 2)
+  provisionReference     String?
+  calculatedBy           String?
+  calculatedAt           DateTime?
+  // REVIEWED
+  reviewedBy             String?
+  reviewedAt             DateTime?
+  reviewAttestation      String?
+  // APPROVED
+  approvedBy             String?
+  approvedAt             DateTime?
+  approvalNote           String?
+  // POSTED
+  postingMode            String? // SYSTEM | MANUAL
+  journalEntryId         String?      @unique
+  postedBy               String?
+  postedAt               DateTime?
+  // PAID
+  paidAmount             Decimal?     @db.Decimal(18, 2)
+  paidOn                 DateTime?    @db.Date
+  paymentReference       String?
+  paymentProofDocumentId String?
+  paymentProofDocument   HrDocument?  @relation("HrSettlementProofDoc", fields: [paymentProofDocumentId], references: [id], onDelete: Restrict)
+  paymentJournalEntryId  String?      @unique
+  paidBy                 String?
+  paidAt                 DateTime?
+  // CLOSED / CANCELLED
+  closedBy               String?
+  closedAt               DateTime?
+  closingNote            String?
+  cancelledBy            String?
+  cancelledAt            DateTime?
+  cancelReason           String?
+  /// P-2 rev3 item 4 (D-7g): decisions on a shortfall of the employee's own provision.
+  provisionShortfalls    HrProvisionShortfall[]
+
+  @@index([employeeId, status])
+  @@index([separationId])
+}
+
+// ── Audit ───────────────────────────────────────────────────────────────────────────
+
+/// Append-only (trigger). Every HR write and every read of private data or documents.
+model HrAuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String
+  employeeId String?
+  before     Json?
+  after      Json?
+  reason     String?
+  actorId    String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([employeeId, createdAt])
+  @@index([createdAt])
+}
+
+// ── Printing (G-20 / G-21 Universal Printing System, owner decisions A-1…A-8, B-1…B-10) ─────
+// Additive. Geometry in millimetres; ranges enforced by CHECK constraints in the migration
+// (20261016150000_print_system) and by src/lib/print/profiles.ts. See erp/docs/print/PRINT-SYSTEM.md.
+
+/// A paper / label stock profile. Presets (isPreset, presetKey) are read-only starting points.
+model PrintProfile {
+  id               String                @id @default(cuid())
+  name             String
+  /// A4_PLAIN | A4_SHEET | THERMAL_ROLL | CUSTOM
+  kind             String
+  paperWidthMm     Float
+  paperHeightMm    Float
+  labelWidthMm     Float
+  labelHeightMm    Float
+  marginTopMm      Float                 @default(0)
+  marginLeftMm     Float                 @default(0)
+  marginRightMm    Float                 @default(0)
+  marginBottomMm   Float                 @default(0)
+  gapXMm           Float                 @default(0)
+  gapYMm           Float                 @default(0)
+  columns          Int                   @default(1)
+  rows             Int                   @default(1)
+  /// PORTRAIT | LANDSCAPE
+  orientation      String                @default("PORTRAIT")
+  scalePct         Int                   @default(100)
+  dpi              Int                   @default(203)
+  offsetXMm        Float                 @default(0)
+  offsetYMm        Float                 @default(0)
+  defaultStartSlot Int                   @default(1)
+  defaultCopies    Int                   @default(1)
+  isPreset         Boolean               @default(false)
+  presetKey        String?               @unique
+  /// Employee.id, denormalized — no FK, so the profile survives the employee row.
+  ownerId          String?
+  ownerName        String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  templatePresets  PrintTemplatePreset[]
+
+  @@index([isPreset])
+}
+
+/// A saved label-content configuration for one template (fields shown and their order, language).
+model PrintTemplatePreset {
+  id            String        @id @default(cuid())
+  name          String
+  /// COFFEE_ORIGIN | CUPPING_RESULTS
+  templateKey   String
+  /// AR | EN | BI
+  language      String
+  /// [{ key, show }] in print order
+  fields        Json
+  /// null = by label size (3 per language bilingual, 2 single-language, 2 on 50 × 30, 6 on A4 plain)
+  notesMaxLines Int?
+  showLogo      Boolean       @default(true)
+  /// Owner decision 2.1: named scorer attribution needs the labels.cupping_named_scorers
+  /// permission AND this privacy confirmation on the preset (who confirmed, when). Null = anonymous.
+  namedScorersConfirmedAt   DateTime?
+  namedScorersConfirmedById String?
+  profileId     String?
+  profile       PrintProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  ownerId       String?
+  ownerName     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([templateKey])
+}
+
+/// Singleton. Administrator-configurable print job cap (orchestrator decision: default 200 labels
+/// per job; enforced by the server; CHECK 1–2000, the hard engine ceiling).
+model PrintSettings {
+  id              String   @id @default("singleton")
+  maxLabelsPerJob Int      @default(200)
+  updatedById     String?
+  updatedAt       DateTime @updatedAt
+}
+
+/// Append-only (DB trigger). Authorized print jobs and profile / preset changes. References and
+/// counts only — never scores, notes or label text.
+model PrintAuditLog {
+  id          String   @id @default(cuid())
+  /// PRINT_JOB | PROFILE_CREATED | PROFILE_UPDATED | PROFILE_DELETED | PRESET_CREATED | PRESET_UPDATED | PRESET_DELETED | SETTINGS_UPDATED
+  action      String
+  actorId     String?
+  actorName   String?
+  templateKey String?
+  language    String?
+  profileId   String?
+  profileName String?
+  /// Geometry snapshot of the profile used.
+  profile     Json?
+  /// [{ kind, id, copies }]
+  items       Json?
+  itemCount   Int      @default(0)
+  copiesTotal Int      @default(0)
+  totalLabels Int      @default(0)
+  totalPages  Int      @default(0)
+  startSlot   Int?
+  warnings    Json?
+  entityId    String?
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { Decimal } from "@/lib/services/commissions/engine";
+import { Decimal, parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import { createPlan, type TierInput, type VersionInput } from "@/lib/services/commissions/plans";
 
 /**
@@ -54,12 +54,11 @@ export async function GET() {
  * a float is a rate that is already approximate before any arithmetic has happened.
  */
 function parseVersion(b: Record<string, unknown>): VersionInput {
+  // Finite decimals only: a NaN rate or bound passes every range check and is stored as NaN.
   const dec = (v: unknown, field: string): Decimal => {
-    try {
-      return new Decimal(String(v));
-    } catch {
-      throw { _appCode: 400, message: `${field} is not a number.` };
-    }
+    const d = parseFiniteDecimal(v);
+    if (!d) throw { _appCode: 400, message: `${field} is not a number.` };
+    return d;
   };
 
   const effectiveFrom = new Date(String(b.effectiveFrom ?? ""));

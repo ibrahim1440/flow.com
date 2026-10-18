@@ -54,7 +54,10 @@ export async function GET(request: Request) {
     };
 
     const where =
-      filter === "overdue"
+      // «متأخرة واليوم» (`crm-followups`): everything open that is due by the end of today.
+      filter === "due"
+        ? { ...base, completedAt: null, dueAt: { lte: endOfRiyadhToday } }
+        : filter === "overdue"
         ? { ...base, completedAt: null, dueAt: { lt: now } }
         : filter === "today"
           ? { ...base, completedAt: null, dueAt: { gte: now, lte: endOfRiyadhToday } }
@@ -67,11 +70,14 @@ export async function GET(request: Request) {
     const [rows, total, overdue, dueToday, open] = await Promise.all([
       prisma.activity.findMany({
         where,
-        orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
+        // `sort=recent`: the latest completed first, for the «آخر النشاط» feed.
+        orderBy: url.searchParams.get("sort") === "recent"
+          ? [{ completedAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }]
+          : [{ dueAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
         skip: (page - 1) * perPage,
         take: perPage,
         select: {
-          id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true,
+          id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true, outcome: true,
           createdAt: true,
           owner: { select: { id: true, name: true } },
           lead: { select: { id: true, companyName: true, status: true } },

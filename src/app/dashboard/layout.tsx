@@ -9,6 +9,13 @@ import { routeAllowed, type Viewer } from "@/lib/nav/registry";
 import { SidebarNav, ContextualNav, Breadcrumbs, useDrawerFocus } from "./_components/Nav";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
 import { UserContext, useLogo, type User } from "./user-context";
+import { AppShell } from "@/components/shell/AppShell";
+import { usesDirection21 } from "@/components/shell/routes";
+import { LegacyFonts } from "@/components/LegacyFonts";
+import { StepUpProvider } from "@/components/auth/StepUp";
+import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
+import { SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
+import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 
 /**
  * The menu now lives in one registry — see `@/lib/nav/registry`.
@@ -73,8 +80,31 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
     router.push("/login");
   }
 
+  // Routes whose screens are already Direction 2.1 (HR, self-service and the rebuilt CRM
+  // routes — one list, `@/components/shell/routes`) get the approved Direction 2.1 shell:
+  // same registry, same route guard, same session; only the presentation differs.
+  if (usesDirection21(pathname)) {
+    return (
+      <AppShell
+        user={user}
+        viewer={viewer}
+        lang={lang}
+        logo={logoBase64}
+        allowed={allowed}
+        onLogout={handleLogout}
+        deniedTitle={t("accessDeniedTitle")}
+        deniedBody={t("accessDeniedBody")}
+        homeLabel={t("dashboard")}
+      >
+        <DesktopRecommendedNotice lang={lang} />
+        {children}
+      </AppShell>
+    );
+  }
+
   return (
     <div className="h-screen overflow-hidden flex bg-cream">
+      <LegacyFonts />
       {sidebarOpen && (
         <div
           className="fixed inset-x-0 top-0 h-[100dvh] bg-black/40 z-40 lg:hidden"
@@ -181,6 +211,7 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
         {allowed && <ContextualNav viewer={viewer} lang={lang} />}
 
         <main className="flex-1 overflow-y-auto p-5 lg:p-7">
+          <DesktopRecommendedNotice lang={lang} />
           {allowed ? (
             children
           ) : (
@@ -213,14 +244,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/auth/me").then((r) => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetch("/api/auth/me").then(async (r) => {
+        if (!r.ok) throw new Error(r.status === 401 && (await r.json().catch(() => null))?.code === "SESSION_ENDED" ? "ended" : "failed");
+        return r.json();
+      }),
       fetch("/api/settings/logo").then((r) => r.json()).catch(() => ({ logoBase64: null })),
     ])
       .then(([meData, logoData]) => {
         setUser(meData.user);
         setLogoBase64(logoData.logoBase64 ?? null);
       })
-      .catch(() => router.push("/login"))
+      // A cookie that no longer names a live session (idle 4 h, absolute 12 h, logout,
+      // revocation — SESSION_ENDED): the sign-in screen says so in both languages. No cookie
+      // at all: the plain sign-in screen.
+      .catch((e: Error) => { if (e.message === "ended") window.location.replace(SESSION_EXPIRED_LOGIN); else router.push("/login"); })
       .finally(() => setLoading(false));
   }, [router]);
 
@@ -240,7 +277,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <UserContext value={{ user, logoBase64 }}>
       <LanguageProvider lang={user.preferredLanguage ?? "ar"}>
-        <DashboardShell user={user}>{children}</DashboardShell>
+        <StepUpProvider lang={user.preferredLanguage === "en" ? "en" : "ar"} privileged={!!user.privileged}>
+          {user.mfaEnrollmentRequired ? (
+            // AUTH_MFA_MODE=required: a privileged account without two-step verification may only enroll.
+            <div dir={user.preferredLanguage === "en" ? "ltr" : "rtl"} className="min-h-screen bg-cream flex items-start sm:items-center justify-center p-4">
+              <div className="w-full max-w-xl" data-testid="mfa-required-screen">
+                <MfaEnrollment lang={user.preferredLanguage === "en" ? "en" : "ar"} onEnrolled={() => window.location.reload()} />
+                <button type="button" onClick={async () => { await fetch("/api/auth/me", { method: "DELETE" }); window.location.href = "/login"; }} className="mt-3 text-sm text-brown/70 hover:text-orange">{user.preferredLanguage === "en" ? "Sign out" : "تسجيل الخروج"}</button>
+              </div>
+            </div>
+          ) : (
+            <DashboardShell user={user}>{children}</DashboardShell>
+          )}
+        </StepUpProvider>
       </LanguageProvider>
     </UserContext>
   );

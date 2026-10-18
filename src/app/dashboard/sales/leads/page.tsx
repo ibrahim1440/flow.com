@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { AlertTriangle, UserPlus, Users2, X, Upload, Download, Trash2, CircleDashed } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle, X, Download, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 
-import {
-  LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, DataTable, Toolbar,
-  SearchField, FilterSelect, formatWhen, num,
-} from "../_components/ui";
+import { LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, Spinner, FocusDialog } from "../_components/ui";
+import { Ico } from "@/components/shell/icons";
+import { usePhone, useD21Phone } from "@/components/shell/page-context";
+import { initials } from "@/components/d21/labels";
+import { dueText, shortDate, dayCount, daysFromToday } from "@/components/d21/format";
+import { LeadPane } from "./LeadPane";
 import { useUnsavedGuard, isDirtyAgainst } from "../../_components/useUnsavedGuard";
 import ImportDialog from "./ImportDialog";
 
@@ -65,81 +68,54 @@ const STATUS_LABELS = LEAD_STATUS_SPECS;
  * logging, one with no commitment needs a date, and anything else is ready to convert. The
  * two follow-up actions navigate to the lead, which is where the forms that perform them
  * live — the list does not grow its own copies of them.
+ *
+ * Direction 2.1 draws every row action as the same compact outlined control (`ui-row-action`):
+ * a column of filled buttons would make each row shout, and the reader is scanning, not acting.
  */
 function RowAction({
-  lead, lang, canConvert, converting, onConvert, isOverdue, hasNoCommitment, full,
+  lead, lang, canConvert, converting, onConvert, isOverdue, hasNoCommitment,
 }: {
   lead: Lead; lang: "ar" | "en"; canConvert: boolean; converting: string | null;
-  onConvert: () => void; isOverdue: boolean; hasNoCommitment: boolean; full?: boolean;
+  onConvert: () => void; isOverdue: boolean; hasNoCommitment: boolean;
 }) {
   const ar = lang === "ar";
-  const base = `${full ? "w-full justify-center " : ""}inline-flex items-center whitespace-nowrap rounded-lg px-3 py-[7px] text-[12px] leading-[18px] transition-colors`;
-  const outline = `${base} border border-oo-border-strong bg-oo-bg-default`;
-
   if (lead.conversion) {
-    // Still a link to the customer it became — the design shows this slot as non-actionable,
-    // but removing the only route to the converted customer would lose real functionality.
-    return (
-      <a href="/dashboard/customers" className={`${outline} text-oo-text-muted hover:text-oo-action-primary`}>
-        {ar ? "محوَّل — لا إجراء" : "Converted — no action"}
-      </a>
-    );
+    // Still a link to the customer it became — removing the only route to the converted
+    // customer would lose real functionality.
+    return <a href="/dashboard/customers" className="btn sm g">{ar ? "محوَّل — لا إجراء" : "Converted — no action"}</a>;
   }
   if (lead.status === "UNQUALIFIED") {
-    return (
-      <span className={`${outline} text-oo-text-muted`}>
-        {ar ? "غير مؤهَّل — لا تحويل" : "Unqualified — no convert"}
-      </span>
-    );
+    return <span className="sm" style={{ whiteSpace: "nowrap" }}>{ar ? "غير مؤهَّل — لا تحويل" : "Unqualified — no convert"}</span>;
   }
   if (isOverdue) {
-    return (
-      <Link href={`/dashboard/sales/leads/${lead.id}`} className={`${outline} text-oo-action-primary hover:border-oo-action-primary`}>
-        {ar ? "تسجيل متابعة" : "Log a follow-up"}
-      </Link>
-    );
+    return <Link href={`/dashboard/sales/leads/${lead.id}`} className="btn sm">{ar ? "تسجيل متابعة" : "Log follow-up"}</Link>;
   }
   if (hasNoCommitment) {
-    return (
-      <Link href={`/dashboard/sales/leads/${lead.id}`} className={`${outline} text-oo-action-primary hover:border-oo-action-primary`}>
-        {ar ? "تحديد موعد متابعة" : "Schedule a follow-up"}
-      </Link>
-    );
+    return <Link href={`/dashboard/sales/leads/${lead.id}`} className="btn sm">{ar ? "جدولة" : "Schedule"}</Link>;
   }
   if (!canConvert) {
-    return (
-      <Link href={`/dashboard/sales/leads/${lead.id}`} className={`${outline} text-oo-action-primary hover:border-oo-action-primary`}>
-        {ar ? "فتح السجل" : "Open the lead"}
-      </Link>
-    );
+    return <Link href={`/dashboard/sales/leads/${lead.id}`} className="btn sm">{ar ? "فتح السجل" : "Open"}</Link>;
   }
   return (
-    <button
-      onClick={onConvert}
-      disabled={converting === lead.id}
-      data-testid={`convert-lead-${lead.id}`}
-      className={`${base} bg-oo-action-primary text-white hover:bg-oo-action-primary-hover disabled:opacity-50`}
-    >
-      {converting === lead.id ? "…" : ar ? "تحويل إلى عميل" : "Convert to customer"}
+    <button type="button" onClick={onConvert} disabled={converting !== null} aria-busy={converting === lead.id || undefined}
+      data-testid={`convert-lead-${lead.id}`} className="btn sm">
+      {converting === lead.id ? (ar ? "جارٍ التحويل…" : "Converting…") : ar ? "تحويل" : "Convert"}
     </button>
   );
 }
 
-/** A key/value line for the narrow layout, mirroring one table column. */
-function KV({ k, v, ltr }: { k: string; v: string; ltr?: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-[12px] leading-[18px] text-oo-text-muted">{k}</span>
-      <span
-        className="text-[14px] leading-[22px] text-oo-text-primary"
-        dir={ltr ? "ltr" : undefined}
-        style={ltr ? { textAlign: "start" } : undefined}
-      >
-        {v}
-      </span>
-    </div>
-  );
-}
+/** The page size the API is asked for. The API caps it at 100 and defaults to 25. */
+const PER_PAGE = 25;
+
+/** The tabs of `crm-leads`: the open ones (new, contacted, qualified) and the closed ones
+    (unqualified, converted) as groups, the three open statuses on their own. Counts are the
+    server's, over everything the search and owner filter match. */
+const STATUS_TABS = ["OPEN", "NEW", "CONTACTED", "QUALIFIED", "CLOSED"] as const;
+const TAB_LABELS: Record<string, { ar: string; en: string }> = {
+  OPEN: { ar: "المفتوحة", en: "Open" }, CLOSED: { ar: "المغلقة", en: "Closed" },
+};
+/** Status → the reference status dot. */
+const LEAD_ST: Record<string, string> = { NEW: "in", QUALIFIED: "ok", CONVERTED: "ok", UNQUALIFIED: "x" };
 
 export default function LeadsPage() {
   const user = useUser();
@@ -157,7 +133,29 @@ export default function LeadsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("OPEN");
+  const [owner, setOwner] = useState("all");
+  const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [overdueAll, setOverdueAll] = useState(0);
+  const [noCommitmentAll, setNoCommitmentAll] = useState(0);
+  // The lead in the preview pane (`crm-leads`: docked at 1440, over the list at 1024).
+  const [selected, setSelected] = useState<string | null>(null);
+  const phone = usePhone();
+  // The API pages at 25. The list used to fetch page 1 and stop, so a rep with a 26th lead
+  // could not reach it from this screen at all (IMD-02).
+  const [page, setPage] = useState(1);
+  // The page the rows on screen actually belong to. The range, and whether the list is
+  // "busy", are read from this rather than from `page`, which moves the moment a button is
+  // pressed — otherwise page 1's rows sat under a "51–78" range until the fetch landed (IMD-14).
+  const [shownPage, setShownPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  // A failed fetch is not an empty list. Showing "no leads yet" over a network error tells
+  // the rep their pipeline is empty when it is merely unreachable.
+  const [loadFailed, setLoadFailed] = useState(false);
+  // Responses can arrive out of order while somebody types; only the latest request may
+  // write the list.
+  const requestSeq = useRef(0);
 
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -165,9 +163,23 @@ export default function LeadsPage() {
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
   const [form, setForm] = useState(EMPTY_LEAD_FORM);
 
+  // `?new=1` opens the form on arrival — the shell's «+ جديد» menu links here. Derived, not
+  // set in an effect; closing the form marks the request handled and drops the parameter.
+  const router = useRouter();
+  const requestedNew = useSearchParams().get("new") === "1";
+  const [newHandled, setNewHandled] = useState(false);
+  const formOpen = showForm || (requestedNew && canWrite && !newHandled);
+  function closeForm() {
+    setShowForm(false);
+    if (requestedNew && !newHandled) {
+      setNewHandled(true);
+      router.replace("/dashboard/sales/leads");
+    }
+  }
+
   // Nine fields somebody may have spent a minute filling in. Navigating away used to
   // discard them without a word.
-  useUnsavedGuard(isDirtyAgainst(showForm, form, EMPTY_LEAD_FORM));
+  useUnsavedGuard(isDirtyAgainst(formOpen, form, EMPTY_LEAD_FORM));
 
   const [converting, setConverting] = useState<string | null>(null);
   /**
@@ -189,31 +201,54 @@ export default function LeadsPage() {
       return;
     }
     setSuccess(lang === "ar" ? "حُذف العميل المحتمل." : "Lead deleted.");
-    load();
+    // Deleting the only lead on the last page would leave an empty page; step back instead.
+    if (rows.length === 1 && page > 1) goToPage(page - 1);
+    else load();
   }
 
-  useEffect(() => { load(); }, []);
-
-  async function load() {
+  async function load(p: number = page) {
+    const seq = ++requestSeq.current;
     const params = new URLSearchParams();
     if (search.trim()) params.set("q", search.trim());
     if (statusFilter) params.set("status", statusFilter);
-    const res = await fetch(`/api/sales/leads?${params}`);
-    if (res.ok) {
-      const data = await res.json();
-      setRows(data.rows ?? []);
-      setScope(data.scope ?? "own");
-    } else {
-      setError(lang === "ar" ? "تعذّر تحميل العملاء المحتملين." : "Could not load leads.");
+    if (owner !== "all") params.set("owner", owner);
+    params.set("page", String(p));
+    params.set("perPage", String(PER_PAGE));
+    try {
+      const res = await fetch(`/api/sales/leads?${params}`);
+      if (seq !== requestSeq.current) return;
+      if (res.ok) {
+        const data = await res.json();
+        setRows(data.rows ?? []);
+        setShownPage(p);
+        setScope(data.scope ?? "own");
+        setTotal(typeof data.total === "number" ? data.total : (data.rows ?? []).length);
+        setCounts(data.counts ?? {});
+        setOwners(data.owners ?? []);
+        setOverdueAll(data.overdue ?? 0);
+        setNoCommitmentAll(data.noCommitment ?? 0);
+        setLoadFailed(false);
+      } else {
+        setLoadFailed(true);
+      }
+    } catch {
+      if (seq === requestSeq.current) setLoadFailed(true);
+    } finally {
+      if (seq === requestSeq.current) setLoading(false);
     }
-    setLoading(false);
   }
 
-  // Debounced so typing does not fire a request per keystroke.
+  // Debounced so typing does not fire a request per keystroke. A new search or filter starts
+  // again from the first page — page 3 of a narrower result may not exist.
   useEffect(() => {
-    const timer = setTimeout(() => { load(); }, 350);
+    const timer = setTimeout(() => { setPage(1); load(1); }, 350);
     return () => clearTimeout(timer);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, owner]);
+
+  function goToPage(p: number) {
+    setPage(p);
+    load(p);
+  }
 
   function openForm() {
     setForm({
@@ -253,7 +288,7 @@ export default function LeadsPage() {
         setFormError(data.error ?? (lang === "ar" ? "تعذّر الحفظ." : "Could not save."));
         return;
       }
-      setShowForm(false);
+      closeForm();
       setSuccess(lang === "ar" ? "تم إنشاء العميل المحتمل." : "Lead created.");
       load();
     } finally {
@@ -287,111 +322,294 @@ export default function LeadsPage() {
     }
   }
 
-  const overdue = useMemo(
-    () => rows.filter((r) => r.nextFollowUpAt && new Date(r.nextFollowUpAt) < new Date() && r.status !== "CONVERTED").length,
-    [rows],
-  );
-
-  // A lead nobody owns a next step for is the commonest way a pipeline goes quiet, and it is
-  // NOT counted as overdue: overdue means a commitment was made and missed, and these have no
-  // commitment to miss. Counted separately rather than folded in, so neither number lies.
-  //
-  // The exclusions differ from `overdue` on purpose. Converted and unqualified leads are
-  // terminal — no next step is expected of them — whereas `overdue` deliberately still counts
-  // an unqualified lead with a date that has passed, because that commitment was real. Leaving
-  // `overdue` alone keeps this change presentational.
-  const noCommitment = useMemo(
-    () => rows.filter((r) => !r.nextFollowUpAt && r.status !== "CONVERTED" && r.status !== "UNQUALIFIED").length,
-    [rows],
-  );
+  // The phone header (`173:586`): the title and «+» for a new lead in place of search.
+  useD21Phone({
+    title: lang === "ar" ? "العملاء المحتملون" : "Leads",
+    action: canWrite ? { href: "/dashboard/sales/leads?new=1", label: lang === "ar" ? "عميل محتمل جديد" : "New lead", icon: "plus" } : undefined,
+  });
+  // «+» links to `?new=1` again after the form was closed once: a new request reopens it.
+  const [prevRequested, setPrevRequested] = useState(requestedNew);
+  if (requestedNew !== prevRequested) {
+    setPrevRequested(requestedNew);
+    if (!requestedNew) setNewHandled(false);
+  }
 
   const label = (m: Record<string, { en: string; ar: string }>, k: string) =>
     lang === "ar" ? (m[k]?.ar ?? k) : (m[k]?.en ?? k);
+  const ar = lang === "ar";
+  const tabLabel = (s: string) => (TAB_LABELS[s] ? (ar ? TAB_LABELS[s].ar : TAB_LABELS[s].en) : label(STATUS_LABELS, s));
+  const filtered = search.trim() !== "" || owner !== "all" || statusFilter !== "OPEN";
+  const from = total === 0 ? 0 : (shownPage - 1) * PER_PAGE + 1;
+  const to = Math.min(total, (shownPage - 1) * PER_PAGE + rows.length);
+  const paging = shownPage !== page;
+  const lastPage = Math.max(1, Math.ceil(total / PER_PAGE));
+  const clearAll = () => { setSearch(""); setOwner("all"); setStatusFilter("OPEN"); };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-10 h-10 border-4 border-oo-action-primary border-t-transparent rounded-full animate-spin" />
+  if (loading) return <div className="pg"><Spinner /></div>;
+
+  // Counted nouns for the header line («19 مفتوحًا · 3 متابعات متأخرة · 2 بلا التزام قادم»).
+  const openText = (n: number) => ar
+    ? (n === 1 ? "واحد مفتوح" : n === 2 ? "اثنان مفتوحان" : n <= 10 ? `${n} مفتوحة` : `${n} مفتوحًا`)
+    : `${n} open`;
+  const lateText = (n: number) => ar
+    ? (n === 1 ? "متابعة متأخرة واحدة" : n === 2 ? "متابعتان متأخرتان" : n <= 10 ? `${n} متابعات متأخرة` : `${n} متابعة متأخرة`)
+    : `${n} overdue`;
+
+  // The next commitment: relative near today («اليوم 13:00», «أمس 15:00»), else the date.
+  const commitment = (lead: Lead) => {
+    if (!lead.nextFollowUpAt) return null;
+    const n = daysFromToday(lead.nextFollowUpAt);
+    const text = Math.abs(n) <= 1 ? dueText(lead.nextFollowUpAt, lang) : shortDate(lead.nextFollowUpAt, lang);
+    const late = new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
+    const flag = !late ? null : n <= -2
+      ? (ar ? `متأخر ${dayCount(-n, lang)}` : `${dayCount(-n, lang)} overdue`)
+      : (ar ? "متأخر" : "Overdue");
+    return { text, flag };
+  };
+  const statusDot = (s: string, id?: string) => (
+    <span className={`st ${LEAD_ST[s] ?? ""}`} data-testid={id ? `lead-status-${id}` : undefined}>{label(STATUS_LABELS, s)}</span>
+  );
+
+  const notices = (
+    <>
+      {error && (
+        <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 16 }}>
+          {error}<button type="button" onClick={() => setError("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+        </p>
+      )}
+      {success && (
+        <p className="notice ok" role="status" data-testid="alert-success" style={{ marginBottom: 16 }}>
+          {success}<button type="button" onClick={() => setSuccess("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+        </p>
+      )}
+    </>
+  );
+
+  const tabs = (
+    <div role="group" aria-label={ar ? "الحالة" : "Status"} className={phone ? "segs" : "tabs"} data-testid="lead-status-tabs">
+      {STATUS_TABS.map((s) => {
+        const on = statusFilter === s;
+        return (
+          <button key={s} type="button" aria-pressed={on} className={on ? "on" : undefined} data-testid={`lead-tab-${s}`}
+            onClick={() => setStatusFilter(s)}>
+            {tabLabel(s)}
+            {typeof counts[s] === "number" && <span className={phone ? "n" : "c"}>{counts[s]}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const searchBox = (
+    <label className="search" style={phone ? { width: "100%", height: 40 } : { width: 280 }}>
+      <Ico name="search" small />
+      <input value={search} onChange={(e) => setSearch(e.target.value)} data-testid="lead-search"
+        placeholder={phone ? (ar ? "الشركة أو الهاتف" : "Company or phone") : (ar ? "الشركة أو جهة الاتصال أو الهاتف" : "Company, contact or phone")}
+        aria-label={ar ? "بحث في العملاء المحتملين" : "Search leads"} />
+    </label>
+  );
+
+  const states = loadFailed ? (
+    <div className="notice er" role="alert" data-testid="leads-load-error">
+      <span>{ar ? "تعذّر تحميل العملاء المحتملين. لم تتغير أي بيانات." : "Could not load leads. Nothing was changed."}</span>
+      <button type="button" className="btn sm" onClick={() => load()}>{ar ? "إعادة المحاولة" : "Try again"}</button>
+    </div>
+  ) : rows.length === 0 ? (
+    filtered ? (
+      <div data-testid="leads-no-results" style={{ padding: "48px 0", textAlign: "center" }}>
+        <p>{ar ? "لا نتائج تطابق البحث أو التصفية." : "No leads match this search or filter."}</p>
+        <button type="button" className="btn" style={{ marginTop: 12 }} data-testid="lead-clear-filters" onClick={clearAll}>
+          {ar ? "مسح التصفية" : "Clear filters"}
+        </button>
       </div>
-    );
-  }
+    ) : (
+      <div data-testid="leads-empty" style={{ padding: "48px 0", textAlign: "center" }}>
+        <p style={{ fontWeight: 500 }}>{t("leadsEmpty")}</p>
+        {canWrite && <p className="lbl" style={{ fontWeight: 400 }}>{ar ? "أضف أول عميل محتمل من زر «عميل محتمل»." : "Add the first one with “Lead”."}</p>}
+      </div>
+    )
+  ) : null;
+
+  const pager = (
+    <nav aria-label={ar ? "صفحات العملاء المحتملين" : "Lead pages"} className="pager">
+      <span className="sm" data-testid="leads-count">
+        <span className="n">{total}</span> {ar ? (statusFilter === "OPEN" ? "عميلًا محتملًا مفتوحًا" : "عميلًا محتملًا") : statusFilter === "OPEN" ? (total === 1 ? "open lead" : "open leads") : total === 1 ? "lead" : "leads"}
+      </span>
+      <span className="sp" />
+      <span className="sm" data-testid="leads-range" aria-live="polite">
+        <bdi dir="ltr" className="n">{from}–{to}</bdi> {ar ? "من" : "of"} <bdi className="n">{total}</bdi>
+      </span>
+      <button type="button" className="btn sm" data-testid="leads-prev" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+        {ar ? "السابق" : "Previous"}
+      </button>
+      <button type="button" className="btn sm" data-testid="leads-next" disabled={page >= lastPage} onClick={() => goToPage(page + 1)}>
+        {ar ? "التالي" : "Next"}
+      </button>
+    </nav>
+  );
+
+  // The preview pane: docked from 1280, over the list from 1024 to 1279 (`crm-leads` 1440 / 1024).
+  const openPreview = (e: React.MouseEvent, id: string) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    if (!window.matchMedia("(min-width: 1024px)").matches) return;
+    e.preventDefault();
+    setSelected(id);
+  };
+  const pane = selected && !phone ? (
+    <LeadPane id={selected} lang={lang} canConvert={canConvert} canWrite={canWrite}
+      onClose={() => setSelected(null)}
+      onChanged={(message: string) => { setSuccess(message); load(); }} />
+  ) : null;
 
   return (
-    <div className="space-y-6">
-      {/* Says what it is. A provisional screen that looks finished is worse than one that
-          admits it, because nobody reviews what appears already signed off. */}
-      <div className="bg-oo-status-waiting-bg border border-oo-status-waiting rounded-xl px-4 py-2.5 flex items-start gap-2">
-        <AlertTriangle size={15} className="text-oo-status-hold flex-shrink-0 mt-0.5" />
-        <p className="text-xs font-bold text-oo-status-hold">{t("provisionalUiBanner")}</p>
-      </div>
-
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-extrabold text-oo-text-primary">{t("leadsTitle")}</h1>
-          <p className="text-oo-text-secondary text-sm font-medium">
-            {/* The design draws the urgent count as an outlined chip rather than coloured
-                text in a sentence, so it survives being scanned rather than read. */}
-            <span className="flex flex-wrap items-center gap-2">
-              {overdue > 0 && (
-                <span
-                  data-testid="count-overdue"
-                  className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2.5 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
-                >
-                  <AlertTriangle size={13} aria-hidden />
-                  {num(overdue, lang)} {t("leadOverdue")}
-                </span>
+    <div className={`split${pane ? " has-pane" : ""}`}>
+    <div className="pg">
+      {phone ? (
+        <>
+          {notices}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{searchBox}</div>
+          {tabs}
+          {states ?? (
+            <div aria-busy={paging || undefined} style={paging ? { opacity: .6 } : undefined} data-testid="leads-table">
+              {rows.map((lead) => {
+                const c = commitment(lead);
+                const name = ar && lead.companyNameAr ? lead.companyNameAr : lead.companyName;
+                return (
+                  <div key={lead.id} className="mrow rowlink" data-testid={`lead-${lead.id}`}>
+                    <div style={{ minWidth: 0 }}>
+                      <Link href={`/dashboard/sales/leads/${lead.id}`} className="who open" data-testid={`open-lead-${lead.id}`}>{name}</Link>
+                    </div>
+                    {statusDot(lead.status, lead.id)}
+                    <div className="r2">
+                      <span style={{ flex: 1, minWidth: 0 }}>{[lead.contactName, lead.city].filter(Boolean).join(" · ")}</span>
+                      {c ? <span>{c.text}</span> : <span data-testid={`lead-no-commitment-${lead.id}`}>{t("leadNoCommitment")}</span>}
+                      {c?.flag && <span className="flag">{c.flag}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+              {lastPage > 1 && pager}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {notices}
+          <div className="ph" style={{ marginBottom: 20 }}>
+            <div>
+              <h1>{t("leadsTitle")}</h1>
+              <div className="meta">
+                <span data-testid="leads-total">{openText(counts.OPEN ?? 0)}</span>
+                <i /><span data-testid="leads-overdue">{lateText(overdueAll)}</span>
+                <i /><span data-testid="count-no-commitment"><span className="n">{noCommitmentAll}</span> {t("leadNoCommitment")}</span>
+              </div>
+            </div>
+            <div className="act">
+              {/* Export is not in the frame; it is the only route to it (record: conflict L-1). */}
+              {canExport && (
+                <a href={`/api/sales/leads/export${statusFilter ? `?status=${statusFilter}` : ""}`} download data-testid="export-leads" className="btn g">
+                  <Download size={16} aria-hidden /> {ar ? "تصدير" : "Export"}
+                </a>
               )}
-              {noCommitment > 0 && (
-                <span
-                  data-testid="count-no-commitment"
-                  className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-hold bg-oo-status-hold-bg px-2.5 py-[3px] text-[12px] leading-[18px] text-oo-status-hold"
-                >
-                  <CircleDashed size={13} aria-hidden />
-                  {num(noCommitment, lang)} {t("leadNoCommitment")}
-                </span>
+              {canImport && (
+                <button type="button" onClick={() => setShowImport(true)} data-testid="import-leads" className="btn g">
+                  <Ico name="dl" small /> {ar ? "استيراد" : "Import"}
+                </button>
               )}
-              <span className="text-[12px] leading-[18px] text-oo-text-muted">
-                {num(rows.length, lang)} {t("leadShown")}
+              {canWrite && (
+                <button type="button" onClick={openForm} className="btn p" data-testid="new-lead">
+                  <Ico name="plus" small /> {ar ? "عميل محتمل" : "Lead"}
+                </button>
+              )}
+            </div>
+          </div>
+          {tabs}
+          <div className="tool" style={{ marginBottom: 8 }}>
+            {searchBox}
+            {scope === "all" && (
+              <span className="chip">
+                <label htmlFor="ld-owner">{ar ? "المالك:" : "Owner:"}</label>
+                <select id="ld-owner" value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="lead-owner">
+                  <option value="all">{ar ? "الكل" : "All"}</option>
+                  {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+                <button type="button" className="x" onClick={() => setOwner("all")} aria-label={ar ? "إزالة فلتر المالك" : "Clear owner"} data-testid="lead-owner-clear">
+                  <Ico name="close" small />
+                </button>
               </span>
-            </span>
-          </p>
-          {/* The counts are computed over the loaded rows, which the filter narrows. Saying so
-              stops the number being read as a total across every lead in the system. */}
-          <p className="text-oo-text-muted text-xs mt-0.5">{t("leadCountScope")}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {canExport && (
-            <a
-              // A real link, not a scripted download: the browser handles the file, the
-              // Content-Disposition header names it, and it still works with JavaScript
-              // having failed to load.
-              href={`/api/sales/leads/export${statusFilter ? `?status=${statusFilter}` : ""}`}
-              download
-              data-testid="export-leads"
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-bg-default border border-oo-border-strong text-oo-text-primary rounded-xl text-sm font-bold hover:border-oo-action-primary active:scale-[0.98] transition-all"
-            >
-              <Download size={16} aria-hidden /> {lang === "ar" ? "تصدير CSV" : "Export CSV"}
-            </a>
+            )}
+            <span className="sp" />
+            {/* The one order the server applies, stated rather than offered as a choice. */}
+            <span className="sort-note">{ar ? "الالتزام القادم ↑" : "Next commitment ↑"}</span>
+          </div>
+          {states ?? (
+            <>
+              <div aria-busy={paging || undefined} style={paging ? { opacity: .6 } : undefined}>
+                <table className="t leads" data-testid="leads-table">
+                  <thead><tr>
+                    <th scope="col">{t("leadCompany")}</th>
+                    <th scope="col" className="xl">{t("leadSource")}</th>
+                    <th scope="col">{t("leadStatus")}</th>
+                    <th scope="col" aria-sort="ascending">{ar ? t("leadNextFollowUp") : "Next commitment"}</th>
+                    <th scope="col" className="xl">{t("leadOwner")}</th>
+                    <th scope="col"><span className="sr-only">{ar ? "الإجراء التالي" : "Next action"}</span></th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((lead) => {
+                      const isOverdue = !!lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
+                      const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
+                      const name = ar && lead.companyNameAr ? lead.companyNameAr : lead.companyName;
+                      const c = commitment(lead);
+                      return (
+                        <tr key={lead.id} data-testid={`lead-${lead.id}`} className={selected === lead.id ? "sel" : undefined}>
+                          <td>
+                            <Link href={`/dashboard/sales/leads/${lead.id}`} data-testid={`open-lead-${lead.id}`} className="who"
+                              style={{ textDecoration: "none", display: "block" }} onClick={(e) => openPreview(e, lead.id)}>
+                              {name}
+                            </Link>
+                            <span className="sm" style={{ display: "block", lineHeight: "18px" }}>{[lead.contactName, lead.city].filter(Boolean).join(" · ")}</span>
+                          </td>
+                          <td className="xl" style={{ color: "var(--text-secondary)" }}>{label(SOURCE_LABELS, lead.source)}</td>
+                          <td>{statusDot(lead.status, lead.id)}</td>
+                          <td>
+                            {hasNoCommitment || !c ? (
+                              <span data-testid={`lead-no-commitment-${lead.id}`} className="sm">{t("leadNoCommitment")}</span>
+                            ) : (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 13.5 }}>{c.text}</span>
+                                {c.flag && <span className="flag">{c.flag}</span>}
+                              </span>
+                            )}
+                          </td>
+                          <td className="xl">
+                            {lead.owner
+                              ? <span className="av s" title={lead.owner.name} aria-label={lead.owner.name}>{initials(lead.owner.name)}</span>
+                              : <span className="sm">{ar ? "غير مُسنَد" : "Unassigned"}</span>}
+                          </td>
+                          <td style={{ textAlign: "end" }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <RowAction lead={lead} lang={lang} canConvert={canConvert} converting={converting}
+                                onConvert={() => convert(lead)} isOverdue={isOverdue} hasNoCommitment={hasNoCommitment} />
+                              {/* Not in the frame; the only delete there is (record: conflict L-2). */}
+                              {canWrite && !lead.conversion && (
+                                <button type="button" className="ib" onClick={() => setDeleting(lead)} data-testid={`delete-lead-${lead.id}`}
+                                  aria-label={ar ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`} title={ar ? "حذف" : "Delete"}>
+                                  <Trash2 size={14} aria-hidden />
+                                </button>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {pager}
+            </>
           )}
-          {canImport && (
-            <button
-              onClick={() => setShowImport(true)}
-              data-testid="import-leads"
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-bg-default border border-oo-border-strong text-oo-text-primary rounded-xl text-sm font-bold hover:border-oo-action-primary active:scale-[0.98] transition-all"
-            >
-              <Upload size={16} aria-hidden /> {lang === "ar" ? "استيراد CSV" : "Import CSV"}
-            </button>
-          )}
-          {canWrite && (
-            <button
-              onClick={openForm}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-oo-action-primary text-white rounded-xl text-sm font-bold hover:bg-oo-action-primary-hover shadow-md shadow-orange/20 active:scale-[0.98] transition-all"
-            >
-              <UserPlus size={16} /> {t("newLeadBtn")}
-            </button>
-          )}
-        </div>
-      </div>
+        </>
+      )}
 
       {showImport && (
         <ImportDialog
@@ -405,369 +623,167 @@ export default function LeadsPage() {
         />
       )}
 
-      {scope === "own" && (
-        <p className="text-xs text-oo-text-muted font-semibold">{t("leadScopeOwn")}</p>
-      )}
-
-      {error && (
-        <div
-          className="bg-oo-status-rejected-bg border border-oo-status-rejected text-oo-status-rejected px-4 py-3 rounded-xl text-sm font-bold"
-          role="alert"
-          data-testid="alert-error"
-        >
-          {error}
-        </div>
-      )}
-      {success && (
-        <div
-          className="bg-oo-status-success-bg border border-oo-status-success text-oo-status-success px-4 py-3 rounded-xl text-sm font-bold"
-          role="status"
-          data-testid="alert-success"
-        >
-          {success}
-        </div>
-      )}
-
-      {/* Toolbar: the status filter at a fixed 200, the search taking the rest, both with a
-          1px border and 10px radius. The old controls used a 2px border and a larger radius,
-          which read as two chunky form fields rather than a quiet filter bar above a table. */}
-      {/* In an RTL document the first child sits on the right. The design puts the search
-          there and the status filter on the left, with the magnifier against the search
-          box's right edge and the chevron against the filter's left edge — so both icons
-          use logical `start`/`end` rather than a hard side. */}
-      <Toolbar>
-        <SearchField
-          value={search}
-          onChange={setSearch}
-          label={lang === "ar" ? "بحث" : "Search"}
-          placeholder={lang === "ar" ? "ابحث بالشركة أو جهة الاتصال أو الجوال…" : "Search company, contact or phone…"}
-        />
-        <FilterSelect value={statusFilter} onChange={setStatusFilter} label={t("leadStatus")}>
-          <option value="">{lang === "ar" ? "كل الحالات" : "All statuses"}</option>
-          {Object.keys(STATUS_LABELS).map((s) => (
-            <option key={s} value={s}>{label(STATUS_LABELS, s)}</option>
-          ))}
-        </FilterSelect>
-      </Toolbar>
-
-      {rows.length === 0 ? (
-        <div className="text-center py-16 bg-oo-bg-default rounded-2xl border border-oo-border-default text-oo-text-muted">
-          <Users2 size={40} className="mx-auto mb-3 opacity-50" />
-          <p className="font-semibold text-lg">{t("leadsEmpty")}</p>
-        </div>
-      ) : (
-        <>
-          {/* ── Desktop: the compact table the design specifies ──────────────────────
-              Column order right-to-left is company, contact, phone, source, status, next
-              commitment, owner, next action. In an RTL document the first cell renders on
-              the right, so DOM order and reading order are the same thing here.
-
-              Row height is 13px of vertical padding against 22px line boxes, which is what
-              makes five leads readable in roughly the height the old cards gave to two. */}
-          <div className="hidden lg:block">
-            <DataTable
-              testId="leads-table"
-              minWidth={1180}
-              cols={[
-                { label: t("leadCompany"), w: "min-w-[240px]" },
-                { label: t("leadContact"), w: "w-[160px]" },
-                { label: lang === "ar" ? "الجوال" : "Phone", w: "w-[145px]" },
-                { label: t("leadSource"), w: "w-[95px]" },
-                { label: t("leadStatus"), w: "w-[150px]" },
-                { label: t("leadNextFollowUp"), w: "w-[210px]" },
-                { label: t("leadOwner"), w: "w-[130px]" },
-                { label: lang === "ar" ? "الإجراء التالي" : "Next action", w: "w-[190px]" },
-              ]}
-            >
-              {rows.map((lead) => {
-                    const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
-                    const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
-                    return (
-                      <tr key={lead.id} data-testid={`lead-${lead.id}`} className="border-t border-oo-border-default">
-                        <td className="px-4 py-[13px] align-middle">
-                          <Link
-                            href={`/dashboard/sales/leads/${lead.id}`}
-                            className="block text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline"
-                            data-testid={`open-lead-${lead.id}`}
-                          >
-                            {lang === "ar" && lead.companyNameAr ? lead.companyNameAr : lead.companyName}
-                          </Link>
-                          <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                            {[lead.city, label(SOURCE_LABELS, lead.source)].filter(Boolean).join(" · ")}
-                          </span>
-                        </td>
-                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary">
-                          {lead.contactName}
-                        </td>
-                        {/* A Latin run inside an RTL cell reverses unless it is marked. */}
-                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[20px] text-oo-text-primary" dir="ltr" style={{ textAlign: "start" }}>
-                          {lead.phone ?? "—"}
-                        </td>
-                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary">
-                          {label(SOURCE_LABELS, lead.source)}
-                        </td>
-                        <td className="px-4 py-[13px] align-middle">
-                          <LeadStatusBadge status={lead.status} testId={`lead-status-${lead.id}`} />
-                        </td>
-                        <td className="px-4 py-[13px] align-middle">
-                          {isOverdue ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked">
-                              <AlertTriangle size={13} aria-hidden /> {t("leadOverdue")}
-                            </span>
-                          ) : hasNoCommitment ? (
-                            <span
-                              data-testid={`lead-no-commitment-${lead.id}`}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-hold bg-oo-status-hold-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-hold"
-                            >
-                              <CircleDashed size={13} aria-hidden /> {t("leadNoCommitment")}
-                            </span>
-                          ) : (
-                            <span className="text-[14px] leading-[22px] text-oo-text-primary">
-                              {formatWhen(lead.nextFollowUpAt, lang)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-[13px] align-middle text-[14px] leading-[22px] text-oo-text-primary">
-                          {lead.owner?.name ?? (lang === "ar" ? "غير مُسنَد" : "Unassigned")}
-                        </td>
-                        <td className="px-4 py-[13px] align-middle">
-                          <div className="flex items-center gap-1.5">
-                            <RowAction
-                              lead={lead}
-                              lang={lang}
-                              canConvert={canConvert}
-                              converting={converting}
-                              onConvert={() => convert(lead)}
-                              isOverdue={!!isOverdue}
-                              hasNoCommitment={hasNoCommitment}
-                            />
-                            {canWrite && !lead.conversion && (
-                              <button
-                                onClick={() => setDeleting(lead)}
-                                data-testid={`delete-lead-${lead.id}`}
-                                aria-label={lang === "ar" ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`}
-                                className="rounded-lg p-1.5 text-oo-text-muted transition-colors hover:bg-oo-status-rejected-bg hover:text-oo-status-rejected"
-                              >
-                                <Trash2 size={14} aria-hidden />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-            </DataTable>
-          </div>
-
-          {/* ── Narrow: the same columns as a stacked record, not a squeezed table ──── */}
-          <div className="space-y-2 lg:hidden">
-            {rows.map((lead) => {
-              const isOverdue = lead.nextFollowUpAt && new Date(lead.nextFollowUpAt) < new Date() && lead.status !== "CONVERTED";
-              const hasNoCommitment = !lead.nextFollowUpAt && lead.status !== "CONVERTED" && lead.status !== "UNQUALIFIED";
-              return (
-                <div key={lead.id} data-testid={`m-lead-${lead.id}`} className="rounded-2xl border border-oo-border-default bg-oo-bg-default p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <LeadStatusBadge status={lead.status} />
-                    <div className="min-w-0 text-end">
-                      <Link
-                        href={`/dashboard/sales/leads/${lead.id}`}
-                        className="block break-words text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline"
-                      >
-                        {lang === "ar" && lead.companyNameAr ? lead.companyNameAr : lead.companyName}
-                      </Link>
-                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                        {[lead.city, label(SOURCE_LABELS, lead.source)].filter(Boolean).join(" · ")}
-                      </span>
-                    </div>
-                  </div>
-                  <dl className="mt-3 space-y-1.5">
-                    <KV k={t("leadContact")} v={lead.contactName} />
-                    <KV k={lang === "ar" ? "الجوال" : "Phone"} v={lead.phone ?? "—"} ltr />
-                    <KV k={t("leadOwner")} v={lead.owner?.name ?? (lang === "ar" ? "غير مُسنَد" : "Unassigned")} />
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] leading-[18px] text-oo-text-muted">{t("leadNextFollowUp")}</span>
-                      {isOverdue ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked">
-                          <AlertTriangle size={13} aria-hidden /> {t("leadOverdue")}
-                        </span>
-                      ) : hasNoCommitment ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-oo-status-hold bg-oo-status-hold-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-hold">
-                          <CircleDashed size={13} aria-hidden /> {t("leadNoCommitment")}
-                        </span>
-                      ) : (
-                        <span className="text-[14px] leading-[22px] text-oo-text-primary">
-                          {formatWhen(lead.nextFollowUpAt, lang)}
-                        </span>
-                      )}
-                    </div>
-                  </dl>
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="flex-1">
-                      <RowAction
-                        lead={lead}
-                        lang={lang}
-                        canConvert={canConvert}
-                        converting={converting}
-                        onConvert={() => convert(lead)}
-                        isOverdue={!!isOverdue}
-                        hasNoCommitment={hasNoCommitment}
-                        full
-                      />
-                    </div>
-                    {canWrite && !lead.conversion && (
-                      <button
-                        onClick={() => setDeleting(lead)}
-                        aria-label={lang === "ar" ? `حذف ${lead.companyName}` : `Delete ${lead.companyName}`}
-                        className="rounded-lg p-2 text-oo-text-muted transition-colors hover:bg-oo-status-rejected-bg hover:text-oo-status-rejected"
-                      >
-                        <Trash2 size={15} aria-hidden />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
       {deleting && (
         <div
-          className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+          data-ui="dialog-scrim"
+          className="fixed inset-0 z-[60] bg-black/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
           onClick={() => setDeleting(null)}
           role="presentation"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={lang === "ar" ? "حذف عميل محتمل" : "Delete a lead"}
-            data-testid="delete-lead-dialog"
-            onClick={(e) => e.stopPropagation()}
-            className="bg-oo-bg-default rounded-2xl w-full max-w-md my-8 shadow-xl"
+          <FocusDialog
+            onClose={() => setDeleting(null)}
+            labelledBy="delete-lead-title"
+            testId="delete-lead-dialog"
+            className="bg-oo-bg-default w-full max-w-[440px] my-8"
           >
-            <div className="p-4 border-b border-oo-border-default">
-              <h2 className="font-extrabold text-oo-text-primary">
-                {lang === "ar" ? "حذف عميل محتمل" : "Delete this lead"}
+            <div className="border-b">
+              <h2 id="delete-lead-title" className="text-oo-text-primary">
+                {ar ? "حذف عميل محتمل" : "Delete this lead"}
               </h2>
             </div>
-            <div className="p-4 space-y-3">
-              <p className="text-sm font-bold text-oo-text-primary">{deleting.companyName}</p>
-              <p className="text-xs text-oo-text-secondary leading-relaxed">
-                {lang === "ar"
+            <div className="py-4 space-y-2">
+              <p className="font-medium text-oo-text-primary">{deleting.companyName}</p>
+              <p className="text-[13.5px] text-oo-text-secondary leading-relaxed">
+                {ar
                   ? "الحذف مخصّص لسجل أُنشئ بالخطأ. أما العميل المحتمل الذي جرت معه محادثات مسجّلة فلا يُحذف — علّمه «غير مؤهل» بدلاً من محو سجل تلك المحادثات."
                   : "Deleting is for a record raised in error. A lead with logged conversations is not deleted — mark it unqualified rather than erasing the record of those conversations."}
               </p>
             </div>
-            <div className="flex gap-3 p-4 border-t border-oo-border-default">
+            <div className="flex justify-end gap-2 py-4 border-t">
+              <button type="button" autoFocus onClick={() => setDeleting(null)} data-ui="btn" className="inline-flex items-center">
+                {ar ? "إلغاء" : "Cancel"}
+              </button>
               <button
                 type="button"
                 onClick={() => remove(deleting)}
                 data-testid="confirm-delete-lead"
-                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700"
+                data-ui="btn"
+                data-variant="danger"
+                className="inline-flex items-center"
               >
-                {lang === "ar" ? "حذف" : "Delete"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleting(null)}
-                className="flex-1 py-2.5 border border-oo-border-strong rounded-xl font-bold text-sm text-oo-text-secondary hover:bg-oo-bg-subtle transition-colors"
-              >
-                {lang === "ar" ? "إلغاء" : "Cancel"}
+                {ar ? "حذف" : "Delete"}
               </button>
             </div>
-          </div>
+          </FocusDialog>
         </div>
       )}
 
-      {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
-          <div className="bg-oo-bg-default rounded-2xl w-full max-w-lg my-8 shadow-xl" data-testid="lead-form">
-            <div className="flex items-center justify-between p-4 border-b border-oo-border-default">
-              <h2 className="font-extrabold text-oo-text-primary">{t("newLeadBtn")}</h2>
-              <button type="button" onClick={() => setShowForm(false)} aria-label="Close" disabled={saving}>
-                <X size={20} className="text-oo-text-muted" />
+      {formOpen && (
+        <div
+          data-ui="dialog-scrim"
+          className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto"
+          role="presentation"
+        >
+          <FocusDialog
+            onClose={() => { if (!saving) closeForm(); }}
+            labelledBy="lead-form-title"
+            testId="lead-form"
+            className="bg-oo-bg-default w-full max-w-lg my-8"
+          >
+            <div className="flex items-center justify-between border-b">
+              <h2 id="lead-form-title" className="text-oo-text-primary">{t("newLeadBtn")}</h2>
+              <button type="button" onClick={() => closeForm()} aria-label={ar ? "إغلاق" : "Close"} disabled={saving}
+                className="grid size-8 place-items-center rounded-lg text-oo-text-muted hover:bg-[var(--d-surface-hover)]">
+                <X size={18} aria-hidden />
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <form
+              className="py-4 space-y-3"
+              onSubmit={(e) => { e.preventDefault(); submit(false); }}
+              noValidate
+            >
               {/* Required first, optional after: a short form gets filled, a long one gets
                   abandoned halfway and leaves a half-built record. */}
-              <label className="block">
-                <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadCompany")} *</span>
+              <label className="block space-y-1.5" data-ui="field">
+                <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadCompany")} <span aria-hidden className="text-oo-status-rejected">*</span></span>
                 <input
                   aria-label={t("leadCompany")}
+                  aria-required="true"
+                  autoFocus
+                  data-ui="input"
                   value={form.companyName}
                   onChange={(e) => { setForm({ ...form, companyName: e.target.value }); setDuplicates([]); }}
-                  className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
+                  className="w-full"
                 />
               </label>
-              <label className="block">
-                <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadContact")} *</span>
+              <label className="block space-y-1.5" data-ui="field">
+                <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadContact")} <span aria-hidden className="text-oo-status-rejected">*</span></span>
                 <input
                   aria-label={t("leadContact")}
+                  aria-required="true"
+                  data-ui="input"
                   value={form.contactName}
                   onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
+                  className="w-full"
                 />
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-[11px] font-bold text-oo-text-secondary">{lang === "ar" ? "الهاتف" : "Phone"}</span>
+                <label className="block space-y-1.5" data-ui="field">
+                  <span className="block text-[13px] font-medium text-oo-text-primary">{ar ? "الهاتف" : "Phone"}</span>
                   <input
                     dir="ltr"
-                    aria-label={lang === "ar" ? "الهاتف" : "Phone"}
+                    inputMode="tel"
+                    aria-label={ar ? "الهاتف" : "Phone"}
+                    data-ui="input"
                     value={form.phone}
                     onChange={(e) => { setForm({ ...form, phone: e.target.value }); setDuplicates([]); }}
-                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
+                    className="w-full text-start"
                   />
                 </label>
-                <label className="block">
-                  <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadCity")}</span>
+                <label className="block space-y-1.5" data-ui="field">
+                  <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadCity")}</span>
                   <input
                     aria-label={t("leadCity")}
+                    data-ui="input"
                     value={form.city}
                     onChange={(e) => setForm({ ...form, city: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
+                    className="w-full"
                   />
                 </label>
-                <label className="block">
-                  <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadSource")}</span>
+                <label className="block space-y-1.5" data-ui="field">
+                  <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadSource")}</span>
                   <select
                     // Named explicitly. Without this the wrapping label hands the control an
                     // accessible name assembled from every option in the list, which is
                     // unusable to a screen reader and ambiguous to anything else looking the
                     // control up by name.
                     aria-label={t("leadSource")}
+                    data-ui="input"
                     value={form.source}
                     onChange={(e) => setForm({ ...form, source: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
+                    className="w-full"
                   >
                     {SOURCES.map((s) => (
                       <option key={s} value={s}>{label(SOURCE_LABELS, s)}</option>
                     ))}
                   </select>
                 </label>
-                <label className="block">
-                  <span className="text-[11px] font-bold text-oo-text-secondary">{t("leadNextFollowUp")}</span>
+                <label className="block space-y-1.5" data-ui="field">
+                  <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadNextFollowUp")}</span>
                   <input
                     type="date"
                     aria-label={t("leadNextFollowUp")}
+                    data-ui="input"
                     value={form.nextFollowUpAt}
                     onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
+                    className="w-full"
                   />
                 </label>
               </div>
+              <p className="text-[12px] text-oo-text-muted">
+                {ar ? "الحقول المعلّمة بـ * مطلوبة: حرفان على الأقل." : "Fields marked * are required: at least two characters."}
+              </p>
 
               {duplicates.length > 0 && (
-                <div className="rounded-xl border border-amber-300 bg-oo-status-waiting-bg p-3" role="alert">
-                  <p className="text-[11px] font-bold text-oo-status-hold uppercase mb-1 flex items-center gap-1.5">
-                    <AlertTriangle size={13} /> {t("leadDuplicateTitle")}
+                <div className="rounded-[9px] border border-oo-status-waiting bg-oo-status-waiting-bg p-3" role="alert">
+                  <p className="text-[13px] font-medium text-oo-status-hold mb-1 flex items-center gap-1.5">
+                    <AlertTriangle size={14} aria-hidden /> {t("leadDuplicateTitle")}
                   </p>
-                  <p className="text-xs text-oo-status-hold leading-relaxed mb-2">{t("leadDuplicateBody")}</p>
+                  <p className="text-[12.5px] text-oo-status-hold leading-relaxed mb-2">{t("leadDuplicateBody")}</p>
                   <ul className="space-y-1 mb-2">
                     {duplicates.map((d) => (
-                      <li key={d.leadId} className="text-xs text-oo-status-hold font-semibold">
+                      <li key={d.leadId} className="text-[12.5px] text-oo-status-hold font-medium">
                         {d.companyName} — {d.contactName}
                       </li>
                     ))}
@@ -776,7 +792,8 @@ export default function LeadsPage() {
                     type="button"
                     onClick={() => submit(true)}
                     disabled={saving}
-                    className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-700 text-white hover:bg-amber-800 disabled:opacity-50"
+                    data-ui="btn"
+                    className="inline-flex items-center"
                   >
                     {t("leadCreateAnyway")}
                   </button>
@@ -784,33 +801,38 @@ export default function LeadsPage() {
               )}
 
               {formError && (
-                <p className="text-xs font-semibold text-oo-status-rejected flex items-start gap-1.5" role="alert">
-                  <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> {formError}
+                <p className="text-[12.5px] font-medium text-oo-status-rejected flex items-start gap-1.5" role="alert">
+                  <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" aria-hidden /> {formError}
                 </p>
               )}
-            </div>
 
-            <div className="flex gap-3 p-4 border-t border-oo-border-default">
-              <button
-                type="button"
-                onClick={() => submit(false)}
-                disabled={!formValid || saving}
-                className="flex-1 py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? "…" : lang === "ar" ? "حفظ" : "Save"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                disabled={saving}
-                className="flex-1 py-2.5 border border-oo-border-strong rounded-xl font-bold text-sm text-oo-text-secondary hover:bg-oo-bg-subtle transition-colors"
-              >
-                {lang === "ar" ? "إلغاء" : "Cancel"}
-              </button>
-            </div>
-          </div>
+              <div className="flex justify-end gap-2 pt-4 border-t border-[var(--d-border-subtle)] -mx-6 px-6">
+                <button
+                  type="button"
+                  onClick={() => closeForm()}
+                  disabled={saving}
+                  data-ui="btn"
+                  className="inline-flex items-center"
+                >
+                  {ar ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!formValid || saving}
+                  aria-busy={saving || undefined}
+                  data-ui="btn"
+                  data-variant="primary"
+                  className="inline-flex items-center"
+                >
+                  {saving ? (ar ? "جارٍ الحفظ…" : "Saving…") : ar ? "حفظ" : "Save"}
+                </button>
+              </div>
+            </form>
+          </FocusDialog>
         </div>
       )}
+    </div>
+    {pane}
     </div>
   );
 }

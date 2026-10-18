@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
+import { assertAdminRoleGate, requireSub } from "@/lib/auth-server";
+import { handleDomainError } from "@/lib/api-error";
 import { releaseShelfStock } from "@/lib/services/shelf-allocation";
 import { releaseFinishedUnits } from "@/lib/services/finished-products";
 import {
@@ -80,6 +80,8 @@ export async function POST(request: Request, { params }: Params) {
       if (!isOwner && !isAdmin) {
         throw { _appCode: 403, message: "Only the order owner or an admin can change order status." };
       }
+      // Changing someone else's order is the admin role exercised: a verified individual.
+      if (!isOwner) await assertAdminRoleGate(user, "orders.status_override");
 
       const currentStatus = order.status as OrderStatus;
       let expectedFromStatuses: OrderStatus[];
@@ -238,10 +240,7 @@ export async function POST(request: Request, { params }: Params) {
 
     return NextResponse.json(result);
   } catch (err: unknown) {
-    if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
-    }
-    return handlePrismaError(err);
+    // handleDomainError keeps a refusal's code (IDENTITY_NOT_VERIFIED) for the client.
+    return handleDomainError(err);
   }
 }

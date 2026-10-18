@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireAnySub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function PUT(request: Request, { params }: Params) {
-  const { error } = await requireSub("inventory", "adjust");
+  // Catalogue maintenance (owner decision, inventory Option A): the receiving duty, or a privileged
+  // adjust holder (gated). Not a stock adjustment: quantities never move here.
+  const { error, user } = await requireAnySub("inventory", ["receive", "adjust"]);
   if (error) return error;
 
   const { id } = await params;
@@ -74,7 +76,9 @@ export async function PUT(request: Request, { params }: Params) {
  * waits on another resource while holding it.
  */
 export async function DELETE(_request: Request, { params }: Params) {
-  const { error } = await requireSub("inventory", "adjust");
+  // Catalogue maintenance (owner decision, inventory Option A): the receiving duty, or a privileged
+  // adjust holder (gated). Not a stock adjustment: quantities never move here.
+  const { error, user } = await requireAnySub("inventory", ["receive", "adjust"]);
   if (error) return error;
 
   const { id } = await params;

@@ -1,9 +1,17 @@
 "use client";
-
-import { useState, useEffect, useRef } from "react";
-import { Tag, Printer, Search } from "lucide-react";
+/**
+ * G-20 · Labels (Direction 2.1): search the coffee catalogue, select origins, and print them
+ * through the G-21 print dialog (B-1) on any configured paper / printer profile. Without
+ * labels.print there is no print action and the dialog never opens (G-21v); the print APIs refuse
+ * on the server either way (B-9).
+ */
+import { useEffect, useMemo, useState } from "react";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
+import { Btn, Flag, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, countNoun, useL } from "@/components/ops/ui";
+import { useI18n } from "@/lib/i18n/context";
+import { PrintDialog, type DialogItem } from "@/components/print/PrintDialog";
+import { PRINT_GATE_NOTE_ID, PrintNotCertifiedNotice, usePrintCertified } from "@/components/print/Certification";
 
 type Product = {
   id: string; productNameEn: string; productNameAr: string | null;
@@ -14,123 +22,122 @@ type Product = {
   roastPathEn: string | null; roastPathAr: string | null;
 };
 
-function LabelCard({ product }: { product: Product }) {
-  return (
-    <div className="border-2 border-orange rounded-xl p-5 bg-white w-[340px] print:break-inside-avoid">
-      <div className="text-center mb-3 border-b border-brown-light pb-3">
-        <div className="w-12 h-12 bg-orange rounded-full flex items-center justify-center mx-auto mb-2">
-          <span className="text-xl text-white font-bold">{"حِ"}</span>
-        </div>
-        <h3 className="font-extrabold text-charcoal text-lg">{product.productNameEn}</h3>
-        {product.productNameAr && <p className="text-brown text-sm" dir="rtl">{product.productNameAr}</p>}
-      </div>
+const PRODUCT_FORMS: [string, string, string, string, string, string] = ["منتج واحد", "منتجان", "منتجات", "منتجًا", "product", "products"];
+const FIELD_FORMS: [string, string, string, string, string, string] = ["حقل واحد", "حقلان", "حقول", "حقلًا", "field", "fields"];
 
-      <div className="space-y-1.5 text-xs">
-        {[
-          { label: "COUNTRY", en: product.countryEn, ar: product.countryAr, labelAr: "الدولة" },
-          { label: "REGION", en: product.regionEn, ar: product.regionAr, labelAr: "المنطقة" },
-          { label: "VARIETY", en: product.varietyEn, ar: product.varietyAr, labelAr: "السلاله" },
-          { label: "PROCESS", en: product.processEn, ar: product.processAr, labelAr: "المعالجة" },
-          { label: "ALTITUDE", en: product.altitude, ar: null, labelAr: "الارتفاع" },
-          { label: "CUP NOTES", en: product.cupNotesEn, ar: product.cupNotesAr, labelAr: "الايحاءات" },
-          { label: "ROAST PATH", en: product.roastPathEn, ar: product.roastPathAr, labelAr: "مسار القهوة" },
-        ].map(({ label, en, ar, labelAr }) => (
-          <div key={label} className="flex justify-between items-start gap-2 py-1 border-b border-cream last:border-0">
-            <div>
-              <span className="font-bold text-brown uppercase text-[10px]">{label}</span>
-              <p className="text-charcoal">{en || "—"}</p>
-            </div>
-            <div className="text-right" dir="rtl">
-              <span className="font-bold text-brown text-[10px]">{labelAr}</span>
-              <p className="text-charcoal">{ar || ""}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="text-center mt-3 pt-2 border-t border-brown-light">
-        <p className="text-[10px] text-brown font-medium">HIQBAH COFFEE ROASTERS | {"محمصة حِقبه"}</p>
-      </div>
-    </div>
-  );
+/** Shown label fields (bilingual) with no value — they print «—» (A-6). */
+function missingCount(p: Product): number {
+  const pairs: [string | null, string | null][] = [
+    [p.productNameEn, p.productNameAr], [p.countryEn, p.countryAr], [p.regionEn, p.regionAr], [p.varietyEn, p.varietyAr],
+    [p.processEn, p.processAr], [p.altitude, p.altitude], [p.cupNotesEn, p.cupNotesAr], [p.roastPathEn, p.roastPathAr],
+  ];
+  return pairs.filter(([a, b]) => !a?.trim() || !b?.trim()).length;
 }
 
 export default function LabelsPage() {
+  return <OpsRoot><LabelsInner /></OpsRoot>;
+}
+
+function LabelsInner() {
   const user = useUser();
+  const L = useL();
+  const { lang } = useI18n();
   const canPrint = hasSubPrivilege(user?.permissions ?? {}, "labels", "print");
-  const [products, setProducts] = useState<Product[]>([]);
+  // The print certification gate (A-8): disabled with the explanation until the server says
+  // printing is enabled (unknown counts as not enabled). The print APIs refuse on the server.
+  const certified = usePrintCertified();
+  const canProfiles = canPrint || user?.role === "admin" || hasSubPrivilege(user?.permissions ?? {}, "labels", "profile_manage");
+  const [products, setProducts] = useState<Product[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const printRef = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [dialog, setDialog] = useState(false);
+  const [printed, setPrinted] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    fetch("/api/coffee-products").then((r) => r.json()).then(setProducts);
-  }, []);
+    let alive = true;
+    fetch("/api/coffee-products", { cache: "no-store" })
+      .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`); return r.json(); })
+      .then((d: Product[]) => { if (alive) { setProducts(d); setErr(null); } })
+      .catch((e) => { if (alive) setErr(String(e.message ?? e)); });
+    return () => { alive = false; };
+  }, [tick]);
 
-  function toggleSelect(id: string) {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setSelected(next);
-  }
-
-  function handlePrint() {
-    window.print();
-  }
-
-  const filtered = products.filter((p) =>
-    `${p.productNameEn} ${p.productNameAr || ""} ${p.countryEn}`.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const toPrint = selected.size > 0 ? products.filter((p) => selected.has(p.id)) : [];
+  const filtered = useMemo(() => (products ?? []).filter((p) =>
+    `${p.productNameEn} ${p.productNameAr ?? ""} ${p.countryEn} ${p.countryAr ?? ""}`.toLowerCase().includes(search.trim().toLowerCase())), [products, search]);
+  const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const items: DialogItem[] = selected.map((id) => {
+    const p = products?.find((x) => x.id === id);
+    return { kind: "product", productId: id, label: (lang === "ar" ? p?.productNameAr || p?.productNameEn : p?.productNameEn) ?? id };
+  });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3 no-print">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">Labels & Stickers</h1>
-          <p className="text-brown text-sm font-medium">{products.length} coffee products — {selected.size} selected</p>
-        </div>
-        {canPrint && selected.size > 0 && (
-          <button onClick={handlePrint} className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold">
-            <Printer size={18} /> Print Selected ({selected.size})
-          </button>
-        )}
-      </div>
+    <div className="hr-page">
+      <PageHeader title={L("الملصقات", "Labels")} actions={<>
+        {canProfiles ? <a className="hr-btn" href="/dashboard/labels/profiles" data-testid="labels-profiles">{L("إعدادات الطباعة", "Print settings")}</a> : null}
+        {canPrint ? (
+          <Btn variant="primary" disabled={selected.length === 0 || certified !== true} onClick={() => setDialog(true)} data-testid="labels-print"
+            aria-describedby={certified === false ? PRINT_GATE_NOTE_ID : undefined}>
+            {L("طباعة المحدد", "Print selected")} (<span className="hr-num">{selected.length}</span>)
+          </Btn>
+        ) : null}
+      </>}>
+        <span>{products ? countNoun(products.length, lang, PRODUCT_FORMS) : "—"}</span>
+        <span>{L("المحدد", "Selected")}: <span className="hr-num">{selected.length}</span></span>
+        <span>{L("الطباعة من الحاسوب أو الجوال", "Print from a computer or a phone")}</span>
+      </PageHeader>
 
-      <div className="relative no-print">
-        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input type="text" placeholder="Search products..." value={search} onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
-      </div>
+      {!canPrint ? <Notice tone="info"><span data-testid="labels-no-print">{L("لا تملك صلاحية الطباعة (labels.print): تستطيع استعراض الملصقات فقط.", "You don’t have print permission (labels.print): you can view labels only.")}</span></Notice> : null}
+      {canPrint && certified === false ? <PrintNotCertifiedNotice /> : null}
+      {printed ? <OpsBanner tone="success" onClose={() => setPrinted(null)}><span data-testid="labels-printed">{L("سُجّلت مهمة الطباعة وفُتحت نافذة الطباعة في المتصفح.", "The print job was recorded and the browser’s print dialog opened.")}</span></OpsBanner> : null}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 no-print">
-        {filtered.map((product) => (
-          <div key={product.id} className={`relative cursor-pointer transition-all ${selected.has(product.id) ? "ring-2 ring-orange rounded-xl" : ""}`}
-            onClick={() => toggleSelect(product.id)}>
-            {selected.has(product.id) && (
-              <div className="absolute -top-2 -right-2 w-6 h-6 bg-orange text-white rounded-full flex items-center justify-center text-xs font-bold z-10">
-                {"✓"}
-              </div>
-            )}
-            <LabelCard product={product} />
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div className="col-span-full text-center py-12 text-gray-400">
-            <Tag size={40} className="mx-auto mb-2" /><p>No products found</p>
-          </div>
-        )}
-      </div>
+      <input className="hr-input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={L("ابحث في المنتجات…", "Search products…")} aria-label={L("ابحث في المنتجات", "Search products")} style={{ maxWidth: 420 }} />
 
-      {toPrint.length > 0 && (
-        <div ref={printRef} className="hidden print:block">
-          <div className="flex flex-wrap gap-6 justify-center">
-            {toPrint.map((product) => (
-              <LabelCard key={product.id} product={product} />
-            ))}
-          </div>
+      {err ? <OpsError message={err} onRetry={() => setTick((t) => t + 1)} /> : !products ? <OpsLoading rows={6} /> : filtered.length === 0 ? (
+        <OpsEmpty title={L("لا توجد منتجات", "No products found")} />
+      ) : (
+        <div className="hr-tablewrap">
+          <table className="hr-table is-mrow lbl-table" aria-label={L("منتجات القهوة", "Coffee products")} data-testid="labels-table">
+            <thead>
+              <tr>
+                <th style={{ width: 44 }}><span className="hr-sr">{L("تحديد", "Select")}</span></th>
+                <th>{L("المنتج", "Product")}</th>
+                <th className="hr-hide-mobile">{L("الدولة", "Country")}</th>
+                <th className="hr-hide-mobile">{L("الإيحاءات", "Cup notes")}</th>
+                <th>{L("الحقول", "Fields")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p) => {
+                const miss = missingCount(p);
+                const on = selected.includes(p.id);
+                return (
+                  <tr key={p.id} aria-selected={on} className="is-clickable" onClick={() => toggle(p.id)}>
+                    <td className="m-end lbl-check" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} aria-label={`${L("تحديد", "Select")} ${p.productNameEn}`} style={{ width: 18, height: 18 }} />
+                    </td>
+                    <td className="m-title">
+                      <span className="lbl-name">{lang === "ar" ? p.productNameAr || p.productNameEn : p.productNameEn}</span>
+                      {miss ? <span className="hr-msub">{L("ينقص", "Missing")} {countNoun(miss, lang, FIELD_FORMS)} · {L("يُطبع «—»", "prints «—»")}</span> : null}
+                      <span className="hr-caption lbl-name-alt" dir={lang === "ar" ? "ltr" : "rtl"}>{lang === "ar" ? p.productNameEn : p.productNameAr ?? "—"}</span>
+                    </td>
+                    <td className="hr-hide-mobile">{lang === "ar" ? p.countryAr || p.countryEn : p.countryEn}</td>
+                    <td className="hr-hide-mobile"><span className="hr-caption">{(lang === "ar" ? p.cupNotesAr || p.cupNotesEn : p.cupNotesEn) ?? "—"}</span></td>
+                    <td>{miss ? <Flag tone="warning">{L("ينقص", "Missing")} {countNoun(miss, lang, FIELD_FORMS)} · {L("يُطبع «—»", "prints «—»")}</Flag> : <span className="hr-caption">{L("مكتملة", "Complete")}</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+
+      {dialog && canPrint && certified === true ? (
+        <PrintDialog open onClose={() => setDialog(false)} items={items} initialTemplate="COFFEE_ORIGIN"
+          subtitle={`${countNoun(items.length, lang, PRODUCT_FORMS)} ${L("محددة في الملصقات", "selected in Labels")}`}
+          onPrinted={(id) => { setPrinted(id); setDialog(false); }} />
+      ) : null}
     </div>
   );
 }

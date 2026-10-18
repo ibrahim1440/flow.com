@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireAuth } from "@/lib/auth-server";
+import { requireAuth, privilegedGate } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
-import { Decimal, ZERO, roundMoney, riyadhMonthStart } from "@/lib/services/commissions/engine";
+import { ZERO, roundMoney, riyadhMonthStart, parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import { approvePeriod, adjust, periodStatement } from "@/lib/services/commissions/accrual";
+import { isReservedByPayroll, lockCommissionPeriod } from "@/lib/hr/services/commission-bridge";
+import { isPayrollLive, payrollLockedRefusal } from "@/lib/hr/payroll-lock";
 
 /**
  * POST /api/commissions/review/actions — approve a period, adjust it, or record a payout.
@@ -66,6 +68,9 @@ export async function POST(request: Request) {
   if (!hasSubPrivilege(user.permissions, "commissions", needed)) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
+  // Commission approval and payout: a verified individual and a recent step-up (SOD.md §19).
+  const refused = await privilegedGate(user, "commissions", needed);
+  if (refused) return refused;
 
   try {
     const employee = await prisma.employee.findUnique({
@@ -107,12 +112,9 @@ export async function POST(request: Request) {
     }
 
     if (action === "adjust") {
-      let amount: Decimal;
-      try {
-        amount = new Decimal(String(b.amount ?? ""));
-      } catch {
-        return NextResponse.json({ error: "amount is not a number." }, { status: 400 });
-      }
+      // Finite decimals only: a NaN adjustment was stored and poisoned the period statement.
+      const amount = parseFiniteDecimal(b.amount ?? "");
+      if (!amount) return NextResponse.json({ error: "amount is not a number." }, { status: 400 });
       const reason = typeof b.reason === "string" ? b.reason : "";
 
       const entryId = await prisma.$transaction(
@@ -144,17 +146,32 @@ export async function POST(request: Request) {
     }
 
     // ── payout ──
-    let amount: Decimal;
-    try {
-      amount = roundMoney(new Decimal(String(b.amount ?? "")));
-    } catch {
-      return NextResponse.json({ error: "amount is not a number." }, { status: 400 });
-    }
+    // Phase 1 payroll lock (independent review F2; owner-adjustable scope, PAYROLL-LOCK.md): a payout
+    // records employee compensation as PAID, so it is refused while payroll is locked — for every
+    // account, administrators included. Calculation, review, approval and adjustments stay open.
+    // Checked again inside the transaction; the database refuses the PAYOUT row and PAID too.
+    if (!(await isPayrollLive())) return handleDomainError(payrollLockedRefusal("COMMISSION_PAYOUT"));
+    const parsed = parseFiniteDecimal(b.amount ?? "");
+    if (!parsed) return NextResponse.json({ error: "amount is not a number." }, { status: 400 });
+    const amount = roundMoney(parsed);
     if (amount.lessThanOrEqualTo(ZERO)) {
       return NextResponse.json({ error: "A payout must be greater than zero." }, { status: 400 });
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Native HR may pay this period through payroll. Both paths take this lock before
+      // reading what is owed, so two payouts can never both pass the check below; and a
+      // period a payroll run has reserved is paid by that run, never also here.
+      await lockCommissionPeriod(tx, employeeId, periodStart);
+      if (!(await isPayrollLive(tx))) throw payrollLockedRefusal("COMMISSION_PAYOUT");
+      if (await isReservedByPayroll(tx, employeeId, periodStart)) {
+        throw {
+          _appCode: 409,
+          message:
+            "This period is reserved by a payroll run and will be paid through payroll. " +
+            "Cancel that run first if it should be paid here instead.",
+        };
+      }
       const before = await periodStatement(tx, employeeId, periodStart);
 
       // Paying more than is owed is refused rather than recorded. An over-payment recorded

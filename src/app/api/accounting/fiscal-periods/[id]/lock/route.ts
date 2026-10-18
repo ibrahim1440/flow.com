@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSub } from "@/lib/auth-server";
+import { requireAdminAction, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { lockFiscalPeriod } from "@/lib/accounting/fiscal-period-service";
 import { AccountingError } from "@/lib/accounting/errors";
@@ -11,9 +11,9 @@ export async function PATCH(_request: Request, { params }: Params) {
   if (error) return error;
   // Defense in depth: there is no role hierarchy above "admin" yet (see saas-readiness.md),
   // so period control is additionally restricted to admin regardless of sub-privilege grants.
-  if (user.role !== "admin") {
-    return NextResponse.json({ error: "Insufficient permissions." }, { status: 403 });
-  }
+  // The admin role is privileged: the same verified-individual gate, with a recent step-up.
+  const refused = await requireAdminAction(user, "accounting.period_lock", { stepUp: true, message: "Insufficient permissions." });
+  if (refused) return refused;
 
   const { id } = await params;
 

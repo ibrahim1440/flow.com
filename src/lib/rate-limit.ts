@@ -47,12 +47,20 @@ export function hashRateLimitKey(value: string): string {
   return createHmac("sha256", pepper).update(value).digest("hex");
 }
 
+/**
+ * The client address, from the PLATFORM only (review P2-6). A client can send any
+ * X-Forwarded-For it likes — the first entry is whatever it wrote — so it is never read: an
+ * attacker rotating it would get a fresh per-address budget on every request. On Vercel the
+ * edge sets x-real-ip itself (a client-sent value is overwritten), so it is trusted there and
+ * only there. Anywhere else (local runs, a host without that guarantee) every request shares
+ * one address bucket, which is the safe direction for a throttle.
+ */
 export function extractIp(request: Request): string {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  // x-real-ip is set by Vercel and most reverse proxies.
-  // Falls back to 0.0.0.0 when neither header is present (e.g. direct local calls).
-  return request.headers.get("x-real-ip") ?? "0.0.0.0";
+  if (process.env.VERCEL === "1") {
+    const real = request.headers.get("x-real-ip")?.trim();
+    if (real) return real;
+  }
+  return "0.0.0.0";
 }
 
 // Removes rows older than 1 hour globally (table hygiene, not per-IP).
@@ -180,4 +188,12 @@ export async function clearAttempts(
   identifierHash: string
 ): Promise<void> {
   await prisma.loginAttempt.deleteMany({ where: { ipHash, identifierHash } });
+}
+
+// Counts failed attempts recorded under this identifier from ANY address in the window (review
+// P2-6: a per-account limit that rotating addresses cannot reset).
+export async function isIdentifierRateLimited(identifierHash: string, maxAttempts: number): Promise<boolean> {
+  const windowStart = new Date(Date.now() - WINDOW_MS);
+  const count = await prisma.loginAttempt.count({ where: { identifierHash, createdAt: { gte: windowStart } } });
+  return count >= maxAttempts;
 }

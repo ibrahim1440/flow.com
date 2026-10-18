@@ -3,6 +3,7 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError, handleDomainError } from "@/lib/api-error";
 import { Decimal } from "@prisma/client/runtime/client";
+import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import { accrueForCollection } from "@/lib/services/commissions/accrual";
 
 /**
@@ -89,7 +90,8 @@ export async function POST(request: Request) {
   }
 
   const num = (v: unknown, field: string): Decimal => {
-    const d = new Decimal(typeof v === "number" || typeof v === "string" ? v : 0);
+    const d = parseFiniteDecimal(typeof v === "number" || typeof v === "string" ? v : 0);
+    if (!d) throw { _appCode: 400, message: `${field} is not a number.` };
     if (d.isNegative()) throw { _appCode: 400, message: `${field} cannot be negative.` };
     return d;
   };

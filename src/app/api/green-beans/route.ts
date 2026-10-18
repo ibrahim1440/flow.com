@@ -69,8 +69,9 @@ export async function POST(request: Request) {
             quantityChanged:   quantityKg,
             previousQuantity:  0,
             newQuantity:       quantityKg,
-            sourceDocType:     "MANUAL_ADJUSTMENT",
-            sourceDocId:       null,
+            // An opening balance is receiving, not a count (review P3-8): its own label.
+            sourceDocType:     "OPENING_BALANCE",
+            sourceDocId:       created.id,
             userId:            user.id,
             notes:             "Opening balance",
           },

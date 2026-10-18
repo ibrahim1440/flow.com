@@ -1,0 +1,131 @@
+/*
+ * «اليوم» — the operations dashboard, Direction 2.1. Figma 1JbZgpMqmPkUVne8ms9Ozz:
+ *   Desktop 1440 `20:236` (page `20:253`), Compact 1024 `24:842`, Mobile 390 `34:1405` + `37:1376`.
+ * Components: PageHeader 41:248, MetricStrip 42:18, StatusDot 11:21, Button 7:114,
+ * Button/Small 7:227, Icon/chev 6:118. Tokens come from components/shell/direction-2.1.css;
+ * the page sits in the ops/HR content scope ([data-hr-root]) for its shared primitives.
+ */
+.dh-page { padding: 16px 48px 48px; display: flex; flex-direction: column; min-width: 0; }
+/* PageHeader (101:7003): title UI/Page title, meta UI/Body S muted with 3 px dot separators. */
+.dh-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dh-head h1 { margin: 0; font: 600 28px/35px var(--f-ui); color: var(--text-primary); }
+.dh-meta { display: flex; align-items: center; gap: 7.9px; margin-top: 6px; font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); flex-wrap: wrap; }
+.dh-meta i { width: 3px; height: 3px; border-radius: 1.5px; background: var(--border-control); flex: none; }
+.dh-actions { display: flex; gap: 8px; }
+.dh-actions .hr-btn { text-decoration: none; }
+
+/* MetricStrip (101:6845): label 12.5 Medium muted · value Number/Metric L 34/37.4 −0.3 with a
+   13 Medium unit · comparison 12.5/22. Hairline separators on the inline-start, no cards. */
+.dh-metrics { display: flex; margin-top: 36px; }
+.dh-metric { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; min-height: 95.4px; }
+.dh-metric + .dh-metric { border-inline-start: 1px solid var(--border-subtle); padding-inline-start: 25px; }
+.dh-mlabel { font: 500 12.5px/22px var(--f-ui); color: var(--text-muted); }
+.dh-mvalue { margin-top: 8px; display: flex; align-items: baseline; gap: 4px; height: 37.4px; }
+.dh-mvalue b { font: 400 34px/37.4px var(--f-num); letter-spacing: -0.3px; color: var(--text-primary); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.dh-mvalue small { font: 500 13px/13px var(--f-ui); color: var(--text-muted); }
+.dh-mcap { margin-top: 6px; height: 22px; font: 400 12.5px/22px var(--f-ui); color: var(--text-muted); } /* one 22 px line, also when a Latin run sits in the Arabic line */
+
+/* Block header (20:300): UI/Section + UI/Caption muted, baseline; a «lk» link at the end. */
+.dh-block { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.dh-block h2 { margin: 0; font: 600 16px/20.8px var(--f-ui); color: var(--text-primary); white-space: nowrap; }
+.dh-block p { margin: 0; font: 400 13px/22px var(--f-ui); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dh-lk { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 4px; font: 500 13px/22px var(--f-ui); color: var(--action-primary); text-decoration: none; white-space: nowrap; }
+.dh-lk svg { width: 16px; height: 16px; stroke-width: 1.5; }
+[dir="rtl"] .dh-lk svg { transform: scaleX(-1); }
+.dh-lk:hover { text-decoration: underline; }
+
+/* Order pipeline (20:303): one row, hairlines top and bottom, 9 px inset; cells 16/20/18 inset,
+   value Number/Flow 30/33 −0.3, label UI/Body S secondary; the waiting cell warning-tinted. */
+.dh-pipehead { margin-top: 40px; }
+.dh-pipe { display: flex; margin-top: 13px; padding: 8px 0; /* 9 px inset in 20:303, whose strokes sit inside the frame */ border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); list-style: none; }
+.dh-stage { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 16px 20px 18px; }
+.dh-stage + .dh-stage { border-inline-start: 1px solid var(--border-subtle); }
+.dh-stage b { font: 400 30px/33px var(--f-num); letter-spacing: -0.3px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.dh-stage span { font: 400 13.5px/22px var(--f-ui); color: var(--text-secondary); }
+.dh-stage small { display: block; margin-top: 2px; font: 400 12px/22px var(--f-ui); color: var(--status-warning); }
+.dh-stage.is-warning { background: var(--status-warning-tint); border-radius: 10px; }
+.dh-stage.is-warning b { color: var(--status-warning); }
+
+/* Divider 20:414 separates the roaster block from the columns; with no roaster source the
+   pipeline's own bottom hairline is the separator, so the divider is not drawn twice. */
+.dh-divider { display: none; }
+
+/* Columns (20:415): «تحتاج إجراء» (604.3) and «استمرارية البن الأخضر» (431.7), 56 apart. */
+.dh-cols { display: grid; grid-template-columns: minmax(0, 604.3fr) minmax(0, 431.7fr); gap: 56px; margin-top: 40px; align-items: start; }
+.dh-col { min-width: 0; display: flex; flex-direction: column; }
+
+/* «تحتاج إجراء» table (20:468): DataTable header 36, rows 46. */
+.dh-table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+.dh-table th { height: 36px; padding: 0 12px; text-align: start; font: 500 12.5px/22px var(--f-ui); color: var(--text-muted); border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
+.dh-table td { height: 46px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; white-space: nowrap; }
+.dh-table th:first-child, .dh-table td:first-child { padding-inline-start: 0; }
+.dh-table th:last-child, .dh-table td:last-child { padding-inline-end: 0; text-align: end; }
+.dh-table .num { font: 400 14px/22px var(--f-num); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.dh-table th.num { font: 500 12.5px/22px var(--f-num); color: var(--text-muted); }
+.dh-table .id { font: 400 12.5px/22px var(--f-mono); color: var(--text-muted); direction: ltr; unicode-bidi: isolate; }
+.dh-table .who { font: 500 14px/22px var(--f-ui); color: var(--text-primary); }
+.dh-table .cnt { font: 500 14px/22px var(--f-ui); color: var(--text-primary); } /* F4 aggregate view: order count per status */
+.dh-table .hr-dot { font-size: 13px; }
+/* StatusDot 11:21: the word keeps text-secondary unless the tone is warning / danger (which tint it). */
+.dh-page .hr-dot:not(.tone-warning):not(.tone-danger):not(.tone-cancelled) > span { color: var(--text-secondary); }
+.dh-sbtn { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); font: 500 12.5px/18px var(--f-ui); color: var(--text-primary); text-decoration: none; white-space: nowrap; }
+.dh-sbtn:hover { background: var(--surface-hover); }
+.dh-list { display: none; }
+
+/* «استمرارية البن الأخضر» (20:416): rows 44 with a hairline; name 150 · kg 70 · track · days 92. */
+.dh-green { list-style: none; margin: 13px 0 0; padding: 0; }
+.dh-green li { display: flex; align-items: center; gap: 16px; height: 44px; border-bottom: 1px solid var(--border-subtle); }
+.dh-gname { width: 150px; flex: none; font: 500 14px/22px var(--f-ui); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dh-gkg { width: 70px; flex: none; font: 400 14px/22px var(--f-num); color: var(--text-secondary); white-space: nowrap; }
+.dh-track { flex: 1; min-width: 0; height: 6px; border-radius: 3px; background: var(--border-subtle); position: relative; }
+.dh-track i { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 3px; background: var(--chart-3); }
+.dh-gdays { width: 92px; flex: none; font: 400 13px/22px var(--f-ui); color: var(--text-secondary); white-space: nowrap; }
+.dh-gdays b { font: inherit; font-family: var(--f-num); }
+.dh-legend { margin-top: 10px; font: 400 12px/22px var(--f-ui); color: var(--text-muted); }
+
+.dh-empty { margin: 14px 0 0; padding: 18px 0; font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
+.dh-gap-hidden { display: none; }
+
+/* ── Compact (24:842): 32 px page inset; the two columns stack (needs-action first). ── */
+@media (max-width: 1279px) {
+  .dh-page { padding: 24px 32px 40px; }
+  .dh-cols { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .dh-gname { width: 150px; }
+}
+
+/* ── Phone (34:1405 / 37:1376): the shell's phone header carries the title and date; metrics are
+   rows, the pipeline scrolls sideways as 96×62 tiles, «تحتاج إجراء» is a list. ── */
+@media (max-width: 767px) {
+  .dh-page { padding: 12px 16px 24px; }
+  .dh-head { display: none; }
+  .dh-metrics { flex-direction: column; margin-top: 0; }
+  .dh-metric, .dh-metric + .dh-metric { flex-direction: row; align-items: center; justify-content: space-between; min-height: 46px; padding: 10px 0 11px; border-inline-start: 0; border-bottom: 1px solid var(--border-subtle); }
+  .dh-mvalue { margin: 0; order: 2; height: auto; }
+  .dh-mvalue b { font-size: 20px; line-height: 22px; letter-spacing: 0; }
+  .dh-mcap { display: none; }
+  .dh-pipehead { margin-top: 14px; }
+  .dh-pipe { margin: 9px -16px 0; padding: 0 16px; border: 0; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+  .dh-stage, .dh-stage + .dh-stage { flex: 0 0 96px; gap: 2px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 10px; }
+  .dh-stage b { font: 500 20px/22px var(--f-num); letter-spacing: 0; }
+  .dh-stage span { font-size: 12px; line-height: 22px; color: var(--text-primary); white-space: nowrap; }
+  .dh-stage small { display: none; }
+  .dh-stage.is-warning { border-color: transparent; }
+  .dh-stage.is-warning span { color: var(--status-warning); }
+  .dh-divider { display: none; }
+  .dh-cols { margin-top: 22px; gap: 22px; }
+  .dh-table { display: none; }
+  .dh-list { display: block; list-style: none; margin: 4px 0 0; padding: 0; }
+  .dh-list li { display: flex; flex-direction: column; gap: 3px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+  .dh-list .l1, .dh-list .l2 { display: flex; align-items: center; gap: 10px; justify-content: space-between; min-width: 0; }
+  .dh-list .l1 > span:first-child { min-width: 0; display: flex; align-items: baseline; gap: 6px; font: 400 14px/22px var(--f-ui); }
+  .dh-list .id { font: 400 12.5px/22px var(--f-mono); color: var(--text-muted); direction: ltr; unicode-bidi: isolate; flex: none; }
+  .dh-list .who { font-weight: 500; color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dh-list .cnt { font-weight: 500; color: var(--text-primary); }
+  .dh-list .l2 > span { font: 400 12.5px/22px var(--f-ui); color: var(--text-muted); }
+  .dh-list .hr-dot { font-size: 12.5px; }
+  .dh-green { margin-top: 3px; }
+  .dh-green li { height: 40px; gap: 10px; }
+  .dh-gname { width: 96px; font-weight: 400; font-size: 13px; }
+  .dh-gkg { display: none; }
+  .dh-gdays { width: 54px; }
+}

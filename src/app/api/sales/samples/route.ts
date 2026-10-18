@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { seesAllSales } from "@/lib/services/sales/scope";
-import { Decimal } from "@/lib/services/commissions/engine";
+import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
 
 /**
  * Sample shipments.
@@ -89,12 +89,8 @@ export async function POST(request: Request) {
     );
   }
 
-  let quantity: Decimal;
-  try {
-    quantity = new Decimal(String(b.quantity ?? 0));
-  } catch {
-    return NextResponse.json({ error: "quantity is not a number." }, { status: 400 });
-  }
+  const quantity = parseFiniteDecimal(b.quantity ?? 0);
+  if (!quantity) return NextResponse.json({ error: "quantity is not a number." }, { status: 400 });
   if (quantity.lessThanOrEqualTo(0)) {
     return NextResponse.json({ error: "A sample quantity must be greater than zero." }, { status: 400 });
   }

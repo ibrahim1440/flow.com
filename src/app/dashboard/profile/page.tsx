@@ -5,6 +5,7 @@ import { UserCircle, Phone, Globe, Lock, CheckCircle, AlertCircle, Eye, EyeOff }
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "@/app/dashboard/user-context";
 import { PIN_LENGTH } from "@/lib/pin-policy";
+import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
 
 export default function ProfilePage() {
   const { t, lang } = useI18n();
@@ -189,6 +190,9 @@ export default function ProfilePage() {
           </button>
         </form>
       </section>
+
+      {/* Two-step verification (owner security decision) */}
+      <div id="mfa"><MfaEnrollment lang={lang === "en" ? "en" : "ar"} /></div>
 
       {/* Change PIN */}
       <section className="bg-white rounded-2xl shadow-sm border border-border p-6">

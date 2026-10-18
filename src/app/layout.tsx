@@ -23,12 +23,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={lang} dir={dir} className="h-full antialiased">
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap"
-          rel="stylesheet"
-        />
+        {/* Fonts are self-hosted (public/fonts) and loaded where they are used: IBM Plex by the
+            Direction 2.1 shell (components/shell/AppShell), Tajawal (the legacy face) by the legacy
+            surfaces (components/LegacyFonts). No third-party font origin is contacted. */}
       </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

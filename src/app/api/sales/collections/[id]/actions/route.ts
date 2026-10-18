@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireModule } from "@/lib/auth-server";
+import { requireModule, privilegedGate } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import {
@@ -61,6 +61,9 @@ export async function POST(request: Request, { params }: Params) {
       { status: 403 },
     );
   }
+  // A privileged permission: exercised by a verified individual only (SOD.md §19).
+  const refused = await privilegedGate(user, "commissions", PRIVILEGE[action]);
+  if (refused) return refused;
 
   const reason = typeof b.reason === "string" ? b.reason : "";
 

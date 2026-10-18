@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
-import { compare, hash } from "bcryptjs";
+import { hash } from "bcryptjs";
+import { verifySecret } from "@/lib/auth/sign-in";
 import { prisma } from "@/lib/db";
-import { requireAuth } from "@/lib/auth-server";
+import { requireAuth, requireFreshAuth, credentialVersion } from "@/lib/auth-server";
+import { isEnrolled } from "@/lib/auth/mfa";
 import { signToken, parsePermissions, buildDefaultPermissions } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
 import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
 import { validatePin } from "@/lib/pin-policy";
 import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
+import { pinSetThrottle, pinUnavailable, isPinLookupConflict } from "@/lib/pin-set-guard";
+import { refreshSessionCookie, setFreshSession } from "@/lib/session-cookie";
 
 // GET — fetch current user's profile details (phone, language)
 export async function GET() {
@@ -47,30 +51,10 @@ export async function PATCH(request: Request) {
       select: { id: true, name: true, role: true, permissions: true, preferredLanguage: true },
     });
 
-    // Re-issue JWT so language preference takes effect on next page load
-    const rawPerms = parsePermissions(updated.permissions as string);
-    const permissions = rawPerms && Object.keys(rawPerms).length > 0
-      ? rawPerms
-      : buildDefaultPermissions(updated.role);
-
+    // Re-sign the CURRENT session's token so the language takes effect on the next page load
+    // (same session row and deadlines; the token carries the language).
     const lang = (updated.preferredLanguage === "en" ? "en" : "ar") as "ar" | "en";
-
-    const token = await signToken({
-      id: updated.id,
-      name: updated.name,
-      role: updated.role,
-      permissions,
-      preferredLanguage: lang,
-    });
-
-    const response = NextResponse.json({ success: true, preferredLanguage: lang });
-    response.cookies.set("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 8,
-      path: "/",
-    });
+    const response = await refreshSessionCookie(NextResponse.json({ success: true, preferredLanguage: lang }), updated.id, user.sessionId);
     return response;
   } catch (err) {
     console.error("[PATCH /api/profile] error:", err);
@@ -82,6 +66,12 @@ export async function PATCH(request: Request) {
 export async function PUT(request: Request) {
   const { user, error } = await requireAuth();
   if (error) return error;
+  // Re-test AUTH-A: for a privileged or MFA-enrolled account, changing its own PIN needs a recent
+  // step-up (username + secret + verification code) — the current PIN alone is not enough.
+  if (user.privileged || (await isEnrolled(user.id))) {
+    const stale = requireFreshAuth(user);
+    if (stale) return stale;
+  }
 
   const { currentPin, newPin } = await request.json();
   if (!currentPin || !newPin) {
@@ -116,20 +106,23 @@ export async function PUT(request: Request) {
   // PIN. currentPin is not shape-checked — bcrypt decides whether it is the right
   // credential — but it IS run through the verifier derivation, because the stored hash is
   // bcrypt(pinVerifierInput(pin)) and a raw-PIN compare would reject the owner's own PIN.
-  if (!(await compare(pinVerifierInput(String(currentPin), secret), employee.pin))) {
+  if (!(await verifySecret(pinVerifierInput(String(currentPin), secret), employee.pin))) {
     await recordFailedAttempt(ipHash, identifierHash);
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
   await clearAttempts(ipHash, identifierHash);
 
+  // Review item 1: throttled like every PIN-setting path, one generic refusal, and the verifier
+  // derived before the uniqueness lookup (same cost whether the PIN is taken or free).
+  const limited = await pinSetThrottle(request, user.id);
+  if (limited) return limited;
+  const nextVerifier = await hash(pinVerifierInput(nextPin, secret), 10);
   const taken = await prisma.employee.findFirst({
     where: { pinLookup: nextLookup, id: { not: user.id } },
     select: { id: true },
   });
-  if (taken) {
-    return NextResponse.json({ error: "This PIN is already in use by another employee" }, { status: 409 });
-  }
+  if (taken) return pinUnavailable(request, user.id, user.id, "PROFILE");
 
   try {
     await prisma.employee.update({
@@ -142,12 +135,17 @@ export async function PUT(request: Request) {
       // (read by nothing, written by nothing) and migration #19 removes it. Refreshing it
       // here would keep a precomputable selector alive alongside the keyed one.
       data: {
-        pin: await hash(pinVerifierInput(nextPin, secret), 10),
+        pin: nextVerifier,
         pinLookup: nextLookup,
       },
     });
-    return NextResponse.json({ success: true });
+    await prisma.hrAuditLog.create({ data: { action: "PIN_CHANGED_SELF", entityType: "Employee", entityId: user.id, after: { route: "PROFILE" }, actorId: user.id } }).catch(() => undefined);
+    // Review item 2: the new PIN changes the credential digest; the caller gets a fresh token
+    // in this response instead of being signed out. AUTH-A: it is not a re-authentication —
+    // authTime, MFA state and the absolute deadline are inherited.
+    return await setFreshSession(NextResponse.json({ success: true }), user.id, user);
   } catch (err) {
+    if (isPinLookupConflict(err)) return pinUnavailable(request, user.id, user.id, "PROFILE");
     return handlePrismaError(err);
   }
 }

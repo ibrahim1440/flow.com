@@ -2,22 +2,24 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 
 export async function GET() {
-  const { error } = await requireAnyModule("customers", "orders");
+  const { user, error } = await requireAnyModule("customers", "orders");
   if (error) return error;
 
-  const customers = await prisma.customer.findMany({
-    orderBy: { name: "asc" },
-    take: 200,
-    include: {
-      _count: { select: { orders: true, roastPreferences: true } },
-      roastPreferences: {
-        include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },
-        orderBy: { createdAt: "asc" },
-      },
+  const related = {
+    _count: { select: { orders: true, roastPreferences: true } },
+    roastPreferences: {
+      include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },
+      orderBy: { createdAt: "asc" as const },
     },
-  });
+  };
+  // F4 / review F-1: orders:view alone (production, dispatch) lists customers by name for the
+  // order screens; the contact record (phone, email, address, opt-out) is the customers module's.
+  const customers = canSeeCustomerContact(user.permissions)
+    ? await prisma.customer.findMany({ orderBy: { name: "asc" }, take: 200, include: related })
+    : await prisma.customer.findMany({ orderBy: { name: "asc" }, take: 200, select: { ...CUSTOMER_NAME_SELECT, ...related } });
   return NextResponse.json(customers);
 }
 

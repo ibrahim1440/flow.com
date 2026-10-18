@@ -11,7 +11,9 @@ async function getBatch(batchId: string, token: string) {
     where: { id: batchId },
     include: {
       greenBean: true,
-      orderItem: { include: { order: { include: { customer: true } } } },
+      // F4 / review F-1: this public link reads only the line's bean name, so the order and
+      // its customer are not loaded at all.
+      orderItem: { select: { beanTypeName: true } },
     },
   });
   if (!batch || batch.qcToken !== token) return null;

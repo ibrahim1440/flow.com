@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Wallet, Paperclip, Upload } from "lucide-react";
+import { Paperclip, Upload } from "lucide-react";
 import {
-  Card, SectionTitle, EmptyState, Field, TextInput, TextArea, Select, Button, Modal,
+  Field, TextInput, TextArea, Select, Button, Modal,
   Money, Num, ROW_ACTION, api, formatDay, num, moneyText,
 } from "../../_components/ui";
 
@@ -203,138 +203,108 @@ export function CollectionsPanel({
   const state = STATE_LABEL[summary.state];
   const doc = summary.document;
 
-  return (
-    <div id="collections" className="scroll-mt-24">
-    <Card>
-      <SectionTitle
-        right={
-          action.available ? (
-            <Button onClick={start} testId="record-collection">
-              + {ar ? "تسجيل تحصيل" : "Record a collection"}
-            </Button>
-          ) : null
-        }
-      >
-        <span className="inline-flex items-center gap-1.5">
-          <Wallet size={14} aria-hidden /> {ar ? "التحصيل" : "Collections"}
-        </span>
-      </SectionTitle>
+  // Drawn with the deal page's own section pattern (`.bh` heading, `.props` figures, plain rows),
+  // not a card of its own: the panel sits inside the Direction 2.1 deal frame. What it shows and
+  // when — the server's verdict, the reason when the action is withheld — is unchanged.
+  const stTone = summary.state === "FULLY_COLLECTED" ? "ok" : summary.state === "PARTIALLY_COLLECTED" ? "wa" : "er";
+  const showReason = !action.available && action.reason !== "NOTHING_OUTSTANDING" && !!UNAVAILABLE[action.reason];
 
-      {/* Why the button is not there. Shown whenever the action is unavailable for a
-          reason the person can act on — a missing privilege, somebody else's deal, no
-          accepted quotation — rather than leaving an unexplained gap where a control
-          should be. NOTHING_OUTSTANDING is deliberately excluded: the figures directly
-          below already say the deal is fully collected, and repeating it as a warning
-          would read as a fault. */}
-      {!action.available && action.reason !== "NOTHING_OUTSTANDING" && UNAVAILABLE[action.reason] && (
-        <div
-          data-testid="collection-unavailable"
-          data-reason={action.reason}
-          className="mb-3 rounded-xl border border-oo-status-waiting bg-oo-status-waiting-bg px-3.5 py-2.5 text-[12px] leading-[18px] text-oo-status-hold"
-        >
+  return (
+    <section id="collections" className="scroll-mt-24" aria-labelledby="collections-title">
+      <div className="bh">
+        <h2 className="bt" id="collections-title">{ar ? "التحصيل" : "Collections"}</h2>
+        {doc && (
+          <span className="sub">
+            <span className={`st ${stTone}`} data-testid="collection-state">{ar ? state.ar : state.en}</span>
+            {" · "}{ar ? "مقابل " : "against "}<bdi className="id" dir="ltr">{doc.quoteNumber}</bdi>
+          </span>
+        )}
+        {action.available && (
+          <button type="button" className="lk" onClick={start} data-testid="record-collection">
+            + {ar ? "تسجيل تحصيل" : "Record a collection"}
+          </button>
+        )}
+      </div>
+
+      {/* Why the button is not there, whenever the person can act on the reason (NOTHING_OUTSTANDING
+          is excluded: the state already says the deal is fully collected). */}
+      {showReason && (
+        <p className="notice" data-testid="collection-unavailable" data-reason={action.reason} style={{ marginBottom: 12 }}>
           {ar ? UNAVAILABLE[action.reason].ar : UNAVAILABLE[action.reason].en}
-        </div>
+        </p>
       )}
 
       {!doc ? (
-        <EmptyState>
-          {ar
-            ? "لا يوجد عرض سعر مقبول بعد، فلا شيء يُحصَّل مقابله."
-            : "No accepted quotation yet, so there is nothing to collect against."}
-        </EmptyState>
+        !showReason && (
+          <p className="lbl" style={{ fontWeight: 400 }}>
+            {ar
+              ? "لا يوجد عرض سعر مقبول بعد، فلا شيء يُحصَّل مقابله."
+              : "No accepted quotation yet, so there is nothing to collect against."}
+          </p>
+        )
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <span
-              className={`inline-flex h-7 items-center rounded-md border px-2.5 py-1 text-[12px] font-medium leading-[18px] ${state.tone}`}
-              data-testid="collection-state"
-            >
-              {ar ? state.ar : state.en}
-            </span>
-            <span className="text-[12px] leading-[18px] text-oo-text-muted">
-              {ar ? "مقابل " : "against "}
-              <Num>{doc.quoteNumber}</Num>
-            </span>
-          </div>
-
-          <dl className="grid gap-2 sm:grid-cols-2">
+          <dl className="props" style={{ gridTemplateColumns: "180px minmax(0,1fr)", marginBottom: 14 }}>
             {[
               [ar ? "قيمة العرض المقبول" : "Accepted quotation", doc.gross, null],
               [ar ? "محصَّل ومعتمَد" : "Approved", summary.approvedGross, ar ? `الأساس الصافي ${moneyText(summary.approvedNet, doc.currency, lang)}` : `net basis ${moneyText(summary.approvedNet, doc.currency, lang)}`],
               [ar ? "بانتظار التحقق" : "Awaiting verification", summary.pendingGross, ar ? "لم يُنشئ عمولة" : "no commission yet"],
-              // Two figures, not one. The debt ignores pending claims; the capacity does
-              // not. Showing only the second under the word "outstanding" read as a debt.
-              [ar ? "المتبقي غير المسدد" : "Unpaid balance", summary.unpaidGross,
-                ar ? "قيمة العرض ناقص المعتمَد" : "quotation less approved"],
-              [ar ? "المتاح لتسجيل تحصيل إضافي" : "Available to submit", summary.availableToSubmitGross,
-                ar ? "غير المسدد ناقص ما هو بانتظار التحقق" : "unpaid less what is pending"],
+              // Two figures, not one. The debt ignores pending claims; the capacity does not.
+              [ar ? "المتبقي غير المسدد" : "Unpaid balance", summary.unpaidGross, ar ? "قيمة العرض ناقص المعتمَد" : "quotation less approved"],
+              [ar ? "المتاح لتسجيل تحصيل إضافي" : "Available to submit", summary.availableToSubmitGross, ar ? "غير المسدد ناقص ما هو بانتظار التحقق" : "unpaid less what is pending"],
             ].map(([k, v, hint]) => (
-              <div key={k as string} className="rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]">
-                <dt className="text-[12px] leading-[18px] text-oo-text-muted">{k as string}</dt>
-                <dd className="text-[14px] leading-[22px] text-oo-text-primary">
+              <div key={k as string} style={{ display: "contents" }}>
+                <dt>{k as string}</dt>
+                <dd>
                   <Money value={v as string} currency={doc.currency} />
-                  {hint && (
-                    <span className="block text-[12px] leading-[18px] text-oo-text-muted">{hint as string}</span>
-                  )}
+                  {hint && <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}> · {hint as string}</span>}
                 </dd>
               </div>
             ))}
           </dl>
 
           {rows.length === 0 ? (
-            <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
-              {ar ? "لم يُسجَّل أي تحصيل بعد." : "Nothing recorded yet."}
-            </p>
+            <p className="lbl" style={{ fontWeight: 400 }}>{ar ? "لم يُسجَّل أي تحصيل بعد." : "Nothing recorded yet."}</p>
           ) : (
-            <ul className="mt-3 space-y-2" data-testid="collection-history">
+            <ul data-testid="collection-history" style={{ listStyle: "none", margin: 0, padding: 0, borderTop: "1px solid var(--border-strong)" }}>
               {rows.map((r) => {
                 const accruals = r.collectionEvent?.accruals ?? [];
                 return (
-                  <li key={r.id} className="rounded-[10px] border border-oo-border-default p-3">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="text-[12px] leading-[18px] text-oo-text-muted">
+                  <li key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: 13.5 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12 }}>
+                      <span>
                         {label(STATUS_LABEL, r.status)}
-                        {" · "}
-                        {label(METHOD_LABEL, r.paymentMethod)}
-                        {" · "}
-                        <Num>{formatDay(r.collectedAt)}</Num>
+                        <span style={{ color: "var(--text-muted)" }}>
+                          {" · "}{label(METHOD_LABEL, r.paymentMethod)}{" · "}<Num>{formatDay(r.collectedAt)}</Num>
+                        </span>
                       </span>
-                      <span className="text-[14px] leading-[22px]">
-                        <Money value={r.amountGross} currency={r.currency} />
-                      </span>
+                      <span style={{ marginInlineStart: "auto" }}><Money value={r.amountGross} currency={r.currency} /></span>
                     </div>
-                    <p className="text-[12px] leading-[18px] text-oo-text-muted">
+                    <div style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
                       {[
                         r.submittedBy ? `${ar ? "سجّله" : "recorded by"} ${r.submittedBy.name}` : null,
                         r.decidedBy ? `${ar ? "قرّره" : "decided by"} ${r.decidedBy.name}` : null,
                         r.referenceNumber ? `${ar ? "مرجع" : "ref"} ${r.referenceNumber}` : null,
                       ].filter(Boolean).join(" · ")}
-                    </p>
+                    </div>
                     {(r.decisionReason || r.reversalReason) && (
-                      <p className="mt-1 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[12px] leading-[18px] text-oo-text-secondary">
-                        {r.reversalReason ?? r.decisionReason}
-                      </p>
+                      <div className="diff">{r.reversalReason ?? r.decisionReason}</div>
                     )}
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] leading-[18px]">
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4, fontSize: 12.5 }}>
                       {/* The commission each approved collection produced, named per person. */}
                       {r.status === "PENDING_VERIFICATION" ? (
-                        <span className="text-oo-text-muted">
+                        <span style={{ color: "var(--text-muted)" }}>
                           {ar ? "العمولة بانتظار الاعتماد المالي" : "commission pending finance approval"}
                         </span>
                       ) : accruals.length > 0 ? (
                         accruals.map((a, i) => (
-                          <span key={i} className="text-oo-text-secondary">
-                            {ar ? "عمولة" : "commission"} <Money value={a.amount} currency={r.currency} />
-                            {" · "}
-                            {a.employee.name}
+                          <span key={i} style={{ color: "var(--text-secondary)" }}>
+                            {ar ? "عمولة" : "commission"} <Money value={a.amount} currency={r.currency} />{" · "}{a.employee.name}
                           </span>
                         ))
                       ) : null}
                       {r._count.evidence > 0 && (
-                        <Link
-                          href={`/api/sales/collections/${r.id}/evidence`}
-                          className="inline-flex items-center gap-1 text-oo-action-primary hover:underline"
-                        >
+                        <Link href={`/api/sales/collections/${r.id}/evidence`} style={{ color: "var(--action-primary)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                           <Paperclip size={12} aria-hidden /> <Num>{num(r._count.evidence, lang)}</Num>
                         </Link>
                       )}
@@ -345,7 +315,7 @@ export function CollectionsPanel({
             </ul>
           )}
 
-          <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
+          <p className="lbl" style={{ fontWeight: 400, marginTop: 10 }}>
             {ar
               ? "تحقّق مالي يدوي. لا يوجد ربط بنكي، ولا يُنشئ أي مبلغ عمولةً قبل اعتماده."
               : "Manual finance verification. There is no bank connection, and no amount creates commission before it is approved."}
@@ -446,7 +416,6 @@ export function CollectionsPanel({
           </div>
         </Modal>
       )}
-    </Card>
-    </div>
+    </section>
   );
 }

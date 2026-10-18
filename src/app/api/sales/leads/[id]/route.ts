@@ -37,7 +37,7 @@ export async function GET(_request: Request, { params }: Params) {
           orderBy: { createdAt: "desc" },
           take: 100,
           select: {
-            id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true,
+            id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true, outcome: true,
             createdAt: true, owner: { select: { id: true, name: true } },
           },
         },

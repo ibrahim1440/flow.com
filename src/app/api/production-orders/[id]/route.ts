@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { canSeeCustomerDetail } from "@/lib/auth/customer-detail";
 import {
   productionProgress,
   PRODUCTION_ORDER_ACTIONS,
@@ -20,8 +21,12 @@ type Params = { params: Promise<{ id: string }> };
  * the server stays the single authority on what may happen next.
  */
 export async function GET(_request: Request, { params }: Params) {
-  const { error } = await requireAnyModule("production", "orders", "qc", "packaging");
+  const { user, error } = await requireAnyModule("production", "orders", "qc", "packaging");
   if (error) return error;
+  // F4 / review F-1: the page draws the customer's name beside the order number and nothing
+  // else of the customer; the customer id goes only to holders of the customer-detail right.
+  // (No contact field is selected here for anyone.)
+  const customerDetail = canSeeCustomerDetail(user.permissions);
 
   const { id } = await params;
 
@@ -51,7 +56,7 @@ export async function GET(_request: Request, { params }: Params) {
             order: {
               select: {
                 id: true, orderNumber: true, status: true,
-                customer: { select: { id: true, name: true } },
+                customer: { select: { id: customerDetail, name: true } },
               },
             },
           },

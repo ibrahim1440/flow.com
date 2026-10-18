@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { createManualJournalEntry, type ManualJournalLineInput } from "@/lib/accounting/journal-service";
-import { AccountingError } from "@/lib/accounting/errors";
+import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 
 export async function GET() {
   const { error } = await requireModule("accounting");
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     return NextResponse.json(entry, { status: 201 });
   } catch (err) {
     if (err instanceof AccountingError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json(accountingErrorJson(err), { status: err.status });
     }
     return handlePrismaError(err);
   }

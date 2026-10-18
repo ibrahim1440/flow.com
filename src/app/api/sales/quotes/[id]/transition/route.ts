@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { requireSub, assertPrivilegedGate } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
@@ -41,6 +41,18 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
+  // Accepting a quotation closes the deal Won in the same transaction (below), so it needs the
+  // same authority as closing the deal by hand: the deal-close privilege, checked exactly as
+  // the opportunity transition route checks it. Required even when the deal is already
+  // closed, because an accepted quotation is itself the basis a deal is won, ordered and
+  // collected on. Refused before any read or write, so nothing is half-applied.
+  if (to === "ACCEPTED" && !hasSubPrivilege(user.permissions, "sales", "deal_close")) {
+    return NextResponse.json(
+      { error: "Recording a quotation as accepted closes the deal, and needs the deal-close permission." },
+      { status: 403 },
+    );
+  }
+
   try {
     // Scoped before anything else. Reaching another rep's quotation by editing the id in the
     // URL is the first thing anybody tries, and this is where it stops.
@@ -54,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
 
     const result = await prisma.$transaction(async (tx) => {
       if (to === "ISSUED") {
-        const issued = await issueQuote(tx, { quoteId: id, actorId: user.id, canApproveDiscount });
+        const issued = await issueQuote(tx, { quoteId: id, actorId: user.id, canApproveDiscount, onDiscountApproval: () => assertPrivilegedGate(user, "sales", "quote_approve_discount") });
         // Issuing a quotation IS the deal reaching the quotation stage. Leaving the board to
         // be updated by hand is how a pipeline stops describing the work.
         const advance = await advanceToQuotationStage(tx, visible.opportunityId, user.id);

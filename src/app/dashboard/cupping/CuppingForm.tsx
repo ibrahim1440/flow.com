@@ -2,6 +2,9 @@
 
 import { useState, useMemo } from "react";
 import { Coffee, ChevronDown, ChevronUp } from "lucide-react";
+import { useI18n } from "@/lib/i18n/context";
+
+type Lang = "ar" | "en";
 
 // ─── SCA Constants ────────────────────────────────────────────────────────────
 
@@ -25,6 +28,8 @@ const CUP_ATTRS = [
 
 type CupKey = (typeof CUP_ATTRS)[number]["key"];
 
+// The stored descriptor is the English word (existing scores keep matching); only the label
+// shown follows the viewer's language (G-13).
 const FLAVOR_TAGS = [
   "Fruity", "Citrus", "Lemon", "Orange", "Grapefruit",
   "Berry", "Blueberry", "Strawberry", "Raspberry",
@@ -40,13 +45,33 @@ const FLAVOR_TAGS = [
   "Winey", "Fermented",
 ];
 
-const SCORE_LABELS: { min: number; label: string; color: string }[] = [
-  { min: 90, label: "Outstanding",  color: "#16a34a" },
-  { min: 85, label: "Excellent",    color: "#22c55e" },
-  { min: 80, label: "Very Good",    color: "#84cc16" },
-  { min: 75, label: "Good",         color: "#eab308" },
-  { min: 70, label: "Fair",         color: "#f97316" },
-  { min: 0,  label: "Below Spec",   color: "#ef4444" },
+const FLAVOR_AR: Record<string, string> = {
+  Fruity: "فاكهي", Citrus: "حمضيات", Lemon: "ليمون", Orange: "برتقال", Grapefruit: "جريب فروت",
+  Berry: "توتي", Blueberry: "توت أزرق", Strawberry: "فراولة", Raspberry: "توت العليق",
+  "Stone Fruit": "فاكهة ذات نواة", Peach: "خوخ", Apricot: "مشمش", Plum: "برقوق",
+  Tropical: "استوائي", Mango: "مانجو", Pineapple: "أناناس", "Passion Fruit": "باشن فروت",
+  Floral: "زهري", Jasmine: "ياسمين", Rose: "ورد", Lavender: "خزامى",
+  Chocolate: "شوكولاتة", "Dark Chocolate": "شوكولاتة داكنة", "Milk Chocolate": "شوكولاتة بالحليب", Cocoa: "كاكاو",
+  Nutty: "مكسرات", Almond: "لوز", Hazelnut: "بندق", Peanut: "فول سوداني",
+  Caramel: "كراميل", Honey: "عسل", Toffee: "توفي", Vanilla: "فانيلا", "Brown Sugar": "سكر بني",
+  Spicy: "توابل", Cinnamon: "قرفة", Clove: "قرنفل",
+  Herbal: "عشبي", "Green Tea": "شاي أخضر",
+  Earthy: "ترابي", Tobacco: "تبغ", Cedar: "أرز",
+  Winey: "نبيذي", Fermented: "مخمّر",
+};
+
+/** A stored descriptor in the viewer's language; an unknown one is shown as stored. */
+export function descriptorLabel(tag: string, lang: Lang): string {
+  return lang === "ar" ? (FLAVOR_AR[tag] ?? tag) : tag;
+}
+
+const SCORE_LABELS: { min: number; label: string; labelAr: string; color: string }[] = [
+  { min: 90, label: "Outstanding", labelAr: "استثنائي",      color: "#16a34a" },
+  { min: 85, label: "Excellent",   labelAr: "ممتاز",         color: "#22c55e" },
+  { min: 80, label: "Very Good",   labelAr: "جيد جدًا",      color: "#84cc16" },
+  { min: 75, label: "Good",        labelAr: "جيد",           color: "#eab308" },
+  { min: 70, label: "Fair",        labelAr: "مقبول",         color: "#f97316" },
+  { min: 0,  label: "Below Spec",  labelAr: "دون المواصفة",  color: "#ef4444" },
 ];
 
 function scoreLabel(s: number) {
@@ -56,18 +81,15 @@ function scoreLabel(s: number) {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ScoreSlider({
-  label, labelAr, value, onChange,
+  label, value, onChange,
 }: {
-  label: string; labelAr: string; value: number; onChange: (v: number) => void;
+  label: string; value: number; onChange: (v: number) => void;
 }) {
   const pct = ((value - 6) / 4) * 100;
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <div>
-          <span className="text-sm font-bold text-charcoal">{label}</span>
-          <span className="text-xs text-brown/50 ltr:ml-1.5 rtl:mr-1.5">{labelAr}</span>
-        </div>
+        <span className="text-sm font-bold text-charcoal">{label}</span>
         <span className="text-lg font-extrabold tabular-nums" style={{ color: scoreLabel(value + 60).color }}>
           {value.toFixed(2)}
         </span>
@@ -81,6 +103,7 @@ function ScoreSlider({
           type="range" min={6} max={10} step={0.25}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
+          aria-label={label}
           className="absolute inset-0 w-full opacity-0 cursor-pointer h-2"
         />
         {/* Thumb */}
@@ -97,29 +120,30 @@ function ScoreSlider({
 }
 
 function CupRow({
-  label, labelAr, cups, onChange,
+  label, cups, onChange, cupLabel,
 }: {
-  label: string; labelAr: string; cups: boolean[]; onChange: (i: number) => void;
+  label: string; cups: boolean[]; onChange: (i: number) => void; cupLabel: (i: number) => string;
 }) {
   const score = cups.filter(Boolean).length * 2;
   return (
     <div className="flex items-center gap-3">
       <div className="flex-1 min-w-0">
         <span className="text-sm font-bold text-charcoal">{label}</span>
-        <span className="text-xs text-brown/50 ltr:ml-1.5 rtl:mr-1.5">{labelAr}</span>
       </div>
       <div className="flex gap-2">
         {cups.map((checked, i) => (
           <button
             key={i} type="button"
             onClick={() => onChange(i)}
+            aria-pressed={checked}
+            aria-label={`${label} · ${cupLabel(i)}`}
             className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all duration-150 text-xs font-bold ${
               checked
                 ? "bg-orange border-orange text-white shadow-sm"
                 : "bg-gray-50 border-gray-200 text-gray-300 hover:border-orange/40"
             }`}
           >
-            <Coffee size={13} strokeWidth={checked ? 2.5 : 1.5} />
+            <Coffee size={13} strokeWidth={checked ? 2.5 : 1.5} aria-hidden="true" />
           </button>
         ))}
       </div>
@@ -142,11 +166,17 @@ type Props = {
   onSubmit: (data: CuppingFormData) => Promise<void>;
   submitting?: boolean;
   submitLabel?: string;
+  /** The guest pages are English and have no language provider; they pass "en". */
+  lang?: Lang;
 };
 
 // ─── Main Form ────────────────────────────────────────────────────────────────
 
-export default function CuppingForm({ onSubmit, submitting = false, submitLabel = "Submit Score" }: Props) {
+export default function CuppingForm({ onSubmit, submitting = false, submitLabel, lang: langProp }: Props) {
+  const ctx = useI18n();
+  const lang: Lang = langProp ?? ctx.lang;
+  const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
+  const attrLabel = (a: { label: string; labelAr: string }) => (lang === "ar" ? a.labelAr : a.label);
   const [sliders, setSliders] = useState<Record<SliderKey, number>>({
     fragranceAroma: 7, flavor: 7, aftertaste: 7,
     acidity: 7, body: 7, balance: 7, overall: 7,
@@ -178,7 +208,9 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
 
   const defectPenalty = defectCups * (defectType === "fault" ? 4 : defectType === "taint" ? 2 : 0);
   const finalScore    = Math.max(0, subtotal - defectPenalty);
-  const { label: qualityLabel, color: qualityColor } = scoreLabel(finalScore);
+  const quality = scoreLabel(finalScore);
+  const qualityLabel = lang === "ar" ? quality.labelAr : quality.label;
+  const qualityColor = quality.color;
 
   function setSlider(key: SliderKey, val: number) {
     setSliders((p) => ({ ...p, [key]: val }));
@@ -216,16 +248,16 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
       {/* ── Live Score Banner ─────────────────────────────────────── */}
       <div className="rounded-2xl p-5 text-center shadow-sm" style={{ backgroundColor: qualityColor + "18", border: `2px solid ${qualityColor}40` }}>
         <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: qualityColor }}>
-          SCA Final Score
+          {L("النتيجة النهائية · SCA", "SCA final score")}
         </p>
         <p className="text-6xl font-black tabular-nums leading-none" style={{ color: qualityColor }}>
           {finalScore.toFixed(2)}
         </p>
         <p className="text-sm font-bold mt-2" style={{ color: qualityColor }}>{qualityLabel}</p>
         <div className="flex justify-center gap-4 mt-3 text-xs text-charcoal/50 font-medium">
-          <span>Subtotal: <strong className="text-charcoal">{subtotal.toFixed(2)}</strong></span>
+          <span>{L("المجموع الجزئي", "Subtotal")}: <strong className="text-charcoal d21-bold">{subtotal.toFixed(2)}</strong></span>
           {defectPenalty > 0 && (
-            <span className="text-red-500">Defects: <strong>-{defectPenalty}</strong></span>
+            <span className="text-red-500">{L("العيوب", "Defects")}: <strong dir="ltr">−{defectPenalty}</strong></span>
           )}
         </div>
       </div>
@@ -233,13 +265,12 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
       {/* ── Slider Attributes ─────────────────────────────────────── */}
       <section className="bg-white rounded-2xl border border-border p-5 space-y-5">
         <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">
-          Sensory Attributes (6 – 10)
+          {L("الصفات الحسية (6 – 10)", "Sensory attributes (6 – 10)")}
         </h3>
         {SLIDER_ATTRS.map((attr) => (
           <ScoreSlider
             key={attr.key}
-            label={attr.label}
-            labelAr={attr.labelAr}
+            label={attrLabel(attr)}
             value={sliders[attr.key]}
             onChange={(v) => setSlider(attr.key, v)}
           />
@@ -250,15 +281,15 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
       <section className="bg-white rounded-2xl border border-border p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">
-            Cup Scores (5 cups × 2 pts)
+            {L("درجات الأكواب (5 أكواب × نقطتان)", "Cup scores (5 cups × 2 pts)")}
           </h3>
-          <span className="text-xs text-brown/50">Tap to mark a failed cup</span>
+          <span className="text-xs text-brown/50">{L("اضغط لتعليم كوب غير مطابق", "Tap to mark a failed cup")}</span>
         </div>
         {CUP_ATTRS.map((attr) => (
           <CupRow
             key={attr.key}
-            label={attr.label}
-            labelAr={attr.labelAr}
+            label={attrLabel(attr)}
+            cupLabel={(i) => L(`كوب ${i + 1}`, `Cup ${i + 1}`)}
             cups={cups[attr.key]}
             onChange={(i) => toggleCup(attr.key, i)}
           />
@@ -267,7 +298,7 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
 
       {/* ── Defects ───────────────────────────────────────────────── */}
       <section className="bg-white rounded-2xl border border-border p-5 space-y-4">
-        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">Defects</h3>
+        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">{L("العيوب", "Defects")}</h3>
         <div className="flex gap-3 flex-wrap">
           {(["none", "taint", "fault"] as const).map((type) => (
             <button key={type} type="button"
@@ -281,14 +312,14 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
                     : "bg-red-500 border-red-500 text-white"
                   : "bg-white border-border text-brown hover:border-charcoal/30"
               }`}>
-              {type === "none" ? "No Defect" : type === "taint" ? "Taint (−2/cup)" : "Fault (−4/cup)"}
+              {type === "none" ? L("لا عيب", "No defect") : type === "taint" ? L("شائبة (−2 لكل كوب)", "Taint (−2/cup)") : L("عيب (−4 لكل كوب)", "Fault (−4/cup)")}
             </button>
           ))}
         </div>
         {defectType !== "none" && (
           <div className="space-y-2">
             <label className="text-xs font-bold text-brown uppercase tracking-wide">
-              Number of defect cups
+              {L("عدد الأكواب المعيبة", "Number of defect cups")}
             </label>
             <div className="flex gap-2">
               {[0, 1, 2, 3, 4, 5].map((n) => (
@@ -305,7 +336,7 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
             </div>
             {defectCups > 0 && (
               <p className="text-xs font-bold text-red-500">
-                Penalty: −{defectCups * (defectType === "fault" ? 4 : 2)} points
+                {L(`الخصم: −${defectCups * (defectType === "fault" ? 4 : 2)} نقاط`, `Penalty: −${defectCups * (defectType === "fault" ? 4 : 2)} points`)}
               </p>
             )}
           </div>
@@ -315,77 +346,79 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
       {/* ── Flavor Tags ───────────────────────────────────────────── */}
       <section className="bg-white rounded-2xl border border-border p-5 space-y-3">
         <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">
-          Flavor Descriptors
+          {L("واصفات النكهة", "Flavor descriptors")}
         </h3>
         <div className="flex flex-wrap gap-2">
           {visibleTags.map((tag) => (
             <button key={tag} type="button"
               onClick={() => toggleTag(tag)}
+              aria-pressed={tags.includes(tag)}
               className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-150 ${
                 tags.includes(tag)
                   ? "bg-orange border-orange text-white shadow-sm"
                   : "bg-cream border-border text-brown hover:border-orange/40 hover:text-orange"
               }`}>
-              {tag}
+              {descriptorLabel(tag, lang)}
             </button>
           ))}
           <button type="button"
             onClick={() => setShowAllTags((p) => !p)}
             className="px-3 py-1.5 rounded-full text-xs font-bold border border-dashed border-border text-brown/50 hover:text-orange hover:border-orange/40 flex items-center gap-1 transition-all">
-            {showAllTags ? <><ChevronUp size={11} /> Less</> : <><ChevronDown size={11} /> +{FLAVOR_TAGS.length - 18} more</>}
+            {showAllTags ? <><ChevronUp size={11} aria-hidden="true" /> {L("أقل", "Less")}</> : <><ChevronDown size={11} aria-hidden="true" /> {L(`+${FLAVOR_TAGS.length - 18} أخرى`, `+${FLAVOR_TAGS.length - 18} more`)}</>}
           </button>
         </div>
         {tags.length > 0 && (
           <p className="text-xs text-brown/50">
-            Selected: <strong className="text-charcoal">{tags.join(", ")}</strong>
+            {L("المختارة", "Selected")}: <strong className="text-charcoal">{tags.map((t) => descriptorLabel(t, lang)).join(L("، ", ", "))}</strong>
           </p>
         )}
       </section>
 
       {/* ── Notes ─────────────────────────────────────────────────── */}
       <section className="bg-white rounded-2xl border border-border p-5">
-        <label className="block text-sm font-extrabold text-charcoal uppercase tracking-wide mb-2">
-          Cupper Notes
+        <label htmlFor="cupper-notes" className="block text-sm font-extrabold text-charcoal uppercase tracking-wide mb-2">
+          {L("ملاحظات المقيّم", "Cupper notes")}
         </label>
         <textarea
+          id="cupper-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
-          placeholder="Describe what you taste, smell, and feel in the cup..."
+          placeholder={L("صف ما تتذوقه وتشمّه وتشعر به في الكوب…", "Describe what you taste, smell, and feel in the cup…")}
           className="w-full px-4 py-3 rounded-xl border-2 border-border bg-cream text-charcoal text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 resize-none transition-colors"
         />
       </section>
 
       {/* ── Score Summary + Submit ─────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-border p-5 space-y-4">
-        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">Score Breakdown</h3>
+        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">{L("تفصيل الدرجة", "Score breakdown")}</h3>
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
           {SLIDER_ATTRS.map((a) => (
             <div key={a.key} className="flex justify-between">
-              <span className="text-brown/70">{a.label}</span>
+              <span className="text-brown/70">{attrLabel(a)}</span>
               <span className="font-bold text-charcoal tabular-nums">{sliders[a.key].toFixed(2)}</span>
             </div>
           ))}
           {CUP_ATTRS.map((a) => (
             <div key={a.key} className="flex justify-between">
-              <span className="text-brown/70">{a.label}</span>
+              <span className="text-brown/70">{attrLabel(a)}</span>
               <span className="font-bold text-charcoal tabular-nums">{cupScores[a.key]}.00</span>
             </div>
           ))}
         </div>
         <div className="border-t border-border pt-3 space-y-1">
           <div className="flex justify-between text-sm">
-            <span className="text-brown/70">Subtotal</span>
+            <span className="text-brown/70">{L("المجموع الجزئي", "Subtotal")}</span>
             <span className="font-bold">{subtotal.toFixed(2)}</span>
           </div>
           {defectPenalty > 0 && (
             <div className="flex justify-between text-sm text-red-500">
-              <span>Defect Penalty</span>
-              <span className="font-bold">−{defectPenalty}.00</span>
+              <span>{L("خصم العيوب", "Defect penalty")}</span>
+              <span className="font-bold" dir="ltr">−{defectPenalty}.00</span>
             </div>
           )}
           <div className="flex justify-between text-base font-extrabold pt-1" style={{ color: qualityColor }}>
-            <span>Final Score</span>
+            <span>{L("النتيجة النهائية", "Final score")}</span>
             <span>{finalScore.toFixed(2)}</span>
           </div>
         </div>
@@ -395,7 +428,7 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel 
           disabled={submitting}
           className="w-full py-3.5 rounded-xl font-extrabold text-white text-sm tracking-wide transition-all duration-200 active:scale-[0.98] disabled:opacity-50"
           style={{ backgroundColor: qualityColor }}>
-          {submitting ? "Submitting…" : submitLabel}
+          {submitting ? L("جارٍ الإرسال…", "Submitting…") : (submitLabel ?? L("إرسال التقييم", "Submit score"))}
         </button>
       </div>
     </form>

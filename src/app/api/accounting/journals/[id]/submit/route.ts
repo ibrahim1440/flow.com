@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { submitJournalEntry } from "@/lib/accounting/journal-service";
-import { AccountingError } from "@/lib/accounting/errors";
+import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -17,7 +17,7 @@ export async function PATCH(_request: Request, { params }: Params) {
     return NextResponse.json(entry);
   } catch (err) {
     if (err instanceof AccountingError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json(accountingErrorJson(err), { status: err.status });
     }
     return handlePrismaError(err);
   }

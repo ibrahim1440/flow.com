@@ -19,6 +19,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const q = (url.searchParams.get("q") ?? "").trim();
   const status = url.searchParams.get("status");
+  const ownerFilter = url.searchParams.get("owner");
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
   const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("perPage") ?? 25) || 25));
 
@@ -27,9 +28,13 @@ export async function GET(request: Request) {
   const seesAll = hasSubPrivilege(user.permissions, "sales", "lead_assign");
 
   try {
-    const where = {
-      ...(seesAll ? {} : { ownerId: user.id }),
-      ...(status ? { status: status as never } : {}),
+    // OPEN and CLOSED are the two groups of the list's tabs (`crm-leads`): still being worked,
+    // and finished one way or the other. Any other value is a single stored status.
+    const statusWhere = status === "OPEN" ? { status: { in: OPEN_STATUSES as never } }
+      : status === "CLOSED" ? { status: { in: CLOSED_STATUSES as never } }
+      : status ? { status: status as never } : {};
+    const scopeWhere = {
+      ...(seesAll ? (ownerFilter ? { ownerId: ownerFilter } : {}) : { ownerId: user.id }),
       ...(q
         ? {
             OR: [
@@ -41,8 +46,10 @@ export async function GET(request: Request) {
           }
         : {}),
     };
+    const where = { ...scopeWhere, ...statusWhere };
+    const now = new Date();
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, byStatus, overdue, noCommitment, ownerRows] = await Promise.all([
       prisma.lead.findMany({
         where,
         orderBy: [{ nextFollowUpAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
@@ -57,13 +64,32 @@ export async function GET(request: Request) {
         },
       }),
       prisma.lead.count({ where }),
+      // The tab counts and the header's two urgency counts, over everything the search and
+      // owner filter match — not just the page on screen.
+      prisma.lead.groupBy({ by: ["status"], where: scopeWhere, _count: { _all: true } }),
+      prisma.lead.count({ where: { ...scopeWhere, status: { in: OPEN_STATUSES as never }, nextFollowUpAt: { lt: now } } }),
+      prisma.lead.count({ where: { ...scopeWhere, status: { in: OPEN_STATUSES as never }, nextFollowUpAt: null } }),
+      // The owner filter's choices: the people who own leads this viewer may see.
+      seesAll
+        ? prisma.lead.findMany({ distinct: ["ownerId"], select: { owner: { select: { id: true, name: true } } } })
+        : Promise.resolve([] as { owner: { id: string; name: string } }[]),
     ]);
+    const counts: Record<string, number> = { OPEN: 0, CLOSED: 0 };
+    for (const g of byStatus) {
+      counts[g.status] = g._count._all;
+      if ((OPEN_STATUSES as string[]).includes(g.status)) counts.OPEN += g._count._all;
+      else counts.CLOSED += g._count._all;
+    }
 
     return NextResponse.json({
       rows,
       page,
       perPage,
       total,
+      counts,
+      owners: ownerRows.map((r) => r.owner),
+      overdue,
+      noCommitment,
       // Stated so the screen can tell an operator they are looking at their own leads
       // rather than leaving them to wonder where everyone else's went.
       scope: seesAll ? "all" : "own",
@@ -72,6 +98,9 @@ export async function GET(request: Request) {
     return handlePrismaError(err);
   }
 }
+
+const OPEN_STATUSES = ["NEW", "CONTACTED", "QUALIFIED"];
+const CLOSED_STATUSES = ["UNQUALIFIED", "CONVERTED"];
 
 /** POST /api/sales/leads — create a lead. */
 export async function POST(request: Request) {

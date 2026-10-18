@@ -503,13 +503,17 @@ export async function commitPackaging(
   const materialsConsumed: CommitResult["materialsConsumed"] = [];
   for (const m of preview.materials) {
     if (m.required <= 0) continue;
-    const ok = await tx.$executeRaw`
+    // Atomic decrement; the balance it actually produced is read back (re-review P3-A), so the
+    // movement's before / after are the real ones even if a receipt or a count committed after the
+    // preview read `m.available`.
+    const drawn = await tx.$queryRaw<{ quantityOnHand: number }[]>`
       UPDATE "MaterialItem"
          SET "quantityOnHand" = "quantityOnHand" - ${m.required}
        WHERE "id" = ${m.materialItemId}
          AND "quantityOnHand" >= ${m.required}
+      RETURNING "quantityOnHand"
     `;
-    if (ok !== 1) {
+    if (drawn.length !== 1) {
       throw {
         _appCode: 409,
         message: `Not enough ${m.label}: ${m.required} needed and the shelf no longer holds it.`,
@@ -521,8 +525,8 @@ export async function commitPackaging(
         category: "PACKAGING_MATERIAL",
         referenceEntityId: m.materialItemId,
         quantityChanged: -m.required,
-        previousQuantity: m.available,
-        newQuantity: m.available - m.required,
+        previousQuantity: drawn[0].quantityOnHand + m.required,
+        newQuantity: drawn[0].quantityOnHand,
         sourceDocType: "BOM_CONSUMPTION",
         sourceDocId: batch.id,
         userId,

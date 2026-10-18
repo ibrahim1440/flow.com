@@ -1,0 +1,404 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Direction 2.1 — the reference PAGE classes, ported.
+
+   Source: docs/design/direction-2.1-rc/src/direction.css + rc.css (light mode), the files the
+   approved Figma frames were built from (FIGMA.md: 1:1 parity). The class names, the values
+   and the selectors are the reference's own, so a screen can be checked against
+   `screens/crm-*.html` element by element. Everything is scoped under `.d21`, which only the
+   Direction 2.1 shell sets (`@/components/shell/routes`); no other page can match a rule here.
+
+   This file holds the page primitives only (page header, buttons, tables, timeline, board,
+   list screens, phone rows). The shell chrome — canvas, sidebar, rail, sheet, top bar, phone
+   header, tab bar, palette — and every token live in `@/components/shell/direction-2.1.css`;
+   nothing here redefines a token or a shell class.
+
+   Physical left/right in the reference (it is drawn RTL only) are written as logical
+   properties so the English (LTR) frame mirrors instead of breaking.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── Primitives ── */
+.d21 .n { font-family: var(--f-num); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate }
+.d21 .id { font-family: var(--f-mono); font-size: 12.5px; direction: ltr; unicode-bidi: isolate; color: var(--text-muted) }
+.d21 .ico { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round }
+.d21 .ico.s { width: 16px; height: 16px }
+.d21 .kbd { margin-inline-start: auto; font: 500 11px/1 var(--f-num); color: var(--text-muted); padding: 3px 5px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--border-strong); direction: ltr; background: var(--surface) }
+.d21 .av { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-selected); color: var(--action-primary); display: grid; place-items: center; font: 600 11.5px/1 var(--f-ui); flex: none }
+.d21 .ib { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-secondary); background: none; border: 0; cursor: pointer }
+.d21 .ib:hover { background: var(--surface-hover) }
+/* A page's own small menu (the deal page's «⋯»). */
+.d21 .menu { position: absolute; bottom: calc(100% + 6px); inset-inline-end: 0; min-width: 196px; background: var(--surface); border-radius: 10px; box-shadow: var(--shadow-pop); padding: 6px; z-index: 70 }
+.d21 .menu a, .d21 .menu button { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border-radius: 7px; font: inherit; font-size: 13.5px; color: var(--text-secondary); background: none; border: 0; text-decoration: none; cursor: pointer; text-align: start }
+.d21 .menu a:hover, .d21 .menu button:hover { background: var(--surface-hover); color: var(--text-primary) }
+.d21 .menu .danger { color: var(--status-danger) }
+.d21 .menu.down { bottom: auto; top: calc(100% + 6px); inset-inline-end: 0; inset-inline-start: auto }
+
+/* ── Page ── */
+.d21 .pg { padding: 16px 48px 48px }
+.d21 .ph { display: flex; align-items: flex-end; gap: 24px; margin-bottom: 26px }
+.d21 .ph h1 { font: 600 28px/1.25 var(--f-ui); margin: 0; letter-spacing: 0 }
+.d21 .ph .meta, .d21 .pane .meta { color: var(--text-muted); font-size: 13.5px; margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center }
+.d21 .ph .meta i, .d21 .pane .meta i { width: 3px; height: 3px; border-radius: 50%; background: var(--border-control) }
+.d21 .ph .act { margin-inline-start: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+
+.d21 .btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 9px; font: 500 13.5px/1 var(--f-ui); color: var(--text-primary); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); white-space: nowrap; border: 0; text-decoration: none; cursor: pointer; transition: transform .12s var(--ease), background-color .15s var(--ease) }
+.d21 .btn:hover { background: var(--surface-hover) }
+.d21 .btn:active { transform: scale(.97) }
+.d21 .btn.p { background: var(--action-primary); color: var(--text-inverse); box-shadow: none }
+.d21 .btn.p:hover { background: var(--action-primary-hover) }
+.d21 .btn.g { box-shadow: none; color: var(--text-secondary); background: none }
+.d21 .btn.g:hover { background: var(--surface-hover) }
+.d21 .btn.dz { background: var(--action-danger); color: var(--text-inverse); box-shadow: none }
+.d21 .btn.dz:hover { background: var(--action-danger-hover) }
+.d21 .btn:disabled, .d21 .btn[aria-disabled="true"] { background: var(--surface-disabled); color: var(--text-disabled); box-shadow: inset 0 0 0 1px var(--border-disabled); cursor: not-allowed; transform: none }
+.d21 .btn.sm { height: 28px; padding: 0 10px; font-size: 12.5px; border-radius: 7px }
+.d21 .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; box-shadow: 0 0 0 2px var(--focus-halo) }
+
+.d21 .bt { font: 600 16px/1.3 var(--f-ui); margin: 0; color: var(--text-primary) }
+.d21 .bh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px }
+.d21 .bh .sub { color: var(--text-muted); font-size: 13px }
+.d21 .bh .lk { margin-inline-start: auto; font: inherit; font-size: 13px; color: var(--action-primary); font-weight: 500; display: flex; align-items: center; gap: 4px; background: none; border: 0; padding: 0; text-decoration: none; cursor: pointer }
+.d21 .bh .lk:hover { text-decoration: underline }
+.d21 .lbl { font-size: 12.5px; color: var(--text-muted); font-weight: 500 }
+.d21 .mid { font: 400 26px/1.1 var(--f-num); letter-spacing: -.01em; font-variant-numeric: tabular-nums }
+.d21 .mid.ar { font-family: var(--f-ui) }
+.d21 .unit { font: 500 13px/1 var(--f-ui); color: var(--text-muted); margin-inline-start: 6px; letter-spacing: 0 }
+.d21 .unit.pre { margin-inline-start: 0; margin-inline-end: 6px }
+.d21 .metrics { display: grid; margin: 0 }
+.d21 .metrics > div { padding-inline-start: 24px; border-inline-start: 1px solid var(--border-subtle); min-width: 0 }
+.d21 .metrics > div:first-child { padding-inline-start: 0; border-inline-start: 0 }
+.d21 .metrics dd { margin: 0 }
+.d21 .metrics .mid { margin: 8px 0 6px }
+.d21 .metrics .d { font-size: 12.5px; color: var(--text-muted) }
+.d21 .cols { display: grid; gap: 56px }
+
+.d21 .st { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); white-space: nowrap }
+.d21 .st::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-disabled) }
+.d21 .st.ok { color: var(--status-success); font-weight: 600 }
+.d21 .st.ok::before { background: var(--status-success) }
+.d21 .st.in::before { background: var(--status-info) }
+.d21 .st.wa { color: var(--status-warning) } .d21 .st.wa::before { background: var(--status-warning) }
+.d21 .st.er { color: var(--status-danger) } .d21 .st.er::before { background: var(--status-danger) }
+.d21 .st.x { color: var(--text-muted); text-decoration: line-through }
+.d21 .flag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--status-danger); background: var(--status-danger-tint); padding: 2px 7px; border-radius: 5px; white-space: nowrap; line-height: 22px }
+.d21 .flag.wa { color: var(--status-warning); background: var(--status-warning-tint) }
+
+.d21 .t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px }
+.d21 .t th { font-size: 12.5px; font-weight: 500; color: var(--text-muted); text-align: start; height: 36px; padding: 0 12px; border-bottom: 1px solid var(--border-strong); white-space: nowrap; background: var(--surface) }
+.d21 .t td { height: 46px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap }
+.d21 .t tr > *:first-child { padding-inline-start: 0 }
+.d21 .t tr > *:last-child { padding-inline-end: 0 }
+.d21 .t td.num, .d21 .t th.num { text-align: end; font-family: var(--f-num); font-variant-numeric: tabular-nums }
+.d21 .t .who { font-weight: 500; color: var(--text-primary) }
+.d21 .t .sm:not(.btn) { font-size: 12.5px; color: var(--text-muted) }
+.d21 .t.dense td { height: 40px }
+.d21 .t a { color: inherit; text-decoration: none }
+.d21 .t a:hover { text-decoration: underline }
+
+.d21 .tl { position: relative; list-style: none; margin: 0; padding: 0 }
+.d21 .tl > li { position: relative; padding: 0 0 22px; padding-inline-start: 28px }
+.d21 .tl > li::before { content: ""; position: absolute; inset-inline-start: 7px; top: 22px; bottom: 0; width: 1px; background: var(--border-strong) }
+.d21 .tl > li:last-child::before { display: none }
+.d21 .tl .m { position: absolute; inset-inline-start: 2px; top: 6px; width: 11px; height: 11px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--border-control) }
+.d21 .tl .m.b { background: var(--action-primary); box-shadow: none }
+.d21 .tl .when { font-size: 12.5px; color: var(--text-muted) }
+.d21 .diff { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); border-radius: 6px; padding: 2px 8px; margin-top: 6px }
+.d21 .props { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 11px 12px; font-size: 13.5px; margin: 0 }
+.d21 .props dt { color: var(--text-muted) }
+.d21 .props dd { margin: 0; color: var(--text-primary); min-width: 0 }
+
+/* Stage tracker. In the reference the steps are text; here each is also the button that moves
+   the deal, so the button carries no chrome of its own. */
+.d21 .track { display: flex; align-items: flex-start; margin: 0; padding: 0; list-style: none }
+.d21 .track > li { flex: 1; position: relative; padding-top: 18px; min-width: 0 }
+.d21 .track > li:last-child { flex: .3 }
+.d21 .track > li::before { content: ""; position: absolute; top: 5px; inset-inline: 0; height: 2px; background: var(--border-strong) }
+.d21 .track > li.done::before { background: var(--action-primary) }
+.d21 .track > li.cur::before { background: linear-gradient(to left, var(--action-primary) 0 66%, var(--border-strong) 66%) }
+[dir="ltr"].d21 .track > li.cur::before, .d21 [dir="ltr"] .track > li.cur::before { background: linear-gradient(to right, var(--action-primary) 0 66%, var(--border-strong) 66%) }
+.d21 .track > li::after { content: ""; position: absolute; top: 0; inset-inline-start: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 2px var(--border-strong) }
+.d21 .track > li.done::after { background: var(--action-primary); box-shadow: none }
+.d21 .track > li.cur::after { background: var(--surface); box-shadow: inset 0 0 0 3px var(--action-primary), 0 0 0 4px var(--action-primary-tint) }
+.d21 .track b { display: block; font-weight: 600; font-size: 14px; margin-top: 4px }
+.d21 .track b.later { color: var(--text-muted); font-weight: 500 }
+.d21 .track small { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 2px }
+.d21 .track button { all: unset; display: block; cursor: pointer; border-radius: 6px; padding-inline-end: 8px }
+.d21 .track button:disabled { cursor: default }
+.d21 .track button:not(:disabled):hover b { color: var(--text-primary); text-decoration: underline }
+.d21 .track button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }
+
+.d21 .callout { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; background: var(--surface-subtle); font-size: 14px }
+.d21 .callout.er { background: var(--status-danger-tint) }
+.d21 .callout .flag { background: var(--surface) }
+.d21 .callout .btn { margin-inline-start: auto }
+.d21 .notice { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-secondary) }
+.d21 .notice.er { background: var(--status-danger-tint); box-shadow: none; color: var(--status-danger) }
+.d21 .notice.ok { background: var(--status-success-tint); box-shadow: none; color: var(--status-success) }
+.d21 .notice button { margin-inline-start: auto; background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0 4px }
+.d21 .hr { height: 1px; background: var(--border-subtle); margin: 0 0 24px }
+
+/* ── Compact (768–1279): the page beside the 64px rail of rc.css `.app.rail` ── */
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .d21 .pg { padding: 12px 32px 36px }
+  .d21 .cols { grid-template-columns: minmax(0, 1fr) !important; gap: 36px !important }
+  .d21 .metrics.m4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; row-gap: 20px }
+  .d21 .metrics.m4 > div:nth-child(3) { padding-inline-start: 0; border-inline-start: 0 }
+}
+@media (max-width: 1023.98px) {
+  .d21 .ph { flex-wrap: wrap; align-items: flex-start }
+  .d21 .ph .act { margin-inline-start: 0 }
+}
+
+/* A small olive text action next to a label (edit beside «التفاصيل», the split beside its row). */
+.d21 .lk-inline { margin-inline-start: auto; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--action-primary); background: none; border: 0; padding: 0; cursor: pointer }
+.d21 .lk-inline:hover { text-decoration: underline }
+.d21 .props dd .lk-inline { margin-inline-start: 8px }
+
+/* Narrow widths: a pipeline with more stages than fit scrolls inside its own strip rather than
+   pushing the page sideways; timeline dates wrap under their title. */
+.d21 .track-wrap { overflow-x: auto; overflow-y: hidden; padding: 4px; margin: -4px }
+@media (max-width: 1023.98px) {
+  .d21 .track > li { min-width: 104px }
+  .d21 .track > li:last-child { min-width: 88px }
+  .d21 .tl .row { flex-wrap: wrap; row-gap: 0 }
+  .d21 .tl .when { white-space: normal !important }
+}
+
+/* The last step is narrow in the reference (flex .3) because it is never current there; when it
+   is, its label and date keep one line each instead of breaking word by word. */
+.d21 .track b, .d21 .track small { white-space: nowrap }
+.d21 .track > li:last-child { min-width: max-content }
+
+/* ── Phone (below 768): the page of the 390 frames (rc.css `.ph-body`, `.mrow`, `.sticky-act`).
+   The shell draws the phone header and the tab bar (78px) and keeps that much room under the
+   sheet's content; 18px more gives the reference's 96px bottom padding. ── */
+@media (max-width: 767.98px) {
+  .d21 .pg { padding: 12px 16px 18px }
+}
+/* A page's own sticky action bar takes the tab bar's place (deal 390: `.sticky-act`). */
+.d21 .sticky-act { position: fixed; inset-inline: 0; bottom: 0; padding: 12px 16px 26px; background: var(--surface); border-top: 1px solid var(--border-subtle); display: flex; gap: 8px; z-index: 40 }
+.d21 .sticky-act .btn { height: 44px }
+/* Phone list row (rc.css `.mrow`). */
+.d21 .mrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle) }
+.d21 .mrow .r2 { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; font-size: 12.5px; color: var(--text-muted) }
+/* Deal 390: the figures as label/value rows, and the next-step band at phone size. */
+.d21 .phrows { display: grid; margin: 12px 0 16px }
+.d21 .phrows > div { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--border-subtle) }
+.d21 .phrows dd { margin: 0 }
+.d21 .callout.ph { align-items: flex-start; gap: 10px; padding: 10px 12px; font-size: 13.5px; line-height: 21px; flex-wrap: wrap }
+.d21 .callout.ph > span:not(.flag) { flex: 1 1 0; min-width: 0 }
+/* «إكمال» (not in the frame, record P-2) on its own line under the band's text. */
+.d21 .callout.ph > .btn { order: 3; margin-inline-start: 0 }
+.d21 .callout.ph:has(> .btn)::after { content: ""; order: 2; flex-basis: 100%; height: 0 }
+.d21 .sticky-act .grow { flex: 1; display: flex }
+.d21 .sticky-act .grow > .btn { flex: 1; justify-content: center }
+.d21 .sticky-act .menu { bottom: calc(100% + 8px) }
+
+/* ── List screens (pipeline, leads, follow-ups): direction.css `.tabs`, `.tool`, `.search`,
+   `.chip`, `.seg`, `.av.s`, rc.css `.segs` ── */
+.d21 .av.s { width: 22px; height: 22px; font-size: 10.5px }
+.d21 .tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; font-size: 14px }
+.d21 .tabs > a, .d21 .tabs > button { padding: 0 0 11px; color: var(--text-muted); border-bottom: 1.5px solid transparent; margin-bottom: -1px; display: flex; gap: 7px; align-items: baseline; white-space: nowrap; text-decoration: none }
+.d21 .tabs > a:hover, .d21 .tabs > button:hover { color: var(--text-primary) }
+.d21 .tabs > a.on, .d21 .tabs > button.on { color: var(--text-primary); border-color: var(--action-primary); font-weight: 500 }
+.d21 .tabs .c { font: 500 12px/1 var(--f-num); color: var(--text-muted) }
+.d21 .tool { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap }
+.d21 .tool .sp { flex: 1 }
+.d21 .search { display: flex; align-items: center; gap: 8px; height: 34px; width: 220px; padding: 0 11px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--border-control); color: var(--text-muted); font-size: 13.5px; background: var(--surface) }
+.d21 .search:focus-within { box-shadow: inset 0 0 0 1.5px var(--focus-ring), 0 0 0 3px var(--action-primary-tint); color: var(--text-primary) }
+.d21 .search input { border: 0; outline: 0; background: none; font: inherit; color: var(--text-primary); min-width: 0; flex: 1; padding: 0 }
+.d21 .search input::placeholder { color: var(--text-muted) }
+.d21 .chip { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px; color: var(--text-secondary); background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); position: relative }
+.d21 .chip b, .d21 .chip select { font-weight: 500; color: var(--text-primary) }
+.d21 .chip select { appearance: none; border: 0; background: none; font: inherit; font-weight: 500; padding: 0; cursor: pointer }
+.d21 .chip .x { display: grid; place-items: center; width: 18px; height: 18px; border: 0; background: none; color: var(--text-muted); cursor: pointer; padding: 0; border-radius: 4px }
+.d21 .chip .x:hover { color: var(--text-primary); background: var(--surface-hover) }
+.d21 .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .seg > * { padding: 5px 12px; border-radius: 7px; font-size: 13px; color: var(--text-muted); border: 0; background: none; font-family: inherit; cursor: pointer }
+.d21 .seg > .on { background: var(--surface); color: var(--text-primary); font-weight: 500; box-shadow: var(--shadow-sheet) }
+.d21 .segs { display: flex; gap: 6px; overflow-x: auto; margin: 4px 0 8px; scrollbar-width: none }
+.d21 .segs > button { white-space: nowrap; padding: 6px 12px; border-radius: 999px; font: inherit; font-size: 13px; color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-strong); background: var(--surface); border: 0; cursor: pointer; flex: none }
+.d21 .segs > button.on { background: var(--text-primary); color: var(--text-inverse); box-shadow: none }
+.d21 .who { font-weight: 500; color: var(--text-primary) }
+.d21 .t .sm:not(.btn) { font-size: 12.5px; color: var(--text-muted) }
+
+/* ── Pipeline board (`crm-pipeline`): stage columns on the subtle surface, white cards ── */
+/* A column is never narrower than the frame's card (`175:876`: 285px at 1024; `174:701` grows the
+   same three to 353px at 1440). More active stages than fit at that width scroll the board
+   sideways inside its wrap, instead of squeezing the cards (QA P2-1). Below 1024 there is no
+   frame; 200px keeps three columns on a 768 drawer layout. */
+.d21 .board-wrap { overflow-x: auto; padding: 2px; margin: -2px; scroll-snap-type: x proximity; --col-min: 200px }
+@media (min-width: 1024px) { .d21 .board-wrap { --col-min: 285px } }
+.d21 .board { display: grid; gap: 16px; align-items: start }
+.d21 .board > .col { scroll-snap-align: start }
+.d21 .col { background: var(--surface-subtle); border-radius: 12px; padding: 12px; display: grid; gap: 10px; align-content: start; min-width: 0 }
+.d21 .colh { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px 4px; white-space: nowrap }
+.d21 .colh b { font-weight: 600 }
+.d21 .colh > .n { font-size: 12.5px; color: var(--text-muted) }
+.d21 .colh .tot { margin-inline-start: auto; font-size: 12.5px; color: var(--text-muted) }
+.d21 .dcard { position: relative; background: var(--surface); border-radius: 10px; box-shadow: var(--shadow-sheet); padding: 12px 14px; min-width: 0 }
+.d21 .dcard:hover { box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-sheet) }
+.d21 .dcard:focus-within { box-shadow: inset 0 0 0 1.5px var(--action-primary) }
+.d21 .dcard .r1 { display: flex; align-items: baseline; gap: 8px }
+.d21 .dcard .r1 .n { margin-inline-start: auto; font-weight: 500 }
+.d21 .open { color: inherit; text-decoration: none; overflow-wrap: anywhere }
+/* The whole card (and a phone row) opens the deal: the link's box covers it. */
+.d21 .dcard .open::after, .d21 .rowlink .open::after { content: ""; position: absolute; inset: 0; border-radius: inherit }
+.d21 .dcard .open:focus-visible { outline: 0 }
+.d21 .dcard .sub { font-size: 12.5px; color: var(--text-muted); line-height: 18px; margin-top: 2px; overflow-wrap: anywhere }
+.d21 .dcard .nx { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); flex-wrap: wrap }
+.d21 .dcard .qt { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--text-muted) }
+.d21 .dcard .qt .id { font-size: 12px }
+.d21 .rowlink { position: relative }
+.d21 .rowlink .btn { position: relative; z-index: 1 }
+/* Phone stage segments: the count in its own small circle (`173:722`). */
+.d21 .segs > button { display: inline-flex; align-items: center; gap: 6px; padding-block: 4px; padding-inline: 12px 4px }
+.d21 .segs > button:last-child:not(:has(.n)) { padding-inline: 12px }
+.d21 .segs > button .n { display: inline-grid; place-items: center; min-width: 26px; height: 26px; border-radius: 50%; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); font-size: 12.5px }
+.d21 .tabs > button { background: none; border-top: 0; border-inline: 0; font: inherit; cursor: pointer }
+.d21 .segs > button[aria-pressed="true"] { background: var(--text-primary); color: var(--text-inverse); box-shadow: none }
+
+/* ── Leads (`crm-leads`): the list beside the preview pane ── */
+.d21 .split.has-pane { display: grid; grid-template-columns: minmax(0, 1fr) 400px; align-items: start }
+.d21 .pane { position: sticky; top: 0; height: calc(100dvh - 68px); display: flex; flex-direction: column; background: var(--surface); border-inline-start: 1px solid var(--border-subtle) }
+.d21 .pane-h { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 24px; border-bottom: 1px solid var(--border-subtle); flex: none }
+.d21 .pane-h .sp { flex: 1 }
+.d21 .pane-h .lk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-primary); text-decoration: none }
+.d21 .pane-h .lk:hover { text-decoration: underline }
+.d21 .pane-b { flex: 1; overflow-y: auto; padding: 24px 24px 16px }
+.d21 .pane-t { font: 600 24px/1.3 var(--f-ui); margin: 0 0 6px; outline: 0 }
+.d21 .pane-f { display: flex; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--border-subtle); flex: none }
+.d21 .pane-f .btn.p { flex: 1; justify-content: center }
+.d21 .pane .callout { align-items: flex-start }
+.d21 .t.leads tr.sel td { background: var(--surface-selected) }
+.d21 .t.leads td { height: 46px }
+.d21 .pager { display: flex; align-items: center; gap: 8px; padding-top: 12px; flex-wrap: wrap }
+.d21 .pager .sp { flex: 1 }
+.d21 .sort-note { font-size: 12.5px; font-weight: 500; color: var(--text-secondary); padding: 0 10px; white-space: nowrap }
+@media (max-width: 1279.98px) {
+  .d21 .t.leads .xl { display: none }
+  /* Compact: the pane sits over the list, at the sheet's start edge (`172:314`). */
+  .d21 .split.has-pane { display: block }
+  .d21 .pane { position: absolute; top: 52px; bottom: 0; inset-inline-end: 0; width: 400px; height: auto; box-shadow: var(--shadow-pop); border: 0; border-start-start-radius: 14px; z-index: 30 }
+}
+@media (max-width: 767.98px) { .d21 .pane { display: none } }
+
+/* ── Follow-ups (`crm-followups`): the list with «آخر النشاط» beside it, under it below 1280 ── */
+.d21 .act-cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; align-items: start }
+@media (max-width: 1279.98px) { .d21 .act-cols { grid-template-columns: minmax(0, 1fr); gap: 36px } }
+.d21 .t tr.grp td { height: 40px; background: var(--surface-subtle); padding-inline: 12px !important }
+.d21 .t tr.grp b { font-weight: 600 } .d21 .t tr.grp b.er { color: var(--status-danger) }
+.d21 .t tr.grp .n { color: var(--text-muted); font-size: 12.5px }
+.d21 .grp-l { font-size: 12.5px; font-weight: 500; color: var(--text-secondary); padding: 14px 0 2px }
+.d21 .grp-l.er { color: var(--status-danger) }
+.d21 .seg > button .n { font-size: 12px }
+.d21 .seg > button { display: inline-flex; align-items: baseline; gap: 8px }
+
+/* ── «+ تسجيل نشاط» record picker (D6.3, `1532:2`) — page-scoped; see CRM-BATCH-0-1.md §17.6 ──
+   The scrim is the approved E1 scrim (`54:2137`): 16% with a blur, over Main only — the sidebar
+   is not dimmed. The dialog is 620 wide at y=116 (1440) / y=108 (1024), centred in Main;
+   radius/lg 14. Geometry from the frames: title bar 74, search 56, scope 52 (segment 250×40),
+   group header 36, row 48, «عرض الكل» 34, footer 43; step 2 body 420 and actions 63 (≈557).
+   On the phone it is a bottom sheet (`BottomSheet` 51:104). */
+.d21 .d63-scrim { position: fixed; top: 0; bottom: 0; inset-inline-end: 0; inset-inline-start: 244px; background: rgb(40 36 26 / .16); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 80; display: flex; justify-content: center; align-items: flex-start; padding: 116px 16px 24px; overflow-y: auto; animation: d21-fade .2s var(--ease) }
+@media (min-width: 1024px) and (max-width: 1279.98px) { .d21 .d63-scrim { inset-inline-start: 64px; padding-top: 108px } }
+@media (max-width: 1023.98px) { .d21 .d63-scrim { inset-inline-start: 0; padding-top: 72px } }
+@media (prefers-reduced-motion: reduce) { .d21 .d63-scrim { animation: none } }
+.d21 .d63 { width: 620px; max-width: 100%; max-height: calc(100dvh - 140px); background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; outline: 0; overflow: hidden }
+/* Title bar 74: 16/26 title, 12/20 step, 32px close at inline-end (hit area padded to 44). */
+.d21 .d63-hd { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px 12px; flex: none }
+.d21 .d63-hd h2 { font: 600 16px/26px var(--f-ui); margin: 0; color: var(--text-primary) }
+.d21 .d63-hd .sub { font-size: 12px; line-height: 20px; color: var(--text-muted) }
+.d21 .d63-hd .ib { margin-inline-start: auto; margin-top: 7px; position: relative; color: var(--text-secondary) }
+.d21 .d63-hd .ib::before { content: ""; position: absolute; inset: -6px }
+/* Search 56: icon at inline-start, Esc at inline-end. */
+.d21 .d63 .q { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); flex: none }
+.d21 .d63 .q input { flex: 1; border: 0; outline: 0; font: inherit; font-size: 15px; color: var(--text-primary); background: none; min-width: 0 }
+.d21 .d63 .q .kbd { margin: 0 }
+/* Scope 52: the segment (250×40 in the frame: 3px padding + 1px border, cells 32 with 12/24 inline padding). */
+.d21 .d63-scope { padding: 4px 20px 8px; flex: none }
+.d21 .d63-scope .seg { padding: 3px; border: 1px solid var(--border-subtle); box-shadow: none }
+.d21 .d63-scope .seg > button { padding: 5px 24px 5px 12px; font-size: 13px; line-height: 22px }
+[dir="ltr"].d21 .d63-scope .seg > button { padding: 5px 12px 5px 24px }
+.d21 .d63-body { padding: 0 8px 4px; overflow-y: auto; flex: 1; min-height: 0 }
+.d21 .d63-grp { font-size: 13px; line-height: 22px; color: var(--text-muted); padding: 8px 14px 6px }
+.d21 .d63-row { display: flex; align-items: center; gap: 12px; height: 48px; padding: 5px 14px; border-radius: 9px; cursor: pointer; color: var(--text-primary) }
+.d21 .d63-row.on, .d21 .d63-row:hover { background: var(--surface-subtle) }
+.d21 .d63-row > .ico, .d21 .d63-card > .ico { color: var(--text-muted) }
+.d21 .d63-row .t, .d21 .d63-card .t { min-width: 0; flex: 1; display: flex; flex-direction: column }
+.d21 .d63-row b, .d21 .d63-card b { font-weight: 500; font-size: 14px; line-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.d21 .d63-row .s, .d21 .d63-card .s { font-size: 12px; line-height: 16px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.d21 .d63-row .flag { flex: none }
+.d21 .d63-more { display: block; width: 100%; height: 34px; text-align: start; font: 500 13.5px/22px var(--f-ui); color: var(--text-primary); background: none; border: 0; padding: 0 14px; border-radius: 9px; cursor: pointer }
+.d21 .d63-more .n { color: var(--action-primary) }
+.d21 .d63-more:hover { text-decoration: underline }
+/* Footer 43. */
+.d21 .d63-ft { display: flex; align-items: center; gap: 14px; padding: 10px 20px; border-top: 1px solid var(--border-subtle); font-size: 12px; line-height: 22px; color: var(--text-muted); flex: none }
+.d21 .d63-ft .hint { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap }
+.d21 .d63-ft .kbd { margin: 0 }
+.d21 .d63-ft .note { margin-inline-start: auto; font-size: 12.5px; text-align: end }
+.d21 .d63-empty { text-align: center; padding: 28px 12px 20px; color: var(--text-primary) }
+.d21 .d63-empty > .ico { display: block; margin: 0 auto 10px; color: var(--text-muted) }
+.d21 .d63-empty b { display: block; font-weight: 600; font-size: 14.5px }
+.d21 .d63-empty p { margin: 6px 0 0; font-size: 13.5px; color: var(--text-muted) }
+.d21 .d63-empty-acts { display: flex; justify-content: center; gap: 8px; margin-top: 16px }
+.d21 .d63-row.skel { pointer-events: none }
+.d21 .d63-skel { display: block; height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--surface-subtle), var(--border-subtle), var(--surface-subtle)); background-size: 200% 100%; animation: d63-shimmer 1.2s linear infinite }
+.d21 .d63-skel.ico { width: 18px; height: 18px; border-radius: 4px; flex: none }
+.d21 .d63-skel.s { height: 8px; margin-top: 6px }
+@keyframes d63-shimmer { from { background-position: 200% 0 } to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .d21 .d63-skel { animation: none } }
+/* Step 2 (`1548:2386`): body 420 = 4 + card 66 + 14 + four 61px rows at 14 + note 20 + 16. */
+.d21 .d63-body.two { padding: 4px 20px 16px }
+.d21 .d63-card { display: flex; align-items: center; gap: 12px; height: 66px; padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); margin-bottom: 14px }
+.d21 .d63-card .lk-inline { margin-inline-start: 8px; flex: none }
+.d21 .d63-form { display: flex; flex-direction: column; gap: 14px }
+.d21 .d63-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; align-items: start }
+/* The D21 field primitive as the frame's FormField: label 13/500 on 19px, 6px gap, 36px control, radius 9. */
+.d21 .d63-form [data-ui="field"] { display: flex; flex-direction: column; gap: 6px }
+.d21 .d63-form [data-ui="field"] > * { margin: 0 }
+.d21 .d63-form [data-ui="field"] > label { font-size: 13px; line-height: 19px; font-weight: 500; color: var(--text-primary) }
+.d21 .d63-form [data-ui="field"] > label > span { color: inherit }
+.d21 .d63-form [data-ui="input"] { height: 36px; min-height: 36px; padding: 0 11px; font-size: 14px; line-height: 22px; border-radius: 9px; border: 1px solid var(--border-control); background: var(--surface); color: var(--text-primary); box-shadow: none }
+.d21 .d63-form [data-ui="input"]::placeholder { color: var(--text-muted) }
+.d21 .d63-form [data-ui="input"]:focus { border-color: var(--action-primary); outline: 2px solid var(--action-primary); outline-offset: 0 }
+.d21 .d63-sel { position: relative; display: block }
+.d21 .d63-sel select { appearance: none; -webkit-appearance: none; padding-inline-end: 34px; width: 100% }
+.d21 .d63-sel > .ico, .d21 .d63-date > .ico { position: absolute; inset-inline-end: 11px; top: 10px; color: var(--text-muted); pointer-events: none }
+.d21 .d63-date { position: relative; display: block }
+.d21 .d63-date input { width: 100%; padding-inline-end: 34px; -webkit-appearance: none; appearance: none }
+.d21 .d63-date input::-webkit-calendar-picker-indicator { opacity: 0; position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer }
+.d21 .d63-date[data-empty="true"] input:not(:focus) { color: transparent }
+.d21 .d63-date .ph { display: none; position: absolute; inset-inline-start: 11px; top: 7px; font-size: 14px; line-height: 22px; color: var(--text-muted); pointer-events: none }
+.d21 .d63-date[data-empty="true"] input:not(:focus) + .ph { display: block }
+/* Due row: the field 480 and «حدث بالفعل» 88 at inline-end, bottom-aligned. */
+.d21 .d63-due { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 12px; align-items: end }
+.d21 .d63-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; line-height: 22px; font-weight: 600; color: var(--text-primary); padding-bottom: 8px; cursor: pointer; white-space: nowrap }
+.d21 .d63-check input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: 0 }
+.d21 .d63-check .box { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); display: grid; place-items: center; color: var(--text-inverse); flex: none }
+.d21 .d63-check .box .ico { width: 12px; height: 12px; opacity: 0 }
+.d21 .d63-check input:checked + .box { background: var(--action-primary); box-shadow: none }
+.d21 .d63-check input:checked + .box .ico { opacity: 1 }
+.d21 .d63-check input:focus-visible + .box { outline: 2px solid var(--action-primary); outline-offset: 2px }
+.d21 .d63-form .sm { color: var(--text-muted); font-size: 12px; line-height: 20px; margin: 0 }
+.d21 .d63-form [data-ui="field-hint"] { font-size: 12px; color: var(--text-muted) }
+/* Actions 63: Cancel at inline-start, then the primary; 34px buttons. */
+.d21 .d63-acts { display: flex; gap: 8px; padding: 13px 20px 15px; border-top: 1px solid var(--border-subtle); flex: none }
+/* Phone: a sheet from the bottom, one full-width 44px «حفظ»; the close button is the cancel. */
+/* The consolidated shell switches the phone by width, not by a class on the frame. */
+@media (max-width: 767.98px) {
+  .d21 .d63-scrim { inset: 0; padding: 0; align-items: flex-end; background: rgb(40 36 26 / .32); -webkit-backdrop-filter: none; backdrop-filter: none }
+  .d21 .d63 { width: 100%; max-width: none; height: calc(100dvh - 56px); max-height: none; border-radius: 20px 20px 0 0; box-shadow: var(--shadow-sheet) }
+  .d21 .d63::before { content: ""; width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: 8px auto 0; flex: none }
+  .d21 .d63-hd { padding: 10px 16px 8px }
+  .d21 .d63 .q { padding: 0 16px; margin: 0 16px 4px; border: 0; box-shadow: inset 0 0 0 1px var(--border-strong); border-radius: 10px; height: 44px }
+  .d21 .d63 .q:focus-within { box-shadow: inset 0 0 0 1.5px var(--action-primary) }
+  .d21 .d63-scope { padding: 4px 16px 8px }
+  .d21 .d63-body { padding: 0 4px 10px }
+  .d21 .d63-body.two { padding: 4px 16px 10px }
+  .d21 .d63-grid2, .d21 .d63-due { grid-template-columns: 1fr }
+  .d21 .d63-check { padding-bottom: 0; justify-self: end; min-height: 44px; padding-inline: 4px }
+  .d21 .d63-ft { padding: 10px 16px 18px; justify-content: center }
+  .d21 .d63-ft .note { margin: 0; text-align: center }
+  .d21 .d63-acts { padding: 12px 16px 26px }
+  .d21 .d63-acts .btn { height: 44px; flex: 1; justify-content: center; font-size: 14.5px }
+}

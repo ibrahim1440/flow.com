@@ -2,27 +2,26 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { KanbanSquare, Trophy, XCircle, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
-import { useI18n } from "@/lib/i18n/context";
-import { useUser } from "../../user-context";
-import {
-  ProvisionalBanner, PageHeader, Alert, SectionTitle, ROW_ACTION, Num, num, formatDay, moneyText,
-} from "../_components/ui";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useLang, pick, Spinner, QUOTE_STATUS_SPECS } from "../_components/ui";
+import { Ico } from "@/components/shell/icons";
+import { usePhone, useD21Phone } from "@/components/shell/page-context";
+import { ACTIVITY_LABELS, initials, splitTitle, openDealsText } from "@/components/d21/labels";
+import { currencyLabel, dayCount, daysFromToday, dueText, shortDate, whole } from "@/components/d21/format";
 
 /**
- * Pipeline.
+ * Pipeline, built to its frames: `crm-pipeline` 1440 (`174:701`), 1024 (`175:876`) and 390
+ * (`173:722`). Header with the open total and its weighted value, the tabs, the tool row,
+ * one column per active stage, and the deals closed each month below the board.
  *
- * SC-03 in the Sales Screens design: numbered stage columns, and the two outcomes in their
- * own section BELOW the board rather than as two more columns beside it.
- *
- * Stage movement is buttons, not drag-and-drop, and that is deliberate rather than a
- * shortcut: this screen is used on a phone and a tablet as much as a desktop, drag needs a
- * keyboard-accessible alternative anyway, and every move has to survive the server refusing
- * it. Buttons give one code path that works with touch, mouse and keyboard, and that visibly
- * reverts when the server says no.
+ * A card opens its deal; moving it, winning or losing it is done on the deal page (stage
+ * tracker, «تعليم رابحة», «تعليم خاسرة»), which is where the frame puts those actions. The
+ * search, owner, close-date and order controls work on the deals already loaded — the board
+ * reads every deal in scope at once, so nothing is filtered on the server.
  */
 
 type Stage = { id: string; code: string; nameEn: string; nameAr: string; position: number; probability: number };
+type Quote = { id: string; quoteNumber: string; revision: number; status: string; acceptedAt: string | null };
 type Deal = {
   id: string;
   title: string;
@@ -31,62 +30,87 @@ type Deal = {
   lostReason: string | null;
   amount: string;
   currency: string;
+  probability?: number;
   expectedCloseAt: string | null;
   nextFollowUpAt: string | null;
   closedAt: string | null;
   customer: { id: string; name: string; nameAr: string | null } | null;
   owner: { id: string; name: string } | null;
-  _count: { quotes: number; samples: number; activities: number };
-  quotes: { id: string }[];
+  _count: { quotes: number; samples: number; activities: number; orderLinks?: number };
+  latestQuote?: Quote | null;
+  acceptedQuote?: Quote | null;
+  nextActivity?: { type: string; subject: string; dueAt: string | null } | null;
 };
 type Payload = {
   stages: Stage[];
   deals: Deal[];
   scope: "own" | "all";
-  can: { close: boolean; reopen: boolean };
+  can: { close: boolean; reopen: boolean; createOrder?: boolean; createLead?: boolean };
 };
 
+const AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+const EN_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 export default function PipelinePage() {
-  const user = useUser();
-  const { t } = useI18n();
-  const lang = user?.preferredLanguage ?? "ar";
-  const rtl = lang === "ar";
+  const lang = useLang();
+  const ar = lang === "ar";
+  const phone = usePhone();
+  useD21Phone({ title: ar ? "الصفقات" : "Deals" });
 
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
+  // A failed load is not "no stages configured" — that message would send a rep to settings
+  // to fix something that is not broken.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [lostFor, setLostFor] = useState<Deal | null>(null);
-  const [lostReason, setLostReason] = useState("");
+  const [followUps, setFollowUps] = useState<number | null>(null);
 
-  /**
-   * Which stage sections are open on narrow screens. Empty means "not chosen yet", and the
-   * first stage opens by default — an accordion where everything is shut shows the operator
-   * a list of headings and no work.
-   */
-  const [openStages, setOpenStages] = useState<Record<string, boolean>>({});
+  const [q, setQ] = useState("");
+  const [owner, setOwner] = useState("all");
+  // D6.2 (owner, 15 Oct): «الكل» is the default; the choice lives in the URL (`?close=quarter`)
+  // as the leads page keeps its `?new=1`, so a reload or a shared link keeps it.
+  const router = useRouter();
+  const closeParam = useSearchParams().get("close");
+  const [closing, setClosingState] = useState<"all" | "quarter">(closeParam === "quarter" ? "quarter" : "all");
+  const setClosing = (v: "all" | "quarter") => {
+    setClosingState(v);
+    router.replace(v === "quarter" ? "/dashboard/sales/pipeline?close=quarter" : "/dashboard/sales/pipeline");
+  };
+  const [sort, setSort] = useState<"value" | "close">("value");
+  const [seg, setSeg] = useState<string | null>(null);
+  // The frame's «لوحة | جدول» segment (QA P2-3): the same deals as a table, same filters and order.
+  const [view, setView] = useState<"board" | "table">("board");
 
-  /**
-   * Reload counter. The fetch lives in the effect rather than a `load()` the effect calls, so
-   * the first `await` precedes any state write. Moving a deal bumps this to refresh.
-   */
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await fetch("/api/sales/opportunities");
+      const res = await fetch("/api/sales/opportunities").catch(() => null);
       if (cancelled) return;
-      if (res.ok) setData(await res.json());
-      else setError(lang === "ar" ? "تعذّر تحميل مسار الصفقات." : "Could not load the pipeline.");
+      if (res?.ok) { setData(await res.json()); setLoadFailed(false); }
+      else setLoadFailed(true);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [lang, reloadToken]);
+  }, [reloadToken]);
 
-  async function move(deal: Deal, body: Record<string, unknown>) {
+  // The count on «الأنشطة والمتابعات»: open follow-ups in the same scope the follow-ups page shows.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/sales/activities?filter=open&perPage=1").catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const j = await res.json().catch(() => null);
+      if (!cancelled && typeof j?.counts?.open === "number") setFollowUps(j.counts.open);
+    })();
+    return () => { cancelled = true; };
+  }, [reloadToken]);
+
+  async function reopen(deal: Deal) {
     if (busy) return;
     setBusy(deal.id);
     setError("");
@@ -95,554 +119,392 @@ export default function PipelinePage() {
       const res = await fetch(`/api/sales/opportunities/${deal.id}/transition`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ toOutcome: "OPEN" }),
       });
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // The server refused. Nothing was moved optimistically, so there is nothing to put
-        // back — the board simply still shows the truth.
-        setError(payload.error ?? (lang === "ar" ? "تعذّر النقل." : "Could not move the deal."));
-        return;
-      }
-      setSuccess(lang === "ar" ? "تم التحديث." : "Updated.");
+      if (!res.ok) { setError(payload.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that.")); return; }
+      setSuccess(ar ? "أُعيد فتح الصفقة." : "Deal reopened.");
       reload();
     } finally {
       setBusy(null);
     }
   }
 
-  const openDeals = useMemo(() => (data?.deals ?? []).filter((d) => d.outcome === "OPEN"), [data]);
-  const won = useMemo(() => (data?.deals ?? []).filter((d) => d.outcome === "WON"), [data]);
-  const lost = useMemo(() => (data?.deals ?? []).filter((d) => d.outcome === "LOST"), [data]);
+  const deals = useMemo(() => data?.deals ?? [], [data]);
+  const stages = data?.stages ?? [];
+  const can = data?.can ?? { close: false, reopen: false };
+  const customerName = (d: Deal) => d.customer ? (ar ? (d.customer.nameAr ?? d.customer.name) : d.customer.name) : null;
 
-  // Whole riyals on a board — the decimals are noise at card size — but through the module's
-  // one formatter, so the numerals and the currency word match every other screen.
-  const money = (v: string, ccy: string) => moneyText(v, ccy, lang, 0);
-  const stageName = (s: Stage) => (rtl ? s.nameAr : s.nameEn);
+  const owners = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of deals) if (d.owner) m.set(d.owner.id, d.owner.name);
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], "ar"));
+  }, [deals]);
 
-  if (loading) {
+  // Search and owner apply to the board and the closed list; the close-date filter to the board.
+  const matches = (d: Deal) => {
+    if (owner !== "all" && d.owner?.id !== owner) return false;
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return [d.title, d.customer?.name ?? "", d.customer?.nameAr ?? ""].some((x) => x.toLowerCase().includes(s));
+  };
+  const inQuarter = (v: string | null) => {
+    if (!v) return false;
+    const d = new Date(v), now = new Date();
+    return d.getFullYear() === now.getFullYear() && Math.floor(d.getMonth() / 3) === Math.floor(now.getMonth() / 3);
+  };
+  const allOpen = deals.filter((d) => d.outcome === "OPEN");
+  const board = allOpen
+    .filter(matches)
+    .filter((d) => closing === "all" || inQuarter(d.expectedCloseAt))
+    .sort((a, b) => sort === "value"
+      ? Number(b.amount) - Number(a.amount)
+      : (a.expectedCloseAt ? new Date(a.expectedCloseAt).getTime() : Infinity) - (b.expectedCloseAt ? new Date(b.expectedCloseAt).getTime() : Infinity));
+  const closed = deals.filter((d) => d.outcome !== "OPEN").filter(matches)
+    .sort((a, b) => (b.closedAt ? new Date(b.closedAt).getTime() : 0) - (a.closedAt ? new Date(a.closedAt).getTime() : 0));
+  // «أُغلقت في أكتوبر»: one block per month, newest first, so no closed deal drops off the screen.
+  const closedByMonth = useMemo(() => {
+    const out: { key: string; label: string; rows: Deal[] }[] = [];
+    for (const d of closed) {
+      const at = d.closedAt ? new Date(d.closedAt) : null;
+      const key = at ? `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}` : "none";
+      let g = out.find((x) => x.key === key);
+      if (!g) {
+        const sameYear = at && at.getFullYear() === new Date().getFullYear();
+        const month = at ? (ar ? AR_MONTHS[at.getMonth()] : EN_MONTHS[at.getMonth()]) + (sameYear ? "" : ` ${at.getFullYear()}`) : "";
+        g = { key, label: at ? (ar ? `أُغلقت في ${month}` : `Closed in ${month}`) : (ar ? "أُغلقت" : "Closed"), rows: [] };
+        out.push(g);
+      }
+      g.rows.push(d);
+    }
+    return out;
+  }, [closed, ar]);
+
+  const total = allOpen.reduce((s, d) => s + Number(d.amount), 0);
+  const weighted = allOpen.reduce((s, d) => s + Number(d.amount) * (d.probability ?? 0) / 100, 0);
+  const cur = currencyLabel("SAR", lang);
+
+  // The next step on a card: its type and when — «مكالمة · 4 أكتوبر», «زيارة · اليوم 16:00».
+  const nextLine = (d: Deal) => {
+    const a = d.nextActivity;
+    if (!a) return null;
+    const type = pick(ACTIVITY_LABELS, a.type, lang);
+    if (!a.dueAt) return { text: type, late: 0 };
+    const n = daysFromToday(a.dueAt);
+    const when = Math.abs(n) <= 1 ? dueText(a.dueAt, lang) : shortDate(a.dueAt, lang);
+    const late = new Date(a.dueAt) < new Date() ? Math.max(1, -n) : 0;
+    return { text: `${type} · ${when}`, late };
+  };
+  const quoteSuffix = (qt: Quote) =>
+    qt.status === "DRAFT" ? ` · ${pick(QUOTE_STATUS_SPECS, "DRAFT", lang)}`
+      : qt.revision > 1 ? ` · ${ar ? "المراجعة" : "revision"} ${qt.revision}` : "";
+  const lateFlag = (n: number) => <span className="flag">{ar ? `متأخرة ${dayCount(n, lang)}` : `${dayCount(n, lang)} overdue`}</span>;
+  // Money reads «422,900 ر.س» in Arabic and "SAR 422,900" in English (the code goes first).
+  const money = (v: number) => ar
+    ? <><span className="n">{whole(v)}</span> {cur}</>
+    : <>{cur} <span className="n">{whole(v)}</span></>;
+
+  const notice = (error || success) ? (
+    <p className={`notice ${error ? "er" : "ok"}`} role={error ? "alert" : "status"} style={{ marginBottom: 16 }}
+      data-testid={error ? "alert-error" : "alert-success"}>
+      {error || success}
+      <button type="button" onClick={() => { setError(""); setSuccess(""); }} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+    </p>
+  ) : null;
+
+  const failed = (
+    <div className="notice er" role="alert" data-testid="pipeline-load-error">
+      <span>{ar ? "تعذّر تحميل مسار الصفقات. لم تتغير أي بيانات." : "Could not load the pipeline. Nothing was changed."}</span>
+      <button type="button" className="btn sm" onClick={() => { setLoading(true); reload(); }}>
+        {ar ? "إعادة المحاولة" : "Try again"}
+      </button>
+    </div>
+  );
+  const noStages = (
+    <p className="lbl" style={{ fontWeight: 400, padding: "32px 0", textAlign: "center" }}>
+      {ar ? "لم يتم إعداد مراحل المسار بعد." : "No pipeline stages are configured yet."}
+    </p>
+  );
+
+  if (loading) return <div className="pg"><Spinner /></div>;
+
+  // ── Phone (`173:722`): stage segments, the stage's total, one row per deal ──
+  if (phone) {
+    const current = seg ?? stages[0]?.id ?? null;
+    const st = stages.find((s) => s.id === current);
+    const rows = current === "closed" ? closed : board.filter((d) => d.stageId === current);
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-10 h-10 border-4 border-oo-action-primary border-t-transparent rounded-full animate-spin" />
+      <div className="pg">
+        {notice}
+        {loadFailed ? failed : stages.length === 0 ? noStages : (
+          <>
+            <div className="segs" role="tablist" aria-label={ar ? "المراحل" : "Stages"} data-testid="pipeline-segs">
+              {stages.map((s) => (
+                <button key={s.id} type="button" role="tab" aria-selected={s.id === current}
+                  className={s.id === current ? "on" : undefined} data-testid={`seg-${s.code}`} onClick={() => setSeg(s.id)}>
+                  {ar ? s.nameAr : s.nameEn} <span className="n">{board.filter((d) => d.stageId === s.id).length}</span>
+                </button>
+              ))}
+              <button type="button" role="tab" aria-selected={current === "closed"} className={current === "closed" ? "on" : undefined}
+                data-testid="seg-closed" onClick={() => setSeg("closed")}>
+                {ar ? "أُغلقت" : "Closed"}
+              </button>
+            </div>
+            {st && (
+              <div style={{ fontSize: 12.5, color: "var(--text-muted)", padding: "2px 0 4px" }}>
+                {money(rows.reduce((s, d) => s + Number(d.amount), 0))} · {ar ? "احتمال المرحلة " : "stage probability "}<span className="n">{st.probability}%</span>
+              </div>
+            )}
+            <div role="tabpanel" data-testid={current === "closed" ? "m-closed" : `m-stage-${st?.code}`}>
+              {rows.length === 0 && (
+                <p className="lbl" style={{ fontWeight: 400, padding: "16px 0" }}>{ar ? "لا صفقات." : "No deals."}</p>
+              )}
+              {rows.map((d) => {
+                const { top, sub } = splitTitle(d.title, customerName(d));
+                const nx = d.outcome === "OPEN" ? nextLine(d) : null;
+                const won = d.outcome === "WON";
+                return (
+                  <div key={d.id} className="mrow rowlink" data-testid={`m-deal-${d.id}`}>
+                    <div style={{ minWidth: 0 }}>
+                      <Link href={`/dashboard/sales/deals/${d.id}`} className="who open" data-testid={`m-open-deal-${d.id}`}>{top}</Link>
+                    </div>
+                    <span className="n" style={{ fontWeight: 500 }}>{whole(d.amount)}</span>
+                    <div className="r2">
+                      {d.outcome === "OPEN" ? (
+                        <>
+                          <span style={{ flex: 1, minWidth: 0 }}>{[sub, nx?.text].filter(Boolean).join(" · ")}</span>
+                          {nx?.late ? lateFlag(nx.late) : null}
+                        </>
+                      ) : (
+                        <>
+                          <span className={`st${won ? " ok" : ""}`} style={{ fontSize: 12.5 }}>{won ? (ar ? "رابحة" : "Won") : (ar ? "خاسرة" : "Lost")}</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            {!won && d.lostReason ? <><bdi>{d.lostReason}</bdi> · </> : null}{d.closedAt ? shortDate(d.closedAt, lang) : ""}
+                          </span>
+                          {!won && can.reopen && (
+                            <button type="button" className="btn sm g" disabled={busy === d.id} onClick={() => reopen(d)}>
+                              {ar ? "إعادة فتح" : "Reopen"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
-  const stages = data?.stages ?? [];
-  const canClose = data?.can.close ?? false;
-  const canReopen = data?.can.reopen ?? false;
-
+  // ── Desktop and compact (`174:701`, `175:876`) ──
   return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
-
-      <PageHeader
-        title={t("pipelineNav")}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{rtl ? "المراحل تُهيَّأ من إعدادات المبيعات" : "Stages are configured in Sales settings"}</span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>
-              {rtl ? "«رابح» و«خاسر» نتيجتان لا مرحلتان" : "Won and Lost are outcomes, not stages"}
-            </span>
-          </span>
-        }
-      />
-
-      {/* What this line says — whose deals these are, and that the outcomes below are NOT
-          inside the total — is the difference between reading this board right and reading
-          it wrong, so it is a sentence rather than a chip.
-
-          Each clause is its own element: joined into one string, the bidi algorithm moves a
-          "·" that falls between two Arabic-Indic numerals and the sentence ends up stating a
-          count it was never given. */}
-      <p
-        className="flex flex-wrap items-center gap-2 text-[12px] leading-[18px] text-oo-text-secondary"
-        data-testid="pipeline-scope"
-      >
-        {[
-          `${rtl ? "النطاق: " : "Scope: "}${
-            data?.scope === "own"
-              ? (rtl ? "صفقاتك المفتوحة أنت" : "your own open deals")
-              : (rtl ? "الصفقات المفتوحة للفريق" : "the team's open deals")
-          }`,
-          `${num(openDeals.length, lang)} ${rtl ? "صفقة بقيمة" : "deals, worth"} ${money(
-            String(openDeals.reduce((s, d) => s + Number(d.amount), 0)),
-            "SAR",
-          )}`,
-          rtl
-            ? `«رابح» و«خاسر» خارج الأعمدة أدناه ولا يدخلان في هذا المجموع`
-            : `Won and Lost sit outside the columns below and are not in that total`,
-        ].map((part, i) => (
-          <span key={i} className="flex items-center gap-2">
-            {i > 0 && <span aria-hidden className="text-oo-border-strong">·</span>}
-            <span>{part}</span>
-          </span>
-        ))}
-      </p>
-
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
-
-      {stages.length === 0 ? (
-        <div className="text-center py-16 bg-oo-bg-default rounded-2xl border border-oo-border-default text-oo-text-muted">
-          <KanbanSquare size={40} className="mx-auto mb-3 opacity-50" />
-          <p className="font-semibold text-lg">
-            {rtl ? "لم يتم إعداد مراحل المسار بعد." : "No pipeline stages are configured yet."}
-          </p>
+    <div className="pg">
+      {notice}
+      <div className="ph" style={{ marginBottom: 20 }}>
+        <div>
+          <h1>{ar ? "مسار الصفقات" : "Deal pipeline"}</h1>
+          {data && (
+            <div className="meta" data-testid="pipeline-scope">
+              <span>{openDealsText(allOpen.length, ar)}</span>
+              <i /><span>{money(total)}</span>
+              <i /><span>{ar ? "مرجّحة بالاحتمال " : "Weighted by probability "}{money(weighted)}</span>
+            </div>
+          )}
         </div>
-      ) : (
+        <div className="act">
+          <div className="seg" role="group" aria-label={ar ? "طريقة العرض" : "View"}>
+            <button type="button" className={view === "board" ? "on" : undefined} aria-pressed={view === "board"}
+              onClick={() => setView("board")} data-testid="pipeline-view-board">{ar ? "لوحة" : "Board"}</button>
+            <button type="button" className={view === "table" ? "on" : undefined} aria-pressed={view === "table"}
+              onClick={() => setView("table")} data-testid="pipeline-view-table">{ar ? "جدول" : "Table"}</button>
+          </div>
+          {can.createLead && (
+            <Link className="btn" href="/dashboard/sales/leads?new=1" data-testid="pipeline-new-lead">
+              <Ico name="plus" small />{ar ? "عميل محتمل" : "New lead"}
+            </Link>
+          )}
+        </div>
+      </div>
+
+      <nav className="tabs" aria-label={ar ? "الصفقات" : "Deals"} data-testid="contextual-nav">
+        <a className="on" aria-current="page" href="/dashboard/sales/pipeline" data-testid="ctx-sales.pipeline">
+          {ar ? "مسار الصفقات" : "Deal pipeline"}
+        </a>
+        <Link href="/dashboard/sales/activities" data-testid="ctx-sales.pipeline.activities">
+          {ar ? "الأنشطة والمتابعات" : "Activities & follow-ups"}
+          {followUps !== null && <span className="c">{followUps}</span>}
+        </Link>
+      </nav>
+
+      {loadFailed ? failed : stages.length === 0 ? noStages : (
         <>
-        {/* Columns scroll horizontally in their own container so the page body never does.
-            Desktop only: below lg the same data is an accordion, because sideways scrolling
-            to find a column is the worst way to use a phone. */}
-        <div className="hidden lg:block overflow-x-auto pb-2">
-          <div className="flex gap-3 min-w-max">
-            {stages.map((stage, stageIdx) => {
-              const inStage = openDeals.filter((d) => d.stageId === stage.id);
-              const stageValue = inStage.reduce((s, d) => s + Number(d.amount), 0);
-              const prev = stages[stageIdx - 1];
-              const next = stages[stageIdx + 1];
-              return (
-                <div
-                  key={stage.id}
-                  className="w-[290px] flex-shrink-0 rounded-2xl border border-oo-border-default bg-oo-bg-default p-3"
-                  data-testid={`stage-${stage.code}`}
-                >
-                  {/* The design numbers the columns, because "which stage comes next" is the
-                      question this board exists to answer and the order is otherwise only
-                      implied by position. */}
-                  <div className="mb-2 flex items-baseline justify-between px-1">
-                    <span className="text-[12px] leading-[18px] tabular-nums text-oo-text-muted">
-                      {num(inStage.length, lang)}
-                    </span>
-                    <span className="text-end">
-                      <span className="block text-[14px] font-medium leading-[22px] text-oo-text-primary">
-                        <Num>{String(stageIdx + 1).padStart(2, "0")}</Num>{" "}
-                        {stageName(stage)}
-                      </span>
-                      <span className="block text-[12px] leading-[18px] tabular-nums text-oo-text-muted">
-                        {money(String(stageValue), "SAR")}
-                      </span>
-                    </span>
-                  </div>
+          <div className="tool" style={{ marginBottom: 16 }}>
+            <label className="search">
+              <Ico name="search" small />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={ar ? "العميل أو الصفقة" : "Customer or deal"}
+                aria-label={ar ? "بحث عن عميل أو صفقة" : "Search customers or deals"} data-testid="pipeline-search" />
+            </label>
+            {data?.scope === "all" && (
+              <span className="chip">
+                <label htmlFor="pl-owner">{ar ? "المالك:" : "Owner:"}</label>
+                <select id="pl-owner" value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="pipeline-owner">
+                  <option value="all">{ar ? "الكل" : "All"}</option>
+                  {owners.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+                <button type="button" className="x" onClick={() => setOwner("all")} aria-label={ar ? "إزالة فلتر المالك" : "Clear owner"} data-testid="pipeline-owner-clear">
+                  <Ico name="close" small />
+                </button>
+              </span>
+            )}
+            <span className="chip">
+              <label htmlFor="pl-close">{ar ? "الإغلاق المتوقع:" : "Expected close:"}</label>
+              <select id="pl-close" value={closing} onChange={(e) => setClosing(e.target.value as "all" | "quarter")} data-testid="pipeline-close">
+                <option value="all">{ar ? "الكل" : "Any time"}</option>
+                <option value="quarter">{ar ? "هذا الربع" : "This quarter"}</option>
+              </select>
+              <button type="button" className="x" onClick={() => setClosing("all")} aria-label={ar ? "إزالة فلتر الإغلاق" : "Clear close date"} data-testid="pipeline-close-clear">
+                <Ico name="close" small />
+              </button>
+            </span>
+            <span className="sp" />
+            <button type="button" className="btn g sm" data-testid="pipeline-sort"
+              onClick={() => setSort((s) => (s === "value" ? "close" : "value"))}
+              aria-label={ar ? `الترتيب: ${sort === "value" ? "القيمة تنازليًا" : "الإغلاق المتوقع"}` : `Order: ${sort === "value" ? "value, highest first" : "expected close"}`}>
+              {sort === "value" ? (ar ? "القيمة ↓" : "Value ↓") : (ar ? "الإغلاق ↑" : "Close ↑")}
+            </button>
+          </div>
 
-                  <div className="space-y-2">
-                    {inStage.length === 0 && (
-                      <p className="rounded-xl border border-dashed border-oo-border-strong px-1 py-4 text-center text-[12px] leading-[18px] text-oo-text-muted">
-                        {rtl ? "لا صفقات" : "No deals"}
-                      </p>
-                    )}
-                    {inStage.map((deal) => (
-                      <div
-                        key={deal.id}
-                        data-testid={`deal-${deal.id}`}
-                        className="rounded-xl border border-oo-border-default bg-oo-bg-default p-3"
-                      >
-                        <Link
-                          href={`/dashboard/sales/deals/${deal.id}`}
-                          data-testid={`open-deal-${deal.id}`}
-                          className="block rounded text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40"
-                        >
-                          {deal.title}
-                        </Link>
-                        <p className="mt-1 text-[18px] font-semibold leading-[28px] tabular-nums text-oo-text-primary">
-                          {money(deal.amount, deal.currency)}
-                        </p>
-                        <p className="text-[12px] leading-[18px] text-oo-text-muted">
-                          {[
-                            deal.customer
-                              ? (rtl && deal.customer.nameAr ? deal.customer.nameAr : deal.customer.name)
-                              : null,
-                            `${rtl ? "احتمال" : "probability"} ${num(stage.probability, lang)}%`,
-                            deal._count.quotes > 0
-                              ? `${rtl ? "عروض" : "quotes"} ${num(deal._count.quotes, lang)}`
-                              : null,
-                            deal._count.samples > 0
-                              ? `${rtl ? "عيّنات" : "samples"} ${num(deal._count.samples, lang)}`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-
-                        {/* Movement, keyboard-reachable and touch-friendly. The design labels
-                            the two buttons rather than leaving bare chevrons, because on a
-                            right-to-left board "forward" is the direction people get wrong. */}
-                        <div className="mt-2 flex items-center gap-1.5 border-t border-oo-border-default pt-2">
-                          <button
-                            type="button"
-                            disabled={!next || busy === deal.id}
-                            onClick={() => next && move(deal, { toStageId: next.id })}
-                            title={next ? `${rtl ? "إلى" : "to"} ${stageName(next)}` : undefined}
-                            aria-label={next ? `${rtl ? "تقديم إلى" : "Move forward to"} ${stageName(next)}` : rtl ? "لا مرحلة بعدها" : "No later stage"}
-                            className={`${ROW_ACTION} gap-1 text-oo-action-primary hover:border-oo-action-primary disabled:opacity-30`}
-                          >
-                            {rtl ? <ChevronLeft size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
-                            {rtl ? "التالية" : "Next"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!prev || busy === deal.id}
-                            onClick={() => prev && move(deal, { toStageId: prev.id })}
-                            title={prev ? `${rtl ? "إلى" : "to"} ${stageName(prev)}` : undefined}
-                            aria-label={prev ? `${rtl ? "إرجاع إلى" : "Move back to"} ${stageName(prev)}` : rtl ? "لا مرحلة قبلها" : "No earlier stage"}
-                            className={`${ROW_ACTION} gap-1 text-oo-text-secondary hover:border-oo-action-primary disabled:opacity-30`}
-                          >
-                            {rtl ? <ChevronRight size={14} aria-hidden /> : <ChevronLeft size={14} aria-hidden />}
-                            {rtl ? "السابقة" : "Back"}
-                          </button>
-                        </div>
-                        {/* Closing a deal is not a move along the board, so it is not on the
-                            same row as the two that are. */}
-                        {canClose && (
-                          <div className="mt-1.5 flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={busy === deal.id}
-                              onClick={() => move(deal, { toOutcome: "WON" })}
-                              className="rounded-[10px] border border-oo-status-success bg-oo-status-success-bg px-2.5 py-1 text-[12px] leading-[18px] text-oo-status-success transition-colors hover:bg-oo-status-success/10 disabled:opacity-50"
-                            >
-                              {rtl ? "رابح" : "Won"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy === deal.id}
-                              onClick={() => { setLostFor(deal); setLostReason(""); }}
-                              className="rounded-[10px] border border-oo-status-rejected bg-oo-status-rejected-bg px-2.5 py-1 text-[12px] leading-[18px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected/10 disabled:opacity-50"
-                            >
-                              {rtl ? "خاسر" : "Lost"}
-                            </button>
+          {view === "table" ? (
+            <table className="t" data-testid="pipeline-table">
+              <thead><tr>
+                <th scope="col">{ar ? "الصفقة" : "Deal"}</th>
+                <th scope="col">{ar ? "المرحلة" : "Stage"}</th>
+                <th scope="col" style={{ textAlign: "end" }}>{ar ? `القيمة · ${cur}` : `Value · ${cur}`}</th>
+                <th scope="col">{ar ? "النشاط القادم" : "Next activity"}</th>
+                <th scope="col">{ar ? "آخر عرض" : "Latest quote"}</th>
+                <th scope="col">{ar ? "المالك" : "Owner"}</th>
+              </tr></thead>
+              <tbody>
+                {board.map((d) => {
+                  const { top, sub } = splitTitle(d.title, customerName(d));
+                  const st = stages.find((x) => x.id === d.stageId);
+                  const nx = nextLine(d);
+                  return (
+                    <tr key={d.id} data-testid={`deal-${d.id}`}>
+                      <td>
+                        <Link href={`/dashboard/sales/deals/${d.id}`} className="who" data-testid={`open-deal-${d.id}`}>{top}</Link>
+                        {sub && <div className="sm">{sub}</div>}
+                      </td>
+                      <td>{st ? (ar ? st.nameAr : st.nameEn) : ""}</td>
+                      <td style={{ textAlign: "end" }}><span className="n">{whole(d.amount)}</span></td>
+                      <td>{nx ? <>{nx.text}{nx.late ? <> {lateFlag(nx.late)}</> : null}</> : <span className="sm">{ar ? "لا نشاط مفتوح" : "Nothing open"}</span>}</td>
+                      <td>{d.latestQuote ? <><bdi className="id" dir="ltr">{d.latestQuote.quoteNumber}</bdi> <span className="sm">{quoteSuffix(d.latestQuote)}</span></> : "—"}</td>
+                      <td>{d.owner?.name ?? (ar ? "غير مُسنَد" : "Unassigned")}</td>
+                    </tr>
+                  );
+                })}
+                {board.length === 0 && (
+                  <tr><td colSpan={6} className="sm">{ar ? "لا صفقات مفتوحة تطابق الفلاتر." : "No open deals match the filters."}</td></tr>
+                )}
+              </tbody>
+            </table>
+          ) : (
+          <div className="board-wrap">
+            <div className="board" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(var(--col-min), 1fr))` }}>
+              {stages.map((s) => {
+                const inStage = board.filter((d) => d.stageId === s.id);
+                return (
+                  <section key={s.id} className="col" aria-label={ar ? s.nameAr : s.nameEn} data-testid={`stage-${s.code}`}>
+                    <div className="colh">
+                      <b>{ar ? s.nameAr : s.nameEn}</b>
+                      <span className="n">{inStage.length}</span>
+                      <span className="tot">{money(inStage.reduce((x, d) => x + Number(d.amount), 0))} · <span className="n">{s.probability}%</span></span>
+                    </div>
+                    {inStage.map((d) => {
+                      const { top, sub } = splitTitle(d.title, customerName(d));
+                      const nx = nextLine(d);
+                      return (
+                        <article key={d.id} className="dcard" data-testid={`deal-${d.id}`}>
+                          <div className="r1">
+                            <Link href={`/dashboard/sales/deals/${d.id}`} className="who open" data-testid={`open-deal-${d.id}`}>{top}</Link>
+                            <span className="n">{whole(d.amount)}</span>
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ── The outcomes, below the board rather than beside it ──────────────────────
-            They were a fifth and sixth column separated by a dashed rule, which reads as
-            two more stages however the rule is drawn. A deal that is won has left the
-            funnel; the design says so with a heading instead of a divider. */}
-        <div className="hidden lg:block">
-          <SectionTitle>
-            {rtl
-              ? "النتائج — خارج الأعمدة، لأن «رابح» و«خاسر» ليستا مرحلتين"
-              : "Outcomes — outside the columns, because Won and Lost are not stages"}
-          </SectionTitle>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {[
-              { key: "won", list: won, label: rtl ? "رابح" : "Won", Icon: Trophy, tone: "success" as const },
-              { key: "lost", list: lost, label: rtl ? "خاسر" : "Lost", Icon: XCircle, tone: "rejected" as const },
-            ].map(({ key, list, label, Icon, tone }) => (
-              <div
-                key={key}
-                className="rounded-2xl border border-oo-border-default bg-oo-bg-default p-3"
-                data-testid={`outcome-${key}`}
-              >
-                <div className="mb-2 flex items-baseline justify-between px-1">
-                  <span className="text-[12px] leading-[18px] tabular-nums text-oo-text-muted">
-                    {num(list.length, lang)}
-                  </span>
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12px] font-medium leading-[18px] ${
-                      tone === "success"
-                        ? "border-oo-status-success bg-oo-status-success-bg text-oo-status-success"
-                        : "border-oo-status-rejected bg-oo-status-rejected-bg text-oo-status-rejected"
-                    }`}
-                  >
-                    {label} <Icon size={14} aria-hidden />
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {list.slice(0, 30).map((deal) => (
-                    <div
-                      key={deal.id}
-                      data-testid={`deal-${deal.id}`}
-                      className={`rounded-xl border p-3 ${
-                        tone === "success" ? "border-oo-status-success" : "border-oo-border-default"
-                      }`}
-                    >
-                      <Link
-                        href={`/dashboard/sales/deals/${deal.id}`}
-                        data-testid={`open-deal-${deal.id}`}
-                        className="block rounded text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40"
-                      >
-                        {deal.title}
-                      </Link>
-                      <p className="text-[18px] font-semibold leading-[28px] tabular-nums text-oo-text-primary">
-                        {money(deal.amount, deal.currency)}
-                      </p>
-                      <p className="text-[12px] leading-[18px] text-oo-text-muted">
-                        {[
-                          deal.closedAt
-                            ? `${tone === "success" ? (rtl ? "رُبحت" : "won") : (rtl ? "أُغلقت" : "closed")} ${formatDay(deal.closedAt, lang)}`
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                      {deal.lostReason && (
-                        <p className="mt-1.5 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[12px] leading-[18px] text-oo-text-secondary">
-                          {rtl ? "السبب" : "Reason"}: {deal.lostReason}
-                        </p>
-                      )}
-                      {canReopen && (
-                        <button
-                          type="button"
-                          disabled={busy === deal.id}
-                          onClick={() => move(deal, { toOutcome: "OPEN" })}
-                          className={`${ROW_ACTION} mt-1.5 text-oo-text-secondary hover:border-oo-action-primary disabled:opacity-50`}
-                        >
-                          {rtl ? "إعادة فتح" : "Reopen"}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {list.length === 0 && (
-                    <p className="rounded-xl border border-dashed border-oo-border-strong px-1 py-4 text-center text-[12px] leading-[18px] text-oo-text-muted">
-                      {rtl ? "لا صفقات" : "None"}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── Narrow screens: the same board as stacked, collapsible sections ──────────
-            Same stages, same outcomes, same `move` handler, same permission flags. Nothing
-            here is a second source of truth; it is one layout swapped for another, so a
-            stage renamed in settings renames in both without anyone remembering to look.
-            Vertical order needs no RTL reversal — top-to-bottom reads the same in Arabic —
-            but the move buttons keep the direction-aware icons the board uses. */}
-        <div className="lg:hidden space-y-3" data-testid="pipeline-accordion">
-          {stages.map((stage, stageIdx) => {
-            const inStage = openDeals.filter((d) => d.stageId === stage.id);
-            const stageValue = inStage.reduce((s, d) => s + Number(d.amount), 0);
-            const prev = stages[stageIdx - 1];
-            const next = stages[stageIdx + 1];
-            // Nothing chosen yet: the first stage is open, so the screen opens on work.
-            const isOpen = openStages[stage.id] ?? stageIdx === 0;
-            return (
-              <div
-                key={stage.id}
-                className="bg-oo-bg-default rounded-2xl border border-oo-border-default overflow-hidden"
-                data-testid={`m-stage-${stage.code}`}
-              >
-                <button
-                  type="button"
-                  aria-expanded={isOpen}
-                  aria-controls={`m-stage-body-${stage.code}`}
-                  onClick={() => setOpenStages((s) => ({ ...s, [stage.id]: !isOpen }))}
-                  className="w-full flex items-center justify-between gap-2 px-4 py-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40"
-                >
-                  <span className="min-w-0">
-                    <span className="block font-bold text-sm text-oo-text-primary truncate">
-                      {stageName(stage)}
-                    </span>
-                    <span className="block text-[11px] text-oo-text-muted tabular-nums">
-                      {inStage.length} · {money(String(stageValue), "SAR")}
-                    </span>
-                  </span>
-                  <ChevronDown
-                    size={18}
-                    aria-hidden
-                    className={`flex-shrink-0 text-oo-text-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-
-                <div id={`m-stage-body-${stage.code}`} hidden={!isOpen} className="px-3 pb-3 space-y-2">
-                  {inStage.length === 0 && (
-                    <p className="text-xs text-oo-text-muted py-4 text-center border border-dashed border-oo-border-strong rounded-xl">
-                      {rtl ? "لا صفقات" : "No deals"}
-                    </p>
-                  )}
-                  {inStage.map((deal) => (
-                    <div
-                      key={deal.id}
-                      data-testid={`m-deal-${deal.id}`}
-                      className="rounded-xl border border-oo-border-default p-3 space-y-2"
-                    >
-                      <Link
-                        href={`/dashboard/sales/deals/${deal.id}`}
-                        data-testid={`m-open-deal-${deal.id}`}
-                        className="block font-bold text-sm text-oo-text-primary leading-snug break-words hover:text-oo-action-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40 rounded"
-                      >
-                        {deal.title}
-                      </Link>
-                      {deal.customer && (
-                        <p className="text-xs text-oo-text-secondary break-words">
-                          {rtl && deal.customer.nameAr ? deal.customer.nameAr : deal.customer.name}
-                        </p>
-                      )}
-                      <p className="text-xs font-bold text-oo-text-primary tabular-nums">
-                        {money(deal.amount, deal.currency)}
-                      </p>
-                      {deal.owner?.name && (
-                        <p className="text-[11px] text-oo-text-muted break-words">{deal.owner.name}</p>
-                      )}
-
-                      {/* Full-width targets: these are pressed with a thumb. */}
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button
-                          type="button"
-                          disabled={!prev || busy === deal.id}
-                          onClick={() => prev && move(deal, { toStageId: prev.id })}
-                          aria-label={prev ? `${rtl ? "إرجاع إلى" : "Move back to"} ${stageName(prev)}` : rtl ? "لا مرحلة قبلها" : "No earlier stage"}
-                          className="flex items-center justify-center gap-1 py-2 rounded-lg border border-oo-border-default text-xs font-bold text-oo-text-secondary disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          {rtl ? <ChevronRight size={14} aria-hidden /> : <ChevronLeft size={14} aria-hidden />}
-                          {rtl ? "السابقة" : "Back"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!next || busy === deal.id}
-                          onClick={() => next && move(deal, { toStageId: next.id })}
-                          aria-label={next ? `${rtl ? "تقديم إلى" : "Move forward to"} ${stageName(next)}` : rtl ? "لا مرحلة بعدها" : "No later stage"}
-                          className="flex items-center justify-center gap-1 py-2 rounded-lg border border-oo-border-default text-xs font-bold text-oo-text-secondary disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          {rtl ? "التالية" : "Next"}
-                          {rtl ? <ChevronLeft size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
-                        </button>
-                      </div>
-                      {canClose && (
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            disabled={busy === deal.id}
-                            onClick={() => move(deal, { toOutcome: "WON" })}
-                            className="py-2 rounded-lg text-xs font-bold text-oo-status-success bg-oo-status-success-bg disabled:opacity-50"
-                          >
-                            {rtl ? "ربح" : "Won"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy === deal.id}
-                            onClick={() => { setLostFor(deal); setLostReason(""); }}
-                            className="py-2 rounded-lg text-xs font-bold text-oo-status-rejected bg-oo-status-rejected-bg disabled:opacity-50"
-                          >
-                            {rtl ? "خسارة" : "Lost"}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Outcomes stay outside the stage list here too — they are results, not stages. */}
-          {[
-            { key: "won", list: won, label: rtl ? "رابحة" : "Won", Icon: Trophy, tone: "text-oo-status-success" },
-            { key: "lost", list: lost, label: rtl ? "خاسرة" : "Lost", Icon: XCircle, tone: "text-oo-status-rejected" },
-          ].map(({ key, list, label, Icon, tone }) => {
-            const isOpen = openStages[`outcome-${key}`] ?? false;
-            return (
-              <div
-                key={key}
-                className="bg-oo-bg-default rounded-2xl border border-oo-border-default border-dashed overflow-hidden"
-                data-testid={`m-outcome-${key}`}
-              >
-                <button
-                  type="button"
-                  aria-expanded={isOpen}
-                  aria-controls={`m-outcome-body-${key}`}
-                  onClick={() => setOpenStages((s) => ({ ...s, [`outcome-${key}`]: !isOpen }))}
-                  className="w-full flex items-center justify-between gap-2 px-4 py-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40"
-                >
-                  <span className={`font-bold text-sm flex items-center gap-1.5 ${tone}`}>
-                    <Icon size={14} aria-hidden /> {label}
-                    <span className="text-[11px] text-oo-text-muted tabular-nums">({list.length})</span>
-                  </span>
-                  <ChevronDown
-                    size={18}
-                    aria-hidden
-                    className={`flex-shrink-0 text-oo-text-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-                <div id={`m-outcome-body-${key}`} hidden={!isOpen} className="px-3 pb-3 space-y-2">
-                  {list.length === 0 && (
-                    <p className="text-xs text-oo-text-muted py-4 text-center border border-dashed border-oo-border-strong rounded-xl">
-                      {rtl ? "لا صفقات" : "None"}
-                    </p>
-                  )}
-                  {list.slice(0, 30).map((deal) => (
-                    <div key={deal.id} data-testid={`m-deal-${deal.id}`} className="rounded-xl border border-oo-border-default p-3 space-y-1.5">
-                      <Link
-                        href={`/dashboard/sales/deals/${deal.id}`}
-                        className="block font-bold text-sm text-oo-text-primary leading-snug break-words hover:text-oo-action-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oo-action-primary/40 rounded"
-                      >
-                        {deal.title}
-                      </Link>
-                      <p className="text-xs font-bold tabular-nums">{money(deal.amount, deal.currency)}</p>
-                      {deal.lostReason && (
-                        <p className="text-[11px] text-oo-status-rejected break-words">
-                          {rtl ? "السبب" : "Reason"}: {deal.lostReason}
-                        </p>
-                      )}
-                      {canReopen && (
-                        <button
-                          type="button"
-                          disabled={busy === deal.id}
-                          onClick={() => move(deal, { toOutcome: "OPEN" })}
-                          className="w-full py-2 rounded-lg text-xs font-bold border border-oo-border-default text-oo-text-secondary disabled:opacity-50"
-                        >
-                          {rtl ? "إعادة فتح" : "Reopen"}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        </>
-      )}
-
-      {/* Lost needs a reason. Asked for here rather than accepted as optional, because a
-          lost-reason report with half its rows blank answers nothing. */}
-      {lostFor && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-oo-bg-default rounded-2xl w-full max-w-md p-5 space-y-3" data-testid="lost-dialog">
-            <h2 className="font-extrabold text-oo-text-primary">{rtl ? "سبب الخسارة" : "Reason for losing"}</h2>
-            <p className="text-xs text-oo-text-secondary">{lostFor.title}</p>
-            <textarea
-              value={lostReason}
-              onChange={(e) => setLostReason(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 rounded-xl border border-oo-border-strong text-sm"
-              placeholder={rtl ? "مثال: السعر أعلى من المنافس" : "e.g. price higher than a competitor"}
-            />
-            <div className="flex gap-3">
-              <button
-                type="button"
-                disabled={lostReason.trim().length < 3 || busy === lostFor.id}
-                onClick={async () => {
-                  const d = lostFor;
-                  setLostFor(null);
-                  await move(d, { toOutcome: "LOST", lostReason });
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-red-700 text-white font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {rtl ? "تأكيد الخسارة" : "Confirm lost"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLostFor(null)}
-                className="flex-1 py-2.5 border border-oo-border-strong rounded-xl font-bold text-sm text-oo-text-secondary hover:bg-oo-bg-subtle transition-colors"
-              >
-                {rtl ? "إلغاء" : "Cancel"}
-              </button>
+                          {sub && <div className="sub">{sub}</div>}
+                          {nx && (
+                            <div className="nx">
+                              {d.owner && <span className="av s" title={d.owner.name} aria-label={d.owner.name}>{initials(d.owner.name)}</span>}
+                              <span>{nx.text}</span>
+                              {nx.late ? lateFlag(nx.late) : null}
+                            </div>
+                          )}
+                          {d.latestQuote && (
+                            <div className="qt">
+                              <Ico name="quote" small />
+                              <bdi className="id" dir="ltr">{d.latestQuote.quoteNumber}</bdi>
+                              <span>{quoteSuffix(d.latestQuote)}</span>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </section>
+                );
+              })}
             </div>
           </div>
-        </div>
+          )}
+
+          {closedByMonth.map((g) => (
+            <section key={g.key} data-testid={`closed-${g.key}`}>
+              <div className="bh" style={{ margin: "32px 0 10px" }}>
+                <h2 className="bt">{g.label}</h2>
+                <span className="sub">{ar ? "النتيجة منفصلة عن المرحلة" : "Outcome is separate from stage"}</span>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table className="t dense"><tbody>
+                  {g.rows.map((d) => {
+                    const { top, sub } = splitTitle(d.title, customerName(d));
+                    const won = d.outcome === "WON";
+                    const acc = d.acceptedQuote;
+                    const date = d.closedAt ? shortDate(d.closedAt, lang) : "";
+                    return (
+                      <tr key={d.id} data-testid={`deal-${d.id}`}>
+                        <td style={{ width: 96 }}><span className={`st${won ? " ok" : ""}`}>{won ? (ar ? "رابحة" : "Won") : (ar ? "خاسرة" : "Lost")}</span></td>
+                        <td>
+                          <Link href={`/dashboard/sales/deals/${d.id}`} className="who" style={{ textDecoration: "none" }} data-testid={`open-deal-${d.id}`}>{top}</Link>
+                          {sub && <span className="sm"> · {sub}</span>}
+                        </td>
+                        <td className="num">{whole(d.amount)}</td>
+                        <td className="sm">
+                          {won
+                            ? (acc ? <>{ar ? "قُبل العرض " : "Accepted "}<bdi className="id" dir="ltr">{acc.quoteNumber}</bdi>{date && ` · ${date}`}</> : date)
+                            : <>{d.lostReason ? <>{ar ? "السبب: " : "Reason: "}<bdi>{d.lostReason}</bdi>{date && " · "}</> : null}{date}</>}
+                        </td>
+                        <td style={{ textAlign: "end" }}>
+                          {won && acc && can.createOrder && !(d._count.orderLinks ?? 0) && (
+                            // The order is made on the quotation, which confirms what it will contain.
+                            <Link className="btn sm" href={`/dashboard/sales/quotes/${acc.id}`} data-testid={`create-order-${d.id}`}>
+                              {ar ? "إنشاء طلب" : "Create order"}
+                            </Link>
+                          )}
+                          {!won && can.reopen && (
+                            <button type="button" className="btn sm g" disabled={busy === d.id} onClick={() => reopen(d)}
+                              data-testid={`reopen-${d.id}`}>
+                              {ar ? "إعادة فتح" : "Reopen"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody></table>
+              </div>
+            </section>
+          ))}
+        </>
       )}
     </div>
   );

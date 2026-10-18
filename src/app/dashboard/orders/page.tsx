@@ -1,17 +1,21 @@
 "use client";
+import { useCreateRequest } from "@/components/shell/page-context";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, ShoppingCart, ChevronDown, ChevronUp, Trash2, UserPlus, X, Pencil, Save, Clock, ClipboardList, MessageSquare } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { Plus, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
+import { LocalizedName } from "@/components/LocalizedName";
 import {
   OrderStatusBadge, NeedsAttentionBadge, OwnerDisplay, ActivityTimeline, AddNoteForm,
   StatusActionsBar, PreparationReviewTable, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
+import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, Tabs, kg, rowOpen, Kg, opsDate } from "@/components/ops/ui";
+
+type OrdersTab = "all" | "review" | "preparing" | "ready" | "hold" | "done";
 
 const COMPLETION_STATUSES = new Set(["Passed", "Partially Packaged", "Packaged", "Blended"]);
 
@@ -50,6 +54,8 @@ type OrderItem = {
   id: string; beanTypeName: string; quantityKg: number; productionStatus: string;
   quantityUnits: number | null;
   productId: string | null; productSkuId: string | null;
+  // E7: master-data names (GET /api/orders, additive); null on a line without a product.
+  product?: { productNameEn: string; productNameAr: string | null } | null;
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; status: string; isBlend: boolean }[];
   deliveries: { date: string; quantityKg: number; deliveryType: string }[];
@@ -107,7 +113,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function OrdersPage() {
   const user = useUser();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
@@ -118,6 +124,8 @@ export default function OrdersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
+  // «جديد» from the shell (A-3): `?new=1` opens the same form as «طلب جديد».
+  useCreateRequest("order", () => setShowForm(true), canCreate);
   // In-flight guard for the create-order write, so the button cannot be pressed twice.
   //
   // Two flags on purpose. The state drives the disabled attribute; the ref is what
@@ -127,6 +135,9 @@ export default function OrdersPage() {
   const [creating, setCreating] = useState(false);
   const creatingRef = useRef(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [tab, setTab] = useState<OrdersTab>("all");
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   // ── SKU-based order entry ────────────────────────────────────────────────
   // A new order line is a finished product and a quantity of whole units. The coffee,
   // origin, pack size, price and BOM all follow from the SKU, so none of them is asked
@@ -162,11 +173,21 @@ export default function OrdersPage() {
       // been a second, disagreeing implementation of availability.
       fetch("/api/products"),
     ]);
-    setOrders(await ordersRes.json());
-    setCustomers(await custRes.json());
-    setBeans(await beansRes.json());
-    setProducts(await productsRes.json());
-    if (catalogRes.ok) setCatalog(await catalogRes.json());
+    // A refused or failed list must not replace the data with an error object (the edit
+    // form calls beans.find on it); each list is only taken from a successful response. A
+    // refused response is still read to the end: an unread body keeps the connection open,
+    // and the page never reaches "network idle" (green beans are refused to a dispatch-only
+    // login, which is a normal state of this screen).
+    const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
+    const [ordersJ, custJ, beansJ, productsJ, catalogJ] = await Promise.all([ordersRes, custRes, beansRes, productsRes, catalogRes].map(take));
+    if (ordersJ === null) { setLoadError(true); setLoaded(true); return; }
+    setLoadError(false);
+    setOrders(ordersJ);
+    if (custJ) setCustomers(custJ);
+    if (beansJ) setBeans(beansJ);
+    if (productsJ) setProducts(productsJ);
+    if (catalogJ) setCatalog(catalogJ);
+    setLoaded(true);
   }
 
   // Live fulfilment check for the lines currently typed into the create form.
@@ -287,7 +308,7 @@ export default function OrdersPage() {
       if (!bean) return null;
       const totalDemand = demandMap.get(item.greenBeanId) || 0;
       if (totalDemand > bean.quantityKg) {
-        return `${t("insufficientStock")} ${bean.quantityKg}kg, Total ordered: ${totalDemand}kg`;
+        return `${t("insufficientStock")} ${bean.quantityKg} ${t("opsKgUnit")} · ${t("opsTotalOrdered")}: ${totalDemand} ${t("opsKgUnit")}`;
       }
       return null;
     });
@@ -347,40 +368,70 @@ export default function OrdersPage() {
     });
   }
 
+  const TAB_STATUSES: Record<OrdersTab, string[] | null> = {
+    all: null,
+    review: ["Waiting Approval", "Waiting Preparation Review"],
+    preparing: ["Preparing"],
+    ready: ["Ready for Shipping"],
+    hold: ["On Hold"],
+    done: ["Completed"],
+  };
+  const inTab = (o: Order, k: OrdersTab) => !TAB_STATUSES[k] || TAB_STATUSES[k]!.includes(o.status);
   const filtered = orders.filter((o) => {
+    if (!inTab(o, tab)) return false;
     const matchSearch = `${o.orderNumber} ${o.customer.name} ${o.quotationNumber || ""}`.toLowerCase().includes(search.toLowerCase());
     if (statusFilter === "all") return matchSearch;
     return matchSearch && o.items.some((i) => i.productionStatus === statusFilter);
   });
+  const open = orders.find((o) => o.id === expanded) ?? null;
+  const productionStatusOf = (order: Order) =>
+    order.items.every((i) => i.productionStatus === "Completed") ? "Completed" : order.items.some((i) => i.productionStatus === "In Production") ? "In Production" : "Pending";
+  const totalKg = (order: Order) => order.items.reduce((s, i) => s + i.quantityKg, 0);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("orders")}</h1>
-          <p className="text-brown text-sm font-medium">{orders.length} {t("totalOrdersCount")}</p>
-        </div>
-        {canCreate && (
-          <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold">
-            <Plus size={18} /> {t("newOrder")}
-          </button>
-        )}
-      </div>
+    <OpsRoot>
+      <div className={`hr-split${open ? " has-preview" : ""}`}>
+        <div className="hr-page">
+          <PageHeader
+            title={t("orders")}
+            actions={canCreate ? (
+              <Btn variant="primary" onClick={() => setShowForm(true)}>
+                <Plus size={16} aria-hidden="true" /> {t("newOrder")}
+              </Btn>
+            ) : null}
+          >
+            <span><span className="hr-num">{orders.length}</span> {t("totalOrdersCount")}</span>
+          </PageHeader>
 
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder={t("searchOrders")} value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:ring-2 focus:ring-orange/30 focus:border-orange outline-none transition-colors" />
-        </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2.5 border-2 border-border rounded-xl bg-white focus:ring-2 focus:ring-orange/30 focus:border-orange outline-none transition-colors">
-          <option value="all">{t("allStatuses")}</option>
-          <option value="Pending">{t("pending")}</option>
-          <option value="In Production">{t("statusInProd")}</option>
-          <option value="Completed">{t("statusCompleted")}</option>
-        </select>
-      </div>
+          <Tabs
+            label={t("orders")}
+            value={tab}
+            onChange={(k) => setTab(k)}
+            items={([
+              ["all", t("opsAll")],
+              ["review", t("opsWaitingReview")],
+              ["preparing", t("orderStatusPreparing")],
+              ["ready", t("orderStatusReadyForShipping")],
+              ["hold", t("orderStatusOnHold")],
+              ["done", t("completed")],
+            ] as [OrdersTab, string][]).map(([key, label]) => ({ key, label, count: orders.filter((o) => inTab(o, key)).length, danger: key === "hold" && orders.some((o) => o.status === "On Hold") }))}
+          />
+
+          <div className="hr-filterbar">
+            <input className="hr-input hr-search" type="search" placeholder={t("searchOrders")} aria-label={t("searchOrders")} value={search} onChange={(e) => setSearch(e.target.value)} />
+            <FilterChip
+              label={t("opsProductionFilter")}
+              value={statusFilter === "all" ? "" : statusFilter}
+              onChange={(v) => setStatusFilter(v || "all")}
+              allLabel={t("allStatuses")}
+              clearLabel={`${t("clearFilters")}: ${t("opsProductionFilter")}`}
+              options={[
+                { value: "Pending", label: t("pending") },
+                { value: "In Production", label: t("statusInProd") },
+                { value: "Completed", label: t("statusCompleted") },
+              ]}
+            />
+          </div>
 
       {showForm && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
@@ -558,115 +609,136 @@ export default function OrdersPage() {
         </div>
       )}
 
-      <div className="space-y-3">
-        {filtered.map((order) => (
-          <div key={order.id} data-testid={`order-card-${order.orderNumber}`} className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-cream/50" onClick={() => setExpanded(expanded === order.id ? null : order.id)}>
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-cream rounded-lg flex items-center justify-center">
-                  <ShoppingCart size={18} className="text-brown" />
-                </div>
-                <div>
-                  <p className="font-semibold flex items-center gap-2 flex-wrap">
-                    #{order.orderNumber} — {order.customer.name}
-                    {orderNeedsAttention(order) && <NeedsAttentionBadge />}
-                  </p>
-                  <p className="text-xs text-brown">
-                    {order.quotationNumber || t("noQuotation")} | {formatDate(order.createdAt)} | {order.items.length} {t("itemsTotal")} | {order.items.reduce((s, i) => s + i.quantityKg, 0)} kg {t("total")}
-                  </p>
-                  <p className="text-xs text-brown/70 flex items-center gap-3 mt-1 flex-wrap">
-                    <OwnerDisplay owner={order.owner} />
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} className="text-brown/50" />
-                      {t("lastActivityLabel")}: {lastActivityOf(order) ? formatDate(lastActivityOf(order)!.createdAt) : "—"}
-                    </span>
-                  </p>
-                </div>
+          {loadError ? (
+            <OpsError message={t("opsLoadFailed")} onRetry={loadData} />
+          ) : !loaded ? (
+            <OpsLoading />
+          ) : filtered.length === 0 ? (
+            <OpsEmpty title={t("noOrdersFound")} />
+          ) : (
+            <>
+              <div className="hr-tablewrap">
+                <table className="hr-table is-mrow" aria-label={t("orders")}>
+                  <thead>
+                    <tr>
+                      <th>{t("opsOrderCol")}</th>
+                      <th>{t("customer")}</th>
+                      <th className="num hr-hide-preview">{t("opsItemsCol")}</th>
+                      <th className="num">{t("qtyKg")}</th>
+                      <th className="hr-hide-preview">{t("opsCreatedCol")}</th>
+                      <th>{t("opsPrepCol")}</th>
+                      <th className="hr-hide-preview">{t("production")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((order) => (
+                      <tr
+                        key={order.id}
+                        data-testid={`order-row-${order.orderNumber}`}
+                        aria-selected={expanded === order.id}
+                        {...rowOpen(() => setExpanded(expanded === order.id ? null : order.id))}
+                      >
+                        <td className="hr-id">#{order.orderNumber}</td>
+                        <td className="m-title strong">
+                          {order.customer.name}
+                          {orderNeedsAttention(order) ? <> <NeedsAttentionBadge /></> : null}
+                          <span className="hr-msub">
+                            <span className="hr-id">#{order.orderNumber}</span> · <span className="hr-num">{order.items.length}</span> {t("itemsTotal")} · <Kg v={totalKg(order)} />
+                          </span>
+                        </td>
+                        <td className="num hr-hide-preview">{order.items.length}</td>
+                        <td className="num">{kg(totalKg(order))}</td>
+                        <td className="hr-hide-preview">{opsDate(order.createdAt, lang)}</td>
+                        <td className="m-end"><OrderStatusBadge status={order.status} /></td>
+                        <td className="hr-hide-preview"><StatusBadge status={productionStatusOf(order)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              {/* Approval is no longer part of the normal path, so its badge is gone from the
-                  row. The lifecycle badge below is the operator's status of record. */}
-              <div className="flex items-center gap-3">
-                <StatusBadge status={order.items.every((i) => i.productionStatus === "Completed") ? "Completed" : order.items.some((i) => i.productionStatus === "In Production") ? "In Production" : "Pending"} />
-                <OrderStatusBadge status={order.status} />
-                {expanded === order.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+              <div className="hr-tablefoot">
+                <span><span className="hr-num">{filtered.length}</span> {t("opsOrdersShown")} · <Kg v={filtered.reduce((s, o) => s + totalKg(o), 0)} /></span>
               </div>
+            </>
+          )}
+        </div>
+
+        {open ? (
+          <aside className="hr-preview" aria-label={t("opsOrderDetail")} data-testid={`order-card-${open.orderNumber}`}>
+            <div className="hr-preview-head">
+              <span className="hr-id">#{open.orderNumber}</span>
+              <Btn variant="ghost" size="sm" aria-label={t("opsCloseDetail")} onClick={() => setExpanded(null)}>✕</Btn>
             </div>
-
-            {expanded === order.id && (
-              <div className="border-t border-border p-3.5 bg-cream">
-                {/* Approve / Reject / Reset-to-Pending are deliberately absent. Routine
-                    approval is not part of the normal order path any more: an order goes
-                    from Created straight into Preparation, and the operator's next action
-                    is Commit Allocation on the preparation screen, not a decision here.
-                    The approval API and its historical data are untouched — only this
-                    routine entry point into it is gone. */}
-                <div className="flex justify-end gap-2 mb-3">
-                  {canEditOrder && editingId !== order.id && (
-                    <button onClick={() => startEdit(order)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-orange bg-orange-light border border-orange/20 rounded-lg hover:bg-orange/10">
-                      <Pencil size={14} /> {t("editOrder")}
-                    </button>
-                  )}
-                  {canDelete && (
-                    <button onClick={() => deleteOrder(order.id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100">
-                      <Trash2 size={14} /> {t("deleteOrder")}
-                    </button>
-                  )}
-                </div>
-
-                {/* Progress Stepper — lifecycle milestones, not the activity log */}
-                <div className="bg-white rounded-xl border border-border px-4 py-3 mb-3">
-                  <OrderProgressStepper status={order.status} approvalStatus={order.approvalStatus} items={order.items} />
-                </div>
-
-                {/* Desktop: two-column (main content + right rail). Tablet and below: single column,
-                    timeline/status actions fall below preparation. */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 mb-4">
-                  <div className="xl:col-span-2 space-y-3">
-                    <div className="bg-white rounded-xl border border-border p-3.5 flex flex-wrap items-center gap-6">
-                      <div>
-                        <p className="text-[11px] font-bold text-brown/50 uppercase tracking-wide mb-1">{t("orderStatusLabel")}</p>
-                        <OrderStatusBadge status={order.status} />
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-bold text-brown/50 uppercase tracking-wide mb-1">{t("orderOwnerLabel")}</p>
-                        <OwnerDisplay owner={order.owner} />
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-border p-3.5">
-                      <p className="text-xs font-bold text-brown mb-2 flex items-center gap-1.5">
-                        <ClipboardList size={14} /> {t("preparationReviewLabel")}
-                      </p>
-                      <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
-                    </div>
-
-                    <div className="bg-white rounded-xl border border-border p-3.5">
-                      <p className="text-xs font-bold text-brown mb-2 flex items-center gap-1.5">
-                        <MessageSquare size={14} /> {t("addNoteLabel")}
-                      </p>
-                      <AddNoteForm orderId={order.id} onSuccess={loadData} />
-                    </div>
-                  </div>
-
-                  <div className="xl:col-span-1 space-y-3">
-                    <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />
-
-                    <div className="bg-white rounded-xl border border-border p-3.5">
-                      <p className="text-xs font-bold text-brown mb-2 flex items-center gap-1.5">
-                        <Clock size={14} /> {t("activityTimelineLabel")}
-                      </p>
-                      <ActivityTimeline activities={order.activities} />
-                    </div>
+            <div className="hr-preview-body">
+              {(() => { const order = open; return (
+              <>
+                <div>
+                  <h2 className="hr-section" style={{ fontSize: 22, lineHeight: "28.6px", margin: 0 }}>{order.customer.name}</h2>
+                  <div className="hr-meta" style={{ marginTop: 6 }}>
+                    <OrderStatusBadge status={order.status} />
+                    {orderNeedsAttention(order) ? <NeedsAttentionBadge /> : null}
+                    <StatusBadge status={productionStatusOf(order)} />
                   </div>
                 </div>
+
+                <OrderProgressStepper status={order.status} approvalStatus={order.approvalStatus} items={order.items} />
+
+                <KV rows={[
+                  [t("quotationNumber"), order.quotationNumber || <span className="hr-muted">{t("noQuotation")}</span>],
+                  [t("opsCreatedAt"), opsDate(order.createdAt, lang)],
+                  [t("orderOwnerLabel"), <OwnerDisplay key="o" owner={order.owner} />],
+                  [t("lastActivityLabel"), lastActivityOf(order) ? opsDate(lastActivityOf(order)!.createdAt, lang) : "—"],
+                  [t("opsPaymentCol"), <StatusBadge key="p" status={order.paymentStatus} />],
+                ]} />
+
+                <section>
+                  <h3 className="hr-label" style={{ margin: "0 0 4px" }}>{t("orderItemsLabel")}</h3>
+                  <ul className="ops-list">
+                    {order.items.map((item) => {
+                      const completionTotal = itemCompletionTotal(item);
+                      const surplus = +(completionTotal - item.quantityKg).toFixed(2);
+                      const isOverproduced = surplus > 1;
+                      return (
+                        <li key={item.id} data-testid={`order-item-${item.id}`}>
+                          <span style={{ minWidth: 0 }}>
+                            {/* E7: the same rule as the preparation review below it. */}
+                            {item.product ? (
+                              <LocalizedName lang={lang} en={item.product.productNameEn} ar={item.product.productNameAr} lastResort={item.beanTypeName} />
+                            ) : (
+                              <bdi>{item.beanTypeName}</bdi>
+                            )}
+                            <span className="ops-sub">
+                              {t("deliveredCol")} <span className="hr-num">{item.deliveredQty}</span> · {t("remainingCol")}{" "}
+                              {isOverproduced ? (
+                                <span style={{ color: "var(--status-warning)" }}>+<Kg v={surplus} /> · {t("surplusToInventory")} ({t("totalProducedLabel")} <Kg v={completionTotal} /> — {t("requiredQtyLabel")} <Kg v={item.quantityKg} />)</span>
+                              ) : <span className="hr-num">{item.remainingQty}</span>}
+                            </span>
+                            <span className="ops-sub" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                              <StatusBadge status={item.productionStatus} />
+                              <StatusBadge status={item.deliveryStatus} />
+                              {isOverproduced ? <span className="hr-flag tone-warning"><span>{t("overproduced")}</span></span> : null}
+                            </span>
+                          </span>
+                          <span style={{ whiteSpace: "nowrap" }}><Kg v={item.quantityKg} /></span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {order.items.some((i) => i.roastingBatches.length > 0) && (
+                    <p className="hr-caption" style={{ margin: "8px 0 0" }}>
+                      {t("linkedBatches")}{" "}
+                      {order.items.flatMap((i) => i.roastingBatches).map((b, i) => (
+                        <span key={b.batchNumber}>{i ? " · " : ""}<span className="ops-serial">{b.batchNumber}</span> (<bdi dir="ltr"><span className="hr-num">{kg(b.greenBeanQuantity, 2)}</span> → <span className="hr-num">{kg(b.roastedBeanQuantity, 2)}</span></bdi> {t("opsKgUnit")})</span>
+                      ))}
+                    </p>
+                  )}
+                </section>
 
                 {editingId === order.id && (() => {
                   const editWarnings = getEditStockWarnings();
                   const hasEditStockError = editWarnings.some((w) => w !== null);
                   return (
-                    <div className="bg-white rounded-xl border border-border p-4 mb-4 space-y-3">
+                    <div className="ops-panel" style={{ marginTop: 0 }}>
                       <div>
                         <label className="block text-xs font-semibold text-brown mb-2">{t("orderItemsLabel")}</label>
                         {editForm.items.map((item, idx) => (
@@ -678,7 +750,7 @@ export default function OrdersPage() {
                                 if (bean) updateEditItem(idx, "beanTypeName", bean.beanType);
                               }} className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
                                 <option value="">{t("selectBean")}</option>
-                                {beans.map((b) => <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg}kg)</option>)}
+                                {beans.map((b) => <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg} {t("opsKgUnit")})</option>)}
                               </select>
                               <input type="number" placeholder="kg" value={item.quantityKg || ""} onChange={(e) => updateEditItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
                                 className="w-24 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
@@ -725,77 +797,38 @@ export default function OrdersPage() {
                   );
                 })()}
 
-                <table className="w-full text-sm">
-                  <thead className="bg-white">
-                    <tr>
-                      <th className="text-start px-3 py-2 font-semibold">{t("beanType")}</th>
-                      <th className="text-end px-3 py-2 font-semibold">{t("qtyKg")}</th>
-                      <th className="text-center px-3 py-2 font-semibold">{t("production")}</th>
-                      <th className="text-center px-3 py-2 font-semibold">{t("deliveryCol")}</th>
-                      <th className="text-end px-3 py-2 font-semibold">{t("deliveredCol")}</th>
-                      <th className="text-end px-3 py-2 font-semibold">{t("remainingCol")}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {order.items.map((item) => {
-                      const completionTotal = itemCompletionTotal(item);
-                      const surplus = +(completionTotal - item.quantityKg).toFixed(2);
-                      const isOverproduced = surplus > 1;
-                      return (
-                        <tr key={item.id}>
-                          <td className="px-3 py-2">{item.beanTypeName}</td>
-                          <td className="px-3 py-2 text-end font-medium">{item.quantityKg}</td>
-                          <td className="px-3 py-2 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <StatusBadge status={item.productionStatus} />
-                              {isOverproduced && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                                  ⚠️ {t("overproduced")}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-center"><StatusBadge status={item.deliveryStatus} /></td>
-                          <td className="px-3 py-2 text-end">{item.deliveredQty}</td>
-                          <td className="px-3 py-2 text-end">
-                            {isOverproduced ? (
-                              <div className="flex flex-col items-end gap-0.5">
-                                <span className="font-bold text-amber-700">+{surplus}kg</span>
-                                <span className="text-[10px] text-amber-600 font-semibold">{t("surplusToInventory")}</span>
-                                <span className="text-[10px] text-brown/50">{t("totalProducedLabel")}: {completionTotal.toFixed(2)}kg — {t("requiredQtyLabel")}: {item.quantityKg}kg</span>
-                              </div>
-                            ) : (
-                              item.remainingQty
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {order.items.some((i) => i.roastingBatches.length > 0) && (
-                  <div className="mt-3 pt-3 border-t">
-                    <p className="text-xs font-semibold text-brown mb-2">{t("linkedBatches")}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {order.items.flatMap((i) => i.roastingBatches).map((b) => (
-                        <span key={b.batchNumber} className="px-2 py-1 bg-orange-light text-brown rounded text-xs font-mono">
-                          {b.batchNumber} ({b.greenBeanQuantity}kg → {b.roastedBeanQuantity}kg)
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="ops-panel">
+                  <h3>{t("preparationReviewLabel")}</h3>
+                  <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
+                </div>
+
+                <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />
+
+                <div className="ops-panel">
+                  <h3>{t("addNoteLabel")}</h3>
+                  <AddNoteForm orderId={order.id} onSuccess={loadData} />
+                </div>
+
+                <div className="ops-panel">
+                  <h3>{t("activityTimelineLabel")}</h3>
+                  <ActivityTimeline activities={order.activities} />
+                </div>
+              </>
+              ); })()}
+            </div>
+            {(canEditOrder && editingId !== open.id) || canDelete ? (
+              <div className="hr-preview-foot">
+                {canEditOrder && editingId !== open.id ? (
+                  <Btn onClick={() => startEdit(open)}><Pencil size={14} aria-hidden="true" /> {t("editOrder")}</Btn>
+                ) : null}
+                {canDelete ? (
+                  <Btn variant="danger" onClick={() => deleteOrder(open.id)}><Trash2 size={14} aria-hidden="true" /> {t("deleteOrder")}</Btn>
+                ) : null}
               </div>
-            )}
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border">
-            <ShoppingCart size={40} className="mx-auto mb-2" />
-            <p>{t("noOrdersFound")}</p>
-          </div>
-        )}
+            ) : null}
+          </aside>
+        ) : null}
       </div>
-    </div>
+    </OpsRoot>
   );
 }

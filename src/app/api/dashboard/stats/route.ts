@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
+import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
 
 function getDateFilter(timeframe: string): { gte: Date } | undefined {
   const now = new Date();
@@ -27,8 +28,10 @@ function getDateFilter(timeframe: string): { gte: Date } | undefined {
 }
 
 export async function GET(request: Request) {
-  const { error } = await requireModule("dashboard");
+  const { user, error } = await requireModule("dashboard");
   if (error) return error;
+  // Owner decision F4: identifiable customer data only with the customer-detail permission.
+  const customerDetail = canSeeCustomerDetail(user.permissions);
 
   const { searchParams } = new URL(request.url);
   const timeframe = searchParams.get("timeframe") ?? "all";
@@ -143,7 +146,10 @@ export async function GET(request: Request) {
     },
     activeCustomers: activeCustomersResult.length,
     inventoryAlerts,
-    recentActiveOrders,
+    // F4: without the customer-detail permission an open order is its line count, kg and line
+    // states only — no customer, no order number, no id.
+    recentActiveOrders: customerDetail ? recentActiveOrders : recentActiveOrders.map(anonymousOrder),
+    customerDetail,
     qcBatchAlerts,
   });
 }

@@ -19,16 +19,21 @@ import {
   type OrderStatus,
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { canSeeCustomerContact, CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";
 
 export async function GET() {
-  const { error } = await requireModule("dispatch");
+  const { user, error } = await requireModule("dispatch");
   if (error) return error;
+  // F4 / review F-1: only dispatch holders reach this list, and they get the customer's name
+  // only — no phone, email or address (a dispatch holder may also be production/QC/packaging).
+  // The full record goes only to holders of the customer contact right (customers module).
+  const customerContact = canSeeCustomerContact(user.permissions);
 
   const deliveries = await prisma.delivery.findMany({
     orderBy: { date: "desc" },
     take: 500,
     include: {
-      orderItem: { include: { order: { include: { customer: true } } } },
+      orderItem: { include: { order: { include: { customer: customerContact ? true : { select: CUSTOMER_DELIVERY_SELECT } } } } },
     },
   });
   return NextResponse.json(deliveries);

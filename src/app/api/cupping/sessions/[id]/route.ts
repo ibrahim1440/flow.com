@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule, requireEdit } from "@/lib/auth-server";
+import { requireAdminAction, requireModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { getCuppingSettings, policyView, scorerCounts } from "@/lib/cupping/close-policy";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -39,19 +40,30 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
+  // E6: the scorer counts and the applicable minimum — counts only, blind-safe.
+  const [counts, settings] = await Promise.all([scorerCounts([id]), getCuppingSettings()]);
+  // Plus each staff scorer's progress (name and cups scored, owner decision 3) — never a score.
+  const policy = { ...policyView(session, counts.get(id), settings.minScorers), scorerProgress: counts.get(id)?.progress ?? [] };
+
   // Blind mode: while Open, only return the current user's own scores
   // (filter, not find — multi-cup sessions produce one score per cup)
   if (session.status === "Open") {
     const myScores = session.scores.filter((s) => s.employeeId === user.id);
-    return NextResponse.json({ ...session, scores: myScores, blind: true });
+    return NextResponse.json({ ...session, ...policy, scores: myScores, blind: true });
   }
 
-  return NextResponse.json({ ...session, blind: false });
+  return NextResponse.json({ ...session, ...policy, blind: false });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
-  const { error } = await requireEdit("cupping");
+  const { user, error } = await requireEdit("cupping");
   if (error) return error;
+  // Closing and deleting a session are administrator actions: the cupping screen offers
+  // them only when `user.role === "admin"`. Cupping edit access alone (create, score) is
+  // not enough; the same rule is enforced here so the API cannot be called around the UI. The
+  // admin role is privileged: a verified individual, and deleting needs a recent step-up.
+  const refused = await requireAdminAction(user, "cupping.session_delete", { stepUp: true });
+  if (refused) return refused;
 
   const { id } = await params;
   try {

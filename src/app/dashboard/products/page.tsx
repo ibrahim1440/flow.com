@@ -5,6 +5,8 @@ import {
   Package, Plus, Search, X, Layers, Boxes, AlertTriangle, Coffee, Tag, Save, Trash2,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
+import { useUser } from "../user-context";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 
 // Finished Products: one row per sellable SKU, its bill of materials, and the packaging
 // materials a BOM draws on. Gated on the `inventory` module — see the note in
@@ -433,8 +435,19 @@ function MaterialTable({
   onError: (m: string) => void;
 }) {
   const { t } = useI18n();
+  const user = useUser();
+  // A count changes the on-hand quantity: an inventory adjustment (privileged, SOD.md §20). Offered
+  // only to inventory › adjust holders; the server enforces it (verified individual + step-up).
+  const canCount = hasSubPrivilege(user?.permissions ?? {}, "inventory", "adjust");
+  // Receiving a delivery only ADDS stock: the routine receiving duty (PIN-only staff), audited
+  // (review P2-4). POST /api/materials/:id/receive.
+  const canReceive = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
+  const [receiving, setReceiving] = useState<string | null>(null);
+  const [rqty, setRqty] = useState("");
+  const [rref, setRref] = useState("");
   const [adjusting, setAdjusting] = useState<string | null>(null);
   const [value, setValue] = useState("");
+  const [reason, setReason] = useState("");
 
   async function saveCount(m: Material) {
     const n = Number(value);
@@ -445,11 +458,31 @@ function MaterialTable({
     const res = await fetch(`/api/materials/${m.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ newActualQuantity: n }),
+      // The reason is required (it is the only document behind a count).
+      body: JSON.stringify({ newActualQuantity: n, reason: reason.trim() }),
     });
     if (!res.ok) onError((await res.json()).error ?? "Failed to adjust stock.");
     setAdjusting(null);
     setValue("");
+    setReason("");
+    onChanged();
+  }
+
+  async function saveReceipt(m: Material) {
+    const n = Number(rqty);
+    if (!Number.isFinite(n) || n <= 0) {
+      onError("Received quantity must be greater than zero.");
+      return;
+    }
+    const res = await fetch(`/api/materials/${m.id}/receive`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ quantity: n, reference: rref.trim() }),
+    });
+    if (!res.ok) onError((await res.json()).error ?? "Failed to receive stock.");
+    setReceiving(null);
+    setRqty("");
+    setRref("");
     onChanged();
   }
 
@@ -490,7 +523,45 @@ function MaterialTable({
               <td className="p-3 text-end text-oo-text-secondary">{m.reorderPoint || "—"}</td>
               <td className="p-3 text-end text-oo-text-secondary">{m.usedInProductCount}</td>
               <td className="p-3 text-end whitespace-nowrap">
-                {adjusting === m.id ? (
+                {receiving === m.id ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      data-testid="material-receive-qty"
+                      type="number"
+                      min={0}
+                      value={rqty}
+                      onChange={(e) => setRqty(e.target.value)}
+                      placeholder={t("receivedQtyLabel")}
+                      aria-label={t("receivedQtyLabel")}
+                      className="w-28 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
+                    />
+                    <input
+                      data-testid="material-receive-ref"
+                      value={rref}
+                      onChange={(e) => setRref(e.target.value)}
+                      maxLength={120}
+                      placeholder={t("receiveRefLabel")}
+                      aria-label={t("receiveRefLabel")}
+                      className="w-44 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={!(Number(rqty) > 0) || rref.trim().length === 0}
+                      onClick={() => saveReceipt(m)}
+                      className="px-2.5 py-1.5 rounded-lg bg-oo-action-primary text-white text-xs font-bold"
+                    >
+                      <Save size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setReceiving(null); setRqty(""); setRref(""); }}
+                      className="px-2.5 py-1.5 rounded-lg border border-oo-border-default text-xs"
+                    >
+                      <X size={13} />
+                    </button>
+                  </span>
+                ) : adjusting === m.id ? (
                   <span className="inline-flex items-center gap-1.5">
                     <input
                       autoFocus
@@ -501,8 +572,18 @@ function MaterialTable({
                       placeholder={t("adjustStockLabel")}
                       className="w-28 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
                     />
+                    <input
+                      data-testid="material-count-reason"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      maxLength={500}
+                      placeholder={t("countReasonLabel")}
+                      aria-label={t("countReasonLabel")}
+                      className="w-44 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
+                    />
                     <button
                       type="button"
+                      disabled={reason.trim().length < 8}
                       onClick={() => saveCount(m)}
                       className="px-2.5 py-1.5 rounded-lg bg-oo-action-primary text-white text-xs font-bold"
                     >
@@ -510,20 +591,34 @@ function MaterialTable({
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAdjusting(null); setValue(""); }}
+                      onClick={() => { setAdjusting(null); setValue(""); setReason(""); }}
                       className="px-2.5 py-1.5 rounded-lg border border-oo-border-default text-xs"
                     >
                       <X size={13} />
                     </button>
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => { setAdjusting(m.id); setValue(String(m.quantityOnHand)); }}
-                    className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold text-oo-text-primary hover:bg-oo-bg-subtle"
-                  >
-                    {t("adjustStockLabel")}
-                  </button>
+                  <span className="inline-flex items-center gap-1.5">
+                    {canReceive && m.isActive && (
+                      <button
+                        type="button"
+                        data-testid="material-receive"
+                        onClick={() => { setAdjusting(null); setReceiving(m.id); setRqty(""); setRref(""); }}
+                        className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold text-oo-text-primary hover:bg-oo-bg-subtle"
+                      >
+                        {t("receiveStockLabel")}
+                      </button>
+                    )}
+                    {canCount && (
+                      <button
+                        type="button"
+                        onClick={() => { setReceiving(null); setAdjusting(m.id); setValue(String(m.quantityOnHand)); setReason(""); }}
+                        className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold text-oo-text-primary hover:bg-oo-bg-subtle"
+                      >
+                        {t("adjustStockLabel")}
+                      </button>
+                    )}
+                  </span>
                 )}
               </td>
             </tr>

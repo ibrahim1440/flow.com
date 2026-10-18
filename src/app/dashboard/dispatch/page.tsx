@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Truck, Search, AlertTriangle, Info, Layers } from "lucide-react";
+import { AlertTriangle, Info, Layers } from "lucide-react";
+import { Bar, Btn, Notice, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, StatusDot, Tabs, Kg, kg, opsDate, Units, UNIT_FORMS, countNoun } from "@/components/ops/ui";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
-import { formatDate } from "@/lib/utils";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
@@ -103,6 +103,8 @@ export default function DispatchPage() {
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
 
   // ── Filter state ──────────────────────────────────────────────────────────
+  // G-1: «جاهز للتسليم» / «سجل التسليمات» are tabs.
+  const [tab,         setTab]         = useState<"ready" | "history">("ready");
   const [search,      setSearch]      = useState("");
   const [readySearch, setReadySearch] = useState("");
   const [readyBean,   setReadyBean]   = useState("");
@@ -116,6 +118,10 @@ export default function DispatchPage() {
   const [lots,          setLots]          = useState<FGLot[]>([]);
   const [lotsLoading,   setLotsLoading]   = useState(false);
   const [submitError,   setSubmitError]   = useState("");
+  // G-10 (OG-D7): a refused submit (4xx — nothing was recorded) and an unconfirmed one
+  // (5xx / network — it may have been recorded; the same key is reused on retry) read
+  // differently.
+  const [submitKind,    setSubmitKind]    = useState<"refused" | "unconfirmed" | null>(null);
   const [submitting,    setSubmitting]    = useState(false);
   // Not state: changing it must never re-render, and a retry has to read the value the
   // previous attempt used, not one a render cycle may not have committed yet.
@@ -124,10 +130,16 @@ export default function DispatchPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => { loadData(); }, []);
 
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   async function loadData() {
     const [ordersRes, delRes] = await Promise.all([fetch("/api/orders"), fetch("/api/deliveries")]);
-    if (ordersRes.ok) setOrders(await ordersRes.json());
-    if (delRes.ok)    setDeliveries(await delRes.json());
+    const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
+    const [ordersJ, delJ] = await Promise.all([ordersRes, delRes].map(take));
+    setLoadError(ordersJ === null || delJ === null);
+    if (ordersJ) setOrders(ordersJ);
+    if (delJ) setDeliveries(delJ);
+    setLoaded(true);
   }
 
   // ── Open delivery modal ───────────────────────────────────────────────────
@@ -183,6 +195,25 @@ export default function DispatchPage() {
     }
   }
 
+  /**
+   * G-4 (owner, 15 Oct): choosing a lot pre-fills what that lot can ship for this line —
+   * the lower of the outstanding amount and the lot's free quantity — and the type follows
+   * (partial when it is less than the outstanding amount). The operator can still change both.
+   */
+  function chooseLot(id: string) {
+    setLotId(id);
+    const lot = lots.find((l) => l.id === id);
+    if (!lot || !selectedItem) return;
+    const unit = isUnitLine(selectedItem);
+    const outstanding = unit
+      ? Math.max(0, (selectedItem.quantityUnits ?? 0) - selectedItem.deliveredUnits)
+      : Math.max(0, +(packagedKg(selectedItem.roastingBatches) - selectedItem.deliveredQty).toFixed(3));
+    const free = Math.max(0, (unit ? lot.deliverableUnits : lot.deliverableQty) ?? 0);
+    const qty = unit ? Math.min(outstanding, Math.floor(free)) : +Math.min(outstanding, free).toFixed(3);
+    const full = unit ? qty >= outstanding : qty >= selectedItem.quantityKg;
+    setForm((f) => ({ ...f, quantityKg: qty, deliveryType: full ? "full" : "partial" }));
+  }
+
   function closeModal() {
     requestKeyRef.current = null;
     setShowForm(false);
@@ -190,6 +221,7 @@ export default function DispatchPage() {
     setLots([]);
     setLotId("");
     setSubmitError("");
+    setSubmitKind(null);
   }
 
   // ── Submit delivery ───────────────────────────────────────────────────────
@@ -206,6 +238,7 @@ export default function DispatchPage() {
     const requestKey = requestKeyRef.current ?? (requestKeyRef.current = newIdempotencyKey());
 
     setSubmitError("");
+    setSubmitKind(null);
     setSubmitting(true);
     try {
       const res = await fetch("/api/deliveries", {
@@ -240,10 +273,12 @@ export default function DispatchPage() {
         // Keeping the key is what makes the retry a replay of that dispatch rather than a
         // second one, which is the entire reason this header exists.
         if (res.status >= 500) {
-          setSubmitError(data.error || "Delivery could not be confirmed. Try again.");
+          setSubmitKind("unconfirmed");
+          setSubmitError(data.error || "");
         } else {
           requestKeyRef.current = null;
-          setSubmitError(data.error || "Delivery failed");
+          setSubmitKind("refused");
+          setSubmitError(data.error || "");
         }
         return;
       }
@@ -255,7 +290,8 @@ export default function DispatchPage() {
     } catch {
       // The request never produced an answer, so whether it reached the server is unknown.
       // The key stays; the operator retries the same dispatch.
-      setSubmitError("Could not reach the server. Check the connection and try again.");
+      setSubmitKind("unconfirmed");
+      setSubmitError("");
     } finally {
       // Reached on every path — including the throw above, which previously left the
       // button disabled with no way back except a reload.
@@ -343,161 +379,196 @@ export default function DispatchPage() {
     const productLabel = lang === "ar" ? (lot.product.productNameAr ?? lot.product.productNameEn) : lot.product.productNameEn;
     if (unitLine) {
       const freeUnits = Math.max(0, lot.deliverableUnits ?? 0);
-      return `${lot.batchNumber} — ${productLabel} — ${t("availableLabel")}: ${freeUnits} ${t("unitsLabel")}`;
+      return `${lot.batchNumber} — ${productLabel} — ${t("availableLabel")}: ${countNoun(freeUnits, lang, UNIT_FORMS)}`;
     }
     const free = Math.max(0, lot.deliverableQty ?? 0);
-    return `${lot.batchNumber} — ${productLabel} — ${t("lotAvailableKg")}: ${free.toFixed(1)} kg`;
+    return `${lot.batchNumber} — ${productLabel} — ${t("lotAvailableKg")}: ${free.toFixed(1)} ${t("opsKgUnit")}`;
   }
 
+  const shownDeliveries = deliveries.filter((d) =>
+    `${d.orderItem.order.orderNumber} ${d.orderItem.order.customer.name} ${d.orderItem.beanTypeName}`
+      .toLowerCase().includes(search.toLowerCase())
+  );
+
+  const readyFiltered = !!(readySearch || readyBean || readyOrder);
+  const clearReadyFilters = () => { setReadySearch(""); setReadyBean(""); setReadyOrder(""); };
+  const deliveringId = canDeliver && showForm && selectedItem ? selectedItem.id : null;
+
   return (
-    <div className="space-y-6">
+    <OpsRoot className="ops-dispatch">
+    <div className={`hr-split${deliveringId ? " has-preview" : ""}`}>
+    <div className="hr-page">
+      <PageHeader title={t("opsDispatchTitle")}>
+        <span><span className="hr-num">{readyItems.length}</span> {t("itemsReadyDelivery")}</span>
+      </PageHeader>
 
-      {/* ── Page header ── */}
-      <div>
-        <h1 className="text-2xl font-extrabold text-charcoal">{t("dispatchTitle")}</h1>
-        <p className="text-brown text-sm font-medium">{readyItems.length} {t("itemsReadyDelivery")}</p>
-      </div>
+      {loadError ? <OpsError message={t("opsLoadFailed")} onRetry={loadData} /> : null}
+      {!loaded && !loadError ? <OpsLoading /> : null}
 
-      {/* ── Ready for delivery ── */}
-      <div>
-        <h2 className="font-semibold text-charcoal mb-3">{t("readyForDelivery")}</h2>
+      {loaded ? (
+        <Tabs
+          label={t("opsDispatchTitle")}
+          value={tab}
+          onChange={setTab}
+          items={[
+            { key: "ready", label: t("readyForDelivery"), count: readyItems.length },
+            { key: "history", label: t("deliveryHistory"), count: deliveries.length },
+          ]}
+        />
+      ) : null}
+
+      {/* ── Ready for delivery (G-1 tab) ── */}
+      {loaded && tab === "ready" ? <section className="hr-stack" style={{ gap: 12 }} aria-label={t("readyForDelivery")}>
         {readyItems.length > 0 && (
-          <div className="mb-3">
-            <WorkflowFilterBar
-              searchQuery={readySearch} onSearchChange={setReadySearch}
-              beanOptions={readyBeanOptions} selectedBean={readyBean} onBeanChange={setReadyBean}
-              orderOptions={readyOrderOptions} selectedOrder={readyOrder} onOrderChange={setReadyOrder}
-              resultCount={filteredReadyItems.length} totalCount={readyItems.length}
-            />
-          </div>
+          <WorkflowFilterBar
+            searchQuery={readySearch} onSearchChange={setReadySearch}
+            beanOptions={readyBeanOptions} selectedBean={readyBean} onBeanChange={setReadyBean}
+            orderOptions={readyOrderOptions} selectedOrder={readyOrder} onOrderChange={setReadyOrder}
+            resultCount={filteredReadyItems.length} totalCount={readyItems.length}
+          />
         )}
-        {filteredReadyItems.length === 0 ? (
-          <div className="text-center py-8 bg-white rounded-2xl border border-border text-muted-foreground">
-            <Truck size={32} className="mx-auto mb-2" /><p>{t("noItemsDelivery")}</p>
-          </div>
+        {readyItems.length === 0 ? (
+          <OpsEmpty title={t("noItemsDelivery")} />
+        ) : filteredReadyItems.length === 0 && readyFiltered ? (
+          // G-2: filtered to nothing is not «nothing to deliver».
+          <OpsEmpty title={t("opsNoResults")} body={t("opsNoResultsBody")} action={<Btn onClick={clearReadyFilters}>{t("opsClearFilters")}</Btn>} />
         ) : (
-          <div className="space-y-2">
-            {filteredReadyItems.map((item) => {
-              const packed    = packagedKg(item.roastingBatches);
-              const available = Math.max(0, +(packed - item.deliveredQty).toFixed(3));
-              return (
-                <div key={item.id} data-testid={`dispatch-row-${item.order.orderNumber}`} className="bg-white rounded-2xl border border-border p-4 flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="font-semibold">#{item.order.orderNumber} — {item.order.customer.name}</p>
-                    <p className="text-sm text-brown font-medium">{item.beanTypeName} — {item.quantityKg}kg {t("kgOrdered")}</p>
-                    <p className="text-xs text-brown/70 mt-0.5">
-                      {t("packaged")}: {packed}kg · {t("availableForDelivery")}: {available}kg
-                    </p>
-                    {item.deliveredQty > 0 && (
-                      <div className="mt-1">
-                        <div className="w-48 bg-muted rounded-full h-1.5">
-                          <div className="bg-success h-1.5 rounded-full" style={{ width: `${Math.min(100, (item.deliveredQty / packed) * 100)}%` }} />
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{item.deliveredQty}kg {t("deliveredKgLabel")}</p>
-                      </div>
-                    )}
-                  </div>
-                  {canDeliver && (
-                    <button
-                      onClick={() => startDelivery(item)}
-                      className="shrink-0 px-4 py-2 bg-orange text-white rounded-lg text-sm hover:bg-orange-dark flex items-center gap-2 shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold"
-                    >
-                      <Truck size={16} /> {t("deliver")}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+          <div className="hr-tablewrap">
+            <table className="hr-table is-mrow ops-dispatch" aria-label={t("readyForDelivery")}>
+              <thead>
+                <tr>
+                  <th>{t("opsOrderCol")}</th>
+                  <th>{t("customer")}</th>
+                  <th>{t("beanCol")}</th>
+                  <th className="num">{t("qtyKg")}</th>
+                  <th className="num">{t("packaged")}</th>
+                  <th className="num">{t("availableForDelivery")}</th>
+                  <th>{t("deliveredCol")}</th>
+                  <th aria-label={t("opsActions")} />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReadyItems.map((item) => {
+                  const packed    = packagedKg(item.roastingBatches);
+                  const available = Math.max(0, +(packed - item.deliveredQty).toFixed(3));
+                  return (
+                    <tr key={item.id} data-testid={`dispatch-row-${item.order.orderNumber}`} aria-selected={deliveringId === item.id}>
+                      <td className="hr-id">#{item.order.orderNumber}</td>
+                      <td className="m-title">
+                        {/* N-07: a Latin name in the Arabic table truncates at its own end. */}
+                        <span className="strong ops-ell-auto" dir="auto">{item.order.customer.name}</span>
+                        <span className="ops-line">
+                          <span className="hr-mobile-only"><span className="hr-id">#{item.order.orderNumber}</span> · {item.beanTypeName} · </span>
+                          <span className="hr-num">{kg(item.quantityKg)}</span> {t("kgOrdered")} · {t("packaged")} <Kg v={packed} /> · {t("availableForDelivery")} <Kg v={available} />
+                        </span>
+                      </td>
+                      <td><span className="ops-ell-auto" dir="auto">{item.beanTypeName}</span></td>
+                      {/* N-06 (OG-D1, FREEZE): table quantities at 2 dp. */}
+                      <td className="num"><span className="hr-num">{kg(item.quantityKg)}</span></td>
+                      <td className="num"><span className="hr-num">{kg(packed)}</span></td>
+                      <td className="num"><span className="hr-num">{kg(available)}</span></td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        {item.deliveredQty > 0 ? (
+                          <>
+                            <Bar pct={packed > 0 ? (item.deliveredQty / packed) * 100 : 0} tone="success" />{" "}
+                            <span className="hr-caption"><Kg v={item.deliveredQty} /><span className="hr-hide-preview"> {t("deliveredKgLabel")}</span></span>
+                          </>
+                        ) : <span className="hr-muted">—</span>}
+                      </td>
+                      <td className="m-end">
+                        {canDeliver && (
+                          <Btn size="sm" variant="primary" className="ops-deliver" onClick={() => startDelivery(item)}>{t("deliver")}</Btn>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
+      </section> : null}
 
-      {/* ── Delivery history ── */}
-      <div>
-        <h2 className="font-semibold text-charcoal mb-3">{t("deliveryHistory")}</h2>
-        <div className="relative mb-3">
-          <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      {/* ── Delivery history (G-1 tab) ── */}
+      {loaded && tab === "history" ? <section className="hr-stack" style={{ gap: 12 }} aria-label={t("deliveryHistory")}>
+        <div className="hr-filterbar">
           <input
-            type="text" placeholder={t("searchDeliveries")} value={search}
+            type="text" placeholder={t("searchDeliveries")} aria-label={t("searchDeliveries")} value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
+            className="hr-input hr-search"
           />
         </div>
-        <div className="bg-white rounded-2xl border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-cream">
-              <tr>
-                <th className="text-start px-4 py-3 font-semibold">{t("date")}</th>
-                <th className="text-start px-4 py-3 font-semibold">{t("orderCol")}</th>
-                <th className="text-start px-4 py-3 font-semibold">{t("customer")}</th>
-                <th className="text-start px-4 py-3 font-semibold">{t("beanCol")}</th>
-                <th className="text-end px-4 py-3 font-semibold">{t("qtyKg")}</th>
-                <th className="text-center px-4 py-3 font-semibold">{t("type")}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {deliveries
-                .filter((d) =>
-                  `${d.orderItem.order.orderNumber} ${d.orderItem.order.customer.name} ${d.orderItem.beanTypeName}`
-                    .toLowerCase().includes(search.toLowerCase())
-                )
-                .map((d) => (
-                  <tr key={d.id} className="hover:bg-cream/50">
-                    <td className="px-4 py-3 text-brown">{formatDate(d.date)}</td>
-                    <td className="px-4 py-3">#{d.orderItem.order.orderNumber}</td>
-                    <td className="px-4 py-3">{d.orderItem.order.customer.name}</td>
-                    <td className="px-4 py-3">{d.orderItem.beanTypeName}</td>
-                    <td className="px-4 py-3 text-end font-medium">{d.quantityKg}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`status-badge ${d.deliveryType === "full" ? "status-completed" : "status-partial"}`}>
-                        {d.deliveryType === "full" ? t("fullBadge") : t("partialBadge")}
+        {deliveries.length === 0 ? (
+          <OpsEmpty title={t("noData")} />
+        ) : shownDeliveries.length === 0 ? (
+          <OpsEmpty title={t("opsNoResults")} body={t("opsNoResultsBody")} action={<Btn onClick={() => setSearch("")}>{t("opsClearFilters")}</Btn>} />
+        ) : (
+          <div className="hr-tablewrap">
+            <table className="hr-table is-mrow" aria-label={t("deliveryHistory")}>
+              <thead>
+                <tr>
+                  <th>{t("date")}</th>
+                  <th>{t("orderCol")}</th>
+                  <th>{t("customer")}</th>
+                  <th>{t("beanCol")}</th>
+                  <th className="num">{t("qtyKg")}</th>
+                  <th>{t("type")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownDeliveries.map((d) => (
+                  <tr key={d.id}>
+                    <td>{opsDate(d.date, lang)}</td>
+                    <td className="hr-id">#{d.orderItem.order.orderNumber}</td>
+                    <td className="m-title">
+                      <span className="strong">{d.orderItem.order.customer.name}</span>
+                      <span className="hr-msub">
+                        <span className="hr-id">#{d.orderItem.order.orderNumber}</span> · {d.orderItem.beanTypeName} · <Kg v={d.quantityKg} /> · {opsDate(d.date, lang)}
                       </span>
+                    </td>
+                    <td>{d.orderItem.beanTypeName}</td>
+                    <td className="num"><span className="hr-num">{kg(d.quantityKg)}</span></td>
+                    <td className="m-end">
+                      <StatusDot map={{ full: [t("fullBadge"), "success"], partial: [t("partialBadge"), "warning"] }} value={d.deliveryType === "full" ? "full" : "partial"} />
                     </td>
                   </tr>
                 ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section> : null}
+    </div>
 
-      {/* ════════════════════════════════════════════════════════════
-          DELIVERY MODAL
-          ════════════════════════════════════════════════════════════ */}
-      {canDeliver && showForm && selectedItem && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={closeModal}
+      {/* G-3 (OG-D1 / D2 / D6): recording a delivery is the pane beside the list (1440), the
+          drawer over it (1024) and a bottom sheet on the phone. Same fields, same request,
+          same idempotency key as the dialog it replaces. */}
+      {deliveringId && selectedItem ? (
+        <OpsPane
+          testId="delivery-pane"
+          label={t("recordDelivery")}
+          title={t("recordDelivery")}
+          sub={<><span className="hr-id">#{selectedItem.order.orderNumber}</span> · {selectedItem.beanTypeName}</>}
+          busy={submitting}
+          onClose={closeModal}
+          footer={
+            <>
+              <Btn variant="primary" type="submit" form="delivery-form" disabled={!canSubmit} busy={submitting}>{t("confirmDelivery")}</Btn>
+              <Btn onClick={closeModal} disabled={submitting}>{t("cancel")}</Btn>
+            </>
+          }
         >
-          <div
-            className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal header */}
-            <div className="flex items-start justify-between mb-1 gap-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-charcoal">{t("recordDelivery")}</h2>
-                <p className="text-sm text-brown font-medium">
-                  #{selectedItem.order.orderNumber} — {selectedItem.beanTypeName}
-                </p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-orange/10 flex items-center justify-center shrink-0">
-                <Truck size={18} className="text-orange" />
-              </div>
-            </div>
-
-            {/* Submit error */}
-            {submitError && (
-              <div className="mt-3 mb-1 flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 font-medium">
-                <AlertTriangle size={15} className="shrink-0 mt-0.5" />
-                <span>{submitError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-
+          {submitKind ? (
+            <Notice tone="danger">
+              <strong style={{ fontWeight: 600 }}>{submitKind === "refused" ? t("deliveryRefused") : t("deliveryUnconfirmed")}</strong>
+              {/* D-7: the server answers in English; an Arabic session shows only its own message. */}
+              {submitError && lang === "en" ? <div>{submitError}</div> : null}
+            </Notice>
+          ) : null}
+          <form id="delivery-form" onSubmit={handleSubmit} className="hr-stack" style={{ gap: 14 }}>
               {/* ── Lot selector ── */}
               <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5">
+                <label htmlFor="delivery-lot" className="block text-sm font-bold text-charcoal mb-1.5">
                   {t("selectBatchLot")} *
                 </label>
 
@@ -517,8 +588,9 @@ export default function DispatchPage() {
                   </div>
                 ) : (
                   <select
+                    id="delivery-lot"
                     value={lotId}
-                    onChange={(e) => setLotId(e.target.value)}
+                    onChange={(e) => chooseLot(e.target.value)}
                     required
                     className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm bg-white"
                   >
@@ -561,7 +633,7 @@ export default function DispatchPage() {
                       <span className={`font-bold tabular-nums ${
                         lotFreeQty > 0 ? "text-green-600" : "text-red-500"
                       }`}>
-                        {lotFreeQty.toFixed(1)} kg {t("lotAvailableKg")}
+                        {unitLine ? <Units v={lotFreeQty} /> : <Kg v={lotFreeQty} digits={1} />} {t("lotAvailableKg")}
                       </span>
                     </div>
                     <p className="text-xs text-brown/60 mt-0.5">
@@ -575,10 +647,11 @@ export default function DispatchPage() {
 
               {/* ── Quantity ── */}
               <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5">
+                <label htmlFor="delivery-qty" className="block text-sm font-bold text-charcoal mb-1.5">
                   {unitLine ? `${t("quantityUnitsLabel")} *` : `${t("quantityKg")} *`}
                 </label>
                 <input
+                  id="delivery-qty"
                   type="number"
                   step={unitLine ? 1 : 0.001}
                   min={unitLine ? 1 : 0.001}
@@ -600,15 +673,15 @@ export default function DispatchPage() {
                     path keeps its packaged-bags heuristic. */}
                 <p className="text-xs text-brown/60 mt-1">
                   {unitLine
-                    ? `${t("maxLabel")} ${Math.max(0, (selectedItem.quantityUnits ?? 0) - selectedItem.deliveredUnits)} ${t("unitsLabel")}`
-                    : `${t("maxLabel")} ${Math.max(0, +(packagedKg(selectedItem.roastingBatches) - selectedItem.deliveredQty).toFixed(3))} kg (${t("packaged")})`}
+                    ? `${t("maxLabel")} ${countNoun(Math.max(0, (selectedItem.quantityUnits ?? 0) - selectedItem.deliveredUnits), lang, UNIT_FORMS)}`
+                    : `${t("maxLabel")} ${Math.max(0, +(packagedKg(selectedItem.roastingBatches) - selectedItem.deliveredQty).toFixed(3))} ${t("opsKgUnit")} (${t("packaged")})`}
                 </p>
 
                 {/* Lot quantity warning */}
                 {lotExceedsQty && (
                   <div className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-red-600">
                     <AlertTriangle size={13} />
-                    {t("lotExceedsWarn")} ({lotFreeQty.toFixed(1)} kg {t("lotAvailableKg")})
+                    {t("lotExceedsWarn")} ({unitLine ? <Units v={lotFreeQty} /> : <Kg v={lotFreeQty} digits={1} />} {t("lotAvailableKg")})
                   </div>
                 )}
 
@@ -623,8 +696,9 @@ export default function DispatchPage() {
 
               {/* ── Delivery type ── */}
               <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5">{t("deliveryType")}</label>
+                <label htmlFor="delivery-type" className="block text-sm font-bold text-charcoal mb-1.5">{t("deliveryType")}</label>
                 <select
+                  id="delivery-type"
                   value={form.deliveryType}
                   onChange={(e) => setForm({ ...form, deliveryType: e.target.value })}
                   className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm bg-white"
@@ -636,8 +710,9 @@ export default function DispatchPage() {
 
               {/* ── Notes ── */}
               <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5">{t("notes")}</label>
+                <label htmlFor="delivery-notes" className="block text-sm font-bold text-charcoal mb-1.5">{t("notes")}</label>
                 <textarea
+                  id="delivery-notes"
                   value={form.notes}
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                   rows={2}
@@ -645,27 +720,10 @@ export default function DispatchPage() {
                 />
               </div>
 
-              {/* ── Actions ── */}
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 shadow-md shadow-orange/20 active:scale-[0.98] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
-                >
-                  {submitting ? "…" : t("confirmDelivery")}
-                </button>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-sm text-brown hover:bg-gray-50 transition-colors"
-                >
-                  {t("cancel")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+          </form>
+        </OpsPane>
+      ) : null}
     </div>
+    </OpsRoot>
   );
 }

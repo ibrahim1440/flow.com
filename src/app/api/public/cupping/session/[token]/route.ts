@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
 import { extractIp } from "@/lib/rate-limit";
 import { checkAndRecordRateLimit } from "@/lib/api-rate-limit";
+import { CuppingRefusal, guestKey, lockOpenSessionForScore, normalizeGuestName } from "@/lib/cupping/close-policy";
 
 type Params = { params: Promise<{ token: string }> };
 
@@ -72,7 +73,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const data = await request.json();
   const { sessionBatchId, externalName, ...scoreData } = data;
-  const name = (externalName ?? "").trim();
+  const name = normalizeGuestName(externalName);
 
   if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
   if (!sessionBatchId) return NextResponse.json({ error: "sessionBatchId is required" }, { status: 400 });
@@ -83,36 +84,50 @@ export async function POST(request: Request, { params }: Params) {
   });
   if (!sessionBatch) return NextResponse.json({ error: "Invalid cup" }, { status: 400 });
 
-  // Prevent duplicate scoring of the same cup by the same external tester
-  const existing = await prisma.cuppingScore.findFirst({
-    where: { sessionBatchId, externalName: name },
-  });
-  if (existing) return NextResponse.json({ error: "You have already scored this cup" }, { status: 409 });
-
   try {
-    const score = await prisma.cuppingScore.create({
-      data: {
-        sessionId: session.id,
-        sessionBatchId,
-        employeeId: null,
-        externalName: name,
-        fragranceAroma: scoreData.fragranceAroma,
-        flavor:         scoreData.flavor,
-        aftertaste:     scoreData.aftertaste,
-        acidity:        scoreData.acidity,
-        body:           scoreData.body,
-        balance:        scoreData.balance,
-        overall:        scoreData.overall,
-        uniformity:     scoreData.uniformity,
-        cleanCup:       scoreData.cleanCup,
-        sweetness:      scoreData.sweetness,
-        defectCups:     scoreData.defectCups,
-        defectType:     scoreData.defectType,
-        finalScore:     scoreData.finalScore,
-        notes:          scoreData.notes || null,
-        flavorDescriptors: scoreData.flavorDescriptors ?? [],
-      },
+    const score = await prisma.$transaction(async (tx) => {
+      if (!(await lockOpenSessionForScore(tx, session.id))) throw new CuppingRefusal(409, "CUPPING_SESSION_CLOSED", "Session is closed");
+      // One score per cup per guest name. The name is compared normalized (trimmed, inner
+      // spaces collapsed, case-insensitive) so «Sara» and « sara » are the same guest. A
+      // transaction-scoped advisory lock on (cup, name) makes two simultaneous submissions
+      // of the same name queue, so the second sees the first. Guest scores never count
+      // toward the close minimum (E6, C-3).
+      const key = guestKey(name);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cupping-guest|${sessionBatchId}|${key}`}))`;
+      const prior = await tx.cuppingScore.findMany({
+        where: { sessionBatchId, employeeId: null, externalName: { not: null } },
+        select: { externalName: true },
+      });
+      if (prior.some((p) => guestKey(p.externalName ?? "") === key)) {
+        throw new CuppingRefusal(409, "CUPPING_ALREADY_SCORED", "You have already scored this cup");
+      }
+      return tx.cuppingScore.create({
+        data: {
+          sessionId: session.id,
+          sessionBatchId,
+          employeeId: null,
+          externalName: name,
+          fragranceAroma: scoreData.fragranceAroma,
+          flavor:         scoreData.flavor,
+          aftertaste:     scoreData.aftertaste,
+          acidity:        scoreData.acidity,
+          body:           scoreData.body,
+          balance:        scoreData.balance,
+          overall:        scoreData.overall,
+          uniformity:     scoreData.uniformity,
+          cleanCup:       scoreData.cleanCup,
+          sweetness:      scoreData.sweetness,
+          defectCups:     scoreData.defectCups,
+          defectType:     scoreData.defectType,
+          finalScore:     scoreData.finalScore,
+          notes:          scoreData.notes || null,
+          flavorDescriptors: scoreData.flavorDescriptors ?? [],
+        },
+      });
     });
     return NextResponse.json(score, { status: 201 });
-  } catch (err) { return handlePrismaError(err); }
+  } catch (err) {
+    if (err instanceof CuppingRefusal) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    return handlePrismaError(err);
+  }
 }

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock, Wallet } from "lucide-react";
+import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock, Wallet, FileText } from "lucide-react";
+import { usePrintCertified } from "@/components/print/Certification";
 import {
   useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
   Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
@@ -85,7 +86,7 @@ type Quote = {
 };
 
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
-type Can = { write: boolean; approveDiscount: boolean; createOrder: boolean };
+type Can = { write: boolean; approveDiscount: boolean; createOrder: boolean; close: boolean };
 
 
 
@@ -323,15 +324,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         }
         actions={
           <>
-            {quote.issuedSnapshot != null && (
-              <Link
-                href={`/dashboard/sales/quotes/${quote.id}/print`}
-                data-testid="open-print"
-                className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary"
-              >
-                <Printer size={15} aria-hidden /> {ar ? "طباعة" : "Print"}
-              </Link>
-            )}
+            {quote.issuedSnapshot != null && <QuoteDocumentLink id={quote.id} ar={ar} />}
             {editable && (
               <Button onClick={save} disabled={busy || lines.length === 0} testId="save-quote">
                 {ar ? "حفظ" : "Save"}
@@ -350,14 +343,17 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             )}
             {quote.status === "ISSUED" && can.write && (
               <>
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => transition("ACCEPTED")}
-                  testId="accept-quote"
-                >
-                  <Check size={15} aria-hidden /> {ar ? "قَبِل العميل" : "Customer accepted"}
-                </Button>
+                {/* Accepting closes the deal Won, so it follows the deal-close privilege. */}
+                {can.close && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => transition("ACCEPTED")}
+                    testId="accept-quote"
+                  >
+                    <Check size={15} aria-hidden /> {ar ? "قَبِل العميل" : "Customer accepted"}
+                  </Button>
+                )}
                 {/* Outlined, like the deal screen's "mark lost": recording a refusal is
                     ordinary work, and a solid red button reads as a warning about the act
                     rather than a record of what the customer said. */}
@@ -975,5 +971,25 @@ function OrderDialog({
           : "A free-text line, or a fractional pack count, is refused with the line named — not silently dropped."}
       </p>
     </Modal>
+  );
+}
+
+/**
+ * The link to the quotation document. Owner decision D1: printing is out of Phase 1, so while
+ * the PRINT_CERTIFIED gate is off (or unknown) it is not offered as «Print»: it opens the
+ * document, which stays viewable (and, per decision point D1-Q, savable as the customer's PDF).
+ */
+function QuoteDocumentLink({ id, ar }: { id: string; ar: boolean }) {
+  const printing = usePrintCertified();
+  return (
+    <Link
+      href={`/dashboard/sales/quotes/${id}/print`}
+      data-testid="open-print"
+      className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary"
+    >
+      {printing === true
+        ? <><Printer size={15} aria-hidden /> {ar ? "طباعة" : "Print"}</>
+        : <><FileText size={15} aria-hidden /> {ar ? "مستند العرض" : "Quotation document"}</>}
+    </Link>
   );
 }

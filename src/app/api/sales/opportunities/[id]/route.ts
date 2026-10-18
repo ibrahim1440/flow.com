@@ -6,7 +6,7 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { collectionSummary, collectionAction } from "@/lib/services/sales/collections";
 import { serialiseSummary } from "@/app/api/sales/collections/route";
-import { Decimal } from "@/lib/services/commissions/engine";
+import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -45,7 +45,7 @@ export async function GET(_request: Request, { params }: Params) {
           },
         },
         conversion: {
-          select: { leadId: true, convertedAt: true, customerCreated: true, lead: { select: { companyName: true } } },
+          select: { leadId: true, convertedAt: true, customerCreated: true, convertedById: true, lead: { select: { companyName: true, contactName: true, phone: true, source: true } } },
         },
         quotes: {
           orderBy: [{ revision: "desc" }, { createdAt: "desc" }],
@@ -54,6 +54,8 @@ export async function GET(_request: Request, { params }: Params) {
             validUntil: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
             issuedAt: true, acceptedAt: true, rejectedAt: true, rejectionNote: true,
             discountApprovedAt: true, supersedesId: true,
+            // The VAT rate is per line; the deal page names it only when every line agrees.
+            lines: { select: { taxRatePercent: true } },
             _count: { select: { lines: true, orderLinks: true } },
           },
         },
@@ -69,7 +71,7 @@ export async function GET(_request: Request, { params }: Params) {
           orderBy: [{ completedAt: { sort: "asc", nulls: "first" } }, { createdAt: "desc" }],
           take: 100,
           select: {
-            id: true, type: true, subject: true, body: true, dueAt: true, completedAt: true,
+            id: true, type: true, subject: true, body: true, outcome: true, dueAt: true, completedAt: true,
             createdAt: true, owner: { select: { id: true, name: true } },
           },
         },
@@ -125,9 +127,18 @@ export async function GET(_request: Request, { params }: Params) {
 
     const summary = await collectionSummary(prisma, id);
 
+    // Who did it, for the history lines whose record names the person (the conversion and
+    // stage/outcome changes). Quotation issue and sample dispatch record no actor, so none is shown.
+    const actorIds = [...new Set([deal.conversion?.convertedById, ...deal.stageEvents.map((e) => e.actorId)]
+      .filter((x): x is string => !!x))];
+    const actors = Object.fromEntries((actorIds.length ? await prisma.employee.findMany({
+      where: { id: { in: actorIds } }, select: { id: true, name: true },
+    }) : []).map((e) => [e.id, e.name]));
+
     return NextResponse.json({
       deal,
       stages,
+      actors,
       collections,
       collectionSummary: serialiseSummary(summary),
       // The verdict, not the ingredients. The panel used to be handed a privilege flag and
@@ -210,12 +221,8 @@ export async function PATCH(request: Request, { params }: Params) {
       data.title = v;
     }
     if (b.amount !== undefined) {
-      let d: Decimal;
-      try {
-        d = new Decimal(String(b.amount));
-      } catch {
-        throw { _appCode: 400, message: "The expected value is not a number." };
-      }
+      const d = parseFiniteDecimal(b.amount);
+      if (!d) throw { _appCode: 400, message: "The expected value is not a number." };
       if (d.isNegative()) throw { _appCode: 400, message: "The expected value cannot be negative." };
       data.amount = d;
     }

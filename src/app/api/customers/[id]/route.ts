@@ -2,22 +2,24 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { error } = await requireAnyModule("customers", "orders");
+  const { user, error } = await requireAnyModule("customers", "orders");
   if (error) return error;
 
   const { id } = await params;
-  const customer = await prisma.customer.findUnique({
-    where: { id },
-    include: {
-      _count: { select: { orders: true } },
-      roastPreferences: {
-        include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },
-        orderBy: { createdAt: "asc" },
-      },
+  const related = {
+    _count: { select: { orders: true } },
+    roastPreferences: {
+      include: { greenBean: { select: { id: true, beanType: true, serialNumber: true } } },
+      orderBy: { createdAt: "asc" as const },
     },
-  });
+  };
+  // F4 / review F-1: without the customers module, the name and roast targets only.
+  const customer = canSeeCustomerContact(user.permissions)
+    ? await prisma.customer.findUnique({ where: { id }, include: related })
+    : await prisma.customer.findUnique({ where: { id }, select: { ...CUSTOMER_NAME_SELECT, ...related } });
   if (!customer) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(customer);
 }

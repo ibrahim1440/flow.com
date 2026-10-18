@@ -15,7 +15,8 @@
  *
  * ── Why a separate module and not another inline check ──────────────────────
  * The rules are not restated here. This aggregates the evaluators that already own them —
- * evaluateDatabaseUrl and evaluatePinLookupSecret — so there is exactly one definition of
+ * evaluateDatabaseUrl, evaluatePinLookupSecret and evaluateMfaKey (src/lib/auth/totp.ts, which also
+ * owns the decoder the running app uses) — so there is exactly one definition of
  * "usable" per variable and no second copy to drift. It exists to give those rules a single
  * entry point that can be called from two places that are not request handlers: the Next.js
  * startup hook (src/instrumentation.ts) and the pre-build validator (scripts/validate-env.ts,
@@ -34,6 +35,7 @@
  */
 import { evaluateDatabaseUrl } from "./db-config";
 import { evaluatePinLookupSecret } from "./pin-lookup";
+import { evaluateMfaKey } from "./auth/totp";
 
 /**
  * Every reason this environment cannot serve traffic, or an empty list.
@@ -57,6 +59,11 @@ export function evaluateServerEnv(
 
   const pinLookup = evaluatePinLookupSecret(env);
   if (!pinLookup.ok) problems.push(pinLookup.reason);
+
+  // Optional, but a value that is present must be usable: a malformed key would otherwise read as
+  // "MFA not configured" and lock every enrolled account out of sign-in, with nothing in any log.
+  const mfa = evaluateMfaKey(env);
+  if (!mfa.ok) problems.push(mfa.reason);
 
   return problems;
 }

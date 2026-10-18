@@ -1,26 +1,37 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Factory, AlertTriangle, CheckCircle, Merge, Box, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
+import { Fragment, useState, useEffect, useMemo } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
+import { Btn, Dot, Metrics, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, kg, type Tone, Kg, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
-import { formatDate } from "@/lib/utils";
 import { exportBatchesPDF, exportBatchesExcel, type BatchExportRow } from "@/lib/export";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintCertified } from "@/components/print/Certification";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { canStartProduction } from "@/lib/order-operations-client";
 import { useI18n } from "@/lib/i18n/context";
 import { type TranslationKey } from "@/lib/i18n/translations";
 
+import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
+  /** When the batch was recorded (the reference log lists batches by this time). */
+  createdAt: string;
+  /** The 48-hour QC reminder, computed by the batches API. */
+  qcDeadline?: string | null;
   greenBeanQuantity: number; roastedBeanQuantity: number; wasteQuantity: number;
   roastProfile: string | null; blendTiming: string | null;
   isBlend: boolean;
   bags3kg: number; bags1kg: number; bags250g: number; bags150g: number; samplesGrams: number;
   parentBatchId: string | null;
   parentBatch: { id: string; batchNumber: string } | null;
-  greenBean: { beanType: string } | null;
+  /** The green lot this roast consumed; the list payload carries the whole lot row. */
+  greenBean: { beanType: string; serialNumber?: string | null } | null;
+  /** Roasted kilograms not yet packed (the packaging page's «remaining» figure). */
+  roastedAvailableKg?: number;
   // Nullable since roast-to-stock: a batch roasted for the shelf has no order behind it.
   orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } } | null;
   qcRecords: { id: string; onProfile: boolean }[];
@@ -50,23 +61,16 @@ type OrderItem = {
 
 type GreenBean = { id: string; beanType: string; quantityKg: number; serialNumber: string };
 
-const STATUS_STYLES: Record<string, string> = {
-  "Pending QC": "bg-warning-bg text-yellow-800",
-  "Passed": "bg-info-bg text-slate",
-  "Partially Packaged": "bg-amber-100 text-amber-800",
-  "Packaged": "bg-success-bg text-green-800",
-  "Blended": "bg-purple-100 text-purple-800",
-};
-
-function statusLabel(status: string, t: (k: TranslationKey) => string) {
-  const map: Record<string, TranslationKey> = {
-    "Pending QC": "statusPendingQc",
-    "Passed": "statusPassed",
-    "Partially Packaged": "statusPartiallyPkg",
-    "Packaged": "statusPackaged",
-    "Blended": "statusBlended",
+/** Direction 2.1 status dots for a roasting batch (label from the same translation keys). */
+function batchStatusMap(t: (k: TranslationKey) => string): Record<string, [string, Tone]> {
+  return {
+    "Pending QC": [t("statusPendingQc"), "warning"],
+    "Passed": [t("statusPassed"), "success"],
+    "Partially Packaged": [t("statusPartiallyPkg"), "info"],
+    "Packaged": [t("statusPackaged"), "success"],
+    "Blended": [t("statusBlended"), "neutral"],
+    "Rejected": [t("rejectedLabel"), "danger"],
   };
-  return map[status] ? t(map[status]) : status;
 }
 
 function formatKg(value: number): string {
@@ -75,7 +79,11 @@ function formatKg(value: number): string {
 
 export default function ProductionPage() {
   const user = useUser();
+  const router = useRouter();
   const { t, lang } = useI18n();
+  // Owner decision D1: the batches PDF (jsPDF) is a printable document, so it follows the same
+  // PRINT_CERTIFIED gate as every other print action (unknown = off). Excel stays available.
+  const printing = usePrintCertified();
   const canStartBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "start_batch");
   const canBlend = hasSubPrivilege(user?.permissions ?? {}, "production", "blend");
   const canRoastToStock = hasSubPrivilege(user?.permissions ?? {}, "production", "roast_to_stock");
@@ -91,6 +99,12 @@ export default function ProductionPage() {
 
   // Roast form
   const [showRoastForm, setShowRoastForm] = useState(false);
+  // Validation notices appear once the roaster has touched the quantities (or tried to submit),
+  // not the moment the form opens (D-3).
+  const [roastTouched, setRoastTouched] = useState(false);
+  // Disclosure rows of the two tables (prd-schedule / prd-overview keep one line per row).
+  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
+  const toggleRow = (id: string) => setOpenRows((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const [roastForm, setRoastForm] = useState({
     greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "", productId: "",
@@ -119,7 +133,8 @@ export default function ProductionPage() {
   const [blendSelected, setBlendSelected] = useState<Set<string>>(new Set());
 
   // Tab
-  const [tab, setTab] = useState<"pending" | "batches">("pending");
+  // The module root is the overview (prd-overview); the roasting list is the schedule tab.
+  const [tab, setTab] = useState<"pending" | "batches" | "blend">("batches");
 
   // Pending tab filter state
   const [pendingSearch, setPendingSearch] = useState("");
@@ -137,6 +152,10 @@ export default function ProductionPage() {
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // The restock reason belongs to the batch being cancelled: opening another batch starts empty.
+  const [restockDraft, setRestockDraft] = useState<{ batchId: string; text: string }>({ batchId: "", text: "" });
+  const restockReason = cancelBatch && restockDraft.batchId === cancelBatch.id ? restockDraft.text : "";
+  const setRestockReason = (text: string) => setRestockDraft({ batchId: cancelBatch?.id ?? "", text });
   // Blending is the one mutating action here with no backend retry protection: the route is
   // concurrency-safe — two blends cannot spend the same roasted coffee twice — but it is not
   // idempotent, so two submissions of the same intent against sources that have room both
@@ -155,18 +174,30 @@ export default function ProductionPage() {
 
   useEffect(() => { loadData(); }, []);
 
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [openPoCount, setOpenPoCount] = useState<number | null>(null);
   async function loadData() {
-    const [ordersRes, beansRes, batchRes, productsRes] = await Promise.all([
+    const [ordersRes, beansRes, batchRes, productsRes, posRes] = await Promise.all([
       fetch("/api/orders?status=Pending,In+Production"),
       fetch("/api/green-beans"),
       fetch("/api/roasting-batches"),
       // Needed only by the roast-to-stock path, which must name the product it produces.
       fetch("/api/coffee-products/summary"),
+      // The «open production orders» tile and tab count (prd-overview), read only.
+      fetch("/api/production-orders?status=PENDING,IN_PRODUCTION"),
     ]);
-    if (ordersRes.ok) setOrders(await ordersRes.json());
-    if (beansRes.ok) setBeans(await beansRes.json());
-    if (productsRes.ok) setProducts(await productsRes.json());
-    if (batchRes.ok) setBatches(await batchRes.json());
+    // Refused responses are read to the end so the page settles (an unread body keeps the
+    // connection open); a failed queue or batch list is reported, not shown as empty.
+    const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
+    const [ordersJ, beansJ, productsJ, batchJ, posJ] = await Promise.all([ordersRes, beansRes, productsRes, batchRes, posRes].map(take));
+    setOpenPoCount(Array.isArray(posJ) ? posJ.length : null);
+    setLoadError(ordersJ === null || batchJ === null);
+    if (ordersJ) setOrders(ordersJ);
+    if (beansJ) setBeans(beansJ);
+    if (productsJ) setProducts(productsJ);
+    if (batchJ) setBatches(batchJ);
+    setLoaded(true);
   }
 
   function startProduction(item: OrderItem) {
@@ -199,6 +230,7 @@ export default function ProductionPage() {
     setPoChoice(livePos.length === 1 ? livePos[0].id : "");
     setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: profileHint, productId: "" });
     setError(""); setSuccess("");
+    setRoastTouched(false);
     setShowRoastForm(true);
   }
 
@@ -214,6 +246,7 @@ export default function ProductionPage() {
     setSelectedItem(null);
     setRoastForm({ greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "", productId: "" });
     setError(""); setSuccess("");
+    setRoastTouched(false);
     setShowRoastForm(true);
   }
 
@@ -238,7 +271,7 @@ export default function ProductionPage() {
     if (roastForm.greenBeanId) {
       const bean = beans.find((b) => b.id === roastForm.greenBeanId);
       if (bean && bean.quantityKg < roastForm.greenBeanQuantity) {
-        setError(`${t("insufficientStock")} ${bean.quantityKg}kg`);
+        setError(`${t("insufficientStock")} ${bean.quantityKg} ${t("opsKgUnit")}`);
         return;
       }
     }
@@ -353,7 +386,10 @@ export default function ProductionPage() {
   async function handleCancelBatch(restock: boolean) {
     if (!cancelBatch) return;
     setCancelling(true);
-    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, { method: "DELETE" });
+    // A restock is an inventory override: it carries its reason (owner decision, inventory Option A).
+    const res = await fetch(`/api/roasting-batches/${cancelBatch.id}?restock=${restock}`, restock
+      ? { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: restockReason.trim() }) }
+      : { method: "DELETE" });
     setCancelling(false);
     if (!res.ok) {
       try { const d = await res.json(); setError(d.error || t("cancelFailed")); }
@@ -440,14 +476,13 @@ export default function ProductionPage() {
     });
   }, [pendingItems, pendingSearch, pendingBean, pendingOrder]);
 
-  const passedBatches = batches.filter((b) => b.status === "Passed");
   const pendingQcBatches = batches.filter((b) => b.status === "Pending QC");
   const blendableBatches = batches.filter((b) => (b.status === "Passed" || b.status === "Pending QC") && !b.isBlend);
 
   function toExportRows(list: Batch[]): BatchExportRow[] {
     return list.map((b) => ({
       batchNumber: b.batchNumber,
-      date: formatDate(b.date),
+      date: opsDate(b.date, lang),
       customer: (b.orderItem?.order.customer.name ?? t("stockBatchLabel")),
       orderNumber: (b.orderItem?.order.orderNumber ?? t("stockBatchLabel")),
       beanType: b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? ""),
@@ -464,48 +499,139 @@ export default function ProductionPage() {
     }));
   }
 
+  // Today, in the batch's own date (the roasting date the server stores, local day).
+  const todayKey = new Date().toDateString();
+  const todays = batches.filter((b) => new Date(b.date).toDateString() === todayKey);
+  const roastedToday = todays.filter((b) => b.status !== "Rejected" && !b.isBlend).reduce((s, b) => s + b.roastedBeanQuantity, 0);
+  // The packaging page's rule: accepted or partly packed batches, by what is still unpacked.
+  const packableBatches = batches.filter((b) => b.status === "Passed" || b.status === "Partially Packaged");
+  const packableKg = packableBatches.reduce((s, b) => s + (b.roastedAvailableKg ?? b.roastedBeanQuantity), 0);
+  const now = Date.now();
+  const hoursSince = (iso: string) => Math.max(0, Math.floor((now - new Date(iso).getTime()) / 3600000));
+  const oldestPendingQcH = pendingQcBatches.length > 0 ? Math.max(...pendingQcBatches.map((b) => hoursSince(b.createdAt))) : 0;
+  const oldestPackableH = packableBatches.length > 0 ? Math.max(...packableBatches.map((b) => hoursSince(b.createdAt))) : 0;
+  // prd-schedule «سجل اليوم»: today's batches by the time they were recorded, latest first.
+  const todayLog = [...todays].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // Every live plan behind the queue, counted once (the «أوامر الإنتاج» tab count).
+  const livePoIds = new Set<string>();
+  const pendingPos: { id: string; productionNumber: string; orderNumber: number }[] = [];
+  for (const item of pendingItems) for (const p of item.productionOrders ?? []) {
+    if (p.status === "PENDING" || p.status === "IN_PRODUCTION") livePoIds.add(p.id);
+    if (p.status === "PENDING" && !pendingPos.some((x) => x.id === p.id)) pendingPos.push({ id: p.id, productionNumber: p.productionNumber, orderNumber: item.order.orderNumber });
+  }
+  // prd-overview «يحتاج انتباهك»: rejected roasts awaiting a decision, QC waits past half the
+  // 48-hour reminder, and plans that are not released yet. Oldest first, six at most.
+  const rejectedBatches = batches.filter((b) => b.status === "Rejected");
+  const lateQc = pendingQcBatches.filter((b) => hoursSince(b.createdAt) >= 24).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const counted = batches.filter((b) => b.status !== "Rejected" && !b.isBlend);
+  const totals = {
+    green: batches.reduce((s, b) => s + b.greenBeanQuantity, 0),
+    roasted: batches.reduce((s, b) => s + b.roastedBeanQuantity, 0),
+    countedKg: counted.reduce((s, b) => s + b.roastedBeanQuantity, 0),
+  };
+  const since30 = now - 30 * 86400000;
+  const blendHistory = batches.filter((b) => b.isBlend && new Date(b.createdAt).getTime() >= since30);
+  const stageMap = batchStatusMap(t);
+
+  // The planned-roaster block (prd-schedule «المحمصة اليوم»). Roasters, capacities and slots are
+  // not modelled yet, so every row shows the approved «غير متوفر بعد» pattern.
+  const roasterBlock = (
+    <section className="hr-stack" style={{ gap: 8 }} aria-label={t("opsRoasterToday")}>
+      <SecHead title={t("opsRoasterToday")} caption={<Dot tone="neutral">{t("opsPlannedTag")}</Dot>} />
+      <dl className="ops-props">
+        <dt>{t("opsRoasterWord")}</dt><dd className="hr-muted">{t("opsNotAvailableYet")}</dd>
+        <dt>{t("opsCapacity")}</dt><dd className="hr-muted">{t("opsNotAvailableYet")}</dd>
+        <dt>{t("opsCurrentSlot")}</dt><dd>{todayLog[0] ? <><span className="hr-num">{opsDate(todayLog[0].createdAt, lang, true)}</span> · <span className="ops-serial">{todayLog[0].batchNumber}</span> · <Kg v={todayLog[0].roastedBeanQuantity} /></> : <span className="hr-muted">{t("opsNotAvailableYet")}</span>}</dd>
+        <dt>{t("opsNextSlot")}</dt><dd className="hr-muted">{t("opsNotAvailableYet")}</dd>
+        <dt>{t("opsRoastProfileRow")}</dt><dd>{t("opsFreeTextPerBatch")}</dd>
+      </dl>
+    </section>
+  );
+
+  const todayLogBlock = (
+    <section className="hr-stack" style={{ gap: 8 }} aria-label={t("opsTodayLog")}>
+      <SecHead title={t("opsTodayLog")} caption={t("opsTodayLogCaption")} />
+      {todayLog.length === 0 ? <p className="hr-caption" style={{ margin: 0 }}>{t("opsNoBatchesToday")}</p> : (
+        <ol className="ops-log">
+          {todayLog.map((b) => {
+            const [label, tone] = stageMap[b.status] ?? [b.status, "neutral" as Tone];
+            return (
+              <li key={b.id}>
+                <span className="ops-log-time">{opsDate(b.createdAt, lang, true).replace(/^\S+\s/, "")}</span>
+                <span className="ops-log-main"><span className="ops-serial">{b.batchNumber}</span> {b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "")}</span>
+                <span className="ops-log-end"><Kg strong v={b.roastedBeanQuantity} /><Dot tone={tone}>{label}{!b.orderItem ? ` · ${t("opsForStock")}` : ""}</Dot></span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("production")}</h1>
-          <p className="text-brown text-sm font-medium">
-            {pendingItems.length} {t("pending")} | {pendingQcBatches.length} {t("awaitingQc")}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {canStartBatch && canRoastToStock && (
-            <button onClick={startStockProduction}
-              className="flex items-center gap-2 px-4 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange-dark transition-all duration-200 shadow-md active:scale-[0.98]">
-              <Boxes size={16} /> {t("roastToStock")}
-            </button>
-          )}
-          {canBlend && blendableBatches.length >= 2 && (
-            <button onClick={() => { setShowBlendForm(true); setBlendSelected(new Set()); setError(""); }}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate text-white rounded-xl font-bold text-sm hover:bg-slate-dark transition-all duration-200 shadow-md">
-              <Merge size={16} /> {t("blendBatches")}
-            </button>
-          )}
-        </div>
-      </div>
+    <OpsRoot>
+    <div className={`hr-split${showBlendForm ? " has-preview" : ""}`}>
+    <div className="hr-page">
+      <PageHeader
+        title={t("opsProductionTitle")}
+        actions={(canStartBatch && canRoastToStock) || (canBlend && blendableBatches.length >= 2) ? (
+          <>
+            {canBlend && blendableBatches.length >= 2 && (
+              <Btn onClick={() => { setShowBlendForm(true); setBlendSelected(new Set()); setError(""); }}>
+                <Merge size={15} aria-hidden="true" /> {t("blendBatches")}
+              </Btn>
+            )}
+            {canStartBatch && canRoastToStock && (
+              <Btn variant="primary" onClick={startStockProduction}>
+                <Boxes size={15} aria-hidden="true" /> {t("roastToStock")}
+              </Btn>
+            )}
+          </>
+        ) : null}
+      >
+        <span><span className="hr-num">{pendingItems.length}</span> {t("pending")} · <span className="hr-num">{pendingQcBatches.length}</span> {t("awaitingQc")}</span>
+      </PageHeader>
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2"><AlertTriangle size={18} />{error}</div>}
-      {success && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl flex items-center gap-2"><CheckCircle size={18} />{success}</div>}
+      {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
+      {success && <OpsBanner tone="success" onClose={() => setSuccess("")}>{success}</OpsBanner>}
 
-      {/* Tabs */}
-      <div className="flex gap-2">
-        <button onClick={() => setTab("pending")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${tab === "pending" ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:border-slate"}`}>
-          {t("pendingOrders")}
-        </button>
-        <button onClick={() => setTab("batches")}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${tab === "batches" ? "bg-charcoal text-white" : "bg-white border border-border text-brown hover:border-slate"}`}>
-          {t("allBatches")} ({batches.length})
-        </button>
-      </div>
+      {/* Metric values are numbers only (the kit lays them out LTR); words and units go in the caption. */}
 
-      {tab === "pending" && (
-        <div className="space-y-3">
+      {/* prd-schedule / prd-overview: one module strip — overview · production orders · roasting
+          schedule · blending · packaging. Orders and packaging are their own routes, so those
+          two tabs navigate; «التتبع والمطابقة» has no route yet and is not drawn. */}
+      <Tabs
+        label={t("production")}
+        value={tab}
+        onChange={(k) => {
+          if (k === "orders") { router.push("/dashboard/production-orders"); return; }
+          if (k === "packaging") { router.push("/dashboard/packaging"); return; }
+          setTab(k);
+        }}
+        items={[
+          { key: "batches" as const, label: t("opsTabOverview") },
+          { key: "orders" as const, label: t("opsTabOrders"), count: openPoCount ?? livePoIds.size },
+          { key: "pending" as const, label: t("opsTabSchedule"), count: pendingItems.length },
+          { key: "blend" as const, label: t("opsTabBlend") },
+          { key: "packaging" as const, label: t("packaging"), count: packableBatches.length },
+        ]}
+      />
+
+      {/* prd-overview tiles: a number, then the unit and qualifier underneath. The phone keeps
+          the first two (prd-390a). */}
+      {tab === "batches" ? <Metrics items={[
+        [t("opsRoastedToday"), kg(roastedToday, 1), t("opsKgUnit")],
+        [t("opsAwaitingQc"), pendingQcBatches.length, oldestPendingQcH > 0 ? `${t("opsBatchesWord")} · ${t("opsOldestSince")} ${oldestPendingQcH} ${t("opsHoursShort")}` : `${t("opsBatchesWord")} · ${t("opsRejectedNotCounted")}`],
+        [t("opsPackable"), kg(packableKg, 1), oldestPackableH > 0 ? `${t("opsKgUnit")} · ${t("opsOldestSince")} ${oldestPackableH} ${t("opsHoursShort")}` : t("opsKgUnit"), "hr-hide-mobile"],
+        [t("opsOpenPOs"), openPoCount ?? livePoIds.size, undefined, "hr-hide-mobile"],
+      ]} /> : null}
+
+      {loadError ? <OpsError message={t("opsLoadFailed")} onRetry={loadData} /> : null}
+      {!loaded && !loadError ? <OpsLoading /> : null}
+
+      {loaded && tab === "pending" && (
+        <>
+          <SecHead title={t("opsWorkList")} caption={t("opsWorkListCaption")} />
           {pendingItems.length > 0 && (
             <WorkflowFilterBar
               searchQuery={pendingSearch} onSearchChange={setPendingSearch}
@@ -515,278 +641,471 @@ export default function ProductionPage() {
             />
           )}
           {filteredPending.length === 0 ? (
-            <div className="text-center py-8 bg-white rounded-2xl border border-border text-brown/40">
-              <Factory size={32} className="mx-auto mb-2 opacity-50" /><p className="font-semibold">{t("noPendingItems")}</p>
-            </div>
+            <OpsEmpty title={t("noPendingItems")} />
           ) : (
-            <div className="space-y-3">
-              {filteredPending.map((item: OrderItem) => {
-                // Both sides finished weight. Charting green input against a finished target
-                // overstated progress on every line, since green is always heavier.
-                const produced = item.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
-                const remaining = item.quantityKg - produced;
-                const progress = item.quantityKg > 0 ? (produced / item.quantityKg) * 100 : 0;
-                // Required / Produced / Remaining in the unit the line was ORDERED in. A
-                // line sold as 240 x 250g bags is worked in bags; only a legacy line with no
-                // SKU behind it is worked in kilograms. Roasting still happens by weight, so
-                // the kilogram figure stays on the card as an explicitly-labelled aside
-                // rather than as one of the three numbers.
-                const unitKg = item.productSku && item.productSku.weightGrams > 0 ? item.productSku.weightGrams / 1000 : 0;
-                const inUnits = unitKg > 0;
-                // Whole units only: a part-filled bag is not a produced bag.
-                const requiredDisp = inUnits ? Math.round(item.quantityKg / unitKg) : item.quantityKg;
-                const producedDisp = inUnits ? Math.floor(produced / unitKg) : produced;
-                const remainingDisp = inUnits ? Math.max(0, requiredDisp - producedDisp) : Math.max(0, remaining);
-                // A roast that failed QC no longer counts as progress (see producedFinishedKg),
-                // which is correct but silent: the line simply stayed in the queue with no
-                // explanation. Surfaced here so the reason for the outstanding work is visible.
-                const rejectedCount = item.roastingBatches.filter((b) => !b.isBlend && b.status === "Rejected").length;
-                return (
-                  <div key={item.id} data-testid={`roast-item-${item.order.orderNumber}`} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-                    <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold text-charcoal">#{item.order.orderNumber} — {item.order.customer.name}</p>
-                        {/* The translation already carries the unit ("kg ordered"), so the
-                            literal kg here was rendering "12kg kg ordered". */}
-                        <p className="text-sm text-brown font-medium">{item.beanTypeName} — {inUnits ? <>{requiredDisp} × {item.productSku!.skuCode}</> : <>{item.quantityKg} {t("kgOrdered")}</>}</p>
-                        {/* The plan this work belongs to, printed on the task itself. A
-                            separate production-order card would have been a second copy of
-                            the same job, and the operator would have had to match them by
-                            hand. Every live plan is listed: when there is more than one the
-                            roast form asks which, and hiding the extras here would make that
-                            question arrive from nowhere. */}
-                        {livePosFor(item).length > 0 && (
-                          <p className="flex flex-wrap items-center gap-1 mt-1">
-                            {livePosFor(item).map((p) => (
-                              <span
-                                key={p.id}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-300 font-mono"
-                              >
-                                {t("prodOrderRef")} {p.productionNumber}
-                              </span>
-                            ))}
-                          </p>
-                        )}
-                        {rejectedCount > 0 && (
-                          <p className="mt-1">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800 border border-red-300">
-                              <AlertTriangle size={11} aria-hidden="true" /> {rejectedCount} {t("prodRejectedRoasts")}
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow ops-rows" aria-label={t("opsRoastQueue")}>
+                <thead>
+                  <tr>
+                    <th>{t("opsOrderCol")}</th>
+                    <th className="hr-hide-mobile">{t("opsProductCol")}</th>
+                    <th className="num">{t("requiredQtyLabel")}</th>
+                    <th className="num">{t("totalProducedLabel")}</th>
+                    <th className="num">{t("remainingCol")}</th>
+                    <th>{t("opsScheduledCol")}</th>
+                    <th className="hr-hide-compact">{t("prodOrderRef")}</th>
+                    <th aria-label={t("opsActions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPending.map((item: OrderItem) => {
+                    // Both sides finished weight. Charting green input against a finished target
+                    // overstated progress on every line, since green is always heavier.
+                    const produced = item.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
+                    const remaining = item.quantityKg - produced;
+                    const inUnits = !!item.productSku && item.productSku.weightGrams > 0;
+                    const unitsOf = (kgs: number) => Math.round((kgs * 1000) / item.productSku!.weightGrams);
+                    const requiredDisp = inUnits ? unitsOf(item.quantityKg) : null;
+                    const producedDisp = inUnits ? unitsOf(produced) : null;
+                    const remainingDisp = inUnits ? Math.max(0, unitsOf(item.quantityKg) - unitsOf(produced)) : null;
+                    // Rejected roasts are excluded from progress above; the count used to be
+                    // silent; surfaced so the reason for the outstanding work is visible.
+                    const rejectedCount = item.roastingBatches.filter((b) => !b.isBlend && b.status === "Rejected").length;
+                    const pref = item.order.customer.roastPreferences?.find((p: CustomerPref) => p.greenBeanId === item.greenBeanId);
+                    const displayProfile = profileOverrides[item.id] ?? pref?.profileName ?? null;
+                    const pos = livePosFor(item);
+                    const open = openRows.has(item.id);
+                    const required = inUnits ? <span className="hr-num">{requiredDisp}</span> : <Kg v={formatKg(item.quantityKg)} />;
+                    const producedCell = inUnits ? <span className="hr-num">{producedDisp}</span> : <Kg v={formatKg(produced)} />;
+                    const remainingCell = inUnits ? <strong className="hr-num">{remainingDisp}</strong> : <Kg strong v={formatKg(Math.max(0, remaining))} />;
+                    return (
+                      <Fragment key={item.id}>
+                        {/* prd-schedule: one 46 px line per order line; the plan flags, the customer's
+                            roast profile and the recorded batches sit in the disclosure row below. */}
+                        <tr data-testid={`roast-item-${item.order.orderNumber}`}>
+                          <td className="m-title">
+                            <span className="ops-rowhead">
+                              <button type="button" className="ops-disclose hr-hide-mobile" aria-expanded={open} aria-label={t("opsDetails")} onClick={() => toggleRow(item.id)}><ChevronDown size={14} aria-hidden="true" /></button>
+                              <span className="hr-id">#{item.order.orderNumber}</span>
+                              <span className="ops-ell" style={{ maxWidth: 180 }}>{item.order.customer.name}</span>
                             </span>
-                          </p>
-                        )}
-                        {/* Customer roast profile badge */}
-                        {editingProfileId === item.id ? (
-                          <div className="flex items-center gap-2 mt-1">
-                            <input
-                              type="text"
-                              placeholder={t("overrideProfile")}
-                              defaultValue={profileOverrides[item.id] ?? item.order.customer.roastPreferences?.find((p: CustomerPref) => p.greenBeanId === item.greenBeanId)?.profileName ?? ""}
-                              autoFocus
-                              className="text-xs px-2 py-1 border border-orange rounded-lg focus:ring-2 focus:ring-orange/20 outline-none w-40"
-                              onBlur={(e) => {
-                                const val = e.target.value.trim();
-                                setProfileOverrides((prev) => ({ ...prev, [item.id]: val }));
-                                setEditingProfileId(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  const val = (e.target as HTMLInputElement).value.trim();
-                                  setProfileOverrides((prev) => ({ ...prev, [item.id]: val }));
-                                  setEditingProfileId(null);
-                                }
-                                if (e.key === "Escape") setEditingProfileId(null);
-                              }}
-                            />
-                          </div>
-                        ) : (() => {
-                          const pref = item.order.customer.roastPreferences?.find((p: CustomerPref) => p.greenBeanId === item.greenBeanId);
-                          const displayProfile = profileOverrides[item.id] ?? pref?.profileName ?? null;
-                          return (
-                            <div className="flex items-center gap-1.5 mt-1">
-                              {displayProfile ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                                  ⭐ {t("customerPrefBadge")}: {displayProfile}
-                                  {pref?.usageType && pref.usageType !== "BOTH" && (
-                                    <span className="opacity-70">
-                                      ({pref.usageType === "ESPRESSO" ? t("usageEspresso") : t("usageFilter")})
-                                    </span>
-                                  )}
-                                  {pref?.usageType === "BOTH" && (
-                                    <span className="opacity-70">({t("usageBoth")})</span>
-                                  )}
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">
-                                  {t("standardBadge")}
-                                </span>
-                              )}
-                              <button
-                                onClick={() => setEditingProfileId(item.id)}
-                                className="p-0.5 rounded text-brown/30 hover:text-orange transition-colors"
-                                title={t("overrideProfile")}
-                              >
-                                <Pencil size={11} />
-                              </button>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                      {canStartBatch && (
-                        <button onClick={() => startProduction(item)}
-                          className="w-full xl:w-auto flex items-center justify-center flex-shrink-0 px-4 py-2 bg-orange text-white rounded-xl text-sm font-bold hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200">
-                          {produced > 0 ? t("continueProd") : t("startProduction")}
-                        </button>
-                      )}
-                    </div>
-                    {/* Required / Produced / Remaining — always shown, always in finished
-                        kilograms. These figures used to appear only once a first roast
-                        existed, so a fresh task carried no number an operator could act on. */}
-                    <div>
-                      <div className="flex justify-between gap-2 text-xs text-brown mb-1">
-                        <span>{inUnits ? `${requiredDisp} ${t("unitsRequired")}` : `${formatKg(item.quantityKg)}kg ${t("requiredKg")}`}</span>
-                        <span>{inUnits ? `${producedDisp} ${t("unitsProduced")}` : `${formatKg(produced)}kg ${t("producedKg")}`}</span>
-                        <span className="font-bold text-charcoal">{inUnits ? `${remainingDisp} ${t("unitsRemaining")}` : `${formatKg(Math.max(0, remaining))}kg ${t("remainingKg")}`}</span>
-                      </div>
-                      <div className="w-full bg-muted rounded-full h-2">
-                        <div className="bg-orange h-2 rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%` }} />
-                      </div>
-                      {/* Roasting is done by weight whatever the line was sold in, so the
-                          kilograms stay on the card — labelled as the roasting figure, not
-                          mixed in with the three numbers above. */}
-                      {inUnits && remaining > 0 && (
-                        <p className="text-[11px] text-brown/50 mt-1">
-                          ≈ {formatKg(Math.max(0, remaining))}kg {t("toRoastAside")}
-                        </p>
-                      )}
-                      {produced > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {item.roastingBatches.map((b) => {
-                            const fullBatch = canEditDate
-                              ? batches.find((x) => x.batchNumber === b.batchNumber)
-                              : undefined;
-                            return fullBatch ? (
-                              <button
-                                key={b.batchNumber}
-                                onClick={() => setEditDateBatch(fullBatch)}
-                                className="flex items-center gap-1 px-2 py-0.5 bg-cream text-brown rounded-lg text-xs font-mono hover:bg-orange/10 hover:text-orange transition-colors"
-                                title={t("editDateBtn")}
-                              >
-                                {b.batchNumber}
-                                <CalendarDays size={9} className="opacity-50" />
-                              </button>
-                            ) : (
-                              <span key={b.batchNumber} className="px-2 py-0.5 bg-cream text-brown rounded-lg text-xs font-mono">{b.batchNumber}</span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                            <span className="hr-msub">
+                              {item.beanTypeName}{inUnits ? <> · <span className="hr-num">{requiredDisp}</span> × <span className="ops-serial">{item.productSku!.skuCode}</span></> : null} · {t("remainingCol")} {remainingCell}
+                            </span>
+                          </td>
+                          <td className="hr-hide-mobile"><span className="ops-ell">{item.beanTypeName}{inUnits ? <> · <span className="ops-serial">{item.productSku!.skuCode}</span></> : null}</span></td>
+                          <td className="num">{required}</td>
+                          <td className="num">{producedCell}</td>
+                          <td className="num">{remainingCell}</td>
+                          <td>
+                            {pos.length > 0 ? <><span className="hr-num">{pos.length}</span> {t("opsPlannedWord")}</> : <span className="hr-muted">{t("opsNoPlan")}</span>}
+                            {rejectedCount > 0 ? <> · <span className="hr-dot tone-danger"><span><span className="hr-num">{rejectedCount}</span> {t("prodRejectedRoasts")}</span></span></> : null}
+                          </td>
+                          <td className="hr-hide-compact">{pos[0] ? <span className="ops-serial">{pos[0].productionNumber}</span> : <span className="hr-muted">—</span>}</td>
+                          <td className="m-end">
+                            {canStartBatch && (
+                              <Btn size="sm" variant={produced > 0 ? "secondary" : "primary"} onClick={() => startProduction(item)}>
+                                {produced > 0 ? t("continueProd") : t("startProduction")}
+                              </Btn>
+                            )}
+                          </td>
+                        </tr>
+                        {open ? (
+                          <tr className="ops-detailrow">
+                            <td colSpan={8}>
+                              <div className="ops-extras">
+                                {/* The plan this work belongs to, printed on the task itself. Every live
+                                    plan is listed: when there is more than one the roast form asks which. */}
+                                {pos.map((p) => (
+                                  <span key={p.id} className="hr-flag tone-info"><span>{t("prodOrderRef")} <span className="ops-serial">{p.productionNumber}</span></span></span>
+                                ))}
+                                {inUnits && remaining > 0 ? <span className="hr-caption">≈ <Kg v={formatKg(Math.max(0, remaining))} /> {t("toRoastAside")}</span> : null}
+                                {/* Customer roast profile (a local, per-session hint; never sent). */}
+                                {editingProfileId === item.id ? (
+                                  <input
+                                    type="text"
+                                    placeholder={t("overrideProfile")}
+                                    defaultValue={profileOverrides[item.id] ?? pref?.profileName ?? ""}
+                                    autoFocus
+                                    className="hr-input"
+                                    style={{ height: 28, width: 180 }}
+                                    onBlur={(e) => {
+                                      const val = e.target.value.trim();
+                                      setProfileOverrides((prev) => ({ ...prev, [item.id]: val }));
+                                      setEditingProfileId(null);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        const val = (e.target as HTMLInputElement).value.trim();
+                                        setProfileOverrides((prev) => ({ ...prev, [item.id]: val }));
+                                        setEditingProfileId(null);
+                                      }
+                                      if (e.key === "Escape") setEditingProfileId(null);
+                                    }}
+                                  />
+                                ) : (
+                                  <span className="hr-caption" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                    {displayProfile ? (
+                                      <>
+                                        {t("customerPrefBadge")}: {displayProfile}
+                                        {pref?.usageType && pref.usageType !== "BOTH" ? <> ({pref.usageType === "ESPRESSO" ? t("usageEspresso") : t("usageFilter")})</> : null}
+                                        {pref?.usageType === "BOTH" ? <> ({t("usageBoth")})</> : null}
+                                      </>
+                                    ) : t("standardBadge")}
+                                    <button type="button" className="hr-btn is-ghost is-sm" style={{ height: 24, padding: "0 4px" }} onClick={() => setEditingProfileId(item.id)} title={t("overrideProfile")} aria-label={t("overrideProfile")}>
+                                      <Pencil size={12} aria-hidden="true" />
+                                    </button>
+                                  </span>
+                                )}
+                                {item.roastingBatches.map((b) => {
+                                  const fullBatch = canEditDate ? batches.find((x) => x.batchNumber === b.batchNumber) : undefined;
+                                  return fullBatch ? (
+                                    <button key={b.batchNumber} type="button" className="hr-btn is-ghost is-sm" style={{ height: 24, padding: "0 6px" }} onClick={() => setEditDateBatch(fullBatch)} title={t("editDateBtn")}>
+                                      <span className="ops-serial">{b.batchNumber}</span> <CalendarDays size={11} aria-hidden="true" />
+                                    </button>
+                                  ) : (
+                                    <span key={b.batchNumber} className="ops-serial">{b.batchNumber}</span>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
+          {/* prd-schedule: today's log beside the planned-roaster block. */}
+          <div className="ops-cols" style={{ marginTop: 16 }}>
+            {todayLogBlock}
+            {roasterBlock}
+          </div>
+        </>
       )}
 
-      {tab === "batches" && (
-        <div className="space-y-3">
-          {batches.length > 0 && (
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => exportBatchesPDF(toExportRows(batches))}
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#6B7280] text-white rounded-xl text-xs font-bold hover:bg-[#4B5563] shadow-sm active:scale-[0.98] transition-all">
-                <FileText size={14} /> PDF
-              </button>
-              <button onClick={() => exportBatchesExcel(toExportRows(batches))}
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#7C3AED] text-white rounded-xl text-xs font-bold hover:bg-[#6D28D9] shadow-sm active:scale-[0.98] transition-all">
-                <FileSpreadsheet size={14} /> Excel
-              </button>
+      {loaded && tab === "blend" && (
+        <>
+          <SecHead
+            title={t("opsBlendable")}
+            caption={t("opsBlendableCaption")}
+            action={canBlend && blendableBatches.length >= 2 ? (
+              <Btn size="sm" onClick={() => { setShowBlendForm(true); setBlendSelected(new Set()); setError(""); }}><Merge size={14} aria-hidden="true" /> {t("blendBatches")}</Btn>
+            ) : undefined}
+          />
+          {blendableBatches.length === 0 ? <OpsEmpty title={t("noData")} /> : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow ops-rows" aria-label={t("opsBlendable")}>
+                <thead>
+                  <tr>
+                    <th>{t("opsBatchCol")}</th>
+                    <th>{t("opsProductOrderCol")}</th>
+                    <th className="num">{t("opsRoastedOutCol")}</th>
+                    <th>{t("opsStatusCol")}</th>
+                    <th>{t("opsRecordedCol")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blendableBatches.map((b) => {
+                    const product = b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? "");
+                    return (
+                      <tr key={b.id}>
+                        <td className="m-title">
+                          <span className="ops-phone-title">{product}</span>
+                          <span className="ops-serial hr-hide-mobile">{b.batchNumber}</span>
+                          <span className="hr-msub"><span className="ops-serial">{b.batchNumber}</span> · {opsDate(b.createdAt, lang, true)} · <StatusDot map={stageMap} value={b.status} /></span>
+                        </td>
+                        <td className="hr-hide-mobile"><span className="ops-ell">{product}{b.orderItem ? <> <span className="hr-id">#{b.orderItem.order.orderNumber}</span></> : <> · {t("stockBatchLabel")}</>}</span></td>
+                        <td className="num m-end"><Kg strong v={b.roastedBeanQuantity} /></td>
+                        <td className="hr-hide-mobile"><StatusDot map={stageMap} value={b.status} /></td>
+                        <td className="hr-hide-mobile"><span className="hr-num">{opsDate(b.createdAt, lang)}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-          {batches.length === 0 ? (
-            <div className="text-center py-8 bg-white rounded-2xl border border-border text-brown/40">
-              <Box size={32} className="mx-auto mb-2 opacity-50" /><p className="font-semibold">{t("noData")}</p>
+          <SecHead title={t("opsBlendHistory")} caption={t("opsLast30Days")} />
+          {blendHistory.length === 0 ? <p className="hr-caption" style={{ margin: 0 }}>{t("opsNoBlends")}</p> : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow ops-rows" aria-label={t("opsBlendHistory")}>
+                <thead>
+                  <tr>
+                    <th>{t("opsBatchCol")}</th>
+                    <th>{t("opsSourcesCol")}</th>
+                    <th className="num">{t("opsRoastedOutCol")}</th>
+                    <th>{t("opsStatusCol")}</th>
+                    <th>{t("opsRecordedCol")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blendHistory.map((b) => (
+                    <tr key={b.id}>
+                      <td className="m-title">
+                        <span className="ops-phone-title">{b.greenBean?.beanType || (b.orderItem?.beanTypeName ?? t("statusBlended"))}</span>
+                        <span className="ops-serial hr-hide-mobile">{b.batchNumber}</span>
+                        <span className="hr-msub"><span className="ops-serial">{b.batchNumber}</span> · {opsDate(b.createdAt, lang, true)} · <StatusDot map={stageMap} value={b.status} /></span>
+                      </td>
+                      <td className="hr-hide-mobile"><span className="ops-ell" style={{ maxWidth: 420 }}>{b.blendInputs.map((inp) => <Fragment key={inp.id}><span className="ops-serial">{inp.sourceBatch.batchNumber}</span> (<Kg v={inp.quantityUsed} />) </Fragment>)}</span></td>
+                      <td className="num m-end"><Kg strong v={b.roastedBeanQuantity} /></td>
+                      <td className="hr-hide-mobile"><StatusDot map={stageMap} value={b.status} /></td>
+                      <td className="hr-hide-mobile"><span className="hr-num">{opsDate(b.createdAt, lang)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ) : (
-            batches.map((batch) => (
-              <div key={batch.id} className="bg-white rounded-2xl border border-border p-4 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300">
-                <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-bold text-charcoal font-mono">{batch.batchNumber}</p>
-                      {canEditDate && (
-                        <button
-                          onClick={() => setEditDateBatch(batch)}
-                          className="p-1 rounded-lg text-brown/40 hover:text-orange hover:bg-orange/10 transition-colors"
-                          title={t("editDateBtn")}
-                        >
-                          <CalendarDays size={13} />
-                        </button>
-                      )}
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${STATUS_STYLES[batch.status] || "bg-gray-100 text-gray-600"}`}>
-                        {statusLabel(batch.status, t)}
-                      </span>
-                      {batch.isBlend && (
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
-                          مزيج
-                        </span>
-                      )}
-                      {batch.blendTiming && (
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${batch.blendTiming === "Before QC" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
-                          {t("blendedLabel")} {batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-brown font-medium">
-                      #{(batch.orderItem?.order.orderNumber ?? t("stockBatchLabel"))} — {(batch.orderItem?.order.customer.name ?? t("stockBatchLabel"))} — {batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")}
-                    </p>
-                    <p className="text-xs text-brown/50 mt-0.5">
-                      {formatKg(batch.roastedBeanQuantity)}kg {t("roastedLabel")} | {formatKg(batch.greenBeanQuantity)}kg {t("greenLabel")} | {formatDate(batch.date)}
-                      {batch.roastProfile && ` | ${batch.roastProfile}`}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    {canCancelBatch && (
-                      <button onClick={() => setCancelBatch(batch)}
-                        className="p-2 rounded-xl text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancel batch">
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {batch.status === "Packaged" && (batch.bags3kg > 0 || batch.bags1kg > 0 || batch.bags250g > 0 || batch.bags150g > 0 || batch.samplesGrams > 0) && (
-                  <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-border">
-                    {batch.bags3kg > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags3kg}x 3kg</span>}
-                    {batch.bags1kg > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags1kg}x 1kg</span>}
-                    {batch.bags250g > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags250g}x 250g</span>}
-                    {batch.bags150g > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.bags150g}x 150g</span>}
-                    {batch.samplesGrams > 0 && <span className="px-2 py-0.5 bg-cream rounded-lg text-xs font-bold text-brown">{batch.samplesGrams}g {t("samplesGramsLabel")}</span>}
-                  </div>
-                )}
-                {batch.childBatches.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <p className="text-xs text-brown/50">{t("sourceBatches")}: {batch.childBatches.map((c) => c.batchNumber).join(", ")}</p>
-                  </div>
-                )}
-                {batch.blendOutputs.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <p className="text-xs text-violet-600 font-medium">
-                      → {t("usedInBlend")}: {batch.blendOutputs.map((o) => o.targetBlendBatch.batchNumber).join(", ")}
-                    </p>
-                  </div>
-                )}
-                {batch.isBlend && batch.blendInputs.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <p className="text-xs text-violet-600/70">
-                      {t("blendSources")}: {batch.blendInputs.map((inp) => `${inp.sourceBatch.batchNumber} (${formatKg(inp.quantityUsed)}kg)`).join(" + ")}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ))
           )}
-        </div>
+        </>
       )}
+
+      {loaded && tab === "batches" && (
+        <>
+          <SecHead
+            title={t("allBatches")}
+            caption={<><span className="hr-num">{todays.length}</span> {t("opsTodaysBatches").toLowerCase()}</>}
+            action={batches.length > 0 ? (
+              <span style={{ display: "inline-flex", gap: 8 }}>
+                <Btn size="sm" data-testid="batches-pdf" disabled={printing !== true} aria-describedby={printing === true ? undefined : PRINT_PHASE1_NOTE_ID} onClick={() => { if (printing === true) exportBatchesPDF(toExportRows(batches)); }}><FileText size={14} aria-hidden="true" /> PDF</Btn>
+                <Btn size="sm" data-testid="batches-excel" onClick={() => exportBatchesExcel(toExportRows(batches))}><FileSpreadsheet size={14} aria-hidden="true" /> Excel</Btn>
+              </span>
+            ) : undefined}
+          />
+          {batches.length > 0 && printing === false ? <PrintPhase1Notice /> : null}
+          {batches.length === 0 ? (
+            <OpsEmpty title={t("noData")} />
+          ) : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow ops-rows" aria-label={t("allBatches")}>
+                <thead>
+                  <tr>
+                    <th>{t("opsBatchCol")}</th>
+                    <th>{t("opsProductOrderCol")}</th>
+                    <th className="hr-hide-compact">{t("opsGreenLotCol")}</th>
+                    <th className="num">{t("opsGreenInCol")}</th>
+                    <th className="num">{t("opsRoastedOutCol")}</th>
+                    <th className="num hr-hide-compact">{t("opsLossCol")}</th>
+                    <th>{t("opsStatusCol")}</th>
+                    <th>{t("opsRecordedCol")}</th>
+                    <th aria-label={t("opsActions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {batches.map((batch) => {
+                    const loss = batch.greenBeanQuantity > 0 ? (1 - batch.roastedBeanQuantity / batch.greenBeanQuantity) * 100 : 0;
+                    const lineage = [
+                      batch.childBatches.length > 0 ? `${t("sourceBatches")}: ${batch.childBatches.map((c) => c.batchNumber).join(", ")}` : null,
+                      batch.blendOutputs.length > 0 ? `${t("usedInBlend")}: ${batch.blendOutputs.map((o) => o.targetBlendBatch.batchNumber).join(", ")}` : null,
+                      batch.isBlend && batch.blendInputs.length > 0 ? `${t("blendSources")}: ${batch.blendInputs.map((inp) => `${inp.sourceBatch.batchNumber} (${formatKg(inp.quantityUsed)} ${t("opsKgUnit")})`).join(" + ")}` : null,
+                    ].filter(Boolean);
+                    const bags = batch.status === "Packaged" ? [
+                      batch.bags3kg > 0 ? `${batch.bags3kg}× 3kg` : null,
+                      batch.bags1kg > 0 ? `${batch.bags1kg}× 1kg` : null,
+                      batch.bags250g > 0 ? `${batch.bags250g}× 250g` : null,
+                      batch.bags150g > 0 ? `${batch.bags150g}× 150g` : null,
+                      batch.samplesGrams > 0 ? `${batch.samplesGrams}g ${t("samplesGramsLabel")}` : null,
+                    ].filter(Boolean) : [];
+                    const extras = [
+                      batch.roastProfile,
+                      batch.isBlend ? `${t("statusBlended")}${batch.blendTiming ? ` · ${batch.blendTiming === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}` : ""}` : null,
+                      ...bags, ...lineage,
+                    ].filter(Boolean) as string[];
+                    const open = openRows.has(batch.id);
+                    const product = batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "");
+                    return (
+                      <Fragment key={batch.id}>
+                        {/* prd-overview: one 46 px line per batch; profile, bags and lineage open below. */}
+                        <tr data-testid={`batch-row-${batch.batchNumber}`}>
+                          <td className="m-title">
+                            <span className="ops-phone-title">{product}{!batch.orderItem ? <span className="hr-muted"> · {t("stockBatchLabel")}</span> : null}</span>
+                            <span className="ops-rowhead hr-hide-mobile">
+                              {extras.length > 0 ? <button type="button" className="ops-disclose hr-hide-mobile" aria-expanded={open} aria-label={t("opsDetails")} onClick={() => toggleRow(batch.id)}><ChevronDown size={14} aria-hidden="true" /></button> : null}
+                              <span className="ops-serial">{batch.batchNumber}</span>
+                              {canEditDate && (
+                                <button type="button" className="hr-btn is-ghost is-sm" style={{ height: 24, padding: "0 4px" }} onClick={() => setEditDateBatch(batch)} title={t("editDateBtn")} aria-label={t("editDateBtn")}>
+                                  <CalendarDays size={13} aria-hidden="true" />
+                                </button>
+                              )}
+                            </span>
+                            <span className="hr-msub">
+                              <span className="ops-serial">{batch.batchNumber}</span>{batch.orderItem ? <> · <span className="hr-id">#{batch.orderItem.order.orderNumber}</span></> : null} · {opsDate(batch.createdAt, lang, true)} · <StatusDot map={stageMap} value={batch.status} />
+                            </span>
+                          </td>
+                          <td className="hr-hide-mobile">
+                            <span className="ops-ell">{product}{batch.orderItem ? <> <span className="hr-id">#{batch.orderItem.order.orderNumber}</span> · {batch.orderItem.order.customer.name}</> : <> · {t("stockBatchLabel")}</>}</span>
+                          </td>
+                          <td className="hr-hide-compact">{batch.greenBean?.serialNumber ? <span className="ops-serial">{batch.greenBean.serialNumber}</span> : <span className="hr-muted">—</span>}</td>
+                          <td className="num"><span className="hr-num">{kg(batch.greenBeanQuantity, 2)}</span></td>
+                          <td className="num m-end"><span className="hr-num hr-hide-mobile" style={batch.status === "Rejected" ? { textDecoration: "line-through", color: "var(--text-muted)" } : undefined}>{kg(batch.roastedBeanQuantity, 2)}</span><span className="ops-only-mobile"><Kg strong v={batch.roastedBeanQuantity} /></span></td>
+                          <td className="num hr-hide-compact"><span className="hr-num" style={{ color: batch.status === "Rejected" ? "var(--status-danger)" : undefined }}>{loss.toFixed(1)}%</span></td>
+                          <td><StatusDot map={stageMap} value={batch.status} /></td>
+                          <td><span className="hr-num">{opsDate(batch.createdAt, lang, true)}</span></td>
+                          <td className="ops-actions">
+                            {canCancelBatch && (
+                              <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setCancelBatch(batch)} title={t("cancelBatchTitle")} aria-label={t("cancelBatchTitle")}>
+                                <Trash2 size={15} aria-hidden="true" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                        {open && extras.length > 0 ? (
+                          <tr className="ops-detailrow"><td colSpan={9}><div className="ops-extras">{extras.map((x, i) => <span key={i} className="hr-caption">{x}</span>)}</div></td></tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+                {/* prd-overview totals: count · counted kg (rejected and blends excluded), in, out. */}
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}><span className="hr-num">{batches.length}</span> {t("opsBatchesWord")} · {t("opsCounted")} <Kg v={totals.countedKg} /></td>
+                    <td className="num"><span className="hr-num">{kg(totals.green, 2)}</span></td>
+                    <td className="num"><span className="hr-num">{kg(totals.roasted, 2)}</span></td>
+                    <td colSpan={4} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {/* prd-overview: what needs attention beside the roasting queue, then the roaster. */}
+          <div className="ops-cols" style={{ marginTop: 16 }}>
+            <section className="hr-stack" style={{ gap: 8 }} aria-label={t("opsAttention")}>
+              <SecHead title={t("opsAttention")} />
+              {rejectedBatches.length + lateQc.length + pendingPos.length === 0 ? <p className="hr-caption" style={{ margin: 0 }}>{t("opsNothingAttention")}</p> : (
+                <ul className="ops-attn">
+                  {rejectedBatches.slice(0, 3).map((b) => {
+                    const lossPct = b.greenBeanQuantity > 0 ? (1 - b.roastedBeanQuantity / b.greenBeanQuantity) * 100 : 0;
+                    return (
+                      <li key={b.id}>
+                        <div>
+                          <Dot tone="danger">{t("opsBatchWord")} <span className="ops-serial">{b.batchNumber}</span> {t("opsRejectedLoss")} <span className="hr-num">{lossPct.toFixed(1)}%</span></Dot>
+                          <span className="ops-attn-sub"><Kg v={b.roastedBeanQuantity} /> {t("opsAwaitingDecision")}</span>
+                        </div>
+                        <Link href="/dashboard/qc" className="hr-btn is-sm">{t("opsOpenQc")}</Link>
+                      </li>
+                    );
+                  })}
+                  {lateQc.slice(0, 3).map((b) => (
+                    <li key={b.id}>
+                      <div>
+                        <Dot tone="warning">{t("opsBatchWord")} <span className="ops-serial">{b.batchNumber}</span> {t("opsAwaitingQcFor")} <span className="hr-num">{hoursSince(b.createdAt)}</span> {t("opsHoursShort")}</Dot>
+                        {b.qcDeadline ? <span className="ops-attn-sub">{t("opsDeadlineCol")} {opsDate(b.qcDeadline, lang, true)}</span> : null}
+                      </div>
+                      <Link href="/dashboard/qc" className="hr-btn is-sm">{t("opsOpenQc")}</Link>
+                    </li>
+                  ))}
+                  {pendingPos.slice(0, 3).map((p) => (
+                    <li key={p.id}>
+                      <div>
+                        <Dot tone="warning"><span className="ops-serial">{p.productionNumber}</span> {t("opsAwaitingRelease")} <span className="hr-id">#{p.orderNumber}</span></Dot>
+                        <span className="ops-attn-sub">{t("opsNoRoastBeforeRelease")}</span>
+                      </div>
+                      <Link href={`/dashboard/production-orders/${p.id}`} className="hr-btn is-sm">{t("opsOpenOrder")}</Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className="hr-stack" style={{ gap: 8 }} aria-label={t("opsRoastQueue")}>
+              <SecHead title={t("opsRoastQueue")} caption={t("opsRoastQueueCaption")} />
+              {pendingItems.length === 0 ? <p className="hr-caption" style={{ margin: 0 }}>{t("noPendingItems")}</p> : (
+                <ol className="ops-log">
+                  {pendingItems.slice(0, 5).map((item: OrderItem) => {
+                    const produced = item.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
+                    return (
+                      <li key={item.id} style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}>
+                        <span className="ops-log-main">{item.beanTypeName} <span className="hr-id">#{item.order.orderNumber}</span> <span className="hr-muted">· {item.order.customer.name}</span></span>
+                        <span className="ops-log-end"><Kg strong v={Math.max(0, item.quantityKg - produced)} /></span>
+                      </li>
+                    );
+                  })}
+                  {pendingItems.length > 5 ? <li style={{ gridTemplateColumns: "minmax(0, 1fr)" }}><button type="button" className="ops-link" style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer" }} onClick={() => setTab("pending")}>+{pendingItems.length - 5} · {t("opsTabSchedule")}</button></li> : null}
+                </ol>
+              )}
+            </section>
+          </div>
+          {roasterBlock}
+        </>
+      )}
+    </div>
+
+    {/* prd-blend 321:2401 / 324:2581: blending is a pane beside the list at 1440, a drawer at
+        1024 and a bottom sheet on the phone. Same selection rules and request as the dialog. */}
+    {showBlendForm && (() => {
+      const selectedBatches = blendableBatches.filter((b) => blendSelected.has(b.id));
+      const selectedStatuses = new Set(selectedBatches.map((b) => b.status));
+      const isMixed = selectedStatuses.size > 1;
+      const blendType = selectedStatuses.size === 1
+        ? (selectedStatuses.has("Pending QC") ? "Before QC" : "After QC")
+        : null;
+      // Blending an order's coffee together with stock coffee has no single right answer:
+      // the result either swallows the order's production into free stock, or claims
+      // unowned stock for an order that never asked for it. The server refuses such a
+      // selection; say so here rather than letting the operator discover it on submit.
+      const owners = new Set(selectedBatches.map((b) => (b.orderItem ? "order" : "stock")));
+      const mixesOwnership = owners.size > 1;
+      const distinctOrderItems = new Set(
+        selectedBatches.filter((b) => b.orderItem).map((b) => b.orderItem!.order.orderNumber)
+      );
+      const mixesOrders = distinctOrderItems.size > 1;
+      const canSubmit = blendSelected.size >= 2 && !isMixed && !mixesOwnership && !mixesOrders;
+      const outKg = selectedBatches.reduce((s, b) => s + b.roastedBeanQuantity, 0);
+      const owner = selectedBatches[0]?.orderItem ?? null;
+      return (
+        <OpsPane
+          testId="blend-pane"
+          label={t("blendBatches")}
+          title={t("blendBatches")}
+          sub={blendType ? (blendType === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")) : t("blendSelectHint")}
+          busy={blending}
+          onClose={() => setShowBlendForm(false)}
+          footer={
+            <>
+              <Btn variant="primary" onClick={handleBlend} disabled={!canSubmit} busy={blending}>{t("blendBatches")} ({blendSelected.size})</Btn>
+              <Btn onClick={() => setShowBlendForm(false)} disabled={blending}>{t("cancel")}</Btn>
+            </>
+          }
+        >
+          <div>
+            <p className="ops-lbl">{t("opsSourcesCol")}</p>
+            <ul className="ops-recs ops-blend-src">
+              {blendableBatches.map((batch) => {
+                const selected = blendSelected.has(batch.id);
+                return (
+                  <li key={batch.id}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, cursor: "pointer" }}>
+                      <input type="checkbox" checked={selected} onChange={() => toggleBlendBatch(batch.id)} aria-label={batch.batchNumber} />
+                      <span style={{ minWidth: 0 }}>
+                        <span className="ops-serial">{batch.batchNumber}</span> · {t("opsWholeBatch")}
+                        <span className="ops-line">{batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} · {batch.orderItem ? <span className="hr-id">#{batch.orderItem.order.orderNumber}</span> : t("stockBatchLabel")}</span>
+                      </span>
+                    </label>
+                    <StatusDot map={stageMap} value={batch.status} />
+                    <Kg strong v={batch.roastedBeanQuantity} />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {isMixed ? <Notice tone="danger">{t("cannotMixStatuses")}</Notice> : null}
+          {mixesOwnership || mixesOrders ? <Notice tone="danger">{mixesOwnership ? t("cannotMixStockAndOrder") : t("cannotMixOrders")}</Notice> : null}
+
+          <dl className="ops-props" style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}>
+            <dt>{t("opsBlendOutput")}</dt><dd style={{ textAlign: "end", fontWeight: 600 }}><Kg v={outKg} /></dd>
+            <dt>{t("opsStatusCol")}</dt><dd style={{ textAlign: "end" }}>{blendType === "Before QC" ? t("statusPendingQc") : blendType === "After QC" ? t("statusPassed") : "—"}</dd>
+            <dt>{t("opsBlendOwner")}</dt><dd style={{ textAlign: "end" }}>{selectedBatches.length === 0 ? "—" : owner ? <><span className="hr-id">#{owner.order.orderNumber}</span> · {owner.order.customer.name}</> : t("stockBatchLabel")}</dd>
+            <dt>{t("opsBlendResultNo")}</dt><dd style={{ textAlign: "end" }} className="hr-muted">{t("opsAssignedOnSave")}</dd>
+          </dl>
+          <p className="ops-note">{blendType === "Before QC" ? t("blendNeedQc") : blendType === "After QC" ? t("blendToPackaging") : t("opsBlendNote")}</p>
+        </OpsPane>
+      );
+    })()}
+    </div>
 
       {/* Overproduction Confirmation Modal */}
       {overproductionExcess !== null && selectedItem && (
@@ -800,15 +1119,15 @@ export default function ProductionPage() {
                 <h3 className="font-extrabold text-charcoal text-base">{t("overprodWarnTitle")}</h3>
                 <p className="text-sm text-brown mt-1">
                   {t("overprodWarnBody")}{" "}
-                  <span className="font-bold text-amber-700">+{formatKg(overproductionExcess)}kg</span>
+                  <span className="font-bold text-amber-700">+<Kg v={formatKg(overproductionExcess)} /></span>
                   {". "}
                   {t("overprodWarnConfirm")}
                 </p>
                 <p className="text-xs text-brown/60 mt-2">
-                  {t("requiredQtyLabel")}: {selectedItem.quantityKg}kg — {t("totalProducedLabel")}: {+(
+                  {t("requiredQtyLabel")}: <Kg v={selectedItem.quantityKg} /> — {t("totalProducedLabel")}: <Kg v={(+(
                     selectedItem.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s, b) => s + b.roastedBeanQuantity, 0) +
                     roastForm.roastedBeanQuantity
-                  ).toFixed(2)}kg
+                  )).toFixed(2)} />
                 </p>
               </div>
             </div>
@@ -861,9 +1180,11 @@ export default function ProductionPage() {
       )}
 
       {/* Roast Form Modal */}
+      {/* Desktop: the approved centred dialog (305:1457). Phone: the 344:3458 bottom sheet
+          (ops.css .ops-roast) — same form, same controls. */}
       {showRoastForm && (selectedItem || stockMode) && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeRoastForm(); }}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+        <div className="ops-roast fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeRoastForm(); }}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg" role="dialog" aria-modal="true" aria-label={stockMode ? t("roastToStockTitle") : t("recordRoastTitle")}>
             <h2 className="text-lg font-extrabold text-charcoal mb-1">
               {stockMode ? t("roastToStockTitle") : t("recordRoastTitle")}
             </h2>
@@ -900,7 +1221,7 @@ export default function ProductionPage() {
                   className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                   <option value="">{t("selectBeanStock")}</option>
                   {beans.map((b) => (
-                    <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {formatKg(b.quantityKg)}kg</option>
+                    <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {formatKg(b.quantityKg)} {t("opsKgUnit")}</option>
                   ))}
                 </select>
               </div>
@@ -927,20 +1248,20 @@ export default function ProductionPage() {
                   {/* FINISHED kilograms still owed. Shown as context beside the green field,
                       never written into it: converting this to a green weight needs the
                       coffee's roast loss, which this screen does not hold. */}
-                  Still to produce: {formatKg(remainingFinishedKg)}kg finished
+                  {t("opsStillToProduce").replace("{kg}", formatKg(remainingFinishedKg))}
                 </p>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-bold text-charcoal mb-1">{t("greenBeanQty")}</label>
                   <input type="number" step="0.01" value={roastForm.greenBeanQuantity}
-                    onChange={(e) => setRoastForm({ ...roastForm, greenBeanQuantity: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => setRoastForm({ ...roastForm, greenBeanQuantity: parseFloat(e.target.value) || 0 })} onBlur={() => setRoastTouched(true)}
                     className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-charcoal mb-1">{t("roastedQty")}</label>
                   <input type="number" step="0.01" value={roastForm.roastedBeanQuantity}
-                    onChange={(e) => setRoastForm({ ...roastForm, roastedBeanQuantity: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => setRoastForm({ ...roastForm, roastedBeanQuantity: parseFloat(e.target.value) || 0 })} onBlur={() => setRoastTouched(true)}
                     className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
                 </div>
               </div>
@@ -963,24 +1284,24 @@ export default function ProductionPage() {
                   !roastForm.greenBeanId || (stockMode && !roastForm.productId);
                 return (
                   <>
-                    {greenQtyInvalid && (
+                    {roastTouched && greenQtyInvalid && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        Green bean quantity must be greater than 0.
+                        {t("opsGreenQtyRequired")}
                       </div>
                     )}
-                    {roastedIsZero && (
+                    {roastTouched && roastedIsZero && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        Roasted quantity must be greater than 0.
+                        {t("opsRoastedQtyRequired")}
                       </div>
                     )}
-                    {roastedExceeds && (
+                    {roastTouched && roastedExceeds && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
                         {t("roastedExceedsGreen")}
                       </div>
                     )}
-                    {insufficientStock && selectedBean && (
+                    {roastTouched && insufficientStock && selectedBean && (
                       <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        Insufficient stock. Available: {formatKg(selectedBean.quantityKg)} kg.
+                        {t("opsInsufficientAvail").replace("{kg}", formatKg(selectedBean.quantityKg))}
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-3">
@@ -1019,94 +1340,6 @@ export default function ProductionPage() {
         </div>
       )}
 
-      {/* Blend Form Modal */}
-      {showBlendForm && (() => {
-        const selectedBatches = blendableBatches.filter((b) => blendSelected.has(b.id));
-        const selectedStatuses = new Set(selectedBatches.map((b) => b.status));
-        const isMixed = selectedStatuses.size > 1;
-        const blendType = selectedStatuses.size === 1
-          ? (selectedStatuses.has("Pending QC") ? "Before QC" : "After QC")
-          : null;
-        // Blending an order's coffee together with stock coffee has no single right answer:
-        // the result either swallows the order's production into free stock, or claims
-        // unowned stock for an order that never asked for it. The server refuses such a
-        // selection; say so here rather than letting the operator discover it on submit.
-        const owners = new Set(selectedBatches.map((b) => (b.orderItem ? "order" : "stock")));
-        const mixesOwnership = owners.size > 1;
-        const distinctOrderItems = new Set(
-          selectedBatches.filter((b) => b.orderItem).map((b) => b.orderItem!.order.orderNumber)
-        );
-        const mixesOrders = distinctOrderItems.size > 1;
-        const canSubmit = blendSelected.size >= 2 && !isMixed && !mixesOwnership && !mixesOrders;
-        return (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowBlendForm(false); }}>
-            <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
-              <h2 className="text-lg font-extrabold text-charcoal mb-1">{t("blendBatches")}</h2>
-              <p className="text-sm text-brown font-medium mb-4">{t("blendSelectHint")}</p>
-              <div className="space-y-2 mb-4">
-                {blendableBatches.map((batch) => {
-                  const selected = blendSelected.has(batch.id);
-                  return (
-                    <div key={batch.id}
-                      onClick={() => toggleBlendBatch(batch.id)}
-                      className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${selected ? "border-orange bg-orange/5" : "border-border hover:border-slate/30"}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-bold text-charcoal font-mono text-sm">{batch.batchNumber}</p>
-                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${STATUS_STYLES[batch.status]}`}>
-                              {statusLabel(batch.status, t)}
-                            </span>
-                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${batch.orderItem ? "bg-info-bg text-slate" : "bg-amber-100 text-amber-800"}`}>
-                              {batch.orderItem ? `#${batch.orderItem.order.orderNumber}` : t("stockBatchLabel")}
-                            </span>
-                          </div>
-                          <p className="text-xs text-brown">{batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? "")} — {batch.roastedBeanQuantity}kg</p>
-                        </div>
-                        <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${selected ? "bg-orange border-orange" : "border-gray-300"}`}>
-                          {selected && <CheckCircle size={14} className="text-white" />}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {isMixed && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-xl text-xs font-bold mb-4">
-                  {t("cannotMixStatuses")}
-                </div>
-              )}
-              {(mixesOwnership || mixesOrders) && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-xl text-xs font-bold mb-4">
-                  {mixesOwnership ? t("cannotMixStockAndOrder") : t("cannotMixOrders")}
-                </div>
-              )}
-              {blendSelected.size >= 2 && !isMixed && !mixesOwnership && !mixesOrders && (
-                <div className={`rounded-xl p-3 mb-4 border ${blendType === "Before QC" ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
-                  <p className="text-xs font-bold text-charcoal mb-1">
-                    {t("blendPreview")} — <span className={blendType === "Before QC" ? "text-amber-700" : "text-emerald-700"}>{blendType === "Before QC" ? t("blendBeforeQc") : t("blendAfterQc")}</span>
-                  </p>
-                  <p className="text-xs text-brown">
-                    {blendSelected.size} batches | {t("totalRoasted")}: {selectedBatches.reduce((s, b) => s + b.roastedBeanQuantity, 0)}kg
-                    {blendType === "Before QC" && ` — ${t("blendNeedQc")}`}
-                    {blendType === "After QC" && ` — ${t("blendToPackaging")}`}
-                  </p>
-                </div>
-              )}
-              <div className="flex gap-3">
-                <button onClick={handleBlend} disabled={!canSubmit || blending}
-                  className="flex-1 py-3 bg-slate text-white rounded-xl font-bold hover:bg-slate-dark shadow-md disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200">
-                  {t("blendBatches")} ({blendSelected.size})
-                </button>
-                <button onClick={() => setShowBlendForm(false)} className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Cancel Batch Modal */}
       {cancelBatch && (() => {
         const isPendingQc = cancelBatch.status === "Pending QC";
@@ -1125,8 +1358,9 @@ export default function ProductionPage() {
               {isPendingQc ? (
                 <>
                   <p className="text-sm text-brown mb-5">{t("cancelBatchMsgPre")}</p>
+                  <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />
                   <div className="flex gap-3">
-                    <button onClick={() => handleCancelBatch(true)} disabled={cancelling}
+                    <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !restockReasonOk(restockReason)}
                       className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 active:scale-[0.98] transition-all">
                       {cancelling ? "…" : t("cancelConfirmRestock")}
                     </button>
@@ -1144,8 +1378,9 @@ export default function ProductionPage() {
                       className="w-full py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 active:scale-[0.98] transition-all">
                       {cancelling ? "…" : t("cancelMarkWasted")}
                     </button>
+                    {hasBean && canOverrideInventory && <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />}
                     {hasBean && (
-                      <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory}
+                      <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory || !restockReasonOk(restockReason)}
                         title={!canOverrideInventory ? t("noOverridePermission") : undefined}
                         className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
                         {cancelling ? "…" : t("cancelRestock")}
@@ -1185,6 +1420,6 @@ export default function ProductionPage() {
           }}
         />
       )}
-    </div>
+    </OpsRoot>
   );
 }

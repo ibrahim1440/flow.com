@@ -1,173 +1,129 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { compare } from "bcryptjs";
-import { signToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, ALL_MODULES } from "@/lib/auth";
 import {
-  extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited,
+  extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, isIdentifierRateLimited,
   recordFailedAttempt, clearAttempts, recordPinFailure, clearPinAttempts,
   isPinSpaceConstrained, isIpQuietForPin, isIpPinRateLimited,
 } from "@/lib/rate-limit";
 import { validatePin } from "@/lib/pin-policy";
 import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
+import { isPrivilegedStored, normalizeUsername } from "@/lib/auth/privileged";
+import { isEnrolled, mfaConfigured } from "@/lib/auth/mfa";
+import { authAudit, completeSignIn, signChallenge, INVALID, MFA_UNAVAILABLE, TOO_MANY, verifySecret } from "@/lib/auth/sign-in";
+import type { SessionMethod } from "@/lib/auth/session";
 
-// There is deliberately no pinHash helper here any more, and no raw-PIN bcrypt either. The
-// legacy pinHash column is neither read nor written under Version B — it is inert until
-// migration #19 drops it — so an employee carrying a valid pinHash and no pinLookup cannot
-// log in. The credential is proved by bcrypt over pinVerifierInput(pin), never over the raw
-// PIN: keeping a raw-PIN comparison around would be an invitation to reintroduce the offline
-// verifier this design exists to retire.
+// Owner security decision (16 Oct, Option A). Three ways in:
+//   · "pin"           — a PIN alone, for OPERATIONAL accounts only. A PIN that resolves to a
+//                       PRIVILEGED account (src/lib/auth/privileged.ts) is refused with exactly the
+//                       answer a wrong PIN gets, counted as a PIN failure, and audited
+//                       (PRIVILEGED_PIN_ONLY_REFUSED). There is no fallback.
+//   · "username_pin"  — username + PIN: the strong method for privileged accounts.
+//   · "password"      — username + password (equal or stronger). The username only: a display
+//                       name never identifies a login.
+// After the first factor, an account with MFA enrolled gets a 5-minute challenge and no session
+// until POST /api/auth/mfa/login proves the second. Otherwise a server-side session opens.
+//
+// There is deliberately no pinHash helper and no raw-PIN bcrypt here: the credential is proved
+// by bcrypt over pinVerifierInput(pin), and the legacy pinHash column is inert.
 
-const ROUTE_MODULE_MAP: Record<string, string> = {
-  "/dashboard": "dashboard",
-  "/dashboard/inventory": "inventory",
-  "/dashboard/orders": "orders",
-  "/dashboard/production": "production",
-  "/dashboard/qc": "qc",
-  "/dashboard/packaging": "packaging",
-  "/dashboard/dispatch": "dispatch",
-  "/dashboard/history": "history",
-  "/dashboard/analytics": "analytics",
-  "/dashboard/labels": "labels",
-  "/dashboard/employees": "employees",
-};
+type Found = { id: string; role: string; permissions: string; active: boolean; pin: string };
 
-function resolveRoute(defaultRoute: string, permissions: ReturnType<typeof parsePermissions>): string {
-  const mod = ROUTE_MODULE_MAP[defaultRoute];
-  if (!mod || mod === "dashboard") return "/dashboard";
-  if (hasModuleAccess(permissions, mod)) return defaultRoute;
-  for (const m of ALL_MODULES) {
-    if (m !== "dashboard" && hasModuleAccess(permissions, m)) return `/dashboard/${m}`;
+/** One account by its username in normal form (the database index uses the same form). */
+async function byUsername(username: string) {
+  const rows = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM "Employee" WHERE auth_norm_username("username") = auth_norm_username(${username}) AND active = true LIMIT 1`;
+  if (!rows.length) return null;
+  return prisma.employee.findUnique({ where: { id: rows[0].id }, select: { id: true, role: true, permissions: true, active: true, pin: true, password: true } });
+}
+
+
+async function afterFirstFactor(request: Request, employeeId: string, method: SessionMethod) {
+  if (await isEnrolled(employeeId)) {
+    if (!mfaConfigured()) {
+      await authAudit(request, { userId: employeeId, action: "SIGN_IN", result: "REFUSED", reasonCode: "MFA_NOT_CONFIGURED" });
+      return MFA_UNAVAILABLE();
+    }
+    await authAudit(request, { userId: employeeId, action: "SIGN_IN_FIRST_FACTOR", result: "SUCCESS", reasonCode: method });
+    return NextResponse.json({ mfaRequired: true, challenge: await signChallenge(employeeId, method, "login") });
   }
-  return "/dashboard";
+  return completeSignIn(request, employeeId, method, false);
 }
 
 export async function POST(request: Request) {
   const ip = extractIp(request);
-  const { method = "pin", pin, username, password } = await request.json();
-
-  type LoginEmployee = { id: string; name: string; role: string; permissions: string; defaultRoute: string | null; active: boolean; preferredLanguage: string };
-  let employee: LoginEmployee | null = null;
+  const ipHash = hashRateLimitKey(ip);
+  const { method = "pin", pin, username, password } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 
   if (method === "pin") {
-    // One PIN shape, checked here exactly as it is checked on every path that SETS one.
-    // An invalid shape is refused before anything is hashed, so a malformed candidate
+    // One PIN shape, checked here exactly as on every path that SETS one: a malformed candidate
     // never reaches the lookup, the verifier or the rate-limit identifier.
     const shape = validatePin(pin);
-    if (!shape.ok) {
-      return NextResponse.json({ error: shape.message }, { status: 400 });
-    }
+    if (!shape.ok) return NextResponse.json({ error: shape.message }, { status: 400 });
     const candidate = shape.pin;
-
-    const ipHash = hashRateLimitKey(ip);
     const identifierHash = hashRateLimitKey("pin:" + candidate);
     await pruneExpired();
-
-    // ── Throttles, before any bcrypt work ─────────────────────────────────
-    // The first two are unchanged. The third is new and exists because neither of them
-    // bounds a DISTRIBUTED walk of the PIN space: the candidate is the identifier, so an
-    // attacker trying 000000, 000001, … produces a different identifierHash every time
-    // and no per-identifier threshold ever accumulates.
-    if (await isIpRateLimited(ipHash, 30)) {
-      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
-    }
-    if (await isPairRateLimited(ipHash, identifierHash, 10)) {
-      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
-    }
-    if (await isPinSpaceConstrained()) {
-      // Under a system-wide burst, admit only addresses that have not just failed. An
-      // operator typing the right PIN has no recent failures and is unaffected; every
-      // enumerating address disqualifies itself on its first miss and gets roughly one
-      // attempt a minute. A staff mistype during an attack costs a bounded wait, never a
-      // lockout an attacker can hold open.
-      if (!(await isIpQuietForPin(ipHash)) || (await isIpPinRateLimited(ipHash, 3))) {
-        return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
-      }
-    }
-
-    // ── Lookup, then proof ────────────────────────────────────────────────
-    // Both derivations are keyed by the same secret the database does not contain. pinHash is
-    // NOT consulted: an employee holding a valid legacy pinHash and no pinLookup cannot
-    // authenticate, which is what makes the old recoverable column inert from today.
+    // Throttles before any bcrypt work: per address, per (address, candidate), and — because the
+    // candidate IS the identifier — a system-wide bucket against a distributed walk of the space.
+    if (await isIpRateLimited(ipHash, 30)) return TOO_MANY();
+    if (await isPairRateLimited(ipHash, identifierHash, 10)) return TOO_MANY();
+    if ((await isPinSpaceConstrained()) && (!(await isIpQuietForPin(ipHash)) || (await isIpPinRateLimited(ipHash, 3)))) return TOO_MANY();
     const secret = requirePinLookupSecret();
-    const lookup = pinLookup(candidate, secret);
-
-    const byLookup = await prisma.employee.findFirst({
-      where: { pinLookup: lookup, active: true },
-      select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, pin: true, preferredLanguage: true },
-    });
-
-    // Finding the row is not authenticating the person: bcrypt still decides. It decides over
-    // pinVerifierInput(candidate), never over the raw candidate — the stored hash is
-    // bcrypt(pinVerifierInput(pin)), so a raw-PIN compare would authenticate no one. Two
-    // independent failures would be needed to admit the wrong operator.
-    if (!byLookup || !(await compare(pinVerifierInput(candidate, secret), byLookup.pin))) {
+    const byLookup = await prisma.employee.findFirst({ where: { pinLookup: pinLookup(candidate, secret), active: true }, select: { id: true, role: true, permissions: true, active: true, pin: true } });
+    // Finding the row is not authenticating the person: bcrypt over pinVerifierInput decides.
+    if (!byLookup || !(await verifySecret(pinVerifierInput(candidate, secret), byLookup.pin))) {
       await recordPinFailure(ipHash, identifierHash);
-      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+      return INVALID();
     }
-
+    if (isPrivilegedStored(byLookup.permissions as string, byLookup.role)) {
+      // Same answer and the same counting as a wrong PIN, so a PIN-only attempt learns nothing.
+      await recordPinFailure(ipHash, identifierHash);
+      await authAudit(request, { userId: byLookup.id, action: "PRIVILEGED_PIN_ONLY_REFUSED", result: "REFUSED", reasonCode: "USERNAME_REQUIRED" });
+      return INVALID();
+    }
     await clearPinAttempts(ipHash, identifierHash);
-    employee = byLookup;
+    return afterFirstFactor(request, byLookup.id, "PIN");
+  }
 
-  } else if (method === "password") {
-    if (!username || !password) {
-      return NextResponse.json({ error: "Username and password required" }, { status: 400 });
-    }
-    const normalizedUsername = String(username).trim().toLowerCase();
-    const ipHash = hashRateLimitKey(ip);
-    const identifierHash = hashRateLimitKey("pwd:" + normalizedUsername);
+  if (method === "username_pin") {
+    const u = normalizeUsername(username);
+    const shape = validatePin(pin);
+    if (!u || !shape.ok) return NextResponse.json({ error: "Username and PIN required", errorAr: "اسم المستخدم والرمز مطلوبان." }, { status: 400 });
+    // Re-test AUTH-F: one budget per username, shared by username + PIN and username + password.
+    const identifierHash = hashRateLimitKey("login:" + u);
     await pruneExpired();
-    if (await isIpRateLimited(ipHash, 30)) {
-      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
-    }
-    if (await isPairRateLimited(ipHash, identifierHash, 10)) {
-      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
-    }
-    const matched = await prisma.employee.findFirst({
-      where: { OR: [{ username }, { name: username }] },
-      select: { id: true, name: true, role: true, permissions: true, defaultRoute: true, active: true, preferredLanguage: true, password: true },
-    });
-    if (!matched || !matched.active || !matched.password || !(await compare(password, matched.password))) {
+    if (await isIpRateLimited(ipHash, 30)) return TOO_MANY();
+    if (await isPairRateLimited(ipHash, identifierHash, 10)) return TOO_MANY();
+    if (await isIdentifierRateLimited(identifierHash, 20)) return TOO_MANY();
+    const secret = requirePinLookupSecret();
+    const found = (await byUsername(u)) as Found | null;
+    const ok = await verifySecret(pinVerifierInput(shape.pin, secret), found?.pin);
+    if (!found || !ok) {
       await recordFailedAttempt(ipHash, identifierHash);
-      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+      await authAudit(request, { userId: found?.id ?? null, action: "SIGN_IN", result: "FAILURE", reasonCode: "USERNAME_PIN", identifier: "login:" + u });
+      return INVALID();
     }
     await clearAttempts(ipHash, identifierHash);
-    const { password: _pw, ...matchedEmployee } = matched;
-    employee = matchedEmployee;
-  } else {
-    return NextResponse.json({ error: "Invalid login method" }, { status: 400 });
+    return afterFirstFactor(request, found.id, "USERNAME_PIN");
   }
 
-  if (!employee) {
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+  if (method === "password") {
+    const u = normalizeUsername(username);
+    if (!u || typeof password !== "string" || !password) return NextResponse.json({ error: "Username and password required", errorAr: "اسم المستخدم وكلمة المرور مطلوبان." }, { status: 400 });
+    const identifierHash = hashRateLimitKey("login:" + u);
+    await pruneExpired();
+    if (await isIpRateLimited(ipHash, 30)) return TOO_MANY();
+    if (await isPairRateLimited(ipHash, identifierHash, 10)) return TOO_MANY();
+    if (await isIdentifierRateLimited(identifierHash, 20)) return TOO_MANY();
+    // Review item 3: the USERNAME only (unique, normal form). A display name never identifies a login.
+    const found = await byUsername(u);
+    const ok = await verifySecret(password, found?.password);
+    if (!found || !found.password || !ok) {
+      await recordFailedAttempt(ipHash, identifierHash);
+      await authAudit(request, { userId: found?.id ?? null, action: "SIGN_IN", result: "FAILURE", reasonCode: "PASSWORD", identifier: "login:" + u });
+      return INVALID();
+    }
+    await clearAttempts(ipHash, identifierHash);
+    return afterFirstFactor(request, found.id, "PASSWORD");
   }
 
-  let permissions = parsePermissions(employee.permissions as string);
-  if (!permissions || Object.keys(permissions).length === 0) {
-    permissions = buildDefaultPermissions(employee.role);
-  }
-
-  const token = await signToken({
-    id: employee.id,
-    name: employee.name,
-    role: employee.role,
-    permissions,
-    preferredLanguage: (employee.preferredLanguage as "ar" | "en") ?? "ar",
-  });
-
-  const redirectTo = resolveRoute(employee.defaultRoute || "/dashboard", permissions);
-
-  const response = NextResponse.json({
-    user: { id: employee.id, name: employee.name, role: employee.role, permissions },
-    redirectTo,
-  });
-
-  response.cookies.set("token", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 8,
-    path: "/",
-  });
-
-  return response;
+  return NextResponse.json({ error: "Invalid login method" }, { status: 400 });
 }

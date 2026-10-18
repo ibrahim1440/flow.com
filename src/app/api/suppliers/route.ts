@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireModule, requireSub } from "@/lib/auth-server";
+import { requireAnySub, requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 
 export async function GET() {
@@ -15,7 +15,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireSub("inventory", "adjust");
+  // Catalogue maintenance (owner decision, inventory Option A): the receiving duty, or a privileged
+  // adjust holder (gated). Not a stock adjustment: quantities never move here.
+  const { error, user } = await requireAnySub("inventory", ["receive", "adjust"]);
   if (error) return error;
 
   const { name, contact } = await request.json();

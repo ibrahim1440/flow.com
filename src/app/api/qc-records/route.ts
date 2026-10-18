@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 
 export async function GET() {
-  const { error } = await requireSub("qc", "view_records");
+  const { user, error } = await requireSub("qc", "view_records");
   if (error) return error;
+  // F4 / review F-1: QC needs the customer's name, not the contact record.
+  const customerContact = canSeeCustomerContact(user.permissions);
 
   const records = await prisma.qcRecord.findMany({
     orderBy: { date: "desc" },
@@ -13,7 +16,11 @@ export async function GET() {
       employee: { select: { id: true, name: true } },
       batch: {
         include: {
-          orderItem: { include: { order: { include: { customer: true } } } },
+          orderItem: {
+            include: {
+              order: { include: { customer: customerContact ? true : { select: CUSTOMER_NAME_SELECT } } },
+            },
+          },
         },
       },
     },

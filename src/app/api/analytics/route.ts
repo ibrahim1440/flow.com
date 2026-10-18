@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
+import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
 
 function isoWeekStart(date: Date): string {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -11,8 +12,10 @@ function isoWeekStart(date: Date): string {
 }
 
 export async function GET() {
-  const { error } = await requireModule("dashboard");
+  const { user, error } = await requireModule("dashboard");
   if (error) return error;
+  // Owner decision F4: identifiable customer data only with the customer-detail permission.
+  const customerDetail = canSeeCustomerDetail(user.permissions);
 
   const now = new Date();
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -175,7 +178,10 @@ export async function GET() {
       readyToDispatch: readyCount,
     },
     inventoryAlerts,
-    recentActiveOrders,
+    // F4: without the customer-detail permission an open order is its line count, kg and line
+    // states only — no customer, no order number, no id.
+    recentActiveOrders: customerDetail ? recentActiveOrders : recentActiveOrders.map(anonymousOrder),
+    customerDetail,
     qcBatchAlerts,
   });
 }

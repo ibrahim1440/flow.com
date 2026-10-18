@@ -30,8 +30,10 @@ import path from "path";
  *
  * ── What the Report-Only policy allows, and why ────────────────────────────
  * Audited against what the application actually loads:
- *   - style/font from fonts.googleapis.com and fonts.gstatic.com — src/app/layout.tsx:26-29
- *     links the Tajawal stylesheet, which then fetches font files from gstatic.
+ *   - fonts are self-hosted (public/fonts: IBM Plex and Tajawal stylesheets and .woff2), so this
+ *     Report-Only policy's style-src and font-src name no third-party origin. Only the
+ *     Report-Only policy changed with self-hosting: the enforced policy below has no style-src or
+ *     font-src at all and is unchanged.
  *   - img-src data: — the login page renders the configured logo from a base64 data URL
  *     (src/app/login/page.tsx:119), and QR codes are drawn to canvas.
  *   - blob: in img-src and connect-src — exports build files client-side and hand them over
@@ -49,8 +51,8 @@ const CSP_REPORT_ONLY = [
   "object-src 'none'",
   // See above: unsafe-inline here documents today's reality rather than endorsing it.
   "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com data:",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data: blob:",
   "connect-src 'self' blob:",
 ].join("; ");
@@ -88,6 +90,12 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: SECURITY_HEADERS },
+      {
+        // Self-hosted font files live under a versioned path whose file name is the upstream
+        // content id (public/fonts/README.md), so a given URL never changes content.
+        source: "/fonts/:family/:version/:file*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
       {
         // Every API response in this application is per-user operational data. None of it
         // may sit in a shared cache, and none of it should be revalidated from one either.
