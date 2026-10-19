@@ -1,0 +1,117 @@
+/* The A4 business document (DocumentSheet): quotation QP-05 1295:987 / QP-03 1295:754 / EN 1373:791,
+   shared with the tax invoice ZT-04 1284:46933. Measurements are the frame's (794 × 1123, 48 px
+   margins); colours are the Direction 2.1 tokens, with the frame's values as fallbacks so the sheet
+   reads the same outside the shell. Logical properties only: the Arabic sheet is the English one
+   mirrored. */
+.dsh {
+  --dsh-primary: var(--text-primary, #28241a);
+  --dsh-secondary: var(--text-secondary, #4a473d);
+  --dsh-muted: var(--text-muted, #6e6a61);
+  --dsh-rule: var(--border-subtle, #efeadf);
+  --dsh-rule-strong: var(--border-strong, #e3dccb);
+  --dsh-ui: "IBM Plex Sans Arabic", "IBM Plex Sans", "Noto Sans Arabic", system-ui, sans-serif;
+  --dsh-num: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --dsh-mono: "IBM Plex Mono", ui-monospace, monospace;
+  background: var(--surface, #fff);
+  color: var(--dsh-primary);
+  box-shadow: inset 0 0 0 1px var(--dsh-rule);
+  width: 100%;
+  max-width: 794px;
+  min-height: 1123px;
+  margin: 0 auto;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  font: 400 13.5px/22px var(--dsh-ui);
+  text-align: start;
+}
+.dsh[lang="en"] { --dsh-ui: "IBM Plex Sans", "IBM Plex Sans Arabic", "Noto Sans Arabic", system-ui, sans-serif }
+.dsh *, .dsh *::before, .dsh *::after { box-sizing: border-box }
+.dsh-body { flex: 1 0 auto }
+.dsh bdi { unicode-bidi: isolate }
+.dsh .mono { font-family: var(--dsh-mono); font-size: 12.5px; line-height: 23px }
+
+/* Logo row, then seller (start) | title (end). */
+.dsh-logo { display: flex; justify-content: flex-start; margin-bottom: 18px }
+.dsh-logo img { display: block; height: 54px; width: auto }
+.dsh-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px 24px }
+.dsh-seller { font-style: normal; display: flex; flex-direction: column; max-width: 360px; color: var(--dsh-secondary) }
+.dsh-seller b { font-weight: 600; color: var(--dsh-primary) }
+.dsh-seller .n { font-family: var(--dsh-num) }
+.dsh-title { display: flex; flex-direction: column; text-align: end; width: 250px; flex: none; color: var(--dsh-secondary) }
+.dsh-title h1 { margin: 0; font: 600 18px/25.2px var(--dsh-ui); color: var(--dsh-primary) }
+.dsh-title .alt { font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", sans-serif }
+.dsh-title .alt[lang="en"] { font-family: var(--dsh-num) }
+
+/* Banner: «مسودة — غير صادر» (warning), a superseded document (danger). */
+.dsh-banner { margin-top: 15px; padding: 12px 14px; border-radius: 10px; display: flex; flex-direction: column; gap: 2px; background: var(--status-warning-tint, #fbf2da); break-inside: avoid }
+.dsh-banner b { font: 600 18px/25.2px var(--dsh-ui); color: var(--dsh-primary) }
+.dsh-banner span { color: var(--dsh-secondary) }
+.dsh-banner.danger { background: var(--status-danger-tint, #fcebe8) }
+.dsh-banner.danger b { color: var(--status-danger, #b42318) }
+
+.dsh-rule { border: 0; border-top: 1px solid var(--dsh-rule); margin: 19px 0 16px }
+
+/* Label / value lists: a 132 px label column. */
+.dsh-props { margin: 0; display: grid; gap: 11px }
+.dsh-props > div { display: flex; gap: 12px; align-items: baseline }
+.dsh-props dt { flex: none; width: 132px; color: var(--dsh-muted) }
+.dsh-props dd { margin: 0; flex: 1; min-width: 0; color: var(--dsh-primary); overflow-wrap: anywhere }
+.dsh-props .mu dd { color: var(--dsh-muted) }
+.dsh-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px 24px; margin-bottom: 22px }
+.dsh-meta-start { width: 340px; max-width: 50% }
+.dsh-meta-end { width: 330px; max-width: 50% }
+
+/* Lines. */
+.dsh-lines { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 22px }
+.dsh-lines th { font: 500 12.5px/22px var(--dsh-ui); color: var(--dsh-muted); text-align: start; height: 36px; padding: 0 12px; border-bottom: 1px solid var(--dsh-rule-strong); white-space: nowrap; vertical-align: middle }
+.dsh-lines td { height: 40px; padding: 0 12px; border-bottom: 1px solid var(--dsh-rule); vertical-align: middle; white-space: nowrap }
+.dsh-lines tr > :first-child { padding-inline-start: 0 }
+.dsh-lines tr > :last-child { padding-inline-end: 0 }
+.dsh-lines .num { text-align: end; font-family: var(--dsh-num); font-variant-numeric: tabular-nums }
+.dsh-lines th.num { font-family: var(--dsh-ui) }
+.dsh-lines td .m, .dsh-lines td .s { display: block }
+.dsh-lines td .s { font-size: 12.5px; line-height: 18px; color: var(--dsh-muted); margin-top: 2px }
+.dsh-lines td.mu { color: var(--dsh-muted); font-family: var(--dsh-num) }
+.dsh-lines td.description { white-space: normal; width: 34%; min-width: 150px }
+.dsh-lines td.quantity .m { font-family: var(--dsh-ui) }
+.dsh-lines thead { display: table-header-group }
+.dsh-lines tr { break-inside: avoid }
+
+/* Totals box (end side): label at the start, amount at the end; a rule; the grand total. */
+.dsh-totals { width: 300px; max-width: 100%; margin: 18px 0 0; margin-inline-start: auto; display: grid; gap: 8px; font-size: 14px; color: var(--dsh-secondary); break-inside: avoid }
+.dsh-totals > div { display: flex; justify-content: space-between; gap: 8px }
+.dsh-totals dt { white-space: nowrap }
+.dsh-totals dd { margin: 0; font-family: var(--dsh-num); font-variant-numeric: tabular-nums; white-space: nowrap }
+.dsh-totals .g { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--dsh-rule); font-weight: 600; color: var(--dsh-primary) }
+
+.dsh-notes, .dsh-bank { break-inside: avoid }
+.dsh-notes { margin-top: 25px }
+.dsh-notes h2, .dsh-bank h2 { margin: 0; font: 500 12.5px/22px var(--dsh-ui); color: var(--dsh-muted) }
+.dsh-notes p { margin: 4px 0 0; white-space: pre-wrap; line-height: 28px }
+.dsh-bank { margin-top: 18px }
+.dsh-bank .dsh-props { margin-top: 2px; width: 420px; max-width: 100% }
+
+/* Screen footer. */
+.dsh-foot { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--dsh-rule); color: var(--dsh-muted); font-size: 12.5px; line-height: 22px }
+.dsh-foot p { margin: 0 0 8px }
+.dsh-foot div { display: flex; justify-content: space-between; gap: 12px }
+.dsh-foot .mono { font-size: 12.5px; line-height: 22px }
+
+@media (max-width: 767.98px) {
+  .dsh { padding: 24px 16px; min-height: 0 }
+  .dsh-head, .dsh-meta { flex-direction: column }
+  .dsh-title { text-align: start; width: auto }
+  .dsh-meta-start, .dsh-meta-end { width: 100%; max-width: none }
+  .dsh-props dt { width: 110px }
+  .dsh-lines { display: block; overflow-x: auto }
+}
+
+@media print {
+  .dsh { box-shadow: none; padding: 0; min-height: 0; max-width: none; width: auto; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact }
+  /* A little tighter than the 48 px frame margins, so a full one-page quotation (seller, customer
+     address and VAT, a two-line draft notice, notes and bank details) stays on one sheet. */
+  .dsh-logo img { height: 46px }
+  /* The running footer is drawn in the page margin on every sheet (DocumentSheet). */
+  .dsh-foot { display: none }
+}

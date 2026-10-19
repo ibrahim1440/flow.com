@@ -5,6 +5,8 @@ import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import { Printer, FileText } from "lucide-react";
 import { usePrintCertified } from "@/components/print/Certification";
+// The stored unit, as the frames write it («800 عبوة»); the printed document uses the same labels.
+import { UNIT_LABELS } from "@/lib/print/quote-document";
 import {
   useLang, pick, Spinner, Button, Field, TextArea, Modal, api,
   QUOTE_STATUS_SPECS, num, formatDay, formatMoney,
@@ -22,9 +24,10 @@ import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
  * 390 1233:24180): header with its facts and actions, the discount band, the lines at the start
  * and the totals, facts and revision chain at the end.
  *
- * Visual port only: the requests, payloads, the local preview arithmetic and every condition
- * that decides which action is offered are the ones this screen already had. What the frames
- * draw and the system does not have (notes to the customer) is not built.
+ * The requests, payloads, the local preview arithmetic and every condition that decides which
+ * action is offered are the server's. Batch "Sales" track A added the notes to the customer
+ * (printed on the document; no effect on any amount) and the discount-approval decision on a
+ * draft (approve / refuse, POST …/discount-approval), with the threshold in force from Settings.
  *
  * ── The totals shown here are the server's ──
  * The figures beside the lines are computed locally so typing feels immediate, and they are
@@ -71,6 +74,8 @@ type Quote = {
   rejectedAt: string | null;
   rejectionNote: string | null;
   discountApprovedAt: string | null;
+  discountRejectionNote: string | null;
+  customerNotes: string | null;
   createdAt: string;
   supersedes: { id: string; quoteNumber: string; revision: number } | null;
   supersededBy: { id: string; quoteNumber: string; revision: number; status: string } | null;
@@ -89,23 +94,20 @@ type Quote = {
     lineTax: string;
     lineTotal: string;
     position: number;
-    productSku: { id: string; skuCode: string; name: string | null; unitOfMeasure: string; price: number } | null;
+    productSku: { id: string; skuCode: string; name: string | null; nameAr: string | null; unitOfMeasure: string; price: number } | null;
   }[];
   orderLinks: { id: string; isFirstOrder: boolean; order: { id: string; orderNumber: number; status: string } }[];
 };
 
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
-type Can = { write: boolean; approveDiscount: boolean; createOrder: boolean; close: boolean };
+type Can = { write: boolean; approveDiscount: boolean; approveThisDiscount: boolean; createOrder: boolean; close: boolean };
+type DiscountInfo = { state: "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED"; approvedBy: string | null; rejectedBy: string | null };
+/** The lines as frozen at issue (`issuedSnapshot.lines`): the names the customer was sent. */
+type SnapLine = { position: number; name: string | null; nameAr: string | null; description: string | null };
 
 /** Quote status → the reference status dot (`.st` + tone), as on the list. */
 const STATUS_DOT: Record<string, string> = {
   ISSUED: "in", ACCEPTED: "ok", REJECTED: "er", EXPIRED: "wa", SUPERSEDED: "x",
-};
-/** The stored unit, as the frames write it («800 عبوة»). The value sent is unchanged. */
-const UNIT_LABELS: Record<string, { en: string; ar: string }> = {
-  KG: { en: "kg", ar: "كغ" },
-  UNIT: { en: "pack", ar: "عبوة" },
-  GRAM: { en: "g", ar: "غ" },
 };
 
 const emptyLine = (): Line => ({
@@ -154,6 +156,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [state, setState] = useState<State | null>(null);
   const [can, setCan] = useState<Can | null>(null);
   const [threshold, setThreshold] = useState("10");
+  const [discount, setDiscount] = useState<DiscountInfo | null>(null);
+  const [notes, setNotes] = useState("");
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const [skus, setSkus] = useState<Sku[]>([]);
 
   const [lines, setLines] = useState<Line[]>([]);
@@ -181,7 +187,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     let cancelled = false;
     (async () => {
     const res = await api<{
-      quote: Quote; state: State; can: Can; discountThresholdPercent: string;
+      quote: Quote; state: State; can: Can; discountThresholdPercent: string; discount: DiscountInfo;
     }>(`/api/sales/quotes/${id}`);
     if (cancelled) return;
     if (res.ok) {
@@ -189,6 +195,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       setState(res.data.state);
       setCan(res.data.can);
       setThreshold(res.data.discountThresholdPercent);
+      setDiscount(res.data.discount);
+      setNotes(res.data.quote.customerNotes ?? "");
       setValidUntil(res.data.quote.validUntil?.slice(0, 10) ?? "");
       setLines(
         res.data.quote.lines.map((l) => ({
@@ -283,7 +291,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     setError("");
     const res = await api<{ totals: Record<string, string>; needsDiscountApproval: boolean; notice: string | null }>(
       `/api/sales/quotes/${id}`,
-      { method: "PUT", body: { lines, validUntil: validUntil || null } },
+      { method: "PUT", body: { lines, validUntil: validUntil || null, customerNotes: notes } },
     );
     setBusy(false);
     if (!res.ok) {
@@ -316,6 +324,22 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           ? ar ? "سُجّل قبول العميل." : "Acceptance recorded."
           : ar ? "تم التحديث." : "Updated.",
     );
+    reload();
+  }
+
+  /** Approve or refuse the draft's discount (discount approvers; POST …/discount-approval). */
+  async function decideDiscount(decision: "APPROVE" | "REJECT") {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const res = await api<{ state: string }>(`/api/sales/quotes/${id}/discount-approval`, {
+      method: "POST", body: { decision, note: decision === "REJECT" ? rejectReason : undefined },
+    });
+    setBusy(false);
+    if (!res.ok) { setError(res.data.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that.")); return; }
+    setRejecting(false);
+    setRejectReason("");
+    setSuccess(decision === "APPROVE" ? (ar ? "اعتُمد الخصم. يمكن إصدار العرض الآن." : "Discount approved. The quotation can be issued now.") : (ar ? "رُفض الخصم وأُبلغ المندوب بالسبب." : "Discount refused; the rep sees the reason."));
     reload();
   }
 
@@ -400,13 +424,19 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     ...(quote.validUntil ? [<span key="valid">{ar ? "صالح حتى " : "Valid until "}{shortDate(quote.validUntil, lang)}</span>] : []),
     ...(state.expired && quote.status === "ISSUED" ? [<span key="lapsed" className="flag wa">{ar ? "انتهت الصلاحية" : "Lapsed"}</span>] : []),
     ...(quote.discountApprovedAt ? [<span key="disc" className="flag ok">{ar ? "خصم معتمد" : "Discount approved"}</span>] : []),
+    ...(quote.status === "DRAFT" && !dirty && discount?.state === "PENDING" ? [<span key="disc-p" className="flag wa" data-testid="quote-discount-flag">{ar ? "يحتاج اعتماد خصم" : "Needs discount approval"}</span>] : []),
     ...(dirty && editable ? [<span key="dirty" className="flag wa" role="status">{ar ? "تغييرات غير محفوظة" : "Unsaved changes"}</span>] : []),
   ];
 
   // ── Actions, in the frame's order: the secondary ones first, the page's primary last. ──
-  const issueLabel = needsApproval && can.approveDiscount
+  // The server's verdict on the saved figures; while lines are unsaved, the local preview's.
+  const dState = dirty ? (needsApproval ? "PENDING" : "NOT_NEEDED") : (discount?.state ?? "NOT_NEEDED");
+  const waiting = dState === "PENDING" || dState === "REJECTED";
+  const issueLabel = waiting && can.approveThisDiscount
     ? (ar ? "اعتماد الخصم وإصدار العرض" : "Approve discount and issue")
     : (ar ? "إصدار العرض" : "Issue");
+  // A rep cannot issue past an undecided discount (the server refuses with 403): said, not offered.
+  const issueBlocked = waiting && !can.approveThisDiscount;
   const saveBtn = editable ? (
     <button type="button" className="btn" onClick={save} disabled={busy || lines.length === 0} data-testid="save-quote">
       {ar ? "حفظ" : "Save"}
@@ -416,8 +446,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     <button
       type="button"
       className="btn p"
-      disabled={busy || dirty || lines.length === 0}
-      title={dirty ? (ar ? "احفظ أولاً" : "Save first") : undefined}
+      disabled={busy || dirty || lines.length === 0 || issueBlocked}
+      title={dirty ? (ar ? "احفظ أولاً" : "Save first") : issueBlocked ? (ar ? "بانتظار اعتماد الخصم" : "Waiting for discount approval") : undefined}
       onClick={() => transition("ISSUED")}
       data-testid="issue-quote"
     >
@@ -453,27 +483,90 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
     </Link>
   ) : null;
-  const docLink = quote.issuedSnapshot != null ? <QuoteDocumentLink id={quote.id} ar={ar} /> : null;
+  // Every quotation has its document: an issued one its frozen snapshot, a draft its saved lines
+  // under the «مسودة — غير صادر» banner (owner decision D-3).
+  const docLink = <QuoteDocumentLink id={quote.id} ar={ar} />;
 
   // ── Blocks ──
-  const discountBand = editable && needsApproval ? (
-    <div className="callout wa" role="note" data-testid="discount-approval-notice">
-      <span>
-        <b>
-          {can.approveDiscount
-            ? (ar ? "الخصم فوق الحدّ — اعتمادك مطلوب." : "Discount above the limit — your approval is required.")
-            : (ar ? "الخصم يتجاوز صلاحيتك — يحتاج اعتماداً." : "The discount is beyond your authority — it needs approval.")}
-        </b>{" "}
-        {ar
-          ? `الخصم الفعّال ${preview.discountPercent.toFixed(2)}% وحدّ الاعتماد ${threshold}%، ` +
-            (can.approveDiscount
-              ? "والإصدار يسجّل اعتمادك على العرض."
-              : "والإصدار يُرفض حتى يصدره مديرٌ لديه صلاحية اعتماد الخصم؛ العرض يبقى مسودة.")
-          : `The effective discount is ${preview.discountPercent.toFixed(2)}% against a ${threshold}% limit; ` +
-            (can.approveDiscount
-              ? "issuing records your approval."
-              : "issuing is refused until a manager with discount approval does it, and the quotation stays a draft.")}
-      </span>
+  const discountBand = quote.status === "DRAFT" && dState !== "NOT_NEEDED" ? (
+    dState === "APPROVED" ? (
+      <p className="notice ok" style={{ marginBottom: 18 }} data-testid="discount-approved-notice">
+        {ar ? "اعتُمد الخصم" : "Discount approved"}
+        {discount?.approvedBy && <> · {discount.approvedBy}</>}
+        {ar ? " — يمكن إصدار العرض. أي تعديل على البنود يُلغي الاعتماد." : " — the quotation can be issued. Any change to the lines withdraws the approval."}
+      </p>
+    ) : (
+      <div className="callout wa q-approval" role="note" data-testid="discount-approval-notice">
+        <span>
+          {dState === "REJECTED" ? (
+            <>
+              <b>{ar ? "رُفض الخصم" : "Discount refused"}{discount?.rejectedBy && <> · {discount.rejectedBy}</>}.</b>{" "}
+              {quote.discountRejectionNote && <><bdi>{quote.discountRejectionNote}</bdi>{" "}</>}
+              {ar ? "عدّل الخصم ثم احفظ لطلب الاعتماد من جديد." : "Change the discount and save to ask again."}
+            </>
+          ) : (
+            <>
+              <b>
+                {can.approveThisDiscount
+                  ? (ar ? "الخصم فوق الحدّ — اعتمادك مطلوب." : "Discount above the limit — your approval is required.")
+                  : (ar ? "الخصم فوق الحدّ — يحتاج اعتماد خصم." : "Discount above the limit — it needs discount approval.")}
+              </b>{" "}
+              {ar
+                ? `الخصم الفعّال ${preview.discountPercent.toFixed(2)}% وحدّ الاعتماد ${threshold}%، ` +
+                  (can.approveThisDiscount
+                    ? "والإصدار يسجّل اعتمادك على العرض."
+                    : "ويبقى العرض مسودة حتى يعتمده مديرٌ لديه صلاحية اعتماد الخصم.")
+                : `The effective discount is ${preview.discountPercent.toFixed(2)}% against a ${threshold}% limit; ` +
+                  (can.approveThisDiscount
+                    ? "issuing records your approval."
+                    : "the quotation stays a draft until a manager with discount approval approves it.")}
+            </>
+          )}
+        </span>
+        {!dirty && can.approveThisDiscount && !rejecting && (
+          <span className="q-approval-acts">
+            <button type="button" className="btn sm" disabled={busy} onClick={() => decideDiscount("APPROVE")} data-testid="approve-discount">
+              {ar ? "اعتماد الخصم فقط" : "Approve the discount only"}
+            </button>
+            {dState === "PENDING" && (
+              <button type="button" className="btn sm g" disabled={busy} onClick={() => setRejecting(true)} data-testid="reject-discount">
+                {ar ? "رفض الخصم" : "Refuse the discount"}
+              </button>
+            )}
+          </span>
+        )}
+        {rejecting && (
+          <span className="q-approval-acts" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <label className="lbl" htmlFor="q-reject-reason" style={{ fontWeight: 400 }}>{ar ? "سبب الرفض (يراه المندوب)" : "Reason (the rep sees it)"}</label>
+            <textarea id="q-reject-reason" className="q-notes" rows={2} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+            <span style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="btn sm" disabled={busy || rejectReason.trim().length < 2} onClick={() => decideDiscount("REJECT")} data-testid="confirm-reject-discount">
+                {ar ? "تأكيد الرفض" : "Confirm"}
+              </button>
+              <button type="button" className="btn sm g" onClick={() => setRejecting(false)}>{ar ? "إلغاء" : "Cancel"}</button>
+            </span>
+          </span>
+        )}
+      </div>
+    )
+  ) : null;
+
+  /* Notes to the customer (Figma 1230:121651 «ملاحظات للعميل · تظهر في المطبوع»): free text on
+     the draft, printed on the document, frozen at issue. They change no amount and no tax. */
+  const notesBlock = editable ? (
+    <div className="q-notes-block">
+      <label htmlFor="q-cust-notes" className="q-notes-l">
+        <b>{ar ? "ملاحظات للعميل · تظهر في المطبوع" : "Notes to the customer · printed on the document"}</b>{" "}
+        <span>{ar ? "(اختياري)" : "(optional)"}</span>
+      </label>
+      <textarea id="q-cust-notes" className="q-notes" rows={3} maxLength={2000} value={notes} data-testid="customer-notes"
+        onChange={(e) => { setNotes(e.target.value); setDirty(true); }} aria-describedby="q-cust-notes-h" />
+      <span id="q-cust-notes-h" className="q-note">{ar ? "لا تغيّر المبالغ أو الضريبة" : "They change no amount and no tax"}</span>
+    </div>
+  ) : quote.customerNotes ? (
+    <div className="q-notes-block" data-testid="customer-notes-readonly">
+      <span className="q-notes-l"><b>{ar ? "ملاحظات للعميل" : "Notes to the customer"}</b></span>
+      <p className="q-notes-ro"><bdi>{quote.customerNotes}</bdi></p>
     </div>
   ) : null;
 
@@ -648,6 +741,13 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   /* A quotation that can no longer be edited is a record, not a form, and its figures are the
      SERVER's, not the local recompute the editor previews with. */
+  const snapLines = ((quote.issuedSnapshot as { lines?: SnapLine[] } | null)?.lines ?? []);
+  /** The product's name as frozen at issue (Arabic in the Arabic UI), else the catalogue's. */
+  const lineName = (l: Quote["lines"][number]) => {
+    const sn = snapLines.find((x) => x.position === l.position);
+    if (sn) return (ar ? sn.nameAr : null) ?? sn.name ?? sn.description ?? "—";
+    return (ar ? l.productSku?.nameAr : null) ?? l.productSku?.name ?? l.description ?? "—";
+  };
   const readTable = (
     <div className="q-scroll">
       <table className="t q-lines" style={{ minWidth: 640 }} data-testid="quote-lines-readonly">
@@ -665,7 +765,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           {quote.lines.map((l) => (
             <tr key={l.id} data-testid={`ro-line-${l.position}`}>
               <td className="prod">
-                <b>{l.productSku?.name ?? l.description ?? "—"}</b>
+                <b><bdi>{lineName(l)}</bdi></b>
                 {l.productSku && <span className="id">{l.productSku.skuCode}</span>}
               </td>
               <td><bdi className="n">{num(Number(l.quantity), lang)}</bdi> {unitLabel(l.unit)}</td>
@@ -832,7 +932,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
       </Link>,
     );
-    if (quote.issuedSnapshot != null) moreItems.push(
+    moreItems.push(
       <Link key="doc" role="menuitem" href={`/dashboard/sales/quotes/${quote.id}/print`} data-testid="open-print">
         {ar ? "مستند العرض" : "Quotation document"}
       </Link>,
@@ -850,7 +950,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           };
         })
       : quote.lines.map((l) => ({
-          key: l.id, name: l.productSku?.name ?? l.description ?? "—",
+          key: l.id, name: lineName(l),
           qty: l.quantity, unit: l.unit, price: l.unitPrice, disc: l.discountPercent, tax: l.taxRatePercent,
           total: formatMoney(l.lineTotal),
         }));
@@ -886,6 +986,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           </div>
         )}
         {editingHere && phoneRows.length === 0 && <div style={{ marginTop: 16 }}>{facts}</div>}
+        {(editingHere || !editable) && notesBlock}
         <dl className="phrows" data-testid="quote-totals">
           {(editable || hasDiscount) ? (
             <>
@@ -957,6 +1058,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           {linesHeader}
           {(editable ? lines.length === 0 : quote.lines.length === 0) ? emptyLines : editable ? editTable : readTable}
           {issuedNote}
+          {notesBlock}
         </section>
         <aside className="q-side">
           {totals}

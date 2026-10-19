@@ -20,6 +20,22 @@ export function seesAllSales(permissions: Permissions | Record<string, unknown>)
   return hasSubPrivilege(permissions as Permissions, "sales", "lead_assign");
 }
 
+/**
+ * Who may read the TEAM's sales reports (GET /api/sales/reports, the «تقارير المبيعات» tab) —
+ * owner decision, batch Sales B: the sales manager and the admin, never a rep.
+ *
+ * `lead_assign` is the existing permission that marks a sales manager: it is the one that
+ * already lets somebody see every rep's leads, deals and quotations (`seesAllSales`). There is
+ * no reports-specific permission, and inventing one would leave every current manager without
+ * the reports until somebody granted it. The admin role passes whatever its stored document
+ * says (with SIMPLE MODE on it holds every permission anyway).
+ *
+ * Pure, so the screen asks the same question the endpoint does.
+ */
+export function seesTeamReports(permissions: Permissions | Record<string, unknown>, role: string | null | undefined): boolean {
+  return role === "admin" || seesAllSales(permissions);
+}
+
 /** A Prisma `where` fragment scoping by owner, or `{}` for someone who sees everything. */
 export function ownerScope(
   permissions: Permissions | Record<string, unknown>,

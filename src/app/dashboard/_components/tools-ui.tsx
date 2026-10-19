@@ -1,8 +1,9 @@
 "use client";
 // Shared pieces of the «tools» screens of UI batch 2 (analytics, history, organisation settings,
 // automation & WhatsApp), on the Direction 2.1 operations scope. Presentation only: no request,
-// permission or data rule lives here. The settings sub-navigation lists only pages that exist
-// and that the viewer may open (the same `routeAllowed` the shell uses).
+// permission or data rule lives here. The settings sub-navigation links only pages that exist
+// and that the viewer may open (the same `routeAllowed` the shell uses); a frame section with
+// no page is drawn disabled, never as a link.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -19,32 +20,44 @@ export function useViewer(): Viewer | null {
   return user ? { permissions: user.permissions, role: user.role } : null;
 }
 
-type SettingsLink = { href: string; ar: string; en: string; icon: D21IconName; also?: string[] };
-// F-P01 / E-P01 «عام · التشغيل · المبيعات · المالية · الأتمتة». The operations and finance
-// settings pages of the frame (production & roasting, inventory, products, invoicing & tax) do
-// not exist yet, so they are not listed.
+type SettingsLink = { href: string | null; ar: string; en: string; icon: D21IconName; also?: string[] };
+// F-P01 / E-P01 / A-P08 «عام · التشغيل · المبيعات · المالية · الأتمتة» (gx.py SNAV). A section of
+// the frame with no settings page yet (production & roasting, inventory, products, invoicing &
+// tax) has `href: null`: it is drawn disabled with «قريباً», links nowhere, and is shown only to
+// somebody who may open the organisation settings — the people those settings would be for.
 const SETTINGS_NAV: { ar: string; en: string; items: SettingsLink[] }[] = [
   { ar: "عام", en: "General", items: [
     { href: "/dashboard/settings", ar: "المنشأة", en: "Organisation", icon: "home" },
     { href: "/dashboard/employees", ar: "المستخدمون والصلاحيات", en: "Users & permissions", icon: "users" },
   ] },
+  { ar: "التشغيل", en: "Operations", items: [
+    { href: null, ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame" },
+    { href: null, ar: "المخزون", en: "Inventory", icon: "box" },
+    { href: null, ar: "المنتجات", en: "Products", icon: "cup" },
+  ] },
   { ar: "المبيعات", en: "Sales", items: [
     { href: "/dashboard/sales/settings", ar: "المبيعات", en: "Sales", icon: "deal" },
+  ] },
+  { ar: "المالية", en: "Finance", items: [
+    { href: null, ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: "invoice" },
   ] },
   { ar: "الأتمتة", en: "Automation", items: [
     { href: "/dashboard/automation", ar: "الأتمتة والواتساب", en: "Automation & WhatsApp", icon: "bell", also: ["/dashboard/automation/"] },
   ] },
 ];
 
-function SettingsNav() {
+/** The settings hub's navigation (1440 only): the pages this viewer may open, and the frame's
+ *  sections without a page yet as disabled «قريباً» rows (organisation-settings viewers only). */
+export function SettingsNav() {
   const pathname = usePathname() ?? "";
   const viewer = useViewer();
   const { lang } = useI18n();
   const ar = lang === "ar";
   if (!viewer) return null;
+  const owner = routeAllowed(viewer, "/dashboard/settings");
   const groups = SETTINGS_NAV
-    .map((g) => ({ ...g, items: g.items.filter((i) => routeAllowed(viewer, i.href)) }))
-    .filter((g) => g.items.length > 0);
+    .map((g) => ({ ...g, items: g.items.filter((i) => (i.href ? routeAllowed(viewer, i.href) : owner)) }))
+    .filter((g) => g.items.some((i) => i.href) || (owner && g.items.length > 0));
   return (
     <nav className="tl-snav" aria-label={ar ? "الإعدادات" : "Settings"} data-testid="settings-nav">
       {groups.map((g) => (
@@ -52,6 +65,17 @@ function SettingsNav() {
           <h3>{ar ? g.ar : g.en}</h3>
           <ul>
             {g.items.map((i) => {
+              if (!i.href) {
+                return (
+                  <li key={i.en}>
+                    <span className="tl-snav-soon" aria-disabled="true" data-testid="settings-nav-soon">
+                      <Ico name={i.icon} small />
+                      <span>{ar ? i.ar : i.en}</span>
+                      <em>{ar ? "قريباً" : "Soon"}</em>
+                    </span>
+                  </li>
+                );
+              }
               const current = pathname === i.href || (i.also ?? []).some((p) => pathname.startsWith(p));
               return (
                 <li key={i.href}>

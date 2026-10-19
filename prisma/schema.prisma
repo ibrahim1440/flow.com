@@ -561,6 +561,30 @@ model CuppingScore {
 model SystemConfig {
   id         String  @id @default("singleton")
   logoBase64 String? @db.Text
+
+  // ─── Quotations (additive, migration 20261021090000_sales_quotes) ─────────────────────
+  /// Discount (percent of the subtotal) above which issuing a quotation needs approval by a
+  /// holder of sales › quote_approve_discount. NULL = not set by the owner: the built-in policy
+  /// value (DISCOUNT_APPROVAL_THRESHOLD, 10%) applies, exactly as before this column existed.
+  /// CHECK 0–60 (DISCOUNT_MAX, the hard ceiling no approval passes).
+  quoteDiscountApprovalPercent Decimal? @db.Decimal(5, 2)
+  /// The seller block of the quotation document. All optional; an empty field is not printed.
+  sellerLegalNameAr            String?
+  sellerLegalNameEn            String?
+  sellerAddressAr              String?
+  sellerAddressEn              String?
+  /// VAT registration number (15 digits, starts and ends with 3; validated by the API).
+  sellerVatNumber              String?
+  /// Commercial registration number (digits; validated by the API).
+  sellerCrNumber               String?
+  sellerPhone                  String?
+  /// Bank transfer details printed on the quotation («بيانات التحويل البنكي»). All optional; the
+  /// section is not printed while all three are empty. Frozen into the issued snapshot with the
+  /// seller block.
+  sellerBankName               String?
+  sellerBankAccountName        String?
+  /// Saudi IBAN, stored normalised: «SA» + 22 digits, no spaces (validated by the API).
+  sellerIban                   String?
 }
 
 model CustomerRoastPreference {
@@ -2046,6 +2070,19 @@ model Quote {
   discountApprovedById String?
   discountApprovedAt   DateTime?
 
+  // ─── Quotations batch (additive, migration 20261021090000_sales_quotes) ───────────────
+  /// The effective discount (percent) the approval above covered. An approval given on a draft
+  /// is cleared whenever the lines are saved with different figures, so it never covers a
+  /// discount nobody approved.
+  discountApprovedPercent Decimal?  @db.Decimal(9, 6)
+  /// A refused discount request on a draft: who, when and why. Cleared when the lines change.
+  discountRejectedById    String?
+  discountRejectedAt      DateTime?
+  discountRejectionNote   String?
+  /// Notes to the customer, printed on the quotation document (Figma 1230:121651). They change
+  /// no amount or tax. Editable on a draft only; frozen into the snapshot at issue.
+  customerNotes           String?
+
   lines      QuoteLine[]
   orderLinks OpportunityOrder[]
 
@@ -2056,6 +2093,27 @@ model Quote {
 
   @@index([opportunityId, status])
   @@index([customerId])
+  @@index([status, createdAt])
+}
+
+/// Append-only record of the quotation decisions and settings that matter for control:
+/// DISCOUNT_APPROVED / DISCOUNT_REJECTED on a quotation, and QUOTE_SETTINGS_UPDATED (the
+/// discount threshold and the seller block). No foreign keys on purpose (audit convention): a
+/// discarded draft keeps its trail. Written by the application only; never updated or deleted.
+model SalesQuoteAudit {
+  id          String   @id @default(cuid())
+  action      String
+  quoteId     String?
+  quoteNumber String?
+  actorId     String?
+  actorName   String?
+  /// The figures the decision was taken on (effective discount, threshold, totals, note) or the
+  /// settings before / after.
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([quoteId, createdAt])
+  @@index([action, createdAt])
 }
 
 model QuoteLine {

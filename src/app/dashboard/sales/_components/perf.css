@@ -81,3 +81,13 @@
 /* The chip's select is as wide as the month it shows. */
 .d21 .perf-chip select { field-sizing: content }
 @media (max-width: 767.98px) { .d21 .bh { flex-wrap: wrap; row-gap: 2px } }
+
+/* Sales settings: the discount-threshold input (batch "Sales", track A). */
+.d21 .q-set-input { width: 200px; height: 34px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface); font: 400 13.5px/1 var(--f-num); color: var(--text-primary) }
+.d21 .q-set-input:focus { outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: var(--focus-ring) }
+
+/* «أهدافي وعمولاتي»: the month's target progress between the statement and the accruals. */
+.d21 .perf-target { display: grid; gap: 8px; margin: 0 0 28px; max-width: 760px }
+.d21 .perf-target .lbl { font-size: 13px; color: var(--text-secondary) }
+.d21 .perf-target-cap { display: flex; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted) }
+.d21 .pf-drill { font-size: 13px; font-weight: 500 }

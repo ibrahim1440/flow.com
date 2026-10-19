@@ -43,6 +43,36 @@ export default function SettingsPage() {
       .catch(() => {});
   }, []);
 
+  // ── The quotation document's seller block (batch "Sales", track A; GET/PUT /api/settings/quotation:
+  //    admin role, step-up; each change audited in SalesQuoteAudit). Empty fields are not printed. ──
+  const SELLER_KEYS = ["sellerLegalNameAr", "sellerLegalNameEn", "sellerAddressAr", "sellerAddressEn", "sellerVatNumber", "sellerCrNumber", "sellerPhone", "sellerBankName", "sellerBankAccountName", "sellerIban"] as const;
+  type SellerKey = (typeof SELLER_KEYS)[number];
+  const [seller, setSeller] = useState<Record<SellerKey, string>>(() => Object.fromEntries(SELLER_KEYS.map((k) => [k, ""])) as Record<SellerKey, string>);
+  const [sellerSaving, setSellerSaving] = useState(false);
+  const [sellerMsg, setSellerMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/settings/quotation")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.seller) setSeller(Object.fromEntries(SELLER_KEYS.map((k) => [k, d.seller[k] ?? ""])) as Record<SellerKey, string>); })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  async function saveSeller(e: React.FormEvent) {
+    e.preventDefault();
+    setSellerSaving(true);
+    setSellerMsg(null);
+    try {
+      const res = await fetch("/api/settings/quotation", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(seller) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setSellerMsg({ ok: false, text: L(j.error ?? "تعذّر الحفظ.", j.errorEn ?? j.error ?? "Could not save.") }); return; }
+      setSeller(Object.fromEntries(SELLER_KEYS.map((k) => [k, j.seller?.[k] ?? ""])) as Record<SellerKey, string>);
+      setSellerMsg({ ok: true, text: L("حُفظت بيانات المنشأة وستظهر في عروض الأسعار التي تصدر من الآن.", "Saved. Quotations issued from now on carry these details.") });
+    } catch {
+      setSellerMsg({ ok: false, text: L("تعذّر الحفظ.", "Could not save.") });
+    } finally {
+      setSellerSaving(false);
+    }
+  }
+
   // ── Cupping close policy (E6, admin only; the API enforces role and range) ──
   const [minScorers, setMinScorers] = useState("");
   const [cupSaving, setCupSaving] = useState(false);
@@ -288,6 +318,51 @@ export default function SettingsPage() {
               </div>
             </div>
             {msgNotice(logoMsg)}
+          </Sec>
+
+          {/* The seller block of the quotation document */}
+          <Sec title={L("بيانات المنشأة في المستندات", "Company details on documents")} caption={L("الاسم النظامي والعنوان والرقم الضريبي والسجل التجاري وبيانات التحويل البنكي · تُطبع في عرض السعر وتُثبَّت عند الإصدار", "Legal name, address, VAT and CR numbers, bank transfer details · printed on the quotation, frozen at issue")} testId="seller-section">
+            <form onSubmit={saveSeller} noValidate className="hr-form">
+              <Field label={L("الاسم النظامي (عربي)", "Legal name (Arabic)")}>
+                <input className="hr-input" value={seller.sellerLegalNameAr} maxLength={160} onChange={(e) => setSeller({ ...seller, sellerLegalNameAr: e.target.value })} data-testid="seller-name-ar" />
+              </Field>
+              <Field label={L("الاسم النظامي (إنجليزي)", "Legal name (English)")}>
+                <input className="hr-input" dir="ltr" value={seller.sellerLegalNameEn} maxLength={160} onChange={(e) => setSeller({ ...seller, sellerLegalNameEn: e.target.value })} data-testid="seller-name-en" />
+              </Field>
+              <Field label={L("العنوان (عربي)", "Address (Arabic)")}>
+                <input className="hr-input" value={seller.sellerAddressAr} maxLength={300} onChange={(e) => setSeller({ ...seller, sellerAddressAr: e.target.value })} data-testid="seller-address-ar" />
+              </Field>
+              <Field label={L("العنوان (إنجليزي)", "Address (English)")}>
+                <input className="hr-input" dir="ltr" value={seller.sellerAddressEn} maxLength={300} onChange={(e) => setSeller({ ...seller, sellerAddressEn: e.target.value })} data-testid="seller-address-en" />
+              </Field>
+              <Field label={L("الرقم الضريبي", "VAT number")} help={L("15 رقمًا يبدأ وينتهي بـ 3", "15 digits, starting and ending with 3")}>
+                <input className="hr-input" dir="ltr" inputMode="numeric" value={seller.sellerVatNumber} maxLength={40} onChange={(e) => setSeller({ ...seller, sellerVatNumber: e.target.value })} data-testid="seller-vat" />
+              </Field>
+              <Field label={L("السجل التجاري", "Commercial registration")} help={L("10 أرقام", "10 digits")}>
+                <input className="hr-input" dir="ltr" inputMode="numeric" value={seller.sellerCrNumber} maxLength={40} onChange={(e) => setSeller({ ...seller, sellerCrNumber: e.target.value })} data-testid="seller-cr" />
+              </Field>
+              <Field label={L("الهاتف", "Phone")}>
+                <input className="hr-input" dir="ltr" value={seller.sellerPhone} maxLength={40} onChange={(e) => setSeller({ ...seller, sellerPhone: e.target.value })} data-testid="seller-phone" />
+              </Field>
+              {/* «بيانات التحويل البنكي» on the quotation: printed only when filled. */}
+              <p className="is-wide" style={{ margin: "8px 0 0", fontWeight: 500 }} data-testid="seller-bank-heading">
+                {L("بيانات التحويل البنكي", "Bank transfer details")}
+                <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>{L(" · تُطبع في عرض السعر عند تعبئتها", " · printed on the quotation when filled in")}</span>
+              </p>
+              <Field label={L("البنك", "Bank")}>
+                <input className="hr-input" value={seller.sellerBankName} maxLength={120} onChange={(e) => setSeller({ ...seller, sellerBankName: e.target.value })} data-testid="seller-bank-name" />
+              </Field>
+              <Field label={L("اسم الحساب", "Account name")}>
+                <input className="hr-input" value={seller.sellerBankAccountName} maxLength={160} onChange={(e) => setSeller({ ...seller, sellerBankAccountName: e.target.value })} data-testid="seller-bank-account" />
+              </Field>
+              <Field label={L("رقم الآيبان", "IBAN")} help={L("SA ثم 22 رقمًا · المسافات مسموحة", "SA, then 22 digits · spaces allowed")}>
+                <input className="hr-input" dir="ltr" style={{ fontFamily: "var(--f-mono)" }} value={seller.sellerIban} maxLength={60} autoComplete="off" spellCheck={false} placeholder="SA…" onChange={(e) => setSeller({ ...seller, sellerIban: e.target.value })} data-testid="seller-iban" />
+              </Field>
+              <div className="is-wide tl-acts">
+                <Btn type="submit" variant="primary" disabled={sellerSaving} busy={sellerSaving} data-testid="seller-save">{L("حفظ بيانات المنشأة", "Save company details")}</Btn>
+              </div>
+            </form>
+            {msgNotice(sellerMsg)}
           </Sec>
 
           {/* Access and sessions */}

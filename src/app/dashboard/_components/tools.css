@@ -195,3 +195,26 @@
   [data-ops-root].tl-root .hr-pagehead:not(:has(.hr-actions > *)) { display: none; }
   [data-ops-root] .hr-table .hr-desktop-only { display: none !important; }
 }
+
+/* A settings section of the frame with no page yet: drawn, disabled, «قريباً». */
+[data-ops-root] .tl-snav-soon, .d21 .tl-snav-soon { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 7px 12px; line-height: 20px; border-radius: 9px; font-size: 14px; color: var(--text-disabled); cursor: not-allowed; border: 1px solid transparent; }
+[data-ops-root] .tl-snav-soon svg, .d21 .tl-snav-soon svg { width: 16px; height: 16px; flex: none; color: var(--text-disabled); }
+[data-ops-root] .tl-snav-soon em, .d21 .tl-snav-soon em { margin-inline-start: auto; font-style: normal; font-size: 11.5px; line-height: 18px; padding: 0 6px; border-radius: 5px; background: var(--surface-subtle); color: var(--text-muted); white-space: nowrap; }
+
+/* The same navigation beside a «.d21» settings page (sales settings, GX A-P08 1229:114164):
+   200px column at the inline start, 40px gap; the rail and the phone drop it. */
+.d21 .perf-settings { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 40px; align-items: start; padding-inline-start: 48px; }
+.d21 .perf-settings > .pg { min-width: 0; }
+@media (min-width: 1280px) { .d21 .perf-settings > .pg { padding-inline-start: 0; } }
+.d21 .perf-settings .tl-snav { box-sizing: border-box; padding-top: 30px; position: sticky; top: 0; }
+.d21 .perf-settings .tl-snav h3 { font-size: 12px; line-height: 18px; font-weight: 500; color: var(--text-muted); margin: 18px 12px 6px; }
+.d21 .perf-settings .tl-snav > div:first-child h3 { margin-top: 0; }
+.d21 .perf-settings .tl-snav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.d21 .perf-settings .tl-snav a { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 7px 12px; line-height: 20px; border-radius: 9px; font-size: 14px; color: var(--text-secondary); text-decoration: none; border: 1px solid transparent; }
+.d21 .perf-settings .tl-snav a:hover { background: var(--surface-hover); color: var(--text-primary); }
+.d21 .perf-settings .tl-snav a[aria-current="page"] { background: var(--surface); border-color: var(--border-subtle); color: var(--text-primary); font-weight: 600; box-shadow: 0 1px 2px rgb(40 36 26 / 0.04); }
+.d21 .perf-settings .tl-snav a svg { width: 16px; height: 16px; flex: none; color: var(--text-muted); }
+@media (max-width: 1279px) {
+  .d21 .perf-settings { grid-template-columns: minmax(0, 1fr); gap: 0; padding-inline-start: 0; }
+  .d21 .perf-settings .tl-snav { display: none; }
+}

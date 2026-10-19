@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import {
   useLang, Button, Field, TextInput, Select, TextArea, Modal, Alert, api, num, formatMoney, monthOptions,
 } from "../_components/ui";
-import { PerfHeader, MonthChip, Bar, PerfNote, PerfNotice, PerfSandbox, PerfLoading } from "../_components/perf";
+import { useInitialMonth, PerfHeader, MonthChip, Bar, PerfNote, PerfNotice, PerfSandbox, PerfLoading } from "../_components/perf";
 import { usePhone } from "@/components/shell/page-context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -36,12 +36,6 @@ type Row = {
   shortfall: string;
 };
 
-function thisMonth(): string {
-  const now = new Date();
-  const riyadh = new Date(now.getTime() + 3 * 3600_000);
-  return `${riyadh.getUTCFullYear()}-${String(riyadh.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 export default function TargetsPage() {
   const lang = useLang();
   const ar = lang === "ar";
@@ -49,7 +43,8 @@ export default function TargetsPage() {
   const phone = usePhone();
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_assign");
 
-  const [month, setMonth] = useState(thisMonth());
+  const initialMonth = useInitialMonth();
+  const [month, setMonth] = useState(initialMonth);
   const [rows, setRows] = useState<Row[]>([]);
   const [scope, setScope] = useState<"own" | "all">("own");
   const [notice, setNotice] = useState<string | null>(null);

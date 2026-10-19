@@ -160,8 +160,30 @@ export async function GET(request: Request) {
         `
       : [];
 
+    // Exact per-status counts and sums for the segments and the header figures (Figma
+    // 1459:15522): over the caller's whole scope — not the 200 rows on screen, and not only the
+    // active segment. The status filter does not narrow them; the deal filter does.
+    const byStatus = await prisma.salesCollection.groupBy({
+      by: ["status"],
+      where: { ...collectionWhere(user.permissions, user.id), ...(opportunityId ? { opportunityId } : {}) },
+      _count: { _all: true },
+      _sum: { amountGross: true, amountNet: true },
+    });
+    const counts: Record<string, number> = { ALL: 0 };
+    const totals: Record<string, { gross: string; net: string }> = {};
+    for (const g of byStatus) {
+      counts[g.status] = g._count._all;
+      counts.ALL += g._count._all;
+      totals[g.status] = {
+        gross: (g._sum.amountGross ?? new Decimal(0)).toFixed(2),
+        net: (g._sum.amountNet ?? new Decimal(0)).toFixed(2),
+      };
+    }
+
     return NextResponse.json({
       rows,
+      counts,
+      totals,
       decisions,
       projectedCommission: projected,
       eligibleDeals,

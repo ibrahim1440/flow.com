@@ -31,7 +31,8 @@ import type { D21IconName } from "@/components/shell/icons";
  */
 
 /** A single permission requirement. `sub` omitted means "any access to the module". */
-export type Ability = { module: string; sub?: string };
+/** A module (and optionally one of its sub-privileges); with `role`, also that account role. */
+export type Ability = { module: string; sub?: string; role?: string };
 
 /**
  * One way to qualify for a node: a single ability, or several that must ALL be held.
@@ -113,7 +114,7 @@ export type ShellHints = {
    * frames (TS-N14, A-05 rep 1458:15314): «التحصيل» and «أهدافي وعمولاتي» for somebody who
    * neither decides collections nor manages anyone's commission.
    */
-  own?: { ar: string; en: string; unlessAny: Ability[] };
+  own?: { ar: string; en: string; unlessAny: Ability[]; crumb?: { ar: string; en: string } };
   /** The reference icon (screens.py ICONS); lucide stays the fallback (register row A-18). */
   icon?: D21IconName;
   /**
@@ -375,10 +376,23 @@ export const NAV: NavNode[] = [
           crumb: { ar: "الأداء والعمولات", en: "Performance & commissions" },
           own: {
             ar: "أهدافي وعمولاتي", en: "My targets & commissions",
+            // The rep's trail «أدائي / عمولاتي» (GX A-05 rep, gx.py perf_shell): no «المالية».
+            crumb: { ar: "أدائي", en: "My performance" },
             unlessAny: [commissions("view_team"), commissions("approve"), commissions("record_payout"), commissions("manage_plans"), { module: "analytics" }],
           },
         },
         children: [
+          {
+            // «لوحة الأداء» — the first tab of every frame of the family (gx.py perf_tabs, the
+            // rep's too: TS-N14). The month's figures from deals, quotations, collections,
+            // targets and the commission ledger (GET /api/sales/performance). The same audience
+            // as the targets and reports beside it: a rep sees their own, a manager the team.
+            id: "finance.performance.dashboard",
+            ar: "لوحة الأداء", en: "Performance dashboard",
+            href: "/dashboard/sales/performance",
+            anyOf: IN_SALES,
+            shell: { ar: "لوحة الأداء", en: "Dashboard" },
+          },
           {
             id: "finance.performance.targets",
             ar: "الأهداف", en: "Targets",
@@ -386,10 +400,14 @@ export const NAV: NavNode[] = [
             anyOf: IN_SALES,
           },
           {
+            // The TEAM's reports: the sales manager (`lead_assign`, the permission that already
+            // shows every rep's work) and the admin — owner decision, batch Sales B. A rep's own
+            // figures are on «لوحة الأداء». GET /api/sales/reports enforces the same rule
+            // (`seesTeamReports`); the route guard is module-level, so the page refuses a rep too.
             id: "finance.performance.reports",
             ar: "تقارير المبيعات", en: "Sales reports",
             href: "/dashboard/sales/reports",
-            anyOf: IN_SALES,
+            anyOf: [sales("lead_assign"), { module: "sales", role: "admin" }],
           },
           {
             id: "finance.performance.analytics",
@@ -689,6 +707,7 @@ void [Package, ShoppingCart, Factory, ClipboardCheck, Box, Truck, History, Tag, 
 export type Viewer = { permissions: Permissions; role: string };
 
 function holds(v: Viewer, a: Ability): boolean {
+  if (a.role && v.role !== a.role) return false;
   return a.sub
     ? hasSubPrivilege(v.permissions, a.module, a.sub)
     : hasModuleAccess(v.permissions, a.module);
@@ -763,6 +782,17 @@ export function shellText(n: NavNode, lang: string, v?: Viewer): string {
   return lang === "ar" ? (n.shell?.ar ?? n.ar) : (n.shell?.en ?? n.en);
 }
 
+/**
+ * Whether the node `id` reads its own-work wording for this viewer (`shell.own`): the GX rep
+ * frames title «الأداء والعمولات» as «أهدافي وعمولاتي» for exactly the viewers whose sidebar
+ * names it so. Presentation only.
+ */
+export function ownWordingApplies(id: string, v: Viewer): boolean {
+  const n = walk(NAV).find((x) => x.node.id === id)?.node;
+  const own = n?.shell?.own;
+  return !!own && !own.unlessAny.some((a) => holds(v, a));
+}
+
 /** The label the Direction 2.1 top-bar trail draws for a node (`shell.crumb`, else its sidebar label). */
 export function crumbText(n: NavNode, lang: string): string {
   const c = n.shell?.crumb;
@@ -778,10 +808,22 @@ export type TrailPart = { key: string; text: string; node: NavNode | null };
  * one before it is dropped, so a section and its only page never read «عروض الأسعار / عروض
  * الأسعار». The root is a label (`node: null`), not a link.
  */
-export function shellTrail(crumbs: NavNode[], lang: string): TrailPart[] {
+export function shellTrail(crumbs: NavNode[], lang: string, v?: Viewer): TrailPart[] {
   let from = 0;
   let root: string | null = null;
   crumbs.forEach((c, i) => { if (c.shell?.trailRoot) { from = i; root = c.shell.trailRoot; } });
+  // A node whose own-work wording applies to this viewer and names an own crumb starts the
+  // trail there, in that wording: the rep's «أدائي / عمولاتي» rather than «المالية / الأداء
+  // والعمولات / عمولاتي». Presentation only — the links are the same nodes.
+  const ownAt = v ? crumbs.findIndex((c) => !!c.shell?.own?.crumb && !c.shell.own.unlessAny.some((a) => holds(v, a))) : -1;
+  if (ownAt >= from && ownAt !== -1) {
+    const c = crumbs[ownAt];
+    const oc = c.shell!.own!.crumb!;
+    return dedupeTrail([
+      { key: c.id, text: lang === "ar" ? oc.ar : oc.en, node: c },
+      ...crumbs.slice(ownAt + 1).map((x) => ({ key: x.id, text: crumbText(x, lang), node: x })),
+    ]);
+  }
   const parts: TrailPart[] = crumbs.slice(from).map((c) => ({ key: c.id, text: crumbText(c, lang), node: c }));
   const label = root ? groupText(root, lang) : null;
   if (root && label) parts.unshift({ key: `grp-${root}`, text: label, node: null });

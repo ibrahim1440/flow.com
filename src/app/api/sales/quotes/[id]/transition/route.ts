@@ -7,6 +7,8 @@ import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import { advanceToQuotationStage, winOnAcceptedQuote } from "@/lib/services/sales/lifecycle";
 import { issueQuote, decideQuote } from "@/lib/services/sales/quotes";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { discountThreshold } from "@/lib/services/sales/quote-settings";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -66,7 +68,14 @@ export async function POST(request: Request, { params }: Params) {
 
     const result = await prisma.$transaction(async (tx) => {
       if (to === "ISSUED") {
-        const issued = await issueQuote(tx, { quoteId: id, actorId: user.id, canApproveDiscount, onDiscountApproval: () => assertPrivilegedGate(user, "sales", "quote_approve_discount") });
+        const issued = await issueQuote(tx, {
+          quoteId: id, actorId: user.id, canApproveDiscount,
+          onDiscountApproval: () => assertPrivilegedGate(user, "sales", "quote_approve_discount"),
+          // The owner's threshold (Settings), else the built-in one — read in the same transaction.
+          threshold: await discountThreshold(tx),
+          // SIMPLE MODE: the one admin may approve the discount on a quotation they raised.
+          forbidSelfApproval: !isSimpleMode(),
+        });
         // Issuing a quotation IS the deal reaching the quotation stage. Leaving the board to
         // be updated by hand is how a pipeline stops describing the work.
         const advance = await advanceToQuotationStage(tx, visible.opportunityId, user.id);

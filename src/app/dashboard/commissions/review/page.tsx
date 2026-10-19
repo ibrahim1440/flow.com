@@ -5,7 +5,7 @@ import {
   useLang, Button, Field, TextInput, TextArea, Money, Modal, Alert, api, monthOptions, formatDay, formatMoney, num,
 } from "../../sales/_components/ui";
 import {
-  PerfHeader, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
+  useInitialMonth, PerfHeader, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
 } from "../../sales/_components/perf";
 import { usePhone } from "@/components/shell/page-context";
 
@@ -85,17 +85,13 @@ type Review = {
 
 
 
-function thisMonth(): string {
-  const riyadh = new Date(Date.now() + 3 * 3600_000);
-  return `${riyadh.getUTCFullYear()}-${String(riyadh.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 export default function CommissionReviewPage() {
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
 
-  const [month, setMonth] = useState(thisMonth());
+  const initialMonth = useInitialMonth();
+  const [month, setMonth] = useState(initialMonth);
   const [data, setData] = useState<Review | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

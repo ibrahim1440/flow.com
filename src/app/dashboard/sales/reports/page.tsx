@@ -2,8 +2,11 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import { useLang, api, LEAD_SOURCE_LABELS, num, formatMoney, monthOptions } from "../_components/ui";
-import { PerfHeader, MonthChip, Bar, PerfNote, PerfNotice, PerfLoading, Metrics } from "../_components/perf";
-import { usePhone } from "@/components/shell/page-context";
+import { useInitialMonth, PerfHeader, MonthChip, Bar, PerfNote, PerfNotice, PerfLoading, Metrics } from "../_components/perf";
+import { usePhone, useD21Phone } from "@/components/shell/page-context";
+import Link from "next/link";
+import { useUser } from "../../user-context";
+import { seesTeamReports } from "@/lib/services/sales/scope";
 
 /**
  * Sales reports — Direction 2.1, GX A-P04 «تقارير المبيعات» (`1222:100243`, EN `1230:124232`,
@@ -52,17 +55,42 @@ type Report = {
 // under two names, one report apart.
 const SOURCE_LABELS = LEAD_SOURCE_LABELS;
 
-function thisMonth(): string {
-  const riyadh = new Date(Date.now() + 3 * 3600_000);
-  return `${riyadh.getUTCFullYear()}-${String(riyadh.getUTCMonth() + 1).padStart(2, "0")}`;
+/**
+ * The team's reports are the sales manager's and the admin's (owner decision, batch Sales B).
+ * The route guard is module-level, so a rep who types the address is told so here — and the
+ * endpoint answers them 403 anyway. Their own figures are on «لوحة الأداء».
+ */
+export default function ReportsRoute() {
+  const user = useUser();
+  const lang = useLang();
+  const ar = lang === "ar";
+  if (!user) return <PerfLoading ar={ar} />;
+  if (!seesTeamReports(user.permissions, user.role)) return <NoReports ar={ar} />;
+  return <ReportsPage />;
 }
 
-export default function ReportsPage() {
+function NoReports({ ar }: { ar: boolean }) {
+  useD21Phone({ title: ar ? "تقارير المبيعات" : "Sales reports", sub: ar ? "الأداء والعمولات" : "Performance and commissions" });
+  return (
+    <div className="pg">
+      <div style={{ padding: "64px 0", textAlign: "center", display: "grid", gap: 10, justifyItems: "center" }} data-testid="reports-no-access" role="status">
+        <p style={{ fontWeight: 600, margin: 0, fontSize: 16 }}>{ar ? "تقارير المبيعات لمدير المبيعات والمسؤول" : "Sales reports are for the sales manager and the admin"}</p>
+        <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 13.5 }}>
+          {ar ? "أداؤك أنت — المحصّل والهدف والصفقات والعروض — في «لوحة الأداء»." : "Your own performance — collected, target, deals and quotations — is on the performance dashboard."}
+        </p>
+        <Link className="btn" href="/dashboard/sales/performance" data-testid="reports-go-dashboard">{ar ? "فتح لوحة الأداء" : "Open the performance dashboard"}</Link>
+      </div>
+    </div>
+  );
+}
+
+function ReportsPage() {
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
 
-  const [month, setMonth] = useState(thisMonth());
+  const initialMonth = useInitialMonth();
+  const [month, setMonth] = useState(initialMonth);
   const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -129,8 +157,17 @@ export default function ReportsPage() {
     <>{ar ? "النطاق: " : "scope: "}{data.scope === "own" ? (ar ? "أداؤك أنت" : "your own") : (ar ? "كل الفريق" : "the whole team")}</>,
   ];
 
-  const sectionHead = (t: string, sub?: string) => (
-    <div className="bh"><h2 className="bt">{t}</h2>{sub && <span className="sub">{sub}</span>}</div>
+  // Each report exports on its own (`?report=`), beside its title; the header button keeps the
+  // whole month in one file. Desktop only, as the header button (390c: export from the desk).
+  const sectionHead = (t: string, report?: string, sub?: string) => (
+    <div className="bh">
+      <h2 className="bt">{t}</h2>{sub && <span className="sub">{sub}</span>}
+      {report && !phone && (
+        <a className="lk" download data-testid={`export-report-${report}`}
+          href={`/api/sales/reports?month=${month}&format=csv&report=${report}`}
+          aria-label={ar ? `تصدير «${t}» CSV` : `Export “${t}” as CSV`}>CSV</a>
+      )}
+    </div>
   );
   const emptyLine = (t: string) => <p className="sm" style={{ color: "var(--text-muted)", fontSize: 13.5, margin: "6px 0" }}>{t}</p>;
   const line = { display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: 13.5 } as const;
@@ -251,13 +288,13 @@ export default function ReportsPage() {
       <div style={{ margin: "4px 0 28px" }}>{headline}</div>
 
       {pair(
-        <>{sectionHead(ar ? "المسار حسب المرحلة" : "Pipeline by stage")}{stages}</>,
-        <>{sectionHead(ar ? "مصادر العملاء المحتملين" : "Lead sources")}{sources}</>,
+        <>{sectionHead(ar ? "المسار حسب المرحلة" : "Pipeline by stage", "stages")}{stages}</>,
+        <>{sectionHead(ar ? "مصادر العملاء المحتملين" : "Lead sources", "sources")}{sources}</>,
       )}
       <div className="hr" style={{ margin: "28px 0" }} />
       {pair(
-        <>{sectionHead(ar ? "أسباب الخسارة" : "Why deals were lost")}{lost}</>,
-        <>{sectionHead(ar ? "طول دورة البيع" : "Sales cycle")}{cycle}</>,
+        <>{sectionHead(ar ? "أسباب الخسارة" : "Why deals were lost", "lost")}{lost}</>,
+        <>{sectionHead(ar ? "طول دورة البيع" : "Sales cycle", "cycle")}{cycle}</>,
       )}
       <div className="hr" style={{ margin: "28px 0" }} />
       <div style={{ margin: "4px 0 28px" }}>{closing}</div>

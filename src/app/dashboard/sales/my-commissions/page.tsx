@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 import { ACCRUAL_STATUS_SPECS, formatMoney, formatDay, num, api } from "../_components/ui";
 import {
-  PerfHeader, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
+  useInitialMonth, PerfHeader, Bar, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
 } from "../_components/perf";
 
 /**
@@ -58,6 +58,8 @@ type Payload = {
   accruals: Accrual[];
   ledger: { id: string; type: string; amount: string; reason: string | null; createdAt: string }[];
   target: { targetAmount: string; bonusAmount: string; currency: string } | null;
+  /** The month's target progress, as the targets screen measures it (null without a target). */
+  progress: { target: string | null; achieved: string; percent: string | null; remaining: string | null; met: boolean | null } | null;
   collectionSources: string[];
   sandbox: boolean;
   notice: string | null;
@@ -101,19 +103,14 @@ const STATUS_NOTES: Record<string, { en: string; ar: string }> = {
   },
 };
 
-/** A month input value (2026-09) for the current Riyadh month. */
-function currentMonthValue(): string {
-  const riyadh = new Date(Date.now() + 3 * 3600_000);
-  return `${riyadh.getUTCFullYear()}-${String(riyadh.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 export default function MyCommissionsPage() {
   const user = useUser();
   const { t } = useI18n();
   const lang = user?.preferredLanguage ?? "ar";
   const ar = lang === "ar";
 
-  const [month, setMonth] = useState(currentMonthValue());
+  const initialMonth = useInitialMonth();
+  const [month, setMonth] = useState(initialMonth);
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -228,6 +225,27 @@ export default function MyCommissionsPage() {
               </p>
             </div>
           </div>
+
+          {/* ── «أهدافي»: the month's target, achieved against it and what remains ── */}
+          {data.progress && data.progress.target !== null && (
+            <div className="perf-target" data-testid="target-progress">
+              <div className="lbl">{ar ? "هدف الشهر" : "This month's target"}</div>
+              <Bar percent={Number(data.progress.percent ?? 0)} testId="target-progress-bar"
+                label={`${ar ? "تحقّق" : "Achieved"} ${data.progress.percent ?? "0"}%`} />
+              <div className="sm perf-target-cap">
+                <span>
+                  {ar ? "تحقّق " : ""}<span className="n">{(data.progress.percent ?? "0").replace(/\.0$/, "")}%</span>{ar ? "" : " achieved"}
+                  {" · "}{ar ? "المحقَّق " : "collected "}<span className="n" data-testid="target-achieved">{bare(data.progress.achieved)}</span>
+                  {" "}{ar ? "من" : "of"} <span className="n">{bare(data.progress.target)}</span>
+                </span>
+                <span data-testid="target-remaining">
+                  {data.progress.met
+                    ? (ar ? "فوق الهدف" : "above target")
+                    : <>{ar ? "المتبقي " : "remaining "}<span className="n">{bare(data.progress.remaining ?? "0")}</span></>}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="cols perf-cols" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 40 }}>
             {/* ── The accruals themselves ───────────────────────────────────────── */}

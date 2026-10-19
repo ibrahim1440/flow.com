@@ -69,11 +69,14 @@ export default function PipelinePage() {
   const [followUps, setFollowUps] = useState<number | null>(null);
 
   const [q, setQ] = useState("");
-  const [owner, setOwner] = useState("all");
+  const params = useSearchParams();
+  // «لوحة الأداء» opens the board on one rep's deals (`?owner=<employee id>`); the owner
+  // control still offers everyone, and an id with no deal here simply shows none.
+  const [owner, setOwner] = useState(params.get("owner") || "all");
   // D6.2 (owner, 15 Oct): «الكل» is the default; the choice lives in the URL (`?close=quarter`)
   // as the leads page keeps its `?new=1`, so a reload or a shared link keeps it.
   const router = useRouter();
-  const closeParam = useSearchParams().get("close");
+  const closeParam = params.get("close");
   const [closing, setClosingState] = useState<"all" | "quarter">(closeParam === "quarter" ? "quarter" : "all");
   const setClosing = (v: "all" | "quarter") => {
     setClosingState(v);

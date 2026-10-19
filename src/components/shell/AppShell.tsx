@@ -236,7 +236,7 @@ export function AppShell({
   // dropped — «المبيعات / عروض الأسعار», never «… / عروض الأسعار / عروض الأسعار».
   const trail = useMemo(() => {
     const base = showSeg && leafIsPage && title ? crumbs.slice(0, -1) : crumbs;
-    const shown = shellTrail(base, lang);
+    const shown = shellTrail(base, lang, viewer);
     const parts: { key: string; text: string; href: string | null }[] = shown.map((p, i) => ({
       key: p.key, text: p.text, href: !p.node || (i === shown.length - 1 && !title) ? null : firstDestination(viewer, p.node),
     }));

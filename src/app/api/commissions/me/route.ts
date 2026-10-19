@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
-import { riyadhMonthStart, riyadhMonthEnd } from "@/lib/services/commissions/engine";
+import { riyadhMonthStart, riyadhMonthEnd, ZERO } from "@/lib/services/commissions/engine";
 import { periodStatement } from "@/lib/services/commissions/accrual";
+import { netCollectedByEmployee, targetProgress } from "@/lib/services/sales/performance";
 
 /**
  * GET /api/commissions/me — what the signed-in employee has earned in a period.
@@ -78,6 +79,12 @@ export async function GET(request: Request) {
       select: { targetAmount: true, bonusAmount: true, currency: true },
     });
 
+    // The month's target progress, measured exactly as the targets screen measures it: net
+    // collected (qualifying base of recorded collections, split-aware) against the target.
+    // Additive and read-only — no commission, target or payout figure changes by it.
+    const achieved = (await netCollectedByEmployee(prisma, periodStart, periodEnd)).get(user.id);
+    const progress = target ? targetProgress(target.targetAmount, achieved ?? ZERO) : null;
+
     // Says plainly where the money figures came from. Every accrual in this build traces to
     // the sandbox source, and the screen must not present that as a settled payable.
     const sources = [...new Set(accruals.map((a) => a.collectionEvent.sourceSystem))];
@@ -90,6 +97,7 @@ export async function GET(request: Request) {
       accruals,
       ledger,
       target,
+      progress,
       collectionSources: sources,
       sandbox: sandboxOnly,
       notice: sandboxOnly

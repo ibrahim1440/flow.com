@@ -105,6 +105,11 @@ type Payload = {
   /** What approving each pending row would be worth. An estimate, never a total. */
   projectedCommission?: Record<string, string>;
   can: { submit: boolean; verify: boolean; reject: boolean; reverse: boolean };
+  /** Exact per-status counts over the caller's whole scope (ALL = every status), whatever the
+      active segment and the 200-row page. Absent from an older payload. */
+  counts?: Record<string, number>;
+  /** Per-status sums (gross / net), over the same scope. */
+  totals?: Record<string, { gross: string; net: string }>;
 };
 
 /** Status → its word and the reference status dot (`.st` + tone). */
@@ -258,6 +263,14 @@ export default function CollectionsPage() {
   const approved = rows.filter((r) => r.status === "APPROVED");
   const sum = (list: Collection[], key: "amountGross" | "amountNet") =>
     list.reduce((a, r) => a + Number(r[key]), 0).toFixed(2);
+  // The header's figures: the server's sums over the whole scope (exact, whatever segment is
+  // open); the on-screen rows only for an older payload without them.
+  const serverSum = (st: string, key: "gross" | "net") => data.totals ? (data.totals[st]?.[key] ?? "0.00") : null;
+  const pendingGross = serverSum("PENDING_VERIFICATION", "gross") ?? sum(pending, "amountGross");
+  const approvedGross = serverSum("APPROVED", "gross") ?? sum(approved, "amountGross");
+  const approvedNet = serverSum("APPROVED", "net") ?? sum(approved, "amountNet");
+  const pendingCount = data.counts ? (data.counts.PENDING_VERIFICATION ?? 0) : pending.length;
+  const allCount = data.counts ? (data.counts.ALL ?? 0) : rows.length;
 
   // Finance is anyone who can act on the queue. The screen calls itself what it is for the
   // person looking at it rather than showing everyone the same title.
@@ -274,10 +287,8 @@ export default function CollectionsPage() {
   const methodText = (m: string) => (ar ? (METHODS[m]?.ar ?? m) : (METHODS[m]?.en ?? m));
   const unit = ar ? "ر.س" : "SAR";
 
-  // Per-segment counts are exact only on «الكل», where every row (up to the server's 200) is
-  // loaded; on a filtered view only the active segment's own count is known.
-  const counts: Record<string, number> = {};
-  if (status === "") for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  // Per-segment counts: the server's, exact on every segment (not limited to the rows loaded).
+  const counts: Record<string, number> = data.counts ?? {};
 
   const notices = (
     <>
@@ -298,7 +309,7 @@ export default function CollectionsPage() {
     <div role="group" aria-label={ar ? "الحالة" : "Status"} className={phone ? "segs" : "seg"} data-testid="collection-status-filter">
       {SEGMENTS.map((s) => {
         const on = status === s.value;
-        const n = s.value === "" ? null : status === "" ? (counts[s.value] ?? 0) : on ? rows.length : null;
+        const n = s.value === "" ? null : (counts[s.value] ?? 0);
         return (
           <button key={s.value || "ALL"} type="button" aria-pressed={on} className={on ? "on" : undefined}
             data-testid={`collection-tab-${s.value || "ALL"}`} onClick={() => setStatus(s.value)}>
@@ -696,7 +707,10 @@ export default function CollectionsPage() {
               </div>
             ))}
             <p className="lbl" style={{ fontWeight: 400, marginTop: 12 }}>
-              {ar ? `يُعرض ${num(rows.length, lang)} تحصيل · الأحدث أولًا` : `${rows.length} shown · newest first`}
+              {(() => {
+                const of = status ? (counts[status] ?? rows.length) : allCount;
+                return ar ? `يُعرض ${num(rows.length, lang)} من ${num(of, lang)} · الأحدث أولًا` : `${rows.length} of ${of} shown · newest first`;
+              })()}
             </p>
           </div>
         )}
@@ -727,21 +741,21 @@ export default function CollectionsPage() {
       <dl className="metrics c-metrics">
         <div data-testid="stat-pending">
           <dt>{ar ? "بانتظار التحقق" : "Awaiting verification"}</dt>
-          <dd className="mid"><bdi className="n">{formatMoney(sum(pending, "amountGross"))}</bdi></dd>
+          <dd className="mid"><bdi className="n">{formatMoney(pendingGross)}</bdi></dd>
           <dd className="d">
-            {ar ? `${num(pending.length, lang)} تحصيل — لم يُنشئ عمولة` : `${pending.length} — no commission yet`}
+            {ar ? `${num(pendingCount, lang)} تحصيل — لم يُنشئ عمولة` : `${pendingCount} — no commission yet`}
           </dd>
         </div>
         <div data-testid="stat-approved">
           <dt>{ar ? "معتمَد" : "Approved"}</dt>
-          <dd className="mid"><bdi className="n">{formatMoney(sum(approved, "amountGross"))}</bdi></dd>
+          <dd className="mid"><bdi className="n">{formatMoney(approvedGross)}</bdi></dd>
           <dd className="d">
-            {ar ? "الأساس الصافي " : "Net basis "}<bdi className="n">{formatMoney(sum(approved, "amountNet"))}</bdi>
+            {ar ? "الأساس الصافي " : "Net basis "}<bdi className="n">{formatMoney(approvedNet)}</bdi>
           </dd>
         </div>
         <div data-testid="stat-count">
           <dt>{ar ? "الإجمالي المعروض" : "Shown here"}</dt>
-          <dd className="mid"><bdi className="n">{num(rows.length, lang)}</bdi></dd>
+          <dd className="mid"><bdi className="n">{num(allCount, lang)}</bdi></dd>
           <dd className="d">{data.scope === "all" ? (ar ? "كل التحصيلات" : "All collections") : (ar ? "تحصيلاتك أنت" : "Your own only")}</dd>
         </div>
       </dl>

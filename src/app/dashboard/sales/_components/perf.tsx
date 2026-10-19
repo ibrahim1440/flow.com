@@ -2,9 +2,18 @@
 
 import { Select } from "@/components/ui/Select";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useSectionPages, usePhone, useD21Phone } from "@/components/shell/page-context";
 import { monthOptions, ACCRUAL_STATUS_SPECS } from "./ui";
+import { useUser } from "@/app/dashboard/user-context";
+import { ownWordingApplies } from "@/lib/nav/registry";
+
+/** True for the viewer the GX rep frames draw (the sidebar's «أهدافي وعمولاتي»). */
+export function usePerfOwnView(): boolean {
+  const user = useUser();
+  return !!user && ownWordingApplies("finance.performance", { permissions: user.permissions, role: user.role });
+}
 
 /**
  * The shared frame of «الأداء والعمولات» in Direction 2.1 (GX A-P03…A-P07: targets `1220:94392`,
@@ -16,15 +25,15 @@ import { monthOptions, ACCRUAL_STATUS_SPECS } from "./ui";
  * the period chip and the page's own action — over a row of tabs, one per page of the section.
  * The tabs are the registry's own pages of `finance.performance` as the shell already resolves
  * them for this viewer (`useSectionPages`), so a tab is never shown to someone the sidebar would
- * not show it to, and nothing here adds a destination. «لوحة الأداء» and «التحليلات التنبؤية» in
- * the frames have no route in this family yet and are not drawn (see the batch report).
+ * not show it to, and nothing here adds a destination. «لوحة الأداء» is the registry's
+ * `finance.performance.dashboard` (/dashboard/sales/performance).
  *
  * Visual only: no page's data, request or permission check changes by using these.
  */
 
 /** The page header of the family (`.ph`), with the section's tabs under it. */
 export function PerfHeader({
-  title, meta, actions, phoneTitle, ar,
+  title: given, meta, actions, phoneTitle, ar,
 }: {
   title: string;
   meta: ReactNode[];
@@ -34,7 +43,10 @@ export function PerfHeader({
   ar: boolean;
 }) {
   const phone = usePhone();
-  const section = ar ? "الأداء والعمولات" : "Performance and commissions";
+  // The rep frames title every tab «أهدافي وعمولاتي» (gx.py perf_head rep=True).
+  const own = usePerfOwnView();
+  const title = own ? (ar ? "أهدافي وعمولاتي" : "My targets and commissions") : given;
+  const section = own ? title : ar ? "الأداء والعمولات" : "Performance and commissions";
   useD21Phone({ title: phoneTitle, sub: title === phoneTitle ? undefined : section });
   if (phone) {
     return (
@@ -108,7 +120,6 @@ export function MonthChip({
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </Select>
-      <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
     </label>
   );
 }
@@ -190,4 +201,19 @@ export function AccrualDot({ status, lang, testId }: { status: string; lang: "ar
   const spec = ACCRUAL_STATUS_SPECS[status];
   const text = spec ? (lang === "ar" ? spec.ar : spec.en) : status;
   return <span className={`st ${ACCRUAL_DOT[status] ?? ""}`} style={{ fontSize: 12.5 }} data-testid={testId}>{text}</span>;
+}
+
+/** This Riyadh month as "YYYY-MM" — the periods of targets and commission. */
+export function thisRiyadhMonth(): string {
+  const riyadh = new Date(Date.now() + 3 * 3600_000);
+  return `${riyadh.getUTCFullYear()}-${String(riyadh.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * The month a page of the family opens on: `?month=YYYY-MM` when a drill-down link carries one
+ * («لوحة الأداء» → targets, reports, review), else this Riyadh month.
+ */
+export function useInitialMonth(): string {
+  const asked = useSearchParams().get("month");
+  return asked && /^\d{4}-(0[1-9]|1[0-2])$/.test(asked) ? asked : thisRiyadhMonth();
 }

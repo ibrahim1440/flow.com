@@ -2,49 +2,57 @@
 
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
-import {
-  useLang, Spinner, api, formatMoney, num, formatDay,
-} from "../../../_components/ui";
+import { useLang, Spinner, api, formatMoney, QUOTE_STATUS_SPECS } from "../../../_components/ui";
 import { useD21Title, useD21Phone } from "@/components/shell/page-context";
 import { usePrintCertified } from "@/components/print/Certification";
 import { PRINT_PHASE1_NOTE, QUOTATION_PDF_WHEN_PRINT_OFF } from "@/lib/print/certification";
 import { BRAND_PRIMARY_SRC, BRAND_PRIMARY_VIEWBOX } from "@/components/brand/BrandMark";
+import { DocumentSheet, type DocRow, type DocTotal } from "@/components/print/document/DocumentSheet";
+import {
+  formatIban, formatPercent, longDate, quoteLineCells, quoteLineColumns, uniformTaxRate,
+  type DocLang, type QuoteDocLine,
+} from "@/lib/print/quote-document";
 
 /**
- * The quotation as a document.
+ * The quotation as a document (Figma QP-05 1295:987; the draft QP-03 1295:754; English 1373:791).
  *
- * ── It renders the SNAPSHOT, not the live rows ──
+ * ── An issued quotation renders its SNAPSHOT, not the live rows ──
  * An issued quotation is what the customer was sent. `QuoteLine` tracks the live catalogue,
  * so a SKU renamed next month would silently rewrite the document; `issuedSnapshot` holds
- * the lines, names and prices exactly as they were frozen at issue. A draft has no snapshot
- * and says so rather than pretending to be a document.
+ * the lines, names, prices, parties and bank details exactly as they were frozen at issue.
+ *
+ * ── A draft renders its saved lines, marked «مسودة — غير صادر» ──
+ * Owner decision D-3: a draft may be previewed and printed with a prominent draft banner and the
+ * draft status in the footer. Printing does not issue it, does not pass the discount approval
+ * and does not change its status. Its figures are the server's saved ones
+ * (GET …/[id] → liveDocument), the same the screen's totals show; nothing is recomputed here.
  *
  * ── Why there is no PDF library ──
- * Every browser prints to PDF, and the print stylesheet below is what decides how that PDF
- * looks. Adding a renderer would put a second layout in the codebase that nobody looks at
- * until a customer complains the total is in the wrong place.
+ * Every browser prints to PDF, and the print stylesheet (DocumentSheet) is what decides how that
+ * PDF looks. The sheet on screen is the same component, so the preview is the document.
  *
- * ── Layout ──
- * Built to GX A-12 (Figma 1230:139687, EN 1233:78380): a screen toolbar (number, what the current
- * version leaves out, the gated action) over an A4 sheet. Only the sheet reaches paper.
+ * ── Language ──
+ * The document follows the user's language; `?lang=en` / `?lang=ar` prints it in the other one
+ * (an English quotation for a customer who reads English), without changing the app's language.
  */
 
-type SnapshotLine = {
-  position: number;
-  skuCode: string | null;
-  name: string | null;
-  nameAr: string | null;
-  description: string | null;
-  quantity: string;
-  unit: string;
-  unitPrice: string;
-  discountPercent: string;
-  taxRatePercent: string;
-  gross: string;
-  discountAmount: string;
-  lineSubtotal: string;
-  lineTax: string;
-  lineTotal: string;
+type Seller = {
+  sellerLegalNameAr: string | null; sellerLegalNameEn: string | null; sellerAddressAr: string | null;
+  sellerAddressEn: string | null; sellerVatNumber: string | null; sellerCrNumber: string | null; sellerPhone: string | null;
+  /** Since the bank transfer details: absent on snapshots frozen before them. */
+  sellerBankName?: string | null; sellerBankAccountName?: string | null; sellerIban?: string | null;
+};
+type DocCustomer = {
+  name: string; nameAr: string | null; phone: string | null; email: string | null; address: string | null;
+  city?: string | null; vatNumber?: string | null; commercialRegNo?: string | null;
+};
+
+type Totals = {
+  subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
+  grandTotal: string;
+  effectiveDiscountPercent: string;
 };
 
 type Snapshot = {
@@ -53,14 +61,12 @@ type Snapshot = {
   revision: number;
   currency: string;
   validUntil: string;
-  totals: {
-    subtotal: string;
-    discountTotal: string;
-    taxTotal: string;
-    grandTotal: string;
-    effectiveDiscountPercent: string;
-  };
-  lines: SnapshotLine[];
+  totals: Totals;
+  lines: QuoteDocLine[];
+  /** Since batch "Sales" track A: frozen at issue. Absent on older snapshots. */
+  customerNotes?: string | null;
+  customer?: DocCustomer | null;
+  seller?: Seller | null;
 };
 
 type Quote = {
@@ -70,34 +76,53 @@ type Quote = {
   status: string;
   currency: string;
   validUntil: string | null;
+  subtotal: string;
+  discountTotal: string;
+  taxTotal: string;
+  grandTotal: string;
   issuedAt: string | null;
   issuedSnapshot: Snapshot | null;
-  customer: { id: string; name: string; nameAr: string | null; phone: string | null; email: string | null; address: string | null } | null;
+  customerNotes: string | null;
+  customer: ({ id: string } & DocCustomer) | null;
   opportunity: { id: string; title: string; owner: { id: string; name: string } | null };
+};
+type QuoteResponse = {
+  quote: Quote;
+  discount?: { state: string };
+  liveDocument: { lines: QuoteDocLine[]; effectiveDiscountPercent: string } | null;
 };
 
 /**
- * What the printed document looks like.
- *
- * Kept beside the page it shapes rather than in a global sheet, where nobody would connect
- * the two while looking at a printing bug. A plain <style> element rather than styled-jsx:
- * React 19 hoists it, and it keeps this page free of a dependency question.
+ * What the application chrome does on paper: it is not part of a customer document. Kept beside
+ * the page it shapes; the sheet's own print rules (page size, margins, running footer) are in
+ * DocumentSheet. A plain <style> element: React 19 hoists it.
  */
 const PRINT_CSS = `
 @media print {
-  /* The application chrome is not part of a customer document. */
   nav, aside, button { display: none !important; }
   a[href]:not([data-doc]) { display: none !important; }
   body { background: #fff !important; }
+  /* The sheet owns the page: no shell gutter around it and no canvas tint behind it (a PDF saved
+     with background graphics on would otherwise show the beige canvas at the page edges). */
+  .d21, .d21-app, .d21-main, .d21-sheet, .d21-body { background: #fff !important; }
+  .pg { padding: 0 !important; background: #fff !important; }
 }
-@page { margin: 16mm; }
 `;
-export default function QuotePrintPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const lang = useLang();
-  const ar = lang === "ar";
 
-  const [quote, setQuote] = useState<Quote | null>(null);
+/** For a caller that hands no search params (the UI harness). One promise, so `use` settles once. */
+const NO_SEARCH: Promise<{ lang?: string }> = Promise.resolve({});
+
+export default function QuotePrintPage({
+  params, searchParams = NO_SEARCH,
+}: { params: Promise<{ id: string }>; searchParams?: Promise<{ lang?: string }> }) {
+  const { id } = use(params);
+  const { lang: langParam } = use(searchParams);
+  const uiLang = useLang();
+  const ar = uiLang === "ar";
+  const docLang: DocLang = langParam === "en" || langParam === "ar" ? langParam : uiLang;
+
+  const [data, setData] = useState<QuoteResponse | null>(null);
+  const [liveSeller, setLiveSeller] = useState<Seller | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // Owner decision D1: printing is out of Phase 1 (PRINT_CERTIFIED gate, unknown counts as off).
@@ -108,13 +133,18 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
   const actionOn = printing === true || pdfOnly;
 
   useEffect(() => {
-    api<{ quote: Quote }>(`/api/sales/quotes/${id}`).then((res) => {
-      if (res.ok) setQuote(res.data.quote);
+    api<QuoteResponse>(`/api/sales/quotes/${id}`).then((res) => {
+      if (res.ok) setData(res.data);
       else setError(res.data.error ?? (ar ? "تعذّر تحميل العرض." : "Could not load the quotation."));
       setLoading(false);
     });
   }, [id, ar]);
+  // The seller block for a draft, and for a document issued before it was frozen into the snapshot.
+  useEffect(() => {
+    api<{ seller: Seller }>("/api/settings/quotation").then((res) => { if (res.ok) setLiveSeller(res.data.seller); });
+  }, []);
 
+  const quote = data?.quote ?? null;
   // The last crumb of the top bar is the quotation number, as on the quotation itself.
   useD21Title(quote?.quoteNumber);
   useD21Phone({
@@ -124,14 +154,15 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
   });
 
   if (loading) return <div className="pg"><Spinner /></div>;
-  if (!quote) return <div className="pg"><p className="notice er" role="alert" data-testid="alert-error">{error}</p></div>;
+  if (!quote || !data) return <div className="pg"><p className="notice er" role="alert" data-testid="alert-error">{error}</p></div>;
 
   const snap = quote.issuedSnapshot;
-  /** Every figure on the document: Latin digits, grouped, two places; the currency is stated once. */
-  const money = (v: string) => formatMoney(v);
-  const issuedOn = formatDay(quote.issuedAt ?? snap?.frozenAt ?? null, lang);
-  const customerName = quote.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : null;
-  const contactLine = [quote.customer?.address, quote.customer?.phone].filter(Boolean);
+  const seller: Seller | null = snap?.seller ?? liveSeller;
+  const L = (a: string, e: string) => (docLang === "ar" ? a : e);
+  const isDraft = !snap;
+  // A snapshot frozen before the bank details existed has no such keys: those read the live
+  // settings, as the seller block always did for snapshots older than it.
+  const bankSource: Seller | null = snap?.seller && "sellerIban" in snap.seller ? snap.seller : liveSeller;
 
   return (
     <div className="pg">
@@ -139,24 +170,28 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
       <div className="q-doc-bar print:hidden">
         <Link href={`/dashboard/sales/quotes/${quote.id}`} className="num">{quote.quoteNumber}</Link>
         <span className="sp" />
-        {snap && (
-          <>
-            <span className="why">
-              {ar ? "بلا رقم ضريبي ولا QR في النسخة الحالية" : "No VAT number or QR in the current version"}
-            </span>
-            <button
-              type="button"
-              className="btn p"
-              onClick={() => { if (actionOn) window.print(); }}
-              data-testid={printing === true ? "print-quote" : "save-quote-pdf"}
-              disabled={!actionOn}
-            >
-              {printing === true ? (ar ? "طباعة / حفظ PDF" : "Print / save as PDF") : (ar ? "حفظ كملف PDF" : "Save as PDF")}
-            </button>
-          </>
-        )}
+        <span className="why">
+          {seller?.sellerVatNumber
+            ? (ar ? "بلا QR (الفوترة الإلكترونية) في النسخة الحالية" : "No e-invoicing QR in the current version")
+            : (ar ? "بلا رقم ضريبي ولا QR في النسخة الحالية · أضف بيانات المنشأة من الإعدادات" : "No VAT number or QR in the current version · add the company details in Settings")}
+        </span>
+        <Link
+          href={`/dashboard/sales/quotes/${quote.id}/print?lang=${docLang === "ar" ? "en" : "ar"}`}
+          className="btn" data-doc data-testid="doc-other-language"
+        >
+          {docLang === "ar" ? "English" : "العربية"}
+        </Link>
+        <button
+          type="button"
+          className="btn p"
+          onClick={() => { if (actionOn) window.print(); }}
+          data-testid={printing === true ? "print-quote" : "save-quote-pdf"}
+          disabled={!actionOn}
+        >
+          {printing === true ? (ar ? "طباعة / حفظ PDF" : "Print / save as PDF") : (ar ? "حفظ كملف PDF" : "Save as PDF")}
+        </button>
       </div>
-      {snap && printing === false && (
+      {printing === false && (
         <div className="q-doc-wrap print:hidden" data-testid="print-phase1-note" style={{ marginBottom: 16 }}>
           <p className="notice">
             {ar ? PRINT_PHASE1_NOTE.ar : PRINT_PHASE1_NOTE.en}
@@ -170,165 +205,162 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
-      {!snap ? (
-        <div className="q-doc-wrap print:hidden">
-          <p className="notice">
-            {ar
-              ? "لا يوجد مستند بعد: العرض ما زال مسودة. المستند يُثبَّت عند الإصدار، وهو ما يضمن أن المطبوع هو ما أُرسل للعميل فعلاً."
-              : "There is no document yet: this quotation is still a draft. The document is frozen at issue, which is what makes the printed copy the thing the customer was actually sent."}
-          </p>
-        </div>
-      ) : (
-        <div className="q-doc-wrap">
-          <article data-testid="quote-document" className="q-doc">
-            {/* The brand logo (guideline v003 primary, olive-clay, for white paper): an <img>, so it
-                reaches paper and «Save as PDF» without "print backgrounds". */}
-            <div className="q-doc-brand">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={BRAND_PRIMARY_SRC} alt={ar ? "حِقبة" : "Hiqbah"} data-testid="quote-logo"
-                width={Math.round(64 * BRAND_PRIMARY_VIEWBOX.w / BRAND_PRIMARY_VIEWBOX.h)} height={64} />
-            </div>
-            <header>
-              <div>
-                <h1>{ar ? "عرض سعر" : "Quotation"}</h1>
-                <p className="ref">
-                  <bdi className="id">{snap.quoteNumber}</bdi>
-                  {snap.revision > 1 && <> · {ar ? "مراجعة" : "revision"} {snap.revision}</>}
-                </p>
-              </div>
-              <dl className="facts">
-                <div>
-                  <dt>{ar ? "التاريخ:" : "Issued:"}</dt>
-                  <dd>{issuedOn}</dd>
-                </div>
-                <div>
-                  <dt>{ar ? "صالح حتى:" : "Valid until:"}</dt>
-                  <dd>{formatDay(snap.validUntil, lang)}</dd>
-                </div>
-                <div>
-                  <dt>{ar ? "العملة:" : "Currency:"}</dt>
-                  <dd>{ar ? "ريال سعودي (SAR)" : `Saudi riyal (${snap.currency})`}</dd>
-                </div>
-              </dl>
-            </header>
+      <div className="q-doc-wrap">
+        <QuoteDocument
+          lang={docLang}
+          quote={quote}
+          snap={snap}
+          live={data.liveDocument}
+          discountPending={isDraft && data.discount?.state === "PENDING"}
+          seller={seller}
+          bank={bankSource}
+          L={L}
+        />
+      </div>
 
-            <section className="parties">
-              <div>
-                <h2>{ar ? "إلى" : "To"}</h2>
-                {quote.customer ? (
-                  <address>
-                    <b>{customerName}</b>
-                    {contactLine.length > 0 && (
-                      <span className="sub" style={{ display: "block" }}>
-                        {quote.customer.address}
-                        {quote.customer.address && quote.customer.phone && " · "}
-                        {quote.customer.phone && <bdi dir="ltr">{quote.customer.phone}</bdi>}
-                      </span>
-                    )}
-                    {quote.customer.email && <span className="sub" style={{ display: "block" }}><bdi dir="ltr">{quote.customer.email}</bdi></span>}
-                  </address>
-                ) : (
-                  <p style={{ margin: 0 }}>—</p>
-                )}
-              </div>
-              <div>
-                <h2>{ar ? "أعدّه" : "Prepared by"}</h2>
-                <b>{quote.opportunity.owner?.name ?? "—"}</b>
-              </div>
-            </section>
-
-            {/* On paper the table has the page's full width; on a phone it does not, so it
-                scrolls inside its own box rather than dragging the document sideways. */}
-            <div className="q-doc-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{ar ? "البند" : "Item"}</th>
-                    <th className="num">{ar ? "الكمية" : "Qty"}</th>
-                    <th className="num">{ar ? "السعر" : "Price"}</th>
-                    <th className="num">{ar ? "خصم" : "Disc."}</th>
-                    <th className="num">{ar ? "ضريبة" : "Tax"}</th>
-                    <th className="num">{ar ? "الإجمالي" : "Total"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {snap.lines.map((l) => (
-                    <tr key={l.position}>
-                      <td className="item">
-                        {/* The name as it stood when the offer was made. */}
-                        <b>{(ar ? l.nameAr : null) ?? l.name ?? l.description ?? "—"}</b>
-                        {l.skuCode && <span className="id">{l.skuCode}</span>}
-                      </td>
-                      <td className="num">{num(Number(l.quantity), lang)}</td>
-                      <td className="num">{money(l.unitPrice)}</td>
-                      <td className="num">{Number(l.discountAmount) > 0 ? money(l.discountAmount) : "—"}</td>
-                      <td className="num">{Number(l.lineTax) > 0 ? money(l.lineTax) : "—"}</td>
-                      <td className="num">{money(l.lineTotal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <dl className="tot">
-              <Row label={ar ? "الإجمالي قبل الخصم" : "Subtotal"} value={money(snap.totals.subtotal)} />
-              {Number(snap.totals.discountTotal) > 0 && (
-                <Row label={ar ? "الخصم" : "Discount"} value={`-${money(snap.totals.discountTotal)}`} />
-              )}
-              {/* The base VAT is charged on. A tax document that jumps from a subtotal to a
-                  tax figure leaves the customer to work out which number it was 15% of. */}
-              <Row
-                label={ar ? "الوعاء الخاضع للضريبة" : "Taxable base"}
-                value={money((Number(snap.totals.subtotal) - Number(snap.totals.discountTotal)).toFixed(2))}
-              />
-              <Row label={ar ? "ضريبة القيمة المضافة" : "VAT"} value={money(snap.totals.taxTotal)} />
-              <dt className="due">{ar ? "الإجمالي المستحق" : "Total due"}</dt>
-              <dd className="due">{money(snap.totals.grandTotal)}</dd>
-            </dl>
-
-            <div className="terms">
-              <p>
-                {ar
-                  ? "الشروط: الأسعار بالريال السعودي وتشمل التسليم داخل المدينة. العرض صالح حتى التاريخ المذكور. تُحتسب ضريبة القيمة المضافة وفق النظام السعودي."
-                  : "Terms: prices are in Saudi riyals and include delivery within the city. The offer holds until the date above. VAT is charged under the Saudi regime."}
-              </p>
-              <p>
-                {ar
-                  ? `الأسعار مثبّتة كما صدرت في ${issuedOn} وتبقى سارية حتى ${formatDay(snap.validUntil, lang)}.`
-                  : `Prices are as issued on ${issuedOn} and hold until ${formatDay(snap.validUntil, lang)}.`}
-              </p>
-              {quote.status === "SUPERSEDED" && (
-                <p className="er">
-                  {ar
-                    ? "استُبدل هذا العرض بمراجعة أحدث. لا تُرسله إلى العميل."
-                    : "This quotation has been superseded by a later revision. Do not send it to the customer."}
-                </p>
-              )}
-            </div>
-
-            {/* The two signature blocks the design ends on: a quotation is signed back. */}
-            <div className="sign">
-              <div>{ar ? "عن المؤسسة" : "For the company"}</div>
-              <div>{ar ? "توقيع العميل" : "Customer signature"}</div>
-            </div>
-          </article>
-        </div>
-      )}
-
-{/* The print rules, kept with the document they shape rather than in a global sheet where
-    nobody would connect the two. A plain <style> element rather than styled-jsx: React 19
-    hoists it, and it keeps this page free of a dependency question nobody wants to answer
-    while looking at a printing bug. */}
       <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+/**
+ * The quotation → the document sheet. Every figure is read from the snapshot (issued) or the
+ * saved draft (live); the sheet only lays them out.
+ */
+function QuoteDocument({
+  lang, quote, snap, live, discountPending, seller, bank, L,
+}: {
+  lang: DocLang;
+  quote: Quote;
+  snap: Snapshot | null;
+  live: QuoteResponse["liveDocument"];
+  discountPending: boolean;
+  seller: Seller | null;
+  bank: Seller | null;
+  L: (ar: string, en: string) => string;
+}) {
+  const ar = lang === "ar";
+  const lines: QuoteDocLine[] = snap?.lines ?? live?.lines ?? [];
+  const totals: Totals = snap?.totals ?? {
+    subtotal: quote.subtotal, discountTotal: quote.discountTotal, taxTotal: quote.taxTotal,
+    grandTotal: quote.grandTotal, effectiveDiscountPercent: live?.effectiveDiscountPercent ?? "0",
+  };
+  const number = snap?.quoteNumber ?? quote.quoteNumber;
+  const revision = snap?.revision ?? quote.revision;
+  const validUntil = snap?.validUntil ?? quote.validUntil;
+  const isDraft = !snap;
+  const spec = QUOTE_STATUS_SPECS[quote.status];
+  const statusWord = spec ? (ar ? spec.ar : spec.en.toLowerCase()) : quote.status;
+  const footStatus = isDraft ? L("مسودة — غير صادر", "Draft — not issued") : (spec ? (ar ? spec.ar : spec.en) : quote.status);
+
+  // Parties: the snapshot's (frozen at issue) or, for a draft and older snapshots, the live ones.
+  const cust: DocCustomer | null = snap?.customer ?? quote.customer;
+  const customerName = cust ? (ar ? (cust.nameAr || cust.name) : cust.name) : null;
+  const place = [cust?.city, cust?.address].filter(Boolean).join(" · ");
+  const sellerName = seller ? (ar ? (seller.sellerLegalNameAr || seller.sellerLegalNameEn) : (seller.sellerLegalNameEn || seller.sellerLegalNameAr)) : null;
+  const sellerAddress = seller ? (ar ? (seller.sellerAddressAr || seller.sellerAddressEn) : (seller.sellerAddressEn || seller.sellerAddressAr)) : null;
+  const notes = snap ? (snap.customerNotes ?? (snap.customer === undefined ? quote.customerNotes : null)) : quote.customerNotes?.trim() || null;
+
+  const money = (v: string) => formatMoney(v);
+  const vat = uniformTaxRate(lines);
+  const hasDiscount = Number(totals.discountTotal) > 0;
+  // The base VAT is charged on. A tax document that jumps from a subtotal to a tax figure leaves
+  // the customer to work out which number it was 15% of.
+  const taxable = (Number(totals.subtotal) - Number(totals.discountTotal)).toFixed(2);
+
+  const metaStart: DocRow[] = [
+    {
+      label: L("رقم العرض", "Quotation number"),
+      value: <><bdi className="mono" dir="ltr">{number}</bdi> · {statusWord}</>,
+      testId: "doc-number",
+    },
+    { label: L("صالح حتى", "Valid until"), value: longDate(validUntil, lang), testId: "doc-valid-until" },
+  ];
+  const metaEnd: DocRow[] = [];
+  if (cust) {
+    metaEnd.push({ label: L("العميل", "Customer"), value: <bdi>{customerName}</bdi>, testId: "quote-customer" });
+    if (place) metaEnd.push({ label: L("العنوان", "Address"), value: <bdi>{place}</bdi>, testId: "quote-customer-address" });
+    if (cust.vatNumber) metaEnd.push({ label: L("الرقم الضريبي", "VAT number"), value: <bdi dir="ltr">{cust.vatNumber}</bdi>, mono: true, muted: true, testId: "quote-customer-vat" });
+  } else {
+    metaEnd.push({ label: L("العميل", "Customer"), value: "—", testId: "quote-customer" });
+  }
+
+  const tot: DocTotal[] = [
+    { label: L("المجموع قبل الخصم", "Subtotal before discount"), value: money(totals.subtotal) },
+  ];
+  if (hasDiscount) {
+    tot.push({
+      label: <>{L("الخصم", "Discount")} <bdi>{formatPercent(totals.effectiveDiscountPercent)}</bdi></>,
+      value: `−${money(totals.discountTotal)}`,
+      testId: "doc-total-discount",
+    });
+  }
+  tot.push({ label: L("الوعاء الخاضع للضريبة", "Taxable amount"), value: money(taxable) });
+  tot.push({ label: <>{L("ضريبة القيمة المضافة", "VAT")}{vat && <> <bdi>{vat}</bdi></>}</>, value: money(totals.taxTotal) });
+  tot.push({ label: L("الإجمالي شامل الضريبة · ر.س", "Total incl. VAT · SAR"), value: money(totals.grandTotal), grand: true, testId: "doc-grand-total" });
+
+  const bankRows: DocRow[] = [];
+  if (bank?.sellerBankName) bankRows.push({ label: L("البنك", "Bank"), value: <bdi>{bank.sellerBankName}</bdi> });
+  if (bank?.sellerBankAccountName) bankRows.push({ label: L("اسم الحساب", "Account name"), value: <bdi>{bank.sellerBankAccountName}</bdi> });
+  if (bank?.sellerIban) bankRows.push({ label: L("رقم الآيبان", "IBAN"), value: <bdi dir="ltr">{formatIban(bank.sellerIban)}</bdi>, mono: true, testId: "doc-iban" });
+
+  const sellerLines = [
+    sellerAddress && <bdi key="a">{sellerAddress}</bdi>,
+    seller?.sellerVatNumber && <>{L("الرقم الضريبي ", "VAT number ")}<bdi dir="ltr" className="n">{seller.sellerVatNumber}</bdi></>,
+  ].filter(Boolean);
+
+  let banner: { tone: "warning" | "danger"; title: string; text: string; testId: string } | null = null;
+  if (isDraft) {
+    banner = {
+      tone: "warning",
+      title: L("مسودة — غير صادر", "Draft — not issued"),
+      text: discountPending
+        ? L("نسخة مسودة للمراجعة، وليست عرض سعر صادرًا. الخصم يحتاج اعتمادًا قبل الإصدار، وقد تتغيّر الأسعار حتى ذلك.",
+          "A draft for review, not an issued quotation. The discount needs approval before issue, and prices may change until then.")
+        : L("نسخة مسودة للمراجعة، وليست عرض سعر صادرًا. قد تتغيّر الأسعار حتى الإصدار.",
+          "A draft for review, not an issued quotation. Prices may change until it is issued."),
+      testId: "doc-draft-banner",
+    };
+  } else if (quote.status === "SUPERSEDED") {
+    banner = {
+      tone: "danger",
+      title: L("مستبدَل بمراجعة أحدث", "Superseded by a later revision"),
+      text: L("استُبدل هذا العرض بمراجعة أحدث. لا تُرسله إلى العميل.", "This quotation has been superseded by a later revision. Do not send it to the customer."),
+      testId: "doc-superseded-banner",
+    };
+  }
+
   return (
-    <>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </>
+    <DocumentSheet
+      lang={lang}
+      testId="quote-document"
+      logo={{
+        src: BRAND_PRIMARY_SRC, alt: L("حِقبة", "Hiqbah"),
+        width: Math.round(54 * BRAND_PRIMARY_VIEWBOX.w / BRAND_PRIMARY_VIEWBOX.h), height: 54,
+      }}
+      seller={sellerName || sellerLines.length ? { name: sellerName, lines: sellerLines, testId: "quote-seller" } : null}
+      title={{
+        main: L("عرض سعر", "Quotation"),
+        lines: [
+          <>{L("المراجعة ", "Revision ")}<bdi>{revision}</bdi></>,
+          <span key="alt" className="alt" lang={ar ? "en" : "ar"} dir={ar ? "ltr" : "rtl"}>{ar ? "Quotation" : "عرض سعر"}</span>,
+        ],
+      }}
+      banner={banner}
+      metaStart={metaStart}
+      metaEnd={metaEnd}
+      columns={quoteLineColumns(lang)}
+      rows={lines.map((l, i) => quoteLineCells(l, i + 1, lang))}
+      totals={tot}
+      notes={notes ? { label: L("ملاحظات", "Notes"), text: notes, testId: "quote-doc-notes" } : null}
+      bank={bankRows.length ? { label: L("بيانات التحويل البنكي", "Bank transfer details"), rows: bankRows, testId: "doc-bank" } : null}
+      footer={{
+        legal: vat
+          ? L(`المبالغ بالريال السعودي. ضريبة القيمة المضافة ${vat} على كل سطر بعد الخصم.`, `Amounts in Saudi riyals. VAT ${vat} on each line after the discount.`)
+          : L("المبالغ بالريال السعودي. ضريبة القيمة المضافة على كل سطر بعد الخصم.", "Amounts in Saudi riyals. VAT on each line after the discount."),
+        page: { before: L("الصفحة ", "Page "), between: L(" من ", " of "), after: ` · ${footStatus}` },
+        docNumber: number,
+      }}
+    />
   );
 }

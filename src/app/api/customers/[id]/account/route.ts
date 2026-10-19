@@ -167,10 +167,13 @@ export async function GET(_request: Request, { params }: Params) {
           select: { leadId: true, convertedAt: true, lead: { select: { source: true, sourceNote: true } } },
         })
       : Promise.resolve(null);
+    // Every stage, hidden ones included: the history names the stages a deal passed through,
+    // and a stage hidden later (only open deals block hiding) must still resolve its label.
+    // The page draws the stage track from the active ones (`isActive`).
     const stagesP = sales
       ? prisma.pipelineStage.findMany({
-          where: { isActive: true }, orderBy: { position: "asc" },
-          select: { id: true, code: true, nameEn: true, nameAr: true, position: true },
+          orderBy: { position: "asc" },
+          select: { id: true, code: true, nameEn: true, nameAr: true, position: true, isActive: true },
         })
       : Promise.resolve(null);
 

@@ -324,7 +324,9 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
 
   // ── The open deal ──
   const deal = data.openDeal;
-  const stages = data.stages ?? [];
+  // The track shows the active stages (plus the deal's own if it is hidden); the history's
+  // labels use every stage (`stageById`).
+  const stages = (data.stages ?? []).filter((s) => s.isActive !== false);
   const nextStep = deal?.nextStep ?? data.nextStep;
   const lateBy = nextStep?.dueAt && new Date(nextStep.dueAt) < new Date() ? Math.max(1, -daysFromToday(nextStep.dueAt)) : 0;
   const reached = new Map<string, string>();

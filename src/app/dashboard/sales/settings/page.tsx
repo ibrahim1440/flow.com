@@ -7,6 +7,7 @@ import {
 } from "../_components/ui";
 import { PerfNotice, PerfLoading, PerfNote } from "../_components/perf";
 import { usePhone, useD21Phone } from "@/components/shell/page-context";
+import { SettingsNav } from "../../_components/tools-ui";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 
 /**
@@ -29,7 +30,8 @@ import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/
  * it, and deleting it would break the history those events exist to preserve.
  *
  * Visual port: the same requests (list, reorder, purpose, retire / restore, the stage dialog).
- * The frame's settings navigation column (المنشأة, المستخدمون…) is not built — see the report.
+ * The frame's settings navigation column (المنشأة, المستخدمون…) is the settings hub's own
+ * (`SettingsNav`, shared with the organisation and automation settings).
  */
 
 type StagePurpose = "QUALIFICATION" | "QUOTATION";
@@ -45,6 +47,8 @@ type Stage = {
   /** What the lifecycle automation means by this column. At most one stage per purpose. */
   purpose: StagePurpose | null;
   _count?: { opportunities: number };
+  /** Deals in this stage that are still open — the only ones that stop it being hidden. */
+  openDeals?: number;
 };
 
 /**
@@ -107,6 +111,34 @@ export default function SalesSettingsPage() {
     })();
     return () => { cancelled = true; };
   }, [ar, reloadToken]);
+
+  // «حد الخصم الذي يحتاج اعتماد» (GET/PUT /api/settings/quotation). Empty = the built-in figure.
+  const [disc, setDisc] = useState<{ stored: string | null; effective: string; canEdit: boolean } | null>(null);
+  const [discInput, setDiscInput] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await api<{ discountApprovalPercent: string | null; effectiveThresholdPercent: string; can: { edit: boolean } }>("/api/settings/quotation");
+      if (cancelled || !res.ok) return;
+      setDisc({ stored: res.data.discountApprovalPercent, effective: res.data.effectiveThresholdPercent, canEdit: res.data.can.edit });
+      setDiscInput(res.data.discountApprovalPercent === null ? "" : String(Number(res.data.discountApprovalPercent)));
+    })();
+    return () => { cancelled = true; };
+  }, [reloadToken]);
+  async function saveThreshold() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const res = await api<{ discountApprovalPercent: string | null; effectiveThresholdPercent: string; errorEn?: string }>(
+      "/api/settings/quotation", { method: "PUT", body: { discountApprovalPercent: discInput.trim() } },
+    );
+    setBusy(false);
+    if (!res.ok) { setError((ar ? res.data.error : res.data.errorEn) ?? res.data.error ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
+    setSuccess(res.data.discountApprovalPercent === null
+      ? (ar ? `حدّ الخصم: الافتراضي (${res.data.effectiveThresholdPercent}%).` : `Discount threshold: the default (${res.data.effectiveThresholdPercent}%).`)
+      : (ar ? `حدّ الخصم الذي يحتاج اعتماد: ${res.data.effectiveThresholdPercent}%.` : `Discount approval threshold: ${res.data.effectiveThresholdPercent}%.`));
+    reload();
+  }
 
   async function patch(changes: Partial<Stage> & { id: string }, okMessage: string) {
     if (busy) return;
@@ -181,7 +213,6 @@ export default function SalesSettingsPage() {
           <option key={p} value={p}>{ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}</option>
         ))}
       </Select>
-      <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
     </span>
   );
 
@@ -194,17 +225,35 @@ export default function SalesSettingsPage() {
     </span>
   );
 
-  const rowBtns = (s: Stage) => (
+  /**
+   * Why «إخفاء» is unavailable, or null when it is not. The server refuses to retire a stage
+   * that still holds OPEN deals (409); won and lost deals stay in a hidden stage and keep its
+   * name (owner decision, batch Sales B). The button says so before anybody presses it.
+   */
+  const holdingReason = (s: Stage): string | null => {
+    const count = s.openDeals ?? 0;
+    if (count === 0) return null;
+    return ar
+      ? `لا تُخفى: فيها ${num(count, lang)} ${count === 1 ? "صفقة مفتوحة" : count === 2 ? "صفقتان مفتوحتان" : "صفقات مفتوحة"}. انقلها إلى مرحلة أخرى أولًا.`
+      : `Cannot be retired: it holds ${count} open deal${count === 1 ? "" : "s"}. Move them to another stage first.`;
+  };
+
+  const rowBtns = (s: Stage) => {
+    const reason = holdingReason(s);
+    return (
     <span className="perf-rowbtns">
       <button type="button" className="btn sm" onClick={() => setEditing(s)} data-testid={`edit-stage-${s.code}`}>
         {ar ? "تعديل" : "Edit"}
       </button>
       {s.isActive ? (
-        <button type="button" className="btn sm" disabled={busy} data-testid={`retire-stage-${s.code}`}
-          title={(s._count?.opportunities ?? 0) > 0 ? (ar ? "انقل الصفقات أولًا" : "Move its deals first") : undefined}
-          onClick={() => patch({ id: s.id, isActive: false }, ar ? "أُخفيت المرحلة." : "Stage retired.")}>
-          {ar ? "إخفاء" : "Retire"}
-        </button>
+        <span title={reason ?? undefined} style={{ display: "inline-flex" }}>
+          <button type="button" className="btn sm" disabled={busy || reason !== null} data-testid={`retire-stage-${s.code}`}
+            title={reason ?? undefined} aria-describedby={reason ? `retire-why-${s.id}` : undefined}
+            onClick={() => patch({ id: s.id, isActive: false }, ar ? "أُخفيت المرحلة." : "Stage retired.")}>
+            {ar ? "إخفاء" : "Retire"}
+          </button>
+          {reason && <span id={`retire-why-${s.id}`} className="sr-only" data-testid={`retire-why-${s.code}`}>{reason}</span>}
+        </span>
       ) : (
         <button type="button" className="btn sm" disabled={busy} data-testid={`restore-stage-${s.code}`}
           onClick={() => patch({ id: s.id, isActive: true }, ar ? "أُعيدت المرحلة." : "Stage restored.")}>
@@ -213,7 +262,8 @@ export default function SalesSettingsPage() {
       )}
       {!s.isActive && <span className="perf-code">{ar ? "مخفية" : "retired"}</span>}
     </span>
-  );
+    );
+  };
 
   const newStage = (
     <button type="button" className="btn p" onClick={() => setAdding(true)} data-testid="new-stage">
@@ -239,10 +289,11 @@ export default function SalesSettingsPage() {
           {moveBtns(s, i)}
           <div className="r2">
             <span style={{ flex: 1 }}>
-              {ar ? "الاحتمال" : "Probability"} <span className="n">{s.probability}%</span> · {ar ? "الصفقات" : "Deals"} <span className="n">{num(s._count?.opportunities ?? 0, lang)}</span>
+              {ar ? "الاحتمال" : "Probability"} <span className="n">{s.probability}%</span> · {ar ? "صفقات مفتوحة" : "Open deals"} <span className="n">{num(s.openDeals ?? 0, lang)}</span>
             </span>
           </div>
           <div className="r2" style={{ marginTop: 6, flexWrap: "wrap" }}>{purposeSelect(s)}{rowBtns(s)}</div>
+          {s.isActive && holdingReason(s) && <div className="r2" aria-hidden>{holdingReason(s)}</div>}
         </div>
       ))}
     </div>
@@ -255,7 +306,7 @@ export default function SalesSettingsPage() {
           <th scope="col">{ar ? "الاسم" : "Name"}</th>
           <th scope="col" className="num">{ar ? "الاحتمال" : "Probability"}</th>
           <th scope="col">{ar ? "الأتمتة" : "Automation"}</th>
-          <th scope="col" className="num">{ar ? "الصفقات" : "Deals"}</th>
+          <th scope="col" className="num">{ar ? "الصفقات المفتوحة" : "Open deals"}</th>
           <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>
         </tr></thead>
         <tbody>
@@ -270,7 +321,9 @@ export default function SalesSettingsPage() {
               </td>
               <td className="num"><span className="n">{s.probability}%</span></td>
               <td>{purposeSelect(s)}</td>
-              <td className="num"><span className="n">{num(s._count?.opportunities ?? 0, lang)}</span></td>
+              <td className="num" title={ar ? `كل الصفقات: ${num(s._count?.opportunities ?? 0, lang)}` : `All deals: ${s._count?.opportunities ?? 0}`}>
+                <span className="n">{num(s.openDeals ?? 0, lang)}</span>
+              </td>
               <td style={{ textAlign: "end" }}>{rowBtns(s)}</td>
             </tr>
           ))}
@@ -280,6 +333,8 @@ export default function SalesSettingsPage() {
   );
 
   return (
+    <div className="perf-settings">
+    {!phone && <SettingsNav />}
     <div className="pg">
       {phone ? (
         <div className="perf-ph">
@@ -289,7 +344,7 @@ export default function SalesSettingsPage() {
       ) : (
         <div className="ph" style={{ marginBottom: 20 }}>
           <div>
-            <h1>{ar ? "إعدادات المبيعات" : "Sales settings"}</h1>
+            <h1>{ar ? "المبيعات" : "Sales"}</h1>
             <div className="meta">
               <span>{ar ? "المراحل والمصادر وحدود الخصم — تغييرها يغيّر سلوك الشاشات فورًا" : "Stages, sources and discount limits — changing these changes the screens at once"}</span>
             </div>
@@ -303,7 +358,7 @@ export default function SalesSettingsPage() {
 
       <div className="bh">
         <h2 className="bt">{ar ? "مراحل مسار الصفقات" : "Pipeline stages"}</h2>
-        <span className="sub">{ar ? "تُخفى ولا تُحذف · لا تُخفى مرحلة فيها صفقات" : "retired, never deleted · a stage holding deals cannot be retired"}</span>
+        <span className="sub">{ar ? "تُخفى ولا تُحذف · لا تُخفى مرحلة فيها صفقات مفتوحة" : "retired, never deleted · a stage holding open deals cannot be retired"}</span>
       </div>
       {stagesBlock}
 
@@ -342,8 +397,8 @@ export default function SalesSettingsPage() {
 
       <div className="hr" style={{ margin: "28px 0" }} />
 
-      {/* Read-only on purpose: the seven stored lead sources, and the discount limits the
-          quotation service applies. Neither is a settings row — changing them is a code change. */}
+      {/* Read-only: the seven stored lead sources. The discount threshold is a setting
+          (Settings › quotations; the admin role edits it), the 60% ceiling is policy in code. */}
       <div className="cols perf-cols" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 40 }}>
         <div>
           <div className="bh">
@@ -359,18 +414,35 @@ export default function SalesSettingsPage() {
         <div>
           <div className="bh">
             <h2 className="bt">{ar ? "حدود الخصم والصلاحيات" : "Discount limits"}</h2>
-            <span className="sub">{ar ? "ثابتة في النظام · للعرض" : "fixed in the system · for reference"}</span>
+            <span className="sub">{disc?.canEdit ? (ar ? "الحد قابل للتعديل · السقف ثابت" : "the threshold is editable · the ceiling is fixed") : (ar ? "للعرض" : "for reference")}</span>
           </div>
+          {disc?.canEdit && (
+            <div className="tool" style={{ alignItems: "flex-end", marginBottom: 14 }} data-testid="discount-threshold-form">
+              <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                <span>{ar ? "حد الخصم الذي يحتاج اعتماد (%)" : "Discount that needs approval, above (%)"}</span>
+                <input className="q-set-input" inputMode="decimal" value={discInput} onChange={(e) => setDiscInput(e.target.value)}
+                  placeholder={ar ? `فارغ = الافتراضي ${DISCOUNT_APPROVAL_THRESHOLD}` : `empty = default ${DISCOUNT_APPROVAL_THRESHOLD}`}
+                  aria-describedby="disc-help" data-testid="discount-threshold-input" />
+              </label>
+              <button type="button" className="btn p" disabled={busy} onClick={saveThreshold} data-testid="discount-threshold-save">{ar ? "حفظ" : "Save"}</button>
+              <span id="disc-help" className="sm" style={{ flexBasis: "100%", fontSize: 12.5, color: "var(--text-muted)" }}>
+                {ar ? `من 0 إلى ${DISCOUNT_MAX}. فوقه يحتاج الإصدار اعتماد مدير لديه صلاحية اعتماد الخصم. فارغ = ${DISCOUNT_APPROVAL_THRESHOLD}% كما هو الآن.` : `0 to ${DISCOUNT_MAX}. Above it, issuing needs a manager with discount approval. Empty = ${DISCOUNT_APPROVAL_THRESHOLD}%, as today.`}
+              </span>
+            </div>
+          )}
           <dl className="props" style={{ gridTemplateColumns: "140px minmax(0,1fr)" }} data-testid="discount-limits">
             <dt>{ar ? "بلا اعتماد" : "Without approval"}</dt>
-            <dd>{ar ? `حتى ${num(DISCOUNT_APPROVAL_THRESHOLD, "ar")}%` : `up to ${DISCOUNT_APPROVAL_THRESHOLD}%`}</dd>
+            <dd>
+              {(() => { const t = Number(disc?.effective ?? DISCOUNT_APPROVAL_THRESHOLD); return ar ? `حتى ${num(t, "ar")}%` : `up to ${t}%`; })()}
+              {disc && disc.stored === null && <span className="sm" style={{ color: "var(--text-muted)" }}>{ar ? " · الافتراضي" : " · default"}</span>}
+            </dd>
             <dt>{ar ? "باعتماد الخصم" : "With discount approval"}</dt>
             <dd>{ar ? `حتى ${num(DISCOUNT_MAX, "ar")}%` : `up to ${DISCOUNT_MAX}%`}</dd>
             <dt>{ar ? "فوق ذلك" : "Above that"}</dt>
             <dd>{ar ? "مرفوض" : "refused"}</dd>
           </dl>
           <p className="sm" style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-muted)" }}>
-            {ar ? "تجاوز الحدّ يحوّل «إصدار العرض» إلى «طلب اعتماد الخصم»." : "Past the threshold, “Issue” becomes “Ask for discount approval”."}
+            {ar ? "تجاوز الحدّ يُعلِّم العرض «يحتاج اعتماد خصم» في القائمة، ويعتمده المدير أو يرفضه قبل الإصدار." : "Past the threshold the quotation is flagged «needs discount approval»; a manager approves or refuses it before it is issued."}
           </p>
         </div>
       </div>
@@ -391,6 +463,7 @@ export default function SalesSettingsPage() {
           }}
         />
       )}
+    </div>
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
+import { hasSubPrivilege } from "@/lib/auth-shared";
+import { seesAllSales } from "@/lib/services/sales/scope";
 
 /**
  * Pipeline stages — the columns of the board, as configuration rather than as a constant
@@ -19,15 +21,23 @@ import { handleDomainError } from "@/lib/api-error";
 const STAGE_PURPOSES = ["QUALIFICATION", "QUOTATION"] as const;
 type StagePurposeValue = (typeof STAGE_PURPOSES)[number];
 
-/** GET /api/sales/stages — the configured stages, with how many deals sit in each. */
+/**
+ * GET /api/sales/stages — the configured stages, with how many deals sit in each.
+ *
+ * The counts are the whole team's, so they are returned only to somebody who sees all sales
+ * or configures the stages (batch Sales B: team-wide figures are not a rep's). `openDeals` is
+ * what decides whether a stage may be hidden; `_count.opportunities` (every deal, closed ones
+ * included) is kept for existing readers.
+ */
 export async function GET(request: Request) {
-  const { error } = await requireModule("sales");
+  const { user, error } = await requireModule("sales");
   if (error) return error;
 
   const includeInactive = new URL(request.url).searchParams.get("all") === "true";
+  const counts = seesAllSales(user.permissions) || hasSubPrivilege(user.permissions, "sales", "stage_manage");
 
   try {
-    const stages = await prisma.pipelineStage.findMany({
+    const rows = await prisma.pipelineStage.findMany({
       where: includeInactive ? {} : { isActive: true },
       orderBy: { position: "asc" },
       select: {
@@ -36,6 +46,12 @@ export async function GET(request: Request) {
         _count: { select: { opportunities: true } },
       },
     });
+    const open = counts
+      ? await prisma.opportunity.groupBy({ by: ["stageId"], where: { outcome: "OPEN" }, _count: { _all: true } })
+      : [];
+    const openBy = new Map(open.map((o) => [o.stageId, o._count._all]));
+    const stages = rows.map(({ _count, ...st }) =>
+      counts ? { ...st, _count, openDeals: openBy.get(st.id) ?? 0 } : st);
     return NextResponse.json({ stages, purposes: STAGE_PURPOSES });
   } catch (err) {
     return handleDomainError(err);
@@ -165,18 +181,26 @@ export async function PATCH(request: Request) {
       return { id: s.id, data };
     });
 
+    // Only OPEN deals block hiding a stage (owner decision, batch Sales B): an open deal in a
+    // hidden column would vanish from the board. Won and lost deals stay exactly where they
+    // are — hiding touches the stage row only, never a deal, its stage reference or its stage
+    // history — and every screen still names their stage (stages are looked up by id, hidden
+    // or not). A closed deal reopened from a hidden stage is moved to the first active stage
+    // by the transition route.
     const retiring = updates.filter((u) => u.data.isActive === false).map((u) => u.id);
     if (retiring.length > 0) {
-      const holding = await prisma.pipelineStage.findMany({
-        where: { id: { in: retiring } },
-        select: { id: true, nameEn: true, _count: { select: { opportunities: true } } },
+      const holding = await prisma.opportunity.groupBy({
+        by: ["stageId"],
+        where: { stageId: { in: retiring }, outcome: "OPEN" },
+        _count: { _all: true },
       });
-      const blocked = holding.filter((h) => h._count.opportunities > 0);
+      const blocked = holding.filter((h) => h._count._all > 0);
       if (blocked.length > 0) {
+        const stage = await prisma.pipelineStage.findUnique({ where: { id: blocked[0].stageId }, select: { nameEn: true } });
         throw {
           _appCode: 409,
           message:
-            `${blocked[0].nameEn} still holds ${blocked[0]._count.opportunities} deals. ` +
+            `${stage?.nameEn ?? "This stage"} still holds ${blocked[0]._count._all} open deals. ` +
             "Move them to another stage before retiring it.",
         };
       }

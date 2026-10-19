@@ -1,6 +1,7 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney, parseFiniteDecimal } from "../commissions/engine";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
+import { settingsFromRow } from "./quote-settings";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -121,6 +122,64 @@ export function priceQuote(lines: LineInput[]): PricedQuote {
   };
 }
 
+// ─── The document of a draft ───────────────────────────────────────────────────
+
+type Num = { toString(): string };
+export type LiveDocumentLineRow = {
+  position: number;
+  description: string | null;
+  quantity: Num;
+  unit: string;
+  unitPrice: Num;
+  discountPercent: Num;
+  taxRatePercent: Num;
+  lineSubtotal: Num;
+  lineTax: Num;
+  lineTotal: Num;
+  productSku: { skuCode: string; name: string | null; nameAr: string | null } | null;
+};
+
+/**
+ * A draft's document figures: its saved lines in the shape `issuedSnapshot.lines` has, so the
+ * printed draft (owner decision D-3: printable, marked «مسودة — غير صادر») and the issued
+ * document are laid out by the same code.
+ *
+ * Nothing new is computed. The line amounts after discount, the VAT and the line totals are the
+ * saved ones; the two figures a line does not store (its gross and its discount amount) and the
+ * effective discount come from `priceLine` / `priceQuote`, the functions that priced the saved
+ * figures and that `issueQuote` freezes. The names are the catalogue's as they read today: a draft
+ * is not frozen until it is issued.
+ */
+export function liveDocumentFigures(lines: LiveDocumentLineRow[]) {
+  const inputs: LineInput[] = lines.map((l) => ({
+    quantity: new Decimal(l.quantity.toString()),
+    unitPrice: new Decimal(l.unitPrice.toString()),
+    discountPercent: new Decimal(l.discountPercent.toString()),
+    taxRatePercent: new Decimal(l.taxRatePercent.toString()),
+  }));
+  const priced = priceQuote(inputs);
+  return {
+    effectiveDiscountPercent: priced.effectiveDiscountPercent.toString(),
+    lines: lines.map((l, i) => ({
+      position: l.position,
+      skuCode: l.productSku?.skuCode ?? null,
+      name: l.productSku?.name ?? l.description,
+      nameAr: l.productSku?.nameAr ?? null,
+      description: l.description,
+      quantity: l.quantity.toString(),
+      unit: l.unit,
+      unitPrice: new Decimal(l.unitPrice.toString()).toFixed(2),
+      discountPercent: l.discountPercent.toString(),
+      taxRatePercent: l.taxRatePercent.toString(),
+      gross: priced.lines[i].gross.toFixed(2),
+      discountAmount: priced.lines[i].discountAmount.toFixed(2),
+      lineSubtotal: new Decimal(l.lineSubtotal.toString()).toFixed(2),
+      lineTax: new Decimal(l.lineTax.toString()).toFixed(2),
+      lineTotal: new Decimal(l.lineTotal.toString()).toFixed(2),
+    })),
+  };
+}
+
 /**
  * Turn request JSON into the line shape this service computes with.
  *
@@ -236,9 +295,51 @@ export function validateLines(lines: LineInput[], skus: Map<string, SkuFacts>): 
   return problems;
 }
 
-/** Whether this quote may be issued by a caller who cannot approve discounts. */
-export function discountNeedsApproval(priced: PricedQuote): boolean {
-  return priced.effectiveDiscountPercent.greaterThan(DISCOUNT_APPROVAL_THRESHOLD_PERCENT);
+/**
+ * Whether this quote's discount is above the approval threshold.
+ *
+ * `threshold` is the one in force (quote-settings.ts: the owner's figure, else the built-in
+ * DISCOUNT_APPROVAL_THRESHOLD_PERCENT). Omitted, the built-in value applies — the behaviour this
+ * function always had.
+ */
+export function discountNeedsApproval(priced: PricedQuote, threshold: Decimal = DISCOUNT_APPROVAL_THRESHOLD_PERCENT): boolean {
+  return priced.effectiveDiscountPercent.greaterThan(threshold);
+}
+
+/**
+ * Does an approval given on the draft cover the discount it carries now?
+ *
+ * An approval records the effective discount it was given for (`discountApprovedPercent`); it
+ * covers that discount and any smaller one. `saveQuoteLines` also clears it whenever the figures
+ * change, so in practice an approval only ever covers the exact lines it was given on.
+ */
+export function approvalCovers(
+  approval: { discountApprovedById: string | null; discountApprovedPercent: { toString(): string } | null },
+  effectiveDiscountPercent: Decimal,
+): boolean {
+  if (!approval.discountApprovedById || approval.discountApprovedPercent === null) return false;
+  return effectiveDiscountPercent.lessThanOrEqualTo(new Decimal(approval.discountApprovedPercent.toString()));
+}
+
+/** The approval state of a draft, as the list and the editor show it. */
+export type DiscountApprovalState = "NOT_NEEDED" | "PENDING" | "APPROVED" | "REJECTED";
+
+export function discountApprovalState(input: {
+  status: string;
+  subtotal: { toString(): string };
+  discountTotal: { toString(): string };
+  discountApprovedById: string | null;
+  discountApprovedPercent: { toString(): string } | null;
+  discountRejectedAt: Date | string | null;
+}, threshold: Decimal): DiscountApprovalState {
+  if (input.status !== "DRAFT") return input.discountApprovedById ? "APPROVED" : "NOT_NEEDED";
+  const subtotal = new Decimal(input.subtotal.toString());
+  if (subtotal.isZero()) return "NOT_NEEDED";
+  const pct = new Decimal(input.discountTotal.toString()).times(HUNDRED).dividedBy(subtotal).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
+  if (!pct.greaterThan(threshold)) return "NOT_NEEDED";
+  if (approvalCovers(input, pct)) return "APPROVED";
+  if (input.discountRejectedAt) return "REJECTED";
+  return "PENDING";
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -341,11 +442,11 @@ export type SaveLinesResult = {
  */
 export async function saveQuoteLines(
   tx: Tx,
-  input: { quoteId: string; lines: LineInput[] },
+  input: { quoteId: string; lines: LineInput[]; threshold?: Decimal },
 ): Promise<SaveLinesResult> {
   const quote = await tx.quote.findUnique({
     where: { id: input.quoteId },
-    select: { id: true, status: true, currency: true },
+    select: { id: true, status: true, currency: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true },
   });
   if (!quote) throw { _appCode: 404, message: "Quotation not found." };
   if (!isEditable(quote.status as QuoteStatus)) {
@@ -400,6 +501,13 @@ export async function saveQuoteLines(
     })),
   });
 
+  // A discount decision taken on the draft (approved or refused) was taken on these figures. If
+  // they change, the decision no longer describes the quotation, so it is cleared and the draft
+  // is flagged again. Saving the same figures (e.g. only the validity date changed) keeps it.
+  const figuresChanged =
+    !priced.subtotal.equals(quote.subtotal.toString()) || !priced.discountTotal.equals(quote.discountTotal.toString()) ||
+    !priced.taxTotal.equals(quote.taxTotal.toString()) || !priced.grandTotal.equals(quote.grandTotal.toString());
+
   await tx.quote.update({
     where: { id: input.quoteId },
     data: {
@@ -407,10 +515,16 @@ export async function saveQuoteLines(
       discountTotal: priced.discountTotal,
       taxTotal: priced.taxTotal,
       grandTotal: priced.grandTotal,
+      ...(figuresChanged
+        ? {
+            discountApprovedById: null, discountApprovedAt: null, discountApprovedPercent: null,
+            discountRejectedById: null, discountRejectedAt: null, discountRejectionNote: null,
+          }
+        : {}),
     },
   });
 
-  return { priced, needsDiscountApproval: discountNeedsApproval(priced) };
+  return { priced, needsDiscountApproval: discountNeedsApproval(priced, input.threshold) };
 }
 
 /**
@@ -423,7 +537,13 @@ export async function saveQuoteLines(
  */
 export async function issueQuote(
   tx: Tx,
-  input: { quoteId: string; actorId: string; canApproveDiscount: boolean; at?: Date; onDiscountApproval?: () => Promise<void> },
+  input: {
+    quoteId: string; actorId: string; canApproveDiscount: boolean; at?: Date; onDiscountApproval?: () => Promise<void>;
+    /** The threshold in force (quote-settings.ts). Omitted: the built-in value. */
+    threshold?: Decimal;
+    /** SIMPLE MODE off: an approver may not approve (by issuing) a discount on a quotation they raised. */
+    forbidSelfApproval?: boolean;
+  },
 ): Promise<{ quoteNumber: string; grandTotal: Decimal; discountApproved: boolean }> {
   const at = input.at ?? new Date();
 
@@ -437,7 +557,14 @@ export async function issueQuote(
     where: { id: input.quoteId },
     select: {
       id: true, quoteNumber: true, revision: true, currency: true, validUntil: true,
-      customerId: true, opportunityId: true,
+      customerId: true, opportunityId: true, createdById: true, customerNotes: true,
+      discountApprovedById: true, discountApprovedAt: true, discountApprovedPercent: true,
+      customer: {
+        select: {
+          name: true, nameAr: true, phone: true, email: true, address: true, city: true,
+          vatNumber: true, commercialRegNo: true,
+        },
+      },
       lines: {
         orderBy: { position: "asc" },
         select: {
@@ -475,20 +602,39 @@ export async function issueQuote(
   // issuing caller can be different people, and the authorisation belongs to the act that
   // puts the price in front of the customer.
   let discountApproved = false;
-  if (discountNeedsApproval(priced)) {
-    if (!input.canApproveDiscount) {
-      throw {
-        _appCode: 403,
-        message:
-          `This quotation discounts ${priced.effectiveDiscountPercent.toDecimalPlaces(2).toString()}%, ` +
-          `above the ${DISCOUNT_APPROVAL_THRESHOLD_PERCENT.toString()}% that may be given without approval. ` +
-          "A manager with discount approval must issue it.",
-      };
+  // Set when the issuer's own act is the approval (as before); null when an approval recorded on
+  // the draft (POST …/discount-approval) already covers this discount and is kept as it is.
+  let approvedNow = false;
+  const threshold = input.threshold ?? DISCOUNT_APPROVAL_THRESHOLD_PERCENT;
+  if (discountNeedsApproval(priced, threshold)) {
+    if (approvalCovers(quote, priced.effectiveDiscountPercent)) {
+      // Approved on the draft by a discount approver, for these figures: anyone who may issue
+      // may now issue it. The approval stays the approver's.
+      discountApproved = true;
+    } else {
+      if (!input.canApproveDiscount) {
+        throw {
+          _appCode: 403,
+          message:
+            `This quotation discounts ${priced.effectiveDiscountPercent.toDecimalPlaces(2).toString()}%, ` +
+            `above the ${threshold.toString()}% that may be given without approval. ` +
+            "A manager with discount approval must approve or issue it.",
+          code: "DISCOUNT_APPROVAL_REQUIRED",
+        };
+      }
+      if (input.forbidSelfApproval && quote.createdById === input.actorId) {
+        throw {
+          _appCode: 403,
+          message: "You raised this quotation, so its discount must be approved by another discount approver.",
+          code: "SELF_APPROVAL",
+        };
+      }
+      // The approval is the exercise of a privileged permission: the caller's gate (verified
+      // individual + step-up, SOD.md §19) runs exactly here, and only when it is needed.
+      if (input.onDiscountApproval) await input.onDiscountApproval();
+      discountApproved = true;
+      approvedNow = true;
     }
-    // The approval is the exercise of a privileged permission: the caller's gate (verified
-    // individual + step-up, SOD.md §19) runs exactly here, and only when it is needed.
-    if (input.onDiscountApproval) await input.onDiscountApproval();
-    discountApproved = true;
   }
 
   const snapshot = {
@@ -497,6 +643,18 @@ export async function issueQuote(
     revision: quote.revision,
     currency: quote.currency,
     validUntil: quote.validUntil.toISOString(),
+    // The document's parties as they stood at issue (a later edit of the customer record or of
+    // the seller settings must not rewrite a document the customer holds). Older snapshots have
+    // neither, and the document then reads the live records, as it always did.
+    customerNotes: quote.customerNotes?.trim() || null,
+    customer: quote.customer
+      ? {
+          name: quote.customer.name, nameAr: quote.customer.nameAr, phone: quote.customer.phone,
+          email: quote.customer.email, address: quote.customer.address, city: quote.customer.city,
+          vatNumber: quote.customer.vatNumber, commercialRegNo: quote.customer.commercialRegNo,
+        }
+      : null,
+    seller: settingsFromRow(await tx.systemConfig.findUnique({ where: { id: "singleton" } })).seller,
     totals: {
       subtotal: priced.subtotal.toFixed(2),
       discountTotal: priced.discountTotal.toFixed(2),
@@ -535,7 +693,9 @@ export async function issueQuote(
       discountTotal: priced.discountTotal,
       taxTotal: priced.taxTotal,
       grandTotal: priced.grandTotal,
-      ...(discountApproved ? { discountApprovedById: input.actorId, discountApprovedAt: at } : {}),
+      ...(approvedNow
+        ? { discountApprovedById: input.actorId, discountApprovedAt: at, discountApprovedPercent: priced.effectiveDiscountPercent }
+        : {}),
     },
   });
 
@@ -669,4 +829,102 @@ export async function reviseQuote(
   await tx.quote.update({ where: { id: input.quoteId }, data: { status: "SUPERSEDED" } });
 
   return created;
+}
+
+// ─── Discount approval on a draft ─────────────────────────────────────────────
+
+/**
+ * Approve or refuse the discount a draft carries, before it is issued (Figma 181:1609 «اعتمادك
+ * مطلوب»). The caller holds `sales › quote_approve_discount` (checked by the route, with its
+ * privileged gate). Recorded on the quotation and in "SalesQuoteAudit" in the same transaction.
+ *
+ *   · only a DRAFT whose discount is above the threshold in force — anything else is 409;
+ *   · SIMPLE MODE off: not on a quotation the approver raised (four eyes). SIMPLE MODE on (one
+ *     owner): allowed, as every other simple-mode bypass;
+ *   · a refusal needs a reason; it blocks nothing by itself (the draft stays a draft and an
+ *     approver may still approve later) but tells the rep to change the discount;
+ *   · either decision is cleared the moment the lines are saved with different figures.
+ */
+export async function decideDiscount(
+  tx: Tx,
+  input: {
+    quoteId: string;
+    decision: "APPROVE" | "REJECT";
+    note?: string | null;
+    actor: { id: string; name: string | null };
+    threshold: Decimal;
+    forbidSelfApproval: boolean;
+    at?: Date;
+  },
+): Promise<{ state: DiscountApprovalState; effectiveDiscountPercent: string }> {
+  const at = input.at ?? new Date();
+  const locked = await tx.$queryRaw<{ id: string; status: string }[]>`
+    SELECT "id", "status"::text AS status FROM "Quote" WHERE "id" = ${input.quoteId} FOR UPDATE
+  `;
+  if (!locked[0]) throw { _appCode: 404, message: "Quotation not found." };
+  if (locked[0].status !== "DRAFT") {
+    throw { _appCode: 409, message: "Only a draft's discount is approved here; an issued quotation is already decided.", code: "NOT_DRAFT" };
+  }
+  const quote = await tx.quote.findUniqueOrThrow({
+    where: { id: input.quoteId },
+    select: {
+      quoteNumber: true, createdById: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
+      lines: { select: { quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true } },
+    },
+  });
+  if (quote.lines.length === 0) throw { _appCode: 409, message: "The quotation has no lines.", code: "NO_LINES" };
+  const priced = priceQuote(quote.lines.map((l) => ({
+    quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent, taxRatePercent: l.taxRatePercent,
+  })));
+  if (!discountNeedsApproval(priced, input.threshold)) {
+    throw {
+      _appCode: 409,
+      message: `This discount (${priced.effectiveDiscountPercent.toDecimalPlaces(2).toString()}%) is within the ${input.threshold.toString()}% threshold and needs no approval.`,
+      code: "NO_APPROVAL_NEEDED",
+    };
+  }
+  const note = (input.note ?? "").trim();
+  if (input.decision === "APPROVE" && input.forbidSelfApproval && quote.createdById === input.actor.id) {
+    throw { _appCode: 403, message: "You raised this quotation, so its discount must be approved by another discount approver.", code: "SELF_APPROVAL" };
+  }
+  if (input.decision === "REJECT" && note.length < 2) {
+    throw { _appCode: 400, message: "Refusing a discount needs a reason the rep can act on.", code: "REASON_REQUIRED" };
+  }
+  if (note.length > 1000) throw { _appCode: 400, message: "The note is longer than 1000 characters." };
+
+  await tx.quote.update({
+    where: { id: input.quoteId },
+    data: input.decision === "APPROVE"
+      ? {
+          discountApprovedById: input.actor.id, discountApprovedAt: at, discountApprovedPercent: priced.effectiveDiscountPercent,
+          discountRejectedById: null, discountRejectedAt: null, discountRejectionNote: null,
+        }
+      : {
+          discountApprovedById: null, discountApprovedAt: null, discountApprovedPercent: null,
+          discountRejectedById: input.actor.id, discountRejectedAt: at, discountRejectionNote: note,
+        },
+  });
+  await tx.salesQuoteAudit.create({
+    data: {
+      action: input.decision === "APPROVE" ? "DISCOUNT_APPROVED" : "DISCOUNT_REJECTED",
+      quoteId: input.quoteId,
+      quoteNumber: quote.quoteNumber,
+      actorId: input.actor.id,
+      actorName: input.actor.name,
+      createdAt: at,
+      details: {
+        effectiveDiscountPercent: priced.effectiveDiscountPercent.toString(),
+        thresholdPercent: input.threshold.toString(),
+        subtotal: priced.subtotal.toFixed(2),
+        discountTotal: priced.discountTotal.toFixed(2),
+        grandTotal: priced.grandTotal.toFixed(2),
+        selfApproval: quote.createdById === input.actor.id,
+        ...(note ? { note } : {}),
+      },
+    },
+  });
+  return {
+    state: input.decision === "APPROVE" ? "APPROVED" : "REJECTED",
+    effectiveDiscountPercent: priced.effectiveDiscountPercent.toString(),
+  };
 }

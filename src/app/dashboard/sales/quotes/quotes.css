@@ -79,54 +79,10 @@
 .d21 .q-doc-bar .sp { flex: 1 }
 .d21 .q-doc-bar .why { font-size: 12.5px; color: var(--text-muted) }
 .d21 .q-doc-wrap { max-width: 795px; margin: 0 auto }
-.d21 .q-doc { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 60px; min-height: 1123px; color: var(--text-primary); font-size: 13.5px; line-height: 22px }
-/* Brand row: the primary logo at the start edge, 64 px (≈ 17 mm) tall; its clear space is the
-   row's bottom margin and the sheet padding. */
-.d21 .q-doc .q-doc-brand { display: flex; justify-content: flex-start; margin-bottom: 28px }
-.d21 .q-doc .q-doc-brand img { display: block; height: 64px; width: auto }
-.d21 .q-doc header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; margin-bottom: 32px }
-.d21 .q-doc h1 { font: 600 24px/1.3 var(--f-ui); margin: 0 }
-.d21 .q-doc .ref { font: 400 14px/22px var(--f-ui); color: var(--text-muted); margin-top: 6px }
-.d21 .q-doc .ref .id { font-size: 14px }
-.d21 .q-doc .facts { margin: 0; font-size: 13.5px; line-height: 22px }
-.d21 .q-doc .facts div { display: flex; gap: 4px }
-.d21 .q-doc .facts dt { color: var(--text-primary) }
-.d21 .q-doc .facts dd { margin: 0; font-family: var(--f-num) }
-.d21 .q-doc .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px }
-.d21 .q-doc .parties h2 { font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); margin: 0 0 6px }
-.d21 .q-doc .parties address { font-style: normal }
-.d21 .q-doc .parties b { font-weight: 600; font-size: 14px; display: block }
-.d21 .q-doc .parties .sub { color: var(--text-secondary) }
-.d21 .q-doc table { width: 100%; border-collapse: collapse; font-size: 14px }
-.d21 .q-doc th { font: 400 13px/22px var(--f-ui); color: var(--text-muted); text-align: start; padding: 0 12px 6px; border-bottom: 1px solid var(--border-strong); white-space: nowrap }
-.d21 .q-doc td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; white-space: nowrap }
-.d21 .q-doc tr > :first-child { padding-inline-start: 0 }
-.d21 .q-doc tr > :last-child { padding-inline-end: 0 }
-.d21 .q-doc td.num, .d21 .q-doc th.num { font-family: var(--f-num); font-variant-numeric: tabular-nums }
-.d21 .q-doc td.item { white-space: normal }
-.d21 .q-doc td.item b { font-weight: 600; display: block }
-.d21 .q-doc td.item .id { display: block; font-size: 12.5px }
-.d21 .q-doc .tot { width: 300px; max-width: 100%; margin: 24px 0 0; margin-inline-start: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; font-size: 13.5px }
-.d21 .q-doc .tot dt { color: var(--text-secondary) }
-.d21 .q-doc .tot dd { margin: 0; font-family: var(--f-num); text-align: end }
-.d21 .q-doc .tot .due { font-weight: 700; color: var(--text-primary) }
-.d21 .q-doc .terms { margin-top: 32px; font-size: 12.5px; line-height: 20px; color: var(--text-secondary) }
-.d21 .q-doc .terms p { margin: 0 }
-.d21 .q-doc .terms .er { color: var(--status-danger); font-weight: 600 }
-.d21 .q-doc .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 60px }
-.d21 .q-doc .sign div { border-top: 1px solid var(--border-strong); padding-top: 10px; font-size: 13.5px }
-@media (max-width: 767.98px) {
-  .d21 .q-doc { padding: 24px 18px; min-height: 0 }
-  .d21 .q-doc .parties { grid-template-columns: 1fr }
-  .d21 .q-doc .q-doc-brand img { height: 48px }
-  .d21 .q-doc-table { overflow-x: auto }
-  .d21 .q-doc table { min-width: 520px }
-}
+/* The sheet itself is DocumentSheet (src/components/print/document). */
 @media print {
   .d21 .q-doc-bar { display: none }
   .d21 .q-doc-wrap { max-width: none }
-  .d21 .q-doc { box-shadow: none; padding: 0; min-height: 0 }
-  .d21 .q-doc .q-doc-brand img { height: 17mm }
 }
 
 /* A positive flag (a discount that was approved). */
@@ -136,3 +92,51 @@
 .d21 .pctw { display: inline-flex; align-items: center; width: 100%; max-width: 56px }
 .d21 .qi.pct { width: 3.2em; field-sizing: content; min-width: 2.4em; max-width: 48px; flex: none; margin-inline: -7px 0; padding-inline-end: 1px; text-align: right }
 .d21 .t.q-lines .sfx { color: inherit }
+
+/* ── Quotations list (`crm-quotes` 181:1609): the toolbar's filter, the selected row, the
+   preview pane's lines and totals, the «+ عرض سعر» picker. ── */
+.d21 .t.quotes tr.sel td { background: var(--surface-selected) }
+.d21 .t.quotes tbody tr { cursor: default }
+.d21 .q-fbtn { cursor: pointer; border: 0; font: inherit; font-size: 13px }
+.d21 .q-fbtn .q-fn { display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 9px; background: var(--action-primary); color: var(--text-inverse); font: 500 11px/1 var(--f-num); padding: 0 5px }
+.d21 .q-filter { min-width: 240px; padding: 10px 12px }
+.d21 .q-filter .lbl { margin: 2px 0 6px; font-weight: 500; font-size: 12.5px }
+.d21 .q-filter hr { border: 0; border-top: 1px solid var(--border-subtle); margin: 8px 0 }
+.d21 .q-fopt { display: flex; align-items: center; gap: 8px; height: 30px; font-size: 13.5px; color: var(--text-secondary); cursor: pointer }
+.d21 .q-fopt input { accent-color: var(--action-primary); margin: 0 }
+.d21 .q-pane .pane-t { font-size: 22px }
+.d21 .q-approval { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px }
+.d21 .q-approval > span:first-child { flex: 1 1 200px; min-width: 0 }
+.d21 .q-approval .q-dflag { flex: none }
+.d21 .q-approval-acts { display: flex; gap: 8px; flex-basis: 100%; flex-wrap: wrap }
+.d21 .q-pane-lines { width: 100%; border-collapse: collapse; font-size: 13.5px }
+.d21 .q-pane-lines th { font: 400 12.5px/20px var(--f-ui); color: var(--text-muted); text-align: start; padding: 0 0 6px; border-bottom: 1px solid var(--border-subtle) }
+.d21 .q-pane-lines th.num, .d21 .q-pane-lines td.num { text-align: end; font-family: var(--f-num); white-space: nowrap; vertical-align: top; padding-top: 8px }
+.d21 .q-pane-lines td { padding: 8px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top }
+.d21 .q-pane-lines td b { display: block; font-weight: 500; line-height: 22px }
+.d21 .q-pane-lines td .sm { display: block; font-size: 12.5px; color: var(--text-muted); line-height: 18px }
+.d21 .q-pane-lines td .wa { color: var(--status-warning) }
+.d21 .q-pane-tot { margin-top: 16px; grid-template-columns: minmax(0, 1fr) auto }
+.d21 .q-pane-tot dd { text-align: end }
+.d21 .q-pane-tot .g { font-weight: 600; color: var(--text-primary) }
+.d21 .q-pane-tot dd.g { font: 700 14.5px/22px var(--f-num) }
+.d21 .q-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 320px; overflow-y: auto }
+.d21 .q-pick button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); font: inherit; text-align: start; cursor: pointer; color: var(--text-primary) }
+.d21 .q-pick button:hover, .d21 .q-pick button:focus-visible { box-shadow: inset 0 0 0 1px var(--action-primary) }
+.d21 .q-pick b { font-weight: 500 }
+.d21 .q-pick .sm { font-size: 12.5px; color: var(--text-muted) }
+.d21 .q-pick-new { display: grid; gap: 6px; padding-top: 4px }
+.d21 .q-input, .d21 .q-notes { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary) }
+.d21 .q-notes { height: auto; padding: 10px 12px; line-height: 22px; resize: vertical; width: 100% }
+.d21 .q-input:focus, .d21 .q-notes:focus { outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: var(--focus-ring) }
+.d21 .ph .meta .lk-inline { font-size: inherit; font-weight: 400; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit }
+.d21 .pager .lk-inline, .d21 .ph .meta .lk-inline, .d21 .q-pick ~ * .lk-inline, .d21 [data-testid="quote-picker"] .lk-inline { margin-inline-start: 0 }
+.d21 .pager .lk-inline { font-size: inherit; font-weight: 400; color: var(--text-secondary) }
+/* Notes to the customer (A-10): label 13.5/500 with a muted «(اختياري)», a 64px box, a muted hint. */
+.d21 .q-notes-block { margin-top: 24px; display: grid; gap: 8px }
+.d21 .q-notes-l { font-size: 13.5px; color: var(--text-muted) }
+.d21 .q-notes-l b { font-weight: 500; color: var(--text-primary) }
+.d21 .q-notes-block .q-note { margin: 0 }
+.d21 .q-notes-ro { margin: 0; white-space: pre-wrap; font-size: 13.5px; line-height: 22px; color: var(--text-primary) }
+.d21 .q-list-ph .act { flex-wrap: nowrap; align-self: flex-start }
+.d21 .t.quotes td:nth-child(2) { min-width: 210px }

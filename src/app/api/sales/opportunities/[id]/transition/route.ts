@@ -34,7 +34,7 @@ export async function POST(request: Request, { params }: Params) {
     typeof b.toOutcome === "string" && (OUTCOMES as readonly string[]).includes(b.toOutcome)
       ? (b.toOutcome as "OPEN" | "WON" | "LOST")
       : null;
-  const toStageId = typeof b.toStageId === "string" ? b.toStageId : null;
+  let toStageId = typeof b.toStageId === "string" ? b.toStageId : null;
 
   if (!toOutcome && !toStageId) {
     return NextResponse.json({ error: "Nothing to change: give a stage or an outcome." }, { status: 400 });
@@ -51,7 +51,7 @@ export async function POST(request: Request, { params }: Params) {
   try {
     const opp = await prisma.opportunity.findUnique({
       where: { id },
-      select: { id: true, ownerId: true },
+      select: { id: true, ownerId: true, outcome: true, stage: { select: { isActive: true } } },
     });
     if (!opp) return NextResponse.json({ error: "Deal not found." }, { status: 404 });
 
@@ -60,6 +60,16 @@ export async function POST(request: Request, { params }: Params) {
     const seesAll = hasSubPrivilege(user.permissions, "sales", "lead_assign");
     if (!seesAll && opp.ownerId !== user.id) {
       return NextResponse.json({ error: "Deal not found." }, { status: 404 });
+    }
+
+    // A won or lost deal may sit in a stage that was hidden after it closed (only OPEN deals
+    // block hiding). Reopening it there would put an open card in a column the board no
+    // longer draws, so a reopen without a chosen stage lands in the first active stage; the
+    // move is recorded in the deal's stage history like any other.
+    if (toOutcome === "OPEN" && !toStageId && opp.outcome !== "OPEN" && !opp.stage.isActive) {
+      const first = await prisma.pipelineStage.findFirst({ where: { isActive: true }, orderBy: { position: "asc" }, select: { id: true } });
+      if (!first) return NextResponse.json({ error: "No active stage to reopen the deal into." }, { status: 409 });
+      toStageId = first.id;
     }
 
     if (toStageId) {

@@ -2,9 +2,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { seesAllSales } from "@/lib/services/sales/scope";
+import { seesTeamReports } from "@/lib/services/sales/scope";
 import { toCsv } from "@/lib/services/sales/csv";
+import { monthKey } from "@/lib/services/sales/performance";
 import { Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd } from "@/lib/services/commissions/engine";
+
+/** The blocks of the reports screen and the CSV sections each one exports (`?report=`). */
+const REPORT_SECTIONS: Record<string, string[]> = {
+  summary: ["Leads", "Pipeline", "Closed", "Sales cycle"],
+  stages: ["Pipeline", "Pipeline stage"],
+  sources: ["Lead source"],
+  lost: ["Lost reason"],
+  cycle: ["Sales cycle"],
+  closed: ["Closed"],
+};
 
 /**
  * GET /api/sales/reports — the four numbers a sales meeting actually asks for.
@@ -19,8 +30,8 @@ import { Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd } from "@/l
  * ── Pipeline duration comes from stage events ──
  * Not from `updatedAt`, which moves whenever anybody edits a note.
  *
- * Every figure is scoped exactly as the lists are: a rep sees their own performance, and
- * seeing the team's needs the privilege that governs seeing the team's work.
+ * The whole endpoint is the team's: it needs `seesTeamReports` (sales › lead_assign, or the
+ * admin role). A rep's own performance is GET /api/sales/performance.
  */
 export async function GET(request: Request) {
   const { user, error } = await requireModule("sales");
@@ -35,11 +46,18 @@ export async function GET(request: Request) {
   const periodStart = riyadhMonthStart(at);
   const periodEnd = riyadhMonthEnd(at);
 
-  const scopeAll = seesAllSales(user.permissions);
-  const mine = scopeAll ? {} : { ownerId: user.id };
+  // Team reports are the sales manager's and the admin's (owner decision, batch Sales B): a rep
+  // gets 403 for the JSON and for every CSV. A rep's own figures are on «لوحة الأداء».
+  if (!seesTeamReports(user.permissions, user.role)) {
+    return NextResponse.json(
+      { error: "تقارير المبيعات لمدير المبيعات والمسؤول فقط.", errorEn: "Sales reports are for the sales manager and the admin only." },
+      { status: 403 },
+    );
+  }
+  const mine = {};
 
   // A spreadsheet of the same figures, for the meeting nobody runs from a browser tab.
-  // Scoped exactly as the screen is — a rep exports their own performance, not the team's.
+  // The same team figures as the screen, under the same gate.
   const asCsv = url.searchParams.get("format") === "csv";
 
   try {
@@ -148,7 +166,7 @@ export async function GET(request: Request) {
     const payload = {
       periodStart,
       periodEnd,
-      scope: scopeAll ? "all" : "own",
+      scope: "all",
 
       leads: {
         created: leadsCreated,
@@ -210,7 +228,8 @@ export async function GET(request: Request) {
     // One flat table rather than several: a reader opening this in Excel wants to read
     // down a column, and a file with four differently-shaped blocks in it cannot be
     // sorted, filtered or pasted into anything.
-    const month = periodStart.toISOString().slice(0, 7);
+    // The Riyadh month (periodStart is 21:00 UTC of the day before, so its UTC date is a month early).
+    const month = monthKey(periodStart);
     const rows: unknown[][] = [
       ["Leads", "Created", payload.leads.created, ""],
       ["Leads", "Converted", payload.leads.converted, ""],
@@ -229,17 +248,29 @@ export async function GET(request: Request) {
       ["Sales cycle", "Mean days", payload.duration.meanDays ?? "", `from ${payload.duration.sampleSize} closed deals`],
     ];
 
+    // `report=` narrows the file to one block of the screen (GX A-P04: each report exports on
+    // its own). The rows are the same rows, filtered by their Section; no value changes.
+    const report = url.searchParams.get("report");
+    const sections = report && Object.hasOwn(REPORT_SECTIONS, report) ? REPORT_SECTIONS[report] : null;
+    if (report && !sections) {
+      return NextResponse.json(
+        { error: `report must be one of: ${Object.keys(REPORT_SECTIONS).join(", ")}.` },
+        { status: 400 },
+      );
+    }
+    const picked = sections ? rows.filter((r) => sections.includes(String(r[0]))) : rows;
+
     if (payload.sandbox) {
       // The caveat travels with the file. A spreadsheet outlives the screen that explained it.
-      rows.push(["Note", "Collection source", "SANDBOX",
+      picked.push(["Note", "Collection source", "SANDBOX",
         "No real payment has been received; these figures are synthetic."]);
     }
 
-    return new NextResponse(toCsv(["Section", "Measure", "Value", "Note"], rows), {
+    return new NextResponse(toCsv(["Section", "Measure", "Value", "Note"], picked), {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="sales-report-${scopeAll ? "all" : "mine"}-${month}.csv"`,
+        "Content-Disposition": `attachment; filename="sales-report-${report ? `${report}-` : ""}all-${month}.csv"`,
         "Cache-Control": "no-store",
       },
     });

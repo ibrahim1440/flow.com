@@ -22,7 +22,7 @@ export type Customer = {
   _count: { orders: number; roastPreferences: number };
 };
 
-export type Stage = { id: string; code: string; nameEn: string; nameAr: string; position: number };
+export type Stage = { id: string; code: string; nameEn: string; nameAr: string; position: number; /** Absent on a deal's own stage; false for a hidden stage (history labels only). */ isActive?: boolean };
 
 export type Activity = {
   id: string; type: string; subject: string; body: string | null; outcome: string | null;
