@@ -62,7 +62,6 @@ export const translations = {
   // sandbox adapter and its gates are built belongs in docs/sales/COMMISSION_RULES.md, not in
   // a banner they read every time they open the screen.
   sandboxBannerBody:  { en: "No money has been received or paid against these figures. They are a calculation only.", ar: "لم يُقبض أي مبلغ ولم يُصرف مقابل هذه الأرقام. هي حساب فقط." },
-  provisionalUiBanner:{ en: "Provisional interface — pending design review", ar: "واجهة مبدئية — في انتظار مراجعة التصميم" },
   inventory:      { en: "Inventory",       ar: "المخزون" },
   orders:         { en: "Orders",          ar: "الطلبات" },
   production:     { en: "Production",      ar: "الإنتاج" },

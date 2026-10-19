@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Circle, LogOut, UserRound } from "lucide-react";
 import {
   NAV, SHELL_GROUP_ORDER, MENU_ORDER, visibleNav, presentTree, resolveActive, resolveHighlight, firstDestination, breadcrumb,
-  shellText, crumbText, groupText, shellTrail, dedupeTrail,
+  shellText, crumbText, groupText, shellGroupOf, shellTrail, dedupeTrail,
   type NavNode, type Viewer,
 } from "@/lib/nav/registry";
 import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
@@ -60,14 +60,24 @@ function NodeIcon({ node, fallback }: { node?: NavNode; fallback?: NavNode }) {
 
 type Item = { node: NavNode; href: string; current: "page" | "true" | undefined };
 type Group = { id: string; label: string | null; items: Item[] };
-type Dest = { id: string; href: string; text: string; context: string | null; node: NavNode; ctx: NavNode | null };
+type Dest = { id: string; href: string; text: string; context: string | null; group: string | null; groupLabel: string | null; node: NavNode; ctx: NavNode | null };
+
+/** Where a group sits: the ungrouped entries first, then SHELL_GROUP_ORDER, the gear's screens last. */
+const SETTINGS_GROUP = "settings";
+const groupRank = (id: string | null) => {
+  if (id === null) return -1;
+  if (id === SETTINGS_GROUP) return SHELL_GROUP_ORDER.length + 1;
+  const i = SHELL_GROUP_ORDER.indexOf(id);
+  return i === -1 ? SHELL_GROUP_ORDER.length : i;
+};
 
 /**
- * The sidebar as the approved frame draws it: ungrouped entries, then flat groups. A module
- * is a group; a hint may move its subunits under another group («التشغيل» holds stock) or a
- * top-level entry into one («الموظفون» in «الفريق»), take an entry — or a whole module, as
- * one entry — out to the gear menu, or keep it out of both (`place: "none"`, the global
- * history: reached from the quick jump, lighting «لوحة التشغيل»).
+ * The sidebar: ungrouped entries («لوحة التشغيل · خدماتي»), then flat groups. A module is a
+ * group; a hint may move its subunits under another group (stock → «المخزون والمشتريات»), a
+ * single subunit into one (the operations module is drawn as «الطلبات · الإنتاج · الجودة»,
+ * owner 19 Oct 2026; see `shellGroupOf`), take an entry — or a whole module, as one entry —
+ * out to the gear menu, or keep it out of both (`place: "none"`, the global history: reached
+ * from the quick jump, lighting «لوحة التشغيل»).
  */
 function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof resolveActive>, viewer: Viewer): { top: Item[]; groups: Group[]; menu: Item[] } {
   const top: Item[] = [];
@@ -82,8 +92,9 @@ function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof 
     if (n.shell?.place === "none") continue;
     if (!n.children) {
       const item: Item = { node: n, href: n.href!, current: active.leaf?.id === n.id ? "page" : undefined };
+      const gid = shellGroupOf(n);
       if (n.shell?.place === "menu") menu.push(item);
-      else if (n.shell?.group) into(n.shell.group, item);
+      else if (gid) into(gid, item);
       else top.push(item);
       continue;
     }
@@ -92,37 +103,58 @@ function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof 
       if (href) menu.push({ node: n, href, current: active.group?.id === n.id ? "true" : undefined });
       continue;
     }
-    const gid = n.shell?.group ?? n.id;
     for (const sub of n.children) {
       if (sub.shell?.place === "none") continue;
       const href = firstDestination(viewer, sub);
       if (!href) continue;
       const item: Item = { node: sub, href, current: active.subunit?.id === sub.id ? (sub.href ? "page" : "true") : undefined };
       if (sub.shell?.place === "menu") menu.push(item);
-      else into(gid, item);
+      else into(shellGroupOf(sub, n) ?? n.id, item);
     }
   }
-  const rank = (id: string) => { const i = SHELL_GROUP_ORDER.indexOf(id); return i === -1 ? SHELL_GROUP_ORDER.length : i; };
-  const ordered = [...groups.values()].filter((g) => g.items.length > 0).sort((a, b) => rank(a.id) - rank(b.id));
+  const ordered = [...groups.values()].filter((g) => g.items.length > 0).sort((a, b) => groupRank(a.id) - groupRank(b.id));
   const menuRank = (id: string) => { const i = MENU_ORDER.indexOf(id); return i === -1 ? MENU_ORDER.length : i; };
   menu.sort((a, b) => menuRank(a.node.id) - menuRank(b.node.id));
   return { top, groups: ordered, menu };
 }
 
+/**
+ * Ctrl K: every destination, grouped and ordered as the sidebar draws them, with the gear's
+ * screens last under «الإعدادات». `context` names the section a page sits in when it is not
+ * the group itself («العملاء» for the leads, «الأتمتة والواتساب» for its rules).
+ */
 function destinations(tree: NavNode[], lang: string, viewer: Viewer): Dest[] {
   const out: Dest[] = [];
   const seen = new Set<string>();
-  const walk = (nodes: NavNode[], ctx: NavNode | null) => {
+  const add = (n: NavNode, group: string | null, parent: NavNode | null, mod: NavNode | null) => {
+    if (!n.href || seen.has(n.href)) return;
+    seen.add(n.href);
+    out.push({
+      id: n.id, href: n.href, text: text(n, lang, viewer),
+      context: parent ? text(parent, lang, viewer) : null,
+      group, groupLabel: group ? groupText(group, lang) : null, node: n, ctx: parent ?? mod,
+    });
+  };
+  const walk = (nodes: NavNode[], group: string | null, parent: NavNode | null, mod: NavNode | null) => {
     for (const n of nodes) {
-      if (n.href && !seen.has(n.href)) {
-        seen.add(n.href);
-        out.push({ id: n.id, href: n.href, text: text(n, lang, viewer), context: ctx ? text(ctx, lang, viewer) : null, node: n, ctx });
-      }
-      if (n.children) walk(n.children, ctx ?? n);
+      add(n, group, parent, mod);
+      if (n.children) walk(n.children, group, n, mod);
     }
   };
-  walk(tree, null);
-  return out;
+  for (const n of tree) {
+    const inMenu = n.shell?.place === "menu";
+    if (!n.children) { add(n, inMenu ? SETTINGS_GROUP : shellGroupOf(n), null, null); continue; }
+    for (const sub of n.children) {
+      const group = inMenu || sub.shell?.place === "menu" ? SETTINGS_GROUP : shellGroupOf(sub, n) ?? n.id;
+      // A gear-menu module keeps its own name as the context («الأتمتة والواتساب»).
+      add(sub, group, inMenu ? n : null, n);
+      if (sub.children) walk(sub.children, group, sub, n);
+    }
+  }
+  return out
+    .map((d, i) => ({ d, i }))
+    .sort((a, b) => groupRank(a.d.group) - groupRank(b.d.group) || a.i - b.i)
+    .map(({ d }) => d);
 }
 
 export function AppShell({
@@ -219,9 +251,9 @@ export function AppShell({
   // «جديد» offers the create actions of the module you are in (owner decision A-3): several →
   // a menu, exactly one → the control opens it directly, none → no control.
   const router = useRouter();
-  // A top-level entry the frames list under a group (shell.group, e.g. the dashboard in «التشغيل»,
-  // 20:236) offers that group's create actions, as the frame's top bar «جديد · C» shows.
-  const moduleId = active.group?.id ?? active.leaf?.shell?.group;
+  // A top-level entry naming `shell.creates` (the operations dashboard and the global history)
+  // offers that module's create actions, as the frame's top bar «جديد · C» shows (20:236).
+  const moduleId = active.group?.id ?? active.leaf?.shell?.creates;
   const creates = useMemo(() => (allowed ? createActions(viewer, moduleId) : []), [viewer, moduleId, allowed]);
   const single = creates.length === 1 ? creates[0] : null;
   const singleHref = single?.href ?? null;
@@ -283,7 +315,10 @@ export function AppShell({
     );
   };
 
-  const groupHref = active.group ? firstDestination(viewer, active.group) : null;
+  // The phone tab bar's section tab: the sidebar group holding the lit entry, opening on its first page.
+  // Outside the sidebar groups (a gear-menu screen) it is the registry module, as before.
+  const litGroup = groups.find((g) => g.items.some((it) => it.current));
+  const moduleHref = !litGroup && active.group ? firstDestination(viewer, active.group) : null;
   const meNode = tree.find((n) => n.id === "me");
   const dests = useMemo(() => destinations(tree, lang, viewer), [tree, lang, viewer]);
   // The phone header keeps naming the section on a list page with a Segmented control (reference
@@ -426,7 +461,8 @@ export function AppShell({
         {!phoneHeader?.ownBar ? (
           <nav className="d21-tabbar" aria-label={ar ? "التنقل السريع" : "Quick navigation"}>
             <Link href="/dashboard" aria-current={pathname === "/dashboard" ? "page" : undefined}><Ico name="home" />{ar ? "الرئيسية" : "Home"}</Link>
-            {active.group && groupHref ? <Link href={groupHref} aria-current="true"><NodeIcon node={active.group} />{text(active.group, lang)}</Link> : null}
+            {litGroup && litGroup.label ? <Link href={litGroup.items[0].href} aria-current="true" data-testid="tab-group"><NodeIcon node={litGroup.items[0].node} fallback={NAV.find((n) => n.id === litGroup.id)} />{litGroup.label}</Link>
+              : active.group && moduleHref ? <Link href={moduleHref} aria-current="true" data-testid="tab-group"><NodeIcon node={active.group} />{text(active.group, lang)}</Link> : null}
             {single ? (
               <div className="d21-fab-slot" data-d21-new>
                 <Link href={single.href} className="d21-fab" aria-label={ar ? `جديد: ${single.labelAr}` : `New: ${single.labelEn}`} data-testid="d21-fab"><Ico name="plus" /></Link>
@@ -450,19 +486,29 @@ export function AppShell({
             <span className="d21-av">{initials(user.name)}</span>
             <div>{user.name}<small>{roleLabel}</small></div>
           </div>
-          {/* Every section, flat, as the approved «المزيد» frame lists them. */}
-          {[...top, ...groups.flatMap((g) => g.items)].map((it) => {
-            const mod = groups.find((g) => g.items.includes(it));
-            const parent = mod ? NAV.find((n) => n.id === mod.id) : undefined;
+          {/* Every section under its heading, exactly as the sidebar groups them (owner, 19 Oct 2026). */}
+          {[{ id: "top", label: null, items: top } as Group, ...groups].filter((g) => g.items.length > 0).map((g) => {
+            const parent = NAV.find((n) => n.id === g.id);
+            const hid = `d21-more-grp-${g.id}`;
             return (
-              <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={it.current ? "page" : undefined} data-testid={`more-${it.node.id}`}>
-                <NodeIcon node={it.node} fallback={parent} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" />
-              </Link>
+              <div key={g.id} role="group" aria-labelledby={g.label ? hid : undefined} data-testid={`moregroup-${g.id}`}>
+                {g.label ? <p className="d21-more-grp" id={hid}>{g.label}</p> : null}
+                {g.items.map((it) => (
+                  <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={it.current ? "page" : undefined} data-testid={`more-${it.node.id}`}>
+                    <NodeIcon node={it.node} fallback={parent} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" />
+                  </Link>
+                ))}
+              </div>
             );
           })}
-          {menuItems.map((it) => (
-            <Link key={it.node.id} href={it.href} className="d21-more-row"><NodeIcon node={it.node} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" /></Link>
-          ))}
+          {menuItems.length > 0 ? (
+            <div role="group" aria-labelledby="d21-more-grp-settings" data-testid="moregroup-settings">
+              <p className="d21-more-grp" id="d21-more-grp-settings">{ar ? "الحساب والإعدادات" : "Account & settings"}</p>
+              {menuItems.map((it) => (
+                <Link key={it.node.id} href={it.href} className="d21-more-row"><NodeIcon node={it.node} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" /></Link>
+              ))}
+            </div>
+          ) : null}
           <button type="button" className="d21-more-row danger" onClick={onLogout}><LogOut aria-hidden /><span>{ar ? "تسجيل الخروج" : "Sign out"}</span></button>
         </MoreSheet>
       ) : null}
@@ -503,7 +549,15 @@ function QuickJump({ lang, dests, onClose }: { lang: string; dests: Dest[]; onCl
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const query = q.trim();
-  const list = query ? dests.filter((d) => d.text.includes(query) || (d.context ?? "").includes(query) || d.text.toLowerCase().includes(query.toLowerCase())) : dests;
+  const hit = (s: string | null) => !!s && (s.includes(query) || s.toLowerCase().includes(query.toLowerCase()));
+  const list = query ? dests.filter((d) => hit(d.text) || hit(d.context) || hit(d.groupLabel)) : dests;
+  // The list keeps the sidebar's groups: a heading wherever the group changes.
+  const blocks: { key: string; label: string | null; items: { d: Dest; i: number }[] }[] = [];
+  list.forEach((d, i) => {
+    const last = blocks[blocks.length - 1];
+    if (last && last.key === (d.group ?? "top")) last.items.push({ d, i });
+    else blocks.push({ key: d.group ?? "top", label: d.groupLabel, items: [{ d, i }] });
+  });
   const cur = Math.min(sel, Math.max(0, list.length - 1));
   const go = (d: Dest | undefined) => { if (d) { router.push(d.href); onClose(); } };
   return (
@@ -531,15 +585,20 @@ function QuickJump({ lang, dests, onClose }: { lang: string; dests: Dest[]; onCl
           <span className="d21-kbd" aria-hidden>Esc</span>
         </div>
         {list.length === 0 ? <p className="empty" role="status">{ar ? "لا توجد صفحة بهذا الاسم ضمن صلاحياتك." : "No page with that name in your access."}</p> : (
-          <ul id="d21-pal-list" role="listbox" aria-label={ar ? "الصفحات" : "Pages"}>
-            {list.map((d, i) => (
-              <li key={d.id} role="option" id={`d21-pal-${d.id}`} aria-selected={i === cur}>
-                <a href={d.href} tabIndex={-1} data-active={i === cur} onMouseEnter={() => setSel(i)} onClick={(e) => { e.preventDefault(); go(d); }}>
-                  <NodeIcon node={d.node} fallback={d.ctx ?? undefined} /><span><b>{d.text}</b>{d.context ? <small>{d.context}</small> : null}</span>
-                </a>
-              </li>
+          <div id="d21-pal-list" role="listbox" aria-label={ar ? "الصفحات" : "Pages"} className="d21-pal-list">
+            {blocks.map((b) => (
+              <ul key={b.key} role="group" aria-label={b.label ?? (ar ? "عام" : "General")} data-testid={`palgroup-${b.key}`}>
+                {b.label ? <li role="presentation" className="d21-pal-grp" aria-hidden>{b.label}</li> : null}
+                {b.items.map(({ d, i }) => (
+                  <li key={d.id} role="option" id={`d21-pal-${d.id}`} aria-selected={i === cur}>
+                    <a href={d.href} tabIndex={-1} data-active={i === cur} onMouseEnter={() => setSel(i)} onClick={(e) => { e.preventDefault(); go(d); }}>
+                      <NodeIcon node={d.node} fallback={d.ctx ?? undefined} /><span><b>{d.text}</b>{d.context ? <small>{d.context}</small> : null}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
             ))}
-          </ul>
+          </div>
         )}
         <div className="d21-pal-foot" aria-hidden><span>↑↓ {ar ? "للتنقل" : "to move"}</span><span>Enter {ar ? "للفتح" : "to open"}</span><span>Esc {ar ? "للإغلاق" : "to close"}</span></div>
       </div>

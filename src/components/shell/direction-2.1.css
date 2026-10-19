@@ -259,7 +259,10 @@
 .d21-pal-in { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 17px; }
 .d21-pal-in input { flex: 1; border: 0; outline: 0; font: inherit; font-size: 17px; color: var(--text-primary); background: none; min-width: 0; }
 .d21-pal-in svg { width: 18px; height: 18px; stroke-width: 1.5; flex: none; }
-.d21-pal ul { list-style: none; margin: 0; padding: 8px; max-height: min(420px, 60dvh); overflow-y: auto; }
+.d21-pal-list { padding: 8px; max-height: min(420px, 60dvh); overflow-y: auto; }
+.d21-pal ul { list-style: none; margin: 0; padding: 0; }
+.d21-pal .d21-pal-grp { font-size: 11.5px; font-weight: 500; color: var(--text-muted); padding: 10px 14px 4px; line-height: 18px; }
+.d21-pal ul + ul .d21-pal-grp { padding-top: 14px; }
 .d21-pal li a { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 14px; border-radius: 9px; text-decoration: none; color: var(--text-primary); }
 .d21-pal li a > svg { width: 18px; height: 18px; color: var(--text-muted); stroke-width: 1.5; flex: none; }
 .d21-pal li a > span { flex: 1; min-width: 0; line-height: 22px; }
@@ -274,6 +277,7 @@
 .d21-more-body { flex: 1; overflow-y: auto; background: var(--surface); border-radius: 20px 20px 0 0; box-shadow: var(--shadow-sheet); padding: 12px 16px 24px; }
 .d21-more-me { display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; }
 .d21-more-me small { display: block; font-size: 12px; color: var(--text-muted); }
+.d21-more-grp { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 0; padding: 18px 0 4px; line-height: 18px; }
 .d21-more-row { display: flex; align-items: center; gap: 12px; height: 48px; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); text-decoration: none; width: 100%; appearance: none; border-inline: 0; border-top: 0; background: none; font: inherit; cursor: pointer; text-align: start; padding: 0; }
 .d21-more-row > svg:first-child { width: 18px; height: 18px; color: var(--text-muted); stroke-width: 1.5; flex: none; }
 .d21-more-row > span { flex: 1; }

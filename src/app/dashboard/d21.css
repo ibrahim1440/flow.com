@@ -213,7 +213,6 @@
 /* ── Containers ────────────────────────────────────────────────────────── */
 .d21 [data-ui="card"] { border-radius: 12px; border-color: var(--d-border-subtle); box-shadow: none; }
 .d21 [data-ui="alert"] { border-radius: 9px; font-size: 13.5px; line-height: 20px; }
-.d21 [data-ui="provisional"] { border-radius: 9px; border-color: color-mix(in srgb, var(--d-warning) 35%, transparent); }
 .d21 [data-ui="empty"] { color: var(--d-text-muted); font-size: 13.5px; }
 
 /* Metrics: columns divided by a hairline, no box. */

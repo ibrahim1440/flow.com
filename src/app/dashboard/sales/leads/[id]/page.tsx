@@ -11,7 +11,7 @@ import {
   runScheduleFollowUp, scheduleMessage, EMPTY_SCHEDULE_STATE, type ScheduleState,
 } from "@/lib/services/sales/follow-up";
 import {
-  ProvisionalBanner, PageHeader, Card, SectionTitle, Alert, Button, Field, TextInput,
+  PageHeader, Card, SectionTitle, Alert, Button, Field, TextInput,
   Select, TextArea, EmptyState, Spinner, LeadStatusBadge, LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS,
   ROW_ACTION, formatWhen, formatDay, num,
 } from "../../_components/ui";
@@ -327,7 +327,6 @@ export default function LeadDetailPage() {
     return (
       <div className={`${PAD} space-y-6`}>
         <SectionPages />
-        <ProvisionalBanner />
         <Alert kind="error">{error}</Alert>
         <Button variant="secondary" onClick={() => router.push("/dashboard/sales/leads")}>
           {ar ? "رجوع إلى القائمة" : "Back to the list"}
@@ -341,7 +340,6 @@ export default function LeadDetailPage() {
   return (
     <div className={`${PAD} space-y-6`}>
       <SectionPages />
-      <ProvisionalBanner />
 
       <Link
         href="/dashboard/sales/leads"

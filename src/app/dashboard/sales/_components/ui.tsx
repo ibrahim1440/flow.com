@@ -2,10 +2,9 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle, FlaskConical, Ban, Check, ChevronDown, Circle, CircleDashed, Clock, FileText,
+  FlaskConical, Ban, Check, ChevronDown, Circle, CircleDashed, Clock, FileText,
   MessageSquare, PackageCheck, RotateCcw, Save, Search, XCircle, type LucideIcon,
 } from "lucide-react";
-import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
 
 /**
@@ -148,22 +147,6 @@ export function pick(
   lang: "ar" | "en",
 ): string {
   return lang === "ar" ? (map[key]?.ar ?? key) : (map[key]?.en ?? key);
-}
-
-/**
- * The provisional-interface notice.
- *
- * A provisional screen that looks finished is worse than one that admits it, because
- * nobody reviews what appears already signed off.
- */
-export function ProvisionalBanner() {
-  const { t } = useI18n();
-  return (
-    <div data-ui="provisional" className="flex items-center gap-2.5 rounded-[10px] border border-oo-status-waiting bg-oo-status-waiting-bg px-4 py-[9px]">
-      <p className="flex-1 text-[12px] font-medium leading-[18px] text-oo-status-hold">{t("provisionalUiBanner")}</p>
-      <AlertTriangle size={16} className="shrink-0 text-oo-status-hold" aria-hidden />
-    </div>
-  );
 }
 
 /**

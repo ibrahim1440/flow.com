@@ -116,8 +116,17 @@ export type ShellHints = {
   own?: { ar: string; en: string; unlessAny: Ability[] };
   /** The reference icon (screens.py ICONS); lucide stays the fallback (register row A-18). */
   icon?: D21IconName;
-  /** List under this group instead of under its own module (a module id or a SHELL_GROUPS key). */
+  /**
+   * List under this group instead of under its own module (a module id or a SHELL_GROUPS key).
+   * On a module it moves every subunit; on a subunit it moves that entry alone, which is how the
+   * one registry module «العمليات» is drawn as «الطلبات · الإنتاج · الجودة» (owner, 19 Oct 2026).
+   */
   group?: string;
+  /**
+   * The module whose «جديد» create actions a top-level entry offers (see `./creates`), when it
+   * belongs to none: the operations dashboard keeps offering «طلب».
+   */
+  creates?: string;
   /**
    * "menu": reached from the user block's gear menu, not from the sidebar (a group placed
    * there is ONE menu entry, opening onto its first permitted page).
@@ -141,16 +150,29 @@ export type ShellHints = {
   as?: string;
 };
 
-/** Groups the approved sidebar draws that are not modules of their own. */
+/**
+ * Groups the sidebar draws that are not modules of their own.
+ *
+ * Owner (19 Oct 2026, phone «المزيد»): the one long «التشغيل» list — thirteen entries from the
+ * dashboard to the labels — is split into sections that each hold one area of work: the order
+ * flow, production, quality, and stock with its purchasing. Presentation only: every entry
+ * keeps its registry node, its permissions and its route; only the heading it is drawn under
+ * (`shell.group`) and the trail's first label (`shell.trailRoot`) change.
+ */
 export const SHELL_GROUPS: Record<string, { ar: string; en: string }> = {
+  orders: { ar: "الطلبات", en: "Orders" },
+  production: { ar: "الإنتاج", en: "Production" },
+  quality: { ar: "الجودة", en: "Quality" },
+  inventory: { ar: "المخزون والمشتريات", en: "Inventory & purchasing" },
   team: { ar: "الفريق", en: "Team" },
 };
 
 /**
- * The approved order of the sidebar groups (20:236: «التشغيل · المبيعات · المالية · الفريق»);
- * a group not listed follows, in registry order.
+ * The order of the sidebar groups, after the ungrouped «لوحة التشغيل · خدماتي»: the order
+ * flow, how it is made, how it is checked, what it is made from, then who buys it, the money
+ * and the people. A group not listed follows, in registry order.
  */
-export const SHELL_GROUP_ORDER = ["operations", "sales", "finance", "team", "hr"];
+export const SHELL_GROUP_ORDER = ["orders", "production", "quality", "inventory", "sales", "finance", "hr", "team"];
 
 /**
  * The gear menu, in this order (GX F-P01 settings navigation: «المنشأة · المستخدمون والصلاحيات ·
@@ -185,6 +207,13 @@ const DECIDES_COLLECTIONS: Ability[] = [
  *   التشغيل: لوحة التشغيل · الطلبات · الإنتاج والتحميص · الجودة والتذوق · المخزون · المشتريات · المنتجات
  *   المبيعات: العملاء · الصفقات · عروض الأسعار
  *   المالية:  النقد والبنوك · الفواتير والتحصيل · الأداء
+ * and the owner's regrouping (19 Oct 2026) splits «التشغيل» into its areas of work:
+ *   (top)                 لوحة التشغيل · خدماتي
+ *   الطلبات:              الطلبات · تجهيز الطلبات · التسليم
+ *   الإنتاج:              أوامر الإنتاج · الإنتاج والتحميص · التعبئة · الملصقات
+ *   الجودة:               الجودة والتذوق · التذوق
+ *   المخزون والمشتريات:   المخزون · المشتريات · المنتجات
+ *   المبيعات · المالية · الموارد البشرية as before; the settings stay in the gear menu.
  * Collections and the whole performance & commissions hub live under «المالية» for EVERY
  * viewer (GX A-05 rep frame 1458:15314 draws a salesperson's «المالية» with «التحصيل» and
  * «أهدافي وعمولاتي»), so nothing of it is listed under «المبيعات» any more and nobody meets
@@ -194,20 +223,20 @@ const DECIDES_COLLECTIONS: Ability[] = [
  * the gear, under «الإعدادات» (GX E-P01, F-P01, A-P08).
  */
 export const NAV: NavNode[] = [
-  // Figma is the source of truth (owner): the approved sidebar lists the dashboard as «لوحة التشغيل»
-  // / "Operations dashboard" first in «التشغيل», and the top bar reads «التشغيل / لوحة التشغيل»
-  // (20:236: sidebar I20:585;249:368, top bar 101:6411; EN shells e.g. I1560:158819).
-  { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", group: "operations", trailRoot: "operations" } },
+  // «لوحة التشغيل» / "Operations dashboard" (20:236). Since the owner's regrouping (19 Oct 2026)
+  // it heads the sidebar ungrouped, with «خدماتي», above the sections; it still offers the
+  // operations «جديد» (an order).
+  { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", creates: "operations" } },
   {
     // GX D-P02 (1494:3302): no sidebar item of its own; «لوحة التشغيل» is highlighted and the
-    // trail reads «التشغيل / السجل العام». Reached from the quick jump and the dashboard's area.
+    // trail reads «لوحة التشغيل / السجل العام». Reached from the quick jump and the dashboard.
     id: "history",
     ar: "السجل", en: "History",
     icon: History,
     href: "/dashboard/history",
     anyOf: [{ module: "history" }],
     highlightAs: ["dashboard"],
-    shell: { ar: "السجل العام", en: "Global history", icon: "note", group: "operations", place: "none", trailRoot: "operations" },
+    shell: { ar: "السجل العام", en: "Global history", icon: "note", place: "none", trailRoot: "dashboard", creates: "operations" },
   },
 
   {
@@ -428,7 +457,7 @@ export const NAV: NavNode[] = [
         icon: ClipboardList,
         anyOf: [{ module: "orders" }],
         unlessAny: [sales()],
-        shell: { icon: "orders" },
+        shell: { icon: "orders", group: "orders", trailRoot: "orders" },
       },
       {
         id: "operations.preparation",
@@ -436,18 +465,10 @@ export const NAV: NavNode[] = [
         href: "/dashboard/workstation/preparation",
         icon: PackageCheck,
         anyOf: [{ module: "orders" }],
-        shell: { icon: "orders" },
+        shell: { icon: "orders", group: "orders", trailRoot: "orders" },
         // G-11: Operations' «الطلبات» is highlighted here. A seller meets orders under Sales
         // instead, has no such entry, and keeps the page's own highlight.
         highlightAs: ["operations.orders"],
-      },
-      {
-        id: "operations.production",
-        ar: "الإنتاج", en: "Production & roasting",
-        href: "/dashboard/production",
-        icon: Flame,
-        anyOf: [{ module: "production" }],
-        shell: { ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame" },
       },
       {
         id: "operations.productionOrders",
@@ -455,7 +476,15 @@ export const NAV: NavNode[] = [
         href: "/dashboard/production-orders",
         icon: ListChecks,
         anyOf: [{ module: "production" }],
-        shell: { icon: "flame" },
+        shell: { icon: "flame", group: "production", trailRoot: "production" },
+      },
+      {
+        id: "operations.production",
+        ar: "الإنتاج", en: "Production & roasting",
+        href: "/dashboard/production",
+        icon: Flame,
+        anyOf: [{ module: "production" }],
+        shell: { ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame", group: "production", trailRoot: "production" },
       },
       {
         id: "operations.packaging",
@@ -463,7 +492,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/packaging",
         icon: Package,
         anyOf: [{ module: "packaging" }],
-        shell: { icon: "box" },
+        shell: { icon: "box", group: "production", trailRoot: "production" },
       },
       {
         id: "operations.dispatch",
@@ -471,7 +500,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/dispatch",
         icon: Truck,
         anyOf: [{ module: "dispatch" }],
-        shell: { icon: "truck" },
+        shell: { icon: "truck", group: "orders", trailRoot: "orders" },
         highlightAs: ["operations.orders"],
       },
       {
@@ -480,7 +509,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/qc",
         icon: FlaskConical,
         anyOf: [{ module: "qc" }],
-        shell: { ar: "الجودة والتذوق", en: "Quality & cupping", icon: "flask" },
+        shell: { ar: "الجودة والتذوق", en: "Quality & cupping", icon: "flask", group: "quality", trailRoot: "quality" },
       },
       {
         id: "operations.cupping",
@@ -488,7 +517,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/cupping",
         icon: Coffee,
         anyOf: [{ module: "cupping" }],
-        shell: { icon: "flask" },
+        shell: { icon: "flask", group: "quality", trailRoot: "quality" },
       },
     ],
   },
@@ -498,35 +527,38 @@ export const NAV: NavNode[] = [
     ar: "المخزون والمنتجات",
     en: "Inventory and products",
     icon: Boxes,
-    // The approved sidebar lists stock under «التشغيل», after the production entries.
-    shell: { group: "operations" },
+    // «المخزون والمشتريات» (owner, 19 Oct 2026); the labels are drawn under «الإنتاج».
+    shell: { group: "inventory" },
     children: [
       {
         id: "stock.inventory",
         ar: "المخزون", en: "Inventory",
         href: "/dashboard/inventory",
         anyOf: [{ module: "inventory" }],
-        shell: { icon: "box" },
+        shell: { icon: "box", trailRoot: "inventory" },
       },
       {
         id: "stock.purchases",
         ar: "المشتريات", en: "Purchases",
         href: "/dashboard/purchases",
         anyOf: [{ module: "inventory" }],
-        shell: { icon: "truck" },
+        shell: { icon: "truck", trailRoot: "inventory" },
       },
       {
         id: "stock.products",
         ar: "المنتجات", en: "Products",
         href: "/dashboard/products",
         anyOf: [{ module: "inventory" }],
-        shell: { icon: "cup" },
+        shell: { icon: "cup", trailRoot: "inventory" },
       },
       {
         id: "stock.labels",
         ar: "الملصقات", en: "Labels",
         href: "/dashboard/labels",
+        icon: Tag,
         anyOf: [{ module: "labels" }],
+        // Printed on the line, with the packing: drawn under «الإنتاج», not with the stock.
+        shell: { group: "production", trailRoot: "production" },
       },
     ],
   },
@@ -707,6 +739,17 @@ export function groupText(id: string, lang: string): string | null {
   if (mod) return shellText(mod, lang);
   const g = SHELL_GROUPS[id];
   return g ? (lang === "ar" ? g.ar : g.en) : null;
+}
+
+/**
+ * The sidebar group an entry is drawn under: its own `shell.group`, else its module's, else the
+ * module itself. A top-level destination with no hint is ungrouped (`null`). The sidebar, the
+ * phone «المزيد» sheet and the quick jump all group by this, so they cannot disagree.
+ */
+export function shellGroupOf(n: NavNode, module?: NavNode): string | null {
+  if (n.shell?.group) return n.shell.group;
+  if (!module || module.id === n.id) return null;
+  return module.shell?.group ?? module.id;
 }
 
 /**
