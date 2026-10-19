@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit, stockChangeGate } from "@/lib/auth-server";
-import { auditPrivilegedInventory } from "@/lib/services/inventory-privileged-audit";
 import { handlePrismaError } from "@/lib/api-error";
-import { normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
+import { applyInventoryAdjustment, normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -136,32 +135,17 @@ export async function PATCH(request: Request, { params }: Params) {
       if (!item) throw { _appCode: 404, message: "Material not found." };
 
       if (adjusting) {
-        const previousQuantity = item.quantityOnHand;
-        const quantityChanged = Number((newActualQuantity - previousQuantity).toFixed(4));
-
-        // 0.001 no-op threshold, matching the green-bean adjust route.
-        if (Math.abs(quantityChanged) >= 0.001) {
-          const movement = await tx.inventoryMovement.create({
-            data: {
-              type: "ADJUSTMENT",
-              category: "PACKAGING_MATERIAL",
-              referenceEntityId: id,
-              quantityChanged,
-              previousQuantity,
-              newQuantity: newActualQuantity,
-              sourceDocType: "MANUAL_ADJUSTMENT",
-              sourceDocId: null,
-              userId: user.id,
-              notes: explained && explained.ok ? explained.reason : null,
-            },
-          });
-          data.quantityOnHand = newActualQuantity;
-          await auditPrivilegedInventory(tx, user, {
-            action: "INVENTORY_ADJUSTED", entityType: "MaterialItem", entityId: id, reason: explained && explained.ok ? explained.reason : "",
-            beforeQuantity: previousQuantity, afterQuantity: newActualQuantity, unit: item.unitOfMeasure,
-            details: { movementId: movement.id, previousQuantity, newQuantity: newActualQuantity, quantityChanged },
-          });
-        }
+        // The shared adjustment service (src/lib/services/inventory-adjustment.ts) — the same code a
+        // count session posts through: it re-takes this row lock, books the ADJUSTMENT movement
+        // (0.001 no-op threshold, matching the green-bean adjust route), sets quantityOnHand and
+        // writes the INVENTORY_ADJUSTED person audit, all in this transaction.
+        await applyInventoryAdjustment(tx, user, {
+          kind: "MATERIAL",
+          entityId: id,
+          target: newActualQuantity,
+          reason: explained && explained.ok ? explained.reason : "",
+          sourceDocId: null,
+        });
       }
 
       return tx.materialItem.update({ where: { id }, data });

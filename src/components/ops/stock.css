@@ -94,3 +94,214 @@
   [data-ops-root] .hr-table.is-mrow td.stk-macts:empty { display: none; }
   [data-ops-root] .hr-table.is-mrow td.stk-macts .hr-btn + .hr-btn { margin-inline-start: 0; }
 }
+
+/* ── Product catalog (Figma 216:2: 256:3410 all products, 258:3751 categories, 276:4776 add category,
+   260:4107 add product, 262:4570 product page; phone 271:6183). Kit tokens only. ─────────────── */
+[data-ops-root] input[type="checkbox"] { accent-color: var(--action-primary); width: 15px; height: 15px; margin: 0; vertical-align: middle; cursor: pointer; }
+[data-ops-root] .cat-muted { color: var(--text-secondary); font-size: 13px; }
+[data-ops-root] .cat-opt { color: var(--text-muted); font-weight: 400; }
+[data-ops-root] .cat-link { appearance: none; background: none; border: 0; padding: 0; font: inherit; font-size: 13.5px; font-weight: 500; color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+[data-ops-root] .cat-link > svg { width: 14px; height: 14px; }
+[data-ops-root] .cat-link:hover { text-decoration: underline; }
+[data-ops-root] .cat-chips { display: inline-flex; gap: 8px; }
+[data-ops-root] .cat-sort { color: var(--text-secondary); font-size: 12.5px; }
+[data-ops-root] .cat-sortlabel { color: var(--text-secondary); font-size: 12.5px; font-weight: 500; }
+
+/* Selection bar (256:3487): subtle box, 44 px, check · «محدد N · names» · actions at the end. */
+[data-ops-root] .cat-selbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 44px; padding: 7px 11px; border-radius: 9px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); font-size: 13px; color: var(--text-primary); }
+[data-ops-root] .cat-selbar-text b { font-family: var(--f-num); font-weight: 600; }
+[data-ops-root] .cat-selbar .hr-btn.is-sm { height: 28px; }
+
+/* Tables: the check column, clickable rows, the selected row, «بلا تصنيف», the pager row. */
+[data-ops-root] .hr-table .cat-ck { width: 28px; padding-inline-end: 0; }
+[data-ops-root] .hr-table tr.cat-row.is-clickable { cursor: pointer; }
+[data-ops-root] .hr-table tr.cat-row.is-clickable:hover > td { background: var(--surface-hover); }
+[data-ops-root] .hr-table tr.cat-row[aria-selected="true"] > td { background: var(--surface-selected); }
+[data-ops-root] .hr-table tr.cat-row.is-virtual .strong { color: var(--text-primary); }
+[data-ops-root] .hr-table .cat-codes { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+[data-ops-root] .hr-table td.cat-free .cat-muted { font-size: 12.5px; }
+[data-ops-root] .hr-table td.cat-free strong { font-weight: 600; }
+[data-ops-root] .hr-table tr.cat-pager td { height: 44px; text-align: end; }
+[data-ops-root] .hr-table tr.cat-pager td .hr-btn { margin-inline-start: 6px; }
+[data-ops-root] .hr-table td.cat-endlink { text-align: end; }
+[data-ops-root] .hr-table td.cat-endlink a { color: var(--text-secondary); text-decoration: none; font-size: 12.5px; }
+[data-ops-root] .hr-table td.cat-endlink a:hover { text-decoration: underline; }
+@media (max-width: 767px) {
+  [data-ops-root] .hr-table.is-mrow td.cat-mend { flex-direction: column; align-items: flex-end; gap: 2px; }
+  [data-ops-root] .cat-mfree { font-weight: 600; font-size: 14px; }
+  [data-ops-root] .hr-table.is-mrow .hr-msub .hr-id { font-size: 12.5px; }
+}
+
+/* Category pane (258:3751 left): description, facts, the product list with «نقل», archive / delete. */
+[data-ops-root] .cat-panetitle { display: inline-flex; align-items: center; gap: 10px; }
+[data-ops-root] .cat-panetitle .hr-dot { font-size: 13px; font-weight: 400; }
+[data-ops-root] .cat-panedesc { margin: 0; font-size: 13.5px; line-height: 22px; color: var(--text-primary); }
+[data-ops-root] .cat-kv > div { padding: 7px 0; border-bottom: 0; }
+[data-ops-root] .cat-panesec { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+[data-ops-root] .cat-panelist, [data-ops-root] .cat-bomlist { list-style: none; margin: 0; padding: 0; }
+[data-ops-root] .cat-panelist li, [data-ops-root] .cat-bomlist li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
+[data-ops-root] .cat-pl-main { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; }
+[data-ops-root] .cat-pl-main .strong { font-weight: 500; color: var(--text-primary); text-decoration: none; }
+[data-ops-root] .cat-pl-main a.strong:hover { text-decoration: underline; }
+[data-ops-root] .cat-pl-main .hr-id { font-size: 12px; color: var(--text-secondary); }
+[data-ops-root] .cat-panefoot { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+[data-ops-root] .cat-panefoot-btns { display: flex; gap: 8px; }
+
+/* Pick lists (add category «المنتجات», «إضافة منتجات»). */
+.cat-picks { display: flex; flex-direction: column; gap: 6px; }
+.cat-picks ul { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; }
+.cat-picks li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border-subtle); }
+.cat-picks label { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13.5px; }
+.cat-picks input[type="checkbox"] { accent-color: var(--action-primary); width: 15px; height: 15px; }
+.cat-pick-now { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.cat-opt { color: var(--text-muted); font-weight: 400; }
+.cat-checkline { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-size: 13.5px; }
+.cat-checkline input { accent-color: var(--action-primary); width: 15px; height: 15px; }
+
+/* Add Product (260:4107): a side header column, the fields beside it, hairlines between sections. */
+[data-ops-root] .cat-legend { margin: -4px 0 0; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+[data-ops-root] .cat-req { color: var(--status-danger); }
+[data-ops-root] .cat-form { display: flex; flex-direction: column; }
+[data-ops-root] .cat-sec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3.6fr); gap: 32px; padding: 24px 0; border-bottom: 1px solid var(--border-subtle); }
+[data-ops-root] .cat-sec > header h2 { margin: 0 0 6px; font-size: 14px; }
+[data-ops-root] .cat-sec > header p { margin: 0; font-size: 12.5px; line-height: 20px; color: var(--text-muted); }
+[data-ops-root] .cat-sec .hr-form { gap: 18px 16px; }
+[data-ops-root] .cat-seg { align-self: flex-start; }
+[data-ops-root] .cat-seg > button.hr-id { font-family: var(--f-mono); font-size: 12.5px; }
+[data-ops-root] .cat-unitin { display: flex; align-items: center; gap: 6px; }
+[data-ops-root] .cat-unitin > .hr-input { flex: 1; min-width: 0; }
+[data-ops-root] .cat-unitin > span { font-size: 12.5px; color: var(--text-muted); }
+[data-ops-root] .cat-skutable td, [data-ops-root] .cat-bomtable td { height: auto; padding-block: 6px; }
+[data-ops-root] .cat-skutable .hr-input, [data-ops-root] .cat-bomtable .hr-input { height: 32px; }
+[data-ops-root] .cat-bom { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+[data-ops-root] .cat-bomname .strong { display: block; font-weight: 500; }
+[data-ops-root] .cat-low { color: var(--status-danger); }
+[data-ops-root] .cat-addrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 10px 0 0; }
+[data-ops-root] .cat-formbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 16px 0 8px; }
+@media (max-width: 1023px) { [data-ops-root] .cat-sec { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
+@media (max-width: 767px) {
+  [data-ops-root] .cat-sec { padding: 18px 0; }
+  [data-ops-root] .cat-skutable thead { display: none; }
+  [data-ops-root] .cat-skutable, [data-ops-root] .cat-skutable tbody { display: block; }
+  [data-ops-root] .cat-skutable tr { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
+  [data-ops-root] .cat-skutable td { display: block; border: 0; padding: 0; }
+  [data-ops-root] .cat-skutable td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
+  [data-ops-root] .cat-bomtable th:nth-child(2), [data-ops-root] .cat-bomtable td:nth-child(2) { display: none; }
+  /* Sticky «حفظ المنتج» (INVENTORY.md «Mobile 390»). */
+  [data-ops-root] .cat-formbar { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--border-subtle); padding: 12px 0 calc(12px + env(safe-area-inset-bottom)); z-index: 5; }
+  [data-ops-root] .cat-formbar > .hr-btn.is-primary { flex: 1; }
+}
+
+/* Product page (262:4570): category eyebrow, two columns under the SKU table. */
+[data-ops-root] .cat-dhead { align-items: flex-start; }
+[data-ops-root] .cat-dtitle { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+[data-ops-root] .cat-eyebrow { font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+[data-ops-root] .cat-sechead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+[data-ops-root] .cat-col .cat-sechead { justify-content: space-between; }
+[data-ops-root] .cat-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; margin-top: 12px; }
+[data-ops-root] .cat-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+[data-ops-root] .cat-qty { white-space: nowrap; font-size: 13.5px; }
+@media (max-width: 1023px) { [data-ops-root] .cat-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+@media (max-width: 767px) {
+  /* The kit's desktop-only marker loses to the table's own display rules (.stk-sub, .cat-chips). */
+  [data-ops-root].stk-products .hr-desktop-only { display: none !important; }
+  /* 271:6183: the phone header carries «+» (useD21Phone action); the page draws no button row. */
+  [data-ops-root].cat-products .hr-pagehead .hr-actions { display: none; }
+  /* The phone header names the product; its h1 stays for assistive technology only. */
+  [data-ops-root].cat-detail .cat-dtitle .hr-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+[data-ops-root] .cat-panetitle .cat-paneedit-btn { margin-inline-start: auto; }
+[data-ops-root] .ops-pane-title:has(.cat-panetitle) { flex: 1; }
+[data-ops-root] .cat-panetitle { width: 100%; }
+@media (max-width: 767px) {
+  /* Add Product, phone: each component is one block — the name over its quantity. */
+  [data-ops-root] .cat-bomtable thead { display: none; }
+  [data-ops-root] .cat-bomtable, [data-ops-root] .cat-bomtable tbody { display: block; }
+  [data-ops-root] .cat-bomtable tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
+  [data-ops-root] .cat-bomtable td { display: block; border: 0; padding: 0; height: auto; }
+  [data-ops-root] .cat-bomtable td.cat-bomname { grid-column: 1 / -1; }
+}
+
+/* ── Batch "Inventory & products", track B (Figma 216:2): the pieces the frames draw that phase 2
+   left out — count sessions, coverage bars, expandable lot rows, the ledger's paging, the lot
+   trace page. Direction 2.1 tokens only. ── */
+
+/* Sort control at the toolbar's end (.tool .sort): text + the Select invisibly over it. */
+[data-ops-root] .stk-sort { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 6px; font-size: 13px; color: var(--text-secondary); white-space: nowrap; border-radius: 7px; }
+[data-ops-root] .stk-sort svg { width: 14px; height: 14px; color: var(--text-muted); }
+[data-ops-root] .stk-sort .stk-sortv { color: var(--text-primary); font-weight: 500; }
+[data-ops-root] .stk-sort:focus-within { outline: 2px solid var(--action-primary); outline-offset: 1px; }
+[data-ops-root] .stk-sort .hq-trigger { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; min-height: 0; padding: 0; border: 0; cursor: pointer; }
+[data-ops-root] .stk-tool .stk-end { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 8px; }
+
+/* Coverage bar + days (green coffee: «التغطية بمعدل التحميص»). */
+[data-ops-root] .stk-cov { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
+[data-ops-root] .stk-cov .ops-bar { width: 120px; }
+[data-ops-root] .stk-cov .ops-bar.tone-neutral > span { background: var(--border-strong); }
+[data-ops-root] .stk-covd { font-size: 13px; color: var(--text-secondary); min-width: 52px; }
+[data-ops-root] .stk-covd.is-danger { color: var(--status-danger); }
+
+/* Expandable group rows (a bean and its lots; a SKU and its lots). */
+[data-ops-root] .stk-chev { width: 14px; height: 14px; color: var(--text-muted); transition: transform .15s; flex: none; }
+[dir="rtl"] [data-ops-root] .stk-chev { transform: scaleX(-1); }
+[data-ops-root] .stk-chev.is-open, [dir="rtl"] [data-ops-root] .stk-chev.is-open { transform: rotate(90deg); }
+[data-ops-root] .stk-exp { appearance: none; border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; text-align: start; }
+[data-ops-root] .stk-exp:focus-visible { outline: 2px solid var(--action-primary); outline-offset: 2px; border-radius: 4px; }
+[data-ops-root] .hr-table tr.is-open > td { background: var(--surface-selected); }
+[data-ops-root] .hr-table tr.stk-lotrow > td { height: 34px; font-size: 13px; color: var(--text-secondary); background: var(--surface); }
+[data-ops-root] .hr-table tr.stk-lotrow > td:first-child { padding-inline-start: 34px; }
+[data-ops-root] .stk-trace { font-size: 13px; }
+[data-ops-root] .stk-lk { color: var(--text-secondary); font-weight: 400; }
+@media (max-width: 767px) {
+  [data-ops-root] .hr-table.is-mrow tr.stk-lotrow > td:first-child { padding-inline-start: 0; }
+  [data-ops-root] .stk-cov .ops-bar { width: 64px; }
+}
+
+/* Recent movements block under a tab's main table. */
+[data-ops-root] .stk-recent { margin-top: 20px; }
+
+/* Ledger paging (268:5577 «10–1 من 300 · السابق · التالي»). */
+[data-ops-root] .stk-pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); padding-top: 6px; }
+[data-ops-root] .stk-pager .stk-pbtns { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Count sessions («الجرد والتسويات»). */
+[data-ops-root] .stk-count-in { width: 120px; text-align: end; }
+[data-ops-root] .hr-table tr.is-uncounted td { color: var(--text-muted); }
+[data-ops-root] .stk-var-pos { color: var(--status-success); font-weight: 600; }
+[data-ops-root] .stk-var-neg { color: var(--status-danger); font-weight: 600; }
+[data-ops-root] .stk-moved { display: block; font-size: 12px; color: var(--status-warning); }
+.stk-pick { display: flex; flex-direction: column; max-height: 340px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: 9px; }
+.stk-pick label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13.5px; cursor: pointer; }
+.stk-pick label:last-child { border-bottom: 0; }
+.stk-pick label:hover { background: var(--surface-subtle); }
+.stk-pick .stk-pick-sub { display: block; font-size: 12px; color: var(--text-muted); }
+.stk-pick .stk-pick-q { font-family: var(--f-num); font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: 13px; white-space: nowrap; }
+.stk-pick-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); }
+
+/* Lot trace (217:2): the chain, the grams bar, the log beside it. */
+[data-ops-root] .stk-trace-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 40px; align-items: start; margin-top: 20px; }
+[data-ops-root] .stk-trace-grid > * { min-width: 0; }
+@media (max-width: 1023px) { [data-ops-root] .stk-trace-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+[data-ops-root] .stk-chain .ops-stage-a { font-family: var(--f-num); font-size: 13px; color: var(--text-primary); }
+[data-ops-root] .stk-chain .ops-stage-b, [data-ops-root] .stk-chain .ops-stage-c { font-size: 13px; color: var(--text-secondary); }
+@media (max-width: 767px) { [data-ops-root] .stk-chain.ops-stages { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; } }
+[data-ops-root] .stk-grams { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--surface-subtle); margin: 10px 0 6px; }
+[data-ops-root] .stk-grams > i { display: block; height: 100%; }
+[data-ops-root] .stk-g-packed { background: var(--action-primary); }
+[data-ops-root] .stk-g-loss { background: var(--status-danger); }
+[data-ops-root] .stk-g-blend { background: var(--status-warning); }
+[data-ops-root] .stk-g-unpacked { background: var(--border-strong); }
+[data-ops-root] .stk-glegend { list-style: none; margin: 0; padding: 0; }
+[data-ops-root] .stk-glegend li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13.5px; }
+[data-ops-root] .stk-glegend li > span:first-child { display: inline-flex; gap: 8px; align-items: baseline; }
+[data-ops-root] .stk-glegend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex: none; }
+[data-ops-root] .stk-glegend .stk-gsub { display: block; font-size: 12px; color: var(--text-muted); }
+[data-ops-root] .stk-big { font: 400 26px/1.1 var(--f-num); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+[data-ops-root] .stk-match { font-size: 13px; color: var(--status-success); font-weight: 500; }
+[data-ops-root] .stk-match.is-gap { color: var(--status-warning); }
+/* A signed quantity + unit («–5.00 كغ», «+16 وحدة»): tabular figures, laid out by the paragraph. */
+[data-ops-root] .stk-qtyc { font-family: var(--f-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 767px) {
+  /* The phone row carries the flag and the process in its own lines (270:5944). */
+  [data-ops-root] .hr-table .hr-desktop-only, [data-ops-root] .hr-table .stk-flag.hr-desktop-only { display: none; }
+}

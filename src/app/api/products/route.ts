@@ -8,6 +8,8 @@ import {
   skuDisplayName,
   packSizeLabel,
 } from "@/lib/services/finished-products";
+import { parseBarcode } from "@/lib/services/product-catalog";
+import { assertBarcodeFree } from "@/lib/services/product-catalog-db";
 
 // Finished Products = ProductSKU. One row is one sellable SKU ("Brazil Coffee – 1 KG").
 //
@@ -40,11 +42,16 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();
   const activeOnly = searchParams.get("activeOnly") !== "false";
+  // `inactiveProducts=1`: active SKUs of inactive products too. Packaging reads this, so stock
+  // already owed to an existing order can still be packed after the product is switched off.
+  const inactiveProducts = searchParams.get("inactiveProducts") === "1";
 
   try {
     const skus = await prisma.productSKU.findMany({
       where: {
-        ...(activeOnly ? { isActive: true } : {}),
+        // An inactive PRODUCT (CoffeeProduct.isActive, the catalog switch) takes every one of its
+        // SKUs out of the sellable list too: the new-order, quote and deal pickers read this.
+        ...(activeOnly ? { isActive: true, ...(inactiveProducts ? {} : { product: { isActive: true } }) } : {}),
         ...(q
           ? {
               OR: [
@@ -58,7 +65,7 @@ export async function GET(request: Request) {
           : {}),
       },
       include: {
-        product: { select: { id: true, productNameEn: true, productNameAr: true, countryEn: true } },
+        product: { select: { id: true, productNameEn: true, productNameAr: true, countryEn: true, isActive: true } },
         _count: { select: { bomComponents: true } },
       },
       orderBy: [{ isActive: "desc" }, { skuCode: "asc" }],
@@ -84,6 +91,8 @@ export async function GET(request: Request) {
         price: s.price,
         isBulk: s.isBulk,
         isActive: s.isActive,
+        barcode: s.barcode,
+        productIsActive: s.product.isActive,
         coffee: s.product,
         bomComponentCount: s._count.bomComponents,
         // A SKU with no BOM can still be sold from existing stock but cannot be produced,
@@ -138,7 +147,12 @@ export async function POST(request: Request) {
       { status: 400 }
     );
 
+  const barcode = parseBarcode(b.barcode);
+  if (!barcode.ok) return NextResponse.json({ error: barcode.error, field: barcode.field }, { status: 400 });
+
   try {
+    const taken = await assertBarcodeFree(barcode.value);
+    if (taken) return taken;
     const coffee = await prisma.coffeeProduct.findUnique({ where: { id: b.productId } });
     if (!coffee) return NextResponse.json({ error: "Coffee / origin not found." }, { status: 404 });
 
@@ -158,6 +172,7 @@ export async function POST(request: Request) {
         category: isCategory(b.category) ? b.category : "ROASTED_COFFEE",
         unitOfMeasure: isUom(b.unitOfMeasure) ? b.unitOfMeasure : "UNIT",
         isActive: b.isActive === undefined ? true : b.isActive === true,
+        barcode: barcode.value,
       },
       include: { product: { select: { productNameEn: true, productNameAr: true } } },
     });

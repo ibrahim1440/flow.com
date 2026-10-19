@@ -2,14 +2,23 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { parsePeriod, periodStart } from "@/lib/inventory/purchases-query";
 
-export async function GET() {
+/**
+ * The purchase register. Without parameters: the newest 200 (unchanged). With `period` (30 | 90 |
+ * 365 | all) the rows are those dated inside the period, up to 1,000 — the page's period filter
+ * (Figma 221:748). The CSV of the same period and sort: GET /api/purchases/export.
+ */
+export async function GET(request: Request) {
   const { error } = await requireModule("inventory");
   if (error) return error;
 
+  const sp = new URL(request.url).searchParams;
+  const start = sp.has("period") ? periodStart(parsePeriod(sp.get("period"))) : null;
   const purchases = await prisma.purchaseRecord.findMany({
-    orderBy: { purchaseDate: "desc" },
-    take: 200,
+    where: start ? { purchaseDate: { gte: start } } : undefined,
+    orderBy: [{ purchaseDate: "desc" }, { createdAt: "desc" }],
+    take: sp.has("period") ? 1000 : 200,
     include: { supplier: true },
   });
   return NextResponse.json(purchases);

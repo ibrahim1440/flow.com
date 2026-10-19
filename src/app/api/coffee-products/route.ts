@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAnyModule, requireAuth } from "@/lib/auth-server";
+import { requireAnyModule, requireAuth, requireModule } from "@/lib/auth-server";
 import { canEdit } from "@/lib/auth";
 import { handlePrismaError } from "@/lib/api-error";
+import { availableUnitsBySku, packSizeLabel } from "@/lib/services/finished-products";
+import { parseListQuery, productOrderBy, productWhere } from "@/lib/services/product-catalog";
+import { createCatalogProduct } from "@/lib/services/product-catalog-db";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const sp = new URL(request.url).searchParams;
+  // The All Products table (Figma 256:3410): one flat, server-filtered, server-sorted, paginated
+  // list. Prices and stock make it a catalog read, so it is the Products section's own gate.
+  if (sp.get("view") === "catalog") return catalogList(sp);
+
   // Widened beyond `labels`: the coffee/origin list is the parent of every finished
   // product, so the Products section (gated on `inventory`) and the order and packaging
   // screens all need to read it. Gated on `labels` alone, the origin dropdown came back
@@ -14,6 +22,77 @@ export async function GET() {
 
   const products = await prisma.coffeeProduct.findMany({ orderBy: { productNameEn: "asc" } });
   return NextResponse.json(products);
+}
+
+async function catalogList(sp: URLSearchParams) {
+  const { error } = await requireModule("inventory");
+  if (error) return error;
+  const parsed = parseListQuery(sp);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error, field: parsed.field }, { status: 400 });
+  const { sort, page, pageSize, lang, ...filter } = parsed.value;
+
+  try {
+    const where = productWhere(filter);
+    // The totals describe the whole filtered result, not the page.
+    const all = await prisma.coffeeProduct.findMany({
+      where,
+      select: { id: true, isActive: true, productSkus: { select: { id: true, isActive: true } } },
+    });
+    const skuIds = all.flatMap((p) => p.productSkus.map((s) => s.id));
+    const [free, produced, items] = await Promise.all([
+      availableUnitsBySku(prisma, skuIds),
+      prisma.finishedGoodsLot.groupBy({ by: ["productSkuId"], where: { productSkuId: { in: skuIds } }, _count: { _all: true } }),
+      prisma.coffeeProduct.findMany({
+        where,
+        orderBy: productOrderBy(sort, lang),
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          category: { select: { id: true, nameAr: true, nameEn: true, isActive: true } },
+          productSkus: {
+            select: { id: true, skuCode: true, weightGrams: true, price: true, isActive: true, barcode: true },
+            orderBy: [{ weightGrams: "asc" }, { skuCode: "asc" }],
+          },
+        },
+      }),
+    ]);
+    const everProduced = new Set(produced.map((g) => g.productSkuId));
+    const freeOf = (ids: string[]) => ids.reduce((s, id) => s + (free.get(id)?.unitsFree ?? 0), 0);
+
+    return NextResponse.json({
+      items: items.map((p) => {
+        const prices = p.productSkus.map((s) => s.price);
+        const ids = p.productSkus.map((s) => s.id);
+        return {
+          id: p.id,
+          productNameAr: p.productNameAr,
+          productNameEn: p.productNameEn,
+          countryEn: p.countryEn, countryAr: p.countryAr,
+          regionEn: p.regionEn, regionAr: p.regionAr,
+          processEn: p.processEn, processAr: p.processAr,
+          isActive: p.isActive,
+          category: p.category,
+          updatedAt: p.updatedAt,
+          skus: p.productSkus.map((s) => ({ ...s, packSize: packSizeLabel(s.weightGrams) })),
+          priceMin: prices.length ? Math.min(...prices) : null,
+          priceMax: prices.length ? Math.max(...prices) : null,
+          freeUnits: freeOf(ids),
+          // «لم يُنتج بعد» (no finished lot ever) versus «لا مخزون» (made before, none free now).
+          everProduced: ids.some((id) => everProduced.has(id)),
+        };
+      }),
+      total: all.length,
+      page,
+      pageSize,
+      totals: {
+        skuCount: skuIds.length,
+        activeProductCount: all.filter((p) => p.isActive).length,
+        freeUnits: freeOf(skuIds),
+      },
+    });
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }
 
 function nullify(v: unknown): string | null {
@@ -33,6 +112,15 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
+
+    // The one-page Add Product form (Figma 260:4107): the product, its SKUs (code, pack size,
+    // price, barcode, active) and each SKU's BOM in ONE transaction, so the form never leaves a
+    // half-created product. Writing SKUs and BOMs is the Products section's edit right.
+    if (body && Array.isArray(body.skus)) {
+      if (!canEdit(user.permissions, "inventory"))
+        return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+      return createCatalogProduct(body);
+    }
 
     if (!body.productNameEn || typeof body.productNameEn !== "string" || !body.productNameEn.trim())
       return NextResponse.json({ error: "productNameEn is required." }, { status: 400 });

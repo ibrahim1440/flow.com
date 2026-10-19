@@ -222,7 +222,9 @@ export default function PackagingPage() {
   }
 
   async function loadCatalog() {
-    const res = await fetch("/api/products");
+    // Active SKUs of inactive products too: switching a product off hides it from NEW orders
+    // only; what an existing order still needs can be packed.
+    const res = await fetch("/api/products?inactiveProducts=1");
     if (res.ok) setCatalog(await res.json());
   }
 

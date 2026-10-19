@@ -2,14 +2,19 @@
 // Purchases — Direction 2.1 (migration phase 2; Figma 221:748 at 1440, 273:6591 at 1024, the
 // «تسجيل مشتريات» phone page 227:1505).
 //
-// Visual port only: the same requests (GET /api/purchases, /api/suppliers, /api/green-beans; POST
-// /api/suppliers for a new supplier, then POST /api/purchases), the same receiving gate and the
-// same client validation as the legacy screen. Recording a purchase moves from a centred modal to
-// the frame's pane: docked beside the register at 1440, a drawer at 1024, a full page on the phone.
-// Export, the period filter and the sort control are drawn in the frame but not built.
+// Requests: GET /api/purchases?period=all, /api/suppliers, /api/green-beans; POST /api/suppliers for a
+// new supplier, then POST /api/purchases (inventory › receive). Recording a purchase is the frame's
+// pane: docked beside the register at 1440, a drawer at 1024, a full page on the phone. Batch
+// "Inventory & products" adds the frame's period filter («آخر 90 يومًا»), the sort, «تصدير» (CSV of
+// the same period / sort / search: GET /api/purchases/export), the 30-day metrics and the lot's
+// balance before / after in the pane. A «تسجيل مشتريات» link from the green coffee tab arrives with
+// ?bean=<lot id> and opens the pane on that lot.
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Btn, Field, Notice, OpsBanner, OpsLoading, OpsPane, OpsRoot, PageHeader, opsDate, useL } from "@/components/ops/ui";
+import { useSearchParams } from "next/navigation";
+import { Btn, Field, FilterChip, Notice, OpsBanner, OpsLoading, OpsPane, OpsRoot, PageHeader, opsDate, useL } from "@/components/ops/ui";
+import { DownloadIcon, SortControl } from "../inventory/_parts/shared";
+import { PURCHASE_PERIODS, periodStart, purchaseTotals, sortPurchases, type PurchasePeriod, type PurchaseSort } from "@/lib/inventory/purchases-query";
 import "@/components/ops/stock.css";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
@@ -28,7 +33,7 @@ const money = (v: number | null | undefined, digits = 2): string =>
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Supplier = { id: string; name: string; contact: string | null };
-type GreenBean = { id: string; beanType: string; beanTypeAr: string | null; serialNumber: string };
+type GreenBean = { id: string; beanType: string; beanTypeAr: string | null; serialNumber: string; quantityKg: number };
 type PurchaseRecord = {
   id: string;
   supplier: Supplier;
@@ -54,13 +59,13 @@ type FormState = {
   notes: string;
 };
 
-function emptyForm(): FormState {
+function emptyForm(itemId = ""): FormState {
   return {
     supplierId: "",
     isNewSupplier: false,
     newSupplierName: "",
     newSupplierContact: "",
-    itemId: "",
+    itemId,
     quantity: "",
     costPerUnit: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
@@ -73,17 +78,19 @@ function emptyForm(): FormState {
 function AddPurchasePane({
   suppliers,
   beans,
+  initialBean,
   onClose,
   onSuccess,
 }: {
   suppliers: Supplier[];
   beans: GreenBean[];
+  initialBean?: string;
   onClose: () => void;
   onSuccess: (msg: string) => void;
 }) {
   const { t, lang } = useI18n();
   const L = useL();
-  const [form, setForm] = useState<FormState>(emptyForm());
+  const [form, setForm] = useState<FormState>(() => emptyForm(initialBean && beans.some((b) => b.id === initialBean) ? initialBean : ""));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -93,6 +100,7 @@ function AddPurchasePane({
   const qty = parseFloat(form.quantity) || 0;
   const cpu = parseFloat(form.costPerUnit) || 0;
   const previewTotal = qty * cpu;
+  const chosen = beans.find((b) => b.id === form.itemId) ?? null;
 
   function handleSupplierSelect(val: string) {
     if (val === "__new__") {
@@ -238,14 +246,29 @@ function AddPurchasePane({
             placeholder={L("ملاحظات اختيارية عن الشحنة…", "Optional notes about the shipment…")} />
         </Field>
 
-        {previewTotal > 0 && (
+        {previewTotal > 0 || chosen ? (
           <dl className="hr-kv">
-            <div>
-              <dt>{t("totalCost")}</dt>
-              <dd><strong className="hr-num">{money(previewTotal)}</strong> {lang === "ar" ? "ر.س" : "SAR"}</dd>
-            </div>
+            {previewTotal > 0 ? (
+              <div>
+                <dt>{t("totalCost")}</dt>
+                <dd><strong className="hr-num">{money(previewTotal)}</strong> {lang === "ar" ? "ر.س" : "SAR"}</dd>
+              </div>
+            ) : null}
+            {/* 221:748 «رصيد اللوت الآن» / «الرصيد بعد التسجيل»: the lot's balance, then + the quantity. */}
+            {chosen ? (
+              <div>
+                <dt>{L("رصيد اللوت الآن", "Lot balance now")}</dt>
+                <dd><span className="hr-num">{fmtQty(chosen.quantityKg, 2)}</span> {lang === "ar" ? "كغ" : "kg"}</dd>
+              </div>
+            ) : null}
+            {chosen && qty > 0 ? (
+              <div>
+                <dt>{L("الرصيد بعد التسجيل", "Balance after recording")}</dt>
+                <dd><strong className="hr-num">{fmtQty(chosen.quantityKg + qty, 2)}</strong> {lang === "ar" ? "كغ" : "kg"}</dd>
+              </div>
+            ) : null}
           </dl>
-        )}
+        ) : null}
       </form>
     </OpsPane>
   );
@@ -257,15 +280,19 @@ export default function PurchasesPage() {
   const { t, lang } = useI18n();
   const L = useL();
   const user = useUser();
+  const sp = useSearchParams();
   // Recording a purchase is the receiving duty, as the API requires (POST /api/purchases: inventory › receive).
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
+  const beanParam = sp.get("bean") ?? undefined;
 
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [period, setPeriod] = useState<PurchasePeriod | "">("90");
+  const [sort, setSort] = useState<PurchaseSort>("newest");
+  const [showForm, setShowForm] = useState(!!beanParam);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
   function showToast(msg: string, type: "ok" | "err" = "ok") {
@@ -273,10 +300,11 @@ export default function PurchasesPage() {
     setTimeout(() => setToast(null), 3500);
   }
 
+  // The whole register (newest 1,000): the period filter and the 30-day metrics are both read from it.
   const loadData = useCallback(async () => {
     setLoading(true);
     const [pRes, sRes, bRes] = await Promise.all([
-      fetch("/api/purchases"),
+      fetch("/api/purchases?period=all"),
       fetch("/api/suppliers"),
       fetch("/api/green-beans"),
     ]);
@@ -291,7 +319,7 @@ export default function PurchasesPage() {
     let cancelled = false;
     (async () => {
       const [pRes, sRes, bRes] = await Promise.all([
-        fetch("/api/purchases"),
+        fetch("/api/purchases?period=all"),
         fetch("/api/suppliers"),
         fetch("/api/green-beans"),
       ]);
@@ -305,11 +333,7 @@ export default function PurchasesPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Build a bean lookup map for table display
-  const beanMap = useMemo(
-    () => new Map(beans.map((b) => [b.id, b])),
-    [beans]
-  );
+  const beanMap = useMemo(() => new Map(beans.map((b) => [b.id, b])), [beans]);
 
   function beanLabel(itemId: string | null): string {
     if (!itemId) return "—";
@@ -318,26 +342,25 @@ export default function PurchasesPage() {
     return lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType;
   }
 
+  const effPeriod: PurchasePeriod = period || "all";
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return purchases;
-    return purchases.filter((p) => {
+    const start = periodStart(effPeriod);
+    const rows = purchases.filter((p) => {
+      if (start && new Date(p.purchaseDate) < start) return false;
+      if (!q) return true;
       const bean = p.itemId ? beanMap.get(p.itemId) : null;
-      const beanName = (bean ? `${bean.beanType} ${bean.beanTypeAr ?? ""}` : "").toLowerCase();
-      return (
-        p.supplier.name.toLowerCase().includes(q) ||
-        beanName.includes(q) ||
-        (p.notes ?? "").toLowerCase().includes(q)
-      );
+      const beanName = (bean ? `${bean.beanType} ${bean.beanTypeAr ?? ""} ${bean.serialNumber}` : "").toLowerCase();
+      return p.supplier.name.toLowerCase().includes(q) || beanName.includes(q) || (p.notes ?? "").toLowerCase().includes(q);
     });
-  }, [purchases, search, beanMap]);
+    return sortPurchases(rows, sort);
+  }, [purchases, search, beanMap, effPeriod, sort]);
 
-  // Summary stats
-  const totalSpendSAR = purchases.reduce((s, p) => s + p.totalCost, 0);
-  const totalKg = purchases.reduce((s, p) => s + p.quantity, 0);
+  // 221:748 metrics: the last 30 days (spend, kg with the weighted SAR/kg), and the suppliers.
+  const start30 = periodStart("30")!;
+  const last30 = purchaseTotals(purchases.filter((p) => new Date(p.purchaseDate) >= start30));
   const uniqueSuppliers = new Set(purchases.map((p) => p.supplier.id)).size;
-  const shownKg = filtered.reduce((s, p) => s + (Number.isFinite(p.quantity) ? p.quantity : 0), 0);
-  const shownSpend = filtered.reduce((s, p) => s + (Number.isFinite(p.totalCost) ? p.totalCost : 0), 0);
+  const shown = purchaseTotals(filtered);
   const latest = purchases.reduce<PurchaseRecord | null>((a, p) => (!a || p.purchaseDate > a.purchaseDate ? p : a), null);
 
   function handleSuccess(msg: string) {
@@ -349,6 +372,9 @@ export default function PurchasesPage() {
   const sar = lang === "ar" ? "ر.س" : "SAR";
   const kgU = lang === "ar" ? "كغ" : "kg";
   const open = canCreate && showForm;
+  const periodLabel = (p: PurchasePeriod) => (p === "all" ? L("كل الفترات", "All time") : p === "365" ? L("آخر سنة", "Last year") : lang === "ar" ? `آخر ${p} يومًا` : `Last ${p} days`);
+  const exportHref = `/api/purchases/export?${new URLSearchParams({ period: effPeriod, sort, ...(search.trim() ? { q: search.trim() } : {}) })}`;
+  const opsWord = (n: number) => (lang === "ar" ? (n === 1 ? "عملية شراء واحدة" : n === 2 ? "عمليتا شراء" : n <= 10 ? `${n} عمليات شراء` : `${n} عملية شراء`) : `${n} ${n === 1 ? "purchase" : "purchases"}`);
 
   return (
     <OpsRoot className="stk-purchases">
@@ -356,7 +382,10 @@ export default function PurchasesPage() {
     <div className="hr-page">
       <PageHeader
         title={t("purchasesTitle")}
-        actions={canCreate ? <Btn variant="primary" onClick={() => setShowForm(true)}><PlusIcon />{t("addPurchase")}</Btn> : null}
+        actions={<>
+          <a className="hr-btn is-ghost" href={exportHref} download data-testid="purchases-export"><DownloadIcon />{L("تصدير", "Export")}</a>
+          {canCreate ? <Btn variant="primary" onClick={() => setShowForm(true)}><PlusIcon />{t("addPurchase")}</Btn> : null}
+        </>}
       >
         <span className="hr-caption">{t("purchasesSubtitle")}</span>
         <span className="hr-caption">{lang === "ar" ? `${uniqueSuppliers} موردين` : `${uniqueSuppliers} suppliers`}</span>
@@ -368,14 +397,14 @@ export default function PurchasesPage() {
         <>
           <div className="stk-metrics" style={{ ["--stk-cols" as string]: 3 }}>
             <div>
-              <span className="stk-lbl">{t("totalSpend")}</span>
-              <span className="stk-mid">{money(totalSpendSAR, 0)}<span className="stk-unit">{sar}</span></span>
-              <span className="stk-d">{purchases.length} {lang === "ar" ? "عملية شراء" : "transactions"}</span>
+              <span className="stk-lbl">{L("الإنفاق · آخر 30 يومًا", "Spend · last 30 days")}</span>
+              <span className="stk-mid">{money(last30.spend, 0)}<span className="stk-unit">{sar}</span></span>
+              <span className="stk-d">{opsWord(last30.count)}</span>
             </div>
             <div>
-              <span className="stk-lbl">{t("totalReceived")}</span>
-              <span className="stk-mid">{totalKg.toFixed(1)}<span className="stk-unit">{kgU}</span></span>
-              <span className="stk-d">{lang === "ar" ? "بن أخضر مستلم" : "green bean received"}</span>
+              <span className="stk-lbl">{L("بن أخضر مستلم · آخر 30 يومًا", "Green coffee received · last 30 days")}</span>
+              <span className="stk-mid">{fmtQty(last30.kg, 2)}<span className="stk-unit">{kgU}</span></span>
+              <span className="stk-d">{last30.avgPerKg === null ? "—" : lang === "ar" ? `متوسط ${money(last30.avgPerKg)} ر.س للكيلو` : `Average ${money(last30.avgPerKg)} SAR per kg`}</span>
             </div>
             <div>
               <span className="stk-lbl">{t("suppliersCount")}</span>
@@ -385,12 +414,20 @@ export default function PurchasesPage() {
           </div>
 
           <div className="stk-tool">
-            <input type="search" className="hr-input hr-search" placeholder={t("searchPurchases")} aria-label={t("searchPurchases")}
+            <input type="search" className="hr-input hr-search" placeholder={L("المورد أو البن", "Supplier or coffee")} aria-label={t("searchPurchases")}
               value={search} onChange={(e) => setSearch(e.target.value)} />
+            <FilterChip label={L("الفترة", "Period")} value={period} onChange={(v) => setPeriod(v as PurchasePeriod | "")} allLabel={periodLabel("all")}
+              options={PURCHASE_PERIODS.filter((p) => p !== "all").map((p) => ({ value: p, label: periodLabel(p) }))} />
+            <span className="stk-end">
+              <SortControl<PurchaseSort> dir={sort === "oldest" ? "up" : "down"} value={sort} onChange={setSort} options={[
+                { value: "newest", label: L("الأحدث", "Newest") }, { value: "oldest", label: L("الأقدم", "Oldest") },
+                { value: "cost", label: L("الأعلى تكلفة", "Highest cost") }, { value: "qty", label: L("الأكبر كمية", "Largest quantity") },
+              ]} />
+            </span>
           </div>
 
           {filtered.length === 0 ? (
-            <div className="hr-state"><h3>{search ? t("noData") : t("noPurchases")}</h3></div>
+            <div className="hr-state"><h3>{search || period ? t("noData") : t("noPurchases")}</h3></div>
           ) : (
             <div className="hr-tablewrap">
               <table className="hr-table is-mrow" aria-label={t("purchasesTitle")}>
@@ -400,8 +437,8 @@ export default function PurchasesPage() {
                     <th>{t("supplier")}</th>
                     <th>{t("greenBeans")}</th>
                     <th className="num">{lang === "ar" ? "الكمية · كغ" : "Qty · kg"}</th>
-                    <th className="num">{t("costPerUnit")}</th>
-                    <th className="num">{t("totalCost")}</th>
+                    <th className="num">{lang === "ar" ? "سعر الكيلو" : "Price per kg"}</th>
+                    <th className="num">{lang === "ar" ? "التكلفة · ر.س" : "Cost · SAR"}</th>
                     <th className="hr-hide-compact hr-hide-preview">{t("notes")}</th>
                   </tr>
                 </thead>
@@ -432,10 +469,10 @@ export default function PurchasesPage() {
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={3}>{lang === "ar" ? `${filtered.length} عمليات شراء` : `${filtered.length} purchases`}</td>
-                    <td className="num stk-tot"><span className="hr-num">{fmtQty(shownKg, 2)}</span></td>
+                    <td colSpan={3}>{opsWord(shown.count)} · {periodLabel(effPeriod)}</td>
+                    <td className="num stk-tot"><span className="hr-num">{money(shown.kg)}</span></td>
                     <td />
-                    <td className="num stk-tot"><span className="hr-num">{money(shownSpend)}</span></td>
+                    <td className="num stk-tot"><span className="hr-num">{money(shown.spend)}</span></td>
                     <td className="hr-hide-compact hr-hide-preview" />
                   </tr>
                 </tfoot>
@@ -446,10 +483,11 @@ export default function PurchasesPage() {
       )}
     </div>
 
-      {open ? (
+      {open && !loading ? (
         <AddPurchasePane
           suppliers={suppliers}
           beans={beans}
+          initialBean={beanParam}
           onClose={() => setShowForm(false)}
           onSuccess={handleSuccess}
         />

@@ -18,6 +18,7 @@ export type Material = {
   id: string;
   code: string;
   name: string;
+  nameAr?: string | null;
   category: string;
   unitOfMeasure: string;
   quantityOnHand: number;
@@ -132,7 +133,7 @@ export function MaterialsPanel({
               {materials.map((m) => (
                 <tr key={m.id} className={m.isActive ? undefined : "is-inactive"}>
                   <td className="m-title">
-                    <span className="strong">{m.name}</span>
+                    <span className="strong">{lang === "ar" && m.nameAr ? m.nameAr : m.name}</span>
                     <span className="stk-sub hr-id hr-desktop-only">{m.code}</span>
                     <span className="hr-msub">
                       <span className="hr-id">{m.code}</span> · {cat(m.category)} · {t("onHandLabel")} <span className="hr-num">{m.quantityOnHand}</span>
@@ -179,7 +180,7 @@ export function MaterialsPanel({
       <Dialog
         open={!!receiving}
         title={t("receiveStockLabel")}
-        sub={receiving ? <><span>{receiving.name}</span> · <span className="hr-id">{receiving.code}</span></> : undefined}
+        sub={receiving ? <><span>{lang === "ar" && receiving.nameAr ? receiving.nameAr : receiving.name}</span> · <span className="hr-id">{receiving.code}</span></> : undefined}
         onClose={() => { setReceiving(null); setRqty(""); setRref(""); }}
         actions={receiving ? (
           <>
@@ -203,7 +204,7 @@ export function MaterialsPanel({
       <Dialog
         open={!!adjusting}
         title={L("جرد وتسوية المخزون", "Count and adjust stock")}
-        sub={adjusting ? <><span>{adjusting.name}</span> · <span className="hr-id">{adjusting.code}</span></> : undefined}
+        sub={adjusting ? <><span>{lang === "ar" && adjusting.nameAr ? adjusting.nameAr : adjusting.name}</span> · <span className="hr-id">{adjusting.code}</span></> : undefined}
         onClose={() => { setAdjusting(null); setValue(""); setReason(""); }}
         actions={adjusting ? (
           <>

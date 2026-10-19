@@ -8,6 +8,8 @@ import {
   skuDisplayName,
   packSizeLabel,
 } from "@/lib/services/finished-products";
+import { parseBarcode } from "@/lib/services/product-catalog";
+import { assertBarcodeFree } from "@/lib/services/product-catalog-db";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -58,6 +60,7 @@ export async function GET(_request: Request, { params }: Params) {
       price: sku.price,
       isBulk: sku.isBulk,
       isActive: sku.isActive,
+      barcode: sku.barcode,
       coffee: sku.product,
       availableUnits: availability.get(sku.id)?.unitsFree ?? 0,
       reservedUnits: availability.get(sku.id)?.unitsReserved ?? 0,
@@ -116,6 +119,13 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   if (b.isActive !== undefined) data.isActive = b.isActive === true;
+
+  // Optional and unique per SKU; 13 digits are checked as EAN-13 (D4). "" clears it.
+  if (b.barcode !== undefined) {
+    const barcode = parseBarcode(b.barcode);
+    if (!barcode.ok) return NextResponse.json({ error: barcode.error, field: barcode.field }, { status: 400 });
+    data.barcode = barcode.value;
+  }
   if (b.isBulk !== undefined) data.isBulk = b.isBulk === true;
 
   if (b.skuCode !== undefined) {
@@ -144,6 +154,11 @@ export async function PATCH(request: Request, { params }: Params) {
   try {
     const existing = await prisma.productSKU.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: "Product not found." }, { status: 404 });
+
+    if (typeof data.barcode === "string") {
+      const taken = await assertBarcodeFree(data.barcode, id);
+      if (taken) return taken;
+    }
 
     if (typeof data.skuCode === "string" && data.skuCode !== existing.skuCode) {
       const clash = await prisma.productSKU.findUnique({ where: { skuCode: data.skuCode } });

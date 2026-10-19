@@ -1,77 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
+import { handlePrismaError } from "@/lib/api-error";
+import { parseLedgerFilter } from "@/lib/inventory/ledger-query";
+import { enrichMovements, ledgerPage } from "@/lib/services/inventory-ledger";
 
-export async function GET() {
+/**
+ * The movement ledger (inventory module, read-only).
+ *
+ *   GET /api/inventory-movements                → the newest 300, enriched (unchanged contract).
+ *   GET /api/inventory-movements?page=1&…       → { total, page, pageSize, rows } with the filters
+ *     type, category, source (sourceDocType), q (item name / code / batch / note), entityId,
+ *     sourceDocId, from, to; pageSize 10 | 25 | 50 | 100 (default 25).
+ * Export of the same filter: GET /api/inventory-movements/export (CSV).
+ */
+export async function GET(request: Request) {
   const { error } = await requireModule("inventory");
   if (error) return error;
 
-  const movements = await prisma.inventoryMovement.findMany({
-    orderBy: { timestamp: "desc" },
-    take: 300,
-  });
-
-  // Batch-enrich: collect unique IDs per category
-  const rawIds = [...new Set(
-    movements.filter((m) => m.category === "RAW_MATERIAL" && m.referenceEntityId).map((m) => m.referenceEntityId!)
-  )];
-  const fglIds = [...new Set(
-    movements.filter((m) => m.category === "FINISHED_GOODS" && m.referenceEntityId).map((m) => m.referenceEntityId!)
-  )];
-  const empIds = [...new Set(movements.filter((m) => m.userId).map((m) => m.userId!))];
-
-  const [beans, lots, emps] = await Promise.all([
-    rawIds.length
-      ? prisma.greenBean.findMany({
-          where: { id: { in: rawIds } },
-          select: { id: true, beanType: true, beanTypeAr: true },
-        })
-      : [],
-    fglIds.length
-      ? prisma.finishedGoodsLot.findMany({
-          where: { id: { in: fglIds } },
-          select: {
-            id: true,
-            batchNumber: true,
-            product: { select: { productNameEn: true, productNameAr: true } },
-          },
-        })
-      : [],
-    empIds.length
-      ? prisma.employee.findMany({
-          where: { id: { in: empIds } },
-          select: { id: true, name: true },
-        })
-      : [],
-  ]);
-
-  const beanMap = new Map(beans.map((b) => [b.id, b]));
-  const fglMap = new Map(lots.map((l) => [l.id, l]));
-  const empMap = new Map(emps.map((e) => [e.id, e.name]));
-
-  const enriched = movements.map((m) => {
-    let entityLabel: string | null = null;
-    let entityLabelAr: string | null = null;
-
-    if (m.referenceEntityId) {
-      if (m.category === "RAW_MATERIAL") {
-        const b = beanMap.get(m.referenceEntityId);
-        entityLabel = b?.beanType ?? null;
-        entityLabelAr = b?.beanTypeAr ?? null;
-      } else {
-        const l = fglMap.get(m.referenceEntityId);
-        entityLabel = l?.batchNumber ?? null;
-        entityLabelAr = l?.product?.productNameAr ?? l?.product?.productNameEn ?? null;
-      }
-    }
-
-    return {
-      ...m,
-      entityLabel,
-      entityLabelAr,
-      userName: m.userId ? (empMap.get(m.userId) ?? null) : null,
-    };
-  });
-
-  return NextResponse.json(enriched);
+  const sp = new URL(request.url).searchParams;
+  try {
+    if (sp.has("page")) return NextResponse.json(await ledgerPage(parseLedgerFilter(sp)));
+    const movements = await prisma.inventoryMovement.findMany({ orderBy: { timestamp: "desc" }, take: 300 });
+    return NextResponse.json(await enrichMovements(movements));
+  } catch (err) {
+    return handlePrismaError(err);
+  }
 }

@@ -614,6 +614,39 @@ model CoffeeProduct {
 
   // BOM lines that consume this coffee as roasted/intermediate stock.
   bomComponents BomComponent[]
+
+  // ─── Product catalog (20261020090000_product_catalog, additive) ──────────
+  // One user-defined category per product (D5); every SKU of the product inherits it.
+  // Nullable: a product without one is «بلا تصنيف». RESTRICT is the database backstop for
+  // «a category holding products cannot be deleted»; the API refuses first with a 409.
+  categoryId String?
+  category   CatalogCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  // Product-level switch: an inactive product is left out of the new-order product pickers
+  // (with all its SKUs). Existing orders keep resolving it. Defaults true, so every existing
+  // product stays active.
+  isActive   Boolean          @default(true)
+
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+// A user-defined product category (CATALOG-BACKEND.md). Named CatalogCategory because
+// `ProductCategory` is already the SKU-type enum («نوع الصنف»). One level only (D2);
+// archiving (isActive = false) is the normal way to retire one.
+model CatalogCategory {
+  id            String          @id @default(cuid())
+  nameAr        String          @unique
+  nameEn        String?
+  description   String?
+  isActive      Boolean         @default(true) // false = archived («مؤرشف»)
+  sortOrder     Int             @default(0) // manual order, «ترتيب: يدوي»
+  archivedAt    DateTime?
+  updatedByName String? // «آخر تعديل · <who>»; a display snapshot, not a reference
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  products      CoffeeProduct[]
+
+  @@index([isActive, sortOrder])
 }
 
 // ─── Procurement ─────────────────────────────────────────────────────────────
@@ -703,6 +736,82 @@ model InventoryMovement {
   @@index([timestamp])
   @@index([category, timestamp])
   @@index([referenceEntityId])
+  // 20261020100000_inventory_counts: the movements of one source document (a count session's
+  // adjustments, a roast's draws) for the count review and the lot traceability page.
+  @@index([sourceDocType, sourceDocId])
+}
+
+// ─── Inventory count sessions (migration 20261020100000_inventory_counts) ─────
+//
+// A physical stock count of several items at once («الجرد والتسويات», Figma 278:4772): a
+// session is started, counted quantities are entered line by line, the variances are reviewed,
+// and the session is POSTED in one step. Posting books each non-zero variance through the
+// existing adjustment service (src/lib/services/inventory-adjustment.ts) — an ADJUSTMENT
+// movement with sourceDocType MANUAL_ADJUSTMENT and sourceDocId = the session id, the new
+// balance and the INVENTORY_ADJUSTED person audit — so the ledger and the balances move exactly
+// as a single-item count does. These two tables never hold stock: they are the count sheet.
+
+enum InventoryCountStatus {
+  OPEN // being counted; lines may be added, counted, removed
+  POSTED // variances booked; read-only
+  CANCELLED // abandoned; nothing booked; read-only
+}
+
+model InventoryCountSession {
+  id     String               @id @default(cuid())
+  /// Human reference («جرد #12»), a SERIAL.
+  number Int                  @unique @default(autoincrement())
+  status InventoryCountStatus @default(OPEN)
+  title  String?
+  notes  String?
+
+  // Employee.id, denormalised (the InventoryMovement.userId convention): no FK.
+  createdById   String?
+  postedById    String?
+  /// The reason given when posting (normalizeAdjustmentReason) — carried onto every movement.
+  postReason    String?
+  postedAt      DateTime?
+  cancelledById String?
+  cancelledAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  lines InventoryCountLine[]
+
+  @@index([status, createdAt])
+}
+
+model InventoryCountLine {
+  id        String                @id @default(cuid())
+  sessionId String
+  session   InventoryCountSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  /// RAW_MATERIAL (GreenBean, kg) or PACKAGING_MATERIAL (MaterialItem, its unit). CHECK in SQL.
+  category InventoryCategory
+  /// GreenBean.id or MaterialItem.id (untyped, like InventoryMovement.referenceEntityId).
+  entityId String
+
+  /// The system balance when the counted quantity was entered (or when the line was added, until
+  /// it is counted). The variance a count observes is countedQty − systemQty; posting applies
+  /// that variance to the balance as it stands at posting time, so stock that moved between the
+  /// count and the posting (a roast, a receipt) is not wiped out by the count.
+  systemQty   Float
+  countedQty  Float?
+  countedAt   DateTime?
+  countedById String?
+  notes       String?
+
+  // Filled when the session is posted (null for a zero variance: nothing booked).
+  postedPreviousQty Float?
+  postedNewQty      Float?
+  postedVariance    Float?
+  movementId        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sessionId, category, entityId])
+  @@index([category, entityId])
 }
 
 // ─── Finished Goods ───────────────────────────────────────────────────────────
@@ -1071,6 +1180,8 @@ model ProductSKU {
   category      ProductCategory @default(ROASTED_COFFEE)
   unitOfMeasure UnitOfMeasure   @default(UNIT)
   isActive      Boolean         @default(true)
+  // GTIN / EAN-13 or an internal code; optional, unique when set (D4). 20261020090000_product_catalog.
+  barcode       String?         @unique
 
   // Bill of materials — what one unit of this SKU consumes.
   bomComponents BomComponent[]

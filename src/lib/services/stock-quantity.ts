@@ -28,3 +28,6 @@ export function parseStockQuantity(v: unknown, opts: { allowZero: boolean; unitO
   if (opts.unitOfMeasure && (DISCRETE_UNITS as readonly string[]).includes(opts.unitOfMeasure) && !Number.isInteger(value)) return { ok: false, message: `must be a whole number for a material counted in ${opts.unitOfMeasure.toLowerCase()}s` };
   return { ok: true, value };
 }
+
+/** Below this, a count equals the system balance and nothing is booked (1 g / 0.001 unit). */
+export const ADJUSTMENT_NOOP_THRESHOLD = 0.001;
