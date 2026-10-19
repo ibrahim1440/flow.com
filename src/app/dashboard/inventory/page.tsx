@@ -1,15 +1,24 @@
 "use client";
-
-import { useState, useEffect, useCallback } from "react";
+// Inventory — Direction 2.1 (migration phase 2; Figma page 216:2, frames 251:2482 green coffee,
+// 253:2987 packaging materials, 266:5230 finished stock, 268:5577 movement ledger, 278:4772
+// count dialog; phones 270:5944 / 270:6058 / 270:6164 / 270:6268 / 270:6388).
+//
+// Visual port only: the same requests (GET /api/green-beans?all=1, /api/finished-goods-lots,
+// /api/inventory-movements, /api/materials; POST/PUT/DELETE /api/green-beans, POST
+// /api/inventory/adjust, the materials receive / count routes), the same permission gates and the
+// same validation as the legacy screen. What the frames draw that the ERP does not store (14-day
+// roast rate and coverage, count sessions, export, pagination) is not built.
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Languages, Pencil, Power, PowerOff, Trash2 } from "lucide-react";
 import {
-  Plus, Package, Search, Pencil, Trash2, X, Languages,
-  PowerOff, Power, Scale, History, Boxes, CheckCircle2,
-  Clock, XCircle,
-} from "lucide-react";
-import { formatDate } from "@/lib/utils";
+  Btn, Field, Notice, OpsBanner, OpsLoading, OpsRoot, PageHeader, StatusDot, Tabs, kg, opsDate, useL,
+} from "@/components/ops/ui";
+import { Dialog } from "@/components/hr/ui";
+import "@/components/ops/stock.css";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import { CheckIcon, MaterialForm, MaterialsPanel, PlusIcon, type Material } from "../_components/stock-materials";
 
 /** A stored quantity for display: "—" when it is not a finite number (Infinity arrives as JSON null), so one bad row cannot crash the screen. */
 const fmtQty = (v: number | null | undefined, digits: number): string =>
@@ -56,7 +65,7 @@ type EnrichedMovement = {
   userName: string | null;
 };
 
-type Tab = "raw" | "finished" | "ledger";
+type Tab = "raw" | "pack" | "finished" | "ledger";
 
 type FormState = {
   serialNumber: string; beanType: string; beanTypeAr: string;
@@ -64,6 +73,9 @@ type FormState = {
   variety: string; process: string; processAr: string;
   altitude: string; location: string; quantityKg: number;
 };
+
+/** The legacy screen's low-stock rule for a green-coffee row (kept as is: below 20 kg). */
+const LOW_KG = 20;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,6 +106,10 @@ async function callTranslate(text: string, target: "ar" | "en"): Promise<string 
   return j.translated ?? null;
 }
 
+function FilterIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z" /></svg>;
+}
+
 // ─── BeanForm (Add / Edit) ───────────────────────────────────────────────────
 
 function BeanForm({
@@ -106,9 +122,9 @@ function BeanForm({
   saving: boolean;
 }) {
   const { t } = useI18n();
+  const L = useL();
   const [form, setForm] = useState<FormState>(initial);
   const [translating, setTranslating] = useState<Record<string, boolean>>({});
-  const [formError, setFormError] = useState("");
 
   const set = (key: keyof FormState, val: string | number) =>
     setForm((p) => ({ ...p, [key]: val }));
@@ -138,136 +154,69 @@ function BeanForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setFormError("");
     await onSave(form);
   }
 
-  function TranslateBtn({
-    sourceKey, targetKey, targetLang, disabled: extraDisabled,
-  }: {
-    sourceKey: keyof FormState; targetKey: keyof FormState;
-    targetLang: "ar" | "en"; disabled?: boolean;
-  }) {
+  function TranslateBtn({ sourceKey, targetKey, targetLang }: { sourceKey: keyof FormState; targetKey: keyof FormState; targetLang: "ar" | "en" }) {
     const busy = translating[targetKey];
     const hasSource = !!(form[sourceKey] as string)?.trim();
+    const label = targetLang === "ar" ? t("translateToAr") : "Translate to English";
     return (
-      <button
-        type="button"
-        title={targetLang === "ar" ? t("translateToAr") : "Translate to English"}
-        onClick={() => translate(sourceKey, targetKey, targetLang)}
-        disabled={busy || !hasSource || extraDisabled}
-        className="shrink-0 px-2 py-1.5 rounded-lg bg-orange/10 text-orange hover:bg-orange/20 disabled:opacity-25 transition-colors"
-      >
-        {busy ? <span className="text-[10px] font-bold px-0.5">…</span> : <Languages size={13} />}
-      </button>
+      <Btn size="sm" variant="ghost" className="hr-iconbtn" title={label} aria-label={label}
+        onClick={() => translate(sourceKey, targetKey, targetLang)} disabled={busy || !hasSource}>
+        {busy ? "…" : <Languages size={16} />}
+      </Btn>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-extrabold text-charcoal">{title}</h2>
-          <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors"><X size={20} /></button>
-        </div>
-
-        {formError && (
-          <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 font-medium">
-            {formError}
+    <Dialog
+      open
+      title={title}
+      className="stk-wide"
+      onClose={onClose}
+      actions={
+        <>
+          <Btn variant="primary" type="submit" form="bean-form" disabled={saving}>{saving ? t("saving") : t("save")}</Btn>
+          <Btn onClick={onClose}>{t("cancel")}</Btn>
+        </>
+      }
+    >
+      <form id="bean-form" onSubmit={handleSubmit} className="hr-form">
+        <Field label={t("serialNumber")} help={L("يُولَّد تلقائيًا", "Auto-generated")}>
+          <input className="hr-input hr-id" dir="ltr" value={form.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} placeholder="GB-20260511-142" />
+        </Field>
+        <Field label={`${t("quantityKg")} *`}>
+          <input className="hr-input" type="number" step="0.01" min="0" value={form.quantityKg} required
+            onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)} />
+        </Field>
+        {bilingualFields.map(({ enKey, arKey, labelEn, labelAr, required }) => (
+          <div key={enKey} style={{ display: "contents" }}>
+            <Field label={`${labelEn}${required ? " *" : ""}`}>
+              <span className="stk-pair">
+                <input className="hr-input" dir="ltr" value={form[enKey] as string} onChange={(e) => set(enKey, e.target.value)} required={required} />
+                <TranslateBtn sourceKey={arKey} targetKey={enKey} targetLang="en" />
+              </span>
+            </Field>
+            <Field label={labelAr}>
+              <span className="stk-pair">
+                <input className="hr-input" dir="rtl" placeholder="اختياري" value={form[arKey] as string} onChange={(e) => set(arKey, e.target.value)} />
+                <TranslateBtn sourceKey={enKey} targetKey={arKey} targetLang="ar" />
+              </span>
+            </Field>
           </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">
-                {t("serialNumber")}
-                <span className="ml-1 normal-case text-brown/40 font-normal">(auto-generated)</span>
-              </label>
-              <input
-                value={form.serialNumber}
-                onChange={(e) => set("serialNumber", e.target.value)}
-                placeholder="GB-20260511-142"
-                className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm font-mono transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">{t("quantityKg")} *</label>
-              <input
-                type="number" step="0.01" min="0" value={form.quantityKg} required
-                onChange={(e) => set("quantityKg", parseFloat(e.target.value) || 0)}
-                className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border overflow-hidden">
-            <div className="grid grid-cols-2 bg-cream text-xs font-extrabold text-brown/60 uppercase tracking-widest">
-              <div className="px-4 py-2 border-r border-border">{t("enFields")}</div>
-              <div className="px-4 py-2">{t("arFields")} (العربية)</div>
-            </div>
-            <div className="divide-y divide-border">
-              {bilingualFields.map(({ enKey, arKey, labelEn, labelAr, required }) => (
-                <div key={enKey} className="grid grid-cols-2">
-                  <div className="px-4 py-3 border-r border-border">
-                    <label className="block text-xs font-bold text-charcoal mb-1.5">{labelEn}{required ? " *" : ""}</label>
-                    <div className="flex gap-1.5">
-                      <input
-                        value={form[enKey] as string}
-                        onChange={(e) => set(enKey, e.target.value)}
-                        required={required}
-                        className="flex-1 min-w-0 px-2.5 py-1.5 text-sm border-2 border-border rounded-lg focus:border-orange focus:ring-1 focus:ring-orange/20 outline-none transition-colors"
-                      />
-                      <TranslateBtn sourceKey={arKey} targetKey={enKey} targetLang="en" />
-                    </div>
-                  </div>
-                  <div className="px-4 py-3">
-                    <label className="block text-xs font-bold text-charcoal mb-1.5 text-right" dir="rtl">{labelAr}</label>
-                    <div className="flex gap-1.5">
-                      <TranslateBtn sourceKey={enKey} targetKey={arKey} targetLang="ar" />
-                      <input
-                        value={form[arKey] as string}
-                        onChange={(e) => set(arKey, e.target.value)}
-                        dir="rtl" placeholder="اختياري"
-                        className="flex-1 min-w-0 px-2.5 py-1.5 text-sm border-2 border-border rounded-lg focus:border-orange focus:ring-1 focus:ring-orange/20 outline-none transition-colors text-right"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { key: "variety", label: t("variety") },
-              { key: "altitude", label: t("altitude") },
-              { key: "location", label: t("storageLocation") },
-            ].map(({ key, label }) => (
-              <div key={key}>
-                <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">{label}</label>
-                <input
-                  value={(form as Record<string, string | number>)[key] as string}
-                  onChange={(e) => set(key as keyof FormState, e.target.value)}
-                  className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm transition-colors"
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={saving}
-              className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 active:scale-[0.98] transition-all disabled:opacity-50">
-              {saving ? t("saving") : t("save")}
-            </button>
-            <button type="button" onClick={onClose}
-              className="flex-1 py-2.5 border-2 border-border rounded-xl text-sm font-bold text-brown hover:bg-gray-50 transition-colors">
-              {t("cancel")}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        ))}
+        {([
+          { key: "variety", label: t("variety") },
+          { key: "altitude", label: t("altitude") },
+          { key: "location", label: t("storageLocation") },
+        ] as const).map(({ key, label }) => (
+          <Field key={key} label={label}>
+            <input className="hr-input" value={form[key] as string} onChange={(e) => set(key, e.target.value)} />
+          </Field>
+        ))}
+      </form>
+    </Dialog>
   );
 }
 
@@ -280,34 +229,24 @@ function DeleteConfirmModal({
 }) {
   const { t } = useI18n();
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-            <Trash2 size={18} className="text-red-500" />
-          </div>
-          <div>
-            <p className="font-extrabold text-charcoal">{bean.beanType}</p>
-            <p className="text-xs text-brown/50 font-mono">{bean.serialNumber}</p>
-          </div>
-        </div>
-        <p className="text-sm text-brown/70">{t("confirmDeleteBean")}</p>
-        <div className="flex gap-2">
-          <button onClick={onConfirm} disabled={deleting}
-            className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 disabled:opacity-50 transition-colors">
-            {deleting ? "…" : t("delete")}
-          </button>
-          <button onClick={onClose}
-            className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-sm text-brown hover:bg-gray-50 transition-colors">
-            {t("cancel")}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog
+      open
+      title={bean.beanType}
+      sub={<span className="hr-id">{bean.serialNumber}</span>}
+      onClose={onClose}
+      actions={
+        <>
+          <Btn variant="danger" onClick={onConfirm} disabled={deleting}>{deleting ? "…" : t("delete")}</Btn>
+          <Btn onClick={onClose}>{t("cancel")}</Btn>
+        </>
+      }
+    >
+      <p style={{ margin: 0 }}>{t("confirmDeleteBean")}</p>
+    </Dialog>
   );
 }
 
-// ─── Adjustment Modal ─────────────────────────────────────────────────────────
+// ─── Adjustment (count) dialog — Figma 278:4772 ──────────────────────────────
 
 function AdjustmentModal({
   bean, onClose, onSuccess,
@@ -316,7 +255,8 @@ function AdjustmentModal({
   onClose: () => void;
   onSuccess: (noChange: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const L = useL();
   const [actualQty, setActualQty] = useState(String(bean.quantityKg));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -347,142 +287,71 @@ function AdjustmentModal({
     onSuccess(res.status === 200);
   }
 
+  const name = lang === "ar" && bean.beanTypeAr ? bean.beanTypeAr : bean.beanType;
+  const zero = Math.abs(delta) < 0.001;
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-orange/10 flex items-center justify-center">
-              <Scale size={18} className="text-orange" />
-            </div>
-            <div>
-              <h2 className="text-base font-extrabold text-charcoal">{t("adjustTitle")}</h2>
-              <p className="text-xs text-brown/60 font-mono">{bean.serialNumber}</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors">
-            <X size={20} />
-          </button>
+    <Dialog
+      open
+      title={t("adjustTitle")}
+      sub={<>{name} · <span className="hr-id">{bean.serialNumber}</span>{bean.location ? ` · ${bean.location}` : ""}</>}
+      onClose={onClose}
+      actions={
+        <>
+          <Btn variant="primary" type="submit" form="adjust-form" disabled={saving}>{saving ? "…" : t("performCount")}</Btn>
+          <Btn onClick={onClose}>{t("cancel")}</Btn>
+        </>
+      }
+    >
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <form id="adjust-form" onSubmit={handleSubmit} className="hr-stack" style={{ gap: 14 }}>
+        <div className="hr-form">
+          <Field label={t("systemQtyLabel")}>
+            <input className="hr-input hr-num" value={fmtQty(bean.quantityKg, 3)} disabled readOnly />
+          </Field>
+          <Field label={`${t("actualQtyLabel")} *`}>
+            <input className="hr-input" type="number" step="0.001" min="0" value={actualQty}
+              onChange={(e) => setActualQty(e.target.value)} required autoFocus />
+          </Field>
         </div>
-
-        {/* Bean identity */}
-        <div className="mb-5 px-4 py-3 bg-cream rounded-xl">
-          <p className="font-bold text-charcoal">{bean.beanType}</p>
-          {bean.beanTypeAr && <p className="text-sm text-brown/70 mt-0.5" dir="rtl">{bean.beanTypeAr}</p>}
-          <p className="text-xs text-brown/50 mt-1">{bean.country}{bean.region ? ` / ${bean.region}` : ""}</p>
-        </div>
-
-        {error && (
-          <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 font-medium">
-            {error}
+        {deltaValid ? (
+          <div className={`stk-diff${zero ? "" : delta > 0 ? " tone-success" : " tone-danger"}`}>
+            <span>{L("الفارق", "Difference")} <strong>{zero ? L("لا تغيير", "No change") : `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${lang === "ar" ? "كغ" : "kg"}`}</strong></span>
+            {zero ? null : <span>{L("يُسجَّل كتسوية", "Recorded as an adjustment")}</span>}
           </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* System qty (read-only) */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">
-              {t("systemQtyLabel")}
-            </label>
-            <div className="px-3 py-2.5 bg-gray-50 border-2 border-border rounded-xl text-sm font-bold text-charcoal font-mono">
-              {fmtQty(bean.quantityKg, 3)} kg
-            </div>
-          </div>
-
-          {/* Actual qty input */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">
-              {t("actualQtyLabel")} *
-            </label>
-            <input
-              type="number" step="0.001" min="0"
-              value={actualQty}
-              onChange={(e) => setActualQty(e.target.value)}
-              required
-              autoFocus
-              className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm font-mono transition-colors"
-            />
-          </div>
-
-          {/* Live delta preview */}
-          {deltaValid && (
-            <div className={`flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold border-2 ${
-              Math.abs(delta) < 0.001
-                ? "bg-gray-50 border-border text-brown/60"
-                : delta > 0
-                  ? "bg-green-50 border-green-200 text-green-700"
-                  : "bg-red-50 border-red-200 text-red-600"
-            }`}>
-              <span>الفارق</span>
-              <span className="font-mono">
-                {Math.abs(delta) < 0.001 ? "لا تغيير" : `${delta > 0 ? "+" : ""}${delta.toFixed(3)} kg`}
-              </span>
-            </div>
-          )}
-
-          {/* Notes */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1">
-              {t("adjustNotes")}
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              placeholder="سبب التسوية (اختياري)"
-              dir="rtl"
-              className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none text-sm resize-none transition-colors text-right"
-            />
-          </div>
-
-          <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={saving}
-              className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 active:scale-[0.98] transition-all disabled:opacity-50">
-              {saving ? "…" : t("performCount")}
-            </button>
-            <button type="button" onClick={onClose}
-              className="flex-1 py-2.5 border-2 border-border rounded-xl text-sm font-bold text-brown hover:bg-gray-50 transition-colors">
-              {t("cancel")}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        ) : null}
+        <Field label={t("adjustNotes")}>
+          <textarea className="hr-textarea" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+            placeholder={L("سبب التسوية (اختياري)", "Reason for the adjustment (optional)")} />
+        </Field>
+      </form>
+    </Dialog>
   );
 }
 
 // ─── Movement type / source helpers ──────────────────────────────────────────
 
-const TYPE_STYLES: Record<string, string> = {
-  IN:         "bg-green-100 text-green-700",
-  OUT:        "bg-red-100 text-red-600",
-  ADJUSTMENT: "bg-blue-100 text-blue-700",
-  LOSS:       "bg-orange/15 text-orange",
+const TYPE_MAP: Record<string, [string, "success" | "neutral" | "warning" | "danger", string]> = {
+  IN:         ["وارد", "success", "In"],
+  OUT:        ["صادر", "neutral", "Out"],
+  ADJUSTMENT: ["تسوية", "warning", "Adjustment"],
+  LOSS:       ["فاقد", "danger", "Loss"],
 };
 
-const SRC_LABELS_AR: Record<string, string> = {
-  PURCHASE:          "شراء",
-  ROASTING_BATCH:    "دفعة تحميص",
-  DELIVERY:          "توصيل",
-  PACKING:           "تعبئة",
-  MANUAL_ADJUSTMENT: "جرد يدوي",
-  BLEND:             "خلط",
-  OPENING_BALANCE:   "رصيد افتتاحي (استلام)",
-  RECEIVING:         "استلام توريد",
+const SRC_LABELS: Record<string, [string, string]> = {
+  PURCHASE:          ["شراء", "Purchase"],
+  ROASTING_BATCH:    ["دفعة تحميص", "Roasting batch"],
+  DELIVERY:          ["توصيل", "Delivery"],
+  PACKING:           ["تعبئة", "Packing"],
+  MANUAL_ADJUSTMENT: ["جرد يدوي", "Manual count"],
+  BLEND:             ["خلط", "Blend"],
+  OPENING_BALANCE:   ["رصيد افتتاحي (استلام)", "Opening balance (receipt)"],
+  RECEIVING:         ["استلام توريد", "Receiving"],
 };
 
-const TYPE_LABELS_AR: Record<string, string> = {
-  IN:         "وارد",
-  OUT:        "صادر",
-  ADJUSTMENT: "تسوية",
-  LOSS:       "فاقد",
-};
-
-const LOT_STATUS_STYLES: Record<string, { label: string; cls: string; icon: React.ElementType }> = {
-  AVAILABLE: { label: "متاح",   cls: "bg-green-100 text-green-700",  icon: CheckCircle2 },
-  RESERVED:  { label: "محجوز",  cls: "bg-amber-100 text-amber-700",  icon: Clock },
-  SHIPPED:   { label: "مشحون",  cls: "bg-gray-100 text-gray-500",    icon: XCircle },
+const LOT_STATUS: Record<string, [string, "success" | "warning" | "neutral", string]> = {
+  AVAILABLE: ["متاح", "success", "Available"],
+  RESERVED:  ["محجوز", "warning", "Reserved"],
+  SHIPPED:   ["مشحون", "neutral", "Shipped"],
 };
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -490,6 +359,7 @@ const LOT_STATUS_STYLES: Record<string, { label: string; cls: string; icon: Reac
 export default function InventoryPage() {
   const user = useUser();
   const { t, lang } = useI18n();
+  const L = useL();
   const canReceive = !!user && hasSubPrivilege(user.permissions, "inventory", "receive");
   const canAdjust  = !!user && hasSubPrivilege(user.permissions, "inventory", "adjust");
   // Bean record edit / (de)activate / delete is catalogue maintenance: the receiving duty or adjust
@@ -504,12 +374,14 @@ export default function InventoryPage() {
   const [beans, setBeans]         = useState<GreenBean[]>([]);
   const [lots, setLots]           = useState<FinishedGoodsLot[]>([]);
   const [movements, setMovements] = useState<EnrichedMovement[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
 
   // UI
   const [search, setSearch]           = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [ledgerSearch, setLedgerSearch] = useState("");
   const [lotsSearch, setLotsSearch]     = useState("");
+  const [matSearch, setMatSearch]       = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
   // Modals
@@ -517,6 +389,7 @@ export default function InventoryPage() {
   const [editTarget, setEditTarget]   = useState<GreenBean | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GreenBean | null>(null);
   const [adjustTarget, setAdjustTarget] = useState<GreenBean | null>(null);
+  const [materialFormOpen, setMaterialFormOpen] = useState(false);
   const [saving, setSaving]   = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -545,24 +418,39 @@ export default function InventoryPage() {
     setLoadedTabs((p) => new Set([...p, "ledger" as Tab]));
   }, []);
 
-  useEffect(() => { loadBeans(); }, [loadBeans]);
+  // The packaging materials list (Figma 253:2987): the products screen's request.
+  const loadMaterials = useCallback(async () => {
+    const res = await fetch("/api/materials?activeOnly=false");
+    if (res.ok) setMaterials(await res.json());
+    setLoadedTabs((p) => new Set([...p, "pack" as Tab]));
+  }, []);
 
+  // The first load: the same request as loadBeans, with every state update after the await.
   useEffect(() => {
-    if (activeTab === "finished" && !loadedTabs.has("finished")) loadLots();
-    if (activeTab === "ledger"   && !loadedTabs.has("ledger"))   loadMovements();
-  }, [activeTab, loadedTabs, loadLots, loadMovements]);
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/green-beans?all=1");
+      const j = await res.json();
+      if (cancelled) return;
+      setBeans(j);
+      setLoadedTabs((p) => new Set([...p, "raw" as Tab]));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Each other tab loads the first time it is opened (as before, now from the tab change itself).
+  function openTab(tab: Tab) {
+    setActiveTab(tab);
+    if (tab === "finished" && !loadedTabs.has("finished")) loadLots();
+    if (tab === "ledger"   && !loadedTabs.has("ledger"))   loadMovements();
+    if (tab === "pack"     && !loadedTabs.has("pack"))     loadMaterials();
+  }
 
   // ── Lang-aware display ────────────────────────────────────────────────────
 
   function disp(en: string | null | undefined, ar: string | null | undefined) {
     if (lang === "ar" && ar) return ar;
     return en ?? "—";
-  }
-
-  function fmtDateTime(ts: string) {
-    return new Date(ts).toLocaleString(lang === "ar" ? "ar-SA" : "en-US", {
-      dateStyle: "short", timeStyle: "short",
-    });
   }
 
   // ── CRUD handlers (unchanged logic) ──────────────────────────────────────
@@ -645,28 +533,53 @@ export default function InventoryPage() {
       .toLowerCase().includes(ledgerSearch.toLowerCase())
   );
 
-  const totalStock  = beans.filter((b) => b.isActive).reduce((s, b) => s + b.quantityKg, 0);
-  const activeCount = beans.filter((b) => b.isActive).length;
+  const filteredMaterials = useMemo(() => {
+    const q = matSearch.trim().toLowerCase();
+    if (!q) return materials;
+    return materials.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  }, [materials, matSearch]);
+
+  const activeBeans = beans.filter((b) => b.isActive);
+  const totalStock  = activeBeans.reduce((s, b) => s + b.quantityKg, 0);
+  const activeCount = activeBeans.length;
+  const lowBeans    = activeBeans.filter((b) => b.quantityKg < LOW_KG);
+  const lastReceipt = activeBeans.reduce<GreenBean | null>((a, b) => (!a || b.receivedDate > a.receivedDate ? b : a), null);
   const availableLots = lots.filter((l) => l.status === "AVAILABLE");
   const totalAvailableFG = availableLots.reduce((s, l) => s + l.availableQty, 0);
   // Split the shelf into what is already promised to an order and what is still sellable.
   const totalReservedFG = availableLots.reduce((s, l) => s + (l.reservedQty ?? 0), 0);
   const totalFreeFG = Math.max(0, totalAvailableFG - totalReservedFG);
+  const lowMaterials = materials.filter((m) => m.belowReorderPoint);
+  const filteredStock = filteredBeans.reduce((s, b) => s + (Number.isFinite(b.quantityKg) ? b.quantityKg : 0), 0);
+
+  // Ledger rows grouped by operational day (268:5577 «اليوم 6», «أمس 4»), newest first as served.
+  const ledgerGroups = useMemo(() => {
+    const out: { day: string; rows: EnrichedMovement[] }[] = [];
+    for (const m of filteredMovements) {
+      const day = opsDate(m.timestamp, lang);
+      const last = out[out.length - 1];
+      if (last && last.day === day) last.rows.push(m);
+      else out.push({ day, rows: [m] });
+    }
+    return out;
+  }, [filteredMovements, lang]);
+
+  const kgU = lang === "ar" ? "كغ" : "kg";
+  const loading = !loadedTabs.has(activeTab);
+  const timeOf = (ts: string) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Riyadh" });
+  };
+
+  const headerAction = activeTab === "raw" && canReceive ? (
+    <Btn variant="primary" onClick={() => setAddOpen(true)}><PlusIcon />{t("addStock")}</Btn>
+  ) : activeTab === "pack" ? (
+    <Btn variant="primary" onClick={() => setMaterialFormOpen(true)}><PlusIcon />{t("newMaterialBtn")}</Btn>
+  ) : null;
 
   return (
-    <div className="space-y-6">
-
-      {/* ── Toast ── */}
-      {toast && (
-        <div className={`fixed top-4 ltr:right-4 rtl:left-4 z-50 rounded-xl px-4 py-3 text-sm font-medium shadow-lg flex items-center gap-3 max-w-sm ${
-          toast.type === "ok"
-            ? "bg-green-50 border border-green-200 text-green-700"
-            : "bg-red-50 border border-red-200 text-red-700"
-        }`}>
-          <span className="flex-1">{toast.msg}</span>
-          <button onClick={() => setToast(null)}><X size={14} /></button>
-        </div>
-      )}
+    <OpsRoot className="stk-inventory">
+    <div className="hr-page">
 
       {/* ── Modals ── */}
       {addOpen && (
@@ -716,359 +629,349 @@ export default function InventoryPage() {
           }}
         />
       )}
-
-      {/* ── Page header ── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("inventory")}</h1>
-          {activeTab === "raw" && (
-            <p className="text-brown text-sm font-medium">
-              {t("totalStock")}: {totalStock.toFixed(1)} kg — {activeCount} {t("varieties")}
-            </p>
-          )}
-          {activeTab === "finished" && (
-            <p className="text-brown text-sm font-medium">
-              متاح للشحن: {totalAvailableFG.toFixed(1)} kg
-              <span className="text-brown/50"> — {t("totalReservedFG")}: {totalReservedFG.toFixed(1)} kg</span>
-              <span className="text-green-600 font-bold"> — {t("totalFreeFG")}: {totalFreeFG.toFixed(1)} kg</span>
-            </p>
-          )}
-          {activeTab === "ledger" && (
-            <p className="text-brown text-sm font-medium">
-              {filteredMovements.length} حركة مسجلة
-            </p>
-          )}
-        </div>
-        {activeTab === "raw" && canReceive && (
-          <button
-            onClick={() => setAddOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg hover:bg-orange/90 shadow-md shadow-orange/20 active:scale-[0.98] transition-all duration-200 font-bold text-sm"
-          >
-            <Plus size={18} /> {t("addStock")}
-          </button>
-        )}
-      </div>
-
-      {/* ── Tab switcher ── */}
-      <div className="flex gap-1 bg-cream border border-border rounded-xl p-1">
-        {([
-          { id: "raw"      as Tab, label: t("rawMaterials"),   icon: Package },
-          { id: "finished" as Tab, label: t("finishedGoods"),  icon: Boxes   },
-          { id: "ledger"   as Tab, label: t("movementLedger"), icon: History },
-        ] as { id: Tab; label: string; icon: React.ElementType }[]).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
-              activeTab === id
-                ? "bg-orange text-white shadow-sm shadow-orange/30"
-                : "text-brown hover:text-charcoal hover:bg-white/60"
-            }`}
-          >
-            <Icon size={15} />
-            <span className="hidden sm:inline">{label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* ════════════════════════════════════════════════════════════
-          TAB 1 — Raw Materials
-          ════════════════════════════════════════════════════════════ */}
-      {activeTab === "raw" && (
-        <div className="space-y-4">
-          {/* Search + inactive toggle */}
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text" placeholder={t("searchBeans")} value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-              />
-            </div>
-            <button
-              onClick={() => setShowInactive((p) => !p)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-bold transition-colors ${
-                showInactive ? "bg-charcoal text-white border-charcoal" : "border-border text-brown hover:border-charcoal/30"
-              }`}
-            >
-              <PowerOff size={14} />
-              {t("showInactive")}
-            </button>
-          </div>
-
-          {/* Beans table */}
-          <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-cream">
-                  <tr>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("serialNumberShort")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("beanType")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("origin")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("process")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("altitude")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("stockKg")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("received")}</th>
-                    <th className="text-center px-4 py-3 font-semibold text-charcoal">{t("actions")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredBeans.map((bean) => (
-                    <tr key={bean.id} className={`transition-colors ${bean.isActive ? "hover:bg-cream/50" : "bg-gray-50/80 opacity-60"}`}>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs">{bean.serialNumber}</span>
-                        {!bean.isActive && (
-                          <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-200 text-gray-500">
-                            {t("inactive")}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-medium">{disp(bean.beanType, bean.beanTypeAr)}</td>
-                      <td className="px-4 py-3">
-                        {disp(bean.country, bean.countryAr)}
-                        {(bean.region || bean.regionAr) && (
-                          <span className="text-brown/50"> / {disp(bean.region, bean.regionAr)}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">{disp(bean.process, bean.processAr) || "—"}</td>
-                      <td className="px-4 py-3 text-brown/70">{bean.altitude || "—"}</td>
-                      <td className="px-4 py-3 text-end">
-                        <span className={`font-bold tabular-nums ${bean.quantityKg < 20 ? "text-red-600" : "text-green-600"}`}>
-                          {fmtQty(bean.quantityKg, 1)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-brown">{formatDate(bean.receivedDate)}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-center gap-1">
-                          {canAdjust && (
-                            <button
-                              title={t("performCount")}
-                              onClick={() => setAdjustTarget(bean)}
-                              className="p-1.5 rounded-lg text-brown/50 hover:text-orange hover:bg-orange/10 transition-colors"
-                            >
-                              <Scale size={14} />
-                            </button>
-                          )}
-                          {canMaintain && (
-                            <button
-                              title={t("edit")}
-                              onClick={() => setEditTarget(bean)}
-                              className="p-1.5 rounded-lg text-brown/50 hover:text-orange hover:bg-orange/10 transition-colors"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          )}
-                          {canMaintain && (
-                            <button
-                              title={bean.isActive ? t("deactivate") : t("activate")}
-                              onClick={() => handleToggleActive(bean)}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                bean.isActive
-                                  ? "text-brown/50 hover:text-amber-500 hover:bg-amber-50"
-                                  : "text-green-600 hover:bg-green-50"
-                              }`}
-                            >
-                              {bean.isActive ? <PowerOff size={14} /> : <Power size={14} />}
-                            </button>
-                          )}
-                          {canMaintain && (
-                            <button
-                              title={t("delete")}
-                              onClick={() => setDeleteTarget(bean)}
-                              className="p-1.5 rounded-lg text-brown/50 hover:text-red-500 hover:bg-red-50 transition-colors"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {filteredBeans.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <Package size={40} className="mx-auto mb-2" />
-                <p>{t("noBeansFound")}</p>
-              </div>
-            )}
-          </div>
-        </div>
+      {materialFormOpen && (
+        <MaterialForm
+          onClose={() => setMaterialFormOpen(false)}
+          onSaved={() => { setMaterialFormOpen(false); loadMaterials(); }}
+          onError={(m) => showToast(m, "err")}
+        />
       )}
 
-      {/* ════════════════════════════════════════════════════════════
-          TAB 2 — Finished Goods
-          ════════════════════════════════════════════════════════════ */}
-      {activeTab === "finished" && (
-        <div className="space-y-4">
-          <div className="relative">
-            <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text" placeholder="بحث في اللوتات…" value={lotsSearch}
-              onChange={(e) => setLotsSearch(e.target.value)}
-              className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-            />
+      {/* ── Page header ── */}
+      <PageHeader title={t("inventory")} actions={headerAction}>
+        {activeTab === "raw" && (
+          <span className="hr-caption">
+            {t("totalStock")}: <span className="hr-num">{totalStock.toFixed(1)}</span> {kgU} — {activeCount} {t("varieties")}
+          </span>
+        )}
+        {activeTab === "finished" && (
+          <span className="hr-caption">
+            {L("متاح للشحن", "Available to ship")}: <span className="hr-num">{totalAvailableFG.toFixed(1)}</span> {kgU}
+            {" — "}{t("totalReservedFG")}: <span className="hr-num">{totalReservedFG.toFixed(1)}</span> {kgU}
+            {" — "}{t("totalFreeFG")}: <span className="hr-num">{totalFreeFG.toFixed(1)}</span> {kgU}
+          </span>
+        )}
+        {activeTab === "ledger" && (
+          <span className="hr-caption">{lang === "ar" ? `${filteredMovements.length} حركة مسجلة` : `${filteredMovements.length} movements recorded`}</span>
+        )}
+        {activeTab === "pack" && (
+          <span className="hr-caption">{lang === "ar" ? `${materials.length} مواد · ${lowMaterials.length} تحت حد إعادة الطلب` : `${materials.length} materials · ${lowMaterials.length} below reorder point`}</span>
+        )}
+      </PageHeader>
+
+      {toast ? <OpsBanner tone={toast.type === "ok" ? "success" : "danger"} onClose={() => setToast(null)}>{toast.msg}</OpsBanner> : null}
+
+      {/* ── Tabs (251:2482: البن الأخضر · مواد التعبئة · المخزون التام · سجل الحركات) ── */}
+      <Tabs
+        label={t("inventory")}
+        value={activeTab}
+        onChange={openTab}
+        items={[
+          { key: "raw", label: L("البن الأخضر", "Green coffee"), count: loadedTabs.has("raw") ? activeCount : undefined },
+          { key: "pack", label: t("tabMaterials"), count: loadedTabs.has("pack") ? materials.length : undefined },
+          { key: "finished", label: t("finishedGoods"), count: loadedTabs.has("finished") ? lots.length : undefined },
+          { key: "ledger", label: t("movementLedger") },
+        ]}
+      />
+
+      {loading ? <OpsLoading /> : null}
+
+      {/* ════════════ Green coffee (251:2482) ════════════ */}
+      {activeTab === "raw" && !loading && (
+        <section className="hr-stack" aria-label={L("البن الأخضر", "Green coffee")}>
+          <div className="stk-metrics">
+            <div>
+              <span className="stk-lbl">{L("البن الأخضر في المخزون", "Green coffee in stock")}</span>
+              <span className="stk-mid">{kg(totalStock)}<span className="stk-unit">{kgU}</span></span>
+              <span className="stk-d">{lang === "ar" ? `${activeCount} لوتات نشطة` : `${activeCount} active lots`}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{L(`أصناف أقل من ${LOW_KG} كغ`, `Lots below ${LOW_KG} kg`)}</span>
+              <span className={`stk-mid${lowBeans.length ? " tone-danger" : ""}`}>{lowBeans.length}</span>
+              <span className="stk-d">{lowBeans.map((b) => disp(b.beanType, b.beanTypeAr)).join(lang === "ar" ? "، " : ", ") || "—"}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{L("آخر استلام", "Last receipt")}</span>
+              <span className="stk-mid">{lastReceipt ? kg(lastReceipt.quantityKg) : "—"}{lastReceipt ? <span className="stk-unit">{kgU}</span> : null}</span>
+              <span className="stk-d">{lastReceipt ? `${opsDate(lastReceipt.receivedDate, lang)} · ${disp(lastReceipt.beanType, lastReceipt.beanTypeAr)}` : "—"}</span>
+            </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-cream">
+          <div className="stk-tool">
+            <input type="search" className="hr-input hr-search" placeholder={t("searchBeans")} aria-label={t("searchBeans")}
+              value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Btn size="sm" className="stk-toggle" aria-pressed={showInactive} onClick={() => setShowInactive((p) => !p)}>
+              <FilterIcon />{t("showInactive")}
+            </Btn>
+          </div>
+
+          {filteredBeans.length === 0 ? (
+            <div className="hr-state"><h3>{t("noBeansFound")}</h3></div>
+          ) : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow" aria-label={L("البن الأخضر", "Green coffee")}>
+                <thead>
                   <tr>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("lotNumber")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("productName")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("totalQtyKg")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("availableQtyKg")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("reservedQtyKg")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("freeQtyKg")}</th>
-                    <th className="text-center px-4 py-3 font-semibold text-charcoal">{t("lotStatusLabel")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("date")}</th>
+                    <th>{L("البن الأخضر", "Green coffee")}</th>
+                    <th>{L("اللوت", "Lot")}</th>
+                    <th className="hr-hide-compact">{t("origin")}</th>
+                    <th className="hr-hide-compact">{t("altitude")}</th>
+                    <th className="num">{lang === "ar" ? "الرصيد · كغ" : "Balance · kg"}</th>
+                    <th>{t("received")}</th>
+                    <th className="hr-mobile-cell" aria-hidden="true" />
+                    <th aria-label={t("actions")} />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
+                  {filteredBeans.map((bean) => {
+                    const low = bean.quantityKg < LOW_KG;
+                    const proc = disp(bean.process, bean.processAr);
+                    return (
+                      <tr key={bean.id} className={bean.isActive ? undefined : "is-inactive"}>
+                        <td className="m-title">
+                          <span className="strong">{disp(bean.beanType, bean.beanTypeAr)}</span>
+                          {bean.process || bean.processAr ? <span className="hr-caption"> · {proc}</span> : null}
+                          {low && bean.isActive ? <> <span className="stk-flag hr-desktop-only">{L(`أقل من ${LOW_KG} كغ`, `Below ${LOW_KG} kg`)}</span></> : null}
+                          {!bean.isActive ? <> <span className="stk-flag tone-warning">{t("inactive")}</span></> : null}
+                          <span className="hr-msub">
+                            <span className="hr-id">{bean.serialNumber}</span> · {disp(bean.country, bean.countryAr)}{bean.location ? ` · ${bean.location}` : ""}
+                          </span>
+                        </td>
+                        <td><span className="hr-id">{bean.serialNumber}</span>{bean.location ? <span className="stk-sub">{bean.location}</span> : null}</td>
+                        <td className="hr-hide-compact">
+                          {disp(bean.country, bean.countryAr)}
+                          {(bean.region || bean.regionAr) && <span className="hr-caption"> / {disp(bean.region, bean.regionAr)}</span>}
+                        </td>
+                        <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{bean.altitude || "—"}</td>
+                        <td className={`num${low ? " is-low" : ""}`} style={{ fontWeight: 600 }}><span className="hr-num">{fmtQty(bean.quantityKg, 2)}</span></td>
+                        <td className="hr-caption" style={{ color: "var(--text-secondary)" }}>{opsDate(bean.receivedDate, lang)}</td>
+                        <td className="m-end hr-mobile-cell" style={{ fontWeight: 600 }}>
+                          <span className="hr-num" style={low ? { color: "var(--status-danger)" } : undefined}>{fmtQty(bean.quantityKg, 2)}</span>&nbsp;{kgU}
+                        </td>
+                        <td className="stk-acts stk-macts">
+                          {canAdjust && (
+                            <Btn size="sm" variant="ghost" title={t("performCount")} onClick={() => setAdjustTarget(bean)}>
+                              <CheckIcon />{L("جرد", "Count")}
+                            </Btn>
+                          )}
+                          {canMaintain && (
+                            <Btn size="sm" variant="ghost" className="hr-iconbtn" title={t("edit")} aria-label={t("edit")} onClick={() => setEditTarget(bean)}>
+                              <Pencil size={16} />
+                            </Btn>
+                          )}
+                          {canMaintain && (
+                            <Btn size="sm" variant="ghost" className="hr-iconbtn"
+                              title={bean.isActive ? t("deactivate") : t("activate")} aria-label={bean.isActive ? t("deactivate") : t("activate")}
+                              onClick={() => handleToggleActive(bean)}>
+                              {bean.isActive ? <PowerOff size={16} /> : <Power size={16} />}
+                            </Btn>
+                          )}
+                          {canMaintain && (
+                            <Btn size="sm" variant="ghost" className="hr-iconbtn" title={t("delete")} aria-label={t("delete")} onClick={() => setDeleteTarget(bean)}>
+                              <Trash2 size={16} />
+                            </Btn>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={4}>{lang === "ar" ? `${filteredBeans.length} لوتات` : `${filteredBeans.length} lots`}</td>
+                    <td className="num stk-tot"><span className="hr-num">{kg(filteredStock)}</span></td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ════════════ Packaging materials (253:2987) ════════════ */}
+      {activeTab === "pack" && !loading && (
+        <section className="hr-stack" aria-label={t("tabMaterials")}>
+          <div className="stk-metrics">
+            <div>
+              <span className="stk-lbl">{L("مواد نشطة", "Active materials")}</span>
+              <span className="stk-mid">{materials.filter((m) => m.isActive).length}</span>
+              <span className="stk-d">{L("تعبئة · ملصقات · مستهلكات", "Packaging · labels · consumables")}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{L("تحت حد إعادة الطلب", "Below reorder point")}</span>
+              <span className={`stk-mid${lowMaterials.length ? " tone-warning" : ""}`}>{lowMaterials.length}</span>
+              <span className="stk-d">{lowMaterials.map((m) => m.name).join(lang === "ar" ? "، " : ", ") || "—"}</span>
+            </div>
+          </div>
+          <MaterialsPanel
+            materials={filteredMaterials}
+            onChanged={loadMaterials}
+            onError={(m) => showToast(m, "err")}
+            search={
+              <div className="stk-tool">
+                <input type="search" className="hr-input hr-search" placeholder={L("رمز المادة أو اسمها", "Material code or name")}
+                  aria-label={L("رمز المادة أو اسمها", "Material code or name")} value={matSearch} onChange={(e) => setMatSearch(e.target.value)} />
+              </div>
+            }
+          />
+        </section>
+      )}
+
+      {/* ════════════ Finished stock (266:5230) ════════════ */}
+      {activeTab === "finished" && !loading && (
+        <section className="hr-stack" aria-label={t("finishedGoods")}>
+          <div className="stk-metrics">
+            <div>
+              <span className="stk-lbl">{L("متاح للشحن", "Available to ship")}</span>
+              <span className="stk-mid">{kg(totalAvailableFG, 1)}<span className="stk-unit">{kgU}</span></span>
+              <span className="stk-d">{lang === "ar" ? `في ${availableLots.length} لوتًا متاحًا` : `in ${availableLots.length} available lots`}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{t("totalReservedFG")}</span>
+              <span className="stk-mid">{kg(totalReservedFG, 1)}<span className="stk-unit">{kgU}</span></span>
+              <span className="stk-d">{L("محجوزة للطلبات", "Reserved for orders")}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{t("totalFreeFG")}</span>
+              <span className="stk-mid">{kg(totalFreeFG, 1)}<span className="stk-unit">{kgU}</span></span>
+              <span className="stk-d">{L("حرّ للبيع", "Free to sell")}</span>
+            </div>
+          </div>
+
+          <div className="stk-tool">
+            <input type="search" className="hr-input hr-search" placeholder={L("بحث في اللوتات…", "Search lots…")} aria-label={L("بحث في اللوتات…", "Search lots…")}
+              value={lotsSearch} onChange={(e) => setLotsSearch(e.target.value)} />
+          </div>
+
+          {filteredLots.length === 0 ? (
+            <div className="hr-state"><h3>{t("noFinishedGoods")}</h3></div>
+          ) : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow" aria-label={t("finishedGoods")}>
+                <thead>
+                  <tr>
+                    <th>{t("lotNumber")}</th>
+                    <th>{t("productName")}</th>
+                    <th className="num hr-hide-compact">{t("totalQtyKg")}</th>
+                    <th className="num">{t("availableQtyKg")}</th>
+                    <th className="num">{t("reservedQtyKg")}</th>
+                    <th className="num">{t("freeQtyKg")}</th>
+                    <th>{t("lotStatusLabel")}</th>
+                    <th className="hr-hide-compact">{t("date")}</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {filteredLots.map((lot) => {
-                    const st = LOT_STATUS_STYLES[lot.status] ?? LOT_STATUS_STYLES.AVAILABLE;
-                    const StatusIcon = st.icon;
                     const availRatio = lot.quantityKg > 0 ? lot.availableQty / lot.quantityKg : 0;
                     const freeQty = Math.max(0, lot.availableQty - (lot.reservedQty ?? 0));
                     return (
-                      <tr key={lot.id} className="hover:bg-cream/50 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs font-bold text-charcoal">{lot.batchNumber}</td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium">{disp(lot.product.productNameEn, lot.product.productNameAr)}</p>
-                        </td>
-                        <td className="px-4 py-3 text-end font-mono text-brown">{fmtQty(lot.quantityKg, 1)}</td>
-                        <td className="px-4 py-3 text-end">
-                          <span className={`font-bold tabular-nums font-mono ${
-                            availRatio > 0.5 ? "text-green-600" : availRatio > 0 ? "text-amber-600" : "text-red-500"
-                          }`}>
-                            {fmtQty(lot.availableQty, 1)}
-                          </span>
-                          <span className="text-brown/40 text-xs ml-1">({(availRatio * 100).toFixed(0)}%)</span>
-                        </td>
-                        <td className="px-4 py-3 text-end font-mono tabular-nums text-brown">
-                          {fmtQty(lot.reservedQty ?? 0, 1)}
-                        </td>
-                        <td className="px-4 py-3 text-end">
-                          <span className={`font-bold tabular-nums font-mono ${
-                            freeQty > 0 ? "text-green-600" : "text-brown/40"
-                          }`}>
-                            {freeQty.toFixed(1)}
+                      <tr key={lot.id}>
+                        <td><span className="hr-id">{lot.batchNumber}</span></td>
+                        <td className="m-title">
+                          <span className="strong">{disp(lot.product.productNameEn, lot.product.productNameAr)}</span>
+                          <span className="hr-msub">
+                            <span className="hr-id">{lot.batchNumber}</span> · {t("availableQtyKg")} <span className="hr-num">{fmtQty(lot.availableQty, 1)}</span> · {t("freeQtyKg")} <span className="hr-num">{freeQty.toFixed(1)}</span>
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${st.cls}`}>
-                            <StatusIcon size={11} />
-                            {st.label}
-                          </span>
+                        <td className="num hr-hide-compact"><span className="hr-num">{fmtQty(lot.quantityKg, 1)}</span></td>
+                        <td className="num">
+                          <span className="hr-num">{fmtQty(lot.availableQty, 1)}</span>
+                          <span className="hr-caption"> ({(availRatio * 100).toFixed(0)}%)</span>
                         </td>
-                        <td className="px-4 py-3 text-brown text-xs">{formatDate(lot.createdAt)}</td>
+                        <td className="num"><span className="hr-num">{fmtQty(lot.reservedQty ?? 0, 1)}</span></td>
+                        <td className="num" style={{ fontWeight: 600 }}><span className="hr-num" style={freeQty > 0 ? undefined : { color: "var(--text-muted)", fontWeight: 400 }}>{freeQty.toFixed(1)}</span></td>
+                        <td className="m-end">
+                          <StatusDot map={LOT_STATUS} value={LOT_STATUS[lot.status] ? lot.status : "AVAILABLE"} />
+                        </td>
+                        <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{opsDate(lot.createdAt, lang)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={2}>{lang === "ar" ? `${filteredLots.length} لوتات` : `${filteredLots.length} lots`}</td>
+                    <td className="hr-hide-compact" />
+                    <td className="num stk-tot"><span className="hr-num">{kg(totalAvailableFG, 1)}</span></td>
+                    <td className="num stk-tot"><span className="hr-num">{kg(totalReservedFG, 1)}</span></td>
+                    <td className="num stk-tot"><span className="hr-num">{kg(totalFreeFG, 1)}</span></td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
               </table>
             </div>
-            {filteredLots.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <Boxes size={40} className="mx-auto mb-2" />
-                <p>{t("noFinishedGoods")}</p>
-              </div>
-            )}
-          </div>
-        </div>
+          )}
+        </section>
       )}
 
-      {/* ════════════════════════════════════════════════════════════
-          TAB 3 — Movement Ledger
-          ════════════════════════════════════════════════════════════ */}
-      {activeTab === "ledger" && (
-        <div className="space-y-4">
-          <div className="relative">
-            <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text" placeholder="بحث في الحركات…" value={ledgerSearch}
-              onChange={(e) => setLedgerSearch(e.target.value)}
-              className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-            />
+      {/* ════════════ Movement ledger (268:5577) ════════════ */}
+      {activeTab === "ledger" && !loading && (
+        <section className="hr-stack" aria-label={t("movementLedger")}>
+          <div className="stk-tool">
+            <input type="search" className="hr-input hr-search" placeholder={L("بحث في الحركات…", "Search movements…")} aria-label={L("بحث في الحركات…", "Search movements…")}
+              value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} />
           </div>
 
-          <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-cream">
+          {filteredMovements.length === 0 ? (
+            <div className="hr-state"><h3>{t("noLedgerMovements")}</h3></div>
+          ) : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow" aria-label={t("movementLedger")}>
+                <thead>
                   <tr>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal whitespace-nowrap">{t("movementDate")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("movementType")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("itemDetails")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal whitespace-nowrap">{t("prevQty")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal whitespace-nowrap">{t("newQtyKg")}</th>
-                    <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("difference")}</th>
-                    <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("sourceDoc")}</th>
+                    <th>{L("الوقت", "Time")}</th>
+                    <th>{t("movementType")}</th>
+                    <th>{L("الصنف والفئة", "Item and category")}</th>
+                    <th className="num">{L("قبل", "Before")}</th>
+                    <th className="num">{L("بعد", "After")}</th>
+                    <th className="num">{t("difference")}</th>
+                    <th>{t("sourceDoc")}</th>
+                    <th className="hr-hide-compact">{L("المستخدم", "User")}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredMovements.map((m) => {
-                    const isGain = m.quantityChanged > 0;
-                    const isLoss = m.quantityChanged < 0;
-                    const isZero = Math.abs(m.quantityChanged) < 0.001;
-                    return (
-                      <tr key={m.id} className="hover:bg-cream/40 transition-colors">
-                        <td className="px-4 py-3 text-xs text-brown whitespace-nowrap font-mono">
-                          {fmtDateTime(m.timestamp)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${TYPE_STYLES[m.type] ?? "bg-gray-100 text-gray-600"}`}>
-                            {TYPE_LABELS_AR[m.type] ?? m.type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-charcoal">
-                            {disp(m.entityLabel, m.entityLabelAr) || "—"}
-                          </p>
-                          <p className="text-[11px] text-brown/50 mt-0.5">
-                            {m.category === "RAW_MATERIAL" ? t("catRawMaterial") : t("catFinishedGoods")}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3 text-end font-mono text-brown/70 tabular-nums">
-                          {fmtQty(m.previousQuantity, 3)}
-                        </td>
-                        <td className="px-4 py-3 text-end font-mono text-charcoal font-semibold tabular-nums">
-                          {fmtQty(m.newQuantity, 3)}
-                        </td>
-                        <td className="px-4 py-3 text-end">
-                          <span className={`font-bold tabular-nums font-mono ${
-                            isZero ? "text-brown/40" : isGain ? "text-green-600" : isLoss ? "text-red-500" : ""
-                          }`}>
-                            {isZero ? "—" : `${isGain ? "+" : ""}${fmtQty(m.quantityChanged, 3)}`}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="text-brown">{SRC_LABELS_AR[m.sourceDocType] ?? m.sourceDocType}</p>
-                          {m.userName && (
-                            <p className="text-[11px] text-brown/50 mt-0.5">{m.userName}</p>
-                          )}
-                          {m.notes && (
-                            <p className="text-[11px] text-brown/60 mt-0.5 italic">{m.notes}</p>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
+                {ledgerGroups.map((g) => (
+                  <tbody key={g.day}>
+                    <tr className="stk-group"><td colSpan={8}>{g.day}</td></tr>
+                    {g.rows.map((m) => {
+                      const isGain = m.quantityChanged > 0;
+                      const isZero = Math.abs(m.quantityChanged) < 0.001;
+                      const src = SRC_LABELS[m.sourceDocType];
+                      const srcLabel = src ? (lang === "ar" ? src[0] : src[1]) : m.sourceDocType;
+                      const change = isZero ? "—" : `${isGain ? "+" : ""}${fmtQty(m.quantityChanged, 3)}`;
+                      return (
+                        <tr key={m.id}>
+                          <td className="hr-caption" style={{ color: "var(--text-secondary)" }}><span className="hr-num">{timeOf(m.timestamp)}</span></td>
+                          <td><StatusDot map={TYPE_MAP} value={TYPE_MAP[m.type] ? m.type : "OUT"} /></td>
+                          <td className="m-title">
+                            <span className="strong">{disp(m.entityLabel, m.entityLabelAr) || "—"}</span>
+                            <span className="stk-sub hr-desktop-only">{m.category === "RAW_MATERIAL" ? t("catRawMaterial") : t("catFinishedGoods")}</span>
+                            <span className="hr-msub">
+                              <span className="hr-num">{timeOf(m.timestamp)}</span> · {(TYPE_MAP[m.type] ?? TYPE_MAP.OUT)[lang === "ar" ? 0 : 2]} · {srcLabel}
+                            </span>
+                          </td>
+                          <td className="num"><span className="hr-num" style={{ color: "var(--text-secondary)" }}>{fmtQty(m.previousQuantity, 3)}</span></td>
+                          <td className="num"><span className="hr-num">{fmtQty(m.newQuantity, 3)}</span></td>
+                          <td className="num m-end" style={{ fontWeight: 600 }}>
+                            <span className={`hr-num ${isZero ? "hr-muted" : isGain ? "stk-gain" : "stk-loss"}`}>{change}</span>
+                          </td>
+                          <td>
+                            <span>{srcLabel}</span>
+                            {m.notes ? <span className="stk-sub">{m.notes}</span> : null}
+                          </td>
+                          <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{m.userName ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                ))}
               </table>
             </div>
-            {filteredMovements.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <History size={40} className="mx-auto mb-2" />
-                <p>{t("noLedgerMovements")}</p>
-              </div>
-            )}
-          </div>
-        </div>
+          )}
+          <p className="stk-foot">{L("السجل للإضافة فقط: لا تُحذف الحركات ولا تُعدَّل.", "The ledger is append-only: movements are never deleted or edited.")}</p>
+        </section>
       )}
     </div>
+    </OpsRoot>
   );
 }

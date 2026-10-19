@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Coffee, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useMemo, type ReactNode } from "react";
 import { useI18n } from "@/lib/i18n/context";
+import { descriptorLabel } from "@/lib/cupping/descriptors";
+import "./cupping-form.css";
 
 type Lang = "ar" | "en";
 
@@ -45,76 +46,83 @@ const FLAVOR_TAGS = [
   "Winey", "Fermented",
 ];
 
-const FLAVOR_AR: Record<string, string> = {
-  Fruity: "فاكهي", Citrus: "حمضيات", Lemon: "ليمون", Orange: "برتقال", Grapefruit: "جريب فروت",
-  Berry: "توتي", Blueberry: "توت أزرق", Strawberry: "فراولة", Raspberry: "توت العليق",
-  "Stone Fruit": "فاكهة ذات نواة", Peach: "خوخ", Apricot: "مشمش", Plum: "برقوق",
-  Tropical: "استوائي", Mango: "مانجو", Pineapple: "أناناس", "Passion Fruit": "باشن فروت",
-  Floral: "زهري", Jasmine: "ياسمين", Rose: "ورد", Lavender: "خزامى",
-  Chocolate: "شوكولاتة", "Dark Chocolate": "شوكولاتة داكنة", "Milk Chocolate": "شوكولاتة بالحليب", Cocoa: "كاكاو",
-  Nutty: "مكسرات", Almond: "لوز", Hazelnut: "بندق", Peanut: "فول سوداني",
-  Caramel: "كراميل", Honey: "عسل", Toffee: "توفي", Vanilla: "فانيلا", "Brown Sugar": "سكر بني",
-  Spicy: "توابل", Cinnamon: "قرفة", Clove: "قرنفل",
-  Herbal: "عشبي", "Green Tea": "شاي أخضر",
-  Earthy: "ترابي", Tobacco: "تبغ", Cedar: "أرز",
-  Winey: "نبيذي", Fermented: "مخمّر",
-};
+export { descriptorLabel };
 
-/** A stored descriptor in the viewer's language; an unknown one is shown as stored. */
-export function descriptorLabel(tag: string, lang: Lang): string {
-  return lang === "ar" ? (FLAVOR_AR[tag] ?? tag) : tag;
-}
+// The descriptors drawn first (G-06 1222:99148 / G-08 1352:18327); the rest open under «n أخرى».
+// Display order only: the stored value is still the English word.
+const FEATURED_TAGS = ["Fruity", "Citrus", "Chocolate", "Caramel", "Floral", "Berry", "Nutty", "Honey"];
 
-const SCORE_LABELS: { min: number; label: string; labelAr: string; color: string }[] = [
-  { min: 90, label: "Outstanding", labelAr: "استثنائي",      color: "#16a34a" },
-  { min: 85, label: "Excellent",   labelAr: "ممتاز",         color: "#22c55e" },
-  { min: 80, label: "Very Good",   labelAr: "جيد جدًا",      color: "#84cc16" },
-  { min: 75, label: "Good",        labelAr: "جيد",           color: "#eab308" },
-  { min: 70, label: "Fair",        labelAr: "مقبول",         color: "#f97316" },
-  { min: 0,  label: "Below Spec",  labelAr: "دون المواصفة",  color: "#ef4444" },
+// The quality band of a final score. The thresholds and words are unchanged; the band is now
+// drawn as a StatusDot (a dot and a word, never colour alone) instead of a tinted banner.
+type Tone = "success" | "info" | "warning" | "danger";
+const SCORE_LABELS: { min: number; label: string; labelAr: string; tone: Tone }[] = [
+  { min: 90, label: "Outstanding", labelAr: "استثنائي",      tone: "success" },
+  { min: 85, label: "Excellent",   labelAr: "ممتاز",         tone: "success" },
+  { min: 80, label: "Very Good",   labelAr: "جيد جدًا",      tone: "success" },
+  { min: 75, label: "Good",        labelAr: "جيد",           tone: "info" },
+  { min: 70, label: "Fair",        labelAr: "مقبول",         tone: "warning" },
+  { min: 0,  label: "Below Spec",  labelAr: "دون المواصفة",  tone: "danger" },
 ];
 
 function scoreLabel(s: number) {
   return SCORE_LABELS.find((l) => s >= l.min) ?? SCORE_LABELS[SCORE_LABELS.length - 1];
 }
 
+const SLIDER_MIN = 6;
+const SLIDER_MAX = 10;
+const SLIDER_STEP = 0.25;
+
+// ─── Icons (Direction 2.1 stroke icons, 16 px in chips) ─────────────────────────
+
+const IconClose = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+);
+const IconFilter = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4" /></svg>
+);
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ScoreSlider({
-  label, value, onChange,
-}: {
-  label: string; value: number; onChange: (v: number) => void;
-}) {
-  const pct = ((value - 6) / 4) * 100;
+/** A labelled section: the title and caption column, then the controls (G-06 «fsec»). */
+function Sec({ title, caption, htmlFor, children }: { title: string; caption?: ReactNode; htmlFor?: string; children: ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-bold text-charcoal">{label}</span>
-        <span className="text-lg font-extrabold tabular-nums" style={{ color: scoreLabel(value + 60).color }}>
-          {value.toFixed(2)}
-        </span>
+    <section className="cf-sec">
+      <div className="cf-head">
+        {htmlFor ? <label htmlFor={htmlFor}>{title}</label> : <h3>{title}</h3>}
+        {caption ? <p>{caption}</p> : null}
       </div>
-      <div className="relative h-2 rounded-full bg-gray-100" dir="ltr">
-        <div
-          className="absolute inset-y-0 left-0 rounded-full transition-all duration-75"
-          style={{ width: `${pct}%`, backgroundColor: "#7C3AED" }}
-        />
+      <div className="cf-body">{children}</div>
+    </section>
+  );
+}
+
+/** A sensory attribute, 6–10 in 0.25 steps: a track on the desk, a − value + stepper on the phone. */
+function ScoreSlider({
+  label, value, onChange, decLabel, incLabel,
+}: {
+  label: string; value: number; onChange: (v: number) => void; decLabel: string; incLabel: string;
+}) {
+  const pct = ((value - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * 100;
+  const step = (d: number) => onChange(Math.min(SLIDER_MAX, Math.max(SLIDER_MIN, value + d)));
+  return (
+    <div className="cf-row">
+      <span className="cf-label">{label}</span>
+      <span className="cf-track">
+        <i style={{ width: `${pct}%` }} />
+        <b style={{ insetInlineStart: `calc(${pct}% - 8px)` }} />
         <input
-          type="range" min={6} max={10} step={0.25}
+          type="range" min={SLIDER_MIN} max={SLIDER_MAX} step={SLIDER_STEP}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           aria-label={label}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer h-2"
         />
-        {/* Thumb */}
-        <div
-          className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white border-2 shadow-md pointer-events-none transition-all duration-75"
-          style={{ left: `calc(${pct}% - 8px)`, borderColor: "#7C3AED" }}
-        />
-      </div>
-      <div className="flex justify-between text-[10px] text-brown/40 font-medium select-none" dir="ltr">
-        <span>6.00</span><span>7.00</span><span>8.00</span><span>9.00</span><span>10.00</span>
-      </div>
+      </span>
+      <span className="cf-val">{value.toFixed(2)}</span>
+      <span className="cf-step" dir="ltr">
+        <button type="button" onClick={() => step(-SLIDER_STEP)} disabled={value <= SLIDER_MIN} aria-label={`${decLabel} · ${label}`}>−</button>
+        <span aria-hidden="true">{value.toFixed(2)}</span>
+        <button type="button" onClick={() => step(SLIDER_STEP)} disabled={value >= SLIDER_MAX} aria-label={`${incLabel} · ${label}`}>+</button>
+      </span>
     </div>
   );
 }
@@ -126,28 +134,22 @@ function CupRow({
 }) {
   const score = cups.filter(Boolean).length * 2;
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex-1 min-w-0">
-        <span className="text-sm font-bold text-charcoal">{label}</span>
-      </div>
-      <div className="flex gap-2">
+    <div className="cf-row is-cups">
+      <span className="cf-label">{label}</span>
+      <span className="cf-cups">
         {cups.map((checked, i) => (
           <button
             key={i} type="button"
+            className="cf-cup"
             onClick={() => onChange(i)}
             aria-pressed={checked}
             aria-label={`${label} · ${cupLabel(i)}`}
-            className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all duration-150 text-xs font-bold ${
-              checked
-                ? "bg-orange border-orange text-white shadow-sm"
-                : "bg-gray-50 border-gray-200 text-gray-300 hover:border-orange/40"
-            }`}
           >
-            <Coffee size={13} strokeWidth={checked ? 2.5 : 1.5} aria-hidden="true" />
+            {i + 1}
           </button>
         ))}
-      </div>
-      <span className="w-8 text-right text-base font-extrabold tabular-nums text-charcoal">{score}</span>
+      </span>
+      <span className="cf-val">{score}</span>
     </div>
   );
 }
@@ -166,13 +168,18 @@ type Props = {
   onSubmit: (data: CuppingFormData) => Promise<void>;
   submitting?: boolean;
   submitLabel?: string;
-  /** The guest pages are English and have no language provider; they pass "en". */
+  /** The guest pages have no language provider; they pass the language the guest chose. */
   lang?: Lang;
+  /**
+   * "staff" (default): G-06 — the label column beside the controls and the score card at the
+   * inline end. "guest": G-08 — sections stacked inside the open cup, the score under them.
+   */
+  variant?: "staff" | "guest";
 };
 
 // ─── Main Form ────────────────────────────────────────────────────────────────
 
-export default function CuppingForm({ onSubmit, submitting = false, submitLabel, lang: langProp }: Props) {
+export default function CuppingForm({ onSubmit, submitting = false, submitLabel, lang: langProp, variant = "staff" }: Props) {
   const ctx = useI18n();
   const lang: Lang = langProp ?? ctx.lang;
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
@@ -194,7 +201,7 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel,
   const [tags, setTags]               = useState<string[]>([]);
   const [showAllTags, setShowAllTags] = useState(false);
 
-  // ── Live score math ────────────────────────────────────────────────────────
+  // ── Live score math (unchanged) ────────────────────────────────────────────
   const cupScores = useMemo(() => ({
     uniformity: cups.uniformity.filter(Boolean).length * 2,
     cleanCup:   cups.cleanCup.filter(Boolean).length * 2,
@@ -210,7 +217,9 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel,
   const finalScore    = Math.max(0, subtotal - defectPenalty);
   const quality = scoreLabel(finalScore);
   const qualityLabel = lang === "ar" ? quality.labelAr : quality.label;
-  const qualityColor = quality.color;
+  // Display split of the same subtotal (G-06 score card): sensory sum, cup sum.
+  const sensoryTotal = Object.values(sliders).reduce((a, b) => a + b, 0);
+  const cupTotal = cupScores.uniformity + cupScores.cleanCup + cupScores.sweetness;
 
   function setSlider(key: SliderKey, val: number) {
     setSliders((p) => ({ ...p, [key]: val }));
@@ -240,197 +249,140 @@ export default function CuppingForm({ onSubmit, submitting = false, submitLabel,
     });
   }
 
-  const visibleTags = showAllTags ? FLAVOR_TAGS : FLAVOR_TAGS.slice(0, 18);
+  const moreCount = FLAVOR_TAGS.length - FEATURED_TAGS.length;
+  const visibleTags = showAllTags
+    ? [...FEATURED_TAGS, ...FLAVOR_TAGS.filter((t) => !FEATURED_TAGS.includes(t))]
+    : [...FEATURED_TAGS, ...tags.filter((t) => !FEATURED_TAGS.includes(t))];
+
+  const guest = variant === "guest";
+  const qualityDot = <span className={`hr-dot tone-${quality.tone}`} data-testid="cupping-quality"><span>{qualityLabel}</span></span>;
+  const label = submitting ? L("جارٍ الإرسال…", "Submitting…") : (submitLabel ?? L("إرسال التقييم", "Submit score"));
+  const submit = (cls?: string) => (
+    <button type="submit" disabled={submitting} aria-busy={submitting || undefined} className={`hr-btn is-primary${cls ? ` ${cls}` : ""}`}>{label}</button>
+  );
+  // The score with the submit, inline: the guest footer (G-08) and the phone's sticky bar (G-06m).
+  const scoreInline = (
+    <div className="cf-score">
+      <span>{L("النتيجة النهائية", "Final score")}</span>
+      <div><span className="cf-final cf-num" data-testid="cupping-final-score">{finalScore.toFixed(2)}</span>{qualityDot}</div>
+    </div>
+  );
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className={`cf ${guest ? "is-stack" : "is-sheet"}`} lang={lang} data-testid="cupping-form">
+      <div className="cf-main">
 
-      {/* ── Live Score Banner ─────────────────────────────────────── */}
-      <div className="rounded-2xl p-5 text-center shadow-sm" style={{ backgroundColor: qualityColor + "18", border: `2px solid ${qualityColor}40` }}>
-        <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: qualityColor }}>
-          {L("النتيجة النهائية · SCA", "SCA final score")}
-        </p>
-        <p className="text-6xl font-black tabular-nums leading-none" style={{ color: qualityColor }}>
-          {finalScore.toFixed(2)}
-        </p>
-        <p className="text-sm font-bold mt-2" style={{ color: qualityColor }}>{qualityLabel}</p>
-        <div className="flex justify-center gap-4 mt-3 text-xs text-charcoal/50 font-medium">
-          <span>{L("المجموع الجزئي", "Subtotal")}: <strong className="text-charcoal d21-bold">{subtotal.toFixed(2)}</strong></span>
-          {defectPenalty > 0 && (
-            <span className="text-red-500">{L("العيوب", "Defects")}: <strong dir="ltr">−{defectPenalty}</strong></span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Slider Attributes ─────────────────────────────────────── */}
-      <section className="bg-white rounded-2xl border border-border p-5 space-y-5">
-        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">
-          {L("الصفات الحسية (6 – 10)", "Sensory attributes (6 – 10)")}
-        </h3>
-        {SLIDER_ATTRS.map((attr) => (
-          <ScoreSlider
-            key={attr.key}
-            label={attrLabel(attr)}
-            value={sliders[attr.key]}
-            onChange={(v) => setSlider(attr.key, v)}
-          />
-        ))}
-      </section>
-
-      {/* ── Cup Attributes ────────────────────────────────────────── */}
-      <section className="bg-white rounded-2xl border border-border p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">
-            {L("درجات الأكواب (5 أكواب × نقطتان)", "Cup scores (5 cups × 2 pts)")}
-          </h3>
-          <span className="text-xs text-brown/50">{L("اضغط لتعليم كوب غير مطابق", "Tap to mark a failed cup")}</span>
-        </div>
-        {CUP_ATTRS.map((attr) => (
-          <CupRow
-            key={attr.key}
-            label={attrLabel(attr)}
-            cupLabel={(i) => L(`كوب ${i + 1}`, `Cup ${i + 1}`)}
-            cups={cups[attr.key]}
-            onChange={(i) => toggleCup(attr.key, i)}
-          />
-        ))}
-      </section>
-
-      {/* ── Defects ───────────────────────────────────────────────── */}
-      <section className="bg-white rounded-2xl border border-border p-5 space-y-4">
-        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">{L("العيوب", "Defects")}</h3>
-        <div className="flex gap-3 flex-wrap">
-          {(["none", "taint", "fault"] as const).map((type) => (
-            <button key={type} type="button"
-              onClick={() => { setDefectType(type); if (type === "none") setDefectCups(0); }}
-              className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
-                defectType === type
-                  ? type === "none"
-                    ? "bg-green-500 border-green-500 text-white"
-                    : type === "taint"
-                    ? "bg-amber-500 border-amber-500 text-white"
-                    : "bg-red-500 border-red-500 text-white"
-                  : "bg-white border-border text-brown hover:border-charcoal/30"
-              }`}>
-              {type === "none" ? L("لا عيب", "No defect") : type === "taint" ? L("شائبة (−2 لكل كوب)", "Taint (−2/cup)") : L("عيب (−4 لكل كوب)", "Fault (−4/cup)")}
-            </button>
+        {/* ── Sensory attributes (6 – 10) ─────────────────────────── */}
+        <Sec title={L("الصفات الحسية", "Sensory attributes")}
+          caption={<>{L("من", "From")} <span className="cf-num">6</span> {L("إلى", "to")} <span className="cf-num">10</span> · {L("خطوة", "step")} <span className="cf-num">0.25</span></>}>
+          {SLIDER_ATTRS.map((attr) => (
+            <ScoreSlider
+              key={attr.key}
+              label={attrLabel(attr)}
+              value={sliders[attr.key]}
+              onChange={(v) => setSlider(attr.key, v)}
+              decLabel={L("إنقاص", "Decrease")}
+              incLabel={L("زيادة", "Increase")}
+            />
           ))}
-        </div>
-        {defectType !== "none" && (
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-brown uppercase tracking-wide">
-              {L("عدد الأكواب المعيبة", "Number of defect cups")}
-            </label>
-            <div className="flex gap-2">
-              {[0, 1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button"
-                  onClick={() => setDefectCups(n)}
-                  className={`w-10 h-10 rounded-xl text-sm font-bold border-2 transition-all ${
-                    defectCups === n
-                      ? "bg-red-500 border-red-500 text-white"
-                      : "bg-white border-border text-charcoal hover:border-red-300"
-                  }`}>
-                  {n}
+        </Sec>
+
+        {/* ── Cup attributes (5 cups × 2 points) ──────────────────── */}
+        <Sec title={L("الأكواب", "Cups")}
+          caption={<><span className="cf-num">5</span> {L("أكواب × نقطتان · اضغط لتعليم كوب فاشل", "cups × 2 points · tap to mark a failed cup")}</>}>
+          {CUP_ATTRS.map((attr) => (
+            <CupRow
+              key={attr.key}
+              label={attrLabel(attr)}
+              cupLabel={(i) => L(`كوب ${i + 1}`, `Cup ${i + 1}`)}
+              cups={cups[attr.key]}
+              onChange={(i) => toggleCup(attr.key, i)}
+            />
+          ))}
+        </Sec>
+
+        {/* ── Defects ─────────────────────────────────────────────── */}
+        <Sec title={L("العيوب", "Defects")}
+          caption={<>{L("شائبة", "Taint")} <span className="cf-num">−2</span> {L("أو عيب", "or fault")} <span className="cf-num">−4</span> {L("لكل كوب", "per cup")}</>}>
+          <div className="cf-seg" role="group" aria-label={L("العيوب", "Defects")}>
+            {(["none", "taint", "fault"] as const).map((type) => (
+              <button key={type} type="button" aria-pressed={defectType === type}
+                onClick={() => { setDefectType(type); if (type === "none") setDefectCups(0); }}>
+                {type === "none" ? L("لا عيب", "No defect") : type === "taint" ? L("شائبة", "Taint") : L("عيب", "Fault")}
+              </button>
+            ))}
+          </div>
+          {defectType !== "none" && (
+            <div className="cf-sub">
+              <span className="cf-sublabel" id="cf-defect-cups">{L("عدد الأكواب المعيبة", "Number of defect cups")}</span>
+              <div className="cf-seg" role="group" aria-labelledby="cf-defect-cups">
+                {[0, 1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} type="button" aria-pressed={defectCups === n} onClick={() => setDefectCups(n)}>
+                    <span className="cf-num">{n}</span>
+                  </button>
+                ))}
+              </div>
+              {defectCups > 0 && (
+                <span className="cf-penalty">
+                  {L("الخصم", "Penalty")}: <span className="cf-num">−{defectCups * (defectType === "fault" ? 4 : 2)}</span> {L("نقاط", "points")}
+                </span>
+              )}
+            </div>
+          )}
+        </Sec>
+
+        {/* ── Flavor descriptors ──────────────────────────────────── */}
+        <Sec title={L("واصفات النكهة", "Flavor descriptors")} caption={L("اختر ما ينطبق", "Pick all that apply")}>
+          <div className="cf-chips">
+            {visibleTags.map((tag) => {
+              const on = tags.includes(tag);
+              return (
+                <button key={tag} type="button" className="cf-chip" onClick={() => toggleTag(tag)} aria-pressed={on}>
+                  {descriptorLabel(tag, lang)}
+                  {on ? <IconClose /> : null}
                 </button>
-              ))}
-            </div>
-            {defectCups > 0 && (
-              <p className="text-xs font-bold text-red-500">
-                {L(`الخصم: −${defectCups * (defectType === "fault" ? 4 : 2)} نقاط`, `Penalty: −${defectCups * (defectType === "fault" ? 4 : 2)} points`)}
-              </p>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* ── Flavor Tags ───────────────────────────────────────────── */}
-      <section className="bg-white rounded-2xl border border-border p-5 space-y-3">
-        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">
-          {L("واصفات النكهة", "Flavor descriptors")}
-        </h3>
-        <div className="flex flex-wrap gap-2">
-          {visibleTags.map((tag) => (
-            <button key={tag} type="button"
-              onClick={() => toggleTag(tag)}
-              aria-pressed={tags.includes(tag)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-150 ${
-                tags.includes(tag)
-                  ? "bg-orange border-orange text-white shadow-sm"
-                  : "bg-cream border-border text-brown hover:border-orange/40 hover:text-orange"
-              }`}>
-              {descriptorLabel(tag, lang)}
+              );
+            })}
+            <button type="button" className="cf-chip is-more" onClick={() => setShowAllTags((p) => !p)} aria-expanded={showAllTags}>
+              <IconFilter />
+              {showAllTags ? L("أقل", "Less") : <><span className="cf-num">{moreCount}</span> {L("أخرى", "more")}</>}
             </button>
-          ))}
-          <button type="button"
-            onClick={() => setShowAllTags((p) => !p)}
-            className="px-3 py-1.5 rounded-full text-xs font-bold border border-dashed border-border text-brown/50 hover:text-orange hover:border-orange/40 flex items-center gap-1 transition-all">
-            {showAllTags ? <><ChevronUp size={11} aria-hidden="true" /> {L("أقل", "Less")}</> : <><ChevronDown size={11} aria-hidden="true" /> {L(`+${FLAVOR_TAGS.length - 18} أخرى`, `+${FLAVOR_TAGS.length - 18} more`)}</>}
-          </button>
-        </div>
-        {tags.length > 0 && (
-          <p className="text-xs text-brown/50">
-            {L("المختارة", "Selected")}: <strong className="text-charcoal">{tags.map((t) => descriptorLabel(t, lang)).join(L("، ", ", "))}</strong>
-          </p>
-        )}
-      </section>
-
-      {/* ── Notes ─────────────────────────────────────────────────── */}
-      <section className="bg-white rounded-2xl border border-border p-5">
-        <label htmlFor="cupper-notes" className="block text-sm font-extrabold text-charcoal uppercase tracking-wide mb-2">
-          {L("ملاحظات المقيّم", "Cupper notes")}
-        </label>
-        <textarea
-          id="cupper-notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={3}
-          placeholder={L("صف ما تتذوقه وتشمّه وتشعر به في الكوب…", "Describe what you taste, smell, and feel in the cup…")}
-          className="w-full px-4 py-3 rounded-xl border-2 border-border bg-cream text-charcoal text-sm focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 resize-none transition-colors"
-        />
-      </section>
-
-      {/* ── Score Summary + Submit ─────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-border p-5 space-y-4">
-        <h3 className="text-sm font-extrabold text-charcoal uppercase tracking-wide">{L("تفصيل الدرجة", "Score breakdown")}</h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-          {SLIDER_ATTRS.map((a) => (
-            <div key={a.key} className="flex justify-between">
-              <span className="text-brown/70">{attrLabel(a)}</span>
-              <span className="font-bold text-charcoal tabular-nums">{sliders[a.key].toFixed(2)}</span>
-            </div>
-          ))}
-          {CUP_ATTRS.map((a) => (
-            <div key={a.key} className="flex justify-between">
-              <span className="text-brown/70">{attrLabel(a)}</span>
-              <span className="font-bold text-charcoal tabular-nums">{cupScores[a.key]}.00</span>
-            </div>
-          ))}
-        </div>
-        <div className="border-t border-border pt-3 space-y-1">
-          <div className="flex justify-between text-sm">
-            <span className="text-brown/70">{L("المجموع الجزئي", "Subtotal")}</span>
-            <span className="font-bold">{subtotal.toFixed(2)}</span>
           </div>
-          {defectPenalty > 0 && (
-            <div className="flex justify-between text-sm text-red-500">
-              <span>{L("خصم العيوب", "Defect penalty")}</span>
-              <span className="font-bold" dir="ltr">−{defectPenalty}.00</span>
-            </div>
-          )}
-          <div className="flex justify-between text-base font-extrabold pt-1" style={{ color: qualityColor }}>
-            <span>{L("النتيجة النهائية", "Final score")}</span>
-            <span>{finalScore.toFixed(2)}</span>
-          </div>
-        </div>
+        </Sec>
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full py-3.5 rounded-xl font-extrabold text-white text-sm tracking-wide transition-all duration-200 active:scale-[0.98] disabled:opacity-50"
-          style={{ backgroundColor: qualityColor }}>
-          {submitting ? L("جارٍ الإرسال…", "Submitting…") : (submitLabel ?? L("إرسال التقييم", "Submit score"))}
-        </button>
+        {/* ── Notes ───────────────────────────────────────────────── */}
+        <Sec title={guest ? L("ملاحظاتك", "Your notes") : L("ملاحظات المقيّم", "Cupper notes")} caption={L("اختياري", "Optional")} htmlFor="cupper-notes">
+          <textarea
+            id="cupper-notes"
+            className="cf-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            placeholder={L("صف ما تتذوقه وتشمّه وتشعر به في الكوب…", "Describe what you taste, smell, and feel in the cup…")}
+          />
+        </Sec>
+
+        {guest ? <div className="cf-foot">{scoreInline}{submit()}</div> : null}
+        {/* Phone: the score and the submit stay reachable at the bottom (G-06m). */}
+        <div className="cf-bar">{scoreInline}{submit()}</div>
       </div>
+
+      {/* ── Score card (G-06, staff, desk) ────────────────────────── */}
+      {!guest ? (
+        <aside className="cf-card" aria-label={L("نتيجة SCA النهائية", "SCA final score")}>
+          <p className="cf-card-cap">{lang === "ar" ? <>نتيجة <span className="cf-num">SCA</span> النهائية</> : <><span className="cf-num">SCA</span> final score</>}</p>
+          <p className="cf-big cf-num">{finalScore.toFixed(2)}</p>
+          <div>{qualityDot}</div>
+          <dl className="cf-props">
+            <dt>{L("الحسّي", "Sensory")}</dt><dd>{sensoryTotal.toFixed(2)}</dd>
+            <dt>{L("الأكواب", "Cups")}</dt><dd>{cupTotal.toFixed(2)}</dd>
+            <dt>{L("العيوب", "Defects")}</dt><dd>{defectPenalty > 0 ? `−${defectPenalty.toFixed(2)}` : "0.00"}</dd>
+            <dt>{L("النهائية", "Final")}</dt><dd className="is-final">{finalScore.toFixed(2)}</dd>
+          </dl>
+          {submit()}
+          <p className="cf-hint">{L("لا يُعدَّل التقييم بعد الإرسال", "A score cannot be changed once submitted")}</p>
+        </aside>
+      ) : null}
     </form>
   );
 }

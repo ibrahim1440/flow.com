@@ -438,28 +438,46 @@ function SessionPageInner({ params }: { params: Promise<{ id: string }> }) {
     : myScores.length > 0;
   const activeCupIndex = session.sessionBatches.findIndex((sb) => sb.id === activeBatchId);
 
+  const remainingCount = session.sessionBatches.filter((sb) => !scoredBatchIds.has(sb.id)).length;
+
   // Owner decision 4: guests are supplementary; the header counts the official panel.
   const staffCount = session.scores.filter((s) => s.employeeId !== null).length;
   const guestCount = session.scores.length - staffCount;
   const header = (
     <>
-      <button type="button" className="ops-link" style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer", width: "fit-content", display: "inline-flex", alignItems: "center", gap: 4 }}
-        onClick={() => { if (activeBatchId) { setActiveBatchId(null); return; } router.push("/dashboard/cupping"); }}>
-        <ChevronLeft size={16} aria-hidden="true" style={{ transform: lang === "ar" ? "scaleX(-1)" : undefined }} />
-        {activeBatchId ? L("كل الأكواب", "All cups") : L("كل الجلسات", "All sessions")}
-      </button>
+      {/* G-06: while a cup is scored, «كل الأكواب» is the header's action; otherwise the link back
+          to the sessions list stays above the title. */}
+      {activeBatchId ? null : (
+        <button type="button" className="ops-link" style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer", width: "fit-content", display: "inline-flex", alignItems: "center", gap: 4 }}
+          onClick={() => router.push("/dashboard/cupping")}>
+          <ChevronLeft size={16} aria-hidden="true" style={{ transform: lang === "ar" ? "scaleX(-1)" : undefined }} />
+          {L("كل الجلسات", "All sessions")}
+        </button>
+      )}
       {/* N-09 (G-07): a closed session is its results page — «جلسة 5 أكتوبر · النتائج», and the
           meta counts the cups and the official (staff) scores, guests apart — «تقييمان · ضيف واحد»
           (owner decision 4). E6: an incomplete close reads «غير مكتملة». */}
+      {isMultiCup && activeBatchId ? (
+        // G-06 1222:98996: «كوب 2 من 3», then «معمّاة · <session>»; «كل الأكواب» is the action.
+        <PageHeader
+          title={<>{L("كوب", "Cup")} <span className="hr-num">{activeCupIndex + 1}</span> {L("من", "of")} <span className="hr-num">{session.sessionBatches.length}</span></>}
+          actions={<Btn variant="ghost" onClick={() => setActiveBatchId(null)} data-testid="cupping-all-cups">{L("كل الأكواب", "All cups")}</Btn>}>
+          {session.blind ? <span className="hr-dot tone-info"><span>{L("معمّاة", "Blind")}</span></span> : null}
+          <span>{session.name}</span>
+          <span className="hr-num">{opsDate(session.date, lang)}</span>
+        </PageHeader>
+      ) : (
       <PageHeader title={isClosed ? <>{session.name} · {L("النتائج", "Results")}</> : session.name}>
         <StatusDot map={{ Open: [L("مفتوحة", "Open"), "info"], Closed: [L("مغلقة", "Closed"), "success"], Incomplete: [L("غير مكتملة", "Incomplete"), "warning"] }} value={session.status === "Closed" && session.closeKind === "INCOMPLETE" ? "Incomplete" : session.status} />
+        {!isClosed && session.blind ? <span>{L("معمّاة", "Blind")}</span> : null}
         {isClosed ? <span>{isMultiCup ? <>{countNoun(session.sessionBatches.length, lang, CUP_FORMS)} · </> : null}{countNoun(staffCount, lang, SCORE_FORMS)}{guestCount > 0 ? <> · {countNoun(guestCount, lang, GUEST_FORMS)}</> : null}</span> : null}
+        {!isClosed && isMultiCup && !activeBatchId ? <span data-testid="cupping-cups-remaining">{cupsRemaining(remainingCount, lang)}</span> : null}
         <span className="hr-num">{opsDate(session.date, lang)}</span>
         {session.batch ? <span>{L("الدفعة", "Batch")} <span className="ops-serial">{session.batch.batchNumber}</span></span> : null}
         {session.greenBean ? <span>{session.greenBean.beanType} <span className="ops-serial">#{session.greenBean.serialNumber}</span></span> : null}
-        {isMultiCup && activeBatchId ? <strong style={{ fontWeight: 600 }}>{L("كوب", "Cup")} <span className="hr-num">{activeCupIndex + 1}</span> {L("من", "of")} <span className="hr-num">{session.sessionBatches.length}</span></strong> : null}
         {canPrintLabels && !activeBatchId ? <Btn size="sm" onClick={() => setPrintOpen(true)} data-testid="cupping-print-labels" disabled={printCertified !== true} aria-describedby={printCertified === false ? PRINT_GATE_NOTE_ID : undefined}>{L("طباعة ملصقات النتائج", "Print result labels")}</Btn> : null}
       </PageHeader>
+      )}
       {canPrintLabels && !activeBatchId && printCertified === false ? <PrintNotCertifiedNotice /> : null}
       {printOpen && printCertified === true ? (
         <PrintDialog open onClose={() => setPrintOpen(false)} initialTemplate="CUPPING_RESULTS" onPrinted={() => setPrintOpen(false)}
@@ -472,9 +490,10 @@ function SessionPageInner({ params }: { params: Promise<{ id: string }> }) {
   );
 
   const errorBox = submitError ? <Notice tone="danger">{submitError}</Notice> : null;
-  // The results use the sheet's width (G-07 two-column composition); scoring stays at 960.
+  // The results use the sheet's width (G-07 two-column composition); the scoring form (G-06) is
+  // its 772 + 40 + 280 composition, the cup picker (G-05) a 640 column.
   // `after` carries the scorer status (owner decision 3) below the page's content.
-  const page = (children: React.ReactNode, after?: React.ReactNode) => <div className="hr-page" style={isClosed ? undefined : { maxWidth: 960 }}>{header}{children}{after}</div>;
+  const page = (children: React.ReactNode, after?: React.ReactNode) => <div className="hr-page" style={isClosed ? undefined : { maxWidth: 1140 }}>{header}{children}{after}</div>;
 
   if (isClosed) {
     return page(<>
@@ -502,50 +521,49 @@ function SessionPageInner({ params }: { params: Promise<{ id: string }> }) {
     return page(<>{errorBox}<CuppingForm onSubmit={handleSubmit} submitting={submitting} submitLabel={L("إرسال تقييمي", "Submit my score")} /></>, <ScorerStatus session={session} />);
   }
 
-  if (hasAllScored) {
-    return page(
-      <>
-        <Notice tone="success"><strong style={{ fontWeight: 600 }}>{L("قيّمت كل الأكواب", "All cups scored")}</strong> · {L("بانتظار إغلاق الجلسة وكشف التقييمات.", "Waiting for the session to be closed and the scores revealed.")}</Notice>
-        <ul className="ops-list">
-          {session.sessionBatches.map((sb, i) => {
-            const cs = myScores.find((s) => s.sessionBatchId === sb.id);
-            return <li key={sb.id}><span>{L("كوب", "Cup")} <span className="hr-num">{i + 1}</span></span>{cs ? <strong className="hr-num">{cs.finalScore.toFixed(2)}</strong> : null}</li>;
-          })}
-        </ul>
-      </>,
-      <ScorerStatus session={session} />,
-    );
-  }
-
-  if (activeBatchId) {
-    return page(<>{errorBox}<CuppingForm onSubmit={handleSubmit} submitting={submitting} submitLabel={L(`إرسال تقييم الكوب ${activeCupIndex + 1}`, `Submit cup ${activeCupIndex + 1} score`)} /></>);
-  }
-
-  // Cup picker
-  const remaining = session.sessionBatches.filter((sb) => !scoredBatchIds.has(sb.id));
-  return page(
-    <section className="hr-stack" style={{ gap: 8 }}>
-      <SecHead title={scoredBatchIds.size > 0
-        ? <><span className="hr-num">{remaining.length}</span> {L("أكواب متبقية", remaining.length === 1 ? "cup remaining" : "cups remaining")}</>
-        : L("اختر كوبًا للبدء", "Choose a cup to start scoring")} />
-      <ul className="ops-queue">
+  // G-05 1220:97620: one card per cup — the number, «كوب n», what is left to do, and the action.
+  // The first cup still to score carries the primary «تقييم». Cup identities stay hidden.
+  const nextId = session.sessionBatches.find((sb) => !scoredBatchIds.has(sb.id))?.id ?? null;
+  const picker = (
+    <div className="cg-col">
+      {hasAllScored ? <Notice tone="success"><strong style={{ fontWeight: 600 }}>{L("قيّمت كل الأكواب", "All cups scored")}</strong> · {L("بانتظار إغلاق الجلسة وكشف التقييمات.", "Waiting for the session to be closed and the scores revealed.")}</Notice> : null}
+      <ul className="cg-cups" aria-label={L("الأكواب", "Cups")}>
         {session.sessionBatches.map((sb, i) => {
           const done = scoredBatchIds.has(sb.id);
           const cs = myScores.find((s) => s.sessionBatchId === sb.id);
           return (
-            <li key={sb.id} className="ops-qrow">
-              <button type="button" className="ops-qhead" disabled={done} onClick={() => !done && setActiveBatchId(sb.id)}>
-                <span className="ops-qmain">
-                  <span className="ops-qtitle">{L("كوب", "Cup")} <span className="hr-num">{i + 1}</span></span>
-                  <span className="ops-sub">{done ? <>{L("قُيّم", "Scored")} · <span className="hr-num">{cs?.finalScore.toFixed(2) ?? ""}</span></> : L("اضغط لتقييم هذا الكوب", "Tap to score this cup")}</span>
+            <li key={sb.id}>
+              <button type="button" className={`cg-cup${done ? " is-done" : ""}`} disabled={done} onClick={() => !done && setActiveBatchId(sb.id)} data-testid={`cupping-cup-${i + 1}`}>
+                <span className="cg-no cf-num" aria-hidden="true">{i + 1}</span>
+                <span className="cg-main">
+                  <span className="cg-title">{L("كوب", "Cup")} <span className="hr-num">{i + 1}</span></span>
+                  <span className="cg-sub">{done ? <>{L("قيّمته", "You scored it")} · <span className="hr-num">{cs?.finalScore.toFixed(2) ?? ""}</span></> : L("اضغط للتقييم", "Tap to score")}</span>
                 </span>
-                <span className="ops-qend">{done ? <span className="hr-dot tone-success"><span>{L("مكتمل", "Done")}</span></span> : null}</span>
+                {done
+                  ? <span className="hr-dot tone-success"><span>{L("قُيّم", "Scored")}</span></span>
+                  : <span className={`hr-btn is-sm${sb.id === nextId ? " is-primary" : ""}`} aria-hidden="true">{L("تقييم", "Score")}</span>}
               </button>
             </li>
           );
         })}
       </ul>
-    </section>,
-    <ScorerStatus session={session} />,
+      <p className="cg-note">{L("هوية الأكواب وتقييمات الآخرين مخفية حتى الإغلاق. يُقيَّم كل كوب مرة واحدة لكل مقيّم ولا يُعدَّل التقييم بعد إرساله.", "Cup identities and other scorers' scores stay hidden until the session is closed. Each scorer scores each cup once, and a score cannot be changed once submitted.")}</p>
+    </div>
   );
+
+  if (activeBatchId) {
+    return page(<>{errorBox}<CuppingForm onSubmit={handleSubmit} submitting={submitting} submitLabel={L(`إرسال تقييم الكوب ${activeCupIndex + 1}`, `Submit cup ${activeCupIndex + 1} score`)} /></>);
+  }
+
+  return page(picker, <ScorerStatus session={session} />);
+}
+
+/** «كوبان متبقيان» / «3 أكواب متبقية» / «cups remaining» (meta of G-05). */
+function cupsRemaining(n: number, lang: "ar" | "en"): string {
+  if (lang === "en") return `${n} ${n === 1 ? "cup" : "cups"} remaining`;
+  if (n === 0) return "لا أكواب متبقية";
+  if (n === 1) return "كوب واحد متبقٍ";
+  if (n === 2) return "كوبان متبقيان";
+  if (n <= 10) return `${n} أكواب متبقية`;
+  return `${n} كوبًا متبقيًا`;
 }

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Users, Plus, Shield, Pencil, Eye, EyeOff, Lock, Navigation, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Eye, EyeOff, Lock, Navigation, Trash2, AlertTriangle } from "lucide-react";
 import {
-  ROLE_LABELS, ALL_MODULES, MODULE_LABELS, MODULE_SUB_PRIVILEGES,
+  ROLE_LABELS, ROLE_LABELS_AR, ALL_MODULES, MODULE_LABELS, MODULE_SUB_PRIVILEGES,
   buildDefaultPermissions, hasSubPrivilege, hasModuleAccess,
   type Permissions, type AccessLevel,
 } from "@/lib/auth-shared";
@@ -14,6 +14,9 @@ import { useUser } from "../user-context";
 import { MfaPanel } from "./MfaPanel";
 import { useI18n } from "@/lib/i18n/context";
 import { PIN_LENGTH } from "@/lib/pin-policy";
+import { Btn, Dot, Empty, Field, Flag, Notice, OpsRoot, PageHeader } from "@/components/ops/ui";
+import { Dialog } from "@/components/hr/ui";
+import "./employees.css";
 
 type Employee = {
   id: string; name: string; username: string | null; role: string;
@@ -67,22 +70,23 @@ const ROUTE_OPTIONS: { value: string; label: string; module: string | null }[] =
   { value: "/dashboard/employees",   label: "Employees",       module: "employees" },
 ];
 
-const ACCESS_COLORS: Record<AccessLevel, string> = {
-  edit: "bg-green-100 text-green-700 border-green-300",
-  view: "bg-info-bg text-slate border-slate/30",
-  none: "bg-gray-100 text-gray-400 border-gray-200",
-};
-
 const ACCESS_ICONS: Record<AccessLevel, typeof Pencil> = {
   edit: Pencil,
   view: Eye,
   none: EyeOff,
 };
 
+// Direction 2.1 (UI batch 1, visual port only): the content scope of the shared shell. The
+// behaviour, fields, requests and payloads below are the legacy page's, unchanged.
 export default function EmployeesPage() {
+  return <OpsRoot><EmployeesInner /></OpsRoot>;
+}
+
+function EmployeesInner() {
   const user = useUser();
   const { t, lang } = useI18n();
   const ar = lang === "ar";
+  const L = (a: string, e: string) => (ar ? a : e);
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "employees", "create");
   const canEditPerms = hasSubPrivilege(user?.permissions ?? {}, "employees", "edit");
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -302,37 +306,49 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="hr-page" data-emp-root="">
+      <PageHeader
+        title={L("المستخدمون والصلاحيات", "Users & permissions")}
+        actions={canCreate ? (
+          <Btn variant="primary" onClick={openNew} data-testid="employees-new">
+            <Plus size={16} strokeWidth={2} aria-hidden="true" /> {t("newEmployee")}
+          </Btn>
+        ) : null}
+      >
+        <span><span className="hr-num">{employees.length}</span> {t("employees")}</span>
+        <span>{L("حسابات الدخول وصلاحياتها", "Sign-in accounts and their access")}</span>
+      </PageHeader>
+
       {permRequests.length > 0 ? (
-        <div role="status" data-testid="hr-permission-requests" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-slate-900" dir={ar ? "rtl" : "ltr"}>
-          <p className="font-bold">{ar ? "منح وتغييرات حساسة بانتظار اعتماد محرر حسابات آخر — لم يُطبَّق بعد:" : "Sensitive grants and changes awaiting another account editor — not applied yet:"}</p>
-          <ul className="mt-2 space-y-2">
+        <div role="status" data-testid="hr-permission-requests" className="hr-notice tone-info emp-notice">
+          <p className="emp-notice-title">{ar ? "منح وتغييرات حساسة بانتظار اعتماد محرر حسابات آخر — لم يُطبَّق بعد:" : "Sensitive grants and changes awaiting another account editor — not applied yet:"}</p>
+          <ul className="emp-reqs">
             {permRequests.map((r) => (
               r.kind === "PERMISSION_REVIEW" ? (
-              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2">
+              <li key={r.id}>
                 <span>
-                  <span className="font-semibold">{r.accountName}</span>: {ar ? "سُحب فورًا — " : "revoked at once — "}{[...r.revoked.map((g) => (ar ? PAYROLL_DUTY_AR[g] : PAYROLL_DUTY_EN[g])), ...(r.fromAdmin ? [ar ? "دور مدير النظام" : "the admin role"] : [])].join(ar ? "، " : ", ")}
-                  <span className="block text-xs text-brown/60">{ar ? "مراجعة لاحقة من شخص آخر · سحبه" : "Post-hoc review by another person · revoked by"} {r.requestedByName ?? "—"}</span>
+                  <span className="emp-strong">{r.accountName}</span>: {ar ? "سُحب فورًا — " : "revoked at once — "}{[...r.revoked.map((g) => (ar ? PAYROLL_DUTY_AR[g] : PAYROLL_DUTY_EN[g])), ...(r.fromAdmin ? [ar ? "دور مدير النظام" : "the admin role"] : [])].join(ar ? "، " : ", ")}
+                  <span className="hr-caption emp-block">{ar ? "مراجعة لاحقة من شخص آخر · سحبه" : "Post-hoc review by another person · revoked by"} {r.requestedByName ?? "—"}</span>
                 </span>
                 {!r.mine && !r.isSubject ? (
-                  <button type="button" onClick={() => void decidePermissionRequest(r, "ACKNOWLEDGE")} className="px-3 py-1.5 rounded-lg border border-border bg-white text-xs font-bold">{ar ? "إقرار المراجعة" : "Acknowledge"}</button>
-                ) : <span className="text-xs text-brown/60">{ar ? "يراجعه شخص آخر" : "Another person reviews it"}</span>}
+                  <Btn size="sm" onClick={() => void decidePermissionRequest(r, "ACKNOWLEDGE")}>{ar ? "إقرار المراجعة" : "Acknowledge"}</Btn>
+                ) : <span className="hr-caption">{ar ? "يراجعه شخص آخر" : "Another person reviews it"}</span>}
               </li>
               ) : (
-              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2">
+              <li key={r.id}>
                 <span>
-                  <span className="font-semibold">{r.accountName}</span>: {[...r.grants.map((g) => (ar ? PAYROLL_DUTY_AR[g] : PAYROLL_DUTY_EN[g])), ...(r.subs ?? []).map((k) => `${(ar ? REVIEWED_GRANT_SUB_AR[k] : REVIEWED_GRANT_SUB_EN[k]) ?? k}${(r.confirms ?? []).includes(k) ? (ar ? " (تأكيد صلاحية قائمة)" : " (confirm, already held)") : ""}`), ...(r.toAdmin ? [ar ? "دور مدير النظام" : "the admin role"] : []), ...(r.credentialFields ?? []).map((f) => (ar ? ({ username: "تغيير اسم المستخدم", pin: "تغيير الرمز السري", password: "تغيير كلمة المرور", active: "إعادة التفعيل" } as Record<string, string>)[f] ?? f : ({ username: "username change", pin: "PIN change", password: "password change", active: "reactivation" } as Record<string, string>)[f] ?? f))].join(ar ? "، " : ", ")}
-                  <span className="block text-xs text-brown/60">{ar ? "طلبه" : "Requested by"} {r.requestedByName ?? "—"} · {hrText(r.reason, ar ? "ar" : "en")}</span>
+                  <span className="emp-strong">{r.accountName}</span>: {[...r.grants.map((g) => (ar ? PAYROLL_DUTY_AR[g] : PAYROLL_DUTY_EN[g])), ...(r.subs ?? []).map((k) => `${(ar ? REVIEWED_GRANT_SUB_AR[k] : REVIEWED_GRANT_SUB_EN[k]) ?? k}${(r.confirms ?? []).includes(k) ? (ar ? " (تأكيد صلاحية قائمة)" : " (confirm, already held)") : ""}`), ...(r.toAdmin ? [ar ? "دور مدير النظام" : "the admin role"] : []), ...(r.credentialFields ?? []).map((f) => (ar ? ({ username: "تغيير اسم المستخدم", pin: "تغيير الرمز السري", password: "تغيير كلمة المرور", active: "إعادة التفعيل" } as Record<string, string>)[f] ?? f : ({ username: "username change", pin: "PIN change", password: "password change", active: "reactivation" } as Record<string, string>)[f] ?? f))].join(ar ? "، " : ", ")}
+                  <span className="hr-caption emp-block">{ar ? "طلبه" : "Requested by"} {r.requestedByName ?? "—"} · {hrText(r.reason, ar ? "ar" : "en")}</span>
                 </span>
-                <span className="flex gap-2">
+                <span className="emp-btns">
                   {r.mine ? (
-                    <button type="button" onClick={() => void decidePermissionRequest(r, "WITHDRAW")} className="px-3 py-1.5 rounded-lg border border-border bg-white text-xs font-bold">{ar ? "سحب الطلب" : "Withdraw"}</button>
+                    <Btn size="sm" onClick={() => void decidePermissionRequest(r, "WITHDRAW")}>{ar ? "سحب الطلب" : "Withdraw"}</Btn>
                   ) : r.isSubject ? (
-                    <span className="text-xs text-brown/60">{ar ? "طلب على حسابك؛ يقرره غيرك" : "A request on your account; someone else decides"}</span>
+                    <span className="hr-caption">{ar ? "طلب على حسابك؛ يقرره غيرك" : "A request on your account; someone else decides"}</span>
                   ) : (
                     <>
-                      <button type="button" onClick={() => void decidePermissionRequest(r, "APPROVE")} className="px-3 py-1.5 rounded-lg bg-orange text-white text-xs font-bold">{ar ? "اعتماد وتطبيق" : "Approve and apply"}</button>
-                      <button type="button" onClick={() => void decidePermissionRequest(r, "REJECT")} className="px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 text-xs font-bold">{ar ? "رفض" : "Reject"}</button>
+                      <Btn size="sm" variant="primary" onClick={() => void decidePermissionRequest(r, "APPROVE")}>{ar ? "اعتماد وتطبيق" : "Approve and apply"}</Btn>
+                      <Btn size="sm" variant="danger" onClick={() => void decidePermissionRequest(r, "REJECT")}>{ar ? "رفض" : "Reject"}</Btn>
                     </>
                   )}
                 </span>
@@ -343,367 +359,314 @@ export default function EmployeesPage() {
         </div>
       ) : null}
       {identityNotVerified.length > 0 ? (
-        <div role="status" data-testid="hr-identity-not-verified" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" dir={ar ? "rtl" : "ltr"}>
-          <p className="font-bold">{ar ? "هوية غير موثّقة — محظور من إجراءات الرواتب حتى التوثيق:" : "Identity not verified — blocked from payroll actions until verified:"}</p>
-          <p className="text-xs mt-0.5">{ar ? "تبقى المهام مسندة، لكن الخادم يرفض كل إجراء رواتب أو إدارة رواتب من هذه الحسابات حتى يرتبط الحساب بشخص (موظف أو شخص خارجي) وتُوثَّق هويته بموافقة شخص ثانٍ." : "The duties stay assigned, but the server refuses every payroll or payroll-administration action from these logins until each is linked to a person (employee or external person) whose identity a second person verifies."}</p>
-          <ul className="mt-1 list-disc ps-5">{identityNotVerified.map((r) => (
+        <div role="status" data-testid="hr-identity-not-verified" className="hr-notice tone-warning emp-notice">
+          <p className="emp-notice-title">{ar ? "هوية غير موثّقة — محظور من إجراءات الرواتب حتى التوثيق:" : "Identity not verified — blocked from payroll actions until verified:"}</p>
+          <p className="hr-caption">{ar ? "تبقى المهام مسندة، لكن الخادم يرفض كل إجراء رواتب أو إدارة رواتب من هذه الحسابات حتى يرتبط الحساب بشخص (موظف أو شخص خارجي) وتُوثَّق هويته بموافقة شخص ثانٍ." : "The duties stay assigned, but the server refuses every payroll or payroll-administration action from these logins until each is linked to a person (employee or external person) whose identity a second person verifies."}</p>
+          <ul className="emp-bullets">{identityNotVerified.map((r) => (
             <li key={r.id}>
-              <span className="font-semibold">{r.name}</span>{r.inactive ? <span className="text-xs"> ({ar ? "غير نشط" : "inactive"})</span> : null}
-              {" "}<span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 border border-amber-300">{r.status === "NOT_VERIFIED" ? (ar ? `مرتبط بـ«${r.personName ?? "—"}» · هوية غير موثّقة` : `linked to “${r.personName ?? "—"}” · identity not verified`) : (ar ? "غير مرتبط بأي شخص" : "not linked to any person")}</span>
-              {" "}<span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-50 text-red-700 border border-red-200">{ar ? "محظور من إجراءات الرواتب حتى التوثيق" : "Blocked from payroll actions until verified"}</span>
+              <span className="emp-strong">{r.name}</span>{r.inactive ? <span className="hr-caption"> ({ar ? "غير نشط" : "inactive"})</span> : null}
+              {" "}<Flag tone="warning">{r.status === "NOT_VERIFIED" ? (ar ? `مرتبط بـ«${r.personName ?? "—"}» · هوية غير موثّقة` : `linked to “${r.personName ?? "—"}” · identity not verified`) : (ar ? "غير مرتبط بأي شخص" : "not linked to any person")}</Flag>
+              {" "}<Flag tone="danger">{ar ? "محظور من إجراءات الرواتب حتى التوثيق" : "Blocked from payroll actions until verified"}</Flag>
               : {[...r.duties.map((g) => (ar ? PAYROLL_DUTY_AR[g] : PAYROLL_DUTY_EN[g])), ...(r.role === "admin" ? [ar ? "دور مدير النظام" : "the admin role"] : [])].join(ar ? "، " : ", ")}
             </li>
           ))}</ul>
         </div>
       ) : null}
       {canEditPerms && identity && identity.requests.some((q) => q.status === "PENDING") ? (
-        <div role="status" data-testid="hr-identity-pending" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-slate-900 flex flex-wrap items-center justify-between gap-2" dir={ar ? "rtl" : "ltr"}>
+        <div role="status" data-testid="hr-identity-pending" className="hr-notice tone-info emp-notice emp-row">
           <span>{ar ? `${identity.requests.filter((q) => q.status === "PENDING").length} طلب هوية (توثيق أو شخص خارجي) بانتظار قرار شخص آخر.` : `${identity.requests.filter((q) => q.status === "PENDING").length} identity request(s) (verification or external person) awaiting another person.`}</span>
-          <a href="/dashboard/hr/settings?view=external" className="px-3 py-1.5 rounded-lg border border-border bg-white text-xs font-bold">{ar ? "مراجعة الطلبات" : "Review requests"}</a>
+          <a href="/dashboard/hr/settings?view=external" className="hr-btn is-sm">{ar ? "مراجعة الطلبات" : "Review requests"}</a>
         </div>
       ) : null}
       {canEditPerms && user ? <MfaPanel ar={ar} meId={user.id} onToast={showToast} /> : null}
       {dutyConflicts.length > 0 ? (
-        <div role="status" data-testid="hr-duty-conflicts-report" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" dir={ar ? "rtl" : "ltr"}>
-          <p className="font-bold">{ar ? "حسابات تجمع مهام رواتب متعارضة — للمراجعة، لم يُسحب شيء تلقائيًا:" : "Accounts holding conflicting payroll duties — for review; nothing was revoked automatically:"}</p>
-          <ul className="mt-1 list-disc ps-5">
+        <div role="status" data-testid="hr-duty-conflicts-report" className="hr-notice tone-warning emp-notice">
+          <p className="emp-notice-title">{ar ? "حسابات تجمع مهام رواتب متعارضة — للمراجعة، لم يُسحب شيء تلقائيًا:" : "Accounts holding conflicting payroll duties — for review; nothing was revoked automatically:"}</p>
+          <ul className="emp-bullets">
             {dutyConflicts.map((c) => (
-              <li key={c.id}><span className="font-semibold">{c.name}</span>{c.inactive ? <span className="text-xs"> ({ar ? "غير نشط" : "inactive"})</span> : null}: {c.conflicts.map(([a, b]) => ar ? `${PAYROLL_DUTY_AR[a]} + ${PAYROLL_DUTY_AR[b]}` : `${PAYROLL_DUTY_EN[a]} + ${PAYROLL_DUTY_EN[b]}`).join(ar ? "، " : ", ")}</li>
+              <li key={c.id}><span className="emp-strong">{c.name}</span>{c.inactive ? <span className="hr-caption"> ({ar ? "غير نشط" : "inactive"})</span> : null}: {c.conflicts.map(([a, b]) => ar ? `${PAYROLL_DUTY_AR[a]} + ${PAYROLL_DUTY_AR[b]}` : `${PAYROLL_DUTY_EN[a]} + ${PAYROLL_DUTY_EN[b]}`).join(ar ? "، " : ", ")}</li>
             ))}
           </ul>
         </div>
       ) : null}
       {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-6 ltr:right-6 rtl:left-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-xl text-sm font-bold text-white transition-all ${toast.ok ? "bg-green-600" : "bg-red-600"}`}>
-          {toast.ok ? "✓" : "✕"} {toast.text}
+        <div className="emp-toast" role="status" data-testid="employees-toast">
+          <Notice tone={toast.ok ? "success" : "danger"}>{toast.ok ? "✓" : "✕"} {toast.text}</Notice>
         </div>
       )}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("employees")}</h1>
-          <p className="text-brown text-sm font-medium">{employees.length} {t("employees")}</p>
-        </div>
-        {canCreate && (
-          <button onClick={openNew}
-            className="flex items-center gap-2 px-5 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange-dark transition-all duration-200 shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98]">
-            <Plus size={18} strokeWidth={2.5} /> {t("newEmployee")}
-          </button>
-        )}
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {employees.map((emp) => {
-          // QA P3: an account on role defaults (empty permissions) shows the duties it ACTUALLY has.
-          // (Roster readers get no permissions at all: nothing to count.)
-          const perms = emp.permissions === undefined ? parsePerms({}) : (effectivePermissions(emp.permissions, emp.role) as ReturnType<typeof parsePerms>);
-          const { edit, view } = countAccess(perms);
-          return (
-            <div key={emp.id} className={`bg-white rounded-2xl border p-5 hover:shadow-lg hover:shadow-charcoal/5 transition-all duration-300 group ${emp.active ? "border-border hover:border-border-light" : "border-red-200 bg-red-50/30 opacity-70"}`}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${emp.active ? "bg-slate/10 group-hover:bg-slate/15" : "bg-red-100"}`}>
-                  <Shield size={20} className={emp.active ? "text-slate" : "text-red-400"} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-charcoal">{emp.name}</p>
-                  {emp.username && (
-                    <p className="text-[11px] text-brown/50 font-mono font-medium">@{emp.username}</p>
-                  )}
-                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-cream text-brown">
-                      {ROLE_LABELS[emp.role] || emp.role}
-                    </span>
-                    {!emp.active && (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-600 border border-red-200">
-                        غير نشط · Inactive
+      {employees.length === 0 ? (
+        <Empty title={t("noEmployeesFound")} />
+      ) : (
+        <div className="hr-tablewrap">
+          <table className="hr-table is-mrow emp-table" aria-label={L("المستخدمون", "Users")}>
+            <thead>
+              <tr>
+                <th>{L("المستخدم", "User")}</th>
+                <th>{L("الدور", "Role")}</th>
+                <th className="hr-hide-compact">{t("permissionsLabel")}</th>
+                <th className="hr-hide-compact">{t("defaultPage")}</th>
+                <th className="hr-hide-compact">{L("أُنشئ", "Created")}</th>
+                <th>{L("الحالة", "Status")}</th>
+                <th aria-label={L("إجراءات", "Actions")} />
+              </tr>
+            </thead>
+            <tbody>
+              {employees.map((emp) => {
+                // QA P3: an account on role defaults (empty permissions) shows the duties it ACTUALLY has.
+                // (Roster readers get no permissions at all: nothing to count.)
+                const perms = emp.permissions === undefined ? parsePerms({}) : (effectivePermissions(emp.permissions, emp.role) as ReturnType<typeof parsePerms>);
+                const { edit, view } = countAccess(perms);
+                const role = (ar ? ROLE_LABELS_AR[emp.role] : ROLE_LABELS[emp.role]) || emp.role;
+                const status = emp.active ? <Dot tone="success">{t("active")}</Dot> : <Dot tone="danger">{t("inactive")}</Dot>;
+                return (
+                  <tr key={emp.id} data-testid="employee-row" className={emp.active ? undefined : "is-inactive"}>
+                    <td className="m-title">
+                      <span className="emp-who">
+                        <span className="hr-avatar emp-avatar" aria-hidden="true">{initials(emp.name)}</span>
+                        <span className="emp-whotext">
+                          <span className="emp-name">{emp.name}</span>
+                          {emp.username ? <bdi dir="ltr" className="emp-user">@{emp.username}</bdi> : null}
+                          <span className="hr-msub">{role} · {status}</span>
+                        </span>
                       </span>
-                    )}
-                    {identity ? <IdentityBadge s={identity.logins.find((l) => l.id === emp.id)} ar={ar} /> : null}
-                  </div>
-                </div>
-                {canEditPerms && identity && (
-                  <button onClick={() => setIdentityFor(emp)} data-testid="hr-identity-open" aria-label={ar ? "الهوية والتوثيق" : "Identity and verification"}
-                    className="px-2.5 py-1.5 text-[11px] font-bold text-brown/70 border border-border rounded-lg hover:text-orange hover:border-orange/40 transition-all duration-200">
-                    {ar ? "الهوية" : "Identity"}
-                  </button>
-                )}
-                {canEditPerms && (
-                  <button onClick={() => openEdit(emp)}
-                    className="p-2.5 text-brown/40 hover:text-orange hover:bg-orange/10 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100">
-                    <Pencil size={16} />
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2 mb-3">
-                <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-green-50 text-green-700 border border-green-200">
-                  {edit} {t("edit")}
-                </span>
-                <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-info-bg text-slate border border-slate/20">
-                  {view} {t("view")}
-                </span>
-                <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-gray-50 text-gray-400 border border-gray-200">
-                  {ALL_MODULES.length - edit - view} {ar ? "مخفية" : "hidden"}
-                </span>
-              </div>
-              <div className="text-xs text-brown/50 font-medium space-y-0.5">
-                <p className="flex items-center gap-1.5">
-                  <Navigation size={11} className="text-[#6B7280]" />
-                  {t("defaultPage")}: <span className="text-charcoal font-bold">{routeLabel(emp.defaultRoute || "/dashboard")}</span>
-                </p>
-                <p>{formatDate(emp.createdAt)}</p>
-                <p>{t("active")}: {emp.active ? <span className="text-green-600 font-bold">{t("active")}</span> : <span className="text-danger font-bold">{t("inactive")}</span>}</p>
-              </div>
-            </div>
-          );
-        })}
-        {employees.length === 0 && (
-          <div className="col-span-full text-center py-16 text-brown/40">
-            <Users size={48} className="mx-auto mb-3 opacity-50" /><p className="font-semibold">{t("noEmployeesFound")}</p>
-          </div>
-        )}
-      </div>
+                    </td>
+                    <td>{role}</td>
+                    <td className="hr-hide-compact">
+                      <span className="emp-counts">
+                        <span><span className="hr-num">{edit}</span> {t("edit")}</span>
+                        <span><span className="hr-num">{view}</span> {t("view")}</span>
+                        <span className="hr-muted"><span className="hr-num">{ALL_MODULES.length - edit - view}</span> {ar ? "مخفية" : "hidden"}</span>
+                      </span>
+                    </td>
+                    <td className="hr-hide-compact">
+                      <span className="emp-route"><Navigation size={12} aria-hidden="true" /> {routeLabel(emp.defaultRoute || "/dashboard")}</span>
+                    </td>
+                    <td className="hr-hide-compact hr-num hr-muted">{formatDate(emp.createdAt)}</td>
+                    <td>
+                      <span className="emp-status">
+                        {status}
+                        {identity ? <IdentityBadge s={identity.logins.find((l) => l.id === emp.id)} ar={ar} /> : null}
+                      </span>
+                    </td>
+                    <td className="m-end">
+                      <span className="emp-btns">
+                        {canEditPerms && identity && (
+                          <Btn size="sm" onClick={() => setIdentityFor(emp)} data-testid="hr-identity-open" aria-label={ar ? "الهوية والتوثيق" : "Identity and verification"}>
+                            {ar ? "الهوية" : "Identity"}
+                          </Btn>
+                        )}
+                        {canEditPerms && (
+                          <Btn size="sm" variant="ghost" className="hr-iconbtn" onClick={() => openEdit(emp)} data-testid="employee-edit" aria-label={`${t("edit")} · ${emp.name}`}>
+                            <Pencil size={15} aria-hidden="true" />
+                          </Btn>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {identityFor && identity ? <IdentityDialog emp={identityFor} reg={identity} ar={ar} onClose={() => setIdentityFor(null)} onDone={(msg) => { setIdentityFor(null); showToast(true, msg); loadIdentity(); }} onError={(msg) => showToast(false, msg)} /> : null}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-white rounded-2xl p-7 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-extrabold text-charcoal mb-5">
-              {editingId ? t("edit") + " " + t("employees") : t("newEmployee")}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Row 1: Display Name + Username */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1.5">{t("displayName")}</label>
-                  <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1.5">{t("usernameLabel")} <span className="text-brown/50 font-normal">(login ID)</span></label>
-                  <div className="relative">
-                    <span className="absolute ltr:left-3.5 rtl:right-3.5 top-1/2 -translate-y-1/2 text-brown/40 font-bold text-sm select-none">@</span>
-                    <input type="text" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 64) })}
-                      className="w-full ltr:pl-8 rtl:pr-8 pr-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors font-mono"
-                      placeholder="e.g. ahmed" required />
-                  </div>
-                </div>
-              </div>
-
-              {/* The number automated WhatsApp messages reach this employee on. */}
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5">{t("phoneNumber")} <span className="text-brown/50 font-normal">(WhatsApp)</span></label>
-                <input type="tel" dir="ltr" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
-                  className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-                  placeholder="05XXXXXXXX" data-testid="employee-phone" />
-              </div>
-
-              {/* Row 2: PIN + Password */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1.5">
-                    {editingId ? t("newPin") : t("pinLabel")}
-                  </label>
-                  <input type="text" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, "") })}
-                    className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors font-mono tracking-widest"
-                    {...(!editingId ? { required: true, minLength: PIN_LENGTH } : {})}
-                    inputMode="numeric" maxLength={PIN_LENGTH} placeholder={`${PIN_LENGTH} digits`} />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1.5">
-                    {editingId ? t("passwordLabel") : t("passwordLabel")}
-                  </label>
-                  <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-                    placeholder="For username+password login" autoComplete="new-password" />
-                </div>
-              </div>
-
-              {/* Account Status (edit only) */}
-              {editingId && (
-                <div className="flex items-center justify-between px-4 py-3 rounded-xl border-2 border-border bg-cream/50">
-                  <div>
-                    <p className="text-sm font-bold text-charcoal">حالة الحساب · Account Status</p>
-                    <p className="text-xs text-brown/50 mt-0.5">{form.active ? "Active — employee can log in" : "Inactive — login blocked"}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
-                    className={`relative w-12 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${form.active ? "bg-green-500" : "bg-red-400"}`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${form.active ? "translate-x-6" : "translate-x-0.5"}`} />
-                  </button>
-                </div>
-              )}
-
-              {editingId && editingHeldInv && ["adjust", "override"].some((k) => hasModuleAccess(permissions, "inventory") && hasSubPrivilege(permissions, "inventory", k)) ? (
-                <label data-testid="confirm-inventory-subs" className="flex items-start gap-2 px-4 py-3 rounded-xl border-2 border-amber-200 bg-amber-50 text-sm text-amber-900">
-                  <input type="checkbox" checked={confirmInv} onChange={(e) => setConfirmInv(e.target.checked)} className="mt-1" />
-                  <span>
-                    <span className="font-bold block">{ar ? "طلب تأكيد صلاحية المخزون المميّزة من محرر حسابات آخر" : "Ask another account editor to confirm the inventory supervisor permissions"}</span>
-                    <span className="text-xs">{ar ? "تعديل المخزون / التجاوز ممنوحان لهذا الحساب مسبقًا. يُنشأ طلب يعتمده شخص ثانٍ ولا يتغيّر شيء عند الاعتماد؛ يُسجَّل الاعتماد دليلًا للمنح." : "Stock adjustment / override are already on this account. A request is created for a second person; nothing changes on approval, and the approval is recorded as the grant's evidence."}</span>
-                  </span>
-                </label>
-              ) : null}
-
-              {/* Default Landing Page */}
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1.5 flex items-center gap-1.5">
-                  <Navigation size={14} className="text-[#6B7280]" /> {t("defaultPage")}
-                </label>
-                <select
-                  value={form.defaultRoute}
-                  onChange={(e) => setForm({ ...form, defaultRoute: e.target.value })}
-                  className="w-full px-4 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors bg-white text-charcoal text-sm"
-                >
-                  {ROUTE_OPTIONS.map((opt) => {
-                    const accessible = !opt.module || opt.module === "dashboard" || hasModuleAccess(permissions, opt.module);
-                    return (
-                      <option key={opt.value} value={opt.value} disabled={!accessible}>
-                        {opt.label}{!accessible ? ` (${t("noAccess")})` : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-                {form.defaultRoute !== "/dashboard" && !accessibleRoutes.find((r) => r.value === form.defaultRoute) && (
-                  <p className="text-xs text-amber-700 font-bold mt-1.5 flex items-center gap-1">
-                    ⚠ This page requires access permissions for that module. Grant access above or change the landing page.
-                  </p>
-                )}
-                <p className="text-xs text-brown/50 mt-1.5 font-medium">
-                  Only pages the employee can access are selectable. Greyed-out options require the relevant module permission.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-2">{t("role")}</label>
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(ROLE_LABELS).map(([key, label]) => (
-                    <button key={key} type="button" onClick={() => applyPreset(key)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border-2 transition-all duration-200 ${
-                        form.role === key
-                          ? "bg-charcoal text-white border-charcoal shadow-md"
-                          : "bg-white text-brown border-border hover:border-slate hover:text-charcoal"
-                      }`}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <Lock size={16} className="text-orange" />
-                  <label className="text-sm font-extrabold text-charcoal">{t("permissionsLabel")}</label>
-                </div>
-
-                <div className="space-y-2">
-                  {ALL_MODULES.map((mod) => {
-                    const perm = permissions[mod] || { access: "none" as AccessLevel };
-                    const subs = MODULE_SUB_PRIVILEGES[mod];
-                    return (
-                      <div key={mod} className="border-2 border-border rounded-xl overflow-hidden hover:border-slate/30 transition-colors">
-                        <div className="flex items-center gap-3 px-4 py-3 bg-cream/50">
-                          <span className="text-sm font-bold text-charcoal flex-1">
-                            {MODULE_LABELS[mod]}
-                          </span>
-                          <div className="flex gap-1.5">
-                            {(["edit", "view", "none"] as AccessLevel[]).map((level) => {
-                              const Icon = ACCESS_ICONS[level];
-                              const active = perm.access === level;
-                              return (
-                                <button key={level} type="button"
-                                  onClick={() => setModuleAccess(mod, level)}
-                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border-2 transition-all duration-200 ${
-                                    active ? ACCESS_COLORS[level] : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"
-                                  }`}>
-                                  <Icon size={12} />
-                                  {level === "edit" ? t("edit") : level === "view" ? t("view") : t("noAccess")}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {mod === "hr" && perm.access !== "none" && formConflicts.length > 0 ? (
-                          <div role="alert" data-testid="hr-duty-conflict" className="px-4 py-2.5 border-t border-amber-200 bg-amber-50 text-xs font-semibold text-amber-900" dir={ar ? "rtl" : "ltr"}>
-                            {ar
-                              ? <>{conflictMessageAr(formConflicts)} لن يُحفظ هذا الجمع. فصل المهام: الإعداد، والاعتماد، وتسجيل الصرف، وإلغاء المسير المعتمد لأشخاص مختلفين.</>
-                              : <>{conflictMessageEn(formConflicts)} This combination will not be saved. Segregation of duties: preparation, approval, payment recording and cancelling an approved run belong to different people.</>}
-                          </div>
-                        ) : null}
-                        {subs && perm.access !== "none" && (
-                          <div className="px-4 py-2.5 border-t border-border bg-white">
-                            <div className="flex flex-wrap gap-x-5 gap-y-2">
-                              {subs.map((sub) => {
-                                const enabled = perm.sub?.[sub.key] === true;
-                                return (
-                                  <label key={sub.key} className="flex items-center gap-2 cursor-pointer group/sub">
-                                    <input type="checkbox" checked={enabled}
-                                      onChange={() => toggleSub(mod, sub.key)}
-                                      className="w-4 h-4 rounded border-2 border-gray-300 text-orange focus:ring-orange/30 accent-orange" />
-                                    <span className={`text-xs font-medium transition-colors ${enabled ? "text-charcoal" : "text-gray-400"}`}>
-                                      {sub.label}
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Delete confirmation inline */}
-              {editingId && deleteConfirm && (
-                <div className="flex items-center gap-3 p-4 rounded-xl border-2 border-red-200 bg-red-50">
-                  <AlertTriangle size={18} className="text-red-500 flex-shrink-0" />
-                  <p className="text-sm text-red-700 font-medium flex-1">Are you sure you want to permanently delete this employee?</p>
-                  <button type="button" onClick={handleDelete} disabled={deleting}
-                    className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
-                    {deleting ? "Deleting…" : "Yes, Delete"}
-                  </button>
-                  <button type="button" onClick={() => setDeleteConfirm(false)}
-                    className="px-3 py-1.5 rounded-lg border border-border text-xs font-bold text-brown hover:bg-cream transition-colors">
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-3">
-                {editingId && user?.role === "admin" && !deleteConfirm && (
-                  <button type="button" onClick={() => setDeleteConfirm(true)}
-                    className="flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-red-200 text-red-500 text-sm font-bold hover:bg-red-50 hover:border-red-400 transition-colors">
-                    <Trash2 size={16} /> حذف
-                  </button>
-                )}
-                <button type="submit"
-                  className="flex-1 py-3 bg-orange text-white rounded-xl font-bold hover:bg-orange-dark transition-all duration-200 shadow-md shadow-orange/20 active:scale-[0.98]">
-                  {editingId ? t("saveChanges") : t("createEmployee")}
-                </button>
-                <button type="button" onClick={() => setShowForm(false)}
-                  className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-            </form>
+      <Dialog
+        open={showForm}
+        title={editingId ? L("تعديل المستخدم", "Edit user") : t("newEmployee")}
+        sub={editingId ? form.name : L("اسم الدخول والرمز وكلمة المرور، ثم الصلاحيات.", "Sign-in name, PIN and password, then the permissions.")}
+        onClose={() => setShowForm(false)}
+        className="emp-dialog"
+        testId="employee-form"
+        actions={<>
+          <Btn type="submit" form="employee-form-el" variant="primary">{editingId ? t("saveChanges") : t("createEmployee")}</Btn>
+          <Btn onClick={() => setShowForm(false)}>{t("cancel")}</Btn>
+          {editingId && user?.role === "admin" && !deleteConfirm && (
+            <Btn variant="danger" className="emp-delete" onClick={() => setDeleteConfirm(true)}>
+              <Trash2 size={15} aria-hidden="true" /> {L("حذف", "Delete")}
+            </Btn>
+          )}
+        </>}
+      >
+        <form id="employee-form-el" onSubmit={handleSubmit} className="emp-form">
+          <div className="hr-form">
+            <Field label={t("displayName")}>
+              <input type="text" className="hr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </Field>
+            <Field label={`${t("usernameLabel")} · ${L("اسم الدخول", "login ID")}`}>
+              <span className="emp-prefixed">
+                <span className="emp-prefix" aria-hidden="true">@</span>
+                <input type="text" dir="ltr" className="hr-input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 64) })}
+                  placeholder="e.g. ahmed" required />
+              </span>
+            </Field>
+            {/* The number automated WhatsApp messages reach this employee on. */}
+            <Field label={`${t("phoneNumber")} · WhatsApp`} wide>
+              <input type="tel" dir="ltr" className="hr-input" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
+                placeholder="05XXXXXXXX" data-testid="employee-phone" />
+            </Field>
+            <Field label={editingId ? t("newPin") : t("pinLabel")}>
+              <input type="text" dir="ltr" className="hr-input emp-pin" value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, "") })}
+                {...(!editingId ? { required: true, minLength: PIN_LENGTH } : {})}
+                inputMode="numeric" maxLength={PIN_LENGTH} placeholder={L(`${PIN_LENGTH} أرقام`, `${PIN_LENGTH} digits`)} />
+            </Field>
+            <Field label={t("passwordLabel")}>
+              <input type="password" dir="ltr" className="hr-input" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder={L("للدخول باسم المستخدم وكلمة المرور", "For username+password login")} autoComplete="new-password" />
+            </Field>
           </div>
-        </div>
-      )}
+
+          {/* Account Status (edit only) */}
+          {editingId && (
+            <div className="emp-switchrow">
+              <span>
+                <span className="emp-strong emp-block">{L("حالة الحساب", "Account status")}</span>
+                <span className="hr-caption">{form.active ? L("نشط — يستطيع الدخول", "Active — employee can log in") : L("غير نشط — الدخول محظور", "Inactive — login blocked")}</span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.active}
+                aria-label={L("حالة الحساب", "Account status")}
+                onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
+                className="emp-switch"
+              >
+                <span />
+              </button>
+            </div>
+          )}
+
+          {editingId && editingHeldInv && ["adjust", "override"].some((k) => hasModuleAccess(permissions, "inventory") && hasSubPrivilege(permissions, "inventory", k)) ? (
+            <label data-testid="confirm-inventory-subs" className="hr-notice tone-warning emp-check">
+              <input type="checkbox" checked={confirmInv} onChange={(e) => setConfirmInv(e.target.checked)} />
+              <span>
+                <span className="emp-strong emp-block">{ar ? "طلب تأكيد صلاحية المخزون المميّزة من محرر حسابات آخر" : "Ask another account editor to confirm the inventory supervisor permissions"}</span>
+                <span className="hr-caption">{ar ? "تعديل المخزون / التجاوز ممنوحان لهذا الحساب مسبقًا. يُنشأ طلب يعتمده شخص ثانٍ ولا يتغيّر شيء عند الاعتماد؛ يُسجَّل الاعتماد دليلًا للمنح." : "Stock adjustment / override are already on this account. A request is created for a second person; nothing changes on approval, and the approval is recorded as the grant's evidence."}</span>
+              </span>
+            </label>
+          ) : null}
+
+          {/* Default Landing Page */}
+          <Field
+            label={t("defaultPage")}
+            help={L("لا تُختار إلا الصفحات التي يصل إليها الموظف؛ الخيارات المعطّلة تحتاج صلاحية الوحدة.", "Only pages the employee can access are selectable. Greyed-out options require the relevant module permission.")}
+          >
+            <select
+              className="hr-select"
+              value={form.defaultRoute}
+              onChange={(e) => setForm({ ...form, defaultRoute: e.target.value })}
+            >
+              {ROUTE_OPTIONS.map((opt) => {
+                const accessible = !opt.module || opt.module === "dashboard" || hasModuleAccess(permissions, opt.module);
+                return (
+                  <option key={opt.value} value={opt.value} disabled={!accessible}>
+                    {opt.label}{!accessible ? ` (${t("noAccess")})` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </Field>
+          {form.defaultRoute !== "/dashboard" && !accessibleRoutes.find((r) => r.value === form.defaultRoute) && (
+            <Notice tone="warning">
+              {L("هذه الصفحة تحتاج صلاحية الوحدة. امنح الوصول أدناه أو غيّر الصفحة الافتراضية.", "This page requires access permissions for that module. Grant access above or change the landing page.")}
+            </Notice>
+          )}
+
+          <div className="emp-group">
+            <span className="hr-label">{L("الدور", "Role")}</span>
+            <div className="emp-roles" role="group" aria-label={L("الدور", "Role")}>
+              {Object.entries(ROLE_LABELS).map(([key, label]) => (
+                <Btn key={key} size="sm" variant={form.role === key ? "primary" : "secondary"} aria-pressed={form.role === key} onClick={() => applyPreset(key)}>
+                  {ar ? ROLE_LABELS_AR[key] ?? label : label}
+                </Btn>
+              ))}
+            </div>
+          </div>
+
+          <div className="emp-group">
+            <span className="emp-permhead"><Lock size={15} aria-hidden="true" /> <span className="hr-section">{t("permissionsLabel")}</span></span>
+            <div className="emp-perms">
+              {ALL_MODULES.map((mod) => {
+                const perm = permissions[mod] || { access: "none" as AccessLevel };
+                const subs = MODULE_SUB_PRIVILEGES[mod];
+                return (
+                  <div key={mod} className="emp-perm">
+                    <div className="emp-permrow">
+                      <span className="emp-strong">{MODULE_LABELS[mod]}</span>
+                      <span className="ops-seg" role="group" aria-label={MODULE_LABELS[mod]}>
+                        {(["edit", "view", "none"] as AccessLevel[]).map((level) => {
+                          const Icon = ACCESS_ICONS[level];
+                          const active = perm.access === level;
+                          return (
+                            <button key={level} type="button" aria-pressed={active} className={level === "none" ? "is-negative" : undefined}
+                              onClick={() => setModuleAccess(mod, level)}>
+                              <Icon size={12} aria-hidden="true" />
+                              {level === "edit" ? t("edit") : level === "view" ? t("view") : t("noAccess")}
+                            </button>
+                          );
+                        })}
+                      </span>
+                    </div>
+
+                    {mod === "hr" && perm.access !== "none" && formConflicts.length > 0 ? (
+                      <div role="alert" data-testid="hr-duty-conflict" className="hr-notice tone-warning">
+                        {ar
+                          ? <>{conflictMessageAr(formConflicts)} لن يُحفظ هذا الجمع. فصل المهام: الإعداد، والاعتماد، وتسجيل الصرف، وإلغاء المسير المعتمد لأشخاص مختلفين.</>
+                          : <>{conflictMessageEn(formConflicts)} This combination will not be saved. Segregation of duties: preparation, approval, payment recording and cancelling an approved run belong to different people.</>}
+                      </div>
+                    ) : null}
+                    {subs && perm.access !== "none" && (
+                      <div className="emp-subs">
+                        {subs.map((sub) => {
+                          const enabled = perm.sub?.[sub.key] === true;
+                          return (
+                            <label key={sub.key} className={enabled ? "is-on" : undefined}>
+                              <input type="checkbox" checked={enabled} onChange={() => toggleSub(mod, sub.key)} />
+                              <span>{sub.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Delete confirmation inline */}
+          {editingId && deleteConfirm && (
+            <div className="hr-notice tone-danger emp-row" role="alert">
+              <span className="emp-row-text"><AlertTriangle size={16} aria-hidden="true" /> {L("هل تريد حذف هذا الموظف نهائيًا؟", "Are you sure you want to permanently delete this employee?")}</span>
+              <span className="emp-btns">
+                <Btn size="sm" variant="danger" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? L("جارٍ الحذف…", "Deleting…") : L("نعم، احذف", "Yes, Delete")}
+                </Btn>
+                <Btn size="sm" onClick={() => setDeleteConfirm(false)}>{t("cancel")}</Btn>
+              </span>
+            </div>
+          )}
+        </form>
+      </Dialog>
     </div>
   );
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((p) => p[0]).join("") || "—";
+}
+
 function IdentityBadge({ s, ar }: { s?: IdentityRegister["logins"][number]; ar: boolean }) {
   if (!s) return null;
-  const [cls, text] = s.verified
-    ? ["bg-green-50 text-green-700 border-green-200", ar ? "هوية موثّقة" : "Identity verified"]
+  const [tone, text] = s.verified
+    ? ["success", ar ? "هوية موثّقة" : "Identity verified"] as const
     : s.personType
-      ? ["bg-amber-50 text-amber-800 border-amber-300", ar ? "هوية غير موثّقة" : "Identity not verified"]
-      : ["bg-gray-50 text-gray-500 border-gray-200", ar ? "غير مرتبط بشخص" : "No person linked"];
-  return <span data-testid="hr-identity-badge" className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold border ${cls}`}>{text}</span>;
+      ? ["warning", ar ? "هوية غير موثّقة" : "Identity not verified"] as const
+      : ["neutral", ar ? "غير مرتبط بشخص" : "No person linked"] as const;
+  return <span data-testid="hr-identity-badge" className={`emp-badge tone-${tone}`}>{text}</span>;
 }
 
 /**
@@ -737,38 +700,41 @@ function IdentityDialog({ emp, reg, ar, onClose, onDone, onError }: { emp: Emplo
     }
   }
   const canSend = reason.trim().length >= 5 && (s?.personType ? !s.verified : !!target) && !pending;
+  const title = ar ? "الهوية والتوثيق" : "Identity and verification";
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={ar ? "الهوية والتوثيق" : "Identity and verification"} data-testid="hr-identity-dialog" dir={ar ? "rtl" : "ltr"} className="bg-white rounded-t-2xl sm:rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-extrabold text-charcoal">{ar ? "الهوية والتوثيق" : "Identity and verification"} · {emp.name}</h2>
-        <p className="text-sm">
-          {s?.verified ? (ar ? `مرتبط بـ«${s.personName}» — هوية موثّقة.` : `Linked to “${s.personName}” — identity verified.`)
-            : s?.personType ? (ar ? `مرتبط بـ«${s.personName}» (${s.personType === "EMPLOYEE" ? "موظف" : "شخص خارجي"}) — هوية غير موثّقة.` : `Linked to “${s.personName}” (${s.personType === "EMPLOYEE" ? "employee" : "external person"}) — identity not verified.`)
-            : (ar ? "غير مرتبط بأي شخص. مهام الرواتب والإدارة لا تُمنح ولا تُنفَّذ إلا لحساب شخص موثّق." : "Not linked to any person. Payroll and administration duties are granted to, and performed by, logins of verified persons only.")}
-        </p>
-        {pending ? <p className="text-sm text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">{ar ? "يوجد طلب هوية لهذا الحساب بانتظار القرار." : "An identity request for this login is awaiting a decision."}</p> : null}
-        {!s?.personType ? (
-          <label className="block text-sm font-bold text-charcoal">
-            {ar ? "اربطه بـ" : "Link it to"}
-            <select value={target} onChange={(e) => setTarget(e.target.value)} className="mt-1.5 w-full px-3 py-2.5 border-2 border-border rounded-xl font-normal">
-              <option value="">—</option>
-              {freeEmployees.length ? <optgroup label={ar ? "موظف (يُوثَّق مع الربط)" : "Employee (verified with the link)"}>{freeEmployees.map((e) => <option key={e.id} value={`E:${e.id}`}>{e.employeeNo} · {e.name}</option>)}</optgroup> : null}
-              {freeExternals.length ? <optgroup label={ar ? "شخص خارجي" : "External person"}>{freeExternals.map((x) => <option key={x.id} value={`X:${x.id}`}>{x.fullName}{x.organization ? ` · ${x.organization}` : ""}</option>)}</optgroup> : null}
-            </select>
-            <span className="block text-xs font-normal text-brown/60 mt-1">{ar ? "لشخص خارجي غير مسجّل: أضفه أولًا من" : "For an external person not yet recorded: add them first in"} <a className="underline" href="/dashboard/hr/settings?view=external">{ar ? "الأشخاص الخارجيون" : "External persons"}</a>.</span>
-          </label>
-        ) : null}
-        {!s?.verified ? (
-          <label className="block text-sm font-bold text-charcoal">
-            {ar ? "السبب وما تحققت منه *" : "Reason and what you checked *"}
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} className="mt-1.5 w-full px-3 py-2 border-2 border-border rounded-xl font-normal" />
-          </label>
-        ) : null}
-        <div className="flex flex-wrap gap-2 justify-end">
-          {!s?.verified ? <button type="button" disabled={!canSend || busy} onClick={() => void send()} className="px-4 py-2 rounded-xl bg-orange text-white text-sm font-bold disabled:opacity-50">{s?.personType ? (ar ? "طلب توثيق الهوية" : "Request verification") : (ar ? "طلب الربط والتوثيق" : "Request link")}</button> : null}
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl border border-border text-sm font-bold">{ar ? "إغلاق" : "Close"}</button>
-        </div>
-      </div>
-    </div>
+    <Dialog
+      open
+      title={`${title} · ${emp.name}`}
+      onClose={onClose}
+      testId="hr-identity-dialog"
+      actions={<>
+        {!s?.verified ? <Btn variant="primary" disabled={!canSend} busy={busy} onClick={() => void send()}>{s?.personType ? (ar ? "طلب توثيق الهوية" : "Request verification") : (ar ? "طلب الربط والتوثيق" : "Request link")}</Btn> : null}
+        <Btn onClick={onClose}>{ar ? "إغلاق" : "Close"}</Btn>
+      </>}
+    >
+      <p className="emp-p">
+        {s?.verified ? (ar ? `مرتبط بـ«${s.personName}» — هوية موثّقة.` : `Linked to “${s.personName}” — identity verified.`)
+          : s?.personType ? (ar ? `مرتبط بـ«${s.personName}» (${s.personType === "EMPLOYEE" ? "موظف" : "شخص خارجي"}) — هوية غير موثّقة.` : `Linked to “${s.personName}” (${s.personType === "EMPLOYEE" ? "employee" : "external person"}) — identity not verified.`)
+          : (ar ? "غير مرتبط بأي شخص. مهام الرواتب والإدارة لا تُمنح ولا تُنفَّذ إلا لحساب شخص موثّق." : "Not linked to any person. Payroll and administration duties are granted to, and performed by, logins of verified persons only.")}
+      </p>
+      {pending ? <Notice tone="info">{ar ? "يوجد طلب هوية لهذا الحساب بانتظار القرار." : "An identity request for this login is awaiting a decision."}</Notice> : null}
+      {!s?.personType ? (
+        <Field
+          label={ar ? "اربطه بـ" : "Link it to"}
+          help={<>{ar ? "لشخص خارجي غير مسجّل: أضفه أولًا من" : "For an external person not yet recorded: add them first in"} <a className="emp-link" href="/dashboard/hr/settings?view=external">{ar ? "الأشخاص الخارجيون" : "External persons"}</a>.</>}
+        >
+          <select value={target} onChange={(e) => setTarget(e.target.value)} className="hr-select">
+            <option value="">—</option>
+            {freeEmployees.length ? <optgroup label={ar ? "موظف (يُوثَّق مع الربط)" : "Employee (verified with the link)"}>{freeEmployees.map((e) => <option key={e.id} value={`E:${e.id}`}>{e.employeeNo} · {e.name}</option>)}</optgroup> : null}
+            {freeExternals.length ? <optgroup label={ar ? "شخص خارجي" : "External person"}>{freeExternals.map((x) => <option key={x.id} value={`X:${x.id}`}>{x.fullName}{x.organization ? ` · ${x.organization}` : ""}</option>)}</optgroup> : null}
+          </select>
+        </Field>
+      ) : null}
+      {!s?.verified ? (
+        <Field label={ar ? "السبب وما تحققت منه *" : "Reason and what you checked *"}>
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} rows={3} className="hr-textarea" />
+        </Field>
+      ) : null}
+    </Dialog>
   );
 }

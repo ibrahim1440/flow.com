@@ -1,16 +1,21 @@
 "use client";
-
+// Products — Direction 2.1 (migration phase 2; Figma 256:3410 «جميع المنتجات», phone 271:6183).
+//
+// Visual port only. Finished Products: one row per sellable SKU, its bill of materials, the coffee
+// / origin catalogue and the packaging materials a BOM draws on. The same requests as before
+// (GET /api/products?activeOnly=false, /api/materials?activeOnly=false, /api/coffee-products,
+// /api/green-beans; POST /api/products, /api/coffee-products, /api/materials; PATCH
+// /api/products/:id; GET/PUT /api/products/:id/bom; the materials receive / count routes) and the
+// same gates: the page is on the `inventory` module (see src/app/api/products/route.ts), the
+// server checks every write. What the frozen frames draw that the backend has no model for —
+// user-defined categories, bulk selection, SKU barcode, the product detail page, the one-page
+// «إضافة منتج» form — is not built (docs/design/direction-2.1-rc/CATALOG-BACKEND.md).
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  Package, Plus, Search, X, Layers, Boxes, AlertTriangle, Coffee, Tag, Save, Trash2,
-} from "lucide-react";
+import { Btn, Dot, Field, Notice, OpsLoading, OpsRoot, PageHeader, Tabs, useL } from "@/components/ops/ui";
+import { Dialog } from "@/components/hr/ui";
+import "@/components/ops/stock.css";
 import { useI18n } from "@/lib/i18n/context";
-import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
-
-// Finished Products: one row per sellable SKU, its bill of materials, and the packaging
-// materials a BOM draws on. Gated on the `inventory` module — see the note in
-// src/app/api/products/route.ts for why this is not a new permission module.
+import { MaterialForm, MaterialsPanel, PlusIcon, type Material } from "../_components/stock-materials";
 
 type Coffee = {
   id: string;
@@ -47,19 +52,6 @@ type Product = {
   partialGrams: number;
 };
 
-type Material = {
-  id: string;
-  code: string;
-  name: string;
-  category: string;
-  unitOfMeasure: string;
-  quantityOnHand: number;
-  reorderPoint: number;
-  isActive: boolean;
-  usedInProductCount: number;
-  belowReorderPoint: boolean;
-};
-
 type BomRow = {
   id?: string;
   type: "ROASTED_COFFEE" | "MATERIAL";
@@ -68,8 +60,13 @@ type BomRow = {
   quantityPerUnit: number;
 };
 
+function TrashIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg>;
+}
+
 export default function ProductsPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const L = useL();
   const [tab, setTab] = useState<"products" | "materials" | "coffees">("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -144,78 +141,79 @@ export default function ProductsPage() {
     );
   }, [coffees, search]);
 
+  const activeSkus = products.filter((p) => p.isActive).length;
+  const searchBox = (
+    <div className="stk-tool">
+      <input type="search" className="hr-input hr-search" value={search} onChange={(e) => setSearch(e.target.value)}
+        placeholder={t("searchProductsPlaceholder")} aria-label={t("searchProductsPlaceholder")} />
+    </div>
+  );
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-2">
-            <Package size={24} className="text-orange" /> {t("productsTitle")}
-          </h1>
-          <p className="text-brown text-sm font-medium">{t("productsSubtitle")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() =>
-            tab === "products"
-              ? setShowProductForm(true)
-              : tab === "materials"
-              ? setShowMaterialForm(true)
-              : setShowCoffeeForm(true)
-          }
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-oo-action-primary text-white text-sm font-bold hover:bg-oo-action-primary-hover transition-colors"
-        >
-          <Plus size={16} />{" "}
-          {tab === "products" ? t("newProductBtn") : tab === "materials" ? t("newMaterialBtn") : t("newCoffeeBtn")}
-        </button>
-      </div>
+    <OpsRoot className="stk-products">
+    <div className="hr-page">
+      <PageHeader
+        title={t("productsNav")}
+        actions={
+          <Btn
+            variant="primary"
+            onClick={() =>
+              tab === "products"
+                ? setShowProductForm(true)
+                : tab === "materials"
+                ? setShowMaterialForm(true)
+                : setShowCoffeeForm(true)
+            }
+          >
+            <PlusIcon />
+            {tab === "products" ? t("newProductBtn") : tab === "materials" ? t("newMaterialBtn") : t("newCoffeeBtn")}
+          </Btn>
+        }
+      >
+        {loading ? <span className="hr-caption">{t("productsSubtitle")}</span> : (
+          <span className="hr-caption">
+            {lang === "ar"
+              ? `${products.length} صنف بيع · ${activeSkus} نشطة · ${coffees.length} بن / منشأ`
+              : `${products.length} SKUs · ${activeSkus} active · ${coffees.length} coffees / origins`}
+          </span>
+        )}
+      </PageHeader>
 
       {error && (
-        <div className="rounded-xl border border-red-300 bg-red-50 text-red-700 text-sm font-medium px-4 py-2.5 flex items-start gap-2">
-          <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
-          <span className="flex-1">{error}</span>
-          <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
-            <X size={16} />
-          </button>
-        </div>
+        <Notice tone="danger">
+          <span style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+            <span>{error}</span>
+            <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setError(null)} aria-label="Dismiss">✕</button>
+          </span>
+        </Notice>
       )}
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {(["products", "coffees", "materials"] as const).map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
-              tab === key
-                ? "bg-oo-bg-elevated text-oo-text-primary border-2 border-oo-border-strong"
-                : "bg-oo-bg-subtle text-oo-text-secondary border-2 border-transparent hover:border-oo-border-default"
-            }`}
-          >
-            {key === "products" ? t("tabProducts") : key === "coffees" ? t("tabCoffees") : t("tabMaterials")}
-          </button>
-        ))}
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={15} className="absolute start-3 top-1/2 -translate-y-1/2 text-oo-text-muted" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("searchProductsPlaceholder")}
-            className="w-full ps-9 pe-3 py-2 rounded-xl border border-oo-border-default bg-white text-sm"
-          />
-        </div>
-      </div>
+      <Tabs
+        label={t("productsNav")}
+        value={tab}
+        onChange={setTab}
+        items={[
+          { key: "products", label: t("tabProducts"), count: loading ? undefined : products.length },
+          { key: "coffees", label: t("tabCoffees"), count: loading ? undefined : coffees.length },
+          { key: "materials", label: t("tabMaterials"), count: loading ? undefined : materials.length },
+        ]}
+      />
 
       {loading ? (
-        <div className="text-center py-16">
-          <div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-brown text-sm font-medium">{t("loading")}</p>
-        </div>
+        <OpsLoading />
       ) : tab === "products" ? (
-        <ProductTable products={visibleProducts} onOpenBom={setBomFor} onChanged={load} onError={setError} />
+        <>
+          {searchBox}
+          <ProductTable products={visibleProducts} onOpenBom={setBomFor} onChanged={load} onError={setError} />
+          <p className="stk-foot">{L("المخزون الحر يُقرأ من لوتات المخزون التام، ولا يُعدَّل من الكتالوج.", "Free stock is read from the finished-stock lots; it is never edited from the catalogue.")}</p>
+        </>
       ) : tab === "coffees" ? (
-        <CoffeeTable coffees={visibleCoffees} products={products} />
+        <>
+          {searchBox}
+          <CoffeeTable coffees={visibleCoffees} products={products} />
+        </>
       ) : (
-        <MaterialTable materials={visibleMaterials} onChanged={load} onError={setError} />
+        <MaterialsPanel materials={visibleMaterials} onChanged={load} onError={setError} search={searchBox} />
       )}
 
       {showProductForm && (
@@ -267,6 +265,7 @@ export default function ProductsPage() {
         />
       )}
     </div>
+    </OpsRoot>
   );
 }
 
@@ -281,7 +280,8 @@ function ProductTable({
   onChanged: () => void;
   onError: (m: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const L = useL();
 
   async function toggleActive(p: Product) {
     const res = await fetch(`/api/products/${p.id}`, {
@@ -294,83 +294,84 @@ function ProductTable({
   }
 
   if (products.length === 0)
-    return (
-      <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
-        <Package size={40} className="mx-auto mb-2" />
-        <p>{t("noProductsYet")}</p>
-      </div>
-    );
+    return <div className="hr-state"><h3>{t("noProductsYet")}</h3></div>;
 
+  const free = products.reduce((s, p) => s + (p.isActive ? p.availableUnits : 0), 0);
   return (
-    <div className="bg-white rounded-2xl border border-oo-border-default overflow-x-auto">
-      <table className="w-full text-sm min-w-[860px]">
+    <div className="hr-tablewrap">
+      <table className="hr-table is-mrow" aria-label={t("tabProducts")}>
         <thead>
-          <tr className="border-b border-oo-border-default text-oo-text-secondary text-xs font-bold uppercase">
-            <th className="text-start p-3">{t("skuCodeLabel")}</th>
-            <th className="text-start p-3">{t("productNameLabel")}</th>
-            <th className="text-start p-3">{t("coffeeOriginLabel")}</th>
-            <th className="text-start p-3">{t("packSizeLabel")}</th>
-            <th className="text-end p-3">{t("sellingPriceLabel")}</th>
-            <th className="text-end p-3">{t("finishedStockLabel")}</th>
-            <th className="text-start p-3">{t("bomLabel")}</th>
-            <th className="text-end p-3" />
+          <tr>
+            <th>{t("productNameLabel")}</th>
+            <th>{t("skuCodeLabel")}</th>
+            <th className="hr-hide-compact">{t("coffeeOriginLabel")}</th>
+            <th>{t("packSizeLabel")}</th>
+            <th className="num hr-hide-compact">{lang === "ar" ? "السعر · ر.س" : "Price · SAR"}</th>
+            <th className="num">{t("finishedStockLabel")}</th>
+            <th>{t("bomLabel")}</th>
+            <th>{L("الحالة", "Status")}</th>
+            <th aria-label={L("الإجراءات", "Actions")} />
           </tr>
         </thead>
         <tbody>
           {products.map((p) => (
-            <tr key={p.id} className={`border-b border-oo-border-default last:border-0 ${p.isActive ? "" : "opacity-55"}`}>
-              <td className="p-3 font-mono text-xs font-bold text-oo-text-primary">{p.skuCode}</td>
-              <td className="p-3 font-semibold text-oo-text-primary">{p.name}</td>
-              <td className="p-3 text-oo-text-secondary">{p.coffee?.productNameEn ?? "—"}</td>
-              <td className="p-3 text-oo-text-secondary">{p.packSize}</td>
-              <td className="p-3 text-end text-oo-text-secondary">{p.price.toFixed(2)}</td>
-              <td className="p-3 text-end">
-                <span className="font-extrabold text-oo-text-primary">{p.availableUnits}</span>
-                <span className="text-oo-text-muted text-xs"> {t("unitsLabel")}</span>
+            <tr key={p.id} className={p.isActive ? undefined : "is-inactive"}>
+              <td className="m-title">
+                <span className="strong">{p.name}</span>
+                <span className="hr-msub">
+                  <span className="hr-id">{p.skuCode}</span> · {p.packSize} · <span className="hr-num">{p.availableUnits}</span> {t("unitsLabel")}
+                </span>
+              </td>
+              <td><span className="hr-id">{p.skuCode}</span></td>
+              <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{p.coffee?.productNameEn ?? "—"}</td>
+              <td>{p.packSize}</td>
+              <td className="num hr-hide-compact"><span className="hr-num">{p.price.toFixed(2)}</span></td>
+              <td className="num">
+                <strong className="hr-num">{p.availableUnits}</strong>
+                <span className="hr-caption"> {t("unitsLabel")}</span>
                 {p.reservedUnits > 0 && (
-                  <div className="text-[11px] text-oo-text-muted">
+                  <span className="stk-sub">
                     {p.reservedUnits} {t("unitsLabel")} reserved
-                  </div>
+                  </span>
                 )}
                 {p.partialPackages > 0 && (
-                  <div
-                    className="text-[11px] font-semibold text-amber-700"
-                    title={t("pkgPartialWarnBody")}
-                  >
+                  <span className="stk-sub" style={{ color: "var(--status-warning)", fontWeight: 500 }} title={t("pkgPartialWarnBody")}>
                     + {p.partialPackages} {t("pkgPartialOnShelf")} ({p.partialGrams} g)
-                  </div>
+                  </span>
                 )}
               </td>
-              <td className="p-3">
+              <td>
                 {p.hasBom ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-oo-status-success">
-                    <Layers size={13} /> {p.bomComponentCount}
+                  <span className="hr-caption" style={{ color: "var(--text-secondary)" }}>
+                    {lang === "ar" ? `${p.bomComponentCount} مكونات` : `${p.bomComponentCount} components`}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-oo-status-blocked">
-                    <AlertTriangle size={13} /> {t("noBomWarning")}
-                  </span>
+                  <span className="stk-flag">{t("noBomWarning")}</span>
                 )}
               </td>
-              <td className="p-3 text-end whitespace-nowrap">
-                <button
-                  type="button"
-                  onClick={() => onOpenBom(p)}
-                  className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold text-oo-text-primary hover:bg-oo-bg-subtle"
-                >
-                  {t("bomLabel")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleActive(p)}
-                  className="ms-2 px-3 py-1.5 rounded-lg border border-oo-border-default text-xs font-semibold text-oo-text-secondary hover:bg-oo-bg-subtle"
-                >
+              <td className="m-end">
+                <Dot tone={p.isActive ? "success" : "neutral"}>{p.isActive ? t("activeLabel") : t("inactiveLabel")}</Dot>
+              </td>
+              <td className="stk-acts stk-macts">
+                <Btn size="sm" onClick={() => onOpenBom(p)}>{t("bomLabel")}</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => toggleActive(p)}>
                   {p.isActive ? t("inactiveLabel") : t("activeLabel")}
-                </button>
+                </Btn>
               </td>
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={5}>
+              {lang === "ar"
+                ? `${products.length} صنف بيع · ${products.filter((p) => p.isActive).length} نشطة`
+                : `${products.length} SKUs · ${products.filter((p) => p.isActive).length} active`}
+            </td>
+            <td className="num stk-tot"><span className="hr-num">{free}</span></td>
+            <td colSpan={3} />
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
@@ -383,264 +384,44 @@ function CoffeeTable({ coffees, products }: { coffees: Coffee[]; products: Produ
   const { t } = useI18n();
 
   if (coffees.length === 0)
-    return (
-      <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
-        <Coffee size={40} className="mx-auto mb-2" />
-        <p>{t("noCoffeesYet")}</p>
-      </div>
-    );
+    return <div className="hr-state"><h3>{t("noCoffeesYet")}</h3></div>;
 
   return (
-    <div className="bg-white rounded-2xl border border-oo-border-default overflow-x-auto">
-      <table className="w-full text-sm min-w-[700px]">
+    <div className="hr-tablewrap">
+      <table className="hr-table is-mrow" aria-label={t("tabCoffees")}>
         <thead>
-          <tr className="border-b border-oo-border-default text-oo-text-secondary text-xs font-bold uppercase">
-            <th className="text-start p-3">{t("coffeeNameEnLabel")}</th>
-            <th className="text-start p-3">{t("countryLabel")}</th>
-            <th className="text-start p-3">{t("regionLabel")}</th>
-            <th className="text-start p-3">{t("processLabel")}</th>
-            <th className="text-end p-3">{t("roastLossLabel")}</th>
-            <th className="text-end p-3">{t("skuCountLabel")}</th>
+          <tr>
+            <th>{t("coffeeNameEnLabel")}</th>
+            <th>{t("countryLabel")}</th>
+            <th className="hr-hide-compact">{t("regionLabel")}</th>
+            <th>{t("processLabel")}</th>
+            <th className="num">{t("roastLossLabel")}</th>
+            <th className="num">{t("skuCountLabel")}</th>
           </tr>
         </thead>
         <tbody>
-          {coffees.map((c) => (
-            <tr key={c.id} className="border-b border-oo-border-default last:border-0">
-              <td className="p-3 font-semibold text-oo-text-primary">
-                {c.productNameEn}
-                {c.productNameAr && <div className="text-xs text-oo-text-muted">{c.productNameAr}</div>}
-              </td>
-              <td className="p-3 text-oo-text-secondary">{c.countryEn}</td>
-              <td className="p-3 text-oo-text-secondary">{c.regionEn || "—"}</td>
-              <td className="p-3 text-oo-text-secondary">{c.processEn || "—"}</td>
-              <td className="p-3 text-end text-oo-text-secondary">{c.expectedRoastLoss}%</td>
-              <td className="p-3 text-end font-bold text-oo-text-primary">
-                {products.filter((p) => p.coffee?.id === c.id).length}
-              </td>
-            </tr>
-          ))}
+          {coffees.map((c) => {
+            const skus = products.filter((p) => p.coffee?.id === c.id);
+            return (
+              <tr key={c.id}>
+                <td className="m-title">
+                  <span className="strong">{c.productNameAr || c.productNameEn}</span>
+                  {c.productNameAr ? <span className="stk-sub hr-desktop-only" dir="ltr" style={{ textAlign: "start" }}><bdi>{c.productNameEn}</bdi></span> : null}
+                  <span className="hr-msub">
+                    {c.countryEn}{c.regionEn ? ` · ${c.regionEn}` : ""}{c.processEn ? ` · ${c.processEn}` : ""}
+                    {skus.length ? <> · <span className="hr-id">{skus.map((p) => p.skuCode).join(" · ")}</span></> : null}
+                  </span>
+                </td>
+                <td>{c.countryEn}</td>
+                <td className="hr-hide-compact hr-caption" style={{ color: "var(--text-secondary)" }}>{c.regionEn || "—"}</td>
+                <td className="hr-caption" style={{ color: "var(--text-secondary)" }}>{c.processEn || "—"}</td>
+                <td className="num"><span className="hr-num">{c.expectedRoastLoss}%</span></td>
+                <td className="num m-end" style={{ fontWeight: 600 }}><span className="hr-num">{skus.length}</span></td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function MaterialTable({
-  materials,
-  onChanged,
-  onError,
-}: {
-  materials: Material[];
-  onChanged: () => void;
-  onError: (m: string) => void;
-}) {
-  const { t } = useI18n();
-  const user = useUser();
-  // A count changes the on-hand quantity: an inventory adjustment (privileged, SOD.md §20). Offered
-  // only to inventory › adjust holders; the server enforces it (verified individual + step-up).
-  const canCount = hasSubPrivilege(user?.permissions ?? {}, "inventory", "adjust");
-  // Receiving a delivery only ADDS stock: the routine receiving duty (PIN-only staff), audited
-  // (review P2-4). POST /api/materials/:id/receive.
-  const canReceive = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
-  const [receiving, setReceiving] = useState<string | null>(null);
-  const [rqty, setRqty] = useState("");
-  const [rref, setRref] = useState("");
-  const [adjusting, setAdjusting] = useState<string | null>(null);
-  const [value, setValue] = useState("");
-  const [reason, setReason] = useState("");
-
-  async function saveCount(m: Material) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) {
-      onError("Counted quantity must be zero or more.");
-      return;
-    }
-    const res = await fetch(`/api/materials/${m.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      // The reason is required (it is the only document behind a count).
-      body: JSON.stringify({ newActualQuantity: n, reason: reason.trim() }),
-    });
-    if (!res.ok) onError((await res.json()).error ?? "Failed to adjust stock.");
-    setAdjusting(null);
-    setValue("");
-    setReason("");
-    onChanged();
-  }
-
-  async function saveReceipt(m: Material) {
-    const n = Number(rqty);
-    if (!Number.isFinite(n) || n <= 0) {
-      onError("Received quantity must be greater than zero.");
-      return;
-    }
-    const res = await fetch(`/api/materials/${m.id}/receive`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ quantity: n, reference: rref.trim() }),
-    });
-    if (!res.ok) onError((await res.json()).error ?? "Failed to receive stock.");
-    setReceiving(null);
-    setRqty("");
-    setRref("");
-    onChanged();
-  }
-
-  if (materials.length === 0)
-    return (
-      <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border">
-        <Boxes size={40} className="mx-auto mb-2" />
-        <p>{t("noMaterialsYet")}</p>
-      </div>
-    );
-
-  return (
-    <div className="bg-white rounded-2xl border border-oo-border-default overflow-x-auto">
-      <table className="w-full text-sm min-w-[720px]">
-        <thead>
-          <tr className="border-b border-oo-border-default text-oo-text-secondary text-xs font-bold uppercase">
-            <th className="text-start p-3">{t("materialCodeLabel")}</th>
-            <th className="text-start p-3">{t("materialNameLabel")}</th>
-            <th className="text-start p-3">{t("categoryLabel")}</th>
-            <th className="text-end p-3">{t("onHandLabel")}</th>
-            <th className="text-end p-3">{t("reorderPointLabel")}</th>
-            <th className="text-end p-3">{t("usedInLabel")}</th>
-            <th className="text-end p-3" />
-          </tr>
-        </thead>
-        <tbody>
-          {materials.map((m) => (
-            <tr key={m.id} className={`border-b border-oo-border-default last:border-0 ${m.isActive ? "" : "opacity-55"}`}>
-              <td className="p-3 font-mono text-xs font-bold text-oo-text-primary">{m.code}</td>
-              <td className="p-3 font-semibold text-oo-text-primary">{m.name}</td>
-              <td className="p-3 text-oo-text-secondary text-xs">{m.category}</td>
-              <td className="p-3 text-end">
-                <span className="font-extrabold text-oo-text-primary">{m.quantityOnHand}</span>
-                {m.belowReorderPoint && (
-                  <div className="text-[11px] font-semibold text-oo-status-blocked">{t("lowStockLabel")}</div>
-                )}
-              </td>
-              <td className="p-3 text-end text-oo-text-secondary">{m.reorderPoint || "—"}</td>
-              <td className="p-3 text-end text-oo-text-secondary">{m.usedInProductCount}</td>
-              <td className="p-3 text-end whitespace-nowrap">
-                {receiving === m.id ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      data-testid="material-receive-qty"
-                      type="number"
-                      min={0}
-                      value={rqty}
-                      onChange={(e) => setRqty(e.target.value)}
-                      placeholder={t("receivedQtyLabel")}
-                      aria-label={t("receivedQtyLabel")}
-                      className="w-28 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
-                    />
-                    <input
-                      data-testid="material-receive-ref"
-                      value={rref}
-                      onChange={(e) => setRref(e.target.value)}
-                      maxLength={120}
-                      placeholder={t("receiveRefLabel")}
-                      aria-label={t("receiveRefLabel")}
-                      className="w-44 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
-                    />
-                    <button
-                      type="button"
-                      disabled={!(Number(rqty) > 0) || rref.trim().length === 0}
-                      onClick={() => saveReceipt(m)}
-                      className="px-2.5 py-1.5 rounded-lg bg-oo-action-primary text-white text-xs font-bold"
-                    >
-                      <Save size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setReceiving(null); setRqty(""); setRref(""); }}
-                      className="px-2.5 py-1.5 rounded-lg border border-oo-border-default text-xs"
-                    >
-                      <X size={13} />
-                    </button>
-                  </span>
-                ) : adjusting === m.id ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      type="number"
-                      min={0}
-                      value={value}
-                      onChange={(e) => setValue(e.target.value)}
-                      placeholder={t("adjustStockLabel")}
-                      className="w-28 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
-                    />
-                    <input
-                      data-testid="material-count-reason"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      maxLength={500}
-                      placeholder={t("countReasonLabel")}
-                      aria-label={t("countReasonLabel")}
-                      className="w-44 px-2 py-1.5 rounded-lg border border-oo-border-strong text-xs"
-                    />
-                    <button
-                      type="button"
-                      disabled={reason.trim().length < 8}
-                      onClick={() => saveCount(m)}
-                      className="px-2.5 py-1.5 rounded-lg bg-oo-action-primary text-white text-xs font-bold"
-                    >
-                      <Save size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setAdjusting(null); setValue(""); setReason(""); }}
-                      className="px-2.5 py-1.5 rounded-lg border border-oo-border-default text-xs"
-                    >
-                      <X size={13} />
-                    </button>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5">
-                    {canReceive && m.isActive && (
-                      <button
-                        type="button"
-                        data-testid="material-receive"
-                        onClick={() => { setAdjusting(null); setReceiving(m.id); setRqty(""); setRref(""); }}
-                        className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold text-oo-text-primary hover:bg-oo-bg-subtle"
-                      >
-                        {t("receiveStockLabel")}
-                      </button>
-                    )}
-                    {canCount && (
-                      <button
-                        type="button"
-                        onClick={() => { setReceiving(null); setAdjusting(m.id); setValue(String(m.quantityOnHand)); setReason(""); }}
-                        className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold text-oo-text-primary hover:bg-oo-bg-subtle"
-                      >
-                        {t("adjustStockLabel")}
-                      </button>
-                    )}
-                  </span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-2xl my-8 shadow-xl">
-        <div className="flex items-center justify-between p-4 border-b border-oo-border-default">
-          <h2 className="font-extrabold text-oo-text-primary">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close">
-            <X size={20} className="text-oo-text-muted" />
-          </button>
-        </div>
-        <div className="p-4">{children}</div>
-      </div>
     </div>
   );
 }
@@ -684,144 +465,46 @@ function ProductForm({
     }
   }
 
-  const field = "w-full px-3 py-2 rounded-xl border border-oo-border-default text-sm";
-
   return (
-    <Modal title={t("newProductBtn")} onClose={onClose}>
-      <div className="space-y-3">
-        {/* An empty dropdown here is a dead end, and the reason is not obvious — say it
-            plainly rather than letting the user hunt for a disabled button. */}
-        {coffees.length === 0 && (
-          <p className="text-xs font-semibold text-oo-status-blocked bg-oo-bg-subtle rounded-xl p-2.5">
-            {t("noCoffeesForProduct")}
-          </p>
-        )}
-        <label className="block">
-          <span className="text-xs font-bold text-oo-text-secondary">{t("coffeeOriginLabel")}</span>
-          <select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })} className={field}>
+    <Dialog
+      open
+      title={t("newProductBtn")}
+      onClose={onClose}
+      actions={
+        <>
+          <Btn variant="primary" busy={saving} disabled={!form.productId || !form.skuCode} onClick={submit}>{t("newProductBtn")}</Btn>
+          <Btn onClick={onClose}>{t("cancel")}</Btn>
+        </>
+      }
+    >
+      {/* An empty dropdown here is a dead end, and the reason is not obvious — say it
+          plainly rather than letting the user hunt for a disabled button. */}
+      {coffees.length === 0 && <Notice tone="warning">{t("noCoffeesForProduct")}</Notice>}
+      <div className="hr-form">
+        <Field label={t("coffeeOriginLabel")} wide>
+          <select className="hr-select" value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
             <option value="">—</option>
             {coffees.map((c) => (
               <option key={c.id} value={c.id}>{c.productNameEn}</option>
             ))}
           </select>
-        </label>
-        <label className="block">
-          <span className="text-xs font-bold text-oo-text-secondary">{t("skuCodeLabel")}</span>
-          <input value={form.skuCode} onChange={(e) => setForm({ ...form, skuCode: e.target.value })} className={field} placeholder="BRA-1KG" />
-        </label>
-        <label className="block">
-          <span className="text-xs font-bold text-oo-text-secondary">{t("productNameLabel")}</span>
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={field} placeholder="Brazil Coffee – 1 KG" />
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("packSizeLabel")} (g)</span>
-            <input type="number" min={1} value={form.weightGrams} onChange={(e) => setForm({ ...form, weightGrams: e.target.value })} className={field} />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("sellingPriceLabel")}</span>
-            <input type="number" min={0} step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className={field} />
-          </label>
-        </div>
+        </Field>
+        <Field label={t("skuCodeLabel")}>
+          <input className="hr-input hr-id" dir="ltr" value={form.skuCode} onChange={(e) => setForm({ ...form, skuCode: e.target.value })} placeholder="BRA-1KG" />
+        </Field>
+        <Field label={t("productNameLabel")}>
+          <input className="hr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Brazil Coffee – 1 KG" />
+        </Field>
         {/* Pack size is the divisor behind every unit balance, so the API refuses to change
             it later. Saying so here avoids a confusing 409 after the fact. */}
-        <p className="text-[11px] text-oo-text-muted">
-          Pack size cannot be changed after the product is created.
-        </p>
-        <button
-          type="button"
-          disabled={saving || !form.productId || !form.skuCode}
-          onClick={submit}
-          className="w-full py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50"
-        >
-          {saving ? "…" : t("newProductBtn")}
-        </button>
+        <Field label={`${t("packSizeLabel")} (g)`} help="Pack size cannot be changed after the product is created.">
+          <input className="hr-input" type="number" min={1} value={form.weightGrams} onChange={(e) => setForm({ ...form, weightGrams: e.target.value })} />
+        </Field>
+        <Field label={t("sellingPriceLabel")}>
+          <input className="hr-input" type="number" min={0} step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+        </Field>
       </div>
-    </Modal>
-  );
-}
-
-function MaterialForm({
-  onClose,
-  onSaved,
-  onError,
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-  onError: (m: string) => void;
-}) {
-  const { t } = useI18n();
-  const [form, setForm] = useState({ code: "", name: "", category: "PACKAGING", quantityOnHand: "0", reorderPoint: "0" });
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/materials", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          code: form.code,
-          name: form.name,
-          category: form.category,
-          quantityOnHand: Number(form.quantityOnHand),
-          reorderPoint: Number(form.reorderPoint),
-        }),
-      });
-      if (!res.ok) {
-        onError((await res.json()).error ?? "Failed to create material.");
-        return;
-      }
-      onSaved();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const field = "w-full px-3 py-2 rounded-xl border border-oo-border-default text-sm";
-
-  return (
-    <Modal title={t("newMaterialBtn")} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("materialCodeLabel")}</span>
-            <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} className={field} placeholder="BAG-1KG" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("categoryLabel")}</span>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={field}>
-              <option value="PACKAGING">PACKAGING</option>
-              <option value="LABEL">LABEL</option>
-              <option value="CONSUMABLE">CONSUMABLE</option>
-              <option value="OTHER">OTHER</option>
-            </select>
-          </label>
-        </div>
-        <label className="block">
-          <span className="text-xs font-bold text-oo-text-secondary">{t("materialNameLabel")}</span>
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={field} placeholder="1KG Coffee Bag" />
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("onHandLabel")}</span>
-            <input type="number" min={0} value={form.quantityOnHand} onChange={(e) => setForm({ ...form, quantityOnHand: e.target.value })} className={field} />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("reorderPointLabel")}</span>
-            <input type="number" min={0} value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: e.target.value })} className={field} />
-          </label>
-        </div>
-        <button
-          type="button"
-          disabled={saving || !form.code || !form.name}
-          onClick={submit}
-          className="w-full py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50"
-        >
-          {saving ? "…" : t("newMaterialBtn")}
-        </button>
-      </div>
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -869,66 +552,51 @@ function CoffeeForm({
     }
   }
 
-  const field = "w-full px-3 py-2 rounded-xl border border-oo-border-default text-sm";
-
   return (
-    <Modal title={t("newCoffeeBtn")} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("coffeeNameEnLabel")}</span>
-            <input value={form.productNameEn} onChange={(e) => setForm({ ...form, productNameEn: e.target.value })} className={field} placeholder="Brazil Santos" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("coffeeNameArLabel")}</span>
-            <input value={form.productNameAr} onChange={(e) => setForm({ ...form, productNameAr: e.target.value })} className={field} placeholder="برازيل سانتوس" />
-          </label>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("countryLabel")}</span>
-            <input value={form.countryEn} onChange={(e) => setForm({ ...form, countryEn: e.target.value })} className={field} placeholder="Brazil" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("regionLabel")}</span>
-            <input value={form.regionEn} onChange={(e) => setForm({ ...form, regionEn: e.target.value })} className={field} />
-          </label>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs font-bold text-oo-text-secondary">{t("processLabel")}</span>
-            <input value={form.processEn} onChange={(e) => setForm({ ...form, processEn: e.target.value })} className={field} placeholder="Washed" />
-          </label>
-          <label className="block">
-            {/* Drives the green-bean draw on every production order derived from this
-                coffee: expectedGreenBeanKg = target / (1 - loss). */}
-            <span className="text-xs font-bold text-oo-text-secondary">{t("roastLossLabel")}</span>
-            <input type="number" min={0} max={50} step="0.1" value={form.expectedRoastLoss}
-              onChange={(e) => setForm({ ...form, expectedRoastLoss: e.target.value })} className={field} />
-          </label>
-        </div>
-        <label className="block">
-          <span className="text-xs font-bold text-oo-text-secondary">{t("defaultGreenBeanLabel")}</span>
-          <select value={form.defaultGreenBeanId} onChange={(e) => setForm({ ...form, defaultGreenBeanId: e.target.value })} className={field}>
+    <Dialog
+      open
+      title={t("newCoffeeBtn")}
+      className="stk-wide"
+      onClose={onClose}
+      actions={
+        <>
+          <Btn variant="primary" busy={saving} disabled={!form.productNameEn.trim() || !form.countryEn.trim()} onClick={submit}>{t("newCoffeeBtn")}</Btn>
+          <Btn onClick={onClose}>{t("cancel")}</Btn>
+        </>
+      }
+    >
+      <div className="hr-form">
+        <Field label={t("coffeeNameEnLabel")}>
+          <input className="hr-input" dir="ltr" value={form.productNameEn} onChange={(e) => setForm({ ...form, productNameEn: e.target.value })} placeholder="Brazil Santos" />
+        </Field>
+        <Field label={t("coffeeNameArLabel")}>
+          <input className="hr-input" dir="rtl" value={form.productNameAr} onChange={(e) => setForm({ ...form, productNameAr: e.target.value })} placeholder="برازيل سانتوس" />
+        </Field>
+        <Field label={t("countryLabel")}>
+          <input className="hr-input" value={form.countryEn} onChange={(e) => setForm({ ...form, countryEn: e.target.value })} placeholder="Brazil" />
+        </Field>
+        <Field label={t("regionLabel")}>
+          <input className="hr-input" value={form.regionEn} onChange={(e) => setForm({ ...form, regionEn: e.target.value })} />
+        </Field>
+        <Field label={t("processLabel")}>
+          <input className="hr-input" value={form.processEn} onChange={(e) => setForm({ ...form, processEn: e.target.value })} placeholder="Washed" />
+        </Field>
+        {/* Drives the green-bean draw on every production order derived from this
+            coffee: expectedGreenBeanKg = target / (1 - loss). */}
+        <Field label={t("roastLossLabel")}>
+          <input className="hr-input" type="number" min={0} max={50} step="0.1" value={form.expectedRoastLoss}
+            onChange={(e) => setForm({ ...form, expectedRoastLoss: e.target.value })} />
+        </Field>
+        <Field label={t("defaultGreenBeanLabel")} wide help={beans.length === 0 ? t("noGreenBeansYet") : undefined}>
+          <select className="hr-select" value={form.defaultGreenBeanId} onChange={(e) => setForm({ ...form, defaultGreenBeanId: e.target.value })}>
             <option value="">—</option>
             {beans.map((b) => (
               <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg}kg)</option>
             ))}
           </select>
-          {beans.length === 0 && (
-            <span className="text-[11px] text-oo-text-muted">{t("noGreenBeansYet")}</span>
-          )}
-        </label>
-        <button
-          type="button"
-          disabled={saving || !form.productNameEn.trim() || !form.countryEn.trim()}
-          onClick={submit}
-          className="w-full py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50"
-        >
-          {saving ? "…" : t("newCoffeeBtn")}
-        </button>
+        </Field>
       </div>
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -948,6 +616,7 @@ function BomEditor({
   onError: (m: string) => void;
 }) {
   const { t } = useI18n();
+  const L = useL();
   const [rows, setRows] = useState<BomRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1002,111 +671,77 @@ function BomEditor({
     }
   }
 
-  const field = "px-2.5 py-1.5 rounded-lg border border-oo-border-default text-sm";
-
   return (
-    <Modal title={`${t("bomLabel")} — ${product.name}`} onClose={onClose}>
+    <Dialog
+      open
+      title={`${t("bomLabel")} — ${product.name}`}
+      sub={<>{t("bomPerUnitLabel")} · {product.packSize} · <span className="hr-id">{product.skuCode}</span></>}
+      className="stk-wide"
+      onClose={onClose}
+      actions={loading ? undefined : (
+        <>
+          <Btn variant="primary" busy={saving} onClick={save}>{t("bomSaveBtn")}</Btn>
+          <Btn onClick={onClose}>{t("cancel")}</Btn>
+        </>
+      )}
+    >
       {loading ? (
-        <p className="text-sm text-oo-text-muted py-6 text-center">{t("loading")}</p>
+        <OpsLoading rows={3} />
       ) : (
-        <div className="space-y-3">
-          <p className="text-xs text-oo-text-muted">
-            {t("bomPerUnitLabel")} · {product.packSize}
-          </p>
-
-          {rows.length === 0 && (
-            <p className="text-sm text-oo-text-muted bg-oo-bg-subtle rounded-xl p-3">{t("bomEmpty")}</p>
-          )}
+        <div className="hr-stack" style={{ gap: 0 }}>
+          {rows.length === 0 && <Notice tone="info">{t("bomEmpty")}</Notice>}
 
           {rows.map((r, idx) => (
-            <div key={idx} className="flex items-center gap-2 flex-wrap border border-oo-border-default rounded-xl p-2.5">
+            <div key={idx} className="stk-bomrow">
+              <span className="stk-kind">{r.type === "ROASTED_COFFEE" ? L("بن محمص", "Roasted coffee") : L("مادة تعبئة", "Packaging material")}</span>
               {r.type === "ROASTED_COFFEE" ? (
                 <>
-                  <Coffee size={15} className="text-oo-text-secondary" />
-                  <select
-                    value={r.coffeeProductId ?? ""}
-                    onChange={(e) => update(idx, { coffeeProductId: e.target.value })}
-                    className={`${field} flex-1 min-w-[160px]`}
-                  >
+                  <select className="hr-select" aria-label={L("بن محمص", "Roasted coffee")} value={r.coffeeProductId ?? ""} onChange={(e) => update(idx, { coffeeProductId: e.target.value })}>
                     <option value="">—</option>
                     {coffees.map((c) => (
                       <option key={c.id} value={c.id}>{c.productNameEn}</option>
                     ))}
                   </select>
-                  <input
-                    type="number"
-                    step="0.001"
-                    min={0}
-                    value={r.quantityPerUnit}
-                    onChange={(e) => update(idx, { quantityPerUnit: Number(e.target.value) })}
-                    className={`${field} w-24`}
-                  />
-                  <span className="text-xs font-bold text-oo-text-muted">kg</span>
+                  <input className="hr-input" type="number" step="0.001" min={0} aria-label={t("bomPerUnitLabel")} value={r.quantityPerUnit}
+                    onChange={(e) => update(idx, { quantityPerUnit: Number(e.target.value) })} />
+                  <span className="stk-u">kg</span>
                 </>
               ) : (
                 <>
-                  <Tag size={15} className="text-oo-text-secondary" />
-                  <select
-                    value={r.materialItemId ?? ""}
-                    onChange={(e) => update(idx, { materialItemId: e.target.value })}
-                    className={`${field} flex-1 min-w-[160px]`}
-                  >
+                  <select className="hr-select" aria-label={L("مادة تعبئة", "Packaging material")} value={r.materialItemId ?? ""} onChange={(e) => update(idx, { materialItemId: e.target.value })}>
                     <option value="">—</option>
                     {materials.map((m) => (
                       <option key={m.id} value={m.id}>{m.name} ({m.code})</option>
                     ))}
                   </select>
-                  <input
-                    type="number"
-                    step="1"
-                    min={0}
-                    value={r.quantityPerUnit}
-                    onChange={(e) => update(idx, { quantityPerUnit: Number(e.target.value) })}
-                    className={`${field} w-24`}
-                  />
-                  <span className="text-xs font-bold text-oo-text-muted">pcs</span>
+                  <input className="hr-input" type="number" step="1" min={0} aria-label={t("bomPerUnitLabel")} value={r.quantityPerUnit}
+                    onChange={(e) => update(idx, { quantityPerUnit: Number(e.target.value) })} />
+                  <span className="stk-u">pcs</span>
                 </>
               )}
-              <button
-                type="button"
-                onClick={() => setRows(rows.filter((_, i) => i !== idx))}
-                className="p-1.5 rounded-lg text-oo-status-blocked hover:bg-red-50"
-                aria-label="Remove component"
-              >
-                <Trash2 size={15} />
-              </button>
+              <Btn size="sm" variant="ghost" className="hr-iconbtn" aria-label="Remove component" title="Remove component"
+                onClick={() => setRows(rows.filter((_, i) => i !== idx))}>
+                <TrashIcon />
+              </Btn>
             </div>
           ))}
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 12 }}>
+            <Btn size="sm" variant="ghost"
               onClick={() =>
                 setRows([...rows, { type: "ROASTED_COFFEE", coffeeProductId: product.coffee?.id ?? null, materialItemId: null, quantityPerUnit: product.weightGrams / 1000 }])
               }
-              className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold hover:bg-oo-bg-subtle"
             >
-              <Coffee size={13} className="inline me-1" /> {t("bomAddCoffee")}
-            </button>
-            <button
-              type="button"
+              <PlusIcon />{t("bomAddCoffee")}
+            </Btn>
+            <Btn size="sm" variant="ghost"
               onClick={() => setRows([...rows, { type: "MATERIAL", coffeeProductId: null, materialItemId: null, quantityPerUnit: 1 }])}
-              className="px-3 py-1.5 rounded-lg border border-oo-border-strong text-xs font-bold hover:bg-oo-bg-subtle"
             >
-              <Tag size={13} className="inline me-1" /> {t("bomAddMaterial")}
-            </button>
+              <PlusIcon />{t("bomAddMaterial")}
+            </Btn>
           </div>
-
-          <button
-            type="button"
-            disabled={saving}
-            onClick={save}
-            className="w-full py-2.5 rounded-xl bg-oo-action-primary text-white font-bold text-sm disabled:opacity-50"
-          >
-            {saving ? "…" : t("bomSaveBtn")}
-          </button>
         </div>
       )}
-    </Modal>
+    </Dialog>
   );
 }

@@ -1,0 +1,97 @@
+/* Users & permissions (/dashboard/employees) — Direction 2.1 visual port (UI batch 1).
+   Only layout glue for this page: every colour, radius, size and type style is a shared
+   Direction 2.1 token (--hr-* from components/hr/hr.css, which map to the shell tokens).
+   Scoped by [data-emp-root]; the dialogs render inside it. */
+
+[data-emp-root] .emp-strong { font-weight: 600; color: var(--hr-text); }
+[data-emp-root] .emp-block { display: block; }
+[data-emp-root] .emp-p { margin: 0; font-size: 14px; color: var(--hr-text-2); }
+[data-emp-root] .emp-link { color: var(--hr-link); text-decoration: underline; }
+[data-emp-root] .emp-btns { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* Notices (pending requests, identity, conflicts, MFA). */
+[data-emp-root] .emp-notice { display: flex; flex-direction: column; gap: 4px; color: var(--hr-text); }
+[data-emp-root] .emp-notice p { margin: 0; }
+[data-emp-root] .emp-notice-title { font-weight: 600; }
+[data-emp-root] .emp-reqs { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+[data-emp-root] .emp-reqs > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--hr-border-subtle); }
+[data-emp-root] .emp-reqs > li:first-child { border-top: 0; padding-top: 0; }
+[data-emp-root] .emp-bullets { margin: 4px 0 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
+[data-emp-root] .emp-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+[data-emp-root] .emp-row-text { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The MFA panel: a white sheet with the shared table. */
+[data-emp-root] .emp-panel { border-radius: var(--hr-r-lg); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+[data-emp-root] .emp-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+[data-emp-root] .emp-panel-title { display: inline-flex; align-items: flex-start; gap: 8px; font-weight: 600; margin: 0; }
+[data-emp-root] .emp-panel-title svg { color: var(--hr-warning); flex: none; margin-top: 3px; }
+[data-emp-root] .emp-panel .hr-table td { height: 40px; }
+
+/* The directory. */
+[data-emp-root] .emp-who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+[data-emp-root] .emp-avatar { width: 32px; height: 32px; margin: 0; }
+[data-emp-root] .emp-whotext { display: flex; flex-direction: column; min-width: 0; line-height: 20px; }
+[data-emp-root] .emp-name { font-weight: 500; color: var(--hr-text); }
+[data-emp-root] .emp-user { font-family: var(--hr-num); font-size: 12.5px; color: var(--hr-muted); align-self: flex-start; }
+[data-emp-root] .emp-table td { white-space: nowrap; }
+[data-emp-root] .emp-table td.m-title { padding-block: 7px; }
+[data-emp-root] .emp-table tr.is-inactive .emp-name { color: var(--hr-muted); }
+[data-emp-root] .emp-table tr.is-inactive .emp-avatar { background: var(--hr-danger-tint); color: var(--hr-danger); }
+[data-emp-root] .emp-table td.m-end { text-align: end; }
+[data-emp-root] .emp-counts { display: inline-flex; gap: 10px; font-size: 13px; color: var(--hr-text-2); }
+[data-emp-root] .emp-route { display: inline-flex; align-items: center; gap: 6px; color: var(--hr-text-2); }
+[data-emp-root] .emp-route svg { color: var(--hr-muted); }
+[data-emp-root] .emp-status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+[data-emp-root] .emp-badge { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 1; white-space: nowrap; }
+[data-emp-root] .emp-badge.tone-success { background: var(--hr-success-tint); color: var(--hr-success); }
+[data-emp-root] .emp-badge.tone-warning { background: var(--hr-warning-tint); color: var(--hr-warning); }
+[data-emp-root] .emp-badge.tone-neutral { background: var(--hr-subtle); color: var(--hr-muted); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+
+/* The toast: the kit's Notice, held at the end corner for four seconds as before. */
+[data-emp-root] .emp-toast { position: fixed; bottom: 24px; inset-inline-end: 24px; z-index: 100; max-width: min(440px, calc(100vw - 32px)); border-radius: var(--hr-r-sm); box-shadow: var(--shadow-pop); }
+[data-emp-root] .emp-toast .hr-notice { font-weight: 500; color: var(--hr-text); }
+
+/* The create / edit dialog. */
+.hr-dialog.emp-dialog { width: min(760px, 100%); }
+[data-emp-root] .emp-form { display: flex; flex-direction: column; gap: 16px; }
+[data-emp-root] .emp-prefixed { position: relative; display: block; }
+/* The field is LTR in both languages, so «@» sits on its physical left. */
+[data-emp-root] .emp-prefix { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--hr-muted); font-weight: 600; pointer-events: none; }
+[data-emp-root] .emp-prefixed .hr-input { padding-left: 26px; font-family: var(--hr-num); }
+[data-emp-root] .emp-pin { font-family: var(--hr-num); letter-spacing: 0.2em; }
+[data-emp-root] .emp-switchrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: var(--hr-r-sm); background: var(--hr-subtle); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+[data-emp-root] .emp-switch { appearance: none; border: 0; cursor: pointer; flex: none; position: relative; width: 40px; height: 22px; border-radius: 999px; background: var(--hr-border-control); transition: background 120ms; }
+[data-emp-root] .emp-switch[aria-checked="true"] { background: var(--hr-success); }
+[data-emp-root] .emp-switch > span { position: absolute; top: 2px; inset-inline-start: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--hr-surface); box-shadow: 0 1px 2px rgb(40 36 26 / 0.2); transition: inset-inline-start 120ms; }
+[data-emp-root] .emp-switch[aria-checked="true"] > span { inset-inline-start: 20px; }
+[data-emp-root] .emp-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+[data-emp-root] .emp-check { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+[data-emp-root] .emp-check input { margin-top: 4px; width: 16px; height: 16px; accent-color: var(--hr-primary); flex: none; }
+[data-emp-root] .emp-group { display: flex; flex-direction: column; gap: 8px; }
+[data-emp-root] .emp-roles { display: flex; flex-wrap: wrap; gap: 6px; }
+[data-emp-root] .emp-permhead { display: inline-flex; align-items: center; gap: 6px; }
+[data-emp-root] .emp-permhead svg { color: var(--hr-muted); }
+[data-emp-root] .emp-perms { display: flex; flex-direction: column; border-radius: var(--hr-r-md); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+[data-emp-root] .emp-perm { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--hr-border-subtle); }
+[data-emp-root] .emp-perm:first-child { border-top: 0; }
+[data-emp-root] .emp-permrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+[data-emp-root] .emp-permrow .ops-seg > button { display: inline-flex; align-items: center; gap: 5px; padding: 0 12px; font-size: 13px; }
+[data-emp-root] .emp-subs { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+[data-emp-root] .emp-subs label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--hr-muted); cursor: pointer; }
+[data-emp-root] .emp-subs label.is-on { color: var(--hr-text); }
+[data-emp-root] .emp-subs input { width: 16px; height: 16px; accent-color: var(--hr-primary); }
+.hr-dialog.emp-dialog .emp-delete { margin-inline-end: auto; }
+
+@media (max-width: 767px) {
+  /* Phone list rows (MobileListRow): avatar + name + «role · status» on the start, actions at the end. */
+  [data-emp-root] .emp-table td.m-title { padding-block: 0; }
+  [data-emp-root] .emp-table .hr-msub .hr-dot { font-size: 13px; }
+  [data-emp-root] .emp-table td.m-end .hr-btn { height: 36px; }
+  [data-emp-root] .emp-table td.m-end .hr-iconbtn { width: 36px; }
+  [data-emp-root] .emp-toast { inset-inline: 16px; bottom: calc(16px + 64px + env(safe-area-inset-bottom)); max-width: none; }
+  [data-emp-root] .emp-permrow { flex-direction: column; align-items: stretch; }
+  [data-emp-root] .emp-permrow .ops-seg { display: flex; }
+  [data-emp-root] .emp-permrow .ops-seg > button { flex: 1 1 0; justify-content: center; height: 36px; }
+  [data-emp-root] .emp-subs label { min-height: 32px; }
+  .hr-dialog.emp-dialog .emp-delete { margin-inline-end: 0; }
+}

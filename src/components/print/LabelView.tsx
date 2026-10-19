@@ -7,7 +7,7 @@
  * «Print/Label · Cupping Results» 1646:6432 (Size × Language × Traceability / State).
  */
 import type { CSSProperties, ReactNode } from "react";
-import { descriptorLabel } from "@/app/dashboard/cupping/CuppingForm";
+import { descriptorLabel } from "@/lib/cupping/descriptors";
 import { MISSING, needsLtrIsolation, scoreText, shown, splitLtrRuns, type PrintLang } from "@/lib/print/bidi";
 import { labelGapMm, labelMetrics, logoPrints, notesText, printedNotes, type CupData, type LabelData, type OriginData } from "@/lib/print/content";
 import { LEGACY_CAVEAT, NO_APPROVED_SCORE, finalMeta, finalMetaShort, legacyMeta, stateMarker } from "@/lib/print/cupping";

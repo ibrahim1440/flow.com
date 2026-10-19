@@ -1,20 +1,25 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
-import { FlaskConical, CheckCircle, Coffee } from "lucide-react";
 import CuppingForm, { type CuppingFormData } from "@/app/dashboard/cupping/CuppingForm";
+import { GuestShell, type GuestLang } from "../GuestShell";
 
 type SessionInfo = { id: string; name: string; status: string };
 
 type Step = "loading" | "closed" | "not-found" | "name" | "form" | "done";
 
+// Guest scoring of a single-sample session by link — Direction 2.1, GX-G G-08 (Figma
+// 1228:5609 name, 1228:103453 scoring, 1228:107763 done). The requests, their bodies and the
+// one-score-per-name guard are unchanged; only how the page is drawn changed.
 export default function GuestCuppingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
 
+  const [lang, setLang] = useState<GuestLang>("ar");
+  const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [step, setStep] = useState<Step>("loading");
   const [name, setName] = useState("");
-  const [nameError, setNameError] = useState("");
+  const [nameError, setNameError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [finalScore, setFinalScore] = useState(0);
@@ -32,8 +37,8 @@ export default function GuestCuppingPage({ params }: { params: Promise<{ id: str
 
   function handleNameSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) { setNameError("Please enter your name"); return; }
-    setNameError("");
+    if (!name.trim()) { setNameError(true); return; }
+    setNameError(false);
     setStep("form");
   }
 
@@ -49,8 +54,8 @@ export default function GuestCuppingPage({ params }: { params: Promise<{ id: str
       const j = await res.json().catch(() => ({}));
       // E6 / C-3: one score per guest name per session (server-side guard).
       setSubmitError(j.code === "CUPPING_ALREADY_SCORED"
-        ? "قيّمت هذه الجلسة مسبقًا بهذا الاسم — You have already scored this session under this name."
-        : j.error || "Failed to submit score");
+        ? L("قيّمت هذه الجلسة مسبقًا بهذا الاسم.", "You have already scored this session under this name.")
+        : j.error || L("تعذّر إرسال التقييم.", "Failed to submit score"));
       setSubmitting(false);
       return;
     }
@@ -59,144 +64,75 @@ export default function GuestCuppingPage({ params }: { params: Promise<{ id: str
     setSubmitting(false);
   }
 
+  const shell = (children: React.ReactNode, opts: { step?: "name" | "cups" | "done"; foot?: boolean } = {}) => (
+    <GuestShell lang={lang} onLang={setLang} title={session?.name} step={opts.step} foot={opts.foot}>{children}</GuestShell>
+  );
+
   // ── States ────────────────────────────────────────────────────────────────────
 
   if (step === "loading") {
-    return (
-      <Shell>
-        <div className="text-center py-16 text-brown/40 text-sm">Loading…</div>
-      </Shell>
-    );
+    return shell(<div className="gc-state" aria-busy="true"><span>{L("جارٍ التحميل…", "Loading…")}</span></div>);
   }
 
   if (step === "not-found") {
-    return (
-      <Shell>
-        <div className="text-center py-16">
-          <Coffee size={36} className="text-orange/30 mx-auto mb-3" />
-          <p className="font-bold text-charcoal">Session not found</p>
-          <p className="text-sm text-brown/50 mt-1">Please check your link and try again.</p>
-        </div>
-      </Shell>
+    return shell(
+      <div className="gc-state">
+        <b>{L("الجلسة غير موجودة", "Session not found")}</b>
+        <span>{L("تحقّق من الرابط ثم أعد المحاولة.", "Please check your link and try again.")}</span>
+      </div>,
     );
   }
 
   if (step === "closed") {
-    return (
-      <Shell>
-        <div className="text-center py-12 space-y-3 px-4">
-          <div className="text-5xl mb-2">☕</div>
-          <p className="text-xl font-extrabold text-charcoal">
-            This cupping session has been closed.
-          </p>
-          <p className="text-lg font-bold text-charcoal/70">
-            عذراً، تم إغلاق جلسة التذوق هذه.
-          </p>
-          <p className="text-sm text-brown/50 mt-2">Thank you for your interest!</p>
-        </div>
-      </Shell>
+    return shell(
+      <div className="gc-state">
+        <b>{L("أُغلقت جلسة التذوق هذه.", "This cupping session has been closed.")}</b>
+        <span>{L("شكرًا لاهتمامك.", "Thank you for your interest!")}</span>
+      </div>,
     );
   }
 
   if (step === "done") {
-    return (
-      <Shell>
-        <div className="text-center py-12 space-y-4 px-4">
-          <CheckCircle size={48} className="text-green-500 mx-auto" />
-          <p className="text-xl font-extrabold text-charcoal">Score Submitted!</p>
-          <p className="text-5xl font-black text-green-600">{finalScore.toFixed(2)}</p>
-          <p className="text-sm text-brown/50 mt-1">
-            Thank you, <strong className="text-charcoal">{name}</strong>!
-            Your score has been recorded.
-          </p>
-          <p className="text-xs text-brown/40 mt-4">
-            شكراً لك! تم تسجيل تقييمك.
-          </p>
-        </div>
-      </Shell>
+    return shell(
+      <div className="gc-done" data-testid="guest-done">
+        <span>{L("تقييمك", "Your score")}</span>
+        <strong className="cf-num">{finalScore.toFixed(2)}</strong>
+        <b>{L("أُرسل تقييمك", "Score submitted")}</b>
+        <p>{L(`شكرًا ${name}. سُجّل تقييمك. لا تظهر النتائج للضيوف.`, `Thank you, ${name}. Your score has been recorded. Results are not shown to guests.`)}</p>
+      </div>,
+      { step: "done" },
     );
   }
 
   if (step === "name") {
-    return (
-      <Shell>
-        <div className="space-y-6 px-1">
-          <div className="text-center">
-            <FlaskConical size={40} className="text-orange mx-auto mb-3" />
-            <h2 className="text-xl font-extrabold text-charcoal">{session?.name}</h2>
-            <p className="text-sm text-brown/60 mt-1">SCA Cupping Session</p>
-          </div>
-
-          <form onSubmit={handleNameSubmit} className="space-y-4">
-            <div className="bg-white rounded-2xl border border-border p-5 space-y-3">
-              <label className="block text-sm font-extrabold text-charcoal uppercase tracking-wide">
-                Enter your name to start
-                <span className="block text-xs text-brown/50 normal-case tracking-normal mt-0.5 font-normal">
-                  أدخل اسمك للبدء
-                </span>
-              </label>
-              <input
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name / اسمك"
-                className="w-full px-4 py-3 rounded-xl border-2 border-border bg-cream text-charcoal text-base focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
-              />
-              {nameError && <p className="text-xs text-red-500 font-medium">{nameError}</p>}
-            </div>
-            <button
-              type="submit"
-              className="w-full py-4 rounded-xl bg-orange text-white font-extrabold text-base hover:bg-orange/90 transition-colors active:scale-[0.98]"
-            >
-              Start Cupping →
-            </button>
-          </form>
+    return shell(
+      <form onSubmit={handleNameSubmit} className="gc-form" noValidate>
+        <p className="gc-note"><b>{L("تذوق", "Cupping")} <span className="cf-num">SCA</span>.</b> {L("أدخل اسمك ثم قيّم الكوب. يُسجَّل تقييم واحد لكل اسم.", "Enter your name, then score the cup. One score is recorded per name.")}</p>
+        <div className="gc-field">
+          <label htmlFor="guest-name">{L("اسمك", "Your name")} <i aria-hidden="true">*</i></label>
+          <input id="guest-name" className="gc-input" autoFocus value={name} onChange={(e) => setName(e.target.value)}
+            aria-invalid={nameError || undefined} aria-describedby={nameError ? "guest-name-err" : undefined} autoComplete="name" />
+          {nameError ? <span id="guest-name-err" className="gc-err">{L("أدخل اسمك", "Please enter your name")}</span> : null}
         </div>
-      </Shell>
+        <button type="submit" className="hr-btn is-primary">{L("ابدأ التذوق", "Start cupping")}</button>
+      </form>,
+      { step: "name", foot: true },
     );
   }
 
   // step === "form"
-  return (
-    <Shell>
-      <div className="space-y-4">
-        <div>
-          <p className="text-xs text-brown/50 font-medium">Cupping as</p>
-          <p className="font-extrabold text-charcoal">{name}</p>
-          <p className="text-xs text-brown/40">{session?.name}</p>
-        </div>
-        {submitError && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600 font-medium">
-            {submitError}
-          </div>
-        )}
-        <CuppingForm
-          lang="en"
-          onSubmit={handleSubmit}
-          submitting={submitting}
-          submitLabel="Submit My Score"
-        />
-      </div>
-    </Shell>
-  );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-cream">
-      <div className="max-w-xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-orange flex items-center justify-center shrink-0">
-            <FlaskConical size={16} className="text-white" />
-          </div>
-          <div>
-            <p className="text-xs font-extrabold text-charcoal leading-none">HIQBAH COFFEE</p>
-            <p className="text-[10px] text-brown/50 leading-none mt-0.5">SCA Cupping</p>
-          </div>
-        </div>
-        {children}
-      </div>
-    </div>
+  return shell(
+    <>
+      <p className="gc-cap">{L(`التقييم باسم ${name}`, `Scoring as ${name}`)}</p>
+      {submitError ? <div className="hr-notice tone-danger" role="alert">{submitError}</div> : null}
+      <CuppingForm
+        lang={lang}
+        variant="guest"
+        onSubmit={handleSubmit}
+        submitting={submitting}
+        submitLabel={L("إرسال تقييمي", "Submit my score")}
+      />
+    </>,
+    { step: "cups", foot: true },
   );
 }

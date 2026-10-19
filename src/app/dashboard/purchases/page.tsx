@@ -1,17 +1,28 @@
 "use client";
-
+// Purchases — Direction 2.1 (migration phase 2; Figma 221:748 at 1440, 273:6591 at 1024, the
+// «تسجيل مشتريات» phone page 227:1505).
+//
+// Visual port only: the same requests (GET /api/purchases, /api/suppliers, /api/green-beans; POST
+// /api/suppliers for a new supplier, then POST /api/purchases), the same receiving gate and the
+// same client validation as the legacy screen. Recording a purchase moves from a centred modal to
+// the frame's pane: docked beside the register at 1440, a drawer at 1024, a full page on the phone.
+// Export, the period filter and the sort control are drawn in the frame but not built.
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  ShoppingBag, Plus, Search, X, ChevronDown, Package, CalendarDays, Banknote,
-} from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { Btn, Field, Notice, OpsBanner, OpsLoading, OpsPane, OpsRoot, PageHeader, opsDate, useL } from "@/components/ops/ui";
+import "@/components/ops/stock.css";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import { PlusIcon } from "../_components/stock-materials";
 
 /** A stored quantity for display: "—" when it is not a finite number (Infinity arrives as JSON null), so one bad row cannot crash the screen. */
 const fmtQty = (v: number | null | undefined, digits: number): string =>
   typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "—";
+
+const money = (v: number | null | undefined, digits = 2): string =>
+  typeof v === "number" && Number.isFinite(v)
+    ? v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })
+    : "—";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,9 +53,6 @@ type FormState = {
   notes: string;
 };
 
-const INPUT_CLS =
-  "w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors bg-white";
-
 function emptyForm(): FormState {
   return {
     supplierId: "",
@@ -59,38 +67,9 @@ function emptyForm(): FormState {
   };
 }
 
-// ─── Stats Card ───────────────────────────────────────────────────────────────
+// ─── Add Purchase pane (221:748 drawer · 227:1505 phone page) ────────────────
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  color,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  sub?: string;
-  color: string;
-}) {
-  return (
-    <div className="bg-white rounded-2xl border border-border shadow-sm p-4 flex items-center gap-4">
-      <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${color}`}>
-        <Icon size={20} strokeWidth={1.8} className="text-white" />
-      </div>
-      <div className="min-w-0">
-        <p className="text-xs font-bold text-brown/60 uppercase tracking-wide truncate">{label}</p>
-        <p className="text-xl font-extrabold text-charcoal leading-tight">{value}</p>
-        {sub && <p className="text-xs text-brown/50 mt-0.5">{sub}</p>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Add Purchase Modal ───────────────────────────────────────────────────────
-
-function AddPurchaseModal({
+function AddPurchasePane({
   suppliers,
   beans,
   onClose,
@@ -102,6 +81,7 @@ function AddPurchaseModal({
   onSuccess: (msg: string) => void;
 }) {
   const { t, lang } = useI18n();
+  const L = useL();
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -189,197 +169,84 @@ function AddPurchaseModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+    <OpsPane
+      testId="purchase-pane"
+      label={t("addPurchase")}
+      title={t("addPurchase")}
+      sub={t("greenBeanPurchase")}
+      phone="page"
+      busy={saving}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn variant="primary" type="submit" form="purchase-form" disabled={saving} style={{ flex: 1 }}>{saving ? t("saving") : t("addPurchase")}</Btn>
+          <Btn onClick={onClose} disabled={saving}>{t("cancel")}</Btn>
+        </>
+      }
     >
-      <div
-        className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-lg font-extrabold text-charcoal">{t("addPurchase")}</h2>
-            <p className="text-xs text-brown/60 mt-0.5">{t("greenBeanPurchase")}</p>
-          </div>
-          <button onClick={onClose} className="text-brown/40 hover:text-charcoal transition-colors">
-            <X size={20} />
-          </button>
-        </div>
+      {formError ? <Notice tone="danger">{formError}</Notice> : null}
+      <form id="purchase-form" onSubmit={handleSubmit} className="hr-stack" style={{ gap: 14 }}>
+        <Field label={`${t("supplier")} *`}>
+          <select className="hr-select" value={form.isNewSupplier ? "__new__" : form.supplierId} onChange={(e) => handleSupplierSelect(e.target.value)}>
+            <option value="">{t("selectSupplier")}</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+            <option value="__new__">＋ {t("addNewSupplier")}</option>
+          </select>
+        </Field>
 
-        {formError && (
-          <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 font-medium">
-            {formError}
+        {form.isNewSupplier && (
+          <div className="hr-stack" style={{ gap: 12, padding: 12, borderRadius: 9, background: "var(--surface-subtle)" }}>
+            <span className="hr-label">{t("newSupplierSection")}</span>
+            <Field label={`${t("supplierName")} *`}>
+              <input className="hr-input" value={form.newSupplierName} onChange={(e) => set("newSupplierName", e.target.value)} placeholder="مثال: شركة المحمصة للتوريد" />
+            </Field>
+            <Field label={t("supplierContact")}>
+              <input className="hr-input" dir="ltr" value={form.newSupplierContact} onChange={(e) => set("newSupplierContact", e.target.value)} placeholder="+966 5x xxx xxxx" />
+            </Field>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Supplier */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-              {t("supplier")} *
-            </label>
-            <div className="relative">
-              <select
-                value={form.isNewSupplier ? "__new__" : form.supplierId}
-                onChange={(e) => handleSupplierSelect(e.target.value)}
-                className={INPUT_CLS + " appearance-none ltr:pr-8 rtl:pl-8 cursor-pointer"}
-              >
-                <option value="">{t("selectSupplier")}</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-                <option value="__new__">＋ {t("addNewSupplier")}</option>
-              </select>
-              <ChevronDown size={14} className="absolute ltr:right-3 rtl:left-3 top-1/2 -translate-y-1/2 text-brown/40 pointer-events-none" />
-            </div>
-          </div>
+        <Field label={`${t("greenBeans")} *`} help={L("يُضاف الوزن إلى رصيد هذا اللوت، وتُسجَّل حركة «وارد · شراء».", "The weight is added to this lot's balance, and an «In · purchase» movement is recorded.")}>
+          <select className="hr-select" value={form.itemId} onChange={(e) => set("itemId", e.target.value)}>
+            <option value="">{t("selectItem")}</option>
+            {beans.map((b) => (
+              <option key={b.id} value={b.id}>
+                {lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType} ({b.serialNumber})
+              </option>
+            ))}
+          </select>
+        </Field>
 
-          {/* New Supplier inline fields */}
-          {form.isNewSupplier && (
-            <div className="rounded-xl border-2 border-orange/30 bg-orange/5 p-4 space-y-3">
-              <p className="text-xs font-extrabold text-orange uppercase tracking-wide">
-                {t("newSupplierSection")}
-              </p>
-              <div>
-                <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-                  {t("supplierName")} *
-                </label>
-                <input
-                  value={form.newSupplierName}
-                  onChange={(e) => set("newSupplierName", e.target.value)}
-                  placeholder="مثال: شركة المحمصة للتوريد"
-                  className={INPUT_CLS}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-                  {t("supplierContact")}
-                </label>
-                <input
-                  value={form.newSupplierContact}
-                  onChange={(e) => set("newSupplierContact", e.target.value)}
-                  placeholder="+966 5x xxx xxxx"
-                  className={INPUT_CLS}
-                />
-              </div>
-            </div>
-          )}
+        <div className="hr-form" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+          <Field label={`${t("quantityKg")} *`}>
+            <input className="hr-input" type="number" min="0.01" step="0.01" value={form.quantity} onChange={(e) => set("quantity", e.target.value)} placeholder="0.00" />
+          </Field>
+          <Field label={`${t("costPerUnit")} *`}>
+            <input className="hr-input" type="number" min="0.01" step="0.01" value={form.costPerUnit} onChange={(e) => set("costPerUnit", e.target.value)} placeholder="0.00" />
+          </Field>
+        </div>
 
-          {/* Green Bean item */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-              {t("greenBeans")} *
-            </label>
-            <div className="relative">
-              <select
-                value={form.itemId}
-                onChange={(e) => set("itemId", e.target.value)}
-                className={INPUT_CLS + " appearance-none ltr:pr-8 rtl:pl-8 cursor-pointer"}
-              >
-                <option value="">{t("selectItem")}</option>
-                {beans.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType} ({b.serialNumber})
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute ltr:right-3 rtl:left-3 top-1/2 -translate-y-1/2 text-brown/40 pointer-events-none" />
-            </div>
-          </div>
+        <Field label={`${t("purchaseDate")} *`}>
+          <input className="hr-input" type="date" value={form.purchaseDate} onChange={(e) => set("purchaseDate", e.target.value)} />
+        </Field>
 
-          {/* Quantity + Cost per unit */}
-          <div className="grid grid-cols-2 gap-3">
+        <Field label={t("notes")}>
+          <textarea className="hr-textarea" value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2}
+            placeholder={L("ملاحظات اختيارية عن الشحنة…", "Optional notes about the shipment…")} />
+        </Field>
+
+        {previewTotal > 0 && (
+          <dl className="hr-kv">
             <div>
-              <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-                {t("quantityKg")} *
-              </label>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={form.quantity}
-                onChange={(e) => set("quantity", e.target.value)}
-                placeholder="0.00"
-                className={INPUT_CLS}
-              />
+              <dt>{t("totalCost")}</dt>
+              <dd><strong className="hr-num">{money(previewTotal)}</strong> {lang === "ar" ? "ر.س" : "SAR"}</dd>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-                {t("costPerUnit")} *
-              </label>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={form.costPerUnit}
-                onChange={(e) => set("costPerUnit", e.target.value)}
-                placeholder="0.00"
-                className={INPUT_CLS}
-              />
-            </div>
-          </div>
-
-          {/* Live total preview */}
-          {previewTotal > 0 && (
-            <div className="flex items-center justify-between px-4 py-3 bg-cream rounded-xl border border-border">
-              <span className="text-xs font-bold text-brown/60 uppercase tracking-wide">
-                {t("totalCost")}
-              </span>
-              <span className="text-lg font-extrabold text-charcoal">
-                {previewTotal.toLocaleString("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ريال
-              </span>
-            </div>
-          )}
-
-          {/* Purchase date */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-              {t("purchaseDate")} *
-            </label>
-            <input
-              type="date"
-              value={form.purchaseDate}
-              onChange={(e) => set("purchaseDate", e.target.value)}
-              className={INPUT_CLS}
-            />
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
-              {t("notes")}
-            </label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => set("notes", e.target.value)}
-              rows={2}
-              placeholder="ملاحظات اختيارية عن الشحنة…"
-              className={INPUT_CLS + " resize-none"}
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-1">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? t("saving") : t("addPurchase")}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2.5 border-2 border-border rounded-xl text-sm font-bold text-brown hover:bg-gray-50 transition-colors"
-            >
-              {t("cancel")}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+          </dl>
+        )}
+      </form>
+    </OpsPane>
   );
 }
 
@@ -387,6 +254,7 @@ function AddPurchaseModal({
 
 export default function PurchasesPage() {
   const { t, lang } = useI18n();
+  const L = useL();
   const user = useUser();
   // Recording a purchase is the receiving duty, as the API requires (POST /api/purchases: inventory › receive).
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "inventory", "receive");
@@ -417,7 +285,24 @@ export default function PurchasesPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // The first load: the same three requests as loadData, with every state update after the await.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [pRes, sRes, bRes] = await Promise.all([
+        fetch("/api/purchases"),
+        fetch("/api/suppliers"),
+        fetch("/api/green-beans"),
+      ]);
+      const [pj, sj, bj] = await Promise.all([pRes, sRes, bRes].map((r) => (r.ok ? r.json() : null)));
+      if (cancelled) return;
+      if (pj) setPurchases(pj);
+      if (sj) setSuppliers(sj);
+      if (bj) setBeans(bj);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Build a bean lookup map for table display
   const beanMap = useMemo(
@@ -450,6 +335,9 @@ export default function PurchasesPage() {
   const totalSpendSAR = purchases.reduce((s, p) => s + p.totalCost, 0);
   const totalKg = purchases.reduce((s, p) => s + p.quantity, 0);
   const uniqueSuppliers = new Set(purchases.map((p) => p.supplier.id)).size;
+  const shownKg = filtered.reduce((s, p) => s + (Number.isFinite(p.quantity) ? p.quantity : 0), 0);
+  const shownSpend = filtered.reduce((s, p) => s + (Number.isFinite(p.totalCost) ? p.totalCost : 0), 0);
+  const latest = purchases.reduce<PurchaseRecord | null>((a, p) => (!a || p.purchaseDate > a.purchaseDate ? p : a), null);
 
   function handleSuccess(msg: string) {
     setShowForm(false);
@@ -457,155 +345,115 @@ export default function PurchasesPage() {
     loadData();
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`fixed top-4 ltr:right-4 rtl:left-4 z-[100] px-4 py-3 rounded-xl text-sm font-bold shadow-lg flex items-center gap-3 max-w-sm ${
-            toast.type === "ok"
-              ? "bg-green-600 text-white"
-              : "bg-red-600 text-white"
-          }`}
-        >
-          <span className="flex-1">{toast.msg}</span>
-          <button onClick={() => setToast(null)}><X size={14} /></button>
-        </div>
-      )}
+  const sar = lang === "ar" ? "ر.س" : "SAR";
+  const kgU = lang === "ar" ? "كغ" : "kg";
+  const open = canCreate && showForm;
 
-      {/* Modal */}
-      {showForm && (
-        <AddPurchaseModal
+  return (
+    <OpsRoot className="stk-purchases">
+    <div className={`hr-split${open ? " has-preview" : ""}`}>
+    <div className="hr-page">
+      <PageHeader
+        title={t("purchasesTitle")}
+        actions={canCreate ? <Btn variant="primary" onClick={() => setShowForm(true)}><PlusIcon />{t("addPurchase")}</Btn> : null}
+      >
+        <span className="hr-caption">{t("purchasesSubtitle")}</span>
+        <span className="hr-caption">{lang === "ar" ? `${uniqueSuppliers} موردين` : `${uniqueSuppliers} suppliers`}</span>
+      </PageHeader>
+
+      {toast ? <OpsBanner tone={toast.type === "ok" ? "success" : "danger"} onClose={() => setToast(null)}>{toast.msg}</OpsBanner> : null}
+
+      {loading ? <OpsLoading /> : (
+        <>
+          <div className="stk-metrics" style={{ ["--stk-cols" as string]: 3 }}>
+            <div>
+              <span className="stk-lbl">{t("totalSpend")}</span>
+              <span className="stk-mid">{money(totalSpendSAR, 0)}<span className="stk-unit">{sar}</span></span>
+              <span className="stk-d">{purchases.length} {lang === "ar" ? "عملية شراء" : "transactions"}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{t("totalReceived")}</span>
+              <span className="stk-mid">{totalKg.toFixed(1)}<span className="stk-unit">{kgU}</span></span>
+              <span className="stk-d">{lang === "ar" ? "بن أخضر مستلم" : "green bean received"}</span>
+            </div>
+            <div>
+              <span className="stk-lbl">{t("suppliersCount")}</span>
+              <span className="stk-mid">{uniqueSuppliers}</span>
+              <span className="stk-d">{latest ? `${L("آخر شراء", "Last purchase")} ${opsDate(latest.purchaseDate, lang)} · ${latest.supplier.name}` : (lang === "ar" ? "مورد نشط" : "active suppliers")}</span>
+            </div>
+          </div>
+
+          <div className="stk-tool">
+            <input type="search" className="hr-input hr-search" placeholder={t("searchPurchases")} aria-label={t("searchPurchases")}
+              value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="hr-state"><h3>{search ? t("noData") : t("noPurchases")}</h3></div>
+          ) : (
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow" aria-label={t("purchasesTitle")}>
+                <thead>
+                  <tr>
+                    <th>{t("date")}</th>
+                    <th>{t("supplier")}</th>
+                    <th>{t("greenBeans")}</th>
+                    <th className="num">{lang === "ar" ? "الكمية · كغ" : "Qty · kg"}</th>
+                    <th className="num">{t("costPerUnit")}</th>
+                    <th className="num">{t("totalCost")}</th>
+                    <th className="hr-hide-compact hr-hide-preview">{t("notes")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((p) => {
+                    const bean = p.itemId ? beanMap.get(p.itemId) : undefined;
+                    return (
+                      <tr key={p.id}>
+                        <td className="hr-caption" style={{ color: "var(--text-secondary)" }}>{opsDate(p.purchaseDate, lang)}</td>
+                        <td className="m-title">
+                          <span className="strong">{p.supplier.name}</span>
+                          {p.supplier.contact ? <span className="stk-sub hr-desktop-only" dir="ltr" style={{ textAlign: "start" }}><bdi>{p.supplier.contact}</bdi></span> : null}
+                          <span className="hr-msub">
+                            {opsDate(p.purchaseDate, lang)} · {beanLabel(p.itemId)} · <span className="hr-num">{fmtQty(p.quantity, 2)}</span> {kgU}
+                          </span>
+                        </td>
+                        <td>
+                          <span>{beanLabel(p.itemId)}</span>
+                          {bean ? <span className="stk-sub hr-id">{bean.serialNumber}</span> : null}
+                        </td>
+                        <td className="num"><span className="hr-num">{fmtQty(p.quantity, 2)}</span></td>
+                        <td className="num"><span className="hr-num">{fmtQty(p.costPerUnit, 2)}</span></td>
+                        <td className="num m-end" style={{ fontWeight: 600 }}><span className="hr-num">{money(p.totalCost)}</span><span className="hr-mobile-only">&nbsp;{sar}</span></td>
+                        <td className="hr-hide-compact hr-hide-preview hr-caption" style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.notes || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>{lang === "ar" ? `${filtered.length} عمليات شراء` : `${filtered.length} purchases`}</td>
+                    <td className="num stk-tot"><span className="hr-num">{fmtQty(shownKg, 2)}</span></td>
+                    <td />
+                    <td className="num stk-tot"><span className="hr-num">{money(shownSpend)}</span></td>
+                    <td className="hr-hide-compact hr-hide-preview" />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+
+      {open ? (
+        <AddPurchasePane
           suppliers={suppliers}
           beans={beans}
           onClose={() => setShowForm(false)}
           onSuccess={handleSuccess}
         />
-      )}
-
-      {/* Page header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("purchasesTitle")}</h1>
-          <p className="text-brown text-sm font-medium">{t("purchasesSubtitle")}</p>
-        </div>
-        {canCreate && (
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg hover:bg-orange/90 shadow-md shadow-orange/20 active:scale-[0.98] transition-all duration-200 font-bold text-sm"
-          >
-            <Plus size={18} />
-            {t("addPurchase")}
-          </button>
-        )}
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          icon={Banknote}
-          label={t("totalSpend")}
-          value={`${totalSpendSAR.toLocaleString("ar-SA", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} ر.س`}
-          sub={`${purchases.length} ${lang === "ar" ? "عملية شراء" : "transactions"}`}
-          color="bg-orange"
-        />
-        <StatCard
-          icon={Package}
-          label={t("totalReceived")}
-          value={`${totalKg.toFixed(1)} كغ`}
-          sub={lang === "ar" ? "بن أخضر مستلم" : "green bean received"}
-          color="bg-emerald-500"
-        />
-        <StatCard
-          icon={ShoppingBag}
-          label={t("suppliersCount")}
-          value={String(uniqueSuppliers)}
-          sub={lang === "ar" ? "مورد نشط" : "active suppliers"}
-          color="bg-blue-500"
-        />
-      </div>
-
-      {/* Search */}
-      <div className="relative">
-        <Search
-          size={18}
-          className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-gray-400"
-        />
-        <input
-          type="text"
-          placeholder={t("searchPurchases")}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-        />
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-brown/50">
-            <div className="w-7 h-7 border-3 border-orange border-t-transparent rounded-full animate-spin mr-3" />
-            {t("loading")}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <ShoppingBag size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="font-medium">{search ? t("noData") : t("noPurchases")}</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-cream">
-                <tr>
-                  <th className="text-start px-4 py-3 font-semibold text-charcoal whitespace-nowrap">
-                    <div className="flex items-center gap-1.5"><CalendarDays size={14} />{t("date")}</div>
-                  </th>
-                  <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("supplier")}</th>
-                  <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("greenBeans")}</th>
-                  <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("quantityKg")}</th>
-                  <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("costPerUnit")}</th>
-                  <th className="text-end px-4 py-3 font-semibold text-charcoal">{t("totalCost")}</th>
-                  <th className="text-start px-4 py-3 font-semibold text-charcoal">{t("notes")}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-cream/50 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap text-brown font-mono text-xs">
-                      {formatDate(p.purchaseDate)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-charcoal">{p.supplier.name}</p>
-                      {p.supplier.contact && (
-                        <p className="text-xs text-brown/50">{p.supplier.contact}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-medium">{beanLabel(p.itemId)}</td>
-                    <td className="px-4 py-3 text-end">
-                      <span className="font-bold text-charcoal">{p.quantity}</span>
-                      <span className="text-brown/50 text-xs"> كغ</span>
-                    </td>
-                    <td className="px-4 py-3 text-end text-brown">
-                      {fmtQty(p.costPerUnit, 2)}
-                    </td>
-                    <td className="px-4 py-3 text-end">
-                      <span className="font-bold text-charcoal">
-                        {typeof p.totalCost === "number" && Number.isFinite(p.totalCost)
-                          ? p.totalCost.toLocaleString("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                          : "—"}
-                      </span>
-                      <span className="text-brown/50 text-xs"> ر.س</span>
-                    </td>
-                    <td className="px-4 py-3 text-brown/70 max-w-[180px] truncate">
-                      {p.notes || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      ) : null}
     </div>
+    </OpsRoot>
   );
 }

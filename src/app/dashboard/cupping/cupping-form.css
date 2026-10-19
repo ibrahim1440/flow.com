@@ -1,0 +1,139 @@
+/*
+ * SCA scoring form (CuppingForm) — Direction 2.1, GX-G (owner-approved 15 Oct), Figma
+ * 1JbZgpMqmPkUVne8ms9Ozz:
+ *   G-06 «نموذج التقييم SCA» 1440 1222:98970 (layout "sheet": label column + score card),
+ *   G-06m 390 1228:109468 (steppers, sticky score bar),
+ *   G-08 guest «الأكواب والتقييم» 1440 1228:103453 (layout "stack": sections stacked, score footer).
+ * Tokens are the shared Direction 2.1 ones (components/shell/direction-2.1.css, `.d21`); this
+ * file defines no colour. Every class is `cf-` prefixed so nothing leaks into other screens.
+ * Physical left/right in the RTL frames are written as logical properties so English mirrors.
+ */
+.cf { display: grid; gap: 40px; align-items: start; font: 400 14px/22px var(--f-ui); color: var(--text-primary); }
+.cf.is-sheet { grid-template-columns: minmax(0, 1fr) 280px; }
+.cf.is-stack { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.cf-main { min-width: 0; display: flex; flex-direction: column; }
+.cf-num { font-family: var(--f-num); font-variant-numeric: tabular-nums; unicode-bidi: isolate; direction: ltr; }
+
+/* Section (G-06 «fsec»): 220 px label column at the inline start, the controls beside it. */
+.cf-sec { display: grid; grid-template-columns: 220px minmax(0, 528px); gap: 24px; padding: 22px 0 23px; border-bottom: 1px solid var(--border-subtle); }
+.cf.is-stack .cf-sec { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 17px 0 16px; border-bottom: 0; border-top: 1px solid var(--border-subtle); }
+.cf-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cf.is-stack .cf-head { gap: 0; }
+.cf-head h3, .cf-head label { margin: 0; font: 600 14px/19.6px var(--f-ui); color: var(--text-primary); }
+.cf-head p { margin: 0; font: 400 12.5px/22px var(--f-ui); color: var(--text-muted); }
+.cf-body { min-width: 0; display: flex; flex-direction: column; }
+
+/* Sensory row: label · track · value (G-06 1222:99039; 6 px block padding, 14 px gaps). */
+.cf-row { display: grid; grid-template-columns: 150px minmax(0, 298px) 52px; align-items: center; gap: 14px; min-height: 34px; padding: 6px 0; }
+.cf.is-stack .cf-row { grid-template-columns: minmax(0, 1fr) minmax(0, 426px) auto; }
+.cf.is-stack .cf-row.is-cups { grid-template-columns: minmax(84px, auto) minmax(0, 1fr) auto; }
+.cf-label { font: 400 14px/22px var(--f-ui); color: var(--text-primary); min-width: 0; }
+.cf-val { font: 500 14px/22px var(--f-num); font-variant-numeric: tabular-nums; color: var(--text-primary); text-align: end; unicode-bidi: isolate; }
+/* Track (1222:99041): 6 px, border/subtle; fill Olive from the inline start; 16 px thumb. */
+.cf-track { position: relative; height: 6px; border-radius: 3px; background: var(--border-subtle); }
+.cf-track > i { position: absolute; top: 0; height: 6px; inset-inline-start: 0; border-radius: 3px; background: var(--action-primary); pointer-events: none; }
+.cf-track > b { position: absolute; top: -5px; width: 16px; height: 16px; border-radius: 8px; background: var(--surface); border: 2px solid var(--focus-ring); pointer-events: none; }
+.cf-track > input { position: absolute; inset-inline: -8px; top: -9px; width: calc(100% + 16px); height: 24px; margin: 0; opacity: 0; cursor: pointer; }
+.cf-track:has(> input:focus-visible) > b { box-shadow: 0 0 0 3px var(--surface-selected); outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Phone stepper (G-06m 1228:109468): − value +, 132 × 40, control border, radius/md. */
+.cf-step { display: none; align-items: center; justify-content: space-between; width: 132px; height: 40px; border: 1px solid var(--border-control); border-radius: 9px; background: var(--surface); }
+.cf-step button { appearance: none; border: 0; background: none; width: 40px; height: 100%; display: grid; place-items: center; color: var(--text-primary); cursor: pointer; font: 500 18px/1 var(--f-num); border-radius: 9px; }
+.cf-step button:disabled { color: var(--text-disabled); cursor: not-allowed; }
+.cf-step span { font: 500 15px/22px var(--f-num); font-variant-numeric: tabular-nums; }
+
+/* Cup row (1222:99086): 5 × 28 boxes, 6 px apart, radius 8. Passed = Olive, failed = outline. */
+.cf-cups { display: flex; gap: 6px; }
+.cf-cup { appearance: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font: 400 12px/22px var(--f-num); cursor: pointer; border: 1.5px solid var(--action-primary); background: var(--action-primary); color: var(--text-inverse); padding: 0; }
+.cf-cup[aria-pressed="false"] { background: var(--surface); border-color: var(--border-control); color: var(--text-muted); }
+.cf-cup:hover { border-color: var(--action-primary-hover); }
+.cf .cf-row.is-cups { min-height: 40px; }
+
+/* Segmented control (10:79): 3 px padding, radius 10, surface/subtle + 1 px border/subtle. */
+.cf-seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-subtle); border: 1px solid var(--border-subtle); width: fit-content; max-width: 100%; flex-wrap: wrap; }
+.cf-seg button { appearance: none; border: 0; background: none; cursor: pointer; padding: 5px 16px; border-radius: 7px; font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); white-space: nowrap; min-width: 36px; }
+.cf-seg button:hover { color: var(--text-primary); }
+.cf-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text-primary); font-weight: 500; box-shadow: var(--shadow-sheet); }
+.cf-sub { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.cf-sublabel { font: 500 12.5px/18px var(--f-ui); color: var(--text-secondary); }
+.cf-penalty { font: 500 12.5px/18px var(--f-ui); color: var(--status-danger); }
+
+/* Descriptor chips (FilterChip 12:16): 30 px, radius 8. Selected = applied chip with ×. */
+.cf-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cf-chip { appearance: none; height: 30px; padding: 0 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font: 400 13px/22px var(--f-ui); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-secondary); white-space: nowrap; }
+.cf-chip:hover { background: var(--surface-hover); }
+.cf-chip[aria-pressed="true"] { background: var(--surface-subtle); border-color: var(--border-subtle); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--action-primary); }
+.cf-chip svg { width: 16px; height: 16px; flex: none; }
+.cf-chip.is-more { color: var(--text-muted); border-style: solid; }
+
+/* Notes (Input 12:83 at 72 px). */
+.cf-notes { width: 100%; min-height: 72px; resize: vertical; border: 1px solid var(--border-control); border-radius: 9px; background: var(--surface); padding: 11px; font: 400 14px/22px var(--f-ui); color: var(--text-primary); }
+.cf-notes:focus { outline: none; border: 1.5px solid var(--focus-ring); padding: 10.5px; box-shadow: 0 0 0 3px var(--surface-selected); }
+.cf-notes::placeholder { color: var(--text-muted); }
+
+/* Score card (G-06 1222:99013): 280 wide, surface/subtle, radius 12, 18/20 padding. */
+.cf-card { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; border-radius: 12px; background: var(--surface-subtle); }
+.cf-card-cap { margin: 0; font: 500 12.5px/22px var(--f-ui); color: var(--text-muted); }
+.cf-big { margin: 0; font: 300 44px/44px var(--f-num); letter-spacing: -0.9px; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: start; }
+.cf-props { margin: 0; display: grid; grid-template-columns: 92px auto; row-gap: 12px; font: 400 13.5px/22px var(--f-ui); }
+.cf-props dt { color: var(--text-muted); }
+.cf-props dd { margin: 0; font-family: var(--f-num); color: var(--text-primary); font-variant-numeric: tabular-nums; unicode-bidi: isolate; direction: ltr; text-align: end; justify-self: start; }
+.cf-props dd.is-final { font-weight: 700; }
+.cf-hint { margin: 0; font: 400 12.5px/22px var(--f-ui); color: var(--text-muted); }
+.cf-card .hr-btn { width: 100%; }
+
+/* Stacked footer (G-08 1228:103666): score, then the submit at the inline end. */
+.cf-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 17px; border-top: 1px solid var(--border-subtle); }
+.cf-score { display: flex; flex-direction: column; min-width: 0; }
+.cf-score > span { font: 500 12.5px/22px var(--f-ui); color: var(--text-muted); }
+.cf-score > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cf-score .cf-final { font: 400 26px/28.6px var(--f-num); letter-spacing: -0.3px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.cf-bar { display: none; }
+
+/* Tablet: the score card goes above the form, full width. */
+@media (min-width: 768px) and (max-width: 1100px) {
+  .cf.is-sheet { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .cf.is-sheet .cf-card { position: static; order: -1; }
+  .cf-sec { grid-template-columns: 180px minmax(0, 1fr); }
+  .cf-row { grid-template-columns: 130px minmax(0, 1fr) 52px; }
+}
+
+/* Phone (G-06m 1228:109468): sections stacked, steppers instead of the track, and the score
+   with the submit in a sticky bar at the bottom. */
+@media (max-width: 767px) {
+  .cf, .cf.is-sheet { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .cf-card, .cf-foot { display: none; }
+  .cf-sec, .cf.is-stack .cf-sec { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 16px 0; border-top: 0; border-bottom: 1px solid var(--border-subtle); }
+  .cf-head { gap: 0; }
+  .cf-row, .cf.is-stack .cf-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; min-height: 53px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+  .cf-row:last-child { border-bottom: 0; }
+  .cf .cf-row.is-cups, .cf.is-stack .cf-row.is-cups { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .cf-row > .cf-track, .cf-row:not(.is-cups) > .cf-val { display: none; }
+  .cf-step { display: flex; }
+  .cf-cup { width: 32px; height: 32px; }
+  .cf-chip { height: 34px; }
+  .cf-bar { display: flex; position: sticky; bottom: 0; z-index: 5; align-items: center; justify-content: space-between; gap: 12px; margin-inline: -16px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border-subtle); }
+  .cf-bar .hr-btn { height: 44px; padding: 0 16px; }
+}
+
+/*
+ * Cup picker (G-05 «اختيار الكوب · معمّى» 1440 1220:97620, 390 1228:107954): a 640 column of
+ * cup cards — the number, «كوب n» and what is left, then the action; a scored cup is subtle.
+ */
+.cg-col { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 640px; }
+.cg-cups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.cg-cup { appearance: none; width: 100%; min-height: 70px; display: flex; align-items: center; gap: 14px; padding: 12px 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); font: inherit; color: inherit; text-align: start; cursor: pointer; }
+.cg-cup:hover:not(:disabled) { background: var(--surface-hover); }
+.cg-cup.is-done { background: var(--surface-subtle); border-color: var(--border-subtle); cursor: default; }
+.cg-no { flex: none; width: 24px; font: 300 24px/28px var(--f-num); color: var(--text-primary); text-align: center; }
+.cg-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cg-title { font: 500 14px/22px var(--f-ui); color: var(--text-primary); }
+.cg-sub { font: 400 12.5px/18px var(--f-ui); color: var(--text-muted); }
+.cg-cup .hr-btn { pointer-events: none; }
+.cg-note { margin: 8px 0 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font: 400 13.5px/22px var(--f-ui); color: var(--text-secondary); }
+@media (max-width: 767px) {
+  .cg-cups { gap: 0; }
+  .cg-cup { min-height: 72px; border: 0; border-bottom: 1px solid var(--border-subtle); border-radius: 0; padding: 12px 0; }
+  .cg-cup.is-done { background: none; }
+  .cg-no { display: none; }
+  .cg-note { margin-top: 4px; }
+}

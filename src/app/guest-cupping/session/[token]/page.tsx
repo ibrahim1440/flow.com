@@ -1,44 +1,50 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
-import { FlaskConical, CheckCircle, Coffee, ChevronRight, ArrowLeft } from "lucide-react";
 import CuppingForm, { type CuppingFormData } from "@/app/dashboard/cupping/CuppingForm";
+import { GuestShell, type GuestLang } from "../../GuestShell";
 
 type CupSlot = { id: string; order: number }; // blind — no bean info
 type SessionInfo = { id: string; name: string; status: string; sessionBatches: CupSlot[] };
 type Step = "loading" | "closed" | "not-found" | "name" | "cup-list" | "scoring" | "all-done";
 
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-cream">
-      <div className="max-w-xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-orange flex items-center justify-center shrink-0">
-            <FlaskConical size={16} className="text-white" />
-          </div>
-          <div>
-            <p className="text-xs font-extrabold text-charcoal leading-none">HIQBAH COFFEE</p>
-            <p className="text-[10px] text-brown/50 leading-none mt-0.5">SCA Blind Cupping</p>
-          </div>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
+/** «كوبان متبقيان» / «3 أكواب متبقية» / «2 cups remaining». */
+function remainingText(n: number, lang: GuestLang): string {
+  if (lang === "en") return `${n} ${n === 1 ? "cup" : "cups"} remaining`;
+  if (n === 1) return "كوب واحد متبقٍ";
+  if (n === 2) return "كوبان متبقيان";
+  if (n <= 10) return `${n} أكواب متبقية`;
+  return `${n} كوبًا متبقيًا`;
 }
 
+/** «3 أكواب» / «3 cups». */
+function cupsText(n: number, lang: GuestLang): string {
+  if (lang === "en") return `${n} ${n === 1 ? "cup" : "cups"}`;
+  if (n === 1) return "كوب واحد";
+  if (n === 2) return "كوبان";
+  if (n <= 10) return `${n} أكواب`;
+  return `${n} كوبًا`;
+}
+
+// Blind guest scoring by session link — Direction 2.1, GX-G G-08 (Figma 1228:5609 name,
+// 1228:103453 cups and scoring with the open cup's form inline, 1228:107763 done; 390:
+// 1225:7062, 1228:5556, 1228:5595). The token handling, the requests and their bodies are
+// unchanged; only how the page is drawn changed.
 export default function GuestSessionPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
 
+  const [lang, setLang] = useState<GuestLang>("ar");
+  const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [step, setStep] = useState<Step>("loading");
   const [name, setName] = useState("");
-  const [nameError, setNameError] = useState("");
+  const [nameError, setNameError] = useState(false);
   const [activeCupId, setActiveCupId] = useState<string | null>(null);
   const [scoredIds, setScoredIds] = useState<Set<string>>(new Set());
+  // The guest's own submitted scores, per cup — shown back to them only («قيّمته · 81.50»).
+  const [myScores, setMyScores] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [lastScore, setLastScore] = useState(0);
 
   useEffect(() => {
     fetch(`/api/public/cupping/session/${token}`)
@@ -53,8 +59,8 @@ export default function GuestSessionPage({ params }: { params: Promise<{ token: 
 
   function handleNameSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) { setNameError("Please enter your name / أدخل اسمك"); return; }
-    setNameError("");
+    if (!name.trim()) { setNameError(true); return; }
+    setNameError(false);
     setStep("cup-list");
   }
 
@@ -76,13 +82,13 @@ export default function GuestSessionPage({ params }: { params: Promise<{ token: 
     });
 
     if (!res.ok) {
-      const j = await res.json();
-      setSubmitError(j.error || "Failed to submit score");
+      const j = await res.json().catch(() => ({}));
+      setSubmitError(j.error || L("تعذّر إرسال التقييم.", "Failed to submit score"));
       setSubmitting(false);
       return;
     }
 
-    setLastScore(data.finalScore);
+    setMyScores((p) => ({ ...p, [activeCupId]: data.finalScore }));
     setScoredIds((prev) => new Set([...prev, activeCupId]));
     setSubmitting(false);
 
@@ -93,203 +99,116 @@ export default function GuestSessionPage({ params }: { params: Promise<{ token: 
     setStep(allDone ? "all-done" : "cup-list");
   }
 
+  const shell = (children: React.ReactNode, opts: { step?: "name" | "cups" | "done"; foot?: boolean } = {}) => (
+    <GuestShell lang={lang} onLang={setLang} title={session?.name} step={opts.step} foot={opts.foot}>{children}</GuestShell>
+  );
+
   // ── Render states ─────────────────────────────────────────────────────────
 
   if (step === "loading") {
-    return (
-      <Shell>
-        <div className="text-center py-16 text-brown/40 text-sm">Loading…</div>
-      </Shell>
-    );
+    return shell(<div className="gc-state" aria-busy="true"><span>{L("جارٍ التحميل…", "Loading…")}</span></div>);
   }
 
   if (step === "not-found") {
-    return (
-      <Shell>
-        <div className="text-center py-16">
-          <Coffee size={36} className="text-orange/30 mx-auto mb-3" />
-          <p className="font-bold text-charcoal">Session not found</p>
-          <p className="text-sm text-brown/50 mt-1">Please check your link and try again.</p>
-        </div>
-      </Shell>
+    return shell(
+      <div className="gc-state">
+        <b>{L("الجلسة غير موجودة", "Session not found")}</b>
+        <span>{L("تحقّق من الرابط ثم أعد المحاولة.", "Please check your link and try again.")}</span>
+      </div>,
     );
   }
 
   if (step === "closed") {
-    return (
-      <Shell>
-        <div className="text-center py-12 space-y-3 px-4">
-          <div className="text-5xl mb-2">☕</div>
-          <p className="text-xl font-extrabold text-charcoal">This cupping session has been closed.</p>
-          <p className="text-lg font-bold text-charcoal/60">عذراً، تم إغلاق جلسة التذوق هذه.</p>
-          <p className="text-sm text-brown/50 mt-2">Thank you for your interest!</p>
-        </div>
-      </Shell>
+    return shell(
+      <div className="gc-state">
+        <b>{L("أُغلقت جلسة التذوق هذه.", "This cupping session has been closed.")}</b>
+        <span>{L("شكرًا لاهتمامك.", "Thank you for your interest!")}</span>
+      </div>,
     );
   }
 
+  const cups = session?.sessionBatches ?? [];
+
   if (step === "all-done") {
-    return (
-      <Shell>
-        <div className="text-center py-12 space-y-4 px-4">
-          <CheckCircle size={56} className="text-green-500 mx-auto" />
-          <p className="text-2xl font-extrabold text-charcoal">All Cups Scored!</p>
-          <p className="text-5xl font-black text-green-600">{lastScore.toFixed(2)}</p>
-          <p className="text-sm text-brown/60 mt-1">
-            Thank you, <strong className="text-charcoal">{name}</strong>! All {session?.sessionBatches.length} cups recorded.
-          </p>
-          <p className="text-xs text-brown/40 mt-4">شكراً لك! تم تسجيل جميع تقييماتك.</p>
-        </div>
-      </Shell>
+    // «متوسط تقييماتك» (1228:107763): the mean of the scores this guest sent, from this page.
+    const sent = Object.values(myScores);
+    const mean = sent.length > 0 ? sent.reduce((a, b) => a + b, 0) / sent.length : 0;
+    return shell(
+      <div className="gc-done" data-testid="guest-done">
+        <span>{L("متوسط تقييماتك", "Your average score")}</span>
+        <strong className="cf-num">{mean.toFixed(2)}</strong>
+        <b>{L("أُرسلت تقييماتك كلها", "All your scores are sent")}</b>
+        <p>{L(`شكرًا ${name}. سُجّلت تقييمات ${cupsText(cups.length, "ar")}. لا تظهر النتائج للضيوف.`, `Thank you, ${name}. Your scores for ${cupsText(cups.length, "en")} are recorded. Results are not shown to guests.`)}</p>
+      </div>,
+      { step: "done" },
     );
   }
 
   if (step === "name") {
-    return (
-      <Shell>
-        <div className="space-y-6 px-1">
-          <div className="text-center">
-            <div className="w-14 h-14 bg-orange/10 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <FlaskConical size={28} className="text-orange" />
-            </div>
-            <h2 className="text-xl font-extrabold text-charcoal">{session?.name}</h2>
-            <p className="text-sm text-brown/60 mt-1">
-              Blind SCA Cupping · {session?.sessionBatches.length} cups
-            </p>
-            <p className="text-xs text-brown/40 mt-1">
-              تقييم عمياء · {session?.sessionBatches.length} أكواب
-            </p>
-          </div>
-
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center space-y-1">
-            <p className="text-sm font-bold text-amber-800">🔒 Blind Tasting Protocol</p>
-            <p className="text-xs text-amber-700">You will evaluate {session?.sessionBatches.length} cups labeled Cup 1, Cup 2… The coffee identities are hidden until the session is closed by the admin.</p>
-          </div>
-
-          <form onSubmit={handleNameSubmit} className="space-y-4">
-            <div className="bg-white rounded-2xl border border-border p-5 space-y-3">
-              <label className="block text-sm font-extrabold text-charcoal uppercase tracking-wide">
-                Enter your name to start
-                <span className="block text-xs text-brown/50 normal-case tracking-normal mt-0.5 font-normal">أدخل اسمك للبدء</span>
-              </label>
-              <input
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name / اسمك"
-                className="w-full px-4 py-3 rounded-xl border-2 border-border bg-cream text-charcoal text-base focus:outline-none focus:border-orange focus:ring-2 focus:ring-orange/20 transition-colors"
-              />
-              {nameError && <p className="text-xs text-red-500 font-medium">{nameError}</p>}
-            </div>
-            <button
-              type="submit"
-              className="w-full py-4 rounded-xl bg-orange text-white font-extrabold text-base hover:bg-orange/90 transition-colors active:scale-[0.98]"
-            >
-              Start Cupping →
-            </button>
-          </form>
+    return shell(
+      <form onSubmit={handleNameSubmit} className="gc-form" noValidate>
+        <p className="gc-note">
+          <b>{L("تذوق معمّى", "Blind cupping")} · {cupsText(cups.length, lang)}.</b>{" "}
+          {L(`تقيّم «${cups.map((_, i) => `كوب ${i + 1}`).join("، ")}». تُكشف هوية البن عند إغلاق الجلسة.`,
+             `You score «${cups.map((_, i) => `Cup ${i + 1}`).join(", ")}». The coffees are revealed when the session is closed.`)}
+        </p>
+        <div className="gc-field">
+          <label htmlFor="guest-name">{L("اسمك", "Your name")} <i aria-hidden="true">*</i></label>
+          <input id="guest-name" className="gc-input" autoFocus value={name} onChange={(e) => setName(e.target.value)}
+            aria-invalid={nameError || undefined} aria-describedby={nameError ? "guest-name-err" : undefined} autoComplete="name" />
+          {nameError ? <span id="guest-name-err" className="gc-err">{L("أدخل اسمك", "Please enter your name")}</span> : null}
         </div>
-      </Shell>
+        <button type="submit" className="hr-btn is-primary">{L("ابدأ التذوق", "Start cupping")}</button>
+      </form>,
+      { step: "name", foot: true },
     );
   }
 
-  if (step === "cup-list") {
-    const cups = session?.sessionBatches ?? [];
-    const remaining = cups.filter((c) => !scoredIds.has(c.id));
-    return (
-      <Shell>
-        <div className="space-y-5">
-          <div>
-            <p className="text-xs font-bold text-brown/50 uppercase tracking-widest">Cupping as</p>
-            <p className="text-lg font-extrabold text-charcoal">{name}</p>
-            <p className="text-xs text-brown/40">{session?.name}</p>
-          </div>
-
-          {remaining.length > 0 ? (
-            <>
-              <p className="text-sm font-bold text-charcoal">
-                {scoredIds.size > 0 ? `${remaining.length} cup${remaining.length !== 1 ? "s" : ""} remaining` : "Select a cup to begin scoring"}
-              </p>
-              <div className="space-y-2">
-                {cups.map((cup, i) => {
-                  const done = scoredIds.has(cup.id);
-                  return (
-                    <button
-                      key={cup.id}
-                      onClick={() => !done && startScoring(cup.id)}
-                      disabled={done}
-                      className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left ${
-                        done
-                          ? "border-green-200 bg-green-50 opacity-75 cursor-default"
-                          : "border-border bg-white hover:border-orange hover:shadow-md active:scale-[0.99]"
-                      }`}
-                    >
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 font-extrabold text-lg ${
-                        done ? "bg-green-100 text-green-600" : "bg-orange/10 text-orange"
-                      }`}>
-                        {done ? <CheckCircle size={24} /> : i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`font-extrabold ${done ? "text-green-700" : "text-charcoal"}`}>
-                          كوب {i + 1} — Cup {i + 1}
-                        </p>
-                        <p className="text-xs text-brown/50 mt-0.5">
-                          {done ? "✓ Scored" : "Tap to score this cup"}
-                        </p>
-                      </div>
-                      {!done && <ChevronRight size={18} className="text-brown/30 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-8 space-y-3">
-              <CheckCircle size={48} className="text-green-500 mx-auto" />
-              <p className="text-xl font-extrabold text-charcoal">All cups scored!</p>
-              <p className="text-sm text-brown/60">Thank you, {name}!</p>
-            </div>
-          )}
-        </div>
-      </Shell>
-    );
-  }
-
-  // step === "scoring"
-  const cups = session?.sessionBatches ?? [];
-  const activeCupIndex = cups.findIndex((c) => c.id === activeCupId);
-
-  return (
-    <Shell>
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => { setActiveCupId(null); setStep("cup-list"); }}
-            className="flex items-center gap-1.5 text-sm font-bold text-brown/60 hover:text-charcoal transition-colors"
-          >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-          <div>
-            <p className="text-xs text-brown/50 font-medium">Scoring as {name}</p>
-            <p className="font-extrabold text-charcoal">كوب {activeCupIndex + 1} — Cup {activeCupIndex + 1}</p>
-            <p className="text-xs text-brown/40">{session?.name}</p>
-          </div>
-        </div>
-
-        {submitError && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600 font-medium">
-            {submitError}
-          </div>
-        )}
-
-        <CuppingForm
-          lang="en"
-          onSubmit={handleSubmitScore}
-          submitting={submitting}
-          submitLabel={`Submit Cup ${activeCupIndex + 1} Score →`}
-        />
-      </div>
-    </Shell>
+  // step === "cup-list" | "scoring": the cups, the open one with its form inline (1228:103479).
+  const remaining = cups.filter((c) => !scoredIds.has(c.id)).length;
+  const nextId = cups.find((c) => !scoredIds.has(c.id))?.id ?? null;
+  return shell(
+    <>
+      <p className="gc-cap">{L(`التقييم باسم ${name}`, `Scoring as ${name}`)} · {remainingText(remaining, lang)}</p>
+      <ul className="gc-cups">
+        {cups.map((cup, i) => {
+          const done = scoredIds.has(cup.id);
+          const open = step === "scoring" && activeCupId === cup.id;
+          return (
+            <li key={cup.id} className={open ? "is-open" : undefined}>
+              <button type="button" className="gc-cuphead" disabled={done} aria-expanded={done ? undefined : open}
+                onClick={() => { if (done) return; if (open) { setActiveCupId(null); setStep("cup-list"); } else startScoring(cup.id); }}
+                data-testid={`guest-cup-${i + 1}`}>
+                <span className="gc-cupmain">
+                  <b>{L("كوب", "Cup")} <span className="cf-num">{i + 1}</span></b>
+                  <span>
+                    {done ? <>{L("قيّمته", "You scored it")} · <span className="cf-num">{(myScores[cup.id] ?? 0).toFixed(2)}</span></>
+                      : open ? L("معمّى · لا تظهر لك تقييمات الآخرين", "Blind · other scores are hidden from you")
+                      : L("اضغط للتقييم", "Tap to score")}
+                  </span>
+                </span>
+                {done ? <span className="hr-dot tone-success"><span>{L("قُيّم", "Scored")}</span></span>
+                  : open ? <span className="hr-dot tone-info"><span>{L("قيد التقييم", "Scoring")}</span></span>
+                  : <span className={`hr-btn is-sm${cup.id === nextId && step !== "scoring" ? " is-primary" : ""}`} aria-hidden="true">{L("تقييم", "Score")}</span>}
+              </button>
+              {open ? (
+                <div className="gc-open">
+                  {submitError ? <div className="hr-notice tone-danger" role="alert" style={{ marginTop: 12 }}>{submitError}</div> : null}
+                  <CuppingForm
+                    key={cup.id}
+                    lang={lang}
+                    variant="guest"
+                    onSubmit={handleSubmitScore}
+                    submitting={submitting}
+                    submitLabel={L(`إرسال تقييم الكوب ${i + 1}`, `Submit cup ${i + 1} score`)}
+                  />
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </>,
+    { step: "cups", foot: true },
   );
 }
