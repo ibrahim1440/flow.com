@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useEffect, useMemo, useState } from "react";
 import { useUser } from "../../user-context";
 import { ALL_CLASSES, CLASS_LABELS, classDirection, isAllocatableClass, SETTLEMENT_CLASSES, type TxnClass } from "@/lib/finance/classes";
@@ -71,10 +72,10 @@ export default function TransactionsPage() {
           { value: "review", label: L(`بحاجة لمراجعة ${counts.data?.total ?? 0}`, `Needs review ${counts.data?.total ?? 0}`) },
           { value: "pending", label: L(`معلّقة ${pend.data?.total ?? 0}`, `Pending ${pend.data?.total ?? 0}`) },
         ]} />
-        <select aria-label={L("الحساب", "Account")} className="hr-select fin-input is-auto" value={accountId} onChange={(e) => { setAccountId(e.target.value); setSkip(0); }}>
+        <Select aria-label={L("الحساب", "Account")} className="hr-select fin-input is-auto" value={accountId} onChange={(e) => { setAccountId(e.target.value); setSkip(0); }}>
           <option value="">{L("كل الحسابات", "All accounts")}</option>
           {accounts.data?.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}
-        </select>
+        </Select>
         <input type="search" className="hr-input hr-search" aria-label={L("بحث", "Search")} placeholder={L("بحث بالوصف أو المرجع أو الطرف", "Search description, reference or counterparty")} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
@@ -266,9 +267,9 @@ function ReviewForm({ id, finCats, canEnter, onChanged, data, reload }: PanelPro
       )}
 
       <Field label={L("التصنيف", "Classification")}>
-        <select className={INPUT} disabled={locked} value={cls} onChange={(e) => setCls(e.target.value as TxnClass)}>
+        <Select className={INPUT} disabled={locked} value={cls} onChange={(e) => setCls(e.target.value as TxnClass)}>
           {classOptions.map((c) => <option key={c} value={c}>{L(CLASS_LABELS[c].ar, CLASS_LABELS[c].en)}</option>)}
-        </select>
+        </Select>
       </Field>
 
       {settlement && (
@@ -283,10 +284,10 @@ function ReviewForm({ id, finCats, canEnter, onChanged, data, reload }: PanelPro
           <span className="hr-label">{L("التوزيع على بنود الميزانية", "Budget classification")}</span>
           {splits.map((s, i) => (
             <div key={i} className="flex gap-2 items-center">
-              <select aria-label={L("بند الميزانية", "Budget category")} className={INPUT} disabled={locked} value={s.finCategoryId} onChange={(e) => setSplits(splits.map((x, j) => (j === i ? { ...x, finCategoryId: e.target.value } : x)))}>
+              <Select aria-label={L("بند الميزانية", "Budget category")} className={INPUT} disabled={locked} value={s.finCategoryId} onChange={(e) => setSplits(splits.map((x, j) => (j === i ? { ...x, finCategoryId: e.target.value } : x)))}>
                 <option value="">{L("اختر بنداً…", "Choose a category…")}</option>
                 {finCats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}
-              </select>
+              </Select>
               <input aria-label={L("المبلغ", "Amount")} className={`${INPUT} !w-[110px] font-semibold tabular-nums`} disabled={locked} value={s.amount} onChange={(e) => setSplits(splits.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} inputMode="decimal" />
               {splits.length > 1 && !locked && <button type="button" onClick={() => setSplits(splits.filter((_, j) => j !== i))} className="hr-btn is-ghost is-sm" aria-label={L("حذف", "Remove")}>✕</button>}
             </div>
@@ -412,7 +413,7 @@ function ReconciliationCard({ accounts, canRecon, onDone }: { accounts: Account[
     <Card className="is-ruled">
       <CardTitle title={L("التسوية مع كشف البنك", "Reconcile with the bank statement")} sub={L("رصيد الدفتر = الرصيد الافتتاحي + السطور المؤكدة حتى التاريخ. السطور المعلّقة تُعرض ولا تُحتسب.", "Book balance = opening balance + confirmed lines to the date. Pending lines are shown, not counted.")} />
       <div className="fin-grid" style={{ ["--fin-cols" as string]: 3 }}>
-        <Field label={L("الحساب", "Account")}><select className={INPUT} value={acc} onChange={(e) => setAcc(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
+        <Field label={L("الحساب", "Account")}><Select className={INPUT} value={acc} onChange={(e) => setAcc(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</Select></Field>
         <Field label={L("تاريخ الكشف", "Statement date")}><input type="date" className={INPUT} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label={L("رصيد الكشف", "Statement balance")}><input className={`${INPUT} font-semibold`} value={bal} onChange={(e) => setBal(e.target.value)} inputMode="decimal" placeholder="0.00" /></Field>
       </div>
@@ -460,13 +461,13 @@ function ManualDialog({ open, onClose, accounts, onDone }: { open: boolean; onCl
   const sameRef = useApi<{ total: number }>(ref.length >= 3 && f.cashAccountId ? withBranch(`/api/finance/transactions?take=1&accountId=${encodeURIComponent(f.cashAccountId)}&reference=${encodeURIComponent(ref)}`, branch) : null);
   return (
     <Dialog open={open} onClose={onClose} title={L("قيد يدوي", "Manual entry")} sub={L("سطر بنكي أو نقدي فعلي. للمبالغ الصادرة استخدم إشارة سالبة.", "An actual bank or cash line. Use a negative amount for money out.")}>
-      <Field label={L("الحساب", "Account")}><select className={INPUT} value={f.cashAccountId} onChange={set("cashAccountId")}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
+      <Field label={L("الحساب", "Account")}><Select className={INPUT} value={f.cashAccountId} onChange={set("cashAccountId")}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</Select></Field>
       <div className="fin-grid">
         <Field label={L("المبلغ (سالب للمبالغ الصادرة)", "Amount (negative for money out)")} error={err.amount}><input className={`${INPUT} ${err.amount ? "!border-red-600" : ""}`} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
         <Field label={L("التاريخ", "Date")} error={err.txnDate}><input type="date" className={`${INPUT} ${err.txnDate ? "!border-red-600" : ""}`} value={f.txnDate} onChange={set("txnDate")} /></Field>
       </div>
       <div className="fin-grid">
-        <Field label={L("الحالة", "Status")}><select className={INPUT} value={f.status} onChange={set("status")}><option value="CONFIRMED">{L("مؤكد", "Confirmed")}</option><option value="PENDING">{L("معلّق", "Pending")}</option></select></Field>
+        <Field label={L("الحالة", "Status")}><Select className={INPUT} value={f.status} onChange={set("status")}><option value="CONFIRMED">{L("مؤكد", "Confirmed")}</option><option value="PENDING">{L("معلّق", "Pending")}</option></Select></Field>
         <Field label={L("المرجع البنكي", "Bank reference")}><input className={INPUT} value={f.bankReference} onChange={set("bankReference")} /></Field>
       </div>
       {sameRef.data && sameRef.data.total > 0 && (
@@ -497,8 +498,8 @@ function TransferDialog({ open, onClose, accounts, onDone }: { open: boolean; on
   return (
     <Dialog open={open} onClose={onClose} title={L("تحويل بين حسابات الشركة", "Transfer between company accounts")} sub={L("ليس إيراداً ولا مصروفاً، ولا يغيّر النقد الموحد.", "Neither revenue nor expense; consolidated cash does not change.")}>
       <div className="fin-grid">
-        <Field label={L("من", "From")}><select className={INPUT} value={f.fromAccountId} onChange={set("fromAccountId")}><option value="">—</option>{opts}</select></Field>
-        <Field label={L("إلى", "To")}><select className={INPUT} value={f.toAccountId} onChange={set("toAccountId")}><option value="">—</option>{opts}</select></Field>
+        <Field label={L("من", "From")}><Select className={INPUT} value={f.fromAccountId} onChange={set("fromAccountId")}><option value="">—</option>{opts}</Select></Field>
+        <Field label={L("إلى", "To")}><Select className={INPUT} value={f.toAccountId} onChange={set("toAccountId")}><option value="">—</option>{opts}</Select></Field>
         <Field label={L("المبلغ", "Amount")}><input className={INPUT} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
         <Field label={L("التاريخ", "Date")}><input type="date" className={INPUT} value={f.txnDate} onChange={set("txnDate")} /></Field>
       </div>

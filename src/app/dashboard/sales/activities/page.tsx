@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -393,11 +394,11 @@ export default function ActivitiesPage() {
             {canSeeTeam && (
               <span className="chip">
                 <label htmlFor="act-owner">{ar ? "المالك:" : "Owner:"}</label>
-                <select id="act-owner" value={teamView ? "team" : "mine"} data-testid="activities-owner"
+                <Select id="act-owner" value={teamView ? "team" : "mine"} data-testid="activities-owner"
                   onChange={(e) => changeFilter(() => setTeamView(e.target.value === "team"))}>
                   <option value="team">{ar ? "الكل" : "All"}</option>
                   <option value="mine">{ar ? "أنا" : "Me"}</option>
-                </select>
+                </Select>
                 <button type="button" className="x" onClick={() => changeFilter(() => setTeamView(true))} aria-label={ar ? "إزالة فلتر المالك" : "Clear owner"} data-testid="activities-owner-clear">
                   <Ico name="close" small />
                 </button>
@@ -405,10 +406,10 @@ export default function ActivitiesPage() {
             )}
             <span className="chip">
               <label htmlFor="act-type">{ar ? "النوع:" : "Type:"}</label>
-              <select id="act-type" value={type} data-testid="activities-type" onChange={(e) => changeFilter(() => setType(e.target.value))}>
+              <Select id="act-type" value={type} data-testid="activities-type" onChange={(e) => changeFilter(() => setType(e.target.value))}>
                 <option value="">{ar ? "الكل" : "All"}</option>
                 {Object.keys(TYPE_LABELS).map((k) => <option key={k} value={k}>{pick(TYPE_LABELS, k, lang)}</option>)}
-              </select>
+              </Select>
               <button type="button" className="x" onClick={() => changeFilter(() => setType(""))} aria-label={ar ? "إزالة فلتر النوع" : "Clear type"} data-testid="activities-type-clear">
                 <Ico name="close" small />
               </button>

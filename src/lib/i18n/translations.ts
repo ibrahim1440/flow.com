@@ -899,6 +899,9 @@ export const translations = {
   toProduceUnitsLabel:    { en: "To produce",                      ar: "للإنتاج" },
   fulfilmentCheckTitle:   { en: "Fulfilment check",                ar: "فحص التوفر" },
   noProductSelected:      { en: "Select a product to add a line.", ar: "اختر منتجاً لإضافة سطر." },
+  packSizeLockedHelp:     { en: "Pack size cannot be changed after the product is created.", ar: "لا يمكن تغيير حجم العبوة بعد إنشاء المنتج." },
+  noProductOption:        { en: "No product",                      ar: "بلا منتج" },
+  noSkuOption:            { en: "No SKU",                          ar: "بلا رمز صنف" },
   legacyLineLabel:        { en: "Legacy line",                     ar: "سطر قديم" },
 
   // ── Production requirement (step 9) ────────────────────────────────────

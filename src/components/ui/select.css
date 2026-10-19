@@ -1,0 +1,217 @@
+/*
+ * Direction 2.1 · Select / Combobox (src/components/ui/Select.tsx).
+ * Popover: white surface, radius 10, the kit's --shadow-pop, 36 px rows, olive ✓.
+ * Phone sheet: the shell's «المزيد» sheet (radius 20 top, --shadow-sheet), 48 px rows,
+ * safe-area padding. Tokens come from .d21 (direction-2.1.css); the fallbacks keep the
+ * control readable on a page outside the Direction 2.1 shell.
+ *
+ * The trigger takes over the className the native <select> had, so the base rules below sit
+ * in the `components` layer: any page or kit rule (unlayered) or Tailwind utility (later
+ * layer) that styled the old select still wins.
+ */
+@layer components {
+  .hq-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    text-align: start;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    background-color: var(--surface, #fff);
+    border: 1px solid var(--border-control, #8a8578);
+    border-radius: 8px;
+    padding: 0 10px;
+    min-height: 34px;
+    line-height: 1.4;
+  }
+  .hq-combo { font: inherit; }
+}
+
+/* The wrapper adds no box: the trigger lays out exactly where the <select> did. */
+.hq-root { display: contents; }
+
+.hq-trigger > .hq-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hq-trigger[data-placeholder] > .hq-value { color: var(--text-muted, #6e6a61); }
+.hq-trigger > .hq-chev { flex: none; width: 16px; height: 16px; color: var(--text-muted, #6e6a61); transition: transform 0.15s var(--ease, ease); }
+.hq-trigger[data-open] > .hq-chev { transform: rotate(180deg); }
+.hq-trigger:disabled { cursor: not-allowed; }
+.hq-trigger:disabled > .hq-chev { color: var(--text-disabled, #b2aea6); }
+.hq-trigger[aria-invalid="true"] { border-color: var(--status-danger, #b42318); }
+
+/* The real <select>: in the form, out of sight, never under the pointer. Kit rules that laid a
+   transparent select over a chip (.hr-fchip-main select) must not stretch it. */
+select.hq-native.hq-native {
+  position: absolute !important;
+  inset: auto !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden;
+}
+
+/* ── Popover / sheet shared ──────────────────────────────────────────────────────── */
+.hq-pop {
+  /* reset the user-agent [popover] box */
+  margin: 0;
+  padding: 0;
+  border: 0;
+  inset: auto;
+  color: var(--text-primary, #28241a);
+  font-family: var(--f-ui, system-ui, sans-serif);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  letter-spacing: normal;
+  text-align: start;
+  text-transform: none;
+  white-space: normal;
+  background: transparent;
+  overflow: visible;
+}
+/* Without the Popover API (old browsers) the layer is still fixed, above the app's dialogs. */
+.hq-pop { z-index: 1000; }
+.hq-pop::backdrop { background: transparent; }
+
+.hq-list { overflow-y: auto; overscroll-behavior: contain; outline: none; padding: 4px; flex: 1 1 auto; min-height: 0; }
+.hq-row-wrap { display: contents; }
+.hq-group { padding: 10px 10px 4px; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--text-muted, #6e6a61); }
+.hq-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--text-primary, #28241a);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.hq-opt[data-active] { background: var(--surface-hover, #f7f4ec); }
+.hq-opt:active { background: var(--surface-selected, #f0f0e9); }
+.hq-opt[aria-selected="true"] { font-weight: 500; }
+.hq-opt[aria-disabled="true"] { color: var(--text-disabled, #b2aea6); cursor: not-allowed; background: none; }
+.hq-opt-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.hq-opt-label { overflow-wrap: anywhere; }
+.hq-opt-label.is-placeholder { color: var(--text-muted, #6e6a61); }
+.hq-opt-hint { font-size: 12.5px; line-height: 18px; color: var(--text-muted, #6e6a61); font-weight: 400; overflow-wrap: anywhere; }
+.hq-check { flex: none; color: var(--action-primary, #5c5c38); }
+.hq-check-space { flex: none; width: 16px; }
+.hq-empty { padding: 12px 10px; color: var(--text-muted, #6e6a61); font-size: 13.5px; }
+
+.hq-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 6px 2px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--border-control, #8a8578);
+  background: var(--surface, #fff);
+  color: var(--text-muted, #6e6a61);
+  flex: none;
+}
+.hq-search:focus-within { box-shadow: inset 0 0 0 1.5px var(--focus-ring, #5c5c38), 0 0 0 3px var(--action-primary-tint, #f0f0e9); color: var(--text-primary, #28241a); }
+.hq-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: none !important;
+  padding: 0 !important;
+  font: inherit;
+  color: var(--text-primary, #28241a);
+}
+.hq-search input::placeholder { color: var(--text-muted, #6e6a61); }
+.hq-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* ── Desktop popover ─────────────────────────────────────────────────────────────── */
+.hq-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #fff);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop, 0 0 0 1px rgb(40 36 26 / 0.07), 0 14px 34px -10px rgb(40 36 26 / 0.22));
+  overflow: hidden;
+  animation: hq-pop-in 0.14s var(--ease, ease) both;
+}
+@keyframes hq-pop-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+
+/* ── Phone sheet (the shell's «المزيد» sheet) ──────────────────────────────────────── */
+.hq-sheet-layer { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; display: flex; flex-direction: column; justify-content: flex-end; }
+.hq-sheet-scrim { position: absolute; inset: 0; background: rgb(40 36 26 / 0.32); animation: hq-fade 0.18s ease both; }
+.hq-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  max-height: 85dvh;
+  background: var(--surface, #fff);
+  border-radius: 20px 20px 0 0;
+  box-shadow: var(--shadow-sheet, 0 0 0 1px rgb(40 36 26 / 0.06), 0 1px 2px rgb(40 36 26 / 0.04));
+  padding: 0 0 max(12px, env(safe-area-inset-bottom));
+  animation: hq-sheet-in 0.22s var(--ease, ease) both;
+}
+.hq-sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong, #e3dccb); margin: 8px auto 0; flex: none; }
+.hq-sheet-head { display: flex; align-items: center; gap: 10px; padding-block: 6px; padding-inline: 16px 8px; min-height: 52px; flex: none; }
+.hq-sheet-title { flex: 1; min-width: 0; margin: 0; font: 600 17px/1.4 var(--f-ui, system-ui, sans-serif); color: var(--text-primary, #28241a); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hq-sheet-close { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 10px; background: none; color: var(--text-muted, #6e6a61); cursor: pointer; padding: 0; }
+.hq-sheet-close:hover { background: var(--surface-hover, #f7f4ec); color: var(--text-primary, #28241a); }
+.hq-sheet .hq-search { margin: 0 16px 6px; height: 44px; font-size: 16px; }
+.hq-sheet .hq-list { padding: 0 8px 4px; }
+.hq-sheet .hq-opt { min-height: 48px; padding: 10px 12px; border-radius: 0; font-size: 15px; }
+.hq-sheet .hq-row-wrap + .hq-row-wrap .hq-opt { box-shadow: inset 0 1px 0 var(--border-subtle, #efeadf); }
+.hq-sheet .hq-opt[data-active], .hq-sheet .hq-opt[aria-selected="true"] { box-shadow: none; border-radius: 10px; }
+.hq-sheet .hq-opt[aria-selected="true"] { background: var(--action-primary-tint, #f0f0e9); color: var(--action-primary, #5c5c38); }
+.hq-sheet .hq-group { padding: 14px 12px 4px; }
+@keyframes hq-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes hq-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hq-menu, .hq-sheet, .hq-sheet-scrim { animation: none; }
+  .hq-trigger > .hq-chev { transition: none; }
+}
+
+/* ── Where a kit drew its own control around the select ───────────────────────────── */
+/* d63 form select: the field draws the chevron (.ico). */
+.d21 .d63-sel .hq-trigger { width: 100%; padding-inline-end: 34px; }
+.d21 .d63-sel .hq-trigger > .hq-chev { display: none; }
+/* Reference chip (`.chip select`): the value reads inline, no box. */
+.d21 .chip .hq-trigger { border: 0; background: none; padding: 0; min-height: 0; height: auto; font-weight: 500; color: var(--text-primary); gap: 2px; }
+.d21 .chip .hq-trigger > .hq-chev { width: 14px; height: 14px; }
+/* HR FilterChip: the transparent control is laid over the chip, which shows the value. */
+.hr-fchip-main .hq-trigger { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; min-height: 0; padding: 0; border: 0; }
+.hr-chip .hq-trigger { border: 0; background: transparent; font-weight: 600; color: var(--hr-text); min-height: 0; padding: 0; }
+/* The CRM period chip. */
+.d21 .perf-chip .hq-trigger { border: 0; background: none; min-height: 0; padding: 0; padding-inline-end: 2px; max-width: 220px; color: var(--text-primary); }
+@media (max-width: 767px) { .d21 .perf-chip .hq-trigger { max-width: 160px; } }
+/* Toolbar filter (`[data-ui="filter"] select`). */
+.d21 [data-ui="filter"] .hq-trigger { height: 34px; min-height: 34px; padding-block: 0; border-radius: 9px; font-size: 13.5px; line-height: 1; border: 1px solid var(--d-border-control, var(--border-control)); background: var(--d-surface, var(--surface)); color: var(--d-text-primary, var(--text-primary)); box-shadow: none; }
+/* Ops pages: the legacy-control normalisation that applied to select. */
+[data-ops-root] .hq-trigger:not(.hr-input) { border-color: var(--border-control); border-radius: 8px; font: inherit; font-size: 14px; background-color: var(--surface); color: var(--text-primary); }
+/* HR: 16 px controls on phones (no iOS zoom; same size as the inputs beside them). */
+@media (max-width: 767px) { [data-hr-root] .hq-trigger { font-size: 16px !important; } }
+.hr-dialog .hq-trigger { scroll-margin-block: 8px 72px; }
+/* Quote line inline select. */
+.d21 .hq-trigger.qi { padding-inline-end: 6px; }
+/* The CRM toolbar filter draws its own chevron. */
+.d21 [data-ui="filter"] .hq-trigger > .hq-chev { display: none; }

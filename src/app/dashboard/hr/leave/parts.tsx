@@ -1,5 +1,6 @@
 "use client";
 // HR-04 · Leave — preview pane, ledger table and dialogs (used by ./page.tsx).
+import { Select } from "@/components/ui/Select";
 import { useState, type ReactNode } from "react";
 import {
   Btn, Dialog, ErrorState, Field, Flag, KV, LoadingTable, Notice, ProposalTag, REQUEST_STATUS, StatusDot,
@@ -202,10 +203,10 @@ export function RequestLeaveDialog({ people, initialEmployeeId, onClose, onDone 
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("الموظف *", "Employee *")} wide>
-          <select className="hr-select" {...f.bind("employeeId")}><option value="">—</option>{people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</select>
+          <Select className="hr-select" {...f.bind("employeeId")}><option value="">—</option>{people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</Select>
         </Field>
         <Field label={L("نوع الإجازة *", "Leave type *")} wide>
-          <select className="hr-select" {...f.bind("leaveTypeId")}><option value="">—</option>{meta?.leaveTypes.map((x) => <option key={x.id} value={x.id}>{leaveTypeName(x, lang)}{x.paid ? "" : L(" · بدون راتب", " · unpaid")}</option>)}</select>
+          <Select className="hr-select" {...f.bind("leaveTypeId")}><option value="">—</option>{meta?.leaveTypes.map((x) => <option key={x.id} value={x.id}>{leaveTypeName(x, lang)}{x.paid ? "" : L(" · بدون راتب", " · unpaid")}</option>)}</Select>
         </Field>
         <Field label={L("تاريخ البداية *", "Start date *")}><input className="hr-input" type="date" {...f.bind("startDate")} /></Field>
         <Field label={L("تاريخ النهاية (يُحتسب) *", "End date (counted) *")} error={f.v.endDate && f.v.startDate && f.v.endDate < f.v.startDate ? L("لا تنتهي الإجازة قبل بدايتها.", "The leave cannot end before it starts.") : null}><input className="hr-input" type="date" min={f.v.startDate} {...f.bind("endDate")} /></Field>
@@ -238,15 +239,15 @@ export function LedgerEntryDialog({ people, initialEmployeeId, onClose, onDone }
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("الموظف *", "Employee *")} wide>
-          <select className="hr-select" {...f.bind("employeeId")}><option value="">—</option>{people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</select>
+          <Select className="hr-select" {...f.bind("employeeId")}><option value="">—</option>{people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</Select>
         </Field>
         <Field label={L("نوع الإجازة *", "Leave type *")}>
-          <select className="hr-select" {...f.bind("leaveTypeId")}><option value="">—</option>{types.map((x) => <option key={x.id} value={x.id}>{leaveTypeName(x, lang)}</option>)}</select>
+          <Select className="hr-select" {...f.bind("leaveTypeId")}><option value="">—</option>{types.map((x) => <option key={x.id} value={x.id}>{leaveTypeName(x, lang)}</option>)}</Select>
         </Field>
         <Field label={L("الحركة *", "Entry *")}>
-          <select className="hr-select" {...f.bind("entryType")}>
+          <Select className="hr-select" {...f.bind("entryType")}>
             <option value="OPENING">{L("رصيد افتتاحي", "Opening balance")}</option><option value="GRANT">{L("منحة", "Grant")}</option><option value="ADJUSTMENT">{L("تسوية (+/−)", "Adjustment (+/−)")}</option>
-          </select>
+          </Select>
         </Field>
         <Field label={L("أيام *", "Days *")} error={daysErr} help={L("حتى منزلتين عشريتين.", "Up to two decimals.")}><input className="hr-input hr-num" inputMode="decimal" dir="ltr" {...f.bind("days")} /></Field>
         <Field label={L("تاريخ السريان *", "Effective date *")}><input className="hr-input" type="date" {...f.bind("effectiveDate")} /></Field>
@@ -295,12 +296,12 @@ export function LeaveTypeDialog({ onClose, onDone }: { onClose: () => void; onDo
       <div className="hr-form">
         <Field label={L("الرمز *", "Code *")}><input className="hr-input" dir="ltr" maxLength={20} {...f.bind("code")} /></Field>
         <Field label={L("الاسم *", "Name *")}><input className="hr-input" maxLength={80} {...f.bind("nameAr")} /></Field>
-        <Field label={L("الراتب", "Pay")}><select className="hr-select" {...f.bind("paid")}><option value="1">{L("مدفوعة", "Paid")}</option><option value="0">{L("بدون راتب", "Unpaid")}</option></select></Field>
-        <Field label={L("الرصيد", "Balance")}><select className="hr-select" {...f.bind("tracksBalance")}><option value="1">{L("تُخصم من رصيد", "Deducted from a balance")}</option><option value="0">{L("بلا رصيد", "No balance")}</option></select></Field>
+        <Field label={L("الراتب", "Pay")}><Select className="hr-select" {...f.bind("paid")}><option value="1">{L("مدفوعة", "Paid")}</option><option value="0">{L("بدون راتب", "Unpaid")}</option></Select></Field>
+        <Field label={L("الرصيد", "Balance")}><Select className="hr-select" {...f.bind("tracksBalance")}><option value="1">{L("تُخصم من رصيد", "Deducted from a balance")}</option><option value="0">{L("بلا رصيد", "No balance")}</option></Select></Field>
         {f.v.tracksBalance === "1" ? (
           <>
             <Field label={L("الاستحقاق السنوي (أيام)", "Annual accrual (days)")} help={L("فارغ = بلا استحقاق شهري.", "Empty = no monthly accrual.")}><input className="hr-input hr-num" dir="ltr" inputMode="decimal" {...f.bind("accrualDaysPerYear")} /></Field>
-            <Field label={L("الرصيد السالب", "Negative balance")}><select className="hr-select" {...f.bind("allowNegative")}><option value="0">{L("غير مسموح", "Not allowed")}</option><option value="1">{L("مسموح", "Allowed")}</option></select></Field>
+            <Field label={L("الرصيد السالب", "Negative balance")}><Select className="hr-select" {...f.bind("allowNegative")}><option value="0">{L("غير مسموح", "Not allowed")}</option><option value="1">{L("مسموح", "Allowed")}</option></Select></Field>
           </>
         ) : null}
         <Field label={L("سبب الطلب *", "Reason for the request *")} wide><textarea className="hr-textarea" maxLength={300} {...f.bind("reason")} /></Field>

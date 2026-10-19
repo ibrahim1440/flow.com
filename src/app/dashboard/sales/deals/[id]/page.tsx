@@ -1203,8 +1203,8 @@ function SampleDialog({
         </Field>
         <Field id="smp-unit" label={ar ? "الوحدة" : "Unit"}>
           <Select id="smp-unit" value={unit} onChange={setUnit}>
-            <option value="KG">KG</option>
-            <option value="GRAM">GRAM</option>
+            <option value="KG">{ar ? "كجم" : "KG"}</option>
+            <option value="GRAM">{ar ? "غرام" : "GRAM"}</option>
             <option value="UNIT">{ar ? "عبوة" : "UNIT"}</option>
           </Select>
         </Field>

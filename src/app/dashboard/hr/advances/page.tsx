@@ -1,4 +1,5 @@
 "use client";
+import { Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 import { Plus } from "lucide-react";
 // HR-06 · Salary advances (Figma 1JbZgpMqmPkUVne8ms9Ozz · 454:1437). Split page: tabs by
@@ -315,9 +316,9 @@ function RepayDialog({ max, busy, error, onClose, onSubmit }: { max: number; bus
         <Field label={L("المبلغ *", "Amount *")} help={L(`الحد الأقصى الآن ${money(max)}`, `Maximum now ${money(max)}`)} error={n > max + 1e-9 ? L("أكبر من المتاح للسداد", "More than can be repaid") : null}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("amount")} /></Field>
         <Field label={L("التاريخ *", "Date *")}><input className="hr-input" type="date" {...f.bind("paidOn")} /></Field>
         <Field label={L("الطريقة", "Method")}>
-          <select className="hr-select" {...f.bind("method")}>
+          <Select className="hr-select" {...f.bind("method")}>
             {Object.keys(METHOD).map((k) => <option key={k} value={k}>{methodLabel(k, lang === "en")}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("المرجع *", "Reference *")}><input className="hr-input" dir="ltr" {...f.bind("reference")} /></Field>
       </div>
@@ -342,10 +343,10 @@ function CreateAdvance({ onClose, onCreated }: { onClose: () => void; onCreated:
       {a.error ? <div data-testid="hr-advance-create-error"><Notice tone="danger">{a.error}</Notice></div> : null}
       <div className="hr-form">
         <Field label={L("الموظف *", "Employee *")} wide>
-          <select className="hr-select" {...f.bind("employeeId")}>
+          <Select className="hr-select" {...f.bind("employeeId")}>
             <option value="">—</option>
             {meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("المبلغ *", "Amount *")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("amount")} /></Field>
         <Field label={L("عدد الأقساط *", "Number of instalments *")} help={amt > 0 && n >= 1 ? L(`≈ ${money(Math.floor((amt / n) * 100) / 100)} للقسط`, `≈ ${money(Math.floor((amt / n) * 100) / 100)} per instalment`) : undefined}><input className="hr-input hr-num" type="number" min={1} max={120} {...f.bind("installmentCount")} /></Field>

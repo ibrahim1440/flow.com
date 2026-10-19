@@ -1,4 +1,5 @@
 "use client";
+import { Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 import { Plus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -194,10 +195,10 @@ function BalancesTab({ people, version, onGrant }: { people: { id: string; fullN
     <>
       <div className="hr-filterbar">
         <label className="hr-chip">{L("الموظف:", "Employee:")}
-          <select value={personId} onChange={(e) => { setPersonId(e.target.value); setTypeId(null); }} aria-label={L("الموظف", "Employee")}>
+          <Select value={personId} onChange={(e) => { setPersonId(e.target.value); setTypeId(null); }} aria-label={L("الموظف", "Employee")}>
             <option value="">{L("اختر موظفًا", "Choose an employee")}</option>
             {people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}
-          </select>
+          </Select>
         </label>
         {personId && can("leave_manage") ? <Btn size="sm" onClick={() => onGrant(personId)}><Plus aria-hidden="true" /> {L("منحة / رصيد افتتاحي", "Grant / opening balance")}</Btn> : null}
       </div>

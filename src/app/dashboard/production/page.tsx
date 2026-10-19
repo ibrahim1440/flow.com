@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1205,32 +1206,32 @@ export default function ProductionPage() {
               {stockMode && (
                 <div>
                   <label className="block text-sm font-bold text-charcoal mb-1">{t("productLabel")}</label>
-                  <select value={roastForm.productId} onChange={(e) => setRoastForm({ ...roastForm, productId: e.target.value })}
+                  <Select value={roastForm.productId} onChange={(e) => setRoastForm({ ...roastForm, productId: e.target.value })}
                     className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                     <option value="">{t("selectProduct")}</option>
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>{lang === "ar" ? (p.productNameAr ?? p.productNameEn) : p.productNameEn}</option>
                     ))}
-                  </select>
+                  </Select>
                   <p className="mt-1 text-xs text-brown/60">{t("roastToStockProductHint")}</p>
                 </div>
               )}
               <div>
                 <label className="block text-sm font-bold text-charcoal mb-1">{t("greenBeanSource")}</label>
-                <select value={roastForm.greenBeanId} onChange={(e) => setRoastForm({ ...roastForm, greenBeanId: e.target.value })}
+                <Select value={roastForm.greenBeanId} onChange={(e) => setRoastForm({ ...roastForm, greenBeanId: e.target.value })}
                   className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                   <option value="">{t("selectBeanStock")}</option>
                   {beans.map((b) => (
                     <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {formatKg(b.quantityKg)} {t("opsKgUnit")}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               {!stockMode && livePosFor(selectedItem).length > 1 && (
                 <div>
                   <label className="block text-sm font-bold text-charcoal mb-1">
                     Production order
                   </label>
-                  <select
+                  <Select
                     value={poChoice}
                     onChange={(e) => setPoChoice(e.target.value)}
                     required
@@ -1240,7 +1241,7 @@ export default function ProductionPage() {
                     {livePosFor(selectedItem).map((p) => (
                       <option key={p.id} value={p.id}>{p.productionNumber} — {p.status}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               )}
               {!stockMode && remainingFinishedKg > 0 && (

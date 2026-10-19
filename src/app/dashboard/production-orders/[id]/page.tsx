@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/context";
@@ -342,14 +343,14 @@ export default function ProductionOrderDetailPage({ params }: { params: Promise<
               <p className="hr-caption" style={{ margin: 0 }}>{t("poNoLinkable")}</p>
             ) : (
               <div className="hr-filterbar">
-                <select value={pickBatch} onChange={(e) => setPickBatch(e.target.value)} className="hr-input" style={{ minWidth: 260, width: "auto" }} aria-label={t("poLinkBatch")}>
+                <Select value={pickBatch} onChange={(e) => setPickBatch(e.target.value)} className="hr-input" style={{ minWidth: 260, width: "auto" }} aria-label={t("poLinkBatch")}>
                   <option value="">—</option>
                   {candidates.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.batchNumber} · {b.roastedBeanQuantity} {t("opsKgUnit")} · {BATCH_STATUS[b.status]?.[0] ?? b.status}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <Btn variant="primary" onClick={() => linkBatch(pickBatch)} disabled={!pickBatch || busy !== null}>{t("poLinkAction")}</Btn>
               </div>
             )}

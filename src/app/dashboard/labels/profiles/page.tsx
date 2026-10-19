@@ -8,6 +8,7 @@
  * profiles (administrators: any). Administrators also set the job cap (default 200). Every rule is
  * enforced again by the API; this screen only offers what the server allows.
  */
+import { Select } from "@/components/ui/Select";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Btn, Notice, OpsBanner, OpsError, OpsLoading, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -271,9 +272,9 @@ function ProfilesInner() {
                 {errs("name").length ? <span className="hr-err">{L("الاسم مطلوب (حتى 80 حرفًا).", "A name is required (up to 80 characters).")}</span> : null}
               </label>
               <label className="pp-field"><span className="pp-label">{L("النوع", "Type")}</span>
-                <select className="hr-select" value={edit.draft.kind} disabled={ro} onChange={(e) => set("kind", e.target.value)} data-field="kind">
+                <Select className="hr-select" value={edit.draft.kind} disabled={ro} onChange={(e) => set("kind", e.target.value)} data-field="kind">
                   {PROFILE_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k][lang === "ar" ? 0 : 1]}</option>)}
-                </select></label>
+                </Select></label>
               <div className="pp-pairs">
                 <div className="pp-field"><span className="pp-label">{L("الورق (العرض × الارتفاع)", "Paper (width × height)")}</span>
                   <div className="pp-pair">{num("paperWidthMm", mm, L("عرض الورق", "Paper width"))}{thermal ? <UnitInput field="paperHeightMm" value="" unit={mm} label={L("طول الورق — لفافة: طول ملصق واحد", "Paper length — roll: one label")} onChange={() => {}} invalid={false} disabled placeholder="—" /> : num("paperHeightMm", mm, L("ارتفاع الورق", "Paper height"))}</div>{errLine(["paperWidthMm", "paperHeightMm"])}</div>

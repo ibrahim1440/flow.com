@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { riyadhDateString } from "@/lib/finance/dates";
 import { useUser } from "../../user-context";
@@ -120,7 +121,7 @@ export default function ReportsPage() {
           <fieldset disabled={!canSettings} className="fin-grid" style={{ ["--fin-cols" as string]: 3, border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <Field label={L("حد التنبيه بالمبلغ (ر.س)", "Alert amount threshold (SAR)")}><input className={`${INPUT} is-num`} value={s.alertAmountThreshold} onChange={(e) => setS({ ...s, alertAmountThreshold: e.target.value })} /></Field>
             <Field label={L("حد التنبيه بالنسبة (%)", "Alert percent threshold (%)")}><input className={`${INPUT} is-num`} value={s.alertPercentThreshold} onChange={(e) => setS({ ...s, alertPercentThreshold: e.target.value })} /></Field>
-            <Field label={L("منطق الحدين", "Threshold logic")}><select className={INPUT} value={s.alertThresholdMode} onChange={(e) => setS({ ...s, alertThresholdMode: e.target.value })}><option value="EITHER">{L("أيهما تجاوز", "Either is crossed")}</option><option value="BOTH">{L("كلاهما معاً", "Both are crossed")}</option></select></Field>
+            <Field label={L("منطق الحدين", "Threshold logic")}><Select className={INPUT} value={s.alertThresholdMode} onChange={(e) => setS({ ...s, alertThresholdMode: e.target.value })}><option value="EITHER">{L("أيهما تجاوز", "Either is crossed")}</option><option value="BOTH">{L("كلاهما معاً", "Both are crossed")}</option></Select></Field>
             <Field label={L("التسوية متأخرة بعد (يوم)", "Reconciliation overdue after (days)")}><input className={`${INPUT} is-num`} value={s.reconciliationDueDays} onChange={(e) => setS({ ...s, reconciliationDueDays: Number(e.target.value) })} /></Field>
             <Field label={L("تنبيه الالتزامات قبل (يوم)", "Obligation alert before (days)")}><input className={`${INPUT} is-num`} value={s.obligationAlertDays} onChange={(e) => setS({ ...s, obligationAlertDays: Number(e.target.value) })} /></Field>
             <Field label={L("تأخر التحصيل — متحفظ (أسبوع)", "Collection delay — conservative (weeks)")}><input className={`${INPUT} is-num`} value={s.conservativeDelayWeeks} onChange={(e) => setS({ ...s, conservativeDelayWeeks: Number(e.target.value) })} /></Field>
@@ -197,8 +198,8 @@ function AccountsCard({ setup, onDone }: { setup: Setup; onDone: () => void }) {
         <Field label={L("الرمز", "Code")}><input className={INPUT} value={f.code} onChange={set("code")} /></Field>
         <Field label={L("الاسم بالعربية", "Arabic name")}><input className={INPUT} value={f.nameAr} onChange={set("nameAr")} /></Field>
         <Field label={L("الاسم بالإنجليزية", "English name")}><input className={INPUT} value={f.nameEn} onChange={set("nameEn")} /></Field>
-        <Field label={L("النوع", "Type")}><select className={INPUT} value={f.type} onChange={set("type")}><option value="BANK">{L("بنك", "Bank")}</option><option value="CASH">{L("نقد", "Cash")}</option><option value="GATEWAY_CLEARING">{L("تسويات بوابة", "Gateway clearing")}</option></select></Field>
-        <Field label={L("النطاق", "Scope")}><select className={INPUT} value={f.branchKey} onChange={set("branchKey")}>{setup.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+        <Field label={L("النوع", "Type")}><Select className={INPUT} value={f.type} onChange={set("type")}><option value="BANK">{L("بنك", "Bank")}</option><option value="CASH">{L("نقد", "Cash")}</option><option value="GATEWAY_CLEARING">{L("تسويات بوابة", "Gateway clearing")}</option></Select></Field>
+        <Field label={L("النطاق", "Scope")}><Select className={INPUT} value={f.branchKey} onChange={set("branchKey")}>{setup.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</Select></Field>
         <Field label={L("البنك", "Bank")}><input className={INPUT} value={f.bankName} onChange={set("bankName")} /></Field>
         <Field label={L("آخر 4 أرقام", "Last 4 digits")}><input className={INPUT} maxLength={4} value={f.accountLast4} onChange={set("accountLast4")} /></Field>
         <Field label={L("الرصيد الافتتاحي", "Opening balance")}><input className={INPUT} value={f.openingBalance} onChange={set("openingBalance")} inputMode="decimal" /></Field>
@@ -236,8 +237,8 @@ function BranchesCard({ setup, canSettings, canAccess, selfId, onCall, busy }: {
           </div>
           {canAccess ? (
             <div className="fin-grid" style={{ ["--fin-cols" as string]: 4 }}>
-              <Field label={L("الموظف", "Employee")}><select className={INPUT} value={acc.employeeId} onChange={(e) => setAcc({ ...acc, employeeId: e.target.value })}><option value="">—</option>{setup.people.filter((p) => p.hasFinance && p.id !== selfId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-              <Field label={L("الفرع", "Branch")}><select className={INPUT} value={acc.branchId} onChange={(e) => setAcc({ ...acc, branchId: e.target.value })}><option value="">—</option>{setup.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+              <Field label={L("الموظف", "Employee")}><Select className={INPUT} value={acc.employeeId} onChange={(e) => setAcc({ ...acc, employeeId: e.target.value })}><option value="">—</option>{setup.people.filter((p) => p.hasFinance && p.id !== selfId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+              <Field label={L("الفرع", "Branch")}><Select className={INPUT} value={acc.branchId} onChange={(e) => setAcc({ ...acc, branchId: e.target.value })}><option value="">—</option>{setup.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</Select></Field>
               <Button busy={busy} disabled={!acc.employeeId || !acc.branchId} onClick={() => onCall("/api/finance/setup/branch-access", { ...acc, grant: true }, L("مُنح الوصول.", "Access granted."))}>{L("منح", "Grant")}</Button>
               <Button kind="danger" busy={busy} disabled={!acc.employeeId || !acc.branchId} onClick={() => onCall("/api/finance/setup/branch-access", { ...acc, grant: false }, L("سُحب الوصول.", "Access revoked."))}>{L("سحب", "Revoke")}</Button>
             </div>
@@ -256,7 +257,7 @@ function NewFinCategory({ onCall, busy }: { onCall: (p: string, j: unknown, ok: 
       <Field label={L("الرمز", "Code")}><input className={INPUT} value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} /></Field>
       <Field label={L("الاسم بالعربية", "Arabic name")}><input className={INPUT} value={f.nameAr} onChange={(e) => setF({ ...f, nameAr: e.target.value })} /></Field>
       <Field label={L("الاسم بالإنجليزية", "English name")}><input className={INPUT} value={f.nameEn} onChange={(e) => setF({ ...f, nameEn: e.target.value })} /></Field>
-      <Field label={L("النوع", "Kind")}><select className={INPUT} value={`${f.kind}:${f.isOperating}`} onChange={(e) => { const [k, o] = e.target.value.split(":"); setF({ ...f, kind: k, isOperating: o === "true" }); }}><option value="RECEIPT:true">{L("مقبوضات تشغيلية", "Operating receipts")}</option><option value="PAYMENT:true">{L("مدفوعات تشغيلية", "Operating payments")}</option><option value="RECEIPT:false">{L("مقبوضات تمويل", "Financing receipts")}</option><option value="PAYMENT:false">{L("مدفوعات تمويل", "Financing payments")}</option></select></Field>
+      <Field label={L("النوع", "Kind")}><Select className={INPUT} value={`${f.kind}:${f.isOperating}`} onChange={(e) => { const [k, o] = e.target.value.split(":"); setF({ ...f, kind: k, isOperating: o === "true" }); }}><option value="RECEIPT:true">{L("مقبوضات تشغيلية", "Operating receipts")}</option><option value="PAYMENT:true">{L("مدفوعات تشغيلية", "Operating payments")}</option><option value="RECEIPT:false">{L("مقبوضات تمويل", "Financing receipts")}</option><option value="PAYMENT:false">{L("مدفوعات تمويل", "Financing payments")}</option></Select></Field>
       <Button busy={busy} disabled={!f.code || !f.nameEn} onClick={() => onCall("/api/finance/setup/fin-categories", f, L("أُضيف البند.", "Category added."))}>{L("بند جديد", "New category")}</Button>
     </div>
   );

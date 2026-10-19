@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { Button, Dialog, Field, INPUT, Notice, api, useL, withBranch } from "../_components/ui";
 
@@ -66,9 +67,9 @@ function ImportDialogBody({ open, onClose, accounts, onDone, branch }: Props) {
   }
   const col = (k: keyof typeof map, label: string) => (
     <Field label={label}>
-      <select className={INPUT} value={map[k]} onChange={(e) => setMap({ ...map, [k]: e.target.value })}>
+      <Select className={INPUT} value={map[k]} onChange={(e) => setMap({ ...map, [k]: e.target.value })}>
         <option value="">—</option>{header.map((h) => <option key={h} value={h}>{h}</option>)}
-      </select>
+      </Select>
     </Field>
   );
   const rowError = (e: { field: string; message: string }) => {
@@ -81,9 +82,9 @@ function ImportDialogBody({ open, onClose, accounts, onDone, branch }: Props) {
   return (
     <Dialog open={open} onClose={onClose} width="max-w-[760px]" title={L("استيراد كشف بنكي (CSV)", "Import bank statement (CSV)")} sub={L("معاينة قبل الحفظ · لا يُرفض سطر لمجرد تطابق التاريخ والمبلغ", "Preview before saving · no line is rejected just because its date and amount match")}>
       <div className="fin-grid" style={{ ["--fin-cols" as string]: 3 }}>
-        <Field label={L("الحساب", "Account")}><select className={INPUT} value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
+        <Field label={L("الحساب", "Account")}><Select className={INPUT} value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</Select></Field>
         <Field label={L("الملف", "File")}><input type="file" accept=".csv,text/csv" className={INPUT} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} /></Field>
-        <Field label={L("صيغة التاريخ", "Date format")}><select className={INPUT} value={fmt} onChange={(e) => setFmt(e.target.value)}><option>YYYY-MM-DD</option><option>DD/MM/YYYY</option><option>MM/DD/YYYY</option></select></Field>
+        <Field label={L("صيغة التاريخ", "Date format")}><Select className={INPUT} value={fmt} onChange={(e) => setFmt(e.target.value)}><option>YYYY-MM-DD</option><option>DD/MM/YYYY</option><option>MM/DD/YYYY</option></Select></Field>
       </div>
       {header.length > 0 && (
         <>

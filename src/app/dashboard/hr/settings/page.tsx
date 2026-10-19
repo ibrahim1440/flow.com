@@ -1,4 +1,5 @@
 "use client";
+import { Combobox, Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 // HR-09 · HR settings (Figma 1JbZgpMqmPkUVne8ms9Ozz · 454:21861). Nothing here ships with an
 // approved value: a policy is drafted by one person and activated by another (four-eyes),
@@ -257,7 +258,7 @@ function PolicyForm({ v, set, base, actions }: { v: PolicyValues; set: (p: Parti
     <>
     <div className="hr-form is-rows is-policy-main">
       <Field label={L("سارية من *", "Effective from *")} help={was(v.effectiveFrom, base?.effectiveFrom)}><input className="hr-input" type="date" {...b("effectiveFrom")} /></Field>
-      <Field label={L("أساس احتساب اليوم", "Day calculation basis")} help={was(dayBasis(v.dayBasis, lang), base ? dayBasis(base.dayBasis, lang) : undefined)}><select className="hr-select" {...b("dayBasis")}><option value="FIXED_30">{dayBasis("FIXED_30", lang)}</option><option value="CALENDAR_DAYS">{dayBasis("CALENDAR_DAYS", lang)}</option></select></Field>
+      <Field label={L("أساس احتساب اليوم", "Day calculation basis")} help={was(dayBasis(v.dayBasis, lang), base ? dayBasis(base.dayBasis, lang) : undefined)}><Select className="hr-select" {...b("dayBasis")}><option value="FIXED_30">{dayBasis("FIXED_30", lang)}</option><option value="CALENDAR_DAYS">{dayBasis("CALENDAR_DAYS", lang)}</option></Select></Field>
       <Field label={L("ساعات اليوم القياسية", "Standard hours per day")} help={was(v.standardDailyHours, base?.standardDailyHours)}><input className="hr-input hr-num" inputMode="decimal" {...b("standardDailyHours")} /></Field>
       <Field label={L("معامل العمل الإضافي (×)", "Overtime multiplier (×)")} help={was(v.overtimeMultiplier, base?.overtimeMultiplier)}><input className="hr-input hr-num" inputMode="decimal" {...b("overtimeMultiplier")} /></Field>
       <Field label={L("حد الاستقطاعات من الإجمالي (%)", "Deduction cap of gross (%)")} help={was(`${v.maxDeductionPercent}%`, base ? `${base.maxDeductionPercent}%` : undefined)}><input className="hr-input hr-num" inputMode="decimal" {...b("maxDeductionPercent")} /></Field>
@@ -295,25 +296,25 @@ function DeductionFields({ v, set }: { v: PolicyValues; set: (p: Partial<PolicyV
       <div className="hr-field is-checks"><span className="hr-label">{L("يشملها الحد العام للاستقطاع", "Covered by the overall deduction cap")}</span><Checks label="" options={DED_CATS.map(([k]) => [k, name(k)] as [string, string])} value={v.dCovers} onChange={(dCovers) => set({ dCovers })} /></div>
       {[0, 1, 2, 3].map((i) => (
         <Field key={i} label={L(`ترتيب التطبيق ${i + 1}`, `Applied ${i + 1}${["st", "nd", "rd", "th"][i]}`)}>
-          <select className="hr-select" value={v.dPriority[i] ?? ""} onChange={(e) => setPriority(i, e.target.value)}>
+          <Select className="hr-select" value={v.dPriority[i] ?? ""} onChange={(e) => setPriority(i, e.target.value)}>
             <option value="">{L("— لم يُحدَّد —", "— not decided —")}</option>
             {DED_CATS.map(([k]) => <option key={k} value={k}>{name(k)}</option>)}
-          </select>
+          </Select>
         </Field>
       ))}
       <Field label={L("عند تجاوز الحد", "When a cap is exceeded")}>
-        <select className="hr-select" value={v.dAction} onChange={(e) => set({ dAction: e.target.value })}>
+        <Select className="hr-select" value={v.dAction} onChange={(e) => set({ dAction: e.target.value })}>
           <option value="">{L("— لم يُحدَّد —", "— not decided —")}</option>
           <option value="WARN">{L("تنبيه فقط", "Warn only")}</option>
           <option value="BLOCK">{L("يمنع إرسال المسير", "Block the run")}</option>
-        </select>
+        </Select>
       </Field>
       <Field label={L("أساس الحد والأجر غير المستحق", "Cap base and unearned pay")}>
-        <select className="hr-select" value={v.dAfterUnearned} onChange={(e) => set({ dAfterUnearned: e.target.value })}>
+        <Select className="hr-select" value={v.dAfterUnearned} onChange={(e) => set({ dAfterUnearned: e.target.value })}>
           <option value="">{L("— لم يُحدَّد —", "— not decided —")}</option>
           <option value="true">{L("بعد خصم الأجر غير المستحق", "After unearned pay")}</option>
           <option value="false">{L("قبل خصم الأجر غير المستحق", "Before unearned pay")}</option>
-        </select>
+        </Select>
       </Field>
       <Field label={L("تصعيد السلفة بعد عدد تأجيلات متتالية", "Escalate an advance after N consecutive deferrals")}><input className="hr-input hr-num" inputMode="numeric" value={v.dEscalate} onChange={(e) => set({ dEscalate: e.target.value })} /></Field>
       <label className="hr-field is-tall" style={{ display: "flex", flexDirection: "row", gap: 8, alignItems: "center" }}>
@@ -422,10 +423,10 @@ function AccountsTab({ map, reload }: { map: Overview["accountMap"]; reload: () 
                 <td data-label={L("الحالة", "Status")}><span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>{account ? <Dot tone="success">{L("مربوط", "Mapped")}</Dot> : <Flag>{L("غير مربوط", "Not mapped")}</Flag>}{waiting.has(key) ? <Flag tone="info">{L("تغيير بانتظار الاعتماد", "Change awaiting approval")}</Flag> : null}</span></td>
                 <td data-label={L("طلب تغيير", "Change request")}>
                   <span style={{ display: "flex", gap: 6 }}>
-                    <select className="hr-select" style={{ height: "var(--hr-control-sm)", minWidth: 180 }} aria-label={L(`حساب ${accountLabel(key, lang)}`, `${accountLabel(key, lang)} account`)} disabled={waiting.has(key)} value={pick[key] ?? ""} onChange={(e) => setPick((s) => ({ ...s, [key]: e.target.value }))}>
+                    <Select className="hr-select" style={{ height: "var(--hr-control-sm)", minWidth: 180 }} aria-label={L(`حساب ${accountLabel(key, lang)}`, `${accountLabel(key, lang)} account`)} disabled={waiting.has(key)} value={pick[key] ?? ""} onChange={(e) => setPick((s) => ({ ...s, [key]: e.target.value }))}>
                       <option value="">{account ? L("اختر لتغييره…", "Choose to change…") : L("اختر حسابًا…", "Choose an account…")}</option>
                       {map.postable.map((a) => <option key={a.id} value={a.id}>{accName(a, lang)}</option>)}
-                    </select>
+                    </Select>
                     <Btn size="sm" variant={pick[key] ? "primary" : "secondary"} disabled={!pick[key] || pick[key] === account?.id || reason.trim().length < 5 || waiting.has(key)} busy={act.busy === key} onClick={() => save(key)}>{L("طلب الربط", "Request mapping")}</Btn>
                   </span>
                 </td>
@@ -594,9 +595,9 @@ function RulesTab({ policies, me, reload }: { policies: Policy[]; me: string | n
     <div className="hr-stack">
       <div className="hr-filterbar">
         <label className="hr-chip">{L("النسخة:", "Version:")}
-          <select value={pid} onChange={(e) => setPid(e.target.value)} aria-label={L("نسخة السياسة", "Policy version")}>
+          <Select value={pid} onChange={(e) => setPid(e.target.value)} aria-label={L("نسخة السياسة", "Policy version")}>
             {policies.map((x) => <option key={x.id} value={x.id}>{L("نسخة", "Version")} {x.version} · {statusLabel(POLICY_STATUS, x.status, lang)}</option>)}
-          </select>
+          </Select>
         </label>
         {p?.status === "DRAFT" && p.createdBy === me ? <Btn variant="primary" onClick={() => setAdding(true)}>{L("+ قاعدة اشتراك", "+ Contribution rule")}</Btn> : null}
       </div>
@@ -652,8 +653,7 @@ function NewRule({ policy, onClose, onDone }: { policy: Policy; onClose: () => v
         <Field label={L("الاسم *", "Name *")}><input className="hr-input" maxLength={80} {...f.bind("nameAr")} /></Field>
         <Field label={L("نسبة الموظف % *", "Employee rate % *")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("employeeRatePercent")} /></Field>
         <Field label={L("نسبة صاحب العمل % *", "Employer rate % *")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("employerRatePercent")} /></Field>
-        <Field label={L("فئة الموظفين *", "Employee group *")} help={L("تطابق «فئة الاشتراك» في البيانات الخاصة للموظف.", "Matches the contribution group in the employee’s private data.")}><input className="hr-input" dir="ltr" maxLength={40} list="hr-contrib-groups" {...f.bind("appliesToGroup")} /></Field>
-        <datalist id="hr-contrib-groups"><option value="SAUDI" /><option value="NON_SAUDI" /></datalist>
+        <Field label={L("فئة الموظفين *", "Employee group *")} help={L("تطابق «فئة الاشتراك» في البيانات الخاصة للموظف.", "Matches the contribution group in the employee’s private data.")}><Combobox className="hr-input" dir="ltr" maxLength={40} {...f.bind("appliesToGroup")} options={[{ value: "SAUDI" }, { value: "NON_SAUDI" }]} /></Field>
         <Field label={L("سقف الوعاء الشهري", "Monthly base cap")} help={L("اختياري.", "Optional.")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("monthlyBaseCap")} /></Field>
         <div className="is-wide"><Checks label={L("مكونات الوعاء *", "Base components *")} options={components(lang)} value={base} onChange={setBase} /></div>
         <Field label={L("المصدر الرسمي *", "Official source *")} wide error={f.v.sourceNote && !noteOk ? L("اذكر المصدر بعشرة أحرف على الأقل.", "Cite the source in at least ten characters.") : null} help={L("مثل: اسم النظام أو التعميم ورقم المادة وتاريخه.", "e.g. the regulation or circular name, article number and date.")}>

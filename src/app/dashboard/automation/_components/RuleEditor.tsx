@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn, Field, Notice, OpsBanner, PageHeader } from "@/components/ops/ui";
@@ -271,10 +272,10 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
               <input id="rule-name" className="hr-input" value={name} onChange={(e) => setName(e.target.value)} disabled={readOnly} placeholder={L("مثال: إشعار العميل بجاهزية الطلب", "e.g. Tell the customer the order is ready")} />
             </Field>
             <Field label={L("لغة القيم في الرسالة", "Language for values")} help={L("مثل اسم الحالة: «جاهز للشحن» أو «Ready for Shipping».", "How statuses and outcomes are written into the message.")}>
-              <select id="rule-locale" className="hr-select" value={locale} onChange={(e) => setLocale(e.target.value === "en" ? "en" : "ar")} disabled={readOnly}>
+              <Select id="rule-locale" className="hr-select" value={locale} onChange={(e) => setLocale(e.target.value === "en" ? "en" : "ar")} disabled={readOnly}>
                 <option value="ar">{L("العربية", "Arabic")}</option>
                 <option value="en">{L("الإنجليزية", "English")}</option>
-              </select>
+              </Select>
             </Field>
             <Field label={L("وصف (اختياري)", "Description (optional)")}>
               <input id="rule-desc" className="hr-input" value={description} onChange={(e) => setDescription(e.target.value)} disabled={readOnly} />
@@ -293,7 +294,7 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
         {/* ── When ── */}
         <Sec title={L("1. متى؟", "1. When")} caption={L("حدث واحد يطلق القاعدة", "One event starts the rule")}>
           <Field label={`${L("الحدث", "Event")} *`} help={event ? (ar ? event.description.ar : event.description.en) : undefined}>
-            <select id="rule-event" className="hr-select" value={eventType} onChange={(e) => changeEvent(e.target.value)} disabled={readOnly}>
+            <Select id="rule-event" className="hr-select" value={eventType} onChange={(e) => changeEvent(e.target.value)} disabled={readOnly}>
               {EVENT_GROUPS.map((g) => (
                 <optgroup key={g.key} label={ar ? g.ar : g.en}>
                   {EVENTS.filter((e) => e.group === g.key).map((e) => (
@@ -303,7 +304,7 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
                   ))}
                 </optgroup>
               ))}
-            </select>
+            </Select>
           </Field>
         </Sec>
 
@@ -318,31 +319,31 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
                   const def = event.variables.find((v) => v.key === c.field);
                   return (
                     <div key={i} className="tl-cond" data-testid={`condition-${i}`}>
-                      <select id={`cond-field-${i}`} className="hr-select" aria-label={L("الحقل", "Field")} value={c.field} disabled={readOnly} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, field: v, value: "" } : x))); }}>
+                      <Select id={`cond-field-${i}`} className="hr-select" aria-label={L("الحقل", "Field")} value={c.field} disabled={readOnly} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, field: v, value: "" } : x))); }}>
                         {event.variables.map((v) => (
                           <option key={v.key} value={v.key}>
                             {ar ? v.ar : v.en}
                           </option>
                         ))}
-                      </select>
-                      <select id={`cond-op-${i}`} className="hr-select" aria-label={L("المقارنة", "Comparison")} value={c.op} disabled={readOnly} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, op: v as ConditionOp } : x))); }}>
+                      </Select>
+                      <Select id={`cond-op-${i}`} className="hr-select" aria-label={L("المقارنة", "Comparison")} value={c.op} disabled={readOnly} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, op: v as ConditionOp } : x))); }}>
                         {CONDITION_OPS.filter((op) => (def?.kind === "number" ? true : !["gt", "gte", "lt", "lte"].includes(op))).map((op) => (
                           <option key={op} value={op}>
                             {ar ? CONDITION_OP_LABELS[op].ar : CONDITION_OP_LABELS[op].en}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                       {OPS_WITHOUT_VALUE.has(c.op) ? (
                         <div />
                       ) : def?.kind === "enum" && def.options ? (
-                        <select id={`cond-value-${i}`} className="hr-select" aria-label={L("القيمة", "Value")} value={c.value} disabled={readOnly} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, value: v } : x))); }}>
+                        <Select id={`cond-value-${i}`} className="hr-select" aria-label={L("القيمة", "Value")} value={c.value} disabled={readOnly} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, value: v } : x))); }}>
                           <option value="">{L("اختر...", "Choose...")}</option>
                           {def.options.map((o) => (
                             <option key={o.value} value={o.value}>
                               {ar ? o.ar : o.en}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       ) : (
                         <input id={`cond-value-${i}`} className="hr-input" aria-label={L("القيمة", "Value")} value={c.value} disabled={readOnly} inputMode={def?.kind === "number" ? "decimal" : "text"} onChange={(e) => { const v = e.target.value; setConditions((cs) => cs.map((x, j) => (j === i ? { ...x, value: v } : x))); }} />
                       )}
@@ -434,11 +435,11 @@ function WaitStepFields({ step, readOnly, lang, onChange }: { step: Extract<Step
   return (
     <div className="tl-wait">
       <input id={`wait-${step.key}`} className="hr-input" aria-label={ar ? "المدة" : "Amount"} value={step.amount} onChange={(e) => onChange({ amount: e.target.value })} inputMode="decimal" disabled={readOnly} aria-invalid={bad || undefined} />
-      <select id={`wait-unit-${step.key}`} className="hr-select" aria-label={ar ? "الوحدة" : "Unit"} value={step.unit} onChange={(e) => onChange({ unit: e.target.value as WaitUnit })} disabled={readOnly}>
+      <Select id={`wait-unit-${step.key}`} className="hr-select" aria-label={ar ? "الوحدة" : "Unit"} value={step.unit} onChange={(e) => onChange({ unit: e.target.value as WaitUnit })} disabled={readOnly}>
         <option value="minutes">{ar ? "دقيقة" : "minutes"}</option>
         <option value="hours">{ar ? "ساعة" : "hours"}</option>
         <option value="days">{ar ? "يوم" : "days"}</option>
-      </select>
+      </Select>
       <span className="hr-caption" style={bad ? { color: "var(--status-danger)" } : undefined}>
         {bad ? (ar ? "الانتظار من دقيقة إلى 7 أيام." : "Between 1 minute and 7 days.") : ar ? "الخطوات التي بعدها تتأخر بهذه المدة." : "Every later step is delayed by this much."}
       </span>
@@ -484,20 +485,20 @@ function MessageStepFields({
       <div className="tl-cols" style={{ gap: 24 }}>
         <div className="hr-stack" style={{ gap: 12 }}>
           <Field label={ar ? "إلى" : "To"}>
-            <select id={`to-${step.key}`} className="hr-select" value={step.kind} onChange={(e) => onChange({ kind: e.target.value as RecipientKind })} disabled={readOnly}>
+            <Select id={`to-${step.key}`} className="hr-select" value={step.kind} onChange={(e) => onChange({ kind: e.target.value as RecipientKind })} disabled={readOnly}>
               {recipientsFor(event).map((k) => (
                 <option key={k} value={k}>
                   {ar ? RECIPIENT_LABELS[k].ar : RECIPIENT_LABELS[k].en}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
           {step.kind === "employee" && (
             <Field
               label={ar ? "الموظف" : "Employee"}
               error={chosenEmployee && !chosenEmployee.hasPhone ? (ar ? "لا يوجد رقم جوال صالح لهذا الموظف." : "This employee has no usable phone number.") : undefined}
             >
-              <select id={`emp-${step.key}`} className="hr-select" value={step.employeeId} onChange={(e) => onChange({ employeeId: e.target.value })} disabled={readOnly}>
+              <Select id={`emp-${step.key}`} className="hr-select" value={step.employeeId} onChange={(e) => onChange({ employeeId: e.target.value })} disabled={readOnly}>
                 <option value="">{ar ? "اختر موظفا..." : "Choose an employee..."}</option>
                 {employees.map((e) => (
                   <option key={e.id} value={e.id}>
@@ -505,7 +506,7 @@ function MessageStepFields({
                     {e.hasPhone ? "" : ar ? " (بلا رقم)" : " (no phone)"}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           )}
           {step.kind === "phone" && (

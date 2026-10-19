@@ -1,4 +1,5 @@
 "use client";
+import { Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 // Payroll runs — list + «إعداد مسير». A run is prepared from current inputs for one month
 // and one scope (whole company or one branch); the API refuses a second REGULAR run for the
@@ -107,23 +108,23 @@ function PrepareDialog({ runs, onClose, onDone }: { runs: RunRow[]; onClose: () 
       <div className="hr-form">
         <Field label={L("الشهر *", "Month *")}><input className="hr-input" type="month" {...f.bind("month")} /></Field>
         <Field label={L("النطاق", "Scope")}>
-          <select className="hr-select" {...f.bind("branchKey")}>
+          <Select className="hr-select" {...f.bind("branchKey")}>
             {companyWide ? <option value="COMPANY">{t("wholeCompany")}</option> : null}
             {meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("النوع", "Type")} help={f.v.kind === "CORRECTION" ? L("يحمل التسويات فقط، لموظفين في مسير معتمد أو مصروف لنفس الشهر.", "Carries adjustments only, for employees in an approved or paid run for the same month.") : undefined}>
-          <select className="hr-select" {...f.bind("kind")}>
+          <Select className="hr-select" {...f.bind("kind")}>
             <option value="REGULAR">{label(KIND_LABEL, "REGULAR", lang)}</option>
             <option value="CORRECTION">{label(KIND_LABEL, "CORRECTION", lang)}</option>
-          </select>
+          </Select>
         </Field>
         {f.v.kind === "CORRECTION" ? (
           <Field label={L("يصحّح المسير *", "Corrects run *")} error={correctable.length ? null : L("لا يوجد مسير معتمد أو مصروف لهذا الشهر.", "No approved or paid run exists for this month.")}>
-            <select className="hr-select" {...f.bind("correctsRunId")}>
+            <Select className="hr-select" {...f.bind("correctsRunId")}>
               <option value="">—</option>
               {correctable.map((r) => <option key={r.id} value={r.id}>#{r.runNo} · {month(r.periodMonth)}</option>)}
-            </select>
+            </Select>
           </Field>
         ) : null}
       </div>

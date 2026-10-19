@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import { Printer, FileText } from "lucide-react";
@@ -546,7 +547,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             return (
               <tr key={i} data-testid={`line-${i}`}>
                 <td className="prod">
-                  <select
+                  <Select
                     aria-label={ar ? `المنتج للبند ${i + 1}` : `Product for line ${i + 1}`}
                     value={l.productSkuId}
                     onChange={(e) => chooseSku(i, e.target.value)}
@@ -558,7 +559,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                         {(ar ? s.nameAr : null) ?? s.name ?? s.skuCode}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   {sku && <span className="id">{sku.skuCode}</span>}
                   {!l.productSkuId && (
                     <input
@@ -580,7 +581,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   />
                 </td>
                 <td>
-                  <select
+                  <Select
                     aria-label={ar ? `وحدة البند ${i + 1}` : `Unit for line ${i + 1}`}
                     value={l.unit}
                     onChange={(e) => setLine(i, { unit: e.target.value })}
@@ -589,7 +590,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                     <option value="KG">{unitLabel("KG")}</option>
                     <option value="UNIT">{unitLabel("UNIT")}</option>
                     <option value="GRAM">{unitLabel("GRAM")}</option>
-                  </select>
+                  </Select>
                 </td>
                 <td>
                   <input

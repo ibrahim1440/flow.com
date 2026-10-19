@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { useUser } from "../../user-context";
 import { Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, Kpi, LoadingState, Metrics, Notice, Status, Table, Td, Th, api, useApi, useFinance, useHasSub, useL, withBranch, type Tone } from "../_components/ui";
@@ -141,14 +142,14 @@ function ObligationDialog({ open, onClose, setup, cats, onDone }: { open: boolea
   return (
     <Dialog open={open} onClose={onClose} width="max-w-[640px]" title={L("التزام جديد", "New obligation")} sub={L("ما تدين به الشركة وموعده. الرواتب والإيجار تُكرر شهرياً عند الحاجة.", "What the company owes and when. Payroll and rent can repeat monthly.")}>
       <div className="fin-grid">
-        <Field label={L("النوع", "Type")}><select className={INPUT} value={f.type} onChange={set("type")}>{Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}</select></Field>
-        <Field label={L("النطاق", "Scope")}><select className={INPUT} value={f.branchKey} onChange={set("branchKey")}>{setup?.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+        <Field label={L("النوع", "Type")}><Select className={INPUT} value={f.type} onChange={set("type")}>{Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{L(v[0], v[1])}</option>)}</Select></Field>
+        <Field label={L("النطاق", "Scope")}><Select className={INPUT} value={f.branchKey} onChange={set("branchKey")}>{setup?.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</Select></Field>
         <Field label={L("الوصف", "Description")}><input className={INPUT} value={f.description} onChange={set("description")} /></Field>
         <Field label={L("الطرف", "Counterparty")}><input className={INPUT} value={f.counterparty} onChange={set("counterparty")} /></Field>
         <Field label={L("المبلغ", "Amount")}><input className={INPUT} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
         <Field label={L("تاريخ الاستحقاق", "Due date")}><input type="date" className={INPUT} value={f.dueDate} onChange={set("dueDate")} /></Field>
-        <Field label={L("فئة التمويل", "Funding category")}><select className={INPUT} value={f.allocationCategoryId} onChange={set("allocationCategoryId")}><option value="">—</option>{cats.filter((c) => c.branchKey === f.branchKey).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select></Field>
-        <Field label={L("بند الميزانية", "Budget category")}><select className={INPUT} value={f.finCategoryId} onChange={set("finCategoryId")}><option value="">—</option>{setup?.finCategories.filter((c) => c.kind === "PAYMENT").map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select></Field>
+        <Field label={L("فئة التمويل", "Funding category")}><Select className={INPUT} value={f.allocationCategoryId} onChange={set("allocationCategoryId")}><option value="">—</option>{cats.filter((c) => c.branchKey === f.branchKey).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select></Field>
+        <Field label={L("بند الميزانية", "Budget category")}><Select className={INPUT} value={f.finCategoryId} onChange={set("finCategoryId")}><option value="">—</option>{setup?.finCategories.filter((c) => c.kind === "PAYMENT").map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select></Field>
         <Field label={L("تكرار شهري (عدد الأشهر)", "Repeat monthly (months)")}><input className={INPUT} value={f.repeatMonths} onChange={set("repeatMonths")} inputMode="numeric" /></Field>
       </div>
       {err && <Notice tone="bad">{err}</Notice>}
@@ -170,12 +171,12 @@ function ItemDialog({ open, onClose, setup, onDone }: { open: boolean; onClose: 
   return (
     <Dialog open={open} onClose={onClose} title={L("بند متوقع", "Expected item")} sub={L("متحصل أو مدفوع متوقع غير مسجّل كالتزام. لا يُحتسب نقداً.", "An expected receipt or payment that is not an obligation. Never counted as cash.")}>
       <div className="fin-grid">
-        <Field label={L("النوع", "Kind")}><select className={INPUT} value={f.kind} onChange={set("kind")}><option value="RECEIPT">{L("متحصل متوقع", "Expected receipt")}</option><option value="PAYMENT">{L("مدفوع متوقع", "Expected payment")}</option></select></Field>
-        <Field label={L("النطاق", "Scope")}><select className={INPUT} value={f.branchKey} onChange={set("branchKey")}>{setup?.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+        <Field label={L("النوع", "Kind")}><Select className={INPUT} value={f.kind} onChange={set("kind")}><option value="RECEIPT">{L("متحصل متوقع", "Expected receipt")}</option><option value="PAYMENT">{L("مدفوع متوقع", "Expected payment")}</option></Select></Field>
+        <Field label={L("النطاق", "Scope")}><Select className={INPUT} value={f.branchKey} onChange={set("branchKey")}>{setup?.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</Select></Field>
         <Field label={L("الوصف", "Description")}><input className={INPUT} value={f.description} onChange={set("description")} /></Field>
         <Field label={L("المبلغ", "Amount")}><input className={INPUT} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
         <Field label={L("التاريخ المتوقع", "Expected date")}><input type="date" className={INPUT} value={f.expectedDate} onChange={set("expectedDate")} /></Field>
-        <Field label={L("بند الميزانية", "Budget category")}><select className={INPUT} value={f.finCategoryId} onChange={set("finCategoryId")}><option value="">—</option>{setup?.finCategories.filter((c) => c.kind === f.kind).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select></Field>
+        <Field label={L("بند الميزانية", "Budget category")}><Select className={INPUT} value={f.finCategoryId} onChange={set("finCategoryId")}><option value="">—</option>{setup?.finCategories.filter((c) => c.kind === f.kind).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select></Field>
       </div>
       {err && <Notice tone="bad">{err}</Notice>}
       <div className="fin-row"><Button kind="primary" busy={busy} onClick={submit}>{L("حفظ", "Save")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>

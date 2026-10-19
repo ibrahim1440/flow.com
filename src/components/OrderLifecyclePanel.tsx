@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { opsDate, countNoun, UNIT_FORMS, Kg } from "@/components/ops/ui";
 import { activityTextAr } from "@/components/ops/activity-text";
@@ -365,7 +366,7 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
       <div className="hr-stack" style={{ gap: 8 }}>
         <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="hr-label">{t("departmentLabel")}</span>
-          <select
+          <Select
             value={department}
             onChange={(e) => setDepartment(e.target.value as OrderNoteDepartment)}
             className="hr-input"
@@ -373,7 +374,7 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
             {DEPARTMENT_OPTIONS.map((d) => (
               <option key={d.value} value={d.value}>{t(d.labelKey)}</option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="hr-label">{t("noteFieldLabel")}</span>

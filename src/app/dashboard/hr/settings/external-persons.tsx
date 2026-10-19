@@ -3,6 +3,7 @@
 // editors only). A verified non-employee identity, e.g. an outside accountant: never on payroll,
 // never a payee. Every change is a REQUEST that another account editor approves; identifying edits
 // and deactivation end the verification. Identity numbers are shown masked only.
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { Btn, Dialog, Dot, Empty, ErrorState, Field, KV, LoadingTable, Notice, hrFetch, useAction, useForm, useHr, dateTimeIn } from "@/components/hr/ui";
 import { useI18n } from "@/lib/i18n/context";
@@ -186,10 +187,10 @@ function ExternalDialog({ op, person, logins, onClose, onDone }: { op: "CREATE" 
         </> : null}
         {op === "CREATE" || op === "LINK" ? (
           <Field label={op === "LINK" ? t("الحساب *", "Login *") : t("الحساب (اختياري)", "Login (optional)")} help={t("حسابات غير مرتبطة بأي شخص فقط.", "Logins linked to no person only.")}>
-            <select className="hr-input" {...f.bind("accountId")}>
+            <Select className="hr-input" {...f.bind("accountId")}>
               <option value="">—</option>
               {logins.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
+            </Select>
           </Field>
         ) : null}
         <Field label={t("السبب *", "Reason *")} help={t("يُحفظ في سجل التدقيق.", "Kept in the audit trail.")}><textarea className="hr-textarea" maxLength={300} {...f.bind("reason")} /></Field>

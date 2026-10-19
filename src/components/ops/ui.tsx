@@ -350,7 +350,7 @@ export function OpsPane({ title, sub, onClose, children, footer, testId, label, 
     }
     const onTab = (e: KeyboardEvent) => {
       if (e.key !== "Tab" || layerAbove(el)) return;
-      const items = Array.from(el.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")).filter((x) => x.offsetParent !== null);
+      const items = Array.from(el.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]):not(.hq-native), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")).filter((x) => x.offsetParent !== null);
       if (items.length === 0) { e.preventDefault(); el.focus(); return; }
       const firstEl = items[0], lastEl = items[items.length - 1];
       const active = document.activeElement as HTMLElement | null;

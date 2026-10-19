@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useEffect, useState } from "react";
 import { useUser } from "../../user-context";
 import { parseMoney } from "@/lib/finance/money";
@@ -221,10 +222,10 @@ function ReservationActions({ r, onDone }: { r: Reservation; onDone: () => void 
       <Button size="sm" kind="ghost" busy={busy} onClick={async () => { const reason = prompt(L("سبب الإلغاء", "Reason")); if (!reason) return; setBusy(true); try { await api(withBranch(`/api/finance/reservations/${r.id}/release`, branch), { method: "POST", json: { reason } }); onDone(); } finally { setBusy(false); } }}>{L("إلغاء الحجز", "Release")}</Button>
       <Dialog open={open} onClose={() => setOpen(false)} title={L("تسجيل الدفع المنفّذ", "Record payment made")} sub={L("لا يرسل النظام أي أموال عبر البنك. نفّذ التحويل من الخدمات المصرفية، ثم اختر هنا السطر الصادر الذي يمثّله (قيد يدوي معلّق أو سطر من الكشف). يُخصم المبلغ من الفئة ويُحرر الحجز في العملية نفسها، وعند وصول الكشف يؤكّد السطر نفسه دون حركة ثانية.", "The application never sends money through the bank. Make the transfer in online banking, then choose the outgoing line that represents it (a pending manual entry or a statement line). The category is reduced and the reservation released together; when the statement arrives it confirms the same line with no second movement.")}>
         <Field label={L("السطر الصادر", "Outgoing line")}>
-          <select className={INPUT} value={txnId} onChange={(e) => setTxnId(e.target.value)}>
+          <Select className={INPUT} value={txnId} onChange={(e) => setTxnId(e.target.value)}>
             <option value="">—</option>
             {outs.data?.rows.filter((t) => Number(t.amount) < 0 && t.status !== "VOID").map((t) => <option key={t.id} value={t.id}>{t.txnDate.slice(0, 10)} · {t.cashAccount.code} · {money(M(t.amount))} · {t.status === "PENDING" ? L("معلّق", "pending") : L("مؤكد", "confirmed")} · {t.description}</option>)}
-          </select>
+          </Select>
         </Field>
         {err && <Notice tone="bad">{err}</Notice>}
         <div className="fin-row"><Button kind="primary" busy={busy} disabled={!txnId} onClick={exec}>{L("تسجيل", "Record")}</Button><Button onClick={() => setOpen(false)}>{L("إلغاء", "Cancel")}</Button></div>
@@ -300,7 +301,7 @@ function PreviewCard({ versions, catName }: { versions: Version[]; catName: (id:
   return (
     <Card>
       <CardTitle title={L("معاينة القواعد", "Rule preview")} sub={L("لا يُحفظ شيء. تُطبّق على حالة الفئات الحالية.", "Nothing is saved. Applied to the categories' current state.")}
-        right={candidates.length > 1 && <select aria-label={L("الإصدار", "Version")} className={`${INPUT} is-auto`} value={vid} onChange={(e) => setVid(e.target.value)}>{candidates.map((v) => <option key={v.id} value={v.id}>v{v.versionNo} · {v.status}</option>)}</select>} />
+        right={candidates.length > 1 && <Select aria-label={L("الإصدار", "Version")} className={`${INPUT} is-auto`} value={vid} onChange={(e) => setVid(e.target.value)}>{candidates.map((v) => <option key={v.id} value={v.id}>v{v.versionNo} · {v.status}</option>)}</Select>} />
       <div className="fin-grid is-keep" style={{ ["--fin-cols" as string]: 3 }}>
         <Field label={L("مبلغ الإيصال", "Receipt amount")}><input className={`${INPUT} is-num`} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" /></Field>
         <Field label={L("ضريبة مطابقة", "Matched VAT")}><input className={`${INPUT} is-num`} value={tax} onChange={(e) => setTax(e.target.value)} inputMode="decimal" /></Field>
@@ -341,17 +342,17 @@ function ManualAllocationDialog({ open, onClose, cats, onDone }: { open: boolean
   }
   return (
     <Dialog open={open} onClose={onClose} title={L("تخصيص يدوي", "Manual allocation")} sub={L("تخصيص داخلي لجزء من نقد موجود — ليس مصروفاً ولا تحويلاً بنكياً. يجب أن يُنسب إلى مصدره.", "An internal earmark of existing cash — not an expense and not a bank transfer. It must name its source.")}>
-      <Field label={L("الفئة", "Category")}><select className={INPUT} value={categoryId} onChange={(e) => setCat(e.target.value)}><option value="">—</option>{cats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select></Field>
+      <Field label={L("الفئة", "Category")}><Select className={INPUT} value={categoryId} onChange={(e) => setCat(e.target.value)}><option value="">—</option>{cats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select></Field>
       <div className="fin-grid">
-        <Field label={L("المصدر", "Source")}><select className={INPUT} value={source} onChange={(e) => { setSource(e.target.value as "txn"); setSrc(""); }}><option value="txn">{L("إيصال مؤكد", "Confirmed receipt")}</option><option value="opening">{L("رصيد افتتاحي لحساب", "Account opening balance")}</option></select></Field>
+        <Field label={L("المصدر", "Source")}><Select className={INPUT} value={source} onChange={(e) => { setSource(e.target.value as "txn"); setSrc(""); }}><option value="txn">{L("إيصال مؤكد", "Confirmed receipt")}</option><option value="opening">{L("رصيد افتتاحي لحساب", "Account opening balance")}</option></Select></Field>
         <Field label={L("المبلغ", "Amount")}><input className={INPUT} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" /></Field>
       </div>
       <Field label={source === "txn" ? L("الإيصال", "Receipt") : L("الحساب", "Account")}>
-        <select className={INPUT} value={srcId} onChange={(e) => setSrc(e.target.value)}>
+        <Select className={INPUT} value={srcId} onChange={(e) => setSrc(e.target.value)}>
           <option value="">—</option>
           {source === "txn" ? receipts.data?.rows.filter((t) => Number(t.amount) > 0 && t.classification !== "INTERNAL_TRANSFER").map((t) => <option key={t.id} value={t.id}>{t.txnDate.slice(0, 10)} · {t.cashAccount.code} · {t.amount} · {t.description}</option>)
             : accounts.data?.filter((a) => !a.isRestricted).map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)} · {money(a.opening)}</option>)}
-        </select>
+        </Select>
       </Field>
       <Field label={L("السبب", "Reason")}><input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
       {cat && <p className="text-xs fin-t2">{L("المتاح حالياً في الفئة", "Currently available in the category")}: {money(cat.available)}</p>}
@@ -374,10 +375,10 @@ function TransferDialog({ open, onClose, cats, people, onDone }: { open: boolean
   return (
     <Dialog open={open} onClose={() => { setOk(false); onClose(); }} title={L("تحويل بين الفئات", "Transfer between categories")} sub={L("يتطلب موافقة صاحب صلاحية اعتماد التحويلات. لا يتحرك أي مبلغ قبل الاعتماد.", "Needs approval from a holder of the transfer-approval duty. Nothing moves before approval.")}>
       <div className="fin-grid">
-        <Field label={L("من", "From")}><select className={INPUT} value={f.fromCategoryId} onChange={(e) => setF({ ...f, fromCategoryId: e.target.value })}><option value="">—</option>{cats.map((c) => <option key={c.id} value={c.id}>{name(c)} · {money(c.available)}</option>)}</select></Field>
-        <Field label={L("إلى", "To")}><select className={INPUT} value={f.toCategoryId} onChange={(e) => setF({ ...f, toCategoryId: e.target.value })}><option value="">—</option>{cats.filter((c) => c.id !== f.fromCategoryId && (!from || c.branchKey === from.branchKey)).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select></Field>
+        <Field label={L("من", "From")}><Select className={INPUT} value={f.fromCategoryId} onChange={(e) => setF({ ...f, fromCategoryId: e.target.value })}><option value="">—</option>{cats.map((c) => <option key={c.id} value={c.id}>{name(c)} · {money(c.available)}</option>)}</Select></Field>
+        <Field label={L("إلى", "To")}><Select className={INPUT} value={f.toCategoryId} onChange={(e) => setF({ ...f, toCategoryId: e.target.value })}><option value="">—</option>{cats.filter((c) => c.id !== f.fromCategoryId && (!from || c.branchKey === from.branchKey)).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select></Field>
         <Field label={L("المبلغ", "Amount")}><input className={INPUT} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} inputMode="decimal" /></Field>
-        <Field label={L("المعتمِد (اختياري)", "Approver (optional)")}><select className={INPUT} value={f.assignedToId} onChange={(e) => setF({ ...f, assignedToId: e.target.value })}><option value="">{L("أي صاحب صلاحية", "Any holder of the duty")}</option>{people.filter((p) => p.duties.includes("transfer_approve")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+        <Field label={L("المعتمِد (اختياري)", "Approver (optional)")}><Select className={INPUT} value={f.assignedToId} onChange={(e) => setF({ ...f, assignedToId: e.target.value })}><option value="">{L("أي صاحب صلاحية", "Any holder of the duty")}</option>{people.filter((p) => p.duties.includes("transfer_approve")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
       </div>
       <Field label={L("السبب", "Reason")}><input className={INPUT} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
       {err && <Notice tone="bad">{err}</Notice>}
@@ -410,12 +411,12 @@ function PaymentRequestDialog({ open, onClose, cats, people, onDone }: { open: b
   const close = () => { setResult(null); setErr(null); onClose(); };
   return (
     <Dialog open={open} onClose={close} title={L("طلب دفع من فئة", "Payment request from a category")} sub={L("يحجز المبلغ من رصيد الفئة حتى تسجيل الدفع المنفّذ (لا يرسل النظام أموالاً)", "Holds the amount in the category until the payment made is recorded (the app sends no money)")}>
-      <Field label={L("الفئة", "Category")}><select className={INPUT} value={f.categoryId} onChange={(e) => setF({ ...f, categoryId: e.target.value })}><option value="">—</option>{cats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)} — {L("المتاح", "available")} {money(c.available)}</option>)}</select></Field>
+      <Field label={L("الفئة", "Category")}><Select className={INPUT} value={f.categoryId} onChange={(e) => setF({ ...f, categoryId: e.target.value })}><option value="">—</option>{cats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)} — {L("المتاح", "available")} {money(c.available)}</option>)}</Select></Field>
       <Field label={L("الالتزام (اختياري)", "Obligation (optional)")}>
-        <select className={INPUT} value={f.obligationId} onChange={(e) => { const o = obligations.data?.rows.find((x) => x.id === e.target.value); setF({ ...f, obligationId: e.target.value, ...(o ? { amount: (Math.max(0, o.remaining - o.reserved) / 100).toFixed(2), dueDate: o.dueDate, payee: f.payee || o.counterparty || "", purpose: f.purpose || o.description } : {}) }); }}>
+        <Select className={INPUT} value={f.obligationId} onChange={(e) => { const o = obligations.data?.rows.find((x) => x.id === e.target.value); setF({ ...f, obligationId: e.target.value, ...(o ? { amount: (Math.max(0, o.remaining - o.reserved) / 100).toFixed(2), dueDate: o.dueDate, payee: f.payee || o.counterparty || "", purpose: f.purpose || o.description } : {}) }); }}>
           <option value="">—</option>
           {obligations.data?.rows.filter((o) => !cat || !o.allocationCategoryId || o.allocationCategoryId === cat.id).map((o) => <option key={o.id} value={o.id}>{o.description} · {money(o.remaining)} · {o.dueDate}</option>)}
-        </select>
+        </Select>
       </Field>
       <div className="fin-grid">
         <Field label={L("المبلغ", "Amount")}><input className={`${INPUT} is-num`} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} inputMode="decimal" /></Field>
@@ -461,16 +462,16 @@ function CategoryDialogBody({ open, onClose, cat, defaultBranch, setup, onDone }
     <Dialog open={open} onClose={onClose} width="max-w-[640px]" title={cat ? L(`تعديل الفئة ${cat.code}`, `Edit category ${cat.code}`) : L("فئة تخصيص جديدة", "New allocation category")}>
       <div className="fin-grid">
         <Field label={L("الرمز", "Code")}><input className={INPUT} disabled={!!cat} value={f.code} onChange={set("code")} /></Field>
-        <Field label={L("الفرع", "Branch")}><select className={INPUT} disabled={!!cat} value={f.branchKey} onChange={set("branchKey")}>{setup?.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+        <Field label={L("الفرع", "Branch")}><Select className={INPUT} disabled={!!cat} value={f.branchKey} onChange={set("branchKey")}>{setup?.scope.all && <option value="COMPANY">{L("مستوى الشركة", "Company level")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</Select></Field>
         <Field label={L("الاسم بالعربية", "Arabic name")}><input className={INPUT} value={f.nameAr} onChange={set("nameAr")} /></Field>
         <Field label={L("الاسم بالإنجليزية", "English name")}><input className={INPUT} value={f.nameEn} onChange={set("nameEn")} /></Field>
-        <Field label={L("نوع التمويل", "Funding type")}><select className={INPUT} value={f.fundingType} onChange={set("fundingType")}><option value="OPEN">{L("مفتوح", "Open")}</option><option value="MONTHLY_TARGET">{L("هدف شهري (لا يُعاد ملؤه بعد الصرف)", "Monthly target (not refilled after spending)")}</option><option value="RESERVE_TARGET">{L("احتياطي مستهدف", "Target reserve")}</option></select></Field>
+        <Field label={L("نوع التمويل", "Funding type")}><Select className={INPUT} value={f.fundingType} onChange={set("fundingType")}><option value="OPEN">{L("مفتوح", "Open")}</option><option value="MONTHLY_TARGET">{L("هدف شهري (لا يُعاد ملؤه بعد الصرف)", "Monthly target (not refilled after spending)")}</option><option value="RESERVE_TARGET">{L("احتياطي مستهدف", "Target reserve")}</option></Select></Field>
         <Field label={L("مبلغ الهدف", "Target amount")}><input className={INPUT} disabled={f.fundingType === "OPEN"} value={f.targetAmount} onChange={set("targetAmount")} inputMode="decimal" /></Field>
         <Field label={L("الأولوية (الأصغر أولاً)", "Priority (lower first)")}><input className={INPUT} value={f.priority} onChange={set("priority")} inputMode="numeric" /></Field>
-        <Field label={L("سياسة الترحيل", "Rollover policy")}><select className={INPUT} value={f.rollover} onChange={set("rollover")}><option value="CARRY_FORWARD">{L("ترحيل الرصيد", "Carry forward")}</option><option value="SWEEP_TO_UNALLOCATED">{L("إعادة لغير المخصص عند الإقفال", "Sweep to unallocated at close")}</option></select></Field>
+        <Field label={L("سياسة الترحيل", "Rollover policy")}><Select className={INPUT} value={f.rollover} onChange={set("rollover")}><option value="CARRY_FORWARD">{L("ترحيل الرصيد", "Carry forward")}</option><option value="SWEEP_TO_UNALLOCATED">{L("إعادة لغير المخصص عند الإقفال", "Sweep to unallocated at close")}</option></Select></Field>
         <Field label={L("حد الإنفاق للدفعة الواحدة", "Spending limit per payment")}><input className={INPUT} value={f.spendingLimit} onChange={set("spendingLimit")} inputMode="decimal" /></Field>
-        <Field label={L("معتمِد التجاوز", "Override approver")}><select className={INPUT} value={f.approverEmployeeId} onChange={set("approverEmployeeId")}><option value="">{L("أي صاحب صلاحية", "Any holder of the duty")}</option>{setup?.people.filter((p) => p.duties.includes("spend_override_approve")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-        <Field label={L("بند الميزانية المرتبط", "Linked budget category")}><select className={INPUT} value={f.finCategoryId} onChange={set("finCategoryId")}><option value="">—</option>{setup?.finCategories.filter((c) => c.kind === "PAYMENT").map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select></Field>
+        <Field label={L("معتمِد التجاوز", "Override approver")}><Select className={INPUT} value={f.approverEmployeeId} onChange={set("approverEmployeeId")}><option value="">{L("أي صاحب صلاحية", "Any holder of the duty")}</option>{setup?.people.filter((p) => p.duties.includes("spend_override_approve")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+        <Field label={L("بند الميزانية المرتبط", "Linked budget category")}><Select className={INPUT} value={f.finCategoryId} onChange={set("finCategoryId")}><option value="">—</option>{setup?.finCategories.filter((c) => c.kind === "PAYMENT").map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select></Field>
       </div>
       <div className="fin-row" style={{ gap: 16 }}>
         <label className="fin-check"><input type="checkbox" disabled={f.fundingType !== "RESERVE_TARGET"} checked={f.replenish} onChange={(e) => setF({ ...f, replenish: e.target.checked })} />{L("يُعاد ملء الاحتياطي بعد الصرف", "Refill the reserve after spending")}</label>
@@ -513,8 +514,8 @@ function RulesEditorBody({ open, onClose, version, cats, onDone, branch, src }: 
       <div className="flex flex-col gap-2">
         {steps.map((s, i) => (
           <div key={i} className="fin-editrow" style={{ gridTemplateColumns: "1.4fr 1.4fr 0.7fr 0.6fr 0.8fr auto" }}>
-            <select aria-label={L("الطريقة", "Method")} className={INPUT} value={s.method} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))}>{PHASE.map((m) => <option key={m} value={m}>{L(METHOD[m][0], METHOD[m][1])}</option>)}</select>
-            <select aria-label={L("الفئة", "Category")} className={INPUT} disabled={s.method === "LEAVE_UNALLOCATED"} value={s.categoryId} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, categoryId: e.target.value } : x)))}><option value="">—</option>{cats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select>
+            <Select aria-label={L("الطريقة", "Method")} className={INPUT} value={s.method} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))}>{PHASE.map((m) => <option key={m} value={m}>{L(METHOD[m][0], METHOD[m][1])}</option>)}</Select>
+            <Select aria-label={L("الفئة", "Category")} className={INPUT} disabled={s.method === "LEAVE_UNALLOCATED"} value={s.categoryId} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, categoryId: e.target.value } : x)))}><option value="">—</option>{cats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select>
             <input aria-label="%" className={INPUT} placeholder="%" disabled={s.method !== "PERCENT_OF_BASE"} value={s.percent} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, percent: e.target.value } : x)))} />
             <input aria-label={L("الوزن", "Weight")} className={INPUT} placeholder={L("وزن", "weight")} disabled={s.method !== "WEIGHTED_REMAINDER"} value={s.weight} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)))} />
             <input aria-label={L("السقف", "Cap")} className={INPUT} placeholder={L("سقف", "cap")} value={s.capAmount} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, capAmount: e.target.value } : x)))} />

@@ -1,5 +1,6 @@
 "use client";
 // HR-02 · Documents. Bytes stay in the database; every download is audited server-side.
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, Dialog, Empty, Field, Flag, Notice, useAction, useForm, useHrI18n } from "@/components/hr/ui";
 import { Check, DOC_CATEGORY, SectionHead, daysUntil, fileSize, lbl, mutate, type Doc, type TabProps } from "./shared";
@@ -85,7 +86,7 @@ function UploadDialog({ id, onClose, onDone }: { id: string; onClose: () => void
           }} style={{ paddingBlock: 4 }} />
         </Field>
         <Field label={L("العنوان *", "Title *")}><input className="hr-input" {...f.bind("title")} /></Field>
-        <Field label={L("الفئة", "Category")}><select className="hr-select" {...f.bind("category")}>{Object.keys(DOC_CATEGORY).map((k) => <option key={k} value={k}>{lbl(DOC_CATEGORY, k, lang)}</option>)}</select></Field>
+        <Field label={L("الفئة", "Category")}><Select className="hr-select" {...f.bind("category")}>{Object.keys(DOC_CATEGORY).map((k) => <option key={k} value={k}>{lbl(DOC_CATEGORY, k, lang)}</option>)}</Select></Field>
         <Field label={L("تاريخ الانتهاء", "Expiry date")} help={L("يظهر تذكير قبل الانتهاء بستين يومًا", "A reminder appears 60 days before expiry")}><input className="hr-input" type="date" {...f.bind("expiresOn")} /></Field>
       </div>
       <Check checked={confidential} onChange={setConfidential}>{L("سري", "Confidential")}</Check>

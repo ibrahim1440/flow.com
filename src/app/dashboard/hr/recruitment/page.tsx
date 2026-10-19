@@ -1,4 +1,5 @@
 "use client";
+import { Combobox, Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 import { Plus } from "lucide-react";
 // HR-08 · Recruitment (Figma 1JbZgpMqmPkUVne8ms9Ozz · 454:21515). Split list + preview.
@@ -234,9 +235,9 @@ function Openings({ q, canManage, onNew }: { q: ReturnType<typeof useHr<Opening[
                 <td data-label={L("الحالة", "Status")}><StatusDot map={OPENING_STATUS} value={o.status} /></td>
                 <td data-label={L("تغيير الحالة", "Change status")}>
                   {canManage ? (
-                    <select className="hr-select" style={{ height: "var(--hr-control-sm)", width: "auto" }} aria-label={L(`حالة ${o.code}`, `${o.code} status`)} value={o.status} disabled={a.busy === o.id} onChange={(e) => setStatus(o.id, e.target.value)}>
+                    <Select className="hr-select" style={{ height: "var(--hr-control-sm)", width: "auto" }} aria-label={L(`حالة ${o.code}`, `${o.code} status`)} value={o.status} disabled={a.busy === o.id} onChange={(e) => setStatus(o.id, e.target.value)}>
                       {Object.keys(OPENING_STATUS).map((k) => <option key={k} value={k}>{statusLabel(OPENING_STATUS, k, lang)}</option>)}
-                    </select>
+                    </Select>
                   ) : null}
                 </td>
               </tr>
@@ -399,8 +400,7 @@ function InterviewDialog({ a, nowIso, onClose, onDone }: { a: Applicant; nowIso:
       {act.error ? <Notice tone="danger">{act.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("الموعد *", "Time *")} help={L("بتوقيت جهازك.", "In your device’s time.")}><input className="hr-input" type="datetime-local" {...f.bind("at")} /></Field>
-        <Field label={L("النوع *", "Type *")}><input className="hr-input" list="hr-interview-kinds" maxLength={60} {...f.bind("kind")} /></Field>
-        <datalist id="hr-interview-kinds">{L("فنية|إدارية|هاتفية|الموارد البشرية", "Technical|Management|Phone|HR").split("|").map((k) => <option key={k} value={k} />)}</datalist>
+        <Field label={L("النوع *", "Type *")}><Combobox className="hr-input" maxLength={60} {...f.bind("kind")} options={L("فنية|إدارية|هاتفية|الموارد البشرية", "Technical|Management|Phone|HR").split("|").map((k) => ({ value: k }))} /></Field>
         <Field label={L("ملاحظات", "Notes")} wide><textarea className="hr-textarea" maxLength={1000} {...f.bind("notes")} /></Field>
       </div>
     </Dialog>
@@ -432,7 +432,7 @@ function OfferDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void
         <Field label={L("بدل النقل", "Transport allowance")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("transport")} /></Field>
         <Field label={L("بدلات أخرى", "Other allowances")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("otherAllowance")} /></Field>
         <Field label={L("تاريخ المباشرة *", "Start date *")}><input className="hr-input" type="date" {...f.bind("startDate")} /></Field>
-        <Field label={L("نوع العقد", "Contract type")}><select className="hr-select" {...f.bind("contractType")}><option value="FIXED_TERM">{L("محدد المدة", "Fixed term")}</option><option value="OPEN_ENDED">{L("غير محدد المدة", "Open-ended")}</option></select></Field>
+        <Field label={L("نوع العقد", "Contract type")}><Select className="hr-select" {...f.bind("contractType")}><option value="FIXED_TERM">{L("محدد المدة", "Fixed term")}</option><option value="OPEN_ENDED">{L("غير محدد المدة", "Open-ended")}</option></Select></Field>
         {f.v.contractType === "FIXED_TERM" ? <Field label={L("مدة العقد (شهر) *", "Contract length (months) *")}><input className="hr-input hr-num" type="number" min={1} max={120} {...f.bind("contractMonths")} /></Field> : null}
         <Field label={L("فترة التجربة (يوم)", "Probation (days)")} help={L("اتركها فارغة إن لم توجد.", "Leave empty if none.")}><input className="hr-input hr-num" type="number" min={0} max={365} {...f.bind("probationDays")} /></Field>
         <Field label={L("فترة الإشعار (يوم)", "Notice period (days)")}><input className="hr-input hr-num" type="number" min={0} max={365} {...f.bind("noticeDays")} /></Field>
@@ -465,11 +465,11 @@ function HireDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void;
         ]} />
       ) : null}
       <div className="hr-form">
-        <Field label={L("الفرع", "Branch")}><select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</select></Field>
-        <Field label={L("الإدارة", "Department")}><select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</select></Field>
-        <Field label={L("المدير المباشر", "Line manager")}><select className="hr-select" {...f.bind("managerId")}><option value="">—</option>{meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</select></Field>
+        <Field label={L("الفرع", "Branch")}><Select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</Select></Field>
+        <Field label={L("الإدارة", "Department")}><Select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</Select></Field>
+        <Field label={L("المدير المباشر", "Line manager")}><Select className="hr-select" {...f.bind("managerId")}><option value="">—</option>{meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</Select></Field>
         <Field label={L("ربط حساب دخول قائم (اختياري)", "Link an existing login (optional)")} help={accounts.error ? accounts.error.message : L("يمكن ربطه لاحقًا من ملف الموظف.", "It can be linked later from the employee file.")}>
-          <select className="hr-select" {...f.bind("accountId")} disabled={!accounts.data}><option value="">{L("بلا حساب", "No account")}</option>{accounts.data?.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+          <Select className="hr-select" {...f.bind("accountId")} disabled={!accounts.data}><option value="">{L("بلا حساب", "No account")}</option>{accounts.data?.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>
         </Field>
       </div>
       <Notice tone="info">{L("التحويل ينشئ ملف موظف واحدًا من بيانات المتقدّم والعرض، ولا ينشئ حساب دخول. إعادة التحويل لا تُنشئ ملفًا ثانيًا. ربط حساب دخول قائم خطوة مستقلة.", "Conversion creates one employee file from the applicant and the offer, and no login account. Converting again does not create a second file. Linking an existing login is a separate step.")}</Notice>
@@ -495,8 +495,8 @@ function NewOpening({ onClose, onDone }: { onClose: () => void; onDone: () => vo
         <Field label={L("الرمز *", "Code *")} help={L("مثل BAR-2026", "e.g. BAR-2026")}><input className="hr-input" dir="ltr" maxLength={20} {...f.bind("code")} /></Field>
         <Field label={L("عدد الشواغر", "Openings")}><input className="hr-input hr-num" type="number" min={1} max={100} {...f.bind("openings")} /></Field>
         <Field label={L("المسمى *", "Title *")} wide><input className="hr-input" maxLength={120} {...f.bind("title")} /></Field>
-        <Field label={L("الإدارة", "Department")}><select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</select></Field>
-        <Field label={L("الفرع", "Branch")}><select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</select></Field>
+        <Field label={L("الإدارة", "Department")}><Select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</Select></Field>
+        <Field label={L("الفرع", "Branch")}><Select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</Select></Field>
       </div>
     </Dialog>
   );
@@ -516,9 +516,8 @@ function NewApplicant({ openings, onClose, onDone }: { openings: Opening[]; onCl
       {act.error ? <Notice tone="danger">{act.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("الاسم الكامل *", "Full name *")} wide><input className="hr-input" maxLength={120} {...f.bind("fullName")} /></Field>
-        <Field label={L("الوظيفة الشاغرة", "Vacancy")}><select className="hr-select" {...f.bind("openingId")}><option value="">—</option>{openings.map((o) => <option key={o.id} value={o.id}>{o.title} · {o.code}</option>)}</select></Field>
-        <Field label={L("المصدر", "Source")}><input className="hr-input" list="hr-applicant-sources" maxLength={60} {...f.bind("source")} /></Field>
-        <datalist id="hr-applicant-sources">{L("موقع حقبة|إحالة|لينكدإن|مكتب توظيف", "Hiqbah website|Referral|LinkedIn|Recruitment agency").split("|").map((k) => <option key={k} value={k} />)}</datalist>
+        <Field label={L("الوظيفة الشاغرة", "Vacancy")}><Select className="hr-select" {...f.bind("openingId")}><option value="">—</option>{openings.map((o) => <option key={o.id} value={o.id}>{o.title} · {o.code}</option>)}</Select></Field>
+        <Field label={L("المصدر", "Source")}><Combobox className="hr-input" maxLength={60} {...f.bind("source")} options={L("موقع حقبة|إحالة|لينكدإن|مكتب توظيف", "Hiqbah website|Referral|LinkedIn|Recruitment agency").split("|").map((k) => ({ value: k }))} /></Field>
         <Field label={L("الجوال", "Mobile")}><input className="hr-input" dir="ltr" inputMode="tel" maxLength={40} {...f.bind("phone")} /></Field>
         <Field label={L("البريد", "Email")}><input className="hr-input" dir="ltr" type="email" maxLength={120} {...f.bind("email")} /></Field>
         <Field label={L("ملاحظات", "Notes")} wide><textarea className="hr-textarea" maxLength={1000} {...f.bind("notes")} /></Field>

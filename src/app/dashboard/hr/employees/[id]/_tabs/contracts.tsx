@@ -1,6 +1,7 @@
 "use client";
 // HR-02 · Contracts & pay. Contracts are versioned (DRAFT → ACTIVE → SUPERSEDED | ENDED);
 // pay is a list of effective-dated versions that never overlap and are never edited.
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, CONTRACT_STATUS, Dialog, Empty, Field, Notice, StatusDot, money, todayIso, useAction, useForm, useHrI18n } from "@/components/hr/ui";
 import { CONTRACT_TYPE, SectionHead, isAmount, lbl, mutate, type Contract, type TabProps } from "./shared";
@@ -123,7 +124,7 @@ function ContractDialog({ id, hireDate, onClose, onDone }: { id: string; hireDat
     <Dialog open title={L("عقد جديد", "New contract")} onClose={onClose} actions={<><Btn variant="primary" busy={a.busy === "save"} onClick={submit} disabled={!f.v.startDate || (fixed && !f.v.endDate) || f.v.noticeDays === ""}>{L("حفظ كمسودة", "Save as draft")}</Btn><Btn onClick={onClose}>{t("cancel")}</Btn></>}>
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
-        <Field label={L("نوع العقد *", "Contract type *")}><select className="hr-select" {...f.bind("type")}><option value="FIXED_TERM">{lbl(CONTRACT_TYPE, "FIXED_TERM", lang)}</option><option value="OPEN_ENDED">{lbl(CONTRACT_TYPE, "OPEN_ENDED", lang)}</option></select></Field>
+        <Field label={L("نوع العقد *", "Contract type *")}><Select className="hr-select" {...f.bind("type")}><option value="FIXED_TERM">{lbl(CONTRACT_TYPE, "FIXED_TERM", lang)}</option><option value="OPEN_ENDED">{lbl(CONTRACT_TYPE, "OPEN_ENDED", lang)}</option></Select></Field>
         <Field label={L("تاريخ البداية *", "Start date *")}><input className="hr-input" type="date" {...f.bind("startDate")} /></Field>
         {fixed ? <Field label={L("تاريخ النهاية *", "End date *")}><input className="hr-input" type="date" {...f.bind("endDate")} /></Field> : null}
         <Field label={L("فترة التجربة (أيام)", "Probation (days)")}><input className="hr-input" type="number" min={0} max={365} dir="ltr" {...f.bind("probationDays")} /></Field>
@@ -149,7 +150,7 @@ export function RenewDialog({ id, current, onClose, onDone }: { id: string; curr
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <Notice>{L("يُنشأ إصدار جديد من العقد", "A new version of contract")} <span className="hr-id">{current.contractNo}</span> {L("ويُفعَّل فورًا، ويُغلق العقد الحالي في اليوم السابق لبداية الجديد.", "is created and activated at once; the current contract closes the day before the new one starts.")}</Notice>
       <div className="hr-form">
-        <Field label={L("نوع العقد *", "Contract type *")}><select className="hr-select" {...f.bind("type")}><option value="FIXED_TERM">{lbl(CONTRACT_TYPE, "FIXED_TERM", lang)}</option><option value="OPEN_ENDED">{lbl(CONTRACT_TYPE, "OPEN_ENDED", lang)}</option></select></Field>
+        <Field label={L("نوع العقد *", "Contract type *")}><Select className="hr-select" {...f.bind("type")}><option value="FIXED_TERM">{lbl(CONTRACT_TYPE, "FIXED_TERM", lang)}</option><option value="OPEN_ENDED">{lbl(CONTRACT_TYPE, "OPEN_ENDED", lang)}</option></Select></Field>
         <Field label={L("تاريخ البداية *", "Start date *")}><input className="hr-input" type="date" {...f.bind("startDate")} /></Field>
         {fixed ? <Field label={L("تاريخ النهاية *", "End date *")}><input className="hr-input" type="date" {...f.bind("endDate")} /></Field> : null}
         <Field label={L("مدة الإشعار (أيام) *", "Notice period (days) *")}><input className="hr-input" type="number" min={0} max={365} dir="ltr" {...f.bind("noticeDays")} /></Field>

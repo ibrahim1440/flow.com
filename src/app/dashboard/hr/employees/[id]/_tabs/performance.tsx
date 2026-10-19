@@ -1,5 +1,6 @@
 "use client";
 // HR-02 · Performance: trainings, reviews and incidents (performance_manage).
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, Dialog, Empty, ErrorState, Field, LoadingTable, Notice, StatusDot, statusLabel, todayIso, useAction, useForm, useHr, useHrI18n } from "@/components/hr/ui";
 import { Check, INCIDENT_CATEGORY, REVIEW_STATUS, SectionHead, TRAINING_STATUS, fmtDateTime, lbl, mutate, type TabProps } from "./shared";
@@ -110,7 +111,7 @@ function TrainingDialog({ id, onClose, onDone }: DlgProps) {
       <div className="hr-form">
         <Field label={L("البرنامج *", "Programme *")} wide><input className="hr-input" {...f.bind("title")} /></Field>
         <Field label={L("الجهة المقدمة", "Provider")}><input className="hr-input" {...f.bind("provider")} /></Field>
-        <Field label={t("status")}><select className="hr-select" {...f.bind("status")}>{Object.keys(TRAINING_STATUS).map((k) => <option key={k} value={k}>{statusLabel(TRAINING_STATUS, k, lang)}</option>)}</select></Field>
+        <Field label={t("status")}><Select className="hr-select" {...f.bind("status")}>{Object.keys(TRAINING_STATUS).map((k) => <option key={k} value={k}>{statusLabel(TRAINING_STATUS, k, lang)}</option>)}</Select></Field>
         <Field label={L("من *", "From *")}><input className="hr-input" type="date" {...f.bind("startDate")} /></Field>
         <Field label={t("to")}><input className="hr-input" type="date" {...f.bind("endDate")} /></Field>
         <Field label={L("ملاحظات", "Notes")} wide><textarea className="hr-textarea" {...f.bind("notes")} /></Field>
@@ -133,9 +134,9 @@ function ReviewDialog({ id, onClose, onDone }: DlgProps) {
       <div className="hr-form">
         <Field label={L("الفترة *", "Period *")} help={L("مثال: 2026-H1", "e.g. 2026-H1")}><input className="hr-input" {...f.bind("periodLabel")} /></Field>
         <Field label={L("التقييم (1–5) *", "Rating (1–5) *")}>
-          <select className="hr-select" {...f.bind("rating")}>
+          <Select className="hr-select" {...f.bind("rating")}>
             {[["5", L("5 · ممتاز", "5 · Excellent")], ["4", L("4 · جيد جدًا", "4 · Very good")], ["3", L("3 · جيد", "3 · Good")], ["2", L("2 · يحتاج تحسينًا", "2 · Needs improvement")], ["1", L("1 · غير مرضٍ", "1 · Unsatisfactory")]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("نقاط القوة", "Strengths")} wide><textarea className="hr-textarea" {...f.bind("strengths")} /></Field>
         <Field label={L("مجالات التحسين", "Areas to improve")} wide><textarea className="hr-textarea" {...f.bind("improvements")} /></Field>
@@ -159,7 +160,7 @@ function IncidentDialog({ id, onClose, onDone }: DlgProps) {
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("التاريخ *", "Date *")}><input className="hr-input" type="date" {...f.bind("occurredOn")} /></Field>
-        <Field label={L("الفئة *", "Category *")}><select className="hr-select" {...f.bind("category")}>{Object.keys(INCIDENT_CATEGORY).map((k) => <option key={k} value={k}>{lbl(INCIDENT_CATEGORY, k, lang)}</option>)}</select></Field>
+        <Field label={L("الفئة *", "Category *")}><Select className="hr-select" {...f.bind("category")}>{Object.keys(INCIDENT_CATEGORY).map((k) => <option key={k} value={k}>{lbl(INCIDENT_CATEGORY, k, lang)}</option>)}</Select></Field>
         <Field label={L("الوصف *", "Description *")} help={L("خمسة أحرف على الأقل", "At least five characters")} wide><textarea className="hr-textarea" {...f.bind("description")} /></Field>
         <Field label={L("الإجراء المتخذ", "Action taken")} wide><input className="hr-input" {...f.bind("actionTaken")} /></Field>
       </div>

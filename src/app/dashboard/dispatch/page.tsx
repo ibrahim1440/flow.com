@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { AlertTriangle, Info, Layers } from "lucide-react";
 import { Bar, Btn, Notice, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, StatusDot, Tabs, Kg, kg, opsDate, Units, UNIT_FORMS, countNoun } from "@/components/ops/ui";
@@ -587,7 +588,7 @@ export default function DispatchPage() {
                     </div>
                   </div>
                 ) : (
-                  <select
+                  <Select
                     id="delivery-lot"
                     value={lotId}
                     onChange={(e) => chooseLot(e.target.value)}
@@ -619,7 +620,7 @@ export default function DispatchPage() {
                         ))}
                       </optgroup>
                     )}
-                  </select>
+                  </Select>
                 )}
 
                 {/* Selected lot detail card */}
@@ -697,7 +698,7 @@ export default function DispatchPage() {
               {/* ── Delivery type ── */}
               <div>
                 <label htmlFor="delivery-type" className="block text-sm font-bold text-charcoal mb-1.5">{t("deliveryType")}</label>
-                <select
+                <Select
                   id="delivery-type"
                   value={form.deliveryType}
                   onChange={(e) => setForm({ ...form, deliveryType: e.target.value })}
@@ -705,7 +706,7 @@ export default function DispatchPage() {
                 >
                   <option value="full">{t("fullDelivery")}</option>
                   <option value="partial">{t("partialDelivery")}</option>
-                </select>
+                </Select>
               </div>
 
               {/* ── Notes ── */}

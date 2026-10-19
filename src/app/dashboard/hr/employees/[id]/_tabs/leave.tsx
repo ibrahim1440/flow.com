@@ -1,6 +1,7 @@
 "use client";
 // HR-02 · Leave: balances per type (ledger sum minus pending), the ledger with a running
 // total, and manual ledger entries (opening / grant / adjustment) for leave_manage.
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, Dialog, Empty, ErrorState, Field, LoadingTable, Notice, ProposalTag, todayIso, useAction, useCan, useForm, useHr, useHrI18n } from "@/components/hr/ui";
 import { leaveTypeName } from "@/lib/i18n/hr";
@@ -106,8 +107,8 @@ function EntryDialog({ id, name, types, initialType, onClose, onDone }: { id: st
     <Dialog open title={L(`قيد رصيد إجازة · ${name}`, `Leave balance entry · ${name}`)} onClose={onClose} actions={<><Btn variant="primary" busy={a.busy === "save"} onClick={submit} disabled={!f.v.leaveTypeId || !daysOk || !f.v.effectiveDate || f.v.reason.trim().length < 3}>{L("حفظ القيد", "Save entry")}</Btn><Btn onClick={onClose}>{t("cancel")}</Btn></>}>
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
-        <Field label={L("نوع الإجازة *", "Leave type *")}><select className="hr-select" {...f.bind("leaveTypeId")}>{types.map((x) => <option key={x.leaveTypeId} value={x.leaveTypeId}>{leaveTypeName(x, lang)}</option>)}</select></Field>
-        <Field label={L("نوع القيد *", "Entry type *")}><select className="hr-select" {...f.bind("entryType")}><option value="OPENING">{L("رصيد افتتاحي", "Opening balance")}</option><option value="GRANT">{L("منح", "Grant")}</option><option value="ADJUSTMENT">{L("تسوية (+ أو −)", "Adjustment (+ or −)")}</option></select></Field>
+        <Field label={L("نوع الإجازة *", "Leave type *")}><Select className="hr-select" {...f.bind("leaveTypeId")}>{types.map((x) => <option key={x.leaveTypeId} value={x.leaveTypeId}>{leaveTypeName(x, lang)}</option>)}</Select></Field>
+        <Field label={L("نوع القيد *", "Entry type *")}><Select className="hr-select" {...f.bind("entryType")}><option value="OPENING">{L("رصيد افتتاحي", "Opening balance")}</option><option value="GRANT">{L("منح", "Grant")}</option><option value="ADJUSTMENT">{L("تسوية (+ أو −)", "Adjustment (+ or −)")}</option></Select></Field>
         <Field label={L("الأيام *", "Days *")} help={f.v.entryType === "ADJUSTMENT" ? L("سالب للخصم، خانتان عشريتان على الأكثر", "Negative to deduct, at most two decimals") : L("رقم موجب، خانتان عشريتان على الأكثر", "A positive number, at most two decimals")} error={f.v.days && !daysOk ? L("قيمة غير صالحة لهذا النوع من القيود", "Not a valid value for this entry type") : null}>
           <input className="hr-input" inputMode="decimal" dir="ltr" {...f.bind("days")} />
         </Field>

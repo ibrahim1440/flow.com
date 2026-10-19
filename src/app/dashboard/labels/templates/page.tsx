@@ -7,6 +7,7 @@
  * always shown. Authorized users only (labels.template_manage or administrator); the API enforces
  * it and audits every change. Anyone who prints may read and apply presets in the print dialog.
  */
+import { Select } from "@/components/ui/Select";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Btn, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -123,20 +124,20 @@ function TemplatesInner() {
           <div className="hr-form" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
             <label className="hr-field"><span className="hr-label">{L("الاسم", "Name")}</span><input className="hr-input" value={draft.name} maxLength={80} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
             <label className="hr-field"><span className="hr-label">{L("اللغة", "Language")}</span>
-              <select className="hr-select" value={draft.language} onChange={(e) => setDraft({ ...draft, language: e.target.value as PrintLang })}>
+              <Select className="hr-select" value={draft.language} onChange={(e) => setDraft({ ...draft, language: e.target.value as PrintLang })}>
                 <option value="BI">{L("ثنائي اللغة", "Bilingual")}</option><option value="AR">عربي</option><option value="EN">English</option>
-              </select></label>
+              </Select></label>
             <label className="hr-field"><span className="hr-label">{L("أقصى أسطر للإيحاءات", "Notes: maximum lines")}</span>
-              <select className="hr-select" value={draft.notesMaxLines ?? ""} onChange={(e) => setDraft({ ...draft, notesMaxLines: e.target.value === "" ? null : Number(e.target.value) })} data-testid="template-notes-lines">
+              <Select className="hr-select" value={draft.notesMaxLines ?? ""} onChange={(e) => setDraft({ ...draft, notesMaxLines: e.target.value === "" ? null : Number(e.target.value) })} data-testid="template-notes-lines">
                 {/* §P2-2: by size = 3 per language on bilingual standard, 2 single-language, 2 on 50 × 30. */}
                 <option value="">{L("حسب المقاس (3 لكل لغة ثنائيًا · 2 بلغة واحدة · 2 على 50 × 30)", "By size (3 per language bilingual · 2 single-language · 2 on 50 × 30)")}</option>
                 {[1, 2, 3, 4, 5, 6].map((v) => <option key={v} value={v}>{v}</option>)}
-              </select></label>
+              </Select></label>
             <label className="hr-field" style={{ gridColumn: "1 / -1" }}><span className="hr-label">{L("ملف الورق (اختياري)", "Paper profile (optional)")}</span>
-              <select className="hr-select" value={draft.profileId} onChange={(e) => setDraft({ ...draft, profileId: e.target.value })}>
+              <Select className="hr-select" value={draft.profileId} onChange={(e) => setDraft({ ...draft, profileId: e.target.value })}>
                 <option value="">{L("— بلا —", "— None —")}</option>
                 {profiles.map((p) => <option key={p.id} value={p.id}>{profileDisplayName(p, lang === "ar" ? "ar" : "en")}</option>)}
-              </select></label>
+              </Select></label>
           </div>
           <div className="hr-tablewrap">
             <table className="hr-table" aria-label={L("الحقول", "Fields")} data-testid="template-fields">

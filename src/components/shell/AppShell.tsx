@@ -11,7 +11,7 @@ import {
 } from "@/lib/nav/registry";
 import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
 import { BrandMark } from "@/components/brand/BrandMark";
-import { Ico } from "./icons";
+import { Ico, type D21IconName } from "./icons";
 import { createActions } from "./creates";
 import { PhoneContext, SectionPagesContext, TitleContext, type PhoneHeader, type SectionPages } from "./page-context";
 import "./direction-2.1.css";
@@ -21,7 +21,7 @@ import "./direction-2.1.css";
  *
  * Approved design (owner decision, 7 Oct 2026; reference build `direction-2.1-rc`,
  * `screens/shell-1440.html`, `shell-1024.html`, `shell-390.html`; Figma 1JbZgpMqmPkUVne8ms9Ozz,
- * Sidebar 13:322): warm canvas sidebar (244 px) with brand bar, «بحث أو انتقال», the flat
+ * Sidebar 13:322): warm canvas sidebar (244 px) with brand bar, «بحث أو انتقال», the folding
  * groups and the user block at the foot; one white sheet carrying the work, with a 52 px top
  * bar holding the trail and «جديد · C»; a 64 px icon rail from 768 to 1279; below 768 a phone
  * header (mark · title · search), the sheet, and the bottom tab bar.
@@ -56,6 +56,26 @@ function NodeIcon({ node, fallback }: { node?: NavNode; fallback?: NavNode }) {
   if (ref) return <Ico name={ref} />;
   const L = node?.icon ?? fallback?.icon ?? Circle;
   return <L aria-hidden />;
+}
+
+/**
+ * The groups are an accordion (owner, 19 Oct 2026): a heading opens its entries and closes the
+ * others. The group holding the current page opens on every navigation; otherwise the last group
+ * this person opened on this device is remembered. Presentation only — the entries, their
+ * permissions and their routes are exactly what `sidebarGroups` returns.
+ */
+const OPEN_GROUP_KEY = "hiqbah.nav.openGroup";
+const readOpenGroup = (): string | null => { try { return window.localStorage.getItem(OPEN_GROUP_KEY) || null; } catch { return null; } };
+const writeOpenGroup = (id: string | null) => { try { window.localStorage.setItem(OPEN_GROUP_KEY, id ?? ""); } catch { /* storage unavailable: the choice lasts this page only */ } };
+
+/** A group heading's icon: the reference set for the shell's own groups, else the module's icon. */
+const GROUP_ICONS: Record<string, D21IconName> = {
+  orders: "orders", production: "flame", quality: "flask", inventory: "box",
+  sales: "deal", finance: "wallet", hr: "users", team: "users", settings: "settings",
+};
+function GroupIcon({ id }: { id: string }) {
+  const ref = GROUP_ICONS[id];
+  return ref ? <Ico name={ref} /> : <NodeIcon node={NAV.find((n) => n.id === id)} />;
 }
 
 type Item = { node: NavNode; href: string; current: "page" | "true" | undefined };
@@ -318,6 +338,28 @@ export function AppShell({
   // The phone tab bar's section tab: the sidebar group holding the lit entry, opening on its first page.
   // Outside the sidebar groups (a gear-menu screen) it is the registry module, as before.
   const litGroup = groups.find((g) => g.items.some((it) => it.current));
+  // The accordion (sidebar, rail and «المزيد» share it): the current page's group opens on every
+  // navigation; a page outside the groups keeps whatever was open.
+  // A gear-menu screen opens «الحساب والإعدادات» in «المزيد» (the sidebar has no such group).
+  const litGroupId = litGroup?.id ?? (menuItems.some((it) => it.current) ? SETTINGS_GROUP : null);
+  const [openGroup, setOpenGroup] = useState<string | null>(litGroupId);
+  const [openFor, setOpenFor] = useState(pathname);
+  if (openFor !== pathname) { setOpenFor(pathname); if (litGroupId) setOpenGroup(litGroupId); }
+  // With no current group (the dashboard, the profile), the group last opened on this device.
+  // Read after mount: the server cannot see this device's storage.
+  const restoredOpen = useRef(false);
+  useEffect(() => {
+    if (restoredOpen.current) return;
+    restoredOpen.current = true;
+    if (litGroupId) return;
+    const saved = readOpenGroup();
+    if (saved) setOpenGroup(saved); // eslint-disable-line react-hooks/set-state-in-effect -- the saved choice exists only in the browser
+  }, [litGroupId]);
+  const toggleGroup = (id: string) => {
+    const next = openGroup === id ? null : id;
+    setOpenGroup(next);
+    writeOpenGroup(next);
+  };
   const moduleHref = !litGroup && active.group ? firstDestination(viewer, active.group) : null;
   const meNode = tree.find((n) => n.id === "me");
   const dests = useMemo(() => destinations(tree, lang, viewer), [tree, lang, viewer]);
@@ -360,11 +402,20 @@ export function AppShell({
             <ul className="d21-navlist">{top.map((it) => navItem(it))}</ul>
             {groups.map((g) => {
               const gid = `d21-grp-${g.id}`;
+              const pid = `d21-grp-panel-${g.id}`;
               const mod = NAV.find((n) => n.id === g.id);
+              const isOpen = openGroup === g.id;
               return (
-                <div key={g.id} role="group" aria-labelledby={g.label ? gid : undefined}>
-                  <p className="d21-grp" id={gid} data-testid={`navgroup-${g.id}`}>{g.label ?? " "}</p>
-                  <ul className="d21-navlist">{g.items.map((it) => navItem(it, mod))}</ul>
+                <div key={g.id} className="d21-grpbox" role="group" aria-labelledby={gid}>
+                  {/* The heading opens and closes its entries (a native button: Enter and Space). */}
+                  <button type="button" className="d21-grp" id={gid} data-testid={`navgroup-${g.id}`}
+                    aria-expanded={isOpen} aria-controls={pid} data-current={g.id === litGroupId ? "true" : undefined}
+                    title={g.label ?? undefined} onClick={() => toggleGroup(g.id)}>
+                    <GroupIcon id={g.id} /><span>{g.label ?? g.id}</span><Ico name="chevd" small className="chev" />
+                  </button>
+                  <div className="d21-acc" id={pid} data-open={isOpen ? "true" : undefined}>
+                    <div className="d21-acc-in"><ul className="d21-navlist">{g.items.map((it) => navItem(it, mod))}</ul></div>
+                  </div>
                 </div>
               );
             })}
@@ -486,29 +537,41 @@ export function AppShell({
             <span className="d21-av">{initials(user.name)}</span>
             <div>{user.name}<small>{roleLabel}</small></div>
           </div>
-          {/* Every section under its heading, exactly as the sidebar groups them (owner, 19 Oct 2026). */}
-          {[{ id: "top", label: null, items: top } as Group, ...groups].filter((g) => g.items.length > 0).map((g) => {
-            const parent = NAV.find((n) => n.id === g.id);
-            const hid = `d21-more-grp-${g.id}`;
-            return (
-              <div key={g.id} role="group" aria-labelledby={g.label ? hid : undefined} data-testid={`moregroup-${g.id}`}>
-                {g.label ? <p className="d21-more-grp" id={hid}>{g.label}</p> : null}
-                {g.items.map((it) => (
-                  <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={it.current ? "page" : undefined} data-testid={`more-${it.node.id}`}>
-                    <NodeIcon node={it.node} fallback={parent} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" />
-                  </Link>
-                ))}
-              </div>
-            );
-          })}
-          {menuItems.length > 0 ? (
-            <div role="group" aria-labelledby="d21-more-grp-settings" data-testid="moregroup-settings">
-              <p className="d21-more-grp" id="d21-more-grp-settings">{ar ? "الحساب والإعدادات" : "Account & settings"}</p>
-              {menuItems.map((it) => (
-                <Link key={it.node.id} href={it.href} className="d21-more-row"><NodeIcon node={it.node} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" /></Link>
+          {/* Every section under its heading, exactly as the sidebar groups them (owner, 19 Oct 2026),
+              each one opening and closing like the sidebar's; the ungrouped entries stay listed. */}
+          {top.length > 0 ? (
+            <div role="group" data-testid="moregroup-top">
+              {top.map((it) => (
+                <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={it.current ? "page" : undefined} data-testid={`more-${it.node.id}`}>
+                  <NodeIcon node={it.node} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" />
+                </Link>
               ))}
             </div>
           ) : null}
+          {[...groups, ...(menuItems.length > 0 ? [{ id: SETTINGS_GROUP, label: ar ? "الحساب والإعدادات" : "Account & settings", items: menuItems } as Group] : [])].map((g) => {
+            const parent = g.id === SETTINGS_GROUP ? undefined : NAV.find((n) => n.id === g.id);
+            const hid = `d21-more-grp-${g.id}`;
+            const pid = `d21-more-panel-${g.id}`;
+            const isOpen = openGroup === g.id;
+            const settings = g.id === SETTINGS_GROUP;
+            return (
+              <div key={g.id} role="group" aria-labelledby={hid} data-testid={`moregroup-${g.id}`}>
+                <button type="button" className="d21-more-grp" id={hid} aria-expanded={isOpen} aria-controls={pid}
+                  data-current={g.id === litGroupId ? "true" : undefined} onClick={() => toggleGroup(g.id)}>
+                  <GroupIcon id={g.id} /><span>{g.label ?? g.id}</span><Ico name="chevd" small className="chev" />
+                </button>
+                <div className="d21-acc" id={pid} data-open={isOpen ? "true" : undefined}>
+                  <div className="d21-acc-in">
+                    {g.items.map((it) => (
+                      <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={!settings && it.current ? "page" : undefined} data-testid={settings ? undefined : `more-${it.node.id}`}>
+                        <NodeIcon node={it.node} fallback={parent} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
           <button type="button" className="d21-more-row danger" onClick={onLogout}><LogOut aria-hidden /><span>{ar ? "تسجيل الخروج" : "Sign out"}</span></button>
         </MoreSheet>
       ) : null}

@@ -1,4 +1,5 @@
 "use client";
+import { Select } from "@/components/ui/Select";
 import { Plus } from "lucide-react";
 // HR-07 · Employee self-service «خدماتي» (Figma 1JbZgpMqmPkUVne8ms9Ozz · desktop 454:1812;
 // 390: 454:22415, leave sheet 455:3154). Needs no HR duty: every call goes to /api/hr/me*,
@@ -339,9 +340,9 @@ function LeaveDialog({ d, onClose, onDone }: { d: Linked; onClose: () => void; o
       {result ? <Notice tone="success">{result.replayed ? L("سبق إرسال هذا الطلب؛ لم يُنشأ طلب ثانٍ.", "This request was already sent; no second request was created.") : <>{L("أُرسل الطلب", "Request sent")} (<span className="hr-num">{days(result.days)}</span> {L("يوم)، وهو بانتظار القرار.", "days); it awaits a decision.")}</>}</Notice> : null}
       <div className="hr-form has-date-pair">
         <Field label={L("النوع", "Type")} wide>
-          <select className="hr-select" disabled={!!result} {...bind("leaveTypeId")}>
+          <Select className="hr-select" disabled={!!result} {...bind("leaveTypeId")}>
             {d.leaveBalances.map((b) => <option key={b.leaveTypeId} value={b.leaveTypeId}>{leaveTypeName(b, lang)}{b.tracksBalance ? L(` · المتاح ${days(b.available)} يومًا`, ` · ${days(b.available)} days available`) : ""}{b.paid ? "" : L(" · بدون راتب", " · unpaid")}</option>)}
-          </select>
+          </Select>
         </Field>
         <div className="is-half-mobile"><Field label={L("تاريخ البداية", "Start date")}><input className="hr-input" type="date" disabled={!!result} {...bind("startDate")} /></Field></div>
         <div className="is-half-mobile"><Field label={L("تاريخ النهاية (يُحتسب)", "End date (counted)")} error={f.v.endDate && f.v.endDate < f.v.startDate ? L("لا تنتهي الإجازة قبل بدايتها.", "The leave cannot end before it starts.") : null}><input className="hr-input" type="date" min={f.v.startDate} disabled={!!result} {...bind("endDate")} /></Field></div>

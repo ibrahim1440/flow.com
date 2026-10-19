@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { AlertTriangle, Trash2, CalendarDays, X, Plus } from "lucide-react";
 import { Bar, Btn, Grams, Notice, OpsBanner, OpsEmpty, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Kg, gUnit, opsDate } from "@/components/ops/ui";
@@ -658,7 +659,7 @@ export default function PackagingPage() {
                       return (
                         <div key={line.uid} data-testid={`pack-line-${idx}`} className="rounded-xl border border-border p-3 space-y-2">
                           <div className="flex items-center gap-2">
-                            <select
+                            <Select
                               aria-label={t("pkgLineType")}
                               value={line.kind}
                               onChange={(e) => changeLineKind(line.uid, e.target.value as UiLine["kind"])}
@@ -667,7 +668,7 @@ export default function PackagingPage() {
                               <option value="pack">{t("pkgLineTypeNew")}</option>
                               <option value="topUp">{t("pkgLineTypeTopUp")}</option>
                               <option value="loss">{t("pkgLineTypeLoss")}</option>
-                            </select>
+                            </Select>
                             <div className="flex-1" />
                             {lines.length > 1 && (
                               <button
@@ -686,7 +687,7 @@ export default function PackagingPage() {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               <label className="block sm:col-span-3">
                                 <span className="text-[11px] font-bold text-brown">{t("productNameLabel")}</span>
-                                <select
+                                <Select
                                   value={line.productSkuId}
                                   onChange={(e) => {
                                     const chosen = catalog.find((c) => c.id === e.target.value);
@@ -704,7 +705,7 @@ export default function PackagingPage() {
                                   {sellable.map((c) => (
                                     <option key={c.id} value={c.id}>{c.name} ({c.skuCode})</option>
                                   ))}
-                                </select>
+                                </Select>
                               </label>
                               <label className="block">
                                 <span className="text-[11px] font-bold text-brown">{t("pkgPackagesCount")}</span>
@@ -739,7 +740,7 @@ export default function PackagingPage() {
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 <label className="block sm:col-span-2">
                                   <span className="text-[11px] font-bold text-brown">{t("pkgChoosePackage")}</span>
-                                  <select
+                                  <Select
                                     value={line.lotId}
                                     onChange={(e) => {
                                       const p = packState?.openPartials.find((o) => o.lotId === e.target.value);
@@ -759,7 +760,7 @@ export default function PackagingPage() {
                                         {p.skuCode} · {p.actualGrams}/{p.nominalGrams} {gUnit(lang)} · {t("pkgFromBatch")} {p.fromThisBatch ? t("pkgThisBatch") : p.batchNumber}
                                       </option>
                                     ))}
-                                  </select>
+                                  </Select>
                                 </label>
                                 <label className="block">
                                   <span className="text-[11px] font-bold text-brown">{t("pkgGramsAdded")}</span>

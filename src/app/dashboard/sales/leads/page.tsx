@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -529,10 +530,10 @@ export default function LeadsPage() {
             {scope === "all" && (
               <span className="chip">
                 <label htmlFor="ld-owner">{ar ? "المالك:" : "Owner:"}</label>
-                <select id="ld-owner" value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="lead-owner">
+                <Select id="ld-owner" value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="lead-owner">
                   <option value="all">{ar ? "الكل" : "All"}</option>
                   {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
+                </Select>
                 <button type="button" className="x" onClick={() => setOwner("all")} aria-label={ar ? "إزالة فلتر المالك" : "Clear owner"} data-testid="lead-owner-clear">
                   <Ico name="close" small />
                 </button>
@@ -743,7 +744,7 @@ export default function LeadsPage() {
                 </label>
                 <label className="block space-y-1.5" data-ui="field">
                   <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadSource")}</span>
-                  <select
+                  <Select
                     // Named explicitly. Without this the wrapping label hands the control an
                     // accessible name assembled from every option in the list, which is
                     // unusable to a screen reader and ambiguous to anything else looking the
@@ -757,7 +758,7 @@ export default function LeadsPage() {
                     {SOURCES.map((s) => (
                       <option key={s} value={s}>{label(SOURCE_LABELS, s)}</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="block space-y-1.5" data-ui="field">
                   <span className="block text-[13px] font-medium text-oo-text-primary">{t("leadNextFollowUp")}</span>

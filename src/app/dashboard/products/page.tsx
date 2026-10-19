@@ -10,6 +10,7 @@
 // server checks every write. What the frozen frames draw that the backend has no model for —
 // user-defined categories, bulk selection, SKU barcode, the product detail page, the one-page
 // «إضافة منتج» form — is not built (docs/design/direction-2.1-rc/CATALOG-BACKEND.md).
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Btn, Dot, Field, Notice, OpsLoading, OpsRoot, PageHeader, Tabs, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -482,12 +483,12 @@ function ProductForm({
       {coffees.length === 0 && <Notice tone="warning">{t("noCoffeesForProduct")}</Notice>}
       <div className="hr-form">
         <Field label={t("coffeeOriginLabel")} wide>
-          <select className="hr-select" value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
+          <Select className="hr-select" value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
             <option value="">—</option>
             {coffees.map((c) => (
               <option key={c.id} value={c.id}>{c.productNameEn}</option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label={t("skuCodeLabel")}>
           <input className="hr-input hr-id" dir="ltr" value={form.skuCode} onChange={(e) => setForm({ ...form, skuCode: e.target.value })} placeholder="BRA-1KG" />
@@ -497,7 +498,7 @@ function ProductForm({
         </Field>
         {/* Pack size is the divisor behind every unit balance, so the API refuses to change
             it later. Saying so here avoids a confusing 409 after the fact. */}
-        <Field label={`${t("packSizeLabel")} (g)`} help="Pack size cannot be changed after the product is created.">
+        <Field label={`${t("packSizeLabel")} (g)`} help={t("packSizeLockedHelp")}>
           <input className="hr-input" type="number" min={1} value={form.weightGrams} onChange={(e) => setForm({ ...form, weightGrams: e.target.value })} />
         </Field>
         <Field label={t("sellingPriceLabel")}>
@@ -588,12 +589,12 @@ function CoffeeForm({
             onChange={(e) => setForm({ ...form, expectedRoastLoss: e.target.value })} />
         </Field>
         <Field label={t("defaultGreenBeanLabel")} wide help={beans.length === 0 ? t("noGreenBeansYet") : undefined}>
-          <select className="hr-select" value={form.defaultGreenBeanId} onChange={(e) => setForm({ ...form, defaultGreenBeanId: e.target.value })}>
+          <Select className="hr-select" value={form.defaultGreenBeanId} onChange={(e) => setForm({ ...form, defaultGreenBeanId: e.target.value })}>
             <option value="">—</option>
             {beans.map((b) => (
               <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg}kg)</option>
             ))}
-          </select>
+          </Select>
         </Field>
       </div>
     </Dialog>
@@ -696,24 +697,24 @@ function BomEditor({
               <span className="stk-kind">{r.type === "ROASTED_COFFEE" ? L("بن محمص", "Roasted coffee") : L("مادة تعبئة", "Packaging material")}</span>
               {r.type === "ROASTED_COFFEE" ? (
                 <>
-                  <select className="hr-select" aria-label={L("بن محمص", "Roasted coffee")} value={r.coffeeProductId ?? ""} onChange={(e) => update(idx, { coffeeProductId: e.target.value })}>
+                  <Select className="hr-select" aria-label={L("بن محمص", "Roasted coffee")} value={r.coffeeProductId ?? ""} onChange={(e) => update(idx, { coffeeProductId: e.target.value })}>
                     <option value="">—</option>
                     {coffees.map((c) => (
                       <option key={c.id} value={c.id}>{c.productNameEn}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input className="hr-input" type="number" step="0.001" min={0} aria-label={t("bomPerUnitLabel")} value={r.quantityPerUnit}
                     onChange={(e) => update(idx, { quantityPerUnit: Number(e.target.value) })} />
                   <span className="stk-u">kg</span>
                 </>
               ) : (
                 <>
-                  <select className="hr-select" aria-label={L("مادة تعبئة", "Packaging material")} value={r.materialItemId ?? ""} onChange={(e) => update(idx, { materialItemId: e.target.value })}>
+                  <Select className="hr-select" aria-label={L("مادة تعبئة", "Packaging material")} value={r.materialItemId ?? ""} onChange={(e) => update(idx, { materialItemId: e.target.value })}>
                     <option value="">—</option>
                     {materials.map((m) => (
                       <option key={m.id} value={m.id}>{m.name} ({m.code})</option>
                     ))}
-                  </select>
+                  </Select>
                   <input className="hr-input" type="number" step="1" min={0} aria-label={t("bomPerUnitLabel")} value={r.quantityPerUnit}
                     onChange={(e) => update(idx, { quantityPerUnit: Number(e.target.value) })} />
                   <span className="stk-u">pcs</span>

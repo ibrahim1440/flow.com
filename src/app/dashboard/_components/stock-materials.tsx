@@ -6,6 +6,7 @@
 // nothing reachable disappears). Requests, permission gates and validation are the ones the
 // products page had: receive = inventory › receive (POST /api/materials/:id/receive), count =
 // inventory › adjust (PATCH /api/materials/:id, reason required), create = POST /api/materials.
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { Btn, Field, useL } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -240,6 +241,7 @@ export function MaterialsPanel({
 
 export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => void; onSaved: () => void; onError: (m: string) => void }) {
   const { t } = useI18n();
+  const L = useL();
   const [form, setForm] = useState({ code: "", name: "", category: "PACKAGING", quantityOnHand: "0", reorderPoint: "0" });
   const [saving, setSaving] = useState(false);
 
@@ -284,12 +286,12 @@ export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => voi
           <input className="hr-input" dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="BAG-1KG" />
         </Field>
         <Field label={t("categoryLabel")}>
-          <select className="hr-select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-            <option value="PACKAGING">PACKAGING</option>
-            <option value="LABEL">LABEL</option>
-            <option value="CONSUMABLE">CONSUMABLE</option>
-            <option value="OTHER">OTHER</option>
-          </select>
+          <Select className="hr-select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+            <option value="PACKAGING">{L("تغليف", "Packaging")}</option>
+            <option value="LABEL">{L("ملصق", "Label")}</option>
+            <option value="CONSUMABLE">{L("مستهلكات", "Consumable")}</option>
+            <option value="OTHER">{L("أخرى", "Other")}</option>
+          </Select>
         </Field>
         <Field label={t("materialNameLabel")} wide>
           <input className="hr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="1KG Coffee Bag" />

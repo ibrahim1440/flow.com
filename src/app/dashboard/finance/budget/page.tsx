@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { Fragment, useMemo, useState } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from "recharts";
 import { useUser } from "../../user-context";
@@ -86,10 +87,10 @@ export default function BudgetPage() {
       <Card>
         <div className="fin-tool">
           <div className="fin-row" style={{ gap: 12 }}>
-            <select aria-label={L("الشهر", "Month")} className="hr-select fin-input is-auto" value={id} onChange={(e) => { if (e.target.value === "__new") { setDlg("new"); return; } setId(e.target.value); setDate(""); }}>
+            <Select aria-label={L("الشهر", "Month")} className="hr-select fin-input is-auto" value={id} onChange={(e) => { if (e.target.value === "__new") { setDlg("new"); return; } setId(e.target.value); setDate(""); }}>
               {list.data?.map((b) => <option key={b.id} value={b.id}>{monthName(b.month, lang)} {b.month.slice(0, 4)} · {branchName(b.branchKey)}</option>)}
               {canPrepare && <option value="__new">{L("+ ميزانية جديدة…", "+ New budget…")}</option>}
-            </select>
+            </Select>
             {r && <Status tone={BSTATUS[r.budget.status][2]}>{L(BSTATUS[r.budget.status][0], BSTATUS[r.budget.status][1])}</Status>}
             {working && working.revisionNo > 1 && <Badge tone="brand">{L(`المراجعة ${working.revisionNo}`, `Revision ${working.revisionNo}`)}</Badge>}
             <span className="fin-cap">{L("أساس نقدي", "Cash basis")}</span>
@@ -339,7 +340,7 @@ function NoteDialog({ row, budgetId, reportDate, people, canPrepare, onClose, on
           <div className="fin-grid">
             <Field label={L("السبب", "Cause")}><input className={INPUT} value={f.explanation} onChange={(e) => setF({ ...f, explanation: e.target.value })} /></Field>
             <Field label={L("الإجراء التصحيحي", "Corrective action")}><input className={INPUT} value={f.correctiveAction} onChange={(e) => setF({ ...f, correctiveAction: e.target.value })} /></Field>
-            <Field label={L("المسؤول", "Responsible")}><select className={INPUT} value={f.responsibleEmployeeId} onChange={(e) => setF({ ...f, responsibleEmployeeId: e.target.value })}><option value="">—</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+            <Field label={L("المسؤول", "Responsible")}><Select className={INPUT} value={f.responsibleEmployeeId} onChange={(e) => setF({ ...f, responsibleEmployeeId: e.target.value })}><option value="">—</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
             <Field label={L("تاريخ المتابعة", "Follow-up date")}><input type="date" className={INPUT} value={f.followUpDate} onChange={(e) => setF({ ...f, followUpDate: e.target.value })} /></Field>
           </div>
           {err && <Notice tone="bad">{err}</Notice>}
@@ -369,9 +370,9 @@ function NewBudgetBody({ open, onClose, setup, onCreated }: NewBudgetProps) {
     <Dialog open={open} onClose={onClose} title={L("ميزانية شهرية جديدة", "New monthly budget")} sub={L("ميزانية نقدية: مقبوضات ومدفوعات. عرض الاستحقاق غير متاح حتى تُرحّل الوحدات قيودها المحاسبية.", "Cash budget: receipts and payments. The accrual view is unavailable until operational modules post accounting entries.")}>
       <div className="fin-grid">
         <Field label={L("الشهر", "Month")}><input type="month" className={INPUT} value={f.month} onChange={(e) => setF({ ...f, month: e.target.value })} /></Field>
-        <Field label={L("النطاق", "Scope")}><select className={INPUT} value={f.branchKey} onChange={(e) => setF({ ...f, branchKey: e.target.value })}>{setup?.scope.all && <option value="COMPANY">{L("الشركة (موحّد)", "Company (consolidated)")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</select></Field>
+        <Field label={L("النطاق", "Scope")}><Select className={INPUT} value={f.branchKey} onChange={(e) => setF({ ...f, branchKey: e.target.value })}>{setup?.scope.all && <option value="COMPANY">{L("الشركة (موحّد)", "Company (consolidated)")}</option>}{setup?.branches.map((b) => <option key={b.id} value={b.id}>{name(b)}</option>)}</Select></Field>
       </div>
-      <Field label={L("نقطة البداية", "Starting point")}><select className={INPUT} value={f.startFrom} onChange={(e) => setF({ ...f, startFrom: e.target.value })}><option value="COPY_PREVIOUS">{L("نسخ الميزانية المعتمدة للشهر السابق", "Copy last month's approved budget")}</option><option value="HISTORICAL_ACTUALS">{L("الفعلي التاريخي للشهر السابق", "Last month's actuals")}</option><option value="EMPTY">{L("فارغة", "Empty")}</option></select></Field>
+      <Field label={L("نقطة البداية", "Starting point")}><Select className={INPUT} value={f.startFrom} onChange={(e) => setF({ ...f, startFrom: e.target.value })}><option value="COPY_PREVIOUS">{L("نسخ الميزانية المعتمدة للشهر السابق", "Copy last month's approved budget")}</option><option value="HISTORICAL_ACTUALS">{L("الفعلي التاريخي للشهر السابق", "Last month's actuals")}</option><option value="EMPTY">{L("فارغة", "Empty")}</option></Select></Field>
       <Field label={L("العنوان (اختياري)", "Title (optional)")}><input className={INPUT} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
       {err && <Notice tone="bad">{err}</Notice>}
       <div className="fin-row"><Button kind="primary" busy={busy} onClick={submit}>{L("إنشاء", "Create")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
@@ -407,12 +408,12 @@ function LinesBody({ open, onClose, report, setup, onSaved, src }: LinesProps & 
       <div className="fin-stack" style={{ maxHeight: "55vh", overflowY: "auto" }}>
         {lines.map((l, i) => (
           <div key={i} className="fin-editrow" style={{ gridTemplateColumns: "0.8fr 1.6fr 0.9fr 1fr 1fr 1fr auto" }}>
-            <select aria-label={L("النوع", "Kind")} className={INPUT} value={l.kind} onChange={(e) => set(i, "kind", e.target.value)}><option value="RECEIPT">{L("مقبوضات", "Receipt")}</option><option value="PAYMENT">{L("مدفوعات", "Payment")}</option><option value="SALES_MEMO">{L("مبيعات (مذكرة)", "Sales (memo)")}</option></select>
-            <select aria-label={L("البند", "Category")} className={INPUT} value={l.finCategoryId} onChange={(e) => set(i, "finCategoryId", e.target.value)}><option value="">—</option>{cats.filter((c) => l.kind === "SALES_MEMO" || c.kind === l.kind).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</select>
+            <Select aria-label={L("النوع", "Kind")} className={INPUT} value={l.kind} onChange={(e) => set(i, "kind", e.target.value)}><option value="RECEIPT">{L("مقبوضات", "Receipt")}</option><option value="PAYMENT">{L("مدفوعات", "Payment")}</option><option value="SALES_MEMO">{L("مبيعات (مذكرة)", "Sales (memo)")}</option></Select>
+            <Select aria-label={L("البند", "Category")} className={INPUT} value={l.finCategoryId} onChange={(e) => set(i, "finCategoryId", e.target.value)}><option value="">—</option>{cats.filter((c) => l.kind === "SALES_MEMO" || c.kind === l.kind).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}</Select>
             <input aria-label={L("المخطط", "Planned")} className={`${INPUT} is-num`} value={l.plannedAmount} onChange={(e) => set(i, "plannedAmount", e.target.value)} inputMode="decimal" />
-            <select aria-label={L("التجزئة", "Phasing")} className={INPUT} value={l.phasing} onChange={(e) => set(i, "phasing", e.target.value)}><option value="DUE_DATE">{L("تاريخ الاستحقاق", "Due date")}</option><option value="CUSTOM_WEIGHTS">{L("أوزان مخصصة", "Custom weights")}</option><option value="STRAIGHT_LINE">{L("خطي", "Straight line")}</option></select>
+            <Select aria-label={L("التجزئة", "Phasing")} className={INPUT} value={l.phasing} onChange={(e) => set(i, "phasing", e.target.value)}><option value="DUE_DATE">{L("تاريخ الاستحقاق", "Due date")}</option><option value="CUSTOM_WEIGHTS">{L("أوزان مخصصة", "Custom weights")}</option><option value="STRAIGHT_LINE">{L("خطي", "Straight line")}</option></Select>
             {l.phasing === "CUSTOM_WEIGHTS" ? <input aria-label={L("الأوزان", "Weights")} className={INPUT} placeholder='{"5":1,"15":1}' value={l.weights} onChange={(e) => set(i, "weights", e.target.value)} /> : <input aria-label={L("الاستحقاق", "Due")} type="date" className={INPUT} disabled={l.phasing !== "DUE_DATE"} value={l.dueDate} min={`${report.budget.month}-01`} max={`${report.budget.month}-31`} onChange={(e) => set(i, "dueDate", e.target.value)} />}
-            <select aria-label={L("المسؤول", "Owner")} className={INPUT} value={l.ownerEmployeeId} onChange={(e) => set(i, "ownerEmployeeId", e.target.value)}><option value="">{L("المسؤول", "Owner")}</option>{setup?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            <Select aria-label={L("المسؤول", "Owner")} className={INPUT} value={l.ownerEmployeeId} onChange={(e) => set(i, "ownerEmployeeId", e.target.value)}><option value="">{L("المسؤول", "Owner")}</option>{setup?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
             <button type="button" className="text-xs font-semibold fin-danger" onClick={() => setLines(lines.filter((_, j) => j !== i))}>{L("حذف", "Remove")}</button>
           </div>
         ))}

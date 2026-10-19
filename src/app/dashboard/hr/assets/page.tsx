@@ -1,4 +1,5 @@
 "use client";
+import { Combobox, Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 // Company assets (no dedicated Figma frame — follows the HR-01 directory list style).
 // An asset has at most one open assignment (DB partial unique index); returning it closes
@@ -107,8 +108,7 @@ function NewAsset({ onClose, onDone }: { onClose: () => void; onDone: () => void
       {act.error ? <Notice tone="danger">{act.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("رقم الأصل *", "Asset number *")} help={L("مثل LAP-014", "e.g. LAP-014")}><input className="hr-input" dir="ltr" maxLength={30} {...f.bind("tag")} /></Field>
-        <Field label={L("الفئة *", "Category *")}><input className="hr-input" list="hr-asset-cats" maxLength={60} {...f.bind("category")} /></Field>
-        <datalist id="hr-asset-cats">{(L("حاسب محمول|جوال|مفاتيح|زي موحد|مركبة|بطاقة دخول", "Laptop|Mobile phone|Keys|Uniform|Vehicle|Access card")).split("|").map((c) => <option key={c} value={c} />)}</datalist>
+        <Field label={L("الفئة *", "Category *")}><Combobox className="hr-input" maxLength={60} {...f.bind("category")} options={(L("حاسب محمول|جوال|مفاتيح|زي موحد|مركبة|بطاقة دخول", "Laptop|Mobile phone|Keys|Uniform|Vehicle|Access card")).split("|").map((c) => ({ value: c }))} /></Field>
         <Field label={L("الاسم *", "Name *")} wide><input className="hr-input" maxLength={120} {...f.bind("name")} /></Field>
         <Field label={L("الرقم التسلسلي", "Serial number")}><input className="hr-input" dir="ltr" maxLength={80} {...f.bind("serialNo")} /></Field>
         <Field label={L("ملاحظات", "Notes")} wide><textarea className="hr-textarea" maxLength={500} {...f.bind("notes")} /></Field>
@@ -138,10 +138,10 @@ function Assign({ a, onClose, onDone }: { a: Asset; onClose: () => void; onDone:
       <div className="hr-form">
         <Field label={L("بحث عن الموظف", "Find employee")}><input className="hr-input" type="search" value={who} onChange={(e) => setWho(e.target.value)} placeholder={L("الاسم أو الرقم الوظيفي", "Name or employee number")} /></Field>
         <Field label={L("المستلم *", "Holder *")}>
-          <select className="hr-select" {...f.bind("employeeId")}>
+          <Select className="hr-select" {...f.bind("employeeId")}>
             <option value="">—</option>
             {people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("تاريخ التسليم *", "Handover date *")}><input className="hr-input" type="date" {...f.bind("assignedOn")} /></Field>
         <Field label={L("الحالة عند التسليم", "Condition at handover")}><input className="hr-input" maxLength={200} placeholder={L("جديد، سليم، خدش بسيط…", "New, good, minor scratch…")} {...f.bind("condition")} /></Field>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -350,10 +351,10 @@ export default function PipelinePage() {
             {data?.scope === "all" && (
               <span className="chip">
                 <label htmlFor="pl-owner">{ar ? "المالك:" : "Owner:"}</label>
-                <select id="pl-owner" value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="pipeline-owner">
+                <Select id="pl-owner" value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="pipeline-owner">
                   <option value="all">{ar ? "الكل" : "All"}</option>
                   {owners.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                </select>
+                </Select>
                 <button type="button" className="x" onClick={() => setOwner("all")} aria-label={ar ? "إزالة فلتر المالك" : "Clear owner"} data-testid="pipeline-owner-clear">
                   <Ico name="close" small />
                 </button>
@@ -361,10 +362,10 @@ export default function PipelinePage() {
             )}
             <span className="chip">
               <label htmlFor="pl-close">{ar ? "الإغلاق المتوقع:" : "Expected close:"}</label>
-              <select id="pl-close" value={closing} onChange={(e) => setClosing(e.target.value as "all" | "quarter")} data-testid="pipeline-close">
+              <Select id="pl-close" value={closing} onChange={(e) => setClosing(e.target.value as "all" | "quarter")} data-testid="pipeline-close">
                 <option value="all">{ar ? "الكل" : "Any time"}</option>
                 <option value="quarter">{ar ? "هذا الربع" : "This quarter"}</option>
-              </select>
+              </Select>
               <button type="button" className="x" onClick={() => setClosing("all")} aria-label={ar ? "إزالة فلتر الإغلاق" : "Clear close date"} data-testid="pipeline-close-clear">
                 <Ico name="close" small />
               </button>

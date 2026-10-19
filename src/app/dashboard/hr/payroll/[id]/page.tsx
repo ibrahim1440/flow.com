@@ -2,6 +2,7 @@
 // HR-03 · Payroll run detail (Figma 1JbZgpMqmPkUVne8ms9Ozz · 451:5844; 1024: 455:2729).
 // Every button is a convenience: the API re-checks the duty and the segregation rules
 // (preparer ≠ approver, nobody approves their own line, payer ≠ preparer).
+import { Select } from "@/components/ui/Select";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -525,16 +526,16 @@ function PayDialog({ run, busy, error, onClose, onSubmit }: { run: RunDetail; bu
         <Field label={L("المبلغ *", "Amount *")} help={L(`المتبقي ${money(run.totals.unpaid)}`, `Remaining ${money(run.totals.unpaid)}`)}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("amount")} /></Field>
         <Field label={L("تاريخ الصرف *", "Payment date *")}><input className="hr-input" type="date" {...f.bind("paidOn")} /></Field>
         <Field label={L("الطريقة", "Method")}>
-          <select className="hr-select" {...f.bind("method")}>
+          <Select className="hr-select" {...f.bind("method")}>
             {Object.keys(METHOD_LABEL).map((k) => <option key={k} value={k}>{label(METHOD_LABEL, k, lang)}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("المرجع *", "Reference *")} help={L("رقم الحوالة أو الشيك أو السند", "Transfer, cheque or voucher number")}><input className="hr-input" dir="ltr" {...f.bind("reference")} /></Field>
         <Field label={L("لموظف واحد (اختياري)", "For one employee (optional)")} help={L("دفعة لبند موظف واحد إثباتها مرجعها. الدفعة المجمّعة تحتاج إثبات البنك لكل موظف.", "A payment to one employee's line is proved by its reference. A bulk payment needs the bank's proof per employee.")}>
-          <select className="hr-select" {...f.bind("lineId")}>
+          <Select className="hr-select" {...f.bind("lineId")}>
             <option value="">{L("دفعة مجمّعة", "Bulk payment")}</option>
             {run.lines.filter((l) => l.settlement && Number(l.settlement.outstanding) > 0).map((l) => <option key={l.id} value={l.id}>{l.employee.employeeNo} · {l.employee.fullNameAr} · {money(l.settlement!.outstanding)}</option>)}
-          </select>
+          </Select>
         </Field>
       </div>
     </Dialog>
@@ -566,16 +567,16 @@ function ProofDialog({ run, busy, error, onClose, onSubmit }: { run: RunDetail; 
       <Notice tone="info">{L("يُقبل ملف نتائج البنك أو مراجع البنك لكل موظف فقط، لا الملف الذي صدّره النظام. يجب أن يطابق كل سطر بند الموظف وصافيه المتبقي، وإلا لا يُسجَّل شيء.", "Only the bank's result file, or the bank's reference per employee, is accepted — never the file this system exported. Every row must match the employee's line and remaining net, or nothing is recorded.")}</Notice>
       <div className="hr-form">
         <Field label={L("الدفعة *", "Payment *")}>
-          <select className="hr-select" value={paymentId} onChange={(e) => setPaymentId(e.target.value)}>
+          <Select className="hr-select" value={paymentId} onChange={(e) => setPaymentId(e.target.value)}>
             {open.map((p) => <option key={p.id} value={p.id}>{p.reference} · {p.paidOn} · {L("بلا إثبات", "unproved")} {money(p.unallocated ?? "0")}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("تاريخ القيد في البنك *", "Bank value date *")}><input className="hr-input" type="date" value={valueDate} onChange={(e) => setValueDate(e.target.value)} /></Field>
         <Field label={L("المصدر", "Source")}>
-          <select className="hr-select" value={mode} onChange={(e) => setMode(e.target.value as "file" | "hand")}>
+          <Select className="hr-select" value={mode} onChange={(e) => setMode(e.target.value as "file" | "hand")}>
             <option value="file">{L("ملف نتائج البنك (CSV)", "Bank result file (CSV)")}</option>
             <option value="hand">{L("إدخال مراجع البنك يدويًا", "Enter the bank's references by hand")}</option>
-          </select>
+          </Select>
         </Field>
         {mode === "file" ? (
           <Field label={L("الملف *", "File *")} wide help={L("الأعمدة: employeeNo, amount, bankReference, status (PAID / REJECTED / RETURNED), originalReference, reason", "Columns: employeeNo, amount, bankReference, status (PAID / REJECTED / RETURNED), originalReference, reason")}>
@@ -645,22 +646,22 @@ function AdjustDialog({ runUrl, lines, onClose, onDone }: { runUrl: string; line
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("الموظف *", "Employee *")} wide>
-          <select className="hr-select" {...f.bind("employeeId")}>
+          <Select className="hr-select" {...f.bind("employeeId")}>
             <option value="">—</option>
             {people.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("النوع", "Type")}>
-          <select className="hr-select" {...f.bind("kind")}>
+          <Select className="hr-select" {...f.bind("kind")}>
             <option value="EARNING">{L("إضافة (مستحق)", "Addition (earning)")}</option>
             <option value="DEDUCTION">{L("خصم", "Deduction")}</option>
-          </select>
+          </Select>
         </Field>
         <Field label={L("الفئة *", "Category *")} help={L("مكافأة نهاية الخدمة وبدل الإجازة ليست فئة راتب: تُصرف من التسوية النهائية.", "End of service and leave encashment are not salary categories: they are paid by the final settlement.")}>
-          <select className="hr-select" value={category} onChange={(e) => f.setV((s) => ({ ...s, category: e.target.value }))}>
+          <Select className="hr-select" value={category} onChange={(e) => f.setV((s) => ({ ...s, category: e.target.value }))}>
             <option value="">—</option>
             {cats.map(([k, ar, en]) => <option key={k} value={k}>{lang === "en" ? en : ar}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("المبلغ *", "Amount *")}><input className="hr-input hr-num" inputMode="decimal" {...f.bind("amount")} /></Field>
         {dues ? (

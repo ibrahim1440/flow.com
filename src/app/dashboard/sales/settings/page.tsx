@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect } from "react";
 import {
   useLang, Button, Field, TextInput, Modal, Alert, api, num, LEAD_SOURCE_LABELS,
@@ -155,7 +156,7 @@ export default function SalesSettingsPage() {
     // Saved on change rather than behind an Edit dialog: a single choice with an immediate
     // consequence, and the server takes the purpose off whichever column held it before.
     <span className="perf-selw">
-      <select
+      <Select
         id={`purpose-${s.id}`}
         className="perf-sel"
         value={s.purpose ?? ""}
@@ -179,7 +180,7 @@ export default function SalesSettingsPage() {
         {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => (
           <option key={p} value={p}>{ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}</option>
         ))}
-      </select>
+      </Select>
       <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
     </span>
   );

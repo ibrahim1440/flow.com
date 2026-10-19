@@ -1,5 +1,6 @@
 "use client";
 // HR-05 · Attendance — dialogs (used by ./page.tsx).
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { Btn, Dialog, Field, Notice, hrFetch, useAction, useForm, useHrI18n } from "@/components/hr/ui";
 
@@ -8,10 +9,10 @@ const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 function PersonSelect({ people, bind }: { people: Person[]; bind: { value: string; onChange: (e: { target: { value: string } }) => void } }) {
   return (
-    <select className="hr-select" {...bind}>
+    <Select className="hr-select" {...bind}>
       <option value="">—</option>
       {people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}
-    </select>
+    </Select>
   );
 }
 
@@ -50,7 +51,7 @@ export function ManualDayDialog({ people, day, initialEmployeeId, onClose, onDon
       <div className="hr-form">
         <Field label={L("الموظف *", "Employee *")} wide><PersonSelect people={people} bind={f.bind("employeeId")} /></Field>
         <Field label={L("اليوم *", "Date *")}><input className="hr-input" type="date" {...f.bind("workDate")} /></Field>
-        <Field label={L("التسجيل", "Entry")}><select className="hr-select" {...f.bind("mode")}><option value="times">{L("حضور وانصراف", "Check-in and check-out")}</option><option value="absent">{L("غياب", "Absent")}</option></select></Field>
+        <Field label={L("التسجيل", "Entry")}><Select className="hr-select" {...f.bind("mode")}><option value="times">{L("حضور وانصراف", "Check-in and check-out")}</option><option value="absent">{L("غياب", "Absent")}</option></Select></Field>
         {!absent ? (
           <>
             <Field label={L("حضور *", "Check-in *")} help={L("بتوقيت الفرع", "Branch time")}><input className="hr-input hr-num" type="time" {...f.bind("checkIn")} /></Field>

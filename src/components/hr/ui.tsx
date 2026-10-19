@@ -2,6 +2,7 @@
 // Native HR — shared UI kit (Direction 2.1, scoped by [data-hr-root]; see hr.css).
 // Pages fetch JSON from /api/hr/* and render with these pieces. Every control here is a
 // convenience: the API re-checks each duty, so a hidden button is never the security.
+import { Select } from "@/components/ui/Select";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { SectionPages } from "@/components/shell/page-context";
 import "./hr.css";
@@ -376,7 +377,7 @@ export function Dialog({ open, title, onClose, children, actions, className, clo
     }
     const onTab = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
-      const items = Array.from(el.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")).filter((x) => x.offsetParent !== null);
+      const items = Array.from(el.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]):not(.hq-native), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")).filter((x) => x.offsetParent !== null);
       if (items.length === 0) { e.preventDefault(); return; }
       const first = items[0], last = items[items.length - 1];
       const active = document.activeElement as HTMLElement | null;
@@ -495,8 +496,8 @@ export function Dialog({ open, title, onClose, children, actions, className, clo
 }
 
 /**
- * FilterChip (library 12:16, Type=Filter): «الفرع: الكل». The value is chosen with a native
- * <select> laid over the chip (keyboard, screen reader and phone pickers stay native); when a
+ * FilterChip (library 12:16, Type=Filter): «الفرع: الكل». The value is chosen with the kit's
+ * Select laid transparently over the chip (popover on desktop, bottom sheet on phones); when a
  * value is set, a separate «×» button clears it. There is deliberately no «تصفية» (Type=Add)
  * chip: no further filters exist to add.
  */
@@ -511,10 +512,10 @@ export function FilterChip({ label, value, onChange, options, allLabel: givenAll
         {active ? null : <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z" /></svg>}
         <span className="hr-fchip-label">{label}:</span>
         <span className="hr-fchip-value" aria-hidden="true">{current}</span>
-        <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+        <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">{allLabel}</option>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        </Select>
       </span>
       {active ? <button type="button" className="hr-fchip-clear" aria-label={clearLabel ?? L(`مسح فلتر ${label}`, `Clear ${label} filter`)} onClick={() => onChange("")}>×</button> : null}
     </span>

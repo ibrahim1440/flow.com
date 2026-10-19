@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -600,12 +601,12 @@ export default function CustomersPage() {
         <form id="roast-profile-form-el" onSubmit={handleSaveProfile} className="hr-form">
           {!editingPref ? (
             <Field label={`${t("beanType")} *`} wide>
-              <select required value={profileForm.greenBeanId} onChange={(e) => setProfileForm({ ...profileForm, greenBeanId: e.target.value })} className="hr-select">
+              <Select required value={profileForm.greenBeanId} onChange={(e) => setProfileForm({ ...profileForm, greenBeanId: e.target.value })} className="hr-select">
                 <option value="">{t("selectBeanLabel")}</option>
                 {availableBeans.map((b) => (
                   <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber})</option>
                 ))}
-              </select>
+              </Select>
             </Field>
           ) : (
             <div className="cu-bean is-wide">
@@ -617,11 +618,11 @@ export default function CustomersPage() {
             <input required value={profileForm.profileName} onChange={(e) => setProfileForm({ ...profileForm, profileName: e.target.value })} placeholder="e.g. Dark-Gua-02" className="hr-input" />
           </Field>
           <Field label={`${t("usageTypeLabel")} *`}>
-            <select required value={profileForm.usageType} onChange={(e) => setProfileForm({ ...profileForm, usageType: e.target.value as UsageType })} className="hr-select">
+            <Select required value={profileForm.usageType} onChange={(e) => setProfileForm({ ...profileForm, usageType: e.target.value as UsageType })} className="hr-select">
               <option value="ESPRESSO">{t("usageEspresso")}</option>
               <option value="FILTER">{t("usageFilter")}</option>
               <option value="BOTH">{t("usageBoth")}</option>
-            </select>
+            </Select>
           </Field>
           <Field label={t("profileNotesLabel")} wide>
             <textarea value={profileForm.notes} onChange={(e) => setProfileForm({ ...profileForm, notes: e.target.value })} rows={2} className="hr-textarea" />

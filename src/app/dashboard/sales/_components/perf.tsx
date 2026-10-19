@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useSectionPages, usePhone, useD21Phone } from "@/components/shell/page-context";
@@ -102,11 +103,11 @@ export function MonthChip({
   return (
     <label className="chip perf-chip">
       <span>{word}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={word} data-testid={testId}>
+      <Select value={value} onChange={(e) => onChange(e.target.value)} aria-label={word} data-testid={testId}>
         {monthOptions(value, lang).map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
-      </select>
+      </Select>
       <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
     </label>
   );

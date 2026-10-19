@@ -1,5 +1,6 @@
 "use client";
 // HR-02 · Assets held by (or returned by) this person. Assign / return need assets_manage.
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, Dialog, Empty, ErrorState, Field, LoadingTable, Notice, StatusDot, todayIso, useAction, useCan, useForm, useHr, useHrI18n } from "@/components/hr/ui";
 import { Check, SectionHead, mutate, type AssetRow, type TabProps } from "./shared";
@@ -68,10 +69,10 @@ function AssignDialog({ id, onClose, onDone }: { id: string; onClose: () => void
       {list.data && avail.length === 0 ? <Notice tone="warning">{L("لا توجد عهد متاحة. أضف العهد من صفحة «العهد».", "No assets are available. Add assets on the Assets page.")}</Notice> : null}
       <div className="hr-form">
         <Field label={L("العهدة *", "Asset *")} wide>
-          <select className="hr-select" {...f.bind("assetId")}>
+          <Select className="hr-select" {...f.bind("assetId")}>
             <option value="">{L("— اختر —", "— Select —")}</option>
             {avail.map((x) => <option key={x.id} value={x.id}>{x.tag} · {x.name}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("تاريخ التسليم *", "Handover date *")}><input className="hr-input" type="date" {...f.bind("assignedOn")} /></Field>
         <Field label={L("الحالة عند التسليم", "Condition at handover")}><input className="hr-input" {...f.bind("condition")} placeholder={L("مثال: جديدة", "e.g. new")} /></Field>

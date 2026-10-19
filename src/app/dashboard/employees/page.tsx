@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect } from "react";
 import { Plus, Pencil, Eye, EyeOff, Lock, Navigation, Trash2, AlertTriangle } from "lucide-react";
 import {
@@ -553,7 +554,7 @@ function EmployeesInner() {
             label={t("defaultPage")}
             help={L("لا تُختار إلا الصفحات التي يصل إليها الموظف؛ الخيارات المعطّلة تحتاج صلاحية الوحدة.", "Only pages the employee can access are selectable. Greyed-out options require the relevant module permission.")}
           >
-            <select
+            <Select
               className="hr-select"
               value={form.defaultRoute}
               onChange={(e) => setForm({ ...form, defaultRoute: e.target.value })}
@@ -566,7 +567,7 @@ function EmployeesInner() {
                   </option>
                 );
               })}
-            </select>
+            </Select>
           </Field>
           {form.defaultRoute !== "/dashboard" && !accessibleRoutes.find((r) => r.value === form.defaultRoute) && (
             <Notice tone="warning">
@@ -723,11 +724,11 @@ function IdentityDialog({ emp, reg, ar, onClose, onDone, onError }: { emp: Emplo
           label={ar ? "اربطه بـ" : "Link it to"}
           help={<>{ar ? "لشخص خارجي غير مسجّل: أضفه أولًا من" : "For an external person not yet recorded: add them first in"} <a className="emp-link" href="/dashboard/hr/settings?view=external">{ar ? "الأشخاص الخارجيون" : "External persons"}</a>.</>}
         >
-          <select value={target} onChange={(e) => setTarget(e.target.value)} className="hr-select">
+          <Select value={target} onChange={(e) => setTarget(e.target.value)} className="hr-select">
             <option value="">—</option>
             {freeEmployees.length ? <optgroup label={ar ? "موظف (يُوثَّق مع الربط)" : "Employee (verified with the link)"}>{freeEmployees.map((e) => <option key={e.id} value={`E:${e.id}`}>{e.employeeNo} · {e.name}</option>)}</optgroup> : null}
             {freeExternals.length ? <optgroup label={ar ? "شخص خارجي" : "External person"}>{freeExternals.map((x) => <option key={x.id} value={`X:${x.id}`}>{x.fullName}{x.organization ? ` · ${x.organization}` : ""}</option>)}</optgroup> : null}
-          </select>
+          </Select>
         </Field>
       ) : null}
       {!s?.verified ? (

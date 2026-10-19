@@ -1,5 +1,6 @@
 "use client";
 // HR-02 · Attendance: shift assignment only. Day-by-day attendance lives on the attendance board.
+import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { Btn, Empty, Field, Notice, todayIso, useAction, useCan, useForm, useHrI18n, useHrMeta } from "@/components/hr/ui";
 import { WEEKDAYS } from "@/lib/i18n/hr";
@@ -39,10 +40,10 @@ export default function AttendanceTab({ id, readOnly }: TabProps) {
         <>
           <div className="hr-form">
             <Field label={L("الوردية *", "Shift *")}>
-              <select className="hr-select" {...f.bind("shiftId")}>
+              <Select className="hr-select" {...f.bind("shiftId")}>
                 <option value="">{L("— اختر —", "— Select —")}</option>
                 {shifts.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.startTime}–{s.endTime}</option>)}
-              </select>
+              </Select>
             </Field>
             <Field label={L("تسري من *", "Effective from *")}><input className="hr-input" type="date" {...f.bind("effectiveFrom")} /></Field>
           </div>

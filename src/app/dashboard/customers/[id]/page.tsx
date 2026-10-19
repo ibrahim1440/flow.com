@@ -111,7 +111,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.code !== "KeyN" || e.ctrlKey || e.metaKey || e.altKey || dialog) return;
-      if (t && (t.closest("input, textarea, select, [contenteditable=true]"))) return;
+      if (t && (t.closest("input, textarea, select, [role=combobox], [data-hq-popup], [contenteditable=true]"))) return;
       if (!noteRef.current) return;
       e.preventDefault();
       setTab("overview");

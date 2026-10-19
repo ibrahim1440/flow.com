@@ -1,4 +1,5 @@
 "use client";
+import { Select } from "@/components/ui/Select";
 import { useCreateRequest } from "@/components/shell/page-context";
 // HR-01 · Directory with split preview (Figma 1JbZgpMqmPkUVne8ms9Ozz · 449:767; 1024: 455:2286;
 // 390: 455:3056; EN 1536:2272 / 1536:7264 / 1536:8485). The directory never shows pay, identity
@@ -242,12 +243,12 @@ function CreatePerson({ onClose, onCreated }: { onClose: () => void; onCreated: 
         <Field label={L("الاسم بالإنجليزية", "Name in English")}><input className="hr-input" dir="ltr" {...f.bind("fullNameEn")} /></Field>
         <Field label={L("المسمى الوظيفي *", "Job title *")}><input className="hr-input" {...f.bind("jobTitle")} /></Field>
         <Field label={L("تاريخ المباشرة *", "Start date *")}><input className="hr-input" type="date" {...f.bind("hireDate")} /></Field>
-        <Field label={t("branch")}><select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</select></Field>
-        <Field label={t("department")}><select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</select></Field>
-        <Field label={L("المدير المباشر", "Line manager")}><select className="hr-select" {...f.bind("managerId")}><option value="">—</option>{meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</select></Field>
+        <Field label={t("branch")}><Select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</Select></Field>
+        <Field label={t("department")}><Select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</Select></Field>
+        <Field label={L("المدير المباشر", "Line manager")}><Select className="hr-select" {...f.bind("managerId")}><option value="">—</option>{meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</Select></Field>
         <Field label={L("نهاية فترة التجربة", "Probation ends")}><input className="hr-input" type="date" {...f.bind("probationEndDate")} /></Field>
-        <Field label={t("status")}><select className="hr-select" {...f.bind("status")}><option value="PROBATION">{L("فترة تجربة", "Probation")}</option><option value="ACTIVE">{L("على رأس العمل", "Active")}</option></select></Field>
-        <Field label={L("نوع التوظيف", "Employment type")}><select className="hr-select" {...f.bind("employmentType")}><option value="FULL_TIME">{L("دوام كامل", "Full time")}</option><option value="PART_TIME">{L("دوام جزئي", "Part time")}</option><option value="TEMPORARY">{L("مؤقت", "Temporary")}</option></select></Field>
+        <Field label={t("status")}><Select className="hr-select" {...f.bind("status")}><option value="PROBATION">{L("فترة تجربة", "Probation")}</option><option value="ACTIVE">{L("على رأس العمل", "Active")}</option></Select></Field>
+        <Field label={L("نوع التوظيف", "Employment type")}><Select className="hr-select" {...f.bind("employmentType")}><option value="FULL_TIME">{L("دوام كامل", "Full time")}</option><option value="PART_TIME">{L("دوام جزئي", "Part time")}</option><option value="TEMPORARY">{L("مؤقت", "Temporary")}</option></Select></Field>
       </div>
       <p className="hr-caption" style={{ margin: 0 }}>{L("لا يُنشأ حساب دخول. الراتب والعقد يُسجَّلان من ملف الموظف بصلاحية «العقود والرواتب».", "No login account is created. Pay and the contract are recorded from the employee file with the “Contracts & payroll” permission.")}</p>
     </Dialog>

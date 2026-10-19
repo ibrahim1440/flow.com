@@ -3,6 +3,7 @@
 // INTERIM MANUAL PROCEDURE: the amounts are calculated by hand outside the system; each step
 // here records its evidence and the server refuses a step whose evidence is missing. Separate
 // from ending the employment. Never shown as paid or complete without verified evidence.
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState, type ReactNode } from "react";
 import { Btn, Dialog, ErrorState, Field, KV, LoadingTable, Notice, money, todayIso, useAction, useForm, useHr, useHrI18n } from "@/components/hr/ui";
 import { SectionHead, isAmount, mutate } from "./shared";
@@ -149,10 +150,10 @@ function StepDialog({ step, s, docs, onClose, onDone }: { step: Step; s: Settlem
   };
   const submit = () => a.run("save", async () => { await mutate(`/api/hr/final-settlements/${s.id}/${step}`, { json: body[step]() }); onDone(); });
   const docSelect = (k: "calcDocumentId" | "paymentProofDocumentId") => (
-    <select className="hr-select" {...f.bind(k)}>
+    <Select className="hr-select" {...f.bind(k)}>
       <option value="">{L("— اختر مستندًا من ملف الموظف —", "— choose a document on the employee's file —")}</option>
       {docs.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
-    </select>
+    </Select>
   );
   return (
     <Dialog open title={titles[step]} onClose={onClose} actions={<><Btn variant={step === "cancel" ? "danger" : "primary"} busy={a.busy === "save"} disabled={!ok[step]} onClick={submit}>{t("save")}</Btn><Btn onClick={onClose}>{t("cancel")}</Btn></>}>

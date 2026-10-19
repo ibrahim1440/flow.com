@@ -7,6 +7,7 @@
  * print dialog. Every value printed comes from the server; this component never builds label text
  * from anything but the API response.
  */
+import { Select } from "@/components/ui/Select";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Btn, Dialog, Notice } from "@/components/hr/ui";
 import { countNoun, useL } from "@/components/ops/ui";
@@ -362,9 +363,9 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
 
               <section className="pd-sec">
                 <h3><label htmlFor="pd-profile">{L("الورق وملف الطابعة", "Paper & printer profile")}</label></h3>
-                <select id="pd-profile" className="hr-select" value={profile.id} onChange={(e) => setProfileId(e.target.value)} data-testid="pd-profile">
+                <Select id="pd-profile" className="hr-select" value={profile.id} onChange={(e) => setProfileId(e.target.value)} data-testid="pd-profile">
                   {meta.profiles.map((p) => { const nm = profileDisplayName(p, uiLang === "ar" ? "ar" : "en"); return <option key={p.id} value={p.id}>{hasArabic(nm) ? nm : iso(nm)} · {iso(dimText(p.labelWidthMm, p.labelHeightMm))}</option>; })}
-                </select>
+                </Select>
                 <a className="ops-link hr-caption" href="/dashboard/labels/profiles" style={{ width: "fit-content" }}>{L("إدارة الملفات", "Manage profiles")}</a>
                 {layoutWarnings(profile).includes("SCALE_NOT_100") ? <Notice tone="warning">{L("مقياس الملف ليس 100٪ — الملصقات ستُطبع بغير مقاسها الفعلي.", "The profile scale is not 100 % — labels will not print at actual size.")}</Notice> : null}
                 {layoutWarnings(profile).includes("GRID_OFF_PAPER") ? <Notice tone="danger">{L("الإزاحة أو المقياس تُخرج الملصقات عن الورقة.", "Offset or scale pushes labels off the paper.")}</Notice> : null}
@@ -387,12 +388,12 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
                   <div className="pd-note" data-testid="pd-guest-note">{L("ملاحظات الضيوف متاحة في التطبيق فقط — لا تُطبع على ملصقات النتائج.", "Guest feedback is available in the app only — it is never printed on results labels.")}</div>
                   <section className="pd-sec" data-testid="pd-notes-mode">
                     <h3><label htmlFor="pd-notes-select">{L("وضع الإيحاءات", "Notes mode")}</label></h3>
-                    <select id="pd-notes-select" className={`hr-select${notesOverridden ? " pd-changed" : ""}`} value={notesMode} onChange={(e) => setNotesMode(e.target.value as NotesMode)} data-testid="pd-notes-select">
+                    <Select id="pd-notes-select" className={`hr-select${notesOverridden ? " pd-changed" : ""}`} value={notesMode} onChange={(e) => setNotesMode(e.target.value as NotesMode)} data-testid="pd-notes-select">
                       <option value="shared">{L("المشتركة (القاعدة المعتمدة)", "Shared (approved rule)")}</option>
                       <option value="scorer">{L("لكل مقيّم", "Per scorer")}</option>
                       {notesMode === "both" || notesDefault === "both" ? <option value="both">{L("المشتركة ولكل مقيّم", "Shared and per scorer")}</option> : null}
                       <option value="none">{L("بلا إيحاءات", "None")}</option>
-                    </select>
+                    </Select>
                     {notesOverridden ? (
                       <div className="pd-changed-note" data-testid="pd-notes-changed">
                         <span className="pd-changed-mark">{L("تغيّرت لهذه المهمة", "Changed for this job")}</span>
@@ -498,17 +499,17 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
                     </ul>
                     {cls !== "compact" ? (
                       <label className="hr-field"><span className="hr-label">{L("أقصى عدد أسطر للإيحاءات", "Notes: maximum lines")}</span>
-                        <select className="hr-select" value={notesLines ?? ""} onChange={(e) => setNotesLines(e.target.value === "" ? null : Number(e.target.value))} data-testid="pd-notes-lines">
+                        <Select className="hr-select" value={notesLines ?? ""} onChange={(e) => setNotesLines(e.target.value === "" ? null : Number(e.target.value))} data-testid="pd-notes-lines">
                           <option value="">{L("حسب المقاس", "By size")} ({defaultNotesLines(cls, lang)})</option>
                           {[1, 2, 3, 4, 5, 6].map((v) => <option key={v} value={v}>{v}</option>)}
-                        </select></label>
+                        </Select></label>
                     ) : null}
                     {meta.presets.filter((p) => p.templateKey === template).length ? (
                       <label className="hr-field"><span className="hr-label">{L("إعداد محفوظ", "Saved preset")}</span>
-                        <select className="hr-select" defaultValue="" onChange={(e) => applyPreset(e.target.value)} data-testid="pd-preset">
+                        <Select className="hr-select" defaultValue="" onChange={(e) => applyPreset(e.target.value)} data-testid="pd-preset">
                           <option value="">{L("— اختر —", "— Choose —")}</option>
                           {meta.presets.filter((p) => p.templateKey === template).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select></label>
+                        </Select></label>
                     ) : null}
                     {meta.canManagePresets ? (
                       <div className="pd-row">

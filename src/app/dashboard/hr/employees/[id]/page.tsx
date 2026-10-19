@@ -2,6 +2,7 @@
 // HR-02 · Employee profile (Figma 1JbZgpMqmPkUVne8ms9Ozz · 449:20852). One page per person;
 // each tab appears only for a caller holding its duty, and the API re-checks every duty —
 // a hidden tab or button is never the control.
+import { Select } from "@/components/ui/Select";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useState } from "react";
@@ -155,21 +156,21 @@ function EditDialog({ person: p, onClose, onDone }: { person: Person; onClose: (
         <Field label={L("الاسم بالعربية *", "Name in Arabic *")}><input className="hr-input" dir="rtl" {...f.bind("fullNameAr")} /></Field>
         <Field label={L("الاسم بالإنجليزية", "Name in English")}><input className="hr-input" dir="ltr" {...f.bind("fullNameEn")} /></Field>
         <Field label={L("المسمى الوظيفي *", "Job title *")}><input className="hr-input" {...f.bind("jobTitle")} /></Field>
-        <Field label={L("نوع التوظيف", "Employment type")}><select className="hr-select" {...f.bind("employmentType")}>{Object.entries(EMPLOYMENT_TYPE).map(([k, v]) => <option key={k} value={k}>{lang === "en" ? v[1] : v[0]}</option>)}</select></Field>
-        <Field label={t("department")}><select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</select></Field>
+        <Field label={L("نوع التوظيف", "Employment type")}><Select className="hr-select" {...f.bind("employmentType")}>{Object.entries(EMPLOYMENT_TYPE).map(([k, v]) => <option key={k} value={k}>{lang === "en" ? v[1] : v[0]}</option>)}</Select></Field>
+        <Field label={t("department")}><Select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</Select></Field>
         <Field label={t("branch")}>
-          <select className="hr-select" {...f.bind("branchId")}>
+          <Select className="hr-select" {...f.bind("branchId")}>
             <option value="">—</option>
             {p.branch && !meta?.branches.some((b) => b.id === p.branch?.id) ? <option value={p.branch.id}>{orgName(p.branch, lang)}</option> : null}
             {meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("المدير المباشر", "Line manager")}>
-          <select className="hr-select" {...f.bind("managerId")}>
+          <Select className="hr-select" {...f.bind("managerId")}>
             <option value="">—</option>
             {p.manager && !managers.some((m) => m.id === p.manager?.id) ? <option value={p.manager.id}>{p.manager.fullNameAr}</option> : null}
             {managers.map((m) => <option key={m.id} value={m.id}>{m.fullNameAr} · {m.employeeNo}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("نهاية فترة التجربة", "Probation ends")}><input className="hr-input" type="date" {...f.bind("probationEndDate")} /></Field>
         <Field label={L("هاتف العمل", "Work phone")}><input className="hr-input" dir="ltr" {...f.bind("workPhone")} /></Field>
@@ -193,9 +194,9 @@ function StatusDialog({ id, status, onClose, onDone }: { id: string; status: str
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
         <Field label={L("الحالة الجديدة *", "New status *")}>
-          <select className="hr-select" {...f.bind("status")}>
+          <Select className="hr-select" {...f.bind("status")}>
             {(["PROBATION", "ACTIVE", "NOTICE", "SUSPENDED"] as const).map((s) => <option key={s} value={s}>{statusLabel(EMPLOYEE_STATUS, s, lang)}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("السبب *", "Reason *")} wide><input className="hr-input" {...f.bind("reason")} /></Field>
       </div>
@@ -221,10 +222,10 @@ function AccountDialog({ id, hasAccount, onClose, onDone }: { id: string; hasAcc
       {list.data ? (
         list.data.length === 0 ? <Notice tone="warning">{L("لا توجد حسابات دخول متاحة للربط.", "No login accounts are available to link.")}</Notice> : (
           <Field label={hasAccount ? L("استبدال الحساب المرتبط بـ", "Replace the linked account with") : L("الحساب", "Account")}>
-            <select className="hr-select" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <Select className="hr-select" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
               <option value="">{L("— اختر —", "— Select —")}</option>
               {list.data.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.role}</option>)}
-            </select>
+            </Select>
           </Field>
         )
       ) : null}

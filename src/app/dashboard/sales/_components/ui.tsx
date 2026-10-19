@@ -1,5 +1,6 @@
 "use client";
 
+import { Select as HqSelect } from "@/components/ui/Select";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   FlaskConical, Ban, Check, ChevronDown, Circle, CircleDashed, Clock, FileText,
@@ -402,7 +403,7 @@ export function Select({
   disabled?: boolean;
 }) {
   return (
-    <select
+    <HqSelect
       id={id}
       value={value}
       disabled={disabled}
@@ -411,7 +412,7 @@ export function Select({
       className={FIELD_BASE}
     >
       {children}
-    </select>
+    </HqSelect>
   );
 }
 
@@ -739,7 +740,7 @@ export function useModalFocus(onClose: () => void) {
     const el = box.current;
     const focusables = () =>
       Array.from(el?.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]):not(.hq-native), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       ) ?? []).filter((n) => n.offsetParent !== null || n === document.activeElement);
     if (el && !el.contains(document.activeElement)) {
       const field = el.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled])");
@@ -927,7 +928,7 @@ export function FilterSelect({
         aria-hidden
         className="pointer-events-none absolute inset-y-0 end-3.5 my-auto text-oo-text-secondary"
       />
-      <select
+      <HqSelect
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
@@ -935,7 +936,7 @@ export function FilterSelect({
         className={`${CONTROL} appearance-none ps-3.5 pe-9`}
       >
         {children}
-      </select>
+      </HqSelect>
     </div>
   );
 }

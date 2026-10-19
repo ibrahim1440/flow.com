@@ -9,6 +9,7 @@ import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
 import { LocalizedName } from "@/components/LocalizedName";
+import { Combobox, Select } from "@/components/ui/Select";
 import {
   OrderStatusBadge, NeedsAttentionBadge, OwnerDisplay, ActivityTimeline, AddNoteForm,
   StatusActionsBar, PreparationReviewTable, OrderProgressStepper, type LifecycleActivity,
@@ -79,7 +80,7 @@ function lastActivityOf(order: Order): LifecycleActivity | null {
   return order.activities.length > 0 ? order.activities[order.activities.length - 1] : null;
 }
 
-type Customer = { id: string; name: string };
+type Customer = { id: string; name: string; phone?: string | null };
 type GreenBean = { id: string; serialNumber: string; beanType: string; quantityKg: number };
 type ProductSku = { id: string; skuCode: string; weightGrams: number; isBulk: boolean; price: number };
 type ProductSummary = { id: string; productNameEn: string; productNameAr: string | null; productSkus: ProductSku[] };
@@ -441,11 +442,12 @@ export default function OrdersPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t("customer")}</label>
                 <div className="flex gap-2">
-                  <select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}
+                  <Select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}
+                    aria-label={t("customer")} data-testid="order-customer"
                     className="flex-1 px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
                     <option value="">{t("selectCustomer")}</option>
-                    {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                    {customers.map((c) => <option key={c.id} value={c.id} data-hint={c.phone || undefined}>{c.name}</option>)}
+                  </Select>
                   <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}
                     className={`p-2 rounded-lg border ${showNewCustomer ? "bg-red-50 border-red-200 text-red-600" : "bg-cream border-border text-brown"} hover:opacity-80`}
                     title={showNewCustomer ? t("cancel") : t("addNewCustomer")}>
@@ -498,8 +500,7 @@ export default function OrdersPage() {
                           <div key={idx} className="mb-2 border-2 border-border rounded-xl p-2.5">
                             <div className="flex gap-2 items-start">
                               <div className="flex-1">
-                                <input
-                                  list={`sku-list-${idx}`}
+                                <Combobox
                                   defaultValue=""
                                   onChange={(e) => {
                                     const v = e.target.value;
@@ -508,18 +509,18 @@ export default function OrdersPage() {
                                     );
                                     updateItem(idx, "productSkuId", chosen ? chosen.id : "");
                                   }}
+                                  options={catalog
+                                    .filter((c) => c.isActive)
+                                    .map((c) => ({
+                                      value: `${c.name} — ${c.skuCode}`,
+                                      label: c.name,
+                                      hint: `${c.skuCode} · ${c.packSize} · ${t("availableLabel")} ${c.availableUnits}`,
+                                    }))}
                                   placeholder={t("searchProductLabel")}
+                                  aria-label={t("searchProductLabel")}
+                                  data-testid={`order-line-product-${idx}`}
                                   className="w-full px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
                                 />
-                                <datalist id={`sku-list-${idx}`}>
-                                  {catalog
-                                    .filter((c) => c.isActive)
-                                    .map((c) => (
-                                      <option key={c.id} value={`${c.name} — ${c.skuCode}`}>
-                                        {`${t("availableLabel")}: ${c.availableUnits}`}
-                                      </option>
-                                    ))}
-                                </datalist>
                               </div>
                               <input
                                 type="number"
@@ -744,14 +745,14 @@ export default function OrdersPage() {
                         {editForm.items.map((item, idx) => (
                           <div key={idx} className="mb-2">
                             <div className="flex gap-2 items-center">
-                              <select value={item.greenBeanId} onChange={(e) => {
+                              <Select value={item.greenBeanId} onChange={(e) => {
                                 const bean = beans.find((b) => b.id === e.target.value);
                                 updateEditItem(idx, "greenBeanId", e.target.value);
                                 if (bean) updateEditItem(idx, "beanTypeName", bean.beanType);
                               }} className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
                                 <option value="">{t("selectBean")}</option>
                                 {beans.map((b) => <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg} {t("opsKgUnit")})</option>)}
-                              </select>
+                              </Select>
                               <input type="number" placeholder="kg" value={item.quantityKg || ""} onChange={(e) => updateEditItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
                                 className="w-24 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
                               {editForm.items.length > 1 && (
@@ -760,21 +761,21 @@ export default function OrdersPage() {
                               )}
                             </div>
                             <div className="flex gap-2 mt-1">
-                              <select value={item.productId} onChange={(e) => {
+                              <Select value={item.productId} onChange={(e) => {
                                 updateEditItem(idx, "productId", e.target.value);
                                 updateEditItem(idx, "productSkuId", "");
                               }} className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
-                                <option value="">No product</option>
+                                <option value="">{t("noProductOption")}</option>
                                 {products.map((p) => <option key={p.id} value={p.id}>{p.productNameEn}</option>)}
-                              </select>
+                              </Select>
                               {item.productId && (
-                                <select value={item.productSkuId} onChange={(e) => updateEditItem(idx, "productSkuId", e.target.value)}
+                                <Select value={item.productSkuId} onChange={(e) => updateEditItem(idx, "productSkuId", e.target.value)}
                                   className="flex-1 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
-                                  <option value="">No SKU</option>
+                                  <option value="">{t("noSkuOption")}</option>
                                   {(products.find((p) => p.id === item.productId)?.productSkus ?? []).map((s) => (
                                     <option key={s.id} value={s.id}>{s.skuCode} ({s.weightGrams}g)</option>
                                   ))}
-                                </select>
+                                </Select>
                               )}
                             </div>
                             {editWarnings[idx] && (

@@ -1,6 +1,7 @@
 "use client";
 // HR-02 · Offboarding: initiate → clearance (assets, advances, pending leave block) →
 // settlement figures (ENTERED, never computed) → complete or cancel.
+import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, Dialog, Empty, ErrorState, Field, Flag, KV, LoadingTable, Notice, StatusDot, money, todayIso, useAction, useForm, useHr, useHrI18n } from "@/components/hr/ui";
 import { leaveTypeName } from "@/lib/i18n/hr";
@@ -154,7 +155,7 @@ function StartDialog({ id, hasAccount, onClose, onDone }: { id: string; hasAccou
     <Dialog open title={L("بدء إنهاء الخدمة", "Start end of service")} onClose={onClose} actions={<><Btn variant="danger" busy={a.busy === "save"} onClick={submit} disabled={!f.v.noticeDate || !f.v.lastWorkingDay || f.v.reason.trim().length < 3}>{L("بدء الإنهاء", "Start")}</Btn><Btn onClick={onClose}>{t("cancel")}</Btn></>}>
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <div className="hr-form">
-        <Field label={L("النوع *", "Type *")}><select className="hr-select" {...f.bind("type")}>{Object.keys(SEPARATION_TYPE).map((k) => <option key={k} value={k}>{lbl(SEPARATION_TYPE, k, lang)}</option>)}</select></Field>
+        <Field label={L("النوع *", "Type *")}><Select className="hr-select" {...f.bind("type")}>{Object.keys(SEPARATION_TYPE).map((k) => <option key={k} value={k}>{lbl(SEPARATION_TYPE, k, lang)}</option>)}</Select></Field>
         <Field label={L("تاريخ الإشعار *", "Notice date *")}><input className="hr-input" type="date" {...f.bind("noticeDate")} /></Field>
         <Field label={L("آخر يوم عمل *", "Last working day *")}><input className="hr-input" type="date" {...f.bind("lastWorkingDay")} /></Field>
         <Field label={L("السبب *", "Reason *")} wide><textarea className="hr-textarea" {...f.bind("reason")} /></Field>

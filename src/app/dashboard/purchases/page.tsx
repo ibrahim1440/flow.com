@@ -7,6 +7,7 @@
 // same client validation as the legacy screen. Recording a purchase moves from a centred modal to
 // the frame's pane: docked beside the register at 1440, a drawer at 1024, a full page on the phone.
 // Export, the period filter and the sort control are drawn in the frame but not built.
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Btn, Field, Notice, OpsBanner, OpsLoading, OpsPane, OpsRoot, PageHeader, opsDate, useL } from "@/components/ops/ui";
 import "@/components/ops/stock.css";
@@ -187,13 +188,13 @@ function AddPurchasePane({
       {formError ? <Notice tone="danger">{formError}</Notice> : null}
       <form id="purchase-form" onSubmit={handleSubmit} className="hr-stack" style={{ gap: 14 }}>
         <Field label={`${t("supplier")} *`}>
-          <select className="hr-select" value={form.isNewSupplier ? "__new__" : form.supplierId} onChange={(e) => handleSupplierSelect(e.target.value)}>
+          <Select className="hr-select" value={form.isNewSupplier ? "__new__" : form.supplierId} onChange={(e) => handleSupplierSelect(e.target.value)}>
             <option value="">{t("selectSupplier")}</option>
             {suppliers.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
             <option value="__new__">＋ {t("addNewSupplier")}</option>
-          </select>
+          </Select>
         </Field>
 
         {form.isNewSupplier && (
@@ -209,14 +210,14 @@ function AddPurchasePane({
         )}
 
         <Field label={`${t("greenBeans")} *`} help={L("يُضاف الوزن إلى رصيد هذا اللوت، وتُسجَّل حركة «وارد · شراء».", "The weight is added to this lot's balance, and an «In · purchase» movement is recorded.")}>
-          <select className="hr-select" value={form.itemId} onChange={(e) => set("itemId", e.target.value)}>
+          <Select className="hr-select" value={form.itemId} onChange={(e) => set("itemId", e.target.value)}>
             <option value="">{t("selectItem")}</option>
             {beans.map((b) => (
               <option key={b.id} value={b.id}>
                 {lang === "ar" && b.beanTypeAr ? b.beanTypeAr : b.beanType} ({b.serialNumber})
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <div className="hr-form" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>

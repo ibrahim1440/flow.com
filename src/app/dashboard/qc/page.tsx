@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Coffee, CheckCircle2, XCircle, Link2, AlertTriangle, Loader2, Trash2, CalendarDays } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
@@ -1108,7 +1109,7 @@ export default function QCPage() {
                     {backlogBatches.find((b) => b.id === form.batchId)?.batchNumber ?? form.batchId}
                   </p>
                 ) : (
-                  <select value={form.batchId} onChange={(e) => {
+                  <Select value={form.batchId} onChange={(e) => {
                     const batch = backlogBatches.find((b) => b.id === e.target.value);
                     if (batch) setForm({ ...form, batchId: batch.id, coffeeOrigin: batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? ""), processing: batch.greenBean?.process || "", serialNumber: batch.batchNumber });
                   }}
@@ -1117,7 +1118,7 @@ export default function QCPage() {
                     {backlogBatches.map((b) => (
                       <option key={b.id} value={b.id}>{b.batchNumber} — {(b.orderItem?.beanTypeName ?? "")} (#{(b.orderItem?.order.orderNumber ?? t("stockBatchLabel"))})</option>
                     ))}
-                  </select>
+                  </Select>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -1128,13 +1129,13 @@ export default function QCPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-charcoal mb-1">{t("process")}</label>
-                  <select value={form.processing} onChange={(e) => setForm({ ...form, processing: e.target.value })}
+                  <Select value={form.processing} onChange={(e) => setForm({ ...form, processing: e.target.value })}
                     className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
                     <option value="">—</option>
                     <option>Natural</option><option>Washed</option><option>Honey</option>
                     <option>Anaerobic</option><option>Innoculated</option><option>Co-Fermented</option>
                     <option>Extended Natural</option>
-                  </select>
+                  </Select>
                 </div>
               </div>
               <div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, Field } from "@/components/hr/ui";
@@ -73,15 +74,15 @@ export function ActivityDialog({ ar, customerId, deals, defaultDealId, onClose, 
       <form id="acc-activity" className="hr-form" onSubmit={save}>
         <Err text={err} />
         <Field label={L("النوع", "Type")}>
-          <select className="hr-select" value={type} onChange={(e) => setType(e.target.value)} data-testid="activity-type">
+          <Select className="hr-select" value={type} onChange={(e) => setType(e.target.value)} data-testid="activity-type">
             {Object.keys(ACTIVITY_LABELS).map((k) => <option key={k} value={k}>{ar ? ACTIVITY_LABELS[k].ar : ACTIVITY_LABELS[k].en}</option>)}
-          </select>
+          </Select>
         </Field>
         {!isTask ? (
           <Field label={L("ماذا حدث؟", "What happened?")}>
-            <select className="hr-select" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+            <Select className="hr-select" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
               {ACTIVITY_OUTCOMES.map((o) => <option key={o} value={o}>{ar ? OUTCOME_LABELS[o].ar : OUTCOME_LABELS[o].en}</option>)}
-            </select>
+            </Select>
           </Field>
         ) : <span />}
         <Field label={`${L("الموضوع", "Subject")} *`} wide>
@@ -91,10 +92,10 @@ export function ActivityDialog({ ar, customerId, deals, defaultDealId, onClose, 
           <textarea className="hr-textarea" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
         </Field>
         <Field label={L("الصفقة", "Deal")} help={L("اختياري: يُسجَّل على العميل وحده إن لم تُختر صفقة.", "Optional: without a deal it is recorded on the customer itself.")}>
-          <select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
+          <Select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
             <option value="">{L("العميل فقط", "The customer only")}</option>
             {deals.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={`${L("موعد الاستحقاق", "Due")}${isTask ? " *" : ""}`} help={isTask ? L("المهمة بلا موعد لا تظهر في المتأخرات أبدًا.", "A task with no due date never appears as overdue.") : undefined}>
           <input className="hr-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} dir="ltr" />
@@ -231,18 +232,18 @@ export function DetailsDialog({ ar, customer, onClose, onDone }: {
         <Field label={L("التوصيل (العنوان)", "Delivery (address)")} wide><textarea className="hr-textarea" rows={2} value={f.address} onChange={set("address")} /></Field>
         <p className="cu-formsec is-wide">{L("الحساب", "Account")}</p>
         <Field label={L("الفئة", "Category")}>
-          <select className="hr-select" value={f.segment} onChange={set("segment")} data-testid="details-segment">
+          <Select className="hr-select" value={f.segment} onChange={set("segment")} data-testid="details-segment">
             <option value="">{L("غير محددة", "Not set")}</option>
             {Object.entries(SEGMENT_LABELS).map(([k, v]) => <option key={k} value={k}>{ar ? v.ar : v.en}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} /></Field>
         <Field label={L("المسؤول", "Account owner")}>
-          <select className="hr-select" value={f.accountOwnerId} onChange={set("accountOwnerId")} data-testid="details-owner">
+          <Select className="hr-select" value={f.accountOwnerId} onChange={set("accountOwnerId")} data-testid="details-owner">
             <option value="">{L("بلا مسؤول", "None")}</option>
             {customer.accountOwner && !employees.some((x) => x.id === customer.accountOwner!.id) && <option value={customer.accountOwner.id}>{customer.accountOwner.name}</option>}
             {employees.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
+          </Select>
         </Field>
         <Field label={L("السجل التجاري", "Commercial registration")} help={L("10 أرقام", "10 digits")}>
           <input className="hr-input" dir="ltr" style={{ textAlign: "start" }} inputMode="numeric" value={f.commercialRegNo} onChange={set("commercialRegNo")} data-testid="details-cr" />
