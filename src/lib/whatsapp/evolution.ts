@@ -1,11 +1,12 @@
 import "server-only";
+import { linkedNumberFrom } from "./owner";
 
 /**
  * The WhatsApp server client (Evolution API 2.x), for exactly one instance.
  *
  * ── What this can do, and what it deliberately cannot ──
- * Five calls: ask for a QR or pairing code, read the connection state, send a text, log the
- * phone out, restart. There is no call to delete or create an instance and there must never
+ * Six calls: ask for a QR or pairing code, read the connection state, read the linked phone's
+ * number (read-only), send a text, log the phone out, restart. There is no call to delete or create an instance and there must never
  * be one: deleting the instance is irreversible on the server side and the number cannot be
  * recreated from here. The key is also scoped to this one instance on the server.
  *
@@ -119,6 +120,17 @@ function readState(body: unknown): ConnectionState {
 export async function getConnectionState(): Promise<{ ok: true; state: ConnectionState } | CallFailure> {
   const r = await call("GET", `/instance/connectionState/${inst()}`);
   return r.ok ? { ok: true, state: readState(r.body) } : r;
+}
+
+/**
+ * The number of the phone linked to this instance (Figma E-05 «الرقم +966 5X XXX XXXX مربوط
+ * بجوال»), from the instance listing's `ownerJid`. Read-only; null while no phone is linked.
+ */
+export async function getLinkedNumber(): Promise<{ ok: true; phone: string | null } | CallFailure> {
+  const cfg = whatsappConfig();
+  if (!cfg.ok) return { ok: false, status: null, error: cfg.reason, transient: false };
+  const r = await call("GET", `/instance/fetchInstances?instanceName=${inst()}`);
+  return r.ok ? { ok: true, phone: linkedNumberFrom(r.body, cfg.config.instance) } : r;
 }
 
 export type ConnectResult =

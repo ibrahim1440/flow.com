@@ -179,7 +179,7 @@ export const SHELL_GROUP_ORDER = ["orders", "production", "quality", "inventory"
  * The gear menu, in this order (GX F-P01 settings navigation: «المنشأة · المستخدمون والصلاحيات ·
  * … · المبيعات · … · الأتمتة والواتساب»), after the profile. An entry not listed follows.
  */
-export const MENU_ORDER = ["profile", "settings", "employees", "sales.settings", "automation"];
+export const MENU_ORDER = ["profile", "settings", "employees", "settings.production", "settings.inventory", "settings.products", "sales.settings", "settings.invoicing", "automation"];
 
 const sales = (sub?: string): Ability => ({ module: "sales", ...(sub ? { sub } : {}) });
 const commissions = (sub?: string): Ability => ({ module: "commissions", ...(sub ? { sub } : {}) });
@@ -608,6 +608,15 @@ export const NAV: NavNode[] = [
         anyOf: [{ module: "automation" }],
       },
       {
+        // «إشعارات الحالات» (feat/whatsapp-status; addition beyond Figma): the same audience as
+        // the message log; the page and its API are for the admin role (others read a notice).
+        id: "automation.statuses",
+        ar: "إشعارات الحالات", en: "Status notifications",
+        icon: Zap,
+        href: "/dashboard/automation/statuses",
+        anyOf: [{ module: "automation" }],
+      },
+      {
         id: "automation.whatsapp",
         ar: "ربط الواتساب", en: "WhatsApp connection",
         icon: QrCode,
@@ -697,6 +706,24 @@ export const NAV: NavNode[] = [
     adminOnly: true,
     shell: { place: "menu", icon: "settings", trailRoot: "settings", crumb: { ar: "المنشأة", en: "Organisation" } },
   },
+  // The settings sections of GX F-P01 (gx.py SNAV) that had no page («قريباً» until batch "Settings"):
+  // the same audience as «المنشأة» (the admin role, the settings module), reached from the gear and
+  // the settings navigation, trail «الإعدادات / …».
+  {
+    // Figma 377:2 RM1–RM5: «الإعدادات / الإنتاج والتحميص / المحامص» (ROASTERS.md §2, D2).
+    id: "settings.production",
+    ar: "الإنتاج والتحميص", en: "Production & roasting",
+    icon: Flame,
+    anyOf: [{ module: "settings" }],
+    adminOnly: true,
+    shell: { place: "menu", icon: "flame", trailRoot: "settings" },
+    children: [
+      { id: "settings.production.roasters", ar: "المحامص", en: "Roasters", icon: Flame, href: "/dashboard/settings/production", anyOf: [{ module: "settings" }], adminOnly: true },
+    ],
+  },
+  { id: "settings.inventory", ar: "المخزون", en: "Inventory", icon: Boxes, href: "/dashboard/settings/inventory", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "box", trailRoot: "settings" } },
+  { id: "settings.products", ar: "المنتجات", en: "Products", icon: Coffee, href: "/dashboard/settings/products", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "cup", trailRoot: "settings" } },
+  { id: "settings.invoicing", ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: FileText, href: "/dashboard/settings/invoicing", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "invoice", trailRoot: "settings" } },
 ];
 
 // Icons imported for the tree above but not otherwise referenced keep the import list

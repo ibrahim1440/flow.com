@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { checkAndRecordRateLimit } from "@/lib/api-rate-limit";
-import { connect, getConnectionState, logout, restart, sendText, whatsappConfig } from "@/lib/whatsapp/evolution";
+import { connect, getConnectionState, getLinkedNumber, logout, restart, sendText, whatsappConfig } from "@/lib/whatsapp/evolution";
 import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { effectiveMode, liveAllowed, readSettings } from "@/lib/automation/settings";
 
@@ -20,6 +20,8 @@ export async function GET() {
     prisma.whatsAppMessage.count({ where: { status: "SENT", sentAt: { gte: new Date(Date.now() - 86_400_000) } } }),
   ]);
   const state = cfg.ok ? await getConnectionState() : null;
+  // The linked phone's number, read from the WhatsApp server while linked (its instance listing).
+  const linked = state?.ok && state.state === "open" ? await getLinkedNumber() : null;
   const effective = effectiveMode(settings);
 
   return NextResponse.json({
@@ -27,6 +29,7 @@ export async function GET() {
     configError: cfg.ok ? null : cfg.reason,
     state: state?.ok ? state.state : null,
     stateError: state && !state.ok ? state.error : null,
+    linkedPhone: linked?.ok ? linked.phone : null,
     sendMode: settings.sendMode,
     testPhone: settings.testPhone,
     liveAllowed: liveAllowed(),

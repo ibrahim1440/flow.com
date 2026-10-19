@@ -35,7 +35,7 @@ type Device = { ref: string; current: boolean; device: DeviceInfo; firstSeenAt: 
 type Activity = { at: string; action: string; result: string; reasonCode: string | null; device: DeviceInfo };
 type SignIn = { at: string; method: string; device: DeviceInfo } | null;
 type Security = {
-  account: { name: string; username: string | null; role: string; createdAt: string; hasPassword: boolean; passwordChangedAt: string | null; pinChangedAt: string | null; mfaEnrolledAt: string | null; phoneNumber: string; preferredLanguage: "ar" | "en" };
+  account: { name: string; username: string | null; role: string; createdAt: string; hasPassword: boolean; passwordChangedAt: string | null; pinChangedAt: string | null; mfaEnrolledAt: string | null; phoneNumber: string; preferredLanguage: "ar" | "en"; pinResetRequired?: boolean };
   currentSignIn: SignIn; previousSignIn: SignIn;
   sessions: Session[]; devices: Device[]; activity: Activity[]; activityMore: boolean;
 };
@@ -406,7 +406,10 @@ export default function ProfilePage() {
 
               {block("pf-pin-h", t("changePin"), pinState, null,
                 <form onSubmit={savePin} className="pf-form" data-testid="pf-pin-form">
-                  {secret("pf-current", t("currentPin"), currentPin, setCurrentPin, { pin: true })}
+                  {/* UR-04: after an administrator cleared the PIN there is no current one — a password step-up confirms the person instead. */}
+                  {data?.account.pinResetRequired
+                    ? <p className="hr-caption pf-note" data-testid="pf-pin-reset">{L("أعاد مسؤول النظام تعيين رمزك. عيّن رمزًا جديدًا؛ نطلب كلمة مرورك للتحقق من هويتك.", "An administrator reset your PIN. Set a new one; we ask for your password to confirm it is you.")}</p>
+                    : secret("pf-current", t("currentPin"), currentPin, setCurrentPin, { pin: true })}
                   {secret("pf-new", t("newPin"), newPin, setNewPin, { pin: true, minLength: PIN_LENGTH })}
                   {secret("pf-confirm", t("confirmNewPin"), confirmPin, setConfirmPin, { pin: true, error: confirmPin && confirmPin !== newPin ? t("pinMismatch") : null })}
                   {msg(pinMsg)}

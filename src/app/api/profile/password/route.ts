@@ -17,7 +17,8 @@ import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 // is replaced by a fresh session in the same response — not a re-authentication: it inherits the
 // step-up clock, MFA state and absolute deadline (session-cookie.ts).
 export async function PUT(request: Request) {
-  const { user, error } = await requireAuth();
+  // A temporary password (UR-03e / UR-04) is changed here: the one request such an account may make.
+  const { user, error } = await requireAuth({ allowPasswordChange: true });
   if (error) return error;
   if (user.privileged || (await isEnrolled(user.id))) {
     const stale = requireFreshAuth(user);
@@ -56,7 +57,8 @@ export async function PUT(request: Request) {
   }
   await clearAttempts(ipHash, identifierHash);
 
-  await prisma.employee.update({ where: { id: user.id }, data: { password: await hash(newPassword, 10) } });
+  // Setting one's own password ends a temporary one (UR-03e / UR-04: «يجب تغييرها عند أول دخول»).
+  await prisma.employee.update({ where: { id: user.id }, data: { password: await hash(newPassword, 10), passwordMustChange: false, passwordTempExpiresAt: null } });
   // The credential digest changed, so the other tokens are already refused; mark their rows ended
   // too, so «الجلسات النشطة» lists only what can still be used.
   const ended = await revokeSessions(prisma, user.id, "PASSWORD_CHANGED_SELF", { exceptId: user.sessionId });

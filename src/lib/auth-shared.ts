@@ -157,6 +157,9 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   employees: [
     { key: "create", label: "Add employees" },
     { key: "edit", label: "Edit employee permissions" },
+    // Owner decision (19 Oct, users & roles): a "power user" changes OTHER users' roles, permissions
+    // and exceptions (src/lib/users/power.ts). Only the administrator grants or removes it.
+    { key: "manage_access", label: "Power user: manage other users' permissions" },
   ],
   settings: [
     { key: "reset", label: "Factory reset (wipe all data)" },

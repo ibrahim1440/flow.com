@@ -7,7 +7,7 @@ import { Btn, Dot, Empty, OpsBanner, OpsLoading, OpsRoot, useL } from "@/compone
 import { useD21Phone } from "@/components/shell/page-context";
 import { api, useLang } from "../sales/_components/ui";
 import { EVENT_GROUPS, getEvent, RECIPIENT_LABELS, type RecipientKind } from "@/lib/automation/catalog";
-import { AutomationHeader, type Connection, useAutomationAbilities } from "./_components/shared";
+import { AutomationHeader, LoadError, type Connection, useAutomationAbilities } from "./_components/shared";
 import { PlusIco, SettingsFrame } from "../_components/tools-ui";
 
 /**
@@ -81,14 +81,16 @@ export default function AutomationRulesPage() {
           ) : undefined}
         />
 
-        {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
+        {error && rows && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
 
-        {!rows && !error ? <OpsLoading /> : rows && rows.length === 0 ? (
-          <Empty
+        {!rows && error ? (
+          <LoadError lang={lang} title={L("تعذّر تحميل القواعد", "Could not load the rules")} onRetry={() => { setError(""); setReloadToken((t) => t + 1); }} />
+        ) : !rows && !error ? <OpsLoading /> : rows && rows.length === 0 ? (
+          <div className="tl-empty"><Empty
             title={L("لا توجد قواعد بعد", "No rules yet")}
             body={L("أنشئ أول قاعدة لترسل رسالة عند حدث في النظام.", "Create a first rule to send a message when something happens.")}
             action={canManageRules ? <Btn variant="primary" onClick={() => router.push("/dashboard/automation/rules/new")}><PlusIco /> {L("قاعدة جديدة", "New rule")}</Btn> : undefined}
-          />
+          /></div>
         ) : rows ? (
           <>
             <div className="hr-tablewrap">

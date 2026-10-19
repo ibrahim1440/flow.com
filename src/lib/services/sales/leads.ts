@@ -252,7 +252,7 @@ export async function transitionOpportunity(
     actorId: string;
     canReopen: boolean;
   },
-): Promise<{ stageId: string; outcome: string }> {
+): Promise<{ stageId: string; outcome: string; fromStageId: string; fromOutcome: string }> {
   const locked = await tx.$queryRaw<{ id: string; stageId: string; outcome: string; customerId: string | null }[]>`
     SELECT "id", "stageId", "outcome"::text AS outcome, "customerId"
       FROM "Opportunity"
@@ -329,6 +329,7 @@ export async function transitionOpportunity(
       actorId: input.actorId,
     },
   });
-
-  return { stageId: nextStageId, outcome: nextOutcome };
+  // The route raises "sales.deal_stage_changed" from these (services/sales/deal-events.ts): this
+  // module is also imported by client screens for its constants, so it must not import the outbox.
+  return { stageId: nextStageId, outcome: nextOutcome, fromStageId: opp.stageId, fromOutcome: opp.outcome };
 }

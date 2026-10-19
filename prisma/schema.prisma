@@ -63,6 +63,77 @@ model Employee {
 
   // Customer account (additive): the accounts this employee is responsible for.
   customerAccounts Customer[] @relation("CustomerAccountOwner")
+
+  // Users, roles & permissions (Figma Phase 8, 20261022090000_users_roles; additive).
+  /// The custom role this account follows (role = "custom"); null = a system template or none.
+  /// The account's `permissions` document stays the one the session applies; a role save
+  /// rewrites the documents of its members (role template plus their explicit overrides).
+  accessRoleId          String?
+  accessRole            AccessRole?          @relation("AccessRoleMembers", fields: [accessRoleId], references: [id], onDelete: SetNull)
+  /// Explicit per-user exceptions to the role (grant or deny, reason, optional expiry).
+  permissionOverrides   PermissionOverride[] @relation("PermissionOverrideAccount")
+  /// An administrator issued a temporary password: every request is refused until the person
+  /// sets their own (PUT /api/profile/password), and the temporary one stops working at
+  /// passwordTempExpiresAt if it was never used.
+  passwordMustChange    Boolean              @default(false)
+  passwordTempExpiresAt DateTime?
+  /// An administrator cleared the station PIN: the person sets a new one themselves from their
+  /// profile after confirming their identity with the password (no current PIN needed then).
+  pinResetRequired      Boolean              @default(false)
+
+  @@index([accessRoleId])
+}
+
+/// A custom access role (Figma UR-05 / UR-06): a named permission template. The system templates
+/// (admin, inventory, roasting, qc, dispatch and «بلا وصول») stay in code and are read-only.
+model AccessRole {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  /// The template: the same JSON permission document an account stores.
+  permissions String     @default("{}")
+  /// The system template key or custom role id this role was copied from.
+  basedOn     String?
+  /// Optimistic concurrency for the role editor (UR-S10): every save increments it.
+  version     Int        @default(1)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  members     Employee[] @relation("AccessRoleMembers")
+}
+
+/// One explicit exception to an account's role (Figma UR-09): a cell of the permission matrix —
+/// a module's level (sub = null) or one action — granted beyond or denied below the role, with a
+/// reason, an optional expiry and, for a permanent sensitive grant, a review date. The account's
+/// `permissions` document carries the value; this row explains it and ends it on expiry.
+model PermissionOverride {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation("PermissionOverrideAccount", fields: [employeeId], references: [id], onDelete: Cascade)
+  module      String
+  /// null = the module's own level; otherwise the action (sub-privilege) key.
+  sub         String?
+  /// GRANT | DENY
+  effect      String
+  /// The value this exception sets: none | view | edit for a module level, true | false for an action.
+  value       String
+  /// The role template's value for the cell when the exception was made (what expiry returns to).
+  roleValue   String
+  sensitive   Boolean   @default(false)
+  reason      String
+  expiresAt   DateTime?
+  reviewAt    DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  /// Set when the exception stops applying: REMOVED (by a person), EXPIRED (by the system) or
+  /// REPLACED (a later exception on the same cell, or the cell now equals the role).
+  endedAt     DateTime?
+  endedById   String?
+  endReason   String?
+
+  @@index([employeeId, endedAt])
+  @@index([endedAt, expiresAt])
 }
 
 /// One signed-in session; the token names it (jti). Valid only while not revoked and within
@@ -585,6 +656,113 @@ model SystemConfig {
   sellerBankAccountName        String?
   /// Saudi IBAN, stored normalised: «SA» + 22 digits, no spaces (validated by the API).
   sellerIban                   String?
+
+  // ─── Settings sections (additive, migration 20261022110000_settings_sections) ─────────
+  /// Settings › Inventory: green coffee below this many kg is flagged «مخزون منخفض» on the
+  /// inventory screen. NULL = not set by the owner: the built-in 20 kg applies, exactly as
+  /// before this column existed. CHECK > 0 and ≤ 100000.
+  inventoryLowStockGreenKg     Decimal? @db.Decimal(10, 3)
+  /// Settings › Invoicing & tax: the VAT percent a NEW quotation line starts with. NULL = the
+  /// built-in 15%. Issued documents keep the rate each line carries. CHECK 0–100.
+  invoiceDefaultVatPercent     Decimal? @db.Decimal(5, 2)
+}
+
+/// Settings › Production & roasting › Roasters (Figma 377:2, ROASTERS.md §4; RM1–RM5). Machine
+/// configuration only: capacity and limits are for planning and validation, never the source of a
+/// roasted weight or a loss (those come from each RoastingBatch). Retired, never deleted.
+/// CHECKs (migration): 0 < min ≤ target ≤ max ≤ nominal, 0 < cycle ≤ 1440, a reason for
+/// MAINTENANCE / STOPPED; unique name (case-insensitive) and one default per type (partial index).
+model Roaster {
+  id                String              @id @default(cuid())
+  name              String
+  /// «الشركة المصنّعة والطراز» — optional free text.
+  manufacturerModel String?
+  /// PRODUCTION | SAMPLE
+  type              String
+  nominalCapacityKg Decimal             @db.Decimal(10, 3)
+  defaultTargetKg   Decimal             @db.Decimal(10, 3)
+  minBatchKg        Decimal             @db.Decimal(10, 3)
+  maxBatchKg        Decimal             @db.Decimal(10, 3)
+  cycleMinutes      Int
+  /// Employee id (no FK, audit convention): must be assigned and hold production › start_batch.
+  defaultOperatorId String?
+  /// AVAILABLE | MAINTENANCE | STOPPED | RETIRED
+  status            String              @default("AVAILABLE")
+  statusReason      String?
+  statusUntil       DateTime?
+  statusSince       DateTime            @default(now())
+  isDefault         Boolean             @default(false)
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  maintenance       RoasterMaintenance[]
+  operators         RoasterOperator[]
+
+  @@index([type, status])
+}
+
+/// A maintenance window of a roaster (RM4 «الصيانة»): planned, in progress, done or cancelled.
+model RoasterMaintenance {
+  id              String   @id @default(cuid())
+  roasterId       String
+  roaster         Roaster  @relation(fields: [roasterId], references: [id], onDelete: Restrict)
+  title           String
+  /// ROUTINE | ONE_OFF
+  kind            String
+  /// ROUTINE only: every N weeks (descriptive; nothing generates the next window).
+  recurrenceWeeks Int?
+  startsAt        DateTime
+  endsAt          DateTime
+  /// PLANNED | IN_PROGRESS | DONE | CANCELLED
+  status          String   @default("PLANNED")
+  /// Employee id (no FK): «بطلب …».
+  requestedById   String?
+  notes           String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([roasterId, startsAt])
+}
+
+/// RM5: who is ASSIGNED to a roaster. Authorization is not stored here — it is the role
+/// permission production › start_batch, read at the time; an assignment of somebody who no longer
+/// holds it is inactive and cannot be made.
+model RoasterOperator {
+  id          String   @id @default(cuid())
+  roasterId   String
+  roaster     Roaster  @relation(fields: [roasterId], references: [id], onDelete: Cascade)
+  /// Employee id (no FK, audit convention).
+  employeeId  String
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([roasterId, employeeId])
+}
+
+/// Append-only (by the application; no FK, audit convention) trail of the settings sections of
+/// migration 20261022110000: every change with its before / after.
+model SettingsAuditLog {
+  id         String   @id @default(cuid())
+  /// production | inventory | invoicing
+  section    String
+  /// SETTINGS_UPDATED | ROASTER_CREATED | ROASTER_UPDATED | ROASTER_STATUS_CHANGED |
+  /// MAINTENANCE_CREATED | MAINTENANCE_UPDATED | OPERATOR_ASSIGNED | OPERATOR_UNASSIGNED
+  action     String
+  entityType String
+  entityId   String
+  /// The field names that changed.
+  changed    String[]
+  before     Json?
+  after      Json?
+  reason     String?
+  actorId    String?
+  actorName  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([section, createdAt])
 }
 
 model CustomerRoastPreference {
@@ -3600,6 +3778,45 @@ model AutomationSettings {
   lastSweepAt DateTime?
   updatedById String?
   updatedAt   DateTime         @updatedAt
+}
+
+/// «إشعارات الحالات» — one row per status that exists somewhere in the system (an order status,
+/// a pipeline stage, a quotation status…), and what WhatsApp should do when a record enters it.
+/// The catalogue is filled and kept current by the status sync (src/lib/automation/status-rules/
+/// sync.ts); a status first seen arrives switched OFF. A status that disappears or is hidden in its
+/// source keeps its row with active = false — rules are never deleted silently.
+/// Migration 20261022100000_whatsapp_status_rules (additive).
+model WhatsAppStatusRule {
+  id            String    @id @default(cuid())
+  /// Where the status lives: order, deal_stage, quote… (STATUS_SOURCES in status-rules/sources.ts).
+  source        String
+  /// The status's stable identity in its source: an order status value, a stage code, an enum value.
+  statusKey     String
+  labelAr       String
+  labelEn       String
+  position      Int       @default(0)
+  /// The owner's switch. New rows are false.
+  enabled       Boolean   @default(false)
+  /// ["customer", "deal_owner", "admins", …] — kinds the source can resolve.
+  recipients    Json      @default("[]")
+  template      String    @default("")
+  /// «إعادة الإرسال عند العودة لنفس الحالة»: false = one message per record, status and person,
+  /// ever; true = one per ENTRY (per automation event), so a record re-entering the status is
+  /// announced again — still never twice for the same entry.
+  renotify      Boolean   @default(false)
+  /// False when the status no longer exists or is hidden in its source.
+  active        Boolean   @default(true)
+  firstSeenAt   DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  inactiveSince DateTime?
+  /// Null while a status found by a later sync has not been looked at — the «جديدة» chip.
+  reviewedAt    DateTime?
+  updatedById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([source, statusKey])
+  @@index([enabled, active])
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════

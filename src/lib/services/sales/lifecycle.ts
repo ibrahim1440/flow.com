@@ -1,5 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { stageFor, advancesForward } from "./stages";
+import { emitDealMoved } from "./deal-events";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -83,6 +84,7 @@ export async function advanceToQuotationStage(
       actorId,
     },
   });
+  await emitDealMoved(tx, { opportunityId, fromStageId: deal.stageId, toStageId: stage.id, fromOutcome: deal.outcome, toOutcome: "OPEN", actorId });
   return { moved: true, stageId: stage.id };
 }
 
@@ -134,5 +136,6 @@ export async function winOnAcceptedQuote(
       actorId,
     },
   });
+  await emitDealMoved(tx, { opportunityId, fromStageId: deal.stageId, toStageId: deal.stageId, fromOutcome: "OPEN", toOutcome: "WON", actorId });
   return true;
 }

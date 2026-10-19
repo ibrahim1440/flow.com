@@ -49,16 +49,31 @@ export type SessionUser = UserPayload & {
   privileged: boolean;
   /** AUTH_MFA_MODE=required and a privileged account without MFA: it may only enroll. */
   mfaEnrollmentRequired: boolean;
+  /** An administrator issued a temporary password: the account may only set its own (UR-03e / UR-04). */
+  passwordChangeRequired: boolean;
 };
 
 export async function getUserWithPermissions(): Promise<SessionUser | null> {
   const user = await getUser();
   if (!user) return null;
 
-  const employee = await prisma.employee.findUnique({
+  let employee = await prisma.employee.findUnique({
     where: { id: user.id },
-    select: { active: true, role: true, permissions: true, username: true, pin: true, password: true },
+    select: {
+      active: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true,
+      // An exception past its expiry stops applying at once (Figma UR-09, owner §9.2): settled here,
+      // before this request is judged, so no session keeps an expired grant.
+      permissionOverrides: { where: { endedAt: null, expiresAt: { lte: new Date() } }, select: { id: true }, take: 1 },
+    },
   });
+  if (employee && employee.permissionOverrides.length) {
+    const { settleExpiredOverrides } = await import("./users/overrides");
+    await settleExpiredOverrides(user.id);
+    employee = await prisma.employee.findUnique({
+      where: { id: user.id },
+      select: { active: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true, permissionOverrides: { where: { id: "-" }, select: { id: true } } },
+    });
+  }
 
   // Deleted, or deactivated since the token was issued. Both resolve as not authenticated
   // rather than as forbidden: there is no live account behind this request at all.
@@ -88,7 +103,7 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   const mfaEnrollmentRequired = !isSimpleMode() && privileged && mfaMode() === "required" && !(await prisma.authMfa.findUnique({ where: { employeeId: user.id }, select: { enrolledAt: true } }))?.enrolledAt;
   // The live role overwrites the token's copy, so every `user.role === "admin"` call site
   // downstream reads current state without any of them having to know that.
-  return { ...user, role: employee.role, permissions, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired };
+  return { ...user, role: employee.role, permissions, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange };
 }
 
 export function unauthorized(msg = "Not authenticated") {
@@ -99,11 +114,16 @@ export function forbidden(msg = "Insufficient permissions") {
   return NextResponse.json({ error: msg }, { status: 403 });
 }
 
-export async function requireAuth(opts: { allowMfaEnrollment?: boolean } = {}) {
+export async function requireAuth(opts: { allowMfaEnrollment?: boolean; allowPasswordChange?: boolean } = {}) {
   const user = await getUserWithPermissions();
   if (!user) return { user: null as never, error: unauthorized() };
   if (user.mfaEnrollmentRequired && !opts.allowMfaEnrollment) {
     return { user: null as never, error: NextResponse.json({ error: "يجب تفعيل التحقق بخطوتين لهذا الحساب أولًا.", errorEn: "Two-step verification must be set up for this account first.", code: "MFA_ENROLLMENT_REQUIRED" }, { status: 403 }) };
+  }
+  // A temporary password (UR-03e / UR-04): until the person sets their own, the only things the
+  // account may do are set it (PUT /api/profile/password), confirm its identity and sign out.
+  if (user.passwordChangeRequired && !opts.allowPasswordChange) {
+    return { user: null as never, error: NextResponse.json({ error: "يجب تغيير كلمة المرور المؤقتة أولًا.", errorEn: "Change the temporary password first.", code: "PASSWORD_CHANGE_REQUIRED" }, { status: 403 }) };
   }
   return { user, error: null };
 }
@@ -134,6 +154,8 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   "inventory.adjust", "inventory.override", "orders.approve",
   "accounting.journal_approve", "accounting.journal_post", "accounting.journal_reverse", "accounting.period_lock", "accounting.period_close",
   "finance.budget_approve", "finance.transfer_approve", "finance.spend_override_approve", "finance.period_close", "finance.payment",
+  // Owner decision 19 Oct: a power user changing another account's access steps up like the administrator.
+  "employees.manage_access",
 ]);
 
 /** Is `module.sub` (or the whole module) a privileged permission? */

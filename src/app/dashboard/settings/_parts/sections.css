@@ -1,0 +1,155 @@
+/*
+ * Settings sections (batch "Settings"): roaster management (Figma 377:2 RM1–RM5), inventory,
+ * products and invoicing & tax. Rendered inside the operations scope like the other settings
+ * pages (OpsRoot + SettingsFrame, tools.css). Only the blocks those kits lack; every value is a
+ * Direction 2.1 token.
+ */
+[data-ops-root] .ss-stack { display: flex; flex-direction: column; gap: 28px; padding-top: 20px; min-width: 0; }
+[data-ops-root] .ss-stack > section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+[data-ops-root] .ss-muted { color: var(--text-muted); font-size: 13px; }
+[data-ops-root] .ss-sub { display: block; margin-top: 2px; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+[data-ops-root] .ss-code { font-family: var(--f-mono); font-size: 12.5px; padding: 0 4px; border-radius: 4px; background: var(--surface); }
+[data-ops-root] .hr-table td .strong { font-weight: 500; color: var(--text-primary); }
+
+/* Block heading (rc .bh): title, caption, an end action. */
+[data-ops-root] .ss-bh { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+[data-ops-root] .ss-bh h2 { font: 600 16px/24px var(--f-ui); margin: 0; color: var(--text-primary); }
+[data-ops-root] .ss-bh h2.ss-h3 { font-size: 13.5px; font-weight: 500; color: var(--text-secondary); }
+[data-ops-root] .ss-bh > span { font-size: 13px; color: var(--text-muted); }
+[data-ops-root] .ss-bh > .ss-link, [data-ops-root] .ss-bh > .ss-bh-end { margin-inline-start: auto; }
+[data-ops-root] .ss-link { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-size: 13.5px; font-weight: 500; color: var(--action-primary); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+[data-ops-root] .ss-link svg { width: 14px; height: 14px; }
+[data-ops-root] .ss-roaster-pick { min-width: 180px; }
+
+/* RM1 metrics: three cells, a hairline between them; the value carries its unit. */
+[data-ops-root] .ss-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+[data-ops-root] .ss-unit { font-size: 13px; font-weight: 400; color: var(--text-secondary); margin-inline-start: 6px; }
+[data-ops-root] .ss-mtext { font-size: 20px; }
+
+/* RM1 sample-roaster empty state. */
+[data-ops-root] .ss-empty { display: grid; justify-items: center; gap: 6px; padding: 28px 16px; border-radius: 10px; background: var(--surface-subtle); text-align: center; }
+[data-ops-root] .ss-empty strong { font-weight: 600; }
+[data-ops-root] .ss-empty p { margin: 0; max-width: 440px; font-size: 13.5px; line-height: 22px; color: var(--text-secondary); }
+[data-ops-root] .ss-empty .hr-btn { margin-top: 8px; text-decoration: none; }
+
+/* Phone lists (378:2): name and status, then the limits line. */
+[data-ops-root] .ss-mlist { list-style: none; margin: 0; padding: 0; }
+[data-ops-root] .ss-mlist li { border-bottom: 1px solid var(--border-subtle); }
+[data-ops-root] .ss-mlist a { display: flex; flex-direction: column; gap: 4px; padding: 12px 0; color: inherit; text-decoration: none; }
+[data-ops-root] .ss-mrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+[data-ops-root] .ss-mrow.is-start { justify-content: flex-start; }
+[data-ops-root] .ss-mrow strong { font-weight: 500; }
+[data-ops-root] .ss-line { padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
+
+/* The phone detail (382:89) and «أثر الحفظ» (RM3): label / value pairs. */
+[data-ops-root] .ss-kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px 16px; margin: 0; font-size: 14px; }
+[data-ops-root] .ss-kv dt { color: var(--text-muted); }
+[data-ops-root] .ss-kv dd { margin: 0; color: var(--text-primary); }
+[data-ops-root] .ss-kv.is-wide { grid-template-columns: 120px minmax(0, 1fr); }
+[data-ops-root] .ss-after { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border-subtle); }
+[data-ops-root] .ss-lbl { font: 500 13px/20px var(--f-ui); color: var(--text-muted); margin: 0 0 10px; }
+@media (max-width: 1279px) { [data-ops-root] .ss-after { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+
+/* RM2 / RM3 form: label-column sections (tl-sec), a two-column field grid. */
+[data-ops-root] .ss-form { display: flex; flex-direction: column; min-width: 0; padding-top: 16px; }
+[data-ops-root] .ss-fsec > .tl-body.ss-fgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+[data-ops-root] .ss-fsec > .tl-body.ss-fgrid.is-one { grid-template-columns: minmax(0, 1fr); }
+[data-ops-root] .ss-fsec > .tl-body.ss-fgrid .is-wide { grid-column: 1 / -1; }
+[data-ops-root] .ss-fsec:last-of-type { border-bottom: 0; }
+[data-ops-root] .ss-fsec .tl-seg { justify-self: start; align-self: start; }
+[data-ops-root] .ss-numin { text-align: end; font-family: var(--f-num); }
+[data-ops-root] .ss-unitin { position: relative; display: block; }
+[data-ops-root] .ss-unitin > span { position: absolute; inset-inline-end: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--text-muted); pointer-events: none; }
+[data-ops-root] .ss-unitin > .ss-numin { padding-inline-end: 56px; }
+[data-ops-root] .hr-input:disabled { background: var(--surface-subtle); color: var(--text-muted); }
+[data-ops-root] .ss-formacts { display: flex; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+[data-ops-root] .ss-formacts .ss-cancel { margin-inline-start: auto; }
+[data-ops-root] .ss-fbody { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 12px; padding: 8px 0; }
+[data-ops-root] .ss-fbody.is-one { grid-template-columns: minmax(0, 1fr); }
+[data-ops-root] .ss-fbody > .is-wide { grid-column: 1 / -1; }
+[data-ops-root] .ss-form .tl-seg { align-self: flex-start; justify-self: start; }
+@media (max-width: 767px) {
+  [data-ops-root] .ss-formacts.is-sticky { position: sticky; bottom: 0; z-index: 2; margin: 16px -16px 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border-subtle); }
+  [data-ops-root] .ss-formacts.is-sticky > * { flex: 1; justify-content: center; }
+  [data-ops-root] .ss-formacts.is-two > * { flex: 1; text-decoration: none; text-align: center; }
+}
+
+/* RM2 error summary. */
+[data-ops-root] .ss-errsum { padding: 12px 14px; border-radius: 10px; background: var(--status-danger-tint); margin: 4px 0 8px; }
+[data-ops-root] .ss-errsum strong { font-weight: 600; color: var(--status-danger); }
+[data-ops-root] .ss-errsum ul { margin: 6px 0 0; padding-inline-start: 18px; font-size: 13.5px; line-height: 24px; }
+
+/* RM3 unsaved bar. */
+[data-ops-root] .ss-unsaved { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 9px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); font-size: 13px; margin-bottom: 8px; }
+[data-ops-root] .ss-dotw { width: 7px; height: 7px; border-radius: 50%; background: var(--status-warning); flex: none; }
+[data-ops-root] .ss-unsaved-text { flex: 1; min-width: 0; }
+[data-ops-root] .ss-unsaved-acts { display: flex; gap: 6px; }
+@media (max-width: 767px) { [data-ops-root] .ss-unsaved { flex-wrap: wrap; } }
+
+/* RM4 status card. */
+[data-ops-root] .ss-statuscard { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 16px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+[data-ops-root] .ss-statuscard .ss-mrow.is-start { gap: 14px; }
+@media (max-width: 767px) { [data-ops-root] .ss-statuscard { grid-template-columns: minmax(0, 1fr); } }
+
+/* RM4 week: the roaster column, then seven days; hatched planned maintenance. */
+[data-ops-root] .ss-weekwrap { overflow-x: auto; }
+[data-ops-root] .ss-week { display: grid; gap: 8px; align-items: center; min-width: 0; }
+[data-ops-root] .ss-weekrow { display: contents; }
+[data-ops-root] .ss-dayhead { text-align: center; display: flex; flex-direction: column; font-size: 13px; }
+[data-ops-root] .ss-dayhead strong { font-weight: 500; }
+[data-ops-root] .ss-dayhead strong.is-today { font-weight: 600; }
+[data-ops-root] .ss-dayhead span { font-size: 12.5px; color: var(--text-muted); }
+[data-ops-root] .ss-weekname { display: flex; flex-direction: column; font-size: 13px; }
+[data-ops-root] .ss-weekname strong { font-weight: 500; }
+[data-ops-root] .ss-weekname span { font-size: 11.5px; color: var(--text-muted); }
+[data-ops-root] .ss-daycell { position: relative; height: 40px; border-radius: 7px; background: var(--surface-selected); overflow: hidden; }
+[data-ops-root] .ss-daycell.is-off { background: var(--surface-subtle); }
+[data-ops-root] .ss-hatch { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: repeating-linear-gradient(135deg, transparent 0 5px, var(--border-strong) 5px 6px); }
+[data-ops-root] .ss-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); }
+[data-ops-root] .ss-legend span { display: inline-flex; align-items: center; gap: 6px; }
+[data-ops-root] .ss-sw { width: 14px; height: 10px; border-radius: 3px; display: inline-block; }
+[data-ops-root] .ss-sw.is-day { background: var(--surface-selected); }
+[data-ops-root] .ss-sw.is-hatch { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--border-strong) 3px 4px); }
+[data-ops-root] .ss-sw.is-off { background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+
+/* RM5: a login that is not authorized reads muted. */
+[data-ops-root] .hr-table tr.ss-off td { color: var(--text-muted); }
+
+/* Inventory / invoicing: one setting row (label column section) with its input and save. */
+[data-ops-root] .ss-setrow { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+[data-ops-root] .ss-setrow .hr-field { width: 200px; }
+
+/* Organisation (F-01 / F-01m / F-03). The reset dialog's «يُحذف / يبقى» pairs. */
+[data-hr-root] .tl-props { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 14px; line-height: 22px; }
+[data-hr-root] .tl-props dt { color: var(--text-muted); }
+[data-hr-root] .tl-props dd { margin: 0; color: var(--text-primary); }
+/* F-S1: the logo tile while uploading. */
+[data-ops-root] .tl-spin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-subtle); border-top-color: var(--text-muted); animation: tl-spin 0.9s linear infinite; }
+@keyframes tl-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { [data-ops-root] .tl-spin { animation: none; } }
+/* F-01m: the logo row, then rows with a chevron; a row's section opens under it. */
+[data-ops-root] .tl-mlogo { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 14px; align-items: center; padding: 12px 0 4px; }
+[data-ops-root] .tl-mlogo .tl-logo { width: 64px; height: 64px; border-radius: 12px; }
+[data-ops-root] .tl-mlogo strong { font-weight: 600; }
+[data-ops-root] .tl-mlogo .hr-btn { justify-self: start; align-self: flex-start; }
+[data-ops-root] .tl-mrows { display: flex; flex-direction: column; }
+[data-ops-root] .tl-mrow { appearance: none; border: 0; background: none; font: inherit; color: inherit; text-align: start; text-decoration: none; display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); cursor: pointer; }
+[data-ops-root] .tl-mrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+[data-ops-root] .tl-mrow-text strong { font-weight: 500; font-size: 15px; }
+[data-ops-root] .tl-mrow-text span { font-size: 13px; color: var(--text-muted); }
+[data-ops-root] .tl-mrow svg { width: 14px; height: 14px; color: var(--text-disabled); margin-top: 4px; }
+[dir="rtl"] [data-ops-root] .tl-mrow svg { transform: scaleX(-1); }
+[data-ops-root] .tl-mrow[aria-expanded="true"] svg { transform: rotate(90deg); }
+[data-ops-root] .tl-mpanel { display: flex; flex-direction: column; gap: 12px; padding: 12px 0 16px; border-bottom: 1px solid var(--border-subtle); }
+
+/* The segmented control as a radio group (aria-checked), drawn as tools.css draws aria-pressed. */
+[data-ops-root] .tl-seg button[role="radio"][aria-checked="true"] { background: var(--surface); color: var(--text-primary); font-weight: 600; box-shadow: 0 1px 2px rgb(40 36 26 / 0.08); }
+[data-ops-root] .tl-seg button:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* Phones (378:2, 382:89): block headings read as small labels; the footnote is plain text. */
+@media (max-width: 767px) {
+  [data-ops-root] .ss-stack { gap: 20px; padding-top: 8px; }
+  [data-ops-root] .ss-stack > section > .ss-bh h2 { font-size: 13.5px; font-weight: 500; color: var(--text-secondary); }
+  [data-ops-root] .tl-note.ss-plain { background: none; padding: 0; font-size: 13px; }
+  [data-ops-root] .ss-metrics { grid-template-columns: minmax(0, 1fr); }
+}

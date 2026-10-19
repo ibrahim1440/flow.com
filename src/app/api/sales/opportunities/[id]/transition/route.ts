@@ -4,6 +4,7 @@ import { requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { transitionOpportunity } from "@/lib/services/sales/leads";
+import { emitDealMoved } from "@/lib/services/sales/deal-events";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -80,18 +81,19 @@ export async function POST(request: Request, { params }: Params) {
       if (!stage) return NextResponse.json({ error: "That stage is not available." }, { status: 400 });
     }
 
-    const result = await prisma.$transaction(
-      (tx) =>
-        transitionOpportunity(tx, {
-          opportunityId: id,
-          toStageId,
-          toOutcome,
-          lostReason: typeof b.lostReason === "string" ? b.lostReason : null,
-          actorId: user.id,
-          canReopen: hasSubPrivilege(user.permissions, "sales", "deal_reopen"),
-        }),
-      TX_OPTS,
-    );
+    const result = await prisma.$transaction(async (tx) => {
+      const moved = await transitionOpportunity(tx, {
+        opportunityId: id,
+        toStageId,
+        toOutcome,
+        lostReason: typeof b.lostReason === "string" ? b.lostReason : null,
+        actorId: user.id,
+        canReopen: hasSubPrivilege(user.permissions, "sales", "deal_reopen"),
+      });
+      // «إشعارات الحالات»: the move, in its own transaction (no-op when no rule listens).
+      await emitDealMoved(tx, { opportunityId: id, fromStageId: moved.fromStageId, toStageId: moved.stageId, fromOutcome: moved.fromOutcome, toOutcome: moved.outcome, actorId: user.id });
+      return { stageId: moved.stageId, outcome: moved.outcome };
+    }, TX_OPTS);
 
     return NextResponse.json(result);
   } catch (err) {

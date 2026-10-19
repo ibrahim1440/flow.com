@@ -32,7 +32,7 @@ type Found = { id: string; role: string; permissions: string; active: boolean; p
 async function byUsername(username: string) {
   const rows = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM "Employee" WHERE auth_norm_username("username") = auth_norm_username(${username}) AND active = true LIMIT 1`;
   if (!rows.length) return null;
-  return prisma.employee.findUnique({ where: { id: rows[0].id }, select: { id: true, role: true, permissions: true, active: true, pin: true, password: true } });
+  return prisma.employee.findUnique({ where: { id: rows[0].id }, select: { id: true, role: true, permissions: true, active: true, pin: true, password: true, passwordMustChange: true, passwordTempExpiresAt: true } });
 }
 
 
@@ -120,6 +120,12 @@ export async function POST(request: Request) {
       await recordFailedAttempt(ipHash, identifierHash);
       await authAudit(request, { userId: found?.id ?? null, action: "SIGN_IN", result: "FAILURE", reasonCode: "PASSWORD", identifier: "login:" + u });
       return INVALID();
+    }
+    // A temporary password issued by an administrator (UR-03e / UR-04) works only until its expiry
+    // («تنتهي صلاحيتها بعد 72 ساعة إن لم تُستخدم»); after that the administrator issues a new one.
+    if (found.passwordMustChange && found.passwordTempExpiresAt && found.passwordTempExpiresAt.getTime() <= Date.now()) {
+      await authAudit(request, { userId: found.id, action: "SIGN_IN", result: "REFUSED", reasonCode: "TEMP_PASSWORD_EXPIRED", identifier: "login:" + u });
+      return NextResponse.json({ error: "Invalid credentials", errorAr: "انتهت صلاحية كلمة المرور المؤقتة. اطلب من مسؤول النظام كلمة جديدة.", code: "TEMP_PASSWORD_EXPIRED" }, { status: 401 });
     }
     await clearAttempts(ipHash, identifierHash);
     return afterFirstFactor(request, found.id, "PASSWORD");

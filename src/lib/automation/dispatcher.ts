@@ -27,6 +27,7 @@ import { normalizePhoneForWhatsApp } from "./phone";
 import { parseStoredConditions, parseStoredSteps, stepOffsetsMinutes, type Recipient } from "./rules";
 import { effectiveMode, readSettings, SETTINGS_ID, type EffectiveMode } from "./settings";
 import { renderTemplate } from "./template";
+import { processStatusRules } from "./status-rules/evaluate";
 
 type Tx = Prisma.TransactionClient;
 
@@ -211,10 +212,6 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
   const rules = def
     ? await tx.automationRule.findMany({ where: { eventType: ev.eventType, isActive: true }, orderBy: { createdAt: "asc" } })
     : [];
-  if (rules.length === 0) {
-    await finish("PROCESSED");
-    return true;
-  }
 
   const contexts = new Map<Lang, EventContext | null>();
   const contextFor = async (lang: Lang) => {
@@ -304,6 +301,13 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
         else report.messagesSkipped++;
       }
     }
+  }
+
+  // «إشعارات الحالات»: the switched-on status rules this event matches (status-rules/evaluate.ts).
+  if (def) {
+    const st = await processStatusRules(tx, event, mode, () => contextFor("ar"));
+    report.messagesQueued += st.queued;
+    report.messagesSkipped += st.skipped;
   }
 
   await finish("PROCESSED");

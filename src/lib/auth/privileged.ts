@@ -6,7 +6,8 @@
 // permissions: stored permissions, or the role's defaults when none are stored):
 //   · the admin role;
 //   · any access to the finance or accounting modules (money and the books);
-//   · user / permission / identity management: employees › create or edit;
+//   · user / permission / identity management: employees › create, edit or manage_access (the
+//     "power user" who changes other users' permissions — owner decision 19 Oct);
 //   · payroll and HR administration: hr › payroll_prepare, payroll_approve, payroll_pay,
 //     payroll_cancel_approved, policy_manage, people_manage, private_view, contracts_manage,
 //     offboard; and (orchestrator ruling on the re-test, AUTH-D) hr › recruit (it links logins),
@@ -26,7 +27,7 @@ import { effectivePermissions } from "@/lib/hr/sod";
 
 export const PRIVILEGED_MODULES = ["finance", "accounting"] as const;
 export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
-  ["employees", "create"], ["employees", "edit"],
+  ["employees", "create"], ["employees", "edit"], ["employees", "manage_access"],
   ["hr", "payroll_prepare"], ["hr", "payroll_approve"], ["hr", "payroll_pay"], ["hr", "payroll_cancel_approved"],
   ["hr", "policy_manage"], ["hr", "people_manage"], ["hr", "private_view"], ["hr", "contracts_manage"], ["hr", "offboard"],
   ["hr", "recruit"], ["hr", "documents_view"], ["hr", "documents_manage"], ["hr", "advances_manage"], ["hr", "attendance_manage"],

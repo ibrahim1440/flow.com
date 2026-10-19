@@ -7,7 +7,7 @@ import { LanguageProvider, useI18n } from "@/lib/i18n/context";
 import { UserContext, type User } from "./user-context";
 import { AppShell } from "@/components/shell/AppShell";
 import { StepUpProvider } from "@/components/auth/StepUp";
-import { ShellLoading, MfaRequiredScreen } from "@/components/shell/ShellStates";
+import { ShellLoading, MfaRequiredScreen, PasswordChangeRequiredScreen } from "@/components/shell/ShellStates";
 import { SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
 import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 
@@ -95,6 +95,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {user.mfaEnrollmentRequired ? (
             // AUTH_MFA_MODE=required: a privileged account without two-step verification may only enroll.
             <MfaRequiredScreen lang={user.preferredLanguage === "en" ? "en" : "ar"} />
+          ) : user.passwordChangeRequired ? (
+            // A temporary password from the administrator (UR-03e / UR-04): set one's own first.
+            <PasswordChangeRequiredScreen lang={user.preferredLanguage === "en" ? "en" : "ar"} />
           ) : (
             <DashboardShell user={user}>{children}</DashboardShell>
           )}

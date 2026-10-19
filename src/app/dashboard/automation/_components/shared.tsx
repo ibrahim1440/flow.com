@@ -63,7 +63,9 @@ const NOTE_AR: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Not a valid Saudi mobile number\.$/, () => "رقم الجوال السعودي غير صالح."],
   [/^A local number that is not a Saudi mobile/, () => "رقم محلي ليس جوالا سعوديا. اكتبه مع مفتاح الدولة."],
   [/^Not a valid phone number\.$/, () => "رقم الجوال غير صالح."],
-  [/^Expired: not sent within 24 hours/, () => "انتهت صلاحيتها: لم ترسل خلال 24 ساعة من موعدها."],
+  [/^Expired: not sent within 24 hours/, () => "انتهت صلاحيتها: لم تُرسل خلال 24 ساعة من موعدها."],
+  // GX E-90 E-S8.
+  [/^Too many requests\. Wait a few minutes\.$/, () => "طلبات كثيرة. انتظر بضع دقائق ثم أعد المحاولة. حدّ الاتصال 60 إجراء كل 10 دقائق، والرسائل التجريبية 10."],
   [/^Interrupted while sending/, () => "انقطع الإرسال: قد تكون وصلت وقد لا تكون. أعد المحاولة فقط إذا تأكدت أنها لم تصل."],
   [/^The rule was deleted before/, () => "حذفت القاعدة قبل إرسال الرسالة."],
   [/^Test message\.$/, () => "رسالة تجريبية."],
@@ -136,7 +138,7 @@ export function Bubble({ text, lang, testId }: { text: string; lang: "ar" | "en"
   );
 }
 
-export type Connection = { sendMode: string; effectiveMode: string; effectiveNote: string | null; state: string | null; configured: boolean; testPhone?: string | null };
+export type Connection = { sendMode: string; effectiveMode: string; effectiveNote: string | null; state: string | null; configured: boolean; testPhone?: string | null; linkedPhone?: string | null };
 
 /** The connection state as the frames word it. */
 export function connectionLabel(state: string | null | undefined, configured = true): { ar: string; en: string; tone: Tone } {
@@ -151,21 +153,30 @@ export function ConnectionStrip({ conn, lang }: { conn: Connection; lang: "ar" |
   const ar = lang === "ar";
   const c = connectionLabel(conn.state, conn.configured);
   const mode = SEND_MODE_LABELS[conn.effectiveMode];
+  // Copy as GX E-90 E-S3 / E-S4 word it.
   const modeNote =
     conn.effectiveMode === "OFF"
-      ? ar ? "القواعد تعمل وتسجل ما كانت سترسله، لكن لا يرسل شيء." : "Rules run and record what they would send; nothing is sent."
+      ? ar ? "القواعد تعمل وتسجّل ما كانت سترسله · لا يُرسل شيء" : "Rules run and record what they would send · nothing is sent"
       : conn.effectiveMode === "TEST"
-        ? ar ? "كل الرسائل تذهب لرقم التجربة فقط." : "Every message goes to the test number only."
+        ? conn.testPhone
+          ? <>{ar ? "كل الرسائل تذهب لرقم التجربة " : "Every message goes to the test number "}<Phone value={conn.testPhone} />{ar ? " فقط" : " only"}</>
+          : ar ? "كل الرسائل تذهب لرقم التجربة فقط" : "Every message goes to the test number only"
         : ar ? "الرسائل تذهب للمستلمين الفعليين." : "Messages go to the real recipients.";
+  // E-S5: LIVE was saved, but this deployment does not allow it — the system behaves as OFF.
+  const liveBlocked = conn.sendMode === "LIVE" && conn.effectiveMode === "OFF";
   return (
+    <>
     <div className="tl-conn" data-testid="automation-connection">
       <div>
         <span className="tl-k">{ar ? "الاتصال" : "Connection"}</span>
         <Dot tone={c.tone}>{ar ? c.ar : c.en}</Dot>
         <span className="tl-d">
           {conn.state === "open"
-            ? ar ? "الرقم مربوط بجوال ويستطيع الإرسال." : "The number is linked to a phone and can send."
-            : ar ? "الواتساب غير متصل الآن." : "WhatsApp is not connected."}
+            ? conn.linkedPhone
+              // GX E-01 / E-04: «الرقم +966 5X XXX XXXX مربوط بجوال».
+              ? <>{ar ? "الرقم " : "Number "}<Phone value={conn.linkedPhone} />{ar ? " مربوط بجوال" : " linked to a phone"}</>
+              : ar ? "الرقم مربوط بجوال ويستطيع الإرسال." : "The number is linked to a phone and can send."
+            : ar ? "لا جوال مربوط · الرسائل تنتظر في الطابور" : "No phone linked · messages wait in the queue"}
         </span>
       </div>
       {mode ? (
@@ -178,6 +189,26 @@ export function ConnectionStrip({ conn, lang }: { conn: Connection; lang: "ar" |
       <Link href="/dashboard/automation/whatsapp" className="hr-btn is-sm tl-end" style={{ textDecoration: "none" }}>
         {ar ? "إعدادات الإرسال" : "Sending settings"}
       </Link>
+    </div>
+    {liveBlocked ? (
+      <div className="tl-note tone-warning" data-testid="automation-live-blocked">
+        {ar
+          ? "الوضع المحفوظ «إرسال فعلي» لكن الإرسال الفعلي غير مفعّل على الخادم، فيعمل النظام كأنه «متوقف». لا يُرسل شيء."
+          : "The saved mode is «Live» but live sending is not enabled on the server, so the system behaves as «Off». Nothing is sent."}
+      </div>
+    ) : null}
+    </>
+  );
+}
+
+/** GX E-90 E-S2: a list that could not be loaded — nothing changed, try again. */
+export function LoadError({ title, onRetry, lang }: { title: string; onRetry: () => void; lang: "ar" | "en" }) {
+  const ar = lang === "ar";
+  return (
+    <div className="tl-loaderr" role="alert" data-testid="automation-load-error">
+      <strong>{title}</strong>
+      <span>{ar ? "لم يتغيّر شيء. أعد المحاولة." : "Nothing changed. Try again."}</span>
+      <button type="button" className="hr-btn" onClick={onRetry}>{ar ? "إعادة المحاولة" : "Try again"}</button>
     </div>
   );
 }
@@ -202,6 +233,8 @@ export function AutomationHeader({ lang, actions, ruleCount, conn, children }: {
   }, [wantsOwn]);
   const shown = wantsOwn ? own : conn;
   const onRules = pathname === "/dashboard/automation" || pathname.startsWith("/dashboard/automation/rules");
+  // «إشعارات الحالات» (addition beyond Figma): the admin role only, as its API.
+  const isAdmin = useUser()?.role === "admin";
   return (
     <>
       <PageHeader title={ar ? "الأتمتة والواتساب" : "Automation & WhatsApp"} actions={actions} />
@@ -209,13 +242,24 @@ export function AutomationHeader({ lang, actions, ruleCount, conn, children }: {
       <LinkTabs
         label={ar ? "صفحات الأتمتة" : "Automation pages"}
         items={[
-          { href: "/dashboard/automation", label: ar ? "القواعد" : "Rules", count: ruleCount, current: onRules, testId: "tab-rules" },
-          { href: "/dashboard/automation/messages", label: ar ? "سجل الرسائل" : "Message log", current: pathname.startsWith("/dashboard/automation/messages"), testId: "tab-messages" },
-          { href: "/dashboard/automation/whatsapp", label: ar ? "ربط الواتساب" : "WhatsApp connection", current: pathname.startsWith("/dashboard/automation/whatsapp"), testId: "tab-whatsapp" },
+          // GX E-01m / E-05m (390): the pills read «القواعد · السجل · الواتساب».
+          { href: "/dashboard/automation", label: <TabLabel full={ar ? "القواعد" : "Rules"} short={ar ? "القواعد" : "Rules"} />, count: ruleCount, current: onRules, testId: "tab-rules" },
+          ...(isAdmin ? [{ href: "/dashboard/automation/statuses", label: <TabLabel full={ar ? "إشعارات الحالات" : "Status notifications"} short={ar ? "الحالات" : "Statuses"} />, current: pathname.startsWith("/dashboard/automation/statuses"), testId: "tab-statuses" }] : []),
+          { href: "/dashboard/automation/messages", label: <TabLabel full={ar ? "سجل الرسائل" : "Message log"} short={ar ? "السجل" : "Log"} />, current: pathname.startsWith("/dashboard/automation/messages"), testId: "tab-messages" },
+          { href: "/dashboard/automation/whatsapp", label: <TabLabel full={ar ? "ربط الواتساب" : "WhatsApp connection"} short={ar ? "الواتساب" : "WhatsApp"} />, current: pathname.startsWith("/dashboard/automation/whatsapp"), testId: "tab-whatsapp" },
         ]}
       />
       {shown ? <ConnectionStrip conn={shown} lang={lang} /> : null}
       {children}
+    </>
+  );
+}
+
+function TabLabel({ full, short }: { full: string; short: string }) {
+  return (
+    <>
+      <span className="tl-hide-phone">{full}</span>
+      <span className="tl-only-phone">{short}</span>
     </>
   );
 }

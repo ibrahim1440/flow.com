@@ -88,7 +88,7 @@ export async function mySecurity(caller: Caller, opts: { activityLimit?: number;
   const activity: MyActivity[] = events.slice(0, limit).map((e) => ({ at: e.occurredAt.toISOString(), action: e.action, result: e.result, reasonCode: e.reasonCode, device: describeUserAgent(e.userAgent) }));
 
   // Account facts (UR-02 «نظرة عامة»).
-  const e = await prisma.employee.findUniqueOrThrow({ where: { id: caller.id }, select: { name: true, username: true, role: true, createdAt: true, password: true, phoneNumber: true, preferredLanguage: true } });
+  const e = await prisma.employee.findUniqueOrThrow({ where: { id: caller.id }, select: { name: true, username: true, role: true, createdAt: true, password: true, phoneNumber: true, preferredLanguage: true, pinResetRequired: true } });
   const mfa = await prisma.authMfa.findUnique({ where: { employeeId: caller.id }, select: { enrolledAt: true } });
   const changed = await credentialChanges(caller.id);
 
@@ -96,6 +96,8 @@ export async function mySecurity(caller: Caller, opts: { activityLimit?: number;
     account: {
       name: e.name, username: e.username, role: e.role, createdAt: e.createdAt.toISOString(),
       hasPassword: !!e.password, passwordChangedAt: changed.password, pinChangedAt: changed.pin,
+      // An administrator cleared the PIN (UR-04): a new one is set without the old one, after a password step-up.
+      pinResetRequired: e.pinResetRequired,
       mfaEnrolledAt: mfa?.enrolledAt ? mfa.enrolledAt.toISOString() : null,
       phoneNumber: e.phoneNumber ?? "", preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar",
     },

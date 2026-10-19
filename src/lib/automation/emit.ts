@@ -21,6 +21,7 @@
 import { after } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { eventTypesOfSources } from "./status-rules/sources";
 
 type Tx = Prisma.TransactionClient;
 
@@ -43,7 +44,14 @@ async function listenedEventTypes(): Promise<Set<string>> {
     select: { eventType: true },
     distinct: ["eventType"],
   });
-  cache = { at: Date.now(), types: new Set(rows.map((r) => r.eventType)) };
+  const types = new Set(rows.map((r) => r.eventType));
+  // «إشعارات الحالات»: a switched-on status rule listens to its source's events. Read apart, so
+  // a database without the status table yet (before 20261022100000) behaves exactly as before.
+  const statusSources = await prisma.whatsAppStatusRule
+    .findMany({ where: { enabled: true, active: true }, select: { source: true }, distinct: ["source"] })
+    .catch(() => [] as { source: string }[]);
+  for (const t of eventTypesOfSources(statusSources.map((r) => r.source))) types.add(t);
+  cache = { at: Date.now(), types };
   return cache.types;
 }
 

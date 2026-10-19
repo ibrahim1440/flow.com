@@ -5,7 +5,7 @@ import { Btn, Dot, Field, Notice, OpsBanner, OpsLoading, OpsRoot } from "@/compo
 import { Dialog } from "@/components/hr/ui";
 import { useD21Phone } from "@/components/shell/page-context";
 import { api, useLang } from "../../sales/_components/ui";
-import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
+import { formatPhone, normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { AutomationHeader, Phone, SEND_MODE_LABELS, connectionLabel, noteText, useAutomationAbilities } from "../_components/shared";
 import { SettingsFrame } from "../../_components/tools-ui";
 
@@ -24,6 +24,7 @@ type Status = {
   configError: string | null;
   state: "open" | "connecting" | "close" | "unknown" | null;
   stateError: string | null;
+  linkedPhone: string | null;
   sendMode: "OFF" | "TEST" | "LIVE";
   testPhone: string | null;
   liveAllowed: boolean;
@@ -79,7 +80,7 @@ export default function WhatsAppConnectionPage() {
       }
       setStatus(r.data);
       setMode(r.data.sendMode);
-      setTestPhone(r.data.testPhone ?? "");
+      setTestPhone(formatPhone(r.data.testPhone));
     })();
     return () => {
       cancelled = true;
@@ -180,7 +181,7 @@ export default function WhatsAppConnectionPage() {
     });
     setBusy(null);
     if (!r.ok) return setError(r.data.error ?? "");
-    setTestPhone(r.data.testPhone ?? "");
+    setTestPhone(formatPhone(r.data.testPhone));
     setSuccess(ar ? "حفظ وضع الإرسال." : "Sending mode saved.");
     load();
   }
@@ -220,7 +221,12 @@ export default function WhatsAppConnectionPage() {
                   <div className="tl-acts">
                     <span data-testid="wa-state"><Dot tone={stateBadge.tone}>{ar ? stateBadge.ar : stateBadge.en}</Dot></span>
                     {status.state === "open" ? (
-                      <span className="hr-caption">{L("الرقم مربوط بجوال ويستطيع الإرسال.", "The number is linked to a phone and can send.")}</span>
+                      <span className="hr-caption" data-testid="wa-linked">
+                        {status.linkedPhone ? (
+                          // GX E-05: «الرقم +966 5X XXX XXXX مربوط بجوال ويستطيع الإرسال.»
+                          <>{L("الرقم ", "Number ")}<Phone value={status.linkedPhone} />{L(" مربوط بجوال ويستطيع الإرسال.", " is linked to a phone and can send.")}</>
+                        ) : L("الرقم مربوط بجوال ويستطيع الإرسال.", "The number is linked to a phone and can send.")}
+                      </span>
                     ) : null}
                   </div>
                   {status.stateError && <p className="hr-caption" style={{ color: "var(--status-danger)", margin: 0 }} dir="auto">{noteText(status.stateError, lang)}</p>}

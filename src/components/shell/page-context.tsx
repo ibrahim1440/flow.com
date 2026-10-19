@@ -28,6 +28,23 @@ export function useD21Title(title: string | null | undefined) {
   }, [title, set]);
 }
 
+/**
+ * Crumbs between the page's registry trail and its own name, when a record sits inside a section
+ * that has no registry node of its own (UR-02 «الإعدادات / المستخدمون والصلاحيات / المستخدمون /
+ * سلمان الشهري»). Text and an optional link each; strings only, so the effect re-runs only on change.
+ */
+export type Crumb = { text: string; href?: string };
+export const CrumbsContext = createContext<(c: Crumb[] | null) => void>(() => {});
+
+export function useD21Crumbs(crumbs: Crumb[] | null | undefined) {
+  const set = useContext(CrumbsContext);
+  const key = crumbs && crumbs.length ? JSON.stringify(crumbs) : "";
+  useEffect(() => {
+    set(key ? (JSON.parse(key) as Crumb[]) : null);
+    return () => set(null);
+  }, [key, set]);
+}
+
 // ── The phone ────────────────────────────────────────────────────────────────────────────
 /**
  * The phone layout of the approved frames (rc.css `.phone`; CRM 390 `173:586`, `173:722`,

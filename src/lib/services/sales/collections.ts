@@ -1,6 +1,7 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney } from "../commissions/engine";
 import { accrueForCollection } from "../commissions/accrual";
+import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -332,6 +333,7 @@ export async function submitCollection(tx: Tx, input: SubmitInput): Promise<Subm
     select: { id: true },
   });
 
+  await emitCollectionStatus(tx, created.id, null, "PENDING_VERIFICATION", input.submittedById);
   return { collectionId: created.id, replayed: false, amountTax: tax, amountNet: net };
 }
 
@@ -445,6 +447,7 @@ export async function approveCollection(
   });
 
   const outcomes = await accrueForCollection(tx, event.id, input.actorId);
+  await emitCollectionStatus(tx, row.id, "PENDING_VERIFICATION", "APPROVED", input.actorId);
 
   return {
     status: "APPROVED",
@@ -491,6 +494,7 @@ export async function rejectCollection(
     },
   });
 
+  await emitCollectionStatus(tx, input.collectionId, row.status, "REJECTED", input.actorId);
   return { status: "REJECTED", replayed: false, collectionEventId: null, commission: [] };
 }
 
@@ -544,6 +548,7 @@ export async function reverseCollection(
   });
 
   const outcomes = await accrueForCollection(tx, row.collectionEventId, input.actorId);
+  await emitCollectionStatus(tx, row.id, "APPROVED", "REVERSED", input.actorId);
 
   return {
     status: "REVERSED",
@@ -642,4 +647,16 @@ export function collectionDecisionAbility(input: {
     // A reversal undoes an approval, so it applies to an APPROVED row and to nothing else.
     reverse: decide(input.canReverse, input.status === "APPROVED", "NOT_APPROVED"),
   };
+}
+
+
+/** «إشعارات الحالات»: a collection entered a status (src/lib/automation, same transaction). */
+async function emitCollectionStatus(tx: Tx, collectionId: string, from: string | null, to: string, actorId: string) {
+  await emitAutomationEvent(tx, {
+    eventType: "sales.collection_status_changed",
+    subjectType: "SalesCollection",
+    subjectId: collectionId,
+    payload: { from, to },
+    actorId,
+  });
 }

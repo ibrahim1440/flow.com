@@ -74,7 +74,16 @@ export async function PUT(request: Request) {
   }
 
   const { currentPin, newPin } = await request.json();
-  if (!currentPin || !newPin) {
+  // UR-04 «إعادة تعيين رمز المحطة»: an administrator cleared the PIN, so there is no current one to
+  // give. The person sets a new PIN after confirming their identity: a recent step-up made with the
+  // PASSWORD (the cleared PIN cannot be the factor).
+  const resetPending = (await prisma.employee.findUnique({ where: { id: user.id }, select: { pinResetRequired: true } }))?.pinResetRequired === true;
+  if (resetPending) {
+    const stale = requireFreshAuth(user);
+    if (stale) return stale;
+    if (user.authFactor !== "PASSWORD") return NextResponse.json({ error: "أكّد هويتك بكلمة المرور أولًا لتعيين رمز جديد.", errorEn: "Confirm your identity with your password first to set a new PIN.", code: "REAUTH_REQUIRED" }, { status: 401 });
+  }
+  if ((!currentPin && !resetPending) || !newPin) {
     return NextResponse.json({ error: "Current PIN and new PIN are required" }, { status: 400 });
   }
   // The shape the whole application now agrees on. currentPin is deliberately NOT
@@ -106,7 +115,7 @@ export async function PUT(request: Request) {
   // PIN. currentPin is not shape-checked — bcrypt decides whether it is the right
   // credential — but it IS run through the verifier derivation, because the stored hash is
   // bcrypt(pinVerifierInput(pin)) and a raw-PIN compare would reject the owner's own PIN.
-  if (!(await verifySecret(pinVerifierInput(String(currentPin), secret), employee.pin))) {
+  if (!resetPending && !(await verifySecret(pinVerifierInput(String(currentPin), secret), employee.pin))) {
     await recordFailedAttempt(ipHash, identifierHash);
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
@@ -137,9 +146,10 @@ export async function PUT(request: Request) {
       data: {
         pin: nextVerifier,
         pinLookup: nextLookup,
+        pinResetRequired: false,
       },
     });
-    await prisma.hrAuditLog.create({ data: { action: "PIN_CHANGED_SELF", entityType: "Employee", entityId: user.id, after: { route: "PROFILE" }, actorId: user.id } }).catch(() => undefined);
+    await prisma.hrAuditLog.create({ data: { action: "PIN_CHANGED_SELF", entityType: "Employee", entityId: user.id, after: { route: "PROFILE", afterAdminReset: resetPending }, actorId: user.id } }).catch(() => undefined);
     // Review item 2: the new PIN changes the credential digest; the caller gets a fresh token
     // in this response instead of being signed out. AUTH-A: it is not a re-authentication —
     // authTime, MFA state and the absolute deadline are inherited.

@@ -21,25 +21,25 @@ export function useViewer(): Viewer | null {
 }
 
 type SettingsLink = { href: string | null; ar: string; en: string; icon: D21IconName; also?: string[] };
-// F-P01 / E-P01 / A-P08 «عام · التشغيل · المبيعات · المالية · الأتمتة» (gx.py SNAV). A section of
-// the frame with no settings page yet (production & roasting, inventory, products, invoicing &
-// tax) has `href: null`: it is drawn disabled with «قريباً», links nowhere, and is shown only to
-// somebody who may open the organisation settings — the people those settings would be for.
+// F-P01 / E-P01 / A-P08 «عام · التشغيل · المبيعات · المالية · الأتمتة» (gx.py SNAV). Every section
+// has a page since batch "Settings" (production & roasting, inventory, products, invoicing & tax).
+// A section with `href: null` would be drawn disabled with «قريباً», link nowhere, and be shown only
+// to somebody who may open the organisation settings.
 const SETTINGS_NAV: { ar: string; en: string; items: SettingsLink[] }[] = [
   { ar: "عام", en: "General", items: [
     { href: "/dashboard/settings", ar: "المنشأة", en: "Organisation", icon: "home" },
-    { href: "/dashboard/employees", ar: "المستخدمون والصلاحيات", en: "Users & permissions", icon: "users" },
+    { href: "/dashboard/employees", ar: "المستخدمون والصلاحيات", en: "Users & permissions", icon: "users", also: ["/dashboard/employees/"] },
   ] },
   { ar: "التشغيل", en: "Operations", items: [
-    { href: null, ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame" },
-    { href: null, ar: "المخزون", en: "Inventory", icon: "box" },
-    { href: null, ar: "المنتجات", en: "Products", icon: "cup" },
+    { href: "/dashboard/settings/production", ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame", also: ["/dashboard/settings/production/"] },
+    { href: "/dashboard/settings/inventory", ar: "المخزون", en: "Inventory", icon: "box" },
+    { href: "/dashboard/settings/products", ar: "المنتجات", en: "Products", icon: "cup" },
   ] },
   { ar: "المبيعات", en: "Sales", items: [
     { href: "/dashboard/sales/settings", ar: "المبيعات", en: "Sales", icon: "deal" },
   ] },
   { ar: "المالية", en: "Finance", items: [
-    { href: null, ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: "invoice" },
+    { href: "/dashboard/settings/invoicing", ar: "الفوترة والضرائب", en: "Invoicing & tax", icon: "invoice" },
   ] },
   { ar: "الأتمتة", en: "Automation", items: [
     { href: "/dashboard/automation", ar: "الأتمتة والواتساب", en: "Automation & WhatsApp", icon: "bell", also: ["/dashboard/automation/"] },
@@ -104,7 +104,7 @@ export function SettingsFrame({ children }: { children: ReactNode }) {
 }
 
 /** A tab row whose tabs are pages (links), drawn like the HR underline tabs. */
-export function LinkTabs({ items, label }: { items: { href: string; label: string; count?: number | string; current: boolean; testId?: string }[]; label: string }) {
+export function LinkTabs({ items, label }: { items: { href: string; label: ReactNode; count?: number | string; current: boolean; testId?: string }[]; label: string }) {
   return (
     <nav className="hr-tabs is-underline tl-tabs" aria-label={label}>
       {items.map((t) => (

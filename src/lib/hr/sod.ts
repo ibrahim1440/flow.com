@@ -16,7 +16,9 @@ import { isSimpleMode, simpleModePermissions } from "@/lib/simple-mode";
 export const PAYROLL_SOD_DUTIES = ["payroll_prepare", "payroll_approve", "payroll_pay", "payroll_cancel_approved"] as const;
 export type PayrollExecDuty = (typeof PAYROLL_SOD_DUTIES)[number];
 /** Administration / permission-granting duties (decision 1a). */
-export const ADMIN_SOD_DUTIES = ["policy_manage", "accounts_create", "accounts_edit"] as const;
+// accounts_manage_access: the "power user" (employees › manage_access, owner decision 19 Oct) grants
+// permissions to others, so it is a permission-granting duty under decision 1a too.
+export const ADMIN_SOD_DUTIES = ["policy_manage", "accounts_create", "accounts_edit", "accounts_manage_access"] as const;
 export type AdminDuty = (typeof ADMIN_SOD_DUTIES)[number];
 export type PayrollSodDuty = PayrollExecDuty | AdminDuty;
 export const SOD_DUTIES: PayrollSodDuty[] = [...PAYROLL_SOD_DUTIES, ...ADMIN_SOD_DUTIES];
@@ -30,6 +32,7 @@ const SOURCE: Record<PayrollSodDuty, [module: string, sub: string]> = {
   policy_manage: ["hr", "policy_manage"],
   accounts_create: ["employees", "create"],
   accounts_edit: ["employees", "edit"],
+  accounts_manage_access: ["employees", "manage_access"],
 };
 
 /** Pairs one person may not hold together. */
@@ -52,6 +55,7 @@ export const PAYROLL_DUTY_AR: Record<PayrollSodDuty, string> = {
   policy_manage: "إدارة سياسة الرواتب والإعدادات",
   accounts_create: "إنشاء الحسابات",
   accounts_edit: "تعديل صلاحيات الحسابات",
+  accounts_manage_access: "مستخدم متقدّم · إدارة صلاحيات المستخدمين",
 };
 
 export const PAYROLL_DUTY_EN: Record<PayrollSodDuty, string> = {
@@ -62,6 +66,7 @@ export const PAYROLL_DUTY_EN: Record<PayrollSodDuty, string> = {
   policy_manage: "Manage payroll policy and settings",
   accounts_create: "Create accounts",
   accounts_edit: "Edit account permissions",
+  accounts_manage_access: "Power user: manage other users' permissions",
 };
 
 /**

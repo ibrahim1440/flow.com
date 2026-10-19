@@ -110,14 +110,15 @@ const STATUS_DOT: Record<string, string> = {
   ISSUED: "in", ACCEPTED: "ok", REJECTED: "er", EXPIRED: "wa", SUPERSEDED: "x",
 };
 
-const emptyLine = (): Line => ({
+/** A new line. `vat`: Settings › Invoicing & tax («النسبة الافتراضية للبند الجديد»), else the built-in 15. */
+const emptyLine = (vat = "15"): Line => ({
   productSkuId: "",
   description: "",
   quantity: "1",
   unit: "KG",
   unitPrice: "0",
   discountPercent: "0",
-  taxRatePercent: "15",
+  taxRatePercent: vat,
 });
 
 /**
@@ -161,6 +162,16 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [skus, setSkus] = useState<Sku[]>([]);
+  // Settings › Invoicing & tax: the VAT a new line starts with (GET /api/settings/invoicing; the
+  // built-in 15% until the owner sets one, or when the read fails).
+  const [defaultVat, setDefaultVat] = useState("15");
+  useEffect(() => {
+    let off = false;
+    fetch("/api/settings/invoicing").then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (!off && typeof j?.effectiveDefaultVatPercent === "string") setDefaultVat(j.effectiveDefaultVatPercent);
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, []);
 
   const [lines, setLines] = useState<Line[]>([]);
   const [validUntil, setValidUntil] = useState("");
@@ -588,7 +599,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     <button
       type="button"
       className="lk-inline"
-      onClick={() => { setLines([...lines, emptyLine()]); setDirty(true); }}
+      onClick={() => { setLines([...lines, emptyLine(defaultVat)]); setDirty(true); }}
       data-testid="add-line"
     >
       {ar ? "إضافة بند" : "Add line"}

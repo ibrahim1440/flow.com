@@ -13,7 +13,7 @@ import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { Ico, type D21IconName } from "./icons";
 import { createActions } from "./creates";
-import { PhoneContext, SectionPagesContext, TitleContext, type PhoneHeader, type SectionPages } from "./page-context";
+import { CrumbsContext, PhoneContext, SectionPagesContext, TitleContext, type Crumb, type PhoneHeader, type SectionPages } from "./page-context";
 import "./direction-2.1.css";
 
 /**
@@ -224,6 +224,8 @@ export function AppShell({
   const [title, setTitle] = useState<string | null>(null);
   const [phoneHeader, setPhoneHeader] = useState<PhoneHeader | null>(null);
   const setTitleStable = useCallback((t: string | null) => setTitle(t), []);
+  const [extraCrumbs, setExtraCrumbs] = useState<Crumb[] | null>(null);
+  const setCrumbsStable = useCallback((c: Crumb[] | null) => setExtraCrumbs(c), []);
   const setPhoneStable = useCallback((h: PhoneHeader | null) => setPhoneHeader(h), []);
 
   // The trail (reference `.top .crumb`): module / section / page — a list page keeps its own
@@ -241,9 +243,11 @@ export function AppShell({
       key: p.key, text: p.text, href: !p.node || (i === shown.length - 1 && !title) ? null : firstDestination(viewer, p.node),
     }));
     if (ownAccount && title) parts.push({ key: "account", text: lang === "ar" ? "الحساب" : "Account", href: null });
+    // A record inside a section without a registry node of its own names that section too.
+    if (title) (extraCrumbs ?? []).forEach((c, i) => parts.push({ key: `extra-${i}`, text: c.text, href: c.href ?? null }));
     if (title) parts.push({ key: "title", text: title, href: null });
     return dedupeTrail(parts);
-  }, [crumbs, showSeg, leafIsPage, title, lang, viewer, ownAccount]);
+  }, [crumbs, showSeg, leafIsPage, title, lang, viewer, ownAccount, extraCrumbs]);
 
   const sectionPages: SectionPages = useMemo(() => showSeg ? {
     label: ar ? "صفحات القسم" : "Section pages",
@@ -379,6 +383,7 @@ export function AppShell({
 
   return (
     <TitleContext value={setTitleStable}>
+    <CrumbsContext value={setCrumbsStable}>
     <PhoneContext value={setPhoneStable}>
     <SectionPagesContext value={sectionPages}>
     <div className="d21" lang={lang} dir={ar ? "rtl" : "ltr"} data-shell="d21">
@@ -578,6 +583,7 @@ export function AppShell({
     </div>
     </SectionPagesContext>
     </PhoneContext>
+    </CrumbsContext>
     </TitleContext>
   );
 }

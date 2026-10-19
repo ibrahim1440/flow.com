@@ -364,6 +364,80 @@ const RESOLVERS: Record<string, Resolver> = {
     };
   },
 
+  "sales.deal_stage_changed": async (db, e, lang, actor) => {
+    const p = payloadOf(e);
+    const deal = await db.opportunity.findUnique({
+      where: { id: e.subjectId },
+      select: {
+        title: true,
+        amount: true,
+        currency: true,
+        outcome: true,
+        customer: { select: CUSTOMER_SELECT },
+        owner: { select: EMPLOYEE_SELECT },
+      },
+    });
+    if (!deal) return null;
+    const ids = [s(p.fromStageId), s(p.toStageId)].filter(Boolean);
+    const stages = ids.length
+      ? await db.pipelineStage.findMany({ where: { id: { in: ids } }, select: { id: true, nameAr: true, nameEn: true } })
+      : [];
+    const stageName = (id: unknown) => {
+      const st = stages.find((x) => x.id === s(id));
+      return st ? (lang === "ar" ? st.nameAr || st.nameEn : st.nameEn) : "";
+    };
+    return {
+      vars: {
+        "deal.title": deal.title,
+        "stage.from": stageName(p.fromStageId),
+        "stage.to": stageName(p.toStageId),
+        "deal.outcome": s(p.toOutcome) || deal.outcome,
+        "deal.value": moneyText(deal.amount, deal.currency),
+        "customer.name": customerName(deal.customer, lang),
+        "owner.name": deal.owner.name,
+        ...common(e, actor),
+      },
+      people: {
+        customer: customerPerson(deal.customer, lang),
+        deal_owner: employeePerson(deal.owner),
+        actor: employeePerson(actor),
+      },
+    };
+  },
+
+  "sales.collection_status_changed": async (db, e, lang, actor) => {
+    const p = payloadOf(e);
+    const c = await db.salesCollection.findUnique({
+      where: { id: e.subjectId },
+      select: {
+        status: true,
+        amountGross: true,
+        currency: true,
+        referenceNumber: true,
+        customer: { select: CUSTOMER_SELECT },
+        opportunity: { select: { title: true, owner: { select: EMPLOYEE_SELECT }, customer: { select: CUSTOMER_SELECT } } },
+      },
+    });
+    if (!c) return null;
+    const customer = c.customer ?? c.opportunity.customer;
+    return {
+      vars: {
+        "collection.status": s(p.to) || c.status,
+        "collection.amount": moneyText(c.amountGross, c.currency),
+        "collection.reference": c.referenceNumber ?? "",
+        "deal.title": c.opportunity.title,
+        "customer.name": customerName(customer, lang),
+        "owner.name": c.opportunity.owner.name,
+        ...common(e, actor),
+      },
+      people: {
+        customer: customerPerson(customer, lang),
+        deal_owner: employeePerson(c.opportunity.owner),
+        actor: employeePerson(actor),
+      },
+    };
+  },
+
   "sales.task_due": async (db, e, lang) => {
     const a = await db.activity.findUnique({
       where: { id: e.subjectId },
@@ -443,4 +517,10 @@ export async function resolveEventContext(db: Db, e: StoredEvent, lang: Lang): P
 /** A specific employee chosen in a step. */
 export async function employeeRecipient(db: Db, employeeId: string): Promise<Person[]> {
   return employeePerson(await employee(db, employeeId));
+}
+
+/** «المالك / المدير»: every active employee holding the admin role (status notifications). */
+export async function adminRecipients(db: Db): Promise<Person[]> {
+  const rows = await db.employee.findMany({ where: { role: "admin", active: true }, select: EMPLOYEE_SELECT, orderBy: { name: "asc" } });
+  return rows.flatMap(employeePerson);
 }

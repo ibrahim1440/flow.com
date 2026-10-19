@@ -218,3 +218,21 @@
   .d21 .perf-settings { grid-template-columns: minmax(0, 1fr); gap: 0; padding-inline-start: 0; }
   .d21 .perf-settings .tl-snav { display: none; }
 }
+
+/* «إشعارات الحالات» (feat/whatsapp-status; addition beyond Figma, in the E-P01 language): one
+   rules table per status group, a group title in the E-05 «tl-h» style above each. */
+[data-ops-root] .tl-sgroup { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+[data-ops-root] .tl-sgroup .hr-table td .tl-body-btn:hover { text-decoration: underline; }
+@media (max-width: 767px) { [data-ops-root] .tl-sgroup { margin-top: 4px; } [data-ops-root] .tl-sgroup .tl-h span { display: none; } }
+/* GX E-90 E-S1 / E-04e: the automation empty states are a filled quiet panel, not a dashed box. */
+[data-ops-root] .tl-empty .hr-state { border: 0; background: var(--surface-subtle); padding: 40px 24px; }
+/* GX E-90 E-S2: a load failure — danger tint, title, line, «إعادة المحاولة». */
+[data-ops-root] .tl-loaderr { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px 16px; border-radius: 12px; background: var(--hr-danger-tint, #f8e3e1); }
+[data-ops-root] .tl-loaderr strong { font-size: 14.5px; font-weight: 600; color: var(--status-danger); }
+[data-ops-root] .tl-loaderr span { font-size: 13.5px; color: var(--text-primary); }
+[data-ops-root] .tl-loaderr .hr-btn { margin-top: 4px; }
+/* GX E-01m / E-05m: on a phone the automation pills carry no count. */
+@media (max-width: 767px) { [data-ops-root] .tl-tabs .hr-count { display: none; } }
+@media (min-width: 768px) { [data-ops-root] .tl-sgroup .hr-table { table-layout: fixed; width: 100%; } }
+/* GX E-04 / E-04e: the log's search field is 182px, so search · statuses · «معالجة الآن» share one row. */
+@media (min-width: 768px) { [data-ops-root] .tl-msgtool .hr-search { flex: 0 1 182px; min-width: 182px; } }

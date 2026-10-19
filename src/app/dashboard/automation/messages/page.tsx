@@ -5,6 +5,7 @@ import { Btn, Empty, OpsBanner, OpsLoading, OpsRoot } from "@/components/ops/ui"
 import { useD21Phone } from "@/components/shell/page-context";
 import { api, useLang } from "../../sales/_components/ui";
 import { getEvent, RECIPIENT_LABELS, type RecipientKind } from "@/lib/automation/catalog";
+import { STATUS_RECIPIENT_LABELS, type StatusRecipient } from "@/lib/automation/status-rules/sources";
 import { AutomationHeader, MESSAGE_STATUS, MessageStatusBadge, Note, Phone, noteText, useAutomationAbilities, when, whenParts } from "../_components/shared";
 import { SettingsFrame } from "../../_components/tools-ui";
 
@@ -106,7 +107,7 @@ export default function AutomationMessagesPage() {
         {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
         {info && <OpsBanner tone="info" onClose={() => setInfo("")}>{info}</OpsBanner>}
 
-        <div className="tl-tool">
+        <div className="tl-tool tl-msgtool">
           <input
             type="search"
             className="hr-input hr-search"
@@ -118,10 +119,12 @@ export default function AutomationMessagesPage() {
           />
           <div className="tl-seg" role="group" aria-label={L("الحالة", "Status")} data-testid="msg-status">
             <button type="button" aria-pressed={status === ""} onClick={() => { setStatus(""); setPage(1); }}>{L("الكل", "All")}</button>
-            {Object.entries(MESSAGE_STATUS).map(([k, s]) => (
+            {/* GX E-04 / E-04e: five statuses, each with its count (0 included); «يرسل الآن» is a
+                moment, not a filter — those rows are under «الكل». */}
+            {Object.entries(MESSAGE_STATUS).filter(([k]) => k !== "SENDING").map(([k, s]) => (
               <button key={k} type="button" aria-pressed={status === k} onClick={() => { setStatus(k); setPage(1); }} data-testid={`msg-status-${k}`}>
                 {ar ? s.ar : s.en}
-                {data?.counts[k] ? <span className="hr-count">{data.counts[k]}</span> : null}
+                {data ? <span className="hr-count">{data.counts[k] ?? 0}</span> : null}
               </button>
             ))}
           </div>
@@ -132,7 +135,14 @@ export default function AutomationMessagesPage() {
         </div>
 
         {!data && !error ? <OpsLoading /> : data && data.rows.length === 0 ? (
-          <Empty title={L("لا توجد رسائل.", "No messages.")} body={status || q ? L("لا رسالة تطابق البحث أو الحالة.", "No message matches the search or status.") : undefined} />
+          <div className="tl-empty">
+            <Empty
+              title={L("لا توجد رسائل", "No messages")}
+              body={status || q
+                ? L("لا رسالة تطابق البحث أو الحالة.", "No message matches the search or status.")
+                : L("تظهر هنا كل رسالة تنشئها القواعد: ما أُرسل، وما ينتظر، وما فشل أو لم يُرسل ولماذا.", "Every message the rules create appears here: what was sent, what is waiting, and what failed or was not sent, and why.")}
+            />
+          </div>
         ) : data ? (
           <div className="hr-tablewrap">
             <table className="hr-table is-mrow" aria-label={L("سجل الرسائل", "Message log")} data-testid="messages-table">
@@ -149,7 +159,7 @@ export default function AutomationMessagesPage() {
               <tbody>
                 {data.rows.map((m) => {
                   const ev = m.eventType ? getEvent(m.eventType) : null;
-                  const kind = RECIPIENT_LABELS[m.recipientKind as RecipientKind];
+                  const kind = RECIPIENT_LABELS[m.recipientKind as RecipientKind] ?? STATUS_RECIPIENT_LABELS[m.recipientKind as StatusRecipient];
                   const open = expanded === m.id;
                   // Sent: when it went. Waiting: when it is due. Anything else: when it was decided.
                   const at = m.status === "SENT" ? m.sentAt : m.status === "QUEUED" ? m.scheduledAt : m.createdAt;

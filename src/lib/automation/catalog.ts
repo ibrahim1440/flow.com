@@ -72,21 +72,34 @@ const YES_NO: EnumOption[] = [
   { value: "no", ar: "لا", en: "No" },
 ];
 
-const DELIVERY_TYPE_OPTIONS: EnumOption[] = [
+export const DELIVERY_TYPE_OPTIONS: EnumOption[] = [
   { value: "full", ar: "كامل", en: "Full" },
   { value: "partial", ar: "جزئي", en: "Partial" },
 ];
 
-const QC_OUTCOME_OPTIONS: EnumOption[] = [
+export const QC_OUTCOME_OPTIONS: EnumOption[] = [
   { value: "Passed", ar: "ناجح", en: "Passed" },
   { value: "Rejected", ar: "مرفوض", en: "Rejected" },
 ];
 
-const QUOTE_STATUS_OPTIONS: EnumOption[] = [
+export const QUOTE_STATUS_OPTIONS: EnumOption[] = [
   { value: "ISSUED", ar: "صدر", en: "Issued" },
   { value: "ACCEPTED", ar: "مقبول", en: "Accepted" },
   { value: "REJECTED", ar: "مرفوض", en: "Rejected" },
   { value: "EXPIRED", ar: "منتهي", en: "Expired" },
+];
+
+export const DEAL_OUTCOME_OPTIONS: EnumOption[] = [
+  { value: "OPEN", ar: "مفتوحة", en: "Open" },
+  { value: "WON", ar: "مكسوبة", en: "Won" },
+  { value: "LOST", ar: "خاسرة", en: "Lost" },
+];
+
+export const COLLECTION_STATUS_OPTIONS: EnumOption[] = [
+  { value: "PENDING_VERIFICATION", ar: "بانتظار التحقق", en: "Awaiting verification" },
+  { value: "APPROVED", ar: "معتمد", en: "Approved" },
+  { value: "REJECTED", ar: "مرفوض", en: "Rejected" },
+  { value: "REVERSED", ar: "معكوس", en: "Reversed" },
 ];
 
 const APPROVAL_TYPE_OPTIONS: EnumOption[] = [
@@ -97,7 +110,7 @@ const APPROVAL_TYPE_OPTIONS: EnumOption[] = [
   { value: "PERIOD_REOPEN", ar: "إعادة فتح فترة", en: "Period reopen" },
 ];
 
-const APPROVAL_DECISION_OPTIONS: EnumOption[] = [
+export const APPROVAL_DECISION_OPTIONS: EnumOption[] = [
   { value: "APPROVED", ar: "معتمد", en: "Approved" },
   { value: "REJECTED", ar: "مرفوض", en: "Rejected" },
   { value: "CANCELLED", ar: "مسحوب", en: "Withdrawn" },
@@ -253,6 +266,47 @@ export const EVENTS: EventDef[] = [
       v("quote.total", "إجمالي العرض", "Quotation total", "1,552.50 SAR"),
       v("quote.validUntil", "صالح حتى", "Valid until", "2026-10-20"),
       v("quote.reason", "سبب الرفض", "Rejection reason", ""),
+      v("deal.title", "الصفقة", "Deal", "توريد شهري"),
+      v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
+      v("owner.name", "مسؤول الصفقة", "Deal owner", "مندوب المبيعات"),
+      ...COMMON_VARS,
+    ],
+    recipients: ["customer", "deal_owner", "actor"],
+  },
+  {
+    key: "sales.deal_stage_changed",
+    group: "sales",
+    ar: "انتقلت الصفقة لمرحلة",
+    en: "Deal moved",
+    description: {
+      ar: "عند نقل صفقة إلى مرحلة أخرى في خط المبيعات، أو كسبها، أو خسارتها، أو إعادة فتحها.",
+      en: "When a deal moves to another pipeline stage, or is won, lost or reopened.",
+    },
+    variables: [
+      v("deal.title", "الصفقة", "Deal", "توريد شهري"),
+      v("stage.from", "المرحلة السابقة", "Previous stage", "تأهيل"),
+      v("stage.to", "المرحلة الجديدة", "New stage", "عرض سعر"),
+      v("deal.outcome", "نتيجة الصفقة", "Deal outcome", "OPEN", "enum", DEAL_OUTCOME_OPTIONS),
+      v("deal.value", "قيمة الصفقة", "Deal value", "12,500.00 SAR"),
+      v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
+      v("owner.name", "مسؤول الصفقة", "Deal owner", "مندوب المبيعات"),
+      ...COMMON_VARS,
+    ],
+    recipients: ["customer", "deal_owner", "actor"],
+  },
+  {
+    key: "sales.collection_status_changed",
+    group: "sales",
+    ar: "تغيرت حالة التحصيل",
+    en: "Collection status changed",
+    description: {
+      ar: "عند تسجيل تحصيل جديد بانتظار التحقق، أو اعتماده، أو رفضه، أو عكسه.",
+      en: "When a collection is recorded for verification, approved, rejected or reversed.",
+    },
+    variables: [
+      v("collection.status", "حالة التحصيل", "Collection status", "APPROVED", "enum", COLLECTION_STATUS_OPTIONS),
+      v("collection.amount", "المبلغ المحصل", "Amount collected", "5,000.00 SAR"),
+      v("collection.reference", "رقم المرجع", "Reference", "TRX-0042"),
       v("deal.title", "الصفقة", "Deal", "توريد شهري"),
       v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
       v("owner.name", "مسؤول الصفقة", "Deal owner", "مندوب المبيعات"),

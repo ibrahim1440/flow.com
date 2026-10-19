@@ -13,7 +13,7 @@ import { normalizeUsername } from "@/lib/auth/privileged";
  * renewed. Sensitive actions accept a session whose authTime is within 10 minutes.
  */
 export async function POST(request: Request) {
-  const { user, error } = await requireAuth({ allowMfaEnrollment: true });
+  const { user, error } = await requireAuth({ allowMfaEnrollment: true, allowPasswordChange: true });
   if (error) return error;
   const { username, pin, password, code } = (await request.json().catch(() => ({}))) as { username?: string; pin?: string; password?: string; code?: string };
   const enrolled = await isEnrolled(user.id);

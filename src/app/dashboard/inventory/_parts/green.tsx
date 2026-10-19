@@ -26,7 +26,8 @@ export type GreenBean = {
 type GroupStat = { consumed: number; rate: number | null; coverage: number | "INF" | null };
 type GreenOverview = { overall: { consumed: number; rate: number | null }; groups: Record<string, GroupStat> };
 
-/** The legacy screen's low-stock rule, kept: below 20 kg (now per bean, «أصناف أقل من 20 كغ»). */
+/** The legacy screen's low-stock rule: below 20 kg (now per bean, «أصناف أقل من 20 كغ»). The built-in
+ *  line; the owner may set another in Settings › Inventory (GET /api/settings/inventory), read below. */
 export const LOW_KG = 20;
 
 type Sort = "coverage" | "balance" | "name";
@@ -45,6 +46,17 @@ export function GreenTab({
   const [ov, setOv] = useState<GreenOverview | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<Sort>("coverage");
+
+  // Settings › Inventory: the low-stock line in force (the built-in 20 kg until the owner sets one).
+  const [lowKg, setLowKg] = useState<number>(LOW_KG);
+  useEffect(() => {
+    let off = false;
+    fetch("/api/settings/inventory").then((r) => (r.ok ? r.json() : null)).then((j) => {
+      const v = Number(j?.effectiveLowStockGreenKg);
+      if (!off && Number.isFinite(v) && v > 0) setLowKg(v);
+    }).catch(() => undefined);
+    return () => { off = true; };
+  }, []);
 
   useEffect(() => {
     let off = false;
@@ -83,7 +95,7 @@ export function GreenTab({
   const activeGroups = new Set(active.map(beanGroupKey));
   const lowGroups = [...activeGroups].map((k) => ({ k, lots: active.filter((b) => beanGroupKey(b) === k) }))
     .map((g) => ({ ...g, bal: g.lots.reduce((s, b) => s + b.quantityKg, 0) }))
-    .filter((g) => g.bal < LOW_KG);
+    .filter((g) => g.bal < lowKg);
   const lastReceipt = active.reduce<GreenBean | null>((a, b) => (!a || b.receivedDate > a.receivedDate ? b : a), null);
   const shownLots = groups.reduce((s, g) => s + g.lots.length, 0);
   const shownBalance = groups.reduce((s, g) => s + g.balance, 0);
@@ -108,7 +120,7 @@ export function GreenTab({
           <span className="stk-d">{rate === null ? L(`السجل أقصر من ${ROAST_WINDOW_DAYS} يومًا`, `History shorter than ${ROAST_WINDOW_DAYS} days`) : L(`متوسط آخر ${ROAST_WINDOW_DAYS} يومًا`, `Average of the last ${ROAST_WINDOW_DAYS} days`)}</span>
         </div>
         <div>
-          <span className="stk-lbl">{L(`أصناف أقل من ${LOW_KG} كغ`, `Beans below ${LOW_KG} kg`)}</span>
+          <span className="stk-lbl">{L(`أصناف أقل من ${lowKg} كغ`, `Beans below ${lowKg} kg`)}</span>
           <span className={`stk-mid${lowGroups.length ? " tone-danger" : ""}`}>{lowGroups.length}</span>
           <span className="stk-d">{lowGroups.map((g) => disp(g.lots[0].beanType, g.lots[0].beanTypeAr)).join(lang === "ar" ? "، " : ", ") || "—"}</span>
         </div>
@@ -154,7 +166,7 @@ export function GreenTab({
               {groups.map((g) => {
                 const first = g.lots[0];
                 const isOpen = open.has(g.key);
-                const low = g.balance < LOW_KG && g.lots.some((l) => l.isActive);
+                const low = g.balance < lowKg && g.lots.some((l) => l.isActive);
                 const cov = g.stat?.coverage ?? null;
                 const covN = cov === "INF" || cov === null ? null : cov;
                 const tone = coverageTone(cov === "INF" ? Infinity : cov);
@@ -169,7 +181,7 @@ export function GreenTab({
                           <span className="strong">{disp(first.beanType, first.beanTypeAr)}</span>
                         </button>
                         {first.process || first.processAr ? <span className="hr-caption hr-desktop-only"> · {proc}</span> : null}
-                        {low ? <> <span className="stk-flag hr-desktop-only">{L(`أقل من ${LOW_KG} كغ`, `Below ${LOW_KG} kg`)}</span></> : null}
+                        {low ? <> <span className="stk-flag hr-desktop-only">{L(`أقل من ${lowKg} كغ`, `Below ${lowKg} kg`)}</span></> : null}
                         <span className="hr-msub">
                           {lotsWord(g.lots.length)}{first.process || first.processAr ? ` · ${proc}` : ""}
                         </span>
@@ -183,7 +195,7 @@ export function GreenTab({
                         <span className="hr-caption">
                           {cov === null ? "—" : cov === "INF" ? L("لا استهلاك", "No consumption") : lang === "ar" ? `تغطية ${cov} ${cov > 2 && cov < 11 ? "أيام" : "يومًا"}` : `${cov} days cover`}
                         </span>
-                        {low ? <span className="stk-flag">{L(`أقل من ${LOW_KG} كغ`, `Below ${LOW_KG} kg`)}</span> : null}
+                        {low ? <span className="stk-flag">{L(`أقل من ${lowKg} كغ`, `Below ${lowKg} kg`)}</span> : null}
                       </td>
                       <td className="stk-acts stk-macts">
                         {canReceive && (low || tone === "danger") ? (
