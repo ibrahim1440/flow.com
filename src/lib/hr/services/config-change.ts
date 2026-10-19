@@ -24,6 +24,7 @@ import { assertLegacyLinksBaselined } from "./journal-integrity";
 import { GOSI_CASE_RULES, GOSI_TREATMENT_CASES } from "../gosi-treatments";
 import { payrollReadiness } from "../readiness";
 import { assertPayrollLive } from "../payroll-lock";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = Prisma.TransactionClient;
 // P-2 (migration 20261017090000): LEAVE_TYPE_CONFIRM — a leave type's proposal mark cleared by a
@@ -281,7 +282,8 @@ export async function decideConfigChange(actor: HrActor, id: string, b: Record<s
       // have their own path and authority (./permission-change) and are invisible here.
       if (!c || !isSettingsKind(c.kind)) throw new HrError("Configuration change not found", 404);
       if (c.status !== "PENDING") throw new HrError(`Only a pending change can be decided (this one is ${c.status}).`, 409);
-      if (c.requestedBy === actor.id) throw new HrError("You requested this change; another policy manager must decide it.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (c.requestedBy === actor.id)) throw new HrError("You requested this change; another policy manager must decide it.", 403, "SELF_ACTION");
       // Decision 1: another PERSON too — not a second account of the requester's linked person.
       if (await samePersonAsAny(tx, [c.requestedBy], actor.id)) throw new HrError("You are the same person as the requester; another person must decide it.", 403, "SAME_PERSON");
       const now = new Date();

@@ -15,6 +15,7 @@ import { nextNumber } from "./people";
 import { postHrJournal } from "./accounting-bridge";
 import { activePolicyFor } from "./policy";
 import { deductionPolicyGaps, loanCapPercent } from "../deductions";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 const D = (v: string | number | Prisma.Decimal) => new Prisma.Decimal(v);
 const ZERO = D(0);
@@ -188,7 +189,8 @@ export async function decideAdvance(actor: HrActor, id: string, b: Record<string
     const a = await tx.hrAdvance.findUnique({ where: { id }, include: { employee: true } });
     if (!a || !inScope(await resolveScope(actor, tx), a.employee)) throw new HrError("Advance not found", 404);
     assertNotSelf(actor, a.employee, "decide an advance");
-    if (a.requestedBy === actor.id) throw new HrError("You recorded this request; another approver must decide it.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (a.requestedBy === actor.id)) throw new HrError("You recorded this request; another approver must decide it.", 403, "SELF_ACTION");
     if (decision === "APPROVE") {
       await lock(tx, `advance:${a.employeeId}`);
       const c = await installmentCapCheck(tx, a.employeeId, a.amount, a.installmentCount, a.firstInstallmentMonth);
@@ -215,7 +217,8 @@ export async function disburseAdvance(actor: HrActor, id: string, b: Record<stri
     const a = await tx.hrAdvance.findUnique({ where: { id }, include: { employee: true } });
     if (!a || !inScope(await resolveScope(actor, tx), a.employee)) throw new HrError("Advance not found", 404);
     assertNotSelf(actor, a.employee, "disburse an advance");
-    if (a.decidedBy === actor.id) throw new HrError("The approver cannot also record the disbursement.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (a.decidedBy === actor.id)) throw new HrError("The approver cannot also record the disbursement.", 403, "SELF_ACTION");
     await lock(tx, `advance:${a.employeeId}`);
     const r = await tx.hrAdvance.updateMany({ where: { id, status: "APPROVED" }, data: { status: "DISBURSED", disbursedBy: actor.id, disbursedAt: new Date(), disbursedOn: paidOn, disbursementRef: reference } });
     if (r.count !== 1) throw new HrError("Only an approved advance can be disbursed.", 409);

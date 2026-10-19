@@ -6,6 +6,7 @@ import { seesAllSales } from "@/lib/services/sales/scope";
 import {
   Decimal, ZERO, roundMoney, riyadhMonthStart, riyadhMonthEnd, qualifyingBase, parseFiniteDecimal,
 } from "@/lib/services/commissions/engine";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 /**
  * Monthly sales targets.
@@ -153,7 +154,8 @@ export async function PUT(request: Request) {
 
   const employeeId = typeof b.employeeId === "string" ? b.employeeId : "";
   if (!employeeId) return NextResponse.json({ error: "employeeId is required." }, { status: 400 });
-  if (employeeId === user.id) {
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (employeeId === user.id)) {
     return NextResponse.json(
       { error: "You cannot set your own target. Ask another manager to set it." },
       { status: 403 },
@@ -230,7 +232,8 @@ export async function DELETE(request: Request) {
   if (!employeeId || !period) {
     return NextResponse.json({ error: "employeeId and month are required." }, { status: 400 });
   }
-  if (employeeId === user.id) {
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (employeeId === user.id)) {
     return NextResponse.json({ error: "You cannot change your own target." }, { status: 403 });
   }
 

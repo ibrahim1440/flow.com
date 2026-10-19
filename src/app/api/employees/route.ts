@@ -7,6 +7,7 @@ import { assertNoNewPayrollConflicts, conflictMessageEn, DutyConflictError, payr
 import { SUBJECT_NOT_VERIFIED_EN } from "@/lib/hr/identity";
 import { isPinLookupConflict, pinSetThrottle, pinUnavailable } from "@/lib/pin-set-guard";
 import { gainedPrivileges, normalizeUsername, usernameValid, USERNAME_INVALID, withoutPrivileged } from "@/lib/auth/privileged";
+import { isSimpleMode } from "@/lib/simple-mode";
 import { ROLE_LABELS } from "@/lib/auth-shared";
 import { HrError } from "@/lib/hr/core";
 import { toArabic } from "@/lib/hr/messages-ar";
@@ -136,7 +137,8 @@ export async function POST(request: Request) {
   // any other: finance, account administration, inventory adjust/override, order approval, …) is
   // granted at creation — the account starts without it, and it is granted once the login belongs
   // to a verified person.
-  const privilegedGained = gainedPrivileges(desired, null);
+  // SIMPLE MODE: privileged permissions are granted at creation (no verified person needed first).
+  const privilegedGained = isSimpleMode() ? [] : gainedPrivileges(desired, null);
   const pending = grants.duties.length > 0 || grants.toAdmin || privilegedGained.length > 0;
   const initial = pending ? withoutPrivileged(withoutSensitiveGrants(desired, null), null) : desired;
   const startDuties = payrollDuties(effectivePermissions(initial.permissions, initial.role));

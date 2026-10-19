@@ -8,6 +8,7 @@ import { isPrivileged, PRIVILEGED_MODULES, PRIVILEGED_SUBS } from "./auth/privil
 import { mfaMode } from "./auth/mfa";
 import { stockChangeRefusal, stockAuthSnapshot } from "./auth/stock-change";
 import { isBcryptHash } from "./auth/secret";
+import { isSimpleMode, simpleModePermissions } from "./simple-mode";
 
 export async function getUser(): Promise<UserPayload | null> {
   const cookieStore = await cookies();
@@ -74,6 +75,8 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   if (!permissions || Object.keys(permissions).length === 0) {
     permissions = buildDefaultPermissions(employee.role);
   }
+  // SIMPLE MODE: the admin role holds every module and sub-privilege (client nav reads this too).
+  permissions = simpleModePermissions(permissions, employee.role);
   const privileged = isPrivileged(permissions, employee.role);
   // A privileged account never works through a PIN-only session: if it became privileged after
   // signing in that way, the session ends here (and the promotion itself revokes them).
@@ -81,7 +84,8 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
     await revokeSession(session.id, "PRIVILEGED_PIN_ONLY");
     return null;
   }
-  const mfaEnrollmentRequired = privileged && mfaMode() === "required" && !(await prisma.authMfa.findUnique({ where: { employeeId: user.id }, select: { enrolledAt: true } }))?.enrolledAt;
+  // SIMPLE MODE: two-step verification stays optional (never forced by AUTH_MFA_MODE=required).
+  const mfaEnrollmentRequired = !isSimpleMode() && privileged && mfaMode() === "required" && !(await prisma.authMfa.findUnique({ where: { employeeId: user.id }, select: { enrolledAt: true } }))?.enrolledAt;
   // The live role overwrites the token's copy, so every `user.role === "admin"` call site
   // downstream reads current state without any of them having to know that.
   return { ...user, role: employee.role, permissions, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired };
@@ -141,6 +145,8 @@ export const IDENTITY_REQUIRED_AR = "حسابك غير مرتبط بشخص مو�
 
 /** The gate itself: verified individual (audited with `step`), then — when asked — a recent step-up. */
 export async function requirePrivilegedAction(user: { id: string; authTime?: Date | string }, step: string, opts: { stepUp?: boolean } = {}): Promise<NextResponse | null> {
+  // SIMPLE MODE: no verified identity is required; a recent step-up (PIN or password) still is.
+  if (isSimpleMode()) return opts.stepUp === false ? null : requireFreshAuth(user);
   const { assertVerifiedActor } = await import("./hr/identity");
   try {
     await assertVerifiedActor(user, step);
@@ -184,6 +190,15 @@ export async function stockChangeGate(
 ): Promise<NextResponse | null> {
   const step = `${module}.${sub}`;
   const holdsSub = hasModuleAccess(user.permissions, module) && hasSubPrivilege(user.permissions, module, sub);
+  // SIMPLE MODE: holding the sub is enough, plus a recent step-up made with the PIN OR the password —
+  // no verified identity, approval evidence, username + PIN credential or username + PIN session.
+  if (isSimpleMode()) {
+    if (!holdsSub) {
+      const r = stockChangeRefusal(sub, { holdsSub, verified: false, approved: false, username: null, pin: null, sessionMethod: user.sessionMethod, authFactor: user.authFactor, authTime: user.authTime });
+      return NextResponse.json({ error: r!.error, errorEn: r!.errorEn, code: r!.code }, { status: r!.status });
+    }
+    return requireFreshAuth(user);
+  }
   let verified = false;
   if (holdsSub) {
     const { assertVerifiedActor } = await import("./hr/identity");

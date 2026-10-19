@@ -13,6 +13,7 @@ import type { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { credentialVersion } from "@/lib/credential-version";
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
+import { simpleModePermissions } from "@/lib/simple-mode";
 
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MS } from "./session-policy";
 
@@ -39,7 +40,8 @@ export async function setSessionCookie(response: NextResponse, employeeId: strin
   const { signToken, parsePermissions, buildDefaultPermissions } = await import("@/lib/auth");
   const e = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId }, select: { id: true, name: true, role: true, permissions: true, preferredLanguage: true, username: true, pin: true, password: true } });
   const raw = parsePermissions(e.permissions as string);
-  const permissions = raw && Object.keys(raw).length > 0 ? raw : buildDefaultPermissions(e.role);
+  // SIMPLE MODE: the admin role holds every module (same rule as the session check).
+  const permissions = simpleModePermissions(raw && Object.keys(raw).length > 0 ? raw : buildDefaultPermissions(e.role), e.role);
   const token = await signToken({ id: e.id, name: e.name, role: e.role, permissions, preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar", cv: credentialVersion({ id: e.id, username: e.username, pin: e.pin, password: e.password }), sid: session.id }, session.expiresAt);
   const maxAge = Math.max(1, Math.floor((session.expiresAt.getTime() - Date.now()) / 1000));
   response.cookies.set("token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge, path: "/" });

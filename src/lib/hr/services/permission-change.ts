@@ -28,6 +28,7 @@ import { assertSubjectVerified, assertVerifiedActor, identityOf, samePersonAsAny
 import { credentialVersion } from "@/lib/credential-version";
 import { gainedPrivileges, isPrivilegedStored } from "@/lib/auth/privileged";
 import { revokeSessions } from "@/lib/auth/session";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; role: string; permissions: Permissions; authTime?: Date | string };
@@ -130,8 +131,10 @@ export async function decidePermissionChange(actor: Actor, id: string, b: Record
       if (c.status !== "PENDING") throw new HrError(`Only a pending change can be decided (this one is ${c.status}).`, 409);
       const p = c.payload as { accountId: string; accountName: string; role: string; permissions: string; grants: string[]; subs?: string[]; toAdmin: boolean; credentials: CredentialChange | null; credentialFields?: string[] };
       // Identity: never the requester, never the account itself — by account and by person.
-      if (c.requestedBy === actor.id) throw new HrError("You requested this change; another account editor must decide it.", 403, "SELF_ACTION");
-      if (p.accountId === actor.id) throw new HrError("Nobody approves a grant to their own account.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (c.requestedBy === actor.id)) throw new HrError("You requested this change; another account editor must decide it.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (p.accountId === actor.id)) throw new HrError("Nobody approves a grant to their own account.", 403, "SELF_ACTION");
       if (await samePersonAsAny(tx, [c.requestedBy, p.accountId], actor.id)) throw new HrError("You are the same person as the requester or the account holder; another person must decide it.", 403, "SAME_PERSON");
       const now = new Date();
       if (decision === "REJECT") {
@@ -254,8 +257,10 @@ export async function acknowledgeRevocationReview(actor: Actor, id: string, b: R
     if (!c || c.kind !== "PERMISSION_REVIEW") throw new HrError("Configuration change not found", 404);
     if (c.status !== "PENDING") throw new HrError(`Only a pending change can be decided (this one is ${c.status}).`, 409);
     const p = c.payload as { accountId: string };
-    if (c.requestedBy === actor.id) throw new HrError("You requested this change; another account editor must decide it.", 403, "SELF_ACTION");
-    if (p.accountId === actor.id) throw new HrError("You cannot review the revocation of your own account.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (c.requestedBy === actor.id)) throw new HrError("You requested this change; another account editor must decide it.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (p.accountId === actor.id)) throw new HrError("You cannot review the revocation of your own account.", 403, "SELF_ACTION");
     if (await samePersonAsAny(tx, [c.requestedBy, p.accountId], actor.id)) throw new HrError("You are the same person as the requester or the account holder; another person must decide it.", 403, "SAME_PERSON");
     await assertVerifiedActor(actor, "PERMISSION_REVIEW_ACKNOWLEDGE", tx);
     await tx.hrConfigChange.update({ where: { id }, data: { status: "APPLIED", decidedBy: actor.id, decidedAt: new Date(), decisionNote: note || "Reviewed" } });

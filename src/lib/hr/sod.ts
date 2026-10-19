@@ -10,6 +10,7 @@
 // all four (decision 1a). Per run the payroll services enforce the execution separation again,
 // whatever duties a person holds.
 import { buildDefaultPermissions, hasModuleAccess, hasSubPrivilege, parsePermissions, type Permissions } from "@/lib/auth-shared";
+import { isSimpleMode, simpleModePermissions } from "@/lib/simple-mode";
 
 /** Payroll execution duties (HR sub-privileges). */
 export const PAYROLL_SOD_DUTIES = ["payroll_prepare", "payroll_approve", "payroll_pay", "payroll_cancel_approved"] as const;
@@ -71,7 +72,8 @@ export const PAYROLL_DUTY_EN: Record<PayrollSodDuty, string> = {
 export function effectivePermissions(raw: string | Permissions | null | undefined, role: string): Permissions {
   let p: Permissions | null = raw == null ? null : typeof raw === "string" ? parsePermissions(raw) : raw;
   if (!p || typeof p !== "object" || Object.keys(p).length === 0) p = buildDefaultPermissions(role);
-  return p;
+  // SIMPLE MODE: the admin role holds everything (the same rule the session applies).
+  return simpleModePermissions(p, role);
 }
 
 /** The value the employees API stores for submitted permissions (same expression as the routes). */
@@ -131,7 +133,8 @@ export type AccountGrant = { permissions: string | null; role: string };
 export function assertNoNewPayrollConflicts(after: AccountGrant, before: AccountGrant | null): { before: PayrollSodDuty[]; after: PayrollSodDuty[] } {
   const prior = before ? effectivePermissions(before.permissions, before.role) : null;
   const next = effectivePermissions(after.permissions, after.role);
-  const added = newPayrollConflicts(prior, next);
+  // SIMPLE MODE: one person may hold every payroll duty (no duty-conflict refusal).
+  const added = isSimpleMode() ? [] : newPayrollConflicts(prior, next);
   if (added.length) throw new DutyConflictError(added);
   return { before: prior ? payrollDuties(prior) : [], after: payrollDuties(next) };
 }
@@ -150,6 +153,8 @@ export function sensitiveGrants(after: AccountGrant, before: AccountGrant | null
   const had = new Set(prior ? payrollDuties(prior) : []);
   const duties = payrollDuties(next).filter((d) => !had.has(d));
   const subs = REVIEWED_GRANT_SUBS.filter((k) => holdsSub(next, k) && !(prior && holdsSub(prior, k)));
+  // SIMPLE MODE: no grant waits for a second account editor — it applies at once (and is audited).
+  if (isSimpleMode()) return { duties: [], toAdmin: false, subs: [] };
   return { duties, toAdmin: after.role === "admin" && before?.role !== "admin", subs };
 }
 

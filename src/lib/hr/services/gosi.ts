@@ -43,6 +43,7 @@ import { assertPostingReady, postHrJournal } from "./accounting-bridge";
 import { assertJournalIntact } from "./journal-integrity";
 import { GOSI_CASE_RULES, GOSI_TREATMENT_CASES, caseLines, caseMismatch, defaultCase, type GosiCase } from "../gosi-treatments";
 import type { AccountKey } from "./policy";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = Prisma.TransactionClient;
 const ZERO = new Prisma.Decimal(0);
@@ -605,7 +606,8 @@ export async function decideGosiSettlement(actor: HrActor, id: string, b: Record
       const s = await tx.hrGosiSettlement.findUnique({ where: { id }, include: { employee: true } });
       if (!s) throw new HrError("GOSI settlement not found", 404);
       if (s.status !== "PENDING") throw new HrError(`Only a pending settlement can be decided (this one is ${s.status}).`, 409);
-      if (s.proposedBy === actor.id) throw new HrError("You proposed this settlement; another approver must decide it.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (s.proposedBy === actor.id)) throw new HrError("You proposed this settlement; another approver must decide it.", 403, "SELF_ACTION");
       if (await samePersonAsAny(tx, [s.proposedBy], actor.id)) throw new HrError("You are the same person as the proposer; another person must decide it.", 403, "SAME_PERSON");
       assertNotSelf(actor, s.employee, "decide a GOSI settlement");
       const now = new Date();

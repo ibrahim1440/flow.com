@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { freshEnough, REAUTH_EN } from "@/lib/auth/step-up";
 import { CONCURRENT_UPDATE_MESSAGE, CONCURRENT_UPDATE_RETRY, concurrencyFailureOf } from "./db-errors";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 export type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -128,7 +129,8 @@ export async function personInScope(db: Db, scope: HrScope, employeeId: string) 
 
 /** The actor may never decide something about themself. */
 export function assertNotSelf(actor: HrActor, subject: { accountId: string | null }, what: string) {
-  if (subject.accountId && subject.accountId === actor.id) {
+  // SIMPLE MODE: the single owner may act on their own HR record.
+  if (subject.accountId && subject.accountId === actor.id && !isSimpleMode()) {
     throw new HrError(`You cannot ${what} for yourself. Another authorised person must do it.`, 403, "SELF_ACTION");
   }
 }

@@ -21,6 +21,7 @@ import { assertVerifiedActor, identityOfMany, samePersonAsAny } from "../identit
 import { revokeSessions } from "@/lib/auth/session";
 import { isPrivilegedStored, privilegeReasons } from "@/lib/auth/privileged";
 import { effectivePermissions } from "../sod";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; role: string; permissions: Permissions; authTime?: Date | string };
@@ -58,7 +59,8 @@ export async function requestMfaReset(actor: Actor, b: Record<string, unknown>) 
   const reason = typeof b.reason === "string" ? b.reason.trim().slice(0, 500) : "";
   if (!accountId) throw new HrError("accountId is required.", 400);
   if (reason.length < 3) throw new HrError("A reason is required.", 400);
-  if (accountId === actor.id) throw new HrError("Nobody resets their own two-step verification; another account editor must request it.", 403, "SELF_ACTION");
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (accountId === actor.id)) throw new HrError("Nobody resets their own two-step verification; another account editor must request it.", 403, "SELF_ACTION");
   try {
     return await prisma.$transaction(async (tx) => {
       await assertVerifiedActor(actor, "MFA_RESET_REQUEST", tx);
@@ -96,8 +98,10 @@ export async function decideMfaReset(actor: Actor, id: string, b: Record<string,
       if (!c || c.kind !== "MFA_RESET") throw new HrError("Configuration change not found", 404);
       if (c.status !== "PENDING") throw new HrError(`Only a pending change can be decided (this one is ${c.status}).`, 409);
       const p = c.payload as { accountId: string };
-      if (c.requestedBy === actor.id) throw new HrError("You requested this change; another account editor must decide it.", 403, "SELF_ACTION");
-      if (p.accountId === actor.id) throw new HrError("Nobody decides a reset of their own two-step verification.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (c.requestedBy === actor.id)) throw new HrError("You requested this change; another account editor must decide it.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (p.accountId === actor.id)) throw new HrError("Nobody decides a reset of their own two-step verification.", 403, "SELF_ACTION");
       if (await samePersonAsAny(tx, [c.requestedBy, p.accountId], actor.id)) throw new HrError("You are the same person as the requester or the account holder; another person must decide it.", 403, "SAME_PERSON");
       const now = new Date();
       if (decision === "REJECT") {

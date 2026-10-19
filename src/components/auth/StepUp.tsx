@@ -9,6 +9,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Delete, ShieldCheck } from "lucide-react";
 import { PIN_LENGTH } from "@/lib/pin-policy";
+import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { isEndedSession, SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
 
 const T = {
@@ -81,7 +82,8 @@ export function StepUpProvider({ lang, privileged, children }: { lang: "ar" | "e
 function StepUpDialog({ lang, privileged, mfa, pinOnly, onDone }: { lang: "ar" | "en"; privileged: boolean; mfa: boolean; pinOnly: boolean; onDone: (ok: boolean) => void }) {
   const t = T[lang];
   const [username, setUsername] = useState("");
-  const [usePassword, setUsePassword] = useState(false);
+  // SIMPLE MODE: with the PIN sign-in methods hidden, the step-up asks for the password first.
+  const [usePassword, setUsePassword] = useState(!SHOW_PIN_SIGN_IN && !pinOnly);
   const [pin, setPin] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");

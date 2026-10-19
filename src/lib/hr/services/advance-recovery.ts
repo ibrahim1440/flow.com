@@ -26,6 +26,7 @@ import { addMonths, isMonth, monthOf } from "../dates";
 import { assertVerifiedActor, samePersonAsAny } from "../identity";
 import { activePolicyFor } from "./policy";
 import { capRefusal, installmentCapCheck, outstanding, schedule } from "./advances";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = Prisma.TransactionClient;
 const ZERO = new Prisma.Decimal(0);
@@ -249,7 +250,8 @@ export async function decideRecovery(actor: HrActor, id: string, b: Record<strin
       if (!c) throw new HrError("Recovery request not found", 404);
       const a = await loadAdvance(tx, actor, c.advanceId);
       if (c.status !== "PENDING") throw new HrError(`Only a pending request can be decided (this one is ${c.status}).`, 409);
-      if (c.requestedBy === actor.id) throw new HrError("You requested this change; another approver must decide it.", 403, "SELF_ACTION");
+      // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+      if (!isSimpleMode() && (c.requestedBy === actor.id)) throw new HrError("You requested this change; another approver must decide it.", 403, "SELF_ACTION");
       if (await samePersonAsAny(tx, [c.requestedBy], actor.id)) throw new HrError("You are the same person as the requester; another person must decide it.", 403, "SAME_PERSON");
       assertNotSelf(actor, a.employee, "decide a recovery procedure");
       await lock(tx, `advance:${a.employeeId}`);

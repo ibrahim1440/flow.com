@@ -7,6 +7,7 @@ import { WifiOff } from "lucide-react";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { cameForExpiredSession, SESSION_EXPIRED_AR, SESSION_EXPIRED_EN } from "@/lib/session-expired";
 import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
+import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import "@/components/shell/direction-2.1.css";
 import "./login.css";
 
@@ -73,7 +74,8 @@ const T = {
 export default function LoginPage() {
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [lang, setLang] = useState<Lang>("ar");
-  const [mode, setMode] = useState<Mode>("pin");
+  // SIMPLE MODE: username + password is the only method shown, and the default (SHOW_PIN_SIGN_IN).
+  const [mode, setMode] = useState<Mode>(SHOW_PIN_SIGN_IN ? "pin" : "password");
   const [pin, setPin] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -291,11 +293,14 @@ export default function LoginPage() {
             </div>
             {noteBox}
 
-            <div role="tablist" aria-label={t.modes} className="lg-seg">
-              {([["pin", t.modePin], ["username_pin", t.modeUserPin], ["password", t.modePassword]] as [Mode, string][]).map(([m, label]) => (
-                <button key={m} role="tab" aria-selected={mode === m} data-testid={`login-mode-${m}`} type="button" onClick={() => switchMode(m)} title={label}>{label}</button>
-              ))}
-            </div>
+            {/* SIMPLE MODE: the PIN methods' tabs are not rendered (code kept; see SHOW_PIN_SIGN_IN). */}
+            {SHOW_PIN_SIGN_IN ? (
+              <div role="tablist" aria-label={t.modes} className="lg-seg">
+                {([["pin", t.modePin], ["username_pin", t.modeUserPin], ["password", t.modePassword]] as [Mode, string][]).map(([m, label]) => (
+                  <button key={m} role="tab" aria-selected={mode === m} data-testid={`login-mode-${m}`} type="button" onClick={() => switchMode(m)} title={label}>{label}</button>
+                ))}
+              </div>
+            ) : null}
 
             {mode !== "pin" ? (
               <div className="lg-fields">
@@ -355,7 +360,8 @@ export default function LoginPage() {
             ) : null}
           </div>
         )}
-        <p className="lg-foot">{t.privNote}</p>
+        {/* SIMPLE MODE: no "privileged accounts use username + PIN" note while the PIN methods are hidden. */}
+        {SHOW_PIN_SIGN_IN ? <p className="lg-foot">{t.privNote}</p> : null}
       </main>
     </div>
   );

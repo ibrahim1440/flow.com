@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { HrError, type HrActor, type Db, TX, accountNames, assertCan, can, resolveScope, personInScope, inScope, audit, lock, assertNotSelf, oneOf, reqText, text, mapDbError } from "../core";
 import { addDays, dayString, isDay, isMonth, monthBounds, parseDay, workingDays } from "../dates";
 import { activePolicyFor } from "./policy";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 const D = (v: string | number | Prisma.Decimal) => new Prisma.Decimal(v);
 
@@ -213,7 +214,8 @@ export async function decideLeave(actor: HrActor, id: string, b: Record<string, 
     const scope = await resolveScope(actor, tx);
     if (!inScope(scope, req.employee)) throw new HrError("Leave request not found", 404);
     assertNotSelf(actor, req.employee, "decide leave");
-    if (req.requestedBy === actor.id) throw new HrError("You filed this request; another approver must decide it.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (req.requestedBy === actor.id)) throw new HrError("You filed this request; another approver must decide it.", 403, "SELF_ACTION");
     await lock(tx, `leave:${req.employeeId}`);
     const fresh = await tx.hrLeaveRequest.findUniqueOrThrow({ where: { id } });
     if (fresh.status !== "PENDING") throw new HrError(`This request is already ${fresh.status}.`, 409);

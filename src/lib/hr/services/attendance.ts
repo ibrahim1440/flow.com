@@ -14,6 +14,7 @@ import { HrError, type HrActor, type Db, TX, assertCan, can, resolveScope, perso
 import { addDays, dayString, instantAt, isDay, localDay, localTime, parseDay } from "../dates";
 import { computeDay, type ShiftDef } from "../attendance-calc";
 import { activePolicyFor } from "./policy";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 async function guarded<T>(fn: () => Promise<T>): Promise<T> {
   try {
@@ -199,7 +200,8 @@ export async function decideCorrection(actor: HrActor, id: string, b: Record<str
     const c = await tx.hrAttendanceCorrection.findUnique({ where: { id }, include: { employee: true } });
     if (!c || !inScope(await resolveScope(actor, tx), c.employee)) throw new HrError("Correction not found", 404);
     assertNotSelf(actor, c.employee, "decide an attendance correction");
-    if (c.requestedBy === actor.id) throw new HrError("You filed this correction; another approver must decide it.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (c.requestedBy === actor.id)) throw new HrError("You filed this correction; another approver must decide it.", 403, "SELF_ACTION");
     await lock(tx, `attendance:${c.employeeId}`);
     if (decision === "REJECT") {
       const r = await tx.hrAttendanceCorrection.updateMany({ where: { id, status: "PENDING" }, data: { status: "REJECTED", decidedBy: actor.id, decidedAt: new Date(), decisionNote: note } });
@@ -256,7 +258,8 @@ export async function decideOvertime(actor: HrActor, id: string, b: Record<strin
     const o = await tx.hrOvertime.findUnique({ where: { id }, include: { employee: true } });
     if (!o || !inScope(await resolveScope(actor, tx), o.employee)) throw new HrError("Overtime not found", 404);
     assertNotSelf(actor, o.employee, "approve overtime");
-    if (o.requestedBy === actor.id) throw new HrError("You recorded this overtime; another approver must decide it.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (o.requestedBy === actor.id)) throw new HrError("You recorded this overtime; another approver must decide it.", 403, "SELF_ACTION");
     const r = await tx.hrOvertime.updateMany({ where: { id, status: "PENDING", payrollRunId: null }, data: { status: decision === "APPROVE" ? "APPROVED" : "REJECTED", decidedBy: actor.id, decidedAt: new Date(), decisionNote: note } });
     if (r.count !== 1) throw new HrError("Only pending overtime can be decided.", 409);
     await audit(tx, { action: `OVERTIME_${decision}`, entityType: "HrOvertime", entityId: id, employeeId: o.employeeId, reason: note, actorId: actor.id });

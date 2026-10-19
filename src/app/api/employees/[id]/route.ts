@@ -24,6 +24,7 @@ import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { assertNoNewPayrollConflicts, conflictMessageEn, DutyConflictError, heldReviewedSubs, payrollDuties, effectivePermissions, sensitiveGrants, storedPermissions, withoutSensitiveGrants } from "@/lib/hr/sod";
 import { recordRevocationReviewIn, requestPermissionChangeIn, type CredentialChange } from "@/lib/hr/services/permission-change";
 import { ROLE_LABELS } from "@/lib/auth-shared";
+import { isSimpleMode } from "@/lib/simple-mode";
 import { HrError } from "@/lib/hr/core";
 import { toArabic } from "@/lib/hr/messages-ar";
 
@@ -191,7 +192,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       // duties that become requests) goes only to an individual account — a login linked to a
       // verified person. Refused (409 SUBJECT_NOT_VERIFIED) and audited otherwise.
       const privilegedGained = gainedPrivileges(desired, beforeGrant);
-      if (privilegedGained.length && !(await identityOf(tx, id)).verified) {
+      // SIMPLE MODE: no verified identity is needed to grant a privileged permission.
+      if (privilegedGained.length && !isSimpleMode() && !(await identityOf(tx, id)).verified) {
         throw new GrantRefused(id, privilegedGained);
       }
       const pending = grants.duties.length > 0 || grants.toAdmin || grants.subs.length > 0;
@@ -217,7 +219,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       // Review P2-5: judged on the duties BEFORE and AFTER this change, and for any login of a
       // VERIFIED person whether or not it holds duties today. Review NEW-1: also any login named by a
       // live verification (linked or not), and (owner security decision) any privileged account.
-      const holdsDuties = isPrivilegedStored(beforeGrant.permissions, beforeGrant.role) || isPrivilegedStored(desired.permissions, desired.role) || before.role === "admin" || desired.role === "admin" || payrollDuties(effectivePermissions(beforeGrant.permissions, beforeGrant.role)).length > 0 || payrollDuties(effectivePermissions(desired.permissions, desired.role)).length > 0 || (await identityOf(tx, id)).personVerified || (await loginAttested(tx, id));
+      // SIMPLE MODE: the admin's credential change (username, PIN, password) or reactivation applies at
+      // once — it is not held for a second account editor.
+      const holdsDuties = !isSimpleMode() && (isPrivilegedStored(beforeGrant.permissions, beforeGrant.role) || isPrivilegedStored(desired.permissions, desired.role) || before.role === "admin" || desired.role === "admin" || payrollDuties(effectivePermissions(beforeGrant.permissions, beforeGrant.role)).length > 0 || payrollDuties(effectivePermissions(desired.permissions, desired.role)).length > 0 || (await identityOf(tx, id)).personVerified || (await loginAttested(tx, id)));
       let credentials: CredentialChange | null = null;
       if (holdsDuties) {
         const c: CredentialChange = {};

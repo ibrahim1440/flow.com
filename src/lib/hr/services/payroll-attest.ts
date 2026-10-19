@@ -26,6 +26,7 @@
 import { createHash } from "node:crypto";
 import { HrError, type Db, oneOf, reqText } from "../core";
 import { personsOf, samePersonAsAny } from "../identity";
+import { isSimpleMode } from "@/lib/simple-mode";
 import { policyFingerprint } from "./policy";
 
 export const ATTEST_SUBJECTS = ["PROPOSAL_CORRECTION", "SEPARATION_EARNING", "SEPARATION_CANCEL", "UNPAID_FULL_PERIOD"] as const;
@@ -73,6 +74,8 @@ export async function runApproverIds(db: Db, runId: string): Promise<Set<string>
 
 /** Whether `actorId` is (or was) the same person as one of these employees. */
 export async function isPersonOf(db: Db, employeeIds: string[], actorId: string): Promise<boolean> {
+  // SIMPLE MODE: the single owner is never refused as "the same person" as a payee / subject.
+  if (isSimpleMode()) return false;
   if (!employeeIds.length) return false;
   if ((await db.hrEmployee.count({ where: { id: { in: employeeIds }, accountId: actorId } })) > 0) return true;
   const mine = await personsOf(db, [actorId]);

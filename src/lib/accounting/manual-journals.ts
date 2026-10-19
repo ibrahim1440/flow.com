@@ -21,6 +21,7 @@
 // not of an allowlisted automatic workflow is never created, changed, posted or deleted while off.
 import { prisma } from "@/lib/db";
 import { AccountingError } from "./errors";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_DISABLED_EN } from "./manual-journals-messages";
 export { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_DISABLED_EN };
@@ -29,6 +30,9 @@ type SettingsReader = { hrSettings: { findUnique: (a: { where: { id: string }; s
 
 /** Read every time (no cache). FAIL-CLOSED: anything but exactly `true` is disabled. */
 export async function manualJournalsEnabled(db: SettingsReader = prisma as unknown as SettingsReader): Promise<boolean> {
+  // SIMPLE MODE: manual journals are enabled in the application. The database guard
+  // (HrA1_manual_journal_guard) reads HrSettings itself: scripts/release/simple-mode-db.sql turns it on.
+  if (isSimpleMode()) return true;
   try {
     const s = await db.hrSettings.findUnique({ where: { id: "singleton" }, select: { manualJournalsEnabled: true } });
     return s?.manualJournalsEnabled === true;

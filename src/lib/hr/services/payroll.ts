@@ -39,6 +39,7 @@ import { adjustmentPostingKey, looksLikeFinalSettlement, parseAdjustmentCategory
 import { runApproverIds, runPreparerIds } from "./payroll-attest";
 // P-2 rev3 item 2: proof of payment per employee (allocations, returns, bank result files).
 import { assertPayrollLive } from "../payroll-lock";
+import { isSimpleMode } from "@/lib/simple-mode";
 import { isAuthorizedPayment, exportMarkerLine } from "../payroll-doc";
 import { allocationsIn, bankRef, completeIfSettled, last4, parseBankResultCsv, proofAmount, reopenIfShort, runSettlement, settlementDto, sha256, usedReference, type AllocationIn } from "./payroll-proof";
 
@@ -79,6 +80,8 @@ export async function runApprovers(tx: Db, runId: string): Promise<Set<string>> 
 
 /** Whether the actor is paid by a line of the run (Q-1: a payee never records the run's payment). */
 async function isPayee(tx: Db, runId: string, actorId: string): Promise<boolean> {
+  // SIMPLE MODE: a payee may record the run's payment (single owner).
+  if (isSimpleMode()) return false;
   // The login linked now, OR the one linked when the line was built (QA P2-2)…
   if ((await tx.hrPayrollLine.count({ where: { runId, OR: [{ employee: { accountId: actorId } }, { snapshot: { path: ["payeeAccountId"], equals: actorId } }] } })) > 0) return true;
   // …OR the actor is (or was) the same PERSON as one of the run's payees (QA2 P2-2: a login once
@@ -387,7 +390,8 @@ export async function addAdjustment(actor: HrActor, runId: string, b: Record<str
     if (run.status !== "DRAFT") throw new HrError("Adjustments are added to a DRAFT run.", 409);
     const person = await tx.hrEmployee.findUnique({ where: { id: employeeId } });
     if (!person || (run.branchKey !== "COMPANY" && person.branchId !== run.branchKey)) throw new HrError("This person is not in the run's scope.", 400);
-    if (person.accountId === actor.id) throw new HrError("You cannot add an adjustment to your own pay.", 403, "SELF_ACTION");
+    // SIMPLE MODE: the owner may adjust their own pay line.
+    if (person.accountId === actor.id && !isSimpleMode()) throw new HrError("You cannot add an adjustment to your own pay.", 403, "SELF_ACTION");
     // Review NEW-9: re-checked inside the transaction, after the lock.
     await assertVerifiedActor(actor, "PAYROLL_ADJUSTMENT", tx);
     // Review P1-B2: never an end-of-service amount, whole or split, since the separation.
@@ -509,11 +513,13 @@ export async function approveLines(actor: HrActor, id: string, b: Record<string,
     await assertSeparationEarningsApprovable(tx, run, actor.id);
     const lines = await tx.hrPayrollLine.findMany({ where: { runId: id, approvedBy: null, ...(lineIds ? { id: { in: lineIds } } : {}) }, include: { employee: { select: { accountId: true, fullNameAr: true } } } });
     const own = lines.filter((l) => l.employee.accountId === actor.id);
-    if (lineIds && own.length) throw new HrError(`You cannot approve your own pay (${own.map((l) => l.employee.fullNameAr).join(", ")}). Another approver must.`, 403, "SELF_ACTION");
-    const mine = lines.filter((l) => l.employee.accountId !== actor.id);
+    // SIMPLE MODE: the owner may approve their own pay line.
+    if (lineIds && own.length && !isSimpleMode()) throw new HrError(`You cannot approve your own pay (${own.map((l) => l.employee.fullNameAr).join(", ")}). Another approver must.`, 403, "SELF_ACTION");
+    // SIMPLE MODE: the owner's own line is approved with the rest (otherwise it is skipped for another approver).
+    const mine = isSimpleMode() ? lines : lines.filter((l) => l.employee.accountId !== actor.id);
     if (mine.length) await tx.hrPayrollLine.updateMany({ where: { id: { in: mine.map((l) => l.id) }, approvedBy: null }, data: { approvedBy: actor.id, approvedAt: new Date() } });
     const remaining = await tx.hrPayrollLine.count({ where: { runId: id, approvedBy: null } });
-    await audit(tx, { action: "PAYROLL_APPROVE_LINES", entityType: "HrPayrollRun", entityId: id, after: { approved: mine.length, skippedOwn: own.length, remaining }, actorId: actor.id });
+    await audit(tx, { action: "PAYROLL_APPROVE_LINES", entityType: "HrPayrollRun", entityId: id, after: { approved: mine.length, skippedOwn: lines.length - mine.length, remaining }, actorId: actor.id });
     let finalized = false;
     let journal: { journalEntryId: string | null; skipped: boolean } | null = null;
     if (remaining === 0) {
@@ -523,7 +529,7 @@ export async function approveLines(actor: HrActor, id: string, b: Record<string,
       await audit(tx, { action: "PAYROLL_APPROVED", entityType: "HrPayrollRun", entityId: id, after: { journalEntryId: journal.journalEntryId, accountingSkipped: journal.skipped, postingDate: dayString(posting.date), routedFromClosedPeriod: posting.routed, postingNote: posting.note }, actorId: actor.id });
       finalized = true;
     }
-    return { ...(await runDto(tx, id, actor)), approvedNow: mine.length, skippedOwn: own.length, finalized, journalEntryId: journal?.journalEntryId ?? null };
+    return { ...(await runDto(tx, id, actor)), approvedNow: mine.length, skippedOwn: lines.length - mine.length, finalized, journalEntryId: journal?.journalEntryId ?? null };
   }, TX)); });
 }
 

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { buildDefaultPermissions, canEdit, hasSubPrivilege, parsePermissions } from "@/lib/auth-shared";
 import { parseMoney, fromMinor } from "../money";
 import { assertCan, assertScope, audit, can, COMPANY, FinanceError, getSettings, reqStr, str, type Db, type FinanceActor, type FinanceScope } from "./context";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 export async function updateSettings(actor: FinanceActor, body: Record<string, unknown>) {
   assertCan(actor, "settings_manage");
@@ -67,7 +68,8 @@ export async function setBranchAccess(actor: FinanceActor, body: Record<string, 
   if (!canEdit(actor.permissions, "employees")) throw new FinanceError("Branch access is changed by an administrator who may edit employees.", 403);
   const employeeId = reqStr(body.employeeId, "Employee", 40);
   const branchId = reqStr(body.branchId, "Branch", 40);
-  if (employeeId === actor.id) throw new FinanceError("You cannot change your own branch access.", 403);
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (employeeId === actor.id)) throw new FinanceError("You cannot change your own branch access.", 403);
   const grant = body.grant !== false;
   return prisma.$transaction(async (tx) => {
     const [e, b] = await Promise.all([tx.employee.findUnique({ where: { id: employeeId } }), tx.finBranch.findUnique({ where: { id: branchId } })]);

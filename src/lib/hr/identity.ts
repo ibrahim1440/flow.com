@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { HrError, audit, type Db } from "./core";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 export type PersonType = "EMPLOYEE" | "EXTERNAL";
 /** Person keys: an employee's id as is, an external person's id prefixed (never a payee id). */
@@ -91,6 +92,8 @@ export async function personsOf(db: Db, accountIds: string[]): Promise<Set<strin
 
 /** True when the actor's login is one of `accounts`, or the actor is (or was) the same person as one of them. */
 export async function samePersonAsAny(db: Db, accounts: Iterable<string>, actorId: string): Promise<boolean> {
+  // SIMPLE MODE: a single owner may request and decide, prepare and approve — no same-person refusal.
+  if (isSimpleMode()) return false;
   const set = new Set(accounts);
   if (set.has(actorId)) return true;
   if (!set.size) return false;
@@ -163,7 +166,8 @@ export async function assertVerifiedActor(actor: { id: string }, step: string, d
   // concurrent revocation waits for this action to commit (or this action sees it).
   if (db !== prisma) await db.$queryRaw`SELECT 1 FROM "HrIdentityVerification" WHERE "accountId" = ${actor.id} AND "revokedAt" IS NULL FOR SHARE`;
   const s = await identityOf(db, actor.id);
-  if (s.verified) return s;
+  // SIMPLE MODE: no action requires a verified identity.
+  if (s.verified || isSimpleMode()) return s;
   // Written on its own (not in the caller's transaction): the refusal rolls that back.
   await audit(prisma, { action: "IDENTITY_NOT_VERIFIED_REFUSED", entityType: "Employee", entityId: actor.id, after: { step, linked: !!s.person, personType: s.person?.type ?? null, personActive: s.person?.active ?? null, verified: false }, actorId: actor.id }).catch(() => undefined);
   throw new HrError(IDENTITY_NOT_VERIFIED_EN, 403, "IDENTITY_NOT_VERIFIED");
@@ -173,6 +177,8 @@ export const SUBJECT_NOT_VERIFIED_EN = "This login is not linked to a verified p
 
 /** A grant of a segregated duty (or the admin role) goes only to a login of a verified person — at request and at approval. */
 export async function assertSubjectVerified(db: Db, accountId: string) {
+  // SIMPLE MODE: a grant does not need the login to belong to a verified person.
+  if (isSimpleMode()) return;
   if (!(await identityOf(db, accountId)).verified) throw new HrError(SUBJECT_NOT_VERIFIED_EN, 409, "SUBJECT_NOT_VERIFIED");
 }
 

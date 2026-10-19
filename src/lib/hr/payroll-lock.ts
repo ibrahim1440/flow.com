@@ -40,6 +40,7 @@
 // entry, reconciliation and approval; settings changes (two people).
 import { prisma } from "@/lib/db";
 import { HrError, type Db } from "./core";
+import { isSimpleMode } from "@/lib/simple-mode";
 import { toArabic } from "./messages-ar";
 
 import { PAYROLL_LOCKED, payrollLockedMessage, type LockedAction } from "./payroll-lock-actions";
@@ -50,6 +51,9 @@ export { PAYROLL_LOCKED, LOCKED_ACTIONS, payrollLockedMessage, type LockedAction
  * settings row, a missing column, a read error or any value other than exactly `true` is LOCKED.
  */
 export async function isPayrollLive(db: Db = prisma): Promise<boolean> {
+  // SIMPLE MODE: payroll is live in the application. The database lock (HrA0_payroll_lock_guard)
+  // reads HrSettings."payrollLive" itself: scripts/release/simple-mode-db.sql switches it on.
+  if (isSimpleMode()) return true;
   try {
     const s = await db.hrSettings.findUnique({ where: { id: "singleton" }, select: { payrollLive: true } });
     return s?.payrollLive === true;

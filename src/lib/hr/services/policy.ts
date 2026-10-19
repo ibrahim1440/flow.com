@@ -15,6 +15,7 @@ import { dayString, isDay, parseDay } from "../dates";
 import { assertVerifiedActor } from "../identity";
 import { assertTestPath } from "../test-path";
 import { deductionPolicyContent, deductionPolicyFields, deductionPolicyGaps } from "../deductions";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 const COMPONENTS = ["BASIC", "HOUSING", "TRANSPORT", "OTHER"] as const;
 export const ACCOUNT_KEYS = [
@@ -183,7 +184,8 @@ export async function activatePolicy(actor: HrActor, id: string, expected?: stri
     const p = await tx.hrPayrollPolicy.findUnique({ where: { id }, include: { contributionRules: true } });
     if (!p) throw new HrError("Policy not found", 404);
     if (p.status !== "DRAFT") throw new HrError(`Only a DRAFT policy can be activated (this one is ${p.status}).`, 409);
-    if (p.createdBy === actor.id) throw new HrError("The person who drafted a policy cannot activate it. Another policy manager must.", 403, "SELF_ACTION");
+    // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+    if (!isSimpleMode() && (p.createdBy === actor.id)) throw new HrError("The person who drafted a policy cannot activate it. Another policy manager must.", 403, "SELF_ACTION");
     // P-2 / E-1: omitting the fingerprint is an in-process test/fixture path only (./test-path).
     if (expected === undefined) await assertTestPath(tx, "Activation without a reviewed fingerprint", actor.id);
     else {

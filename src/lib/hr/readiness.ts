@@ -27,6 +27,10 @@ import { type Db } from "./core";
 import { ACCOUNT_KEYS } from "./services/policy";
 import { identityOfMany, personsOf } from "./identity";
 import { effectivePermissions, payrollDuties, payrollDutyConflicts, PAYROLL_CONFLICT_PAIRS, type PayrollSodDuty } from "./sod";
+import { isSimpleMode } from "@/lib/simple-mode";
+
+/** SIMPLE MODE: findings that only a team of several verified persons can clear. */
+const SIMPLE_MODE_WAIVED = new Set(["CONFLICTING_PERMISSIONS", "PRIVILEGED_UNVERIFIED", "PERSON_CONFLICT", "ACCOUNT_EDITOR_CONFLICT", "ACCOUNT_EDITORS_FEWER_THAN_TWO", "ROLE_NOT_COVERED"]);
 
 export type ReadinessFinding = { code: string; severity: "BLOCKING"; accounts?: { id: string; name: string }[]; detail: string; pairs?: [PayrollSodDuty, PayrollSodDuty][] };
 export type Readiness = { ready: boolean; findings: ReadinessFinding[]; checkedAccounts: number };
@@ -91,5 +95,11 @@ export async function payrollReadiness(db: Db): Promise<Readiness> {
   // Re-review R4: in a release the runtime login cannot write the switch at all (grant-hr-runtime.sql).
   const [p] = await db.$queryRaw<{ ok: boolean }[]>`SELECT has_column_privilege(current_user, '"HrSettings"', 'payrollLive', 'UPDATE') AND has_column_privilege(current_user, '"HrSettings"', 'payrollLiveChangeId', 'UPDATE') AS ok`;
   if (!p?.ok) findings.push({ code: "SWITCH_REQUIRES_RELEASE_STEP", severity: "BLOCKING", detail: "The application's database login cannot write the live-payroll switch: turning it on is an owner-run release step (a migration)." });
+  // SIMPLE MODE: the person-based findings (verified identities, duty conflicts, two distinct persons)
+  // do not block a single owner; the posting-map, username and release-step findings still do.
+  if (isSimpleMode()) {
+    const kept = findings.filter((f) => !SIMPLE_MODE_WAIVED.has(f.code));
+    return { ready: kept.length === 0, findings: kept, checkedAccounts: rows.length };
+  }
   return { ready: findings.length === 0, findings, checkedAccounts: rows.length };
 }

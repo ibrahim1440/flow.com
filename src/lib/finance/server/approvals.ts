@@ -8,6 +8,7 @@ import { assertMayDecide } from "./approval-core";
 import { activateRuleVersion, executeCategoryTransfer } from "./allocation";
 import { decideRevision } from "./budgets";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 export async function approvalQueue(db: Db, actor: FinanceActor, scope: FinanceScope) {
   const subs = ["budget_approve", "transfer_approve", "spend_override_approve", "period_close"].filter((s) => hasSubPrivilege(actor.permissions, "finance", s));
@@ -22,7 +23,8 @@ export async function approvalQueue(db: Db, actor: FinanceActor, scope: FinanceS
   const raised = await db.finApprovalRequest.findMany({ where: { requestedBy: actor.id }, orderBy: { requestedAt: "desc" }, take: 50 });
   const ids = [...new Set([...mine, ...raised].flatMap((r) => [r.requestedBy, r.assignedToId, r.decidedBy]).filter(Boolean) as string[])];
   const people = await db.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
-  return { toDecide: mine.filter((r) => r.requestedBy !== actor.id), raisedByMe: raised, people };
+  // SIMPLE MODE: the single owner decides the requests they raised, so they are listed to decide too.
+  return { toDecide: mine.filter((r) => isSimpleMode() || r.requestedBy !== actor.id), raisedByMe: raised, people };
 }
 
 export async function decideApproval(actor: FinanceActor, scope: FinanceScope, id: string, body: Record<string, unknown>) {

@@ -1,5 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, validatePlanRules, findOverlappingAssignment, type PlanRules } from "./engine";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -212,7 +213,8 @@ export async function assignPlan(
     actorId: string;
   },
 ): Promise<{ assignmentId: string }> {
-  if (input.employeeId === input.actorId) {
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (input.employeeId === input.actorId)) {
     throw {
       _appCode: 403,
       message:
@@ -298,7 +300,8 @@ export async function endAssignment(
     select: { id: true, employeeId: true, effectiveFrom: true, effectiveTo: true },
   });
   if (!a) throw { _appCode: 404, message: "Assignment not found." };
-  if (a.employeeId === input.actorId) {
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (a.employeeId === input.actorId)) {
     throw { _appCode: 403, message: "You cannot change your own commission assignment." };
   }
   if (input.effectiveTo.getTime() <= a.effectiveFrom.getTime()) {

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { parsePermissions, buildDefaultPermissions, hasModuleAccess, ALL_MODULES } from "@/lib/auth";
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 import { startSession, type SessionMethod } from "./session";
+import { simpleModePermissions } from "@/lib/simple-mode";
 export { verifySecret } from "./secret";
 
 /** One authentication event (never a credential): AuthAuditLog. */
@@ -50,6 +51,8 @@ export async function completeSignIn(request: Request, employeeId: string, metho
   const e = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId }, select: { id: true, name: true, role: true, permissions: true, defaultRoute: true } });
   let permissions = parsePermissions(e.permissions as string);
   if (!permissions || Object.keys(permissions).length === 0) permissions = buildDefaultPermissions(e.role);
+  // SIMPLE MODE: the admin role holds every module (same rule as the session).
+  permissions = simpleModePermissions(permissions, e.role);
   const response = NextResponse.json({ user: { id: e.id, name: e.name, role: e.role, permissions }, redirectTo: resolveRoute(e.defaultRoute || "/dashboard", permissions) });
   await startSession(response, e.id, method, mfa, request);
   await authAudit(request, { userId: e.id, action: "SIGN_IN", result: "SUCCESS", reasonCode: method, metadata: { mfa } });

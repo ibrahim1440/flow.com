@@ -7,6 +7,7 @@ import { ZERO, roundMoney, riyadhMonthStart, parseFiniteDecimal } from "@/lib/se
 import { approvePeriod, adjust, periodStatement } from "@/lib/services/commissions/accrual";
 import { isReservedByPayroll, lockCommissionPeriod } from "@/lib/hr/services/commission-bridge";
 import { isPayrollLive, payrollLockedRefusal } from "@/lib/hr/payroll-lock";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 /**
  * POST /api/commissions/review/actions — approve a period, adjust it, or record a payout.
@@ -52,7 +53,8 @@ export async function POST(request: Request) {
   const periodStart = riyadhMonthStart(at);
 
   // The rule that has to hold before any privilege is even consulted.
-  if (employeeId === user.id) {
+  // SIMPLE MODE: a single owner may decide their own request / act on their own record.
+  if (!isSimpleMode() && (employeeId === user.id)) {
     return NextResponse.json(
       {
         error:
