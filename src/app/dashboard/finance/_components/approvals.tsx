@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Segmented, api, useApi, useL, withBranch, useFinance, type Tone } from "./ui";
+import { Button, Dialog, Status, EmptyState, ErrorState, Field, INPUT, LoadingState, Segmented, api, useApi, useL, withBranch, useFinance, type Tone } from "./ui";
 
 type Req = {
   id: string; type: string; payload: Record<string, unknown>; status: string; summary: string; reason: string | null; requestedBy: string; requestedAt: string;
@@ -65,30 +65,30 @@ export function ApprovalsDialog({ open, onClose, onDecided }: { open: boolean; o
   const list = tab === "mine" ? q.data?.toDecide ?? [] : q.data?.raisedByMe ?? [];
   return (
     <Dialog open={open} onClose={onClose} width="max-w-[640px]" title={L("الموافقات", "Approvals")} sub={L("الطلبات التي تنتظر قرارك. لا يمكنك اعتماد طلب قدّمته بنفسك.", "Requests waiting for your decision. You cannot approve a request you raised.")}>
-      <Segmented value={tab} onChange={setTab} options={[{ value: "mine", label: L(`بانتظار قراري (${q.data?.toDecide.length ?? 0})`, `Waiting for me (${q.data?.toDecide.length ?? 0})`) }, { value: "raised", label: L("طلباتي", "My requests") }]} />
+      <Segmented label={L("الموافقات", "Approvals")} value={tab} onChange={setTab} options={[{ value: "mine", label: L(`بانتظار قراري (${q.data?.toDecide.length ?? 0})`, `Waiting for me (${q.data?.toDecide.length ?? 0})`) }, { value: "raised", label: L("طلباتي", "My requests") }]} />
       {q.loading && !q.data ? <LoadingState /> : q.error ? <ErrorState error={q.error} onRetry={q.reload} /> : list.length === 0 ? (
         <EmptyState title={tab === "mine" ? L("لا توجد طلبات بانتظار قرارك", "Nothing is waiting for you") : L("لم تقدّم طلبات بعد", "You have not raised any requests")} />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="fin-stack" style={{ gap: 10 }}>
           {list.map((r) => {
             const [ar, en, tone] = TYPE_LABEL[r.type] ?? [r.type, r.type, "info"];
             const expanded = tab === "mine" && openId === r.id;
             return (
-              <div key={r.id} className={`rounded-xl bg-white p-3.5 flex flex-col gap-2 ${expanded ? "border-2 border-orange" : "border border-border"}`}>
-                <button type="button" className="flex items-start gap-2 text-start" onClick={() => tab === "mine" && setOpenId(expanded ? null : r.id)}>
-                  <Badge tone={tone}>{L(ar, en)}</Badge>
-                  <span className="text-sm font-bold text-charcoal">{summary(r)}</span>
+              <div key={r.id} className={`fin-box ${expanded ? "is-pick" : "is-line"}`} style={{ padding: "12px 14px", gap: 6 }}>
+                <button type="button" className="fin-appr-head" onClick={() => tab === "mine" && setOpenId(expanded ? null : r.id)}>
+                  <Status tone={tone}>{L(ar, en)}</Status>
+                  <span className="fin-strong fin-t1">{summary(r)}</span>
                 </button>
-                <p className="text-xs text-brown">
+                <p className="fin-cap">
                   {tab === "mine" ? L(`طلبه ${person(r.requestedBy)}`, `Requested by ${person(r.requestedBy)}`) : L("طلبك", "Your request")} · {when(r.requestedAt)}
                   {r.assignedToId ? ` · ${L("المعتمِد المسمّى", "Named approver")}: ${person(r.assignedToId)}` : ""}
                 </p>
-                {r.reason && <p className="text-xs text-charcoal">{L("السبب", "Reason")}: {r.reason}</p>}
+                {r.reason && <p className="fin-cap fin-t2">{L("السبب", "Reason")}: {r.reason}</p>}
                 {tab === "raised" && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge tone={STATUS[r.status][2]}>{L(STATUS[r.status][0], STATUS[r.status][1])}</Badge>
-                    {r.decidedBy && <span className="text-xs text-brown">{person(r.decidedBy)} · {r.decidedAt ? when(r.decidedAt) : ""}{r.decisionNote ? ` · ${r.decisionNote}` : ""}</span>}
-                    {r.status === "PENDING" && <Button kind="ghost" busy={busy} onClick={() => withdraw(r.id)}>{L("سحب الطلب", "Withdraw")}</Button>}
+                  <div className="fin-row">
+                    <Status tone={STATUS[r.status][2]}>{L(STATUS[r.status][0], STATUS[r.status][1])}</Status>
+                    {r.decidedBy && <span className="fin-cap">{person(r.decidedBy)} · {r.decidedAt ? when(r.decidedAt) : ""}{r.decisionNote ? ` · ${r.decisionNote}` : ""}</span>}
+                    {r.status === "PENDING" && <Button size="sm" kind="ghost" busy={busy} onClick={() => withdraw(r.id)}>{L("سحب الطلب", "Withdraw")}</Button>}
                   </div>
                 )}
                 {expanded && (
@@ -96,10 +96,10 @@ export function ApprovalsDialog({ open, onClose, onDecided }: { open: boolean; o
                     <Field label={L("ملاحظة القرار (إلزامية عند الرفض)", "Decision note (required to reject)")}>
                       <input className={INPUT} value={note} onChange={(e) => setNote(e.target.value)} />
                     </Field>
-                    {err && <p className="text-xs text-red-600">{err}</p>}
-                    <div className="flex gap-2">
-                      <Button kind="primary" busy={busy} onClick={() => decide(r.id, "APPROVE")}>{L("اعتماد", "Approve")}</Button>
-                      <Button kind="danger" busy={busy} onClick={() => decide(r.id, "REJECT")}>{L("رفض", "Reject")}</Button>
+                    {err && <p className="fin-cap fin-danger">{err}</p>}
+                    <div className="fin-row">
+                      <Button size="sm" kind="primary" busy={busy} onClick={() => decide(r.id, "APPROVE")}>{L("اعتماد", "Approve")}</Button>
+                      <Button size="sm" kind="danger" busy={busy} onClick={() => decide(r.id, "REJECT")}>{L("رفض", "Reject")}</Button>
                     </div>
                   </>
                 )}

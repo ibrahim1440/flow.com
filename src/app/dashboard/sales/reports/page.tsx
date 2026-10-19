@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { TrendingUp, Download } from "lucide-react";
-import {
-  useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Money, api, FilterSelect, LEAD_SOURCE_LABELS, num, StatStrip, Stat, monthOptions,
-} from "../_components/ui";
+import { useState, useEffect, type ReactNode } from "react";
+import { useLang, api, LEAD_SOURCE_LABELS, num, formatMoney, monthOptions } from "../_components/ui";
+import { PerfHeader, MonthChip, Bar, PerfNote, PerfNotice, PerfLoading, Metrics } from "../_components/perf";
+import { usePhone } from "@/components/shell/page-context";
 
 /**
- * Sales reports.
+ * Sales reports — Direction 2.1, GX A-P04 «تقارير المبيعات» (`1222:100243`, EN `1230:124232`,
+ * 1024 `1224:4857`, 390 `1432:16498`).
  *
  * ── Conversion rate is a cohort rate ──
  * "Leads this month divided by deals this month" measures nothing, because the two sets are
@@ -17,7 +16,8 @@ import {
  * link the two, which is what those rows exist for. The label says so, because a
  * conversion rate with no stated denominator is a number people quote for years.
  *
- * PROVISIONAL INTERFACE — see the banner.
+ * Visual port: the same report request and CSV link; nothing is computed here that was not
+ * computed before.
  */
 
 type Report = {
@@ -60,6 +60,7 @@ function thisMonth(): string {
 export default function ReportsPage() {
   const lang = useLang();
   const ar = lang === "ar";
+  const phone = usePhone();
 
   const [month, setMonth] = useState(thisMonth());
   const [data, setData] = useState<Report | null>(null);
@@ -67,14 +68,8 @@ export default function ReportsPage() {
   const [error, setError] = useState("");
 
   /**
-   * Loads the period.
-   *
-   * The fetch lives in the effect rather than in a `useCallback` the effect then calls. The
-   * lint rule resolves a called callback and sees setState reachable from the effect body;
-   * inlining puts the first `await` before any state write, which is the property the rule
-   * is actually asking for. Nothing else calls this, so there is nothing to keep callable.
-   *
-   * `cancelled` guards against a slow response for an old month landing after a newer one.
+   * Loads the period. The fetch lives in the effect (the first `await` precedes every state
+   * write); `cancelled` guards against a slow response for an old month landing after a newer one.
    */
   useEffect(() => {
     let cancelled = false;
@@ -92,236 +87,188 @@ export default function ReportsPage() {
     return () => { cancelled = true; };
   }, [month, ar]);
 
-  if (loading) return <Spinner />;
-  if (!data) return <Alert kind="error">{error}</Alert>;
+  if (loading) return <PerfLoading ar={ar} />;
+  if (!data) {
+    return <div className="pg"><PerfNotice kind="error" ar={ar}>{error}</PerfNotice></div>;
+  }
 
-  const maxStage = Math.max(1, ...data.pipeline.byStage.map((s) => s.count));
+  const maxValue = Math.max(1, ...data.pipeline.byStage.map((s) => Number(s.value)));
+  const maxCount = Math.max(1, ...data.pipeline.byStage.map((s) => s.count));
+  // Bars by value, as the frame draws them; a stage of zero-value deals still shows its count.
+  const allZero = data.pipeline.byStage.every((s) => Number(s.value) === 0);
 
   /** Counts and percentages in the reader's own numerals. */
   const n = (v: number) => num(v, lang);
-  const pct = (raw: string) => {
-    // The server sends "36.84"; the trailing ".00" is noise in a headline figure.
-    const trimmed = raw.replace(/\.0+$/, "");
-    return ar ? `${trimmed}%` : `${trimmed}%`;
-  };
-  const months = monthOptions(month, lang);
-  const currentMonthLabel = months.find((o) => o.value === month)?.label ?? month;
+  const pct = (raw: string) => `${raw.replace(/\.0+$/, "")}%`;
+  const days = (d: number | null) =>
+    d === null ? "—" : ar ? `${n(d)} يومًا` : `${d} days`;
+  const monthLabel = monthOptions(month, lang).find((o) => o.value === month)?.label ?? month;
+  const sourceLabel = (s: string) => (ar ? (SOURCE_LABELS[s]?.ar ?? s) : (SOURCE_LABELS[s]?.en ?? s));
+
+  const actions = (
+    <>
+      <MonthChip value={month} onChange={setMonth} lang={lang} testId="rp-month" />
+      {!phone && (
+        <a
+          // A real link rather than a scripted download: the browser handles the file,
+          // the Content-Disposition header names it, and it survives JavaScript failing.
+          href={`/api/sales/reports?month=${month}&format=csv`}
+          download
+          data-testid="export-report"
+          className="btn"
+        >
+          <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" /></svg>
+          {ar ? "تصدير CSV" : "Export CSV"}
+        </a>
+      )}
+    </>
+  );
+
+  const meta = [
+    monthLabel,
+    <>{ar ? "النطاق: " : "scope: "}{data.scope === "own" ? (ar ? "أداؤك أنت" : "your own") : (ar ? "كل الفريق" : "the whole team")}</>,
+  ];
+
+  const sectionHead = (t: string, sub?: string) => (
+    <div className="bh"><h2 className="bt">{t}</h2>{sub && <span className="sub">{sub}</span>}</div>
+  );
+  const emptyLine = (t: string) => <p className="sm" style={{ color: "var(--text-muted)", fontSize: 13.5, margin: "6px 0" }}>{t}</p>;
+  const line = { display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: 13.5 } as const;
+
+  const stages = data.pipeline.byStage.length === 0 ? emptyLine(ar ? "لا توجد صفقات مفتوحة." : "No open deals.") : (
+    <div data-testid="stage-breakdown">
+      {data.pipeline.byStage.map((s) => {
+        const w = allZero ? (s.count / maxCount) * 100 : (Number(s.value) / maxValue) * 100;
+        const figure = <span className="n">{n(s.count)} · {formatMoney(s.value)}</span>;
+        return phone ? (
+          <div key={s.stageId} style={{ padding: "6px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13.5, marginBottom: 6 }}>
+              <span>{ar ? s.nameAr : s.nameEn}</span>{figure}
+            </div>
+            <Bar percent={w} />
+          </div>
+        ) : (
+          <div key={s.stageId} style={{ display: "grid", gridTemplateColumns: "110px minmax(0,1fr) 150px", gap: 12, alignItems: "center", padding: "6px 0", fontSize: 13.5 }}>
+            <span>{ar ? s.nameAr : s.nameEn}</span>
+            <Bar percent={w} />
+            {/* `.n` is LTR, so «end» is its right edge, as in the frame. */}
+            <span className="n" style={{ textAlign: "end" }}>{n(s.count)} · {formatMoney(s.value)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const sources = data.leads.bySource.length === 0 ? emptyLine(ar ? "لا يوجد عملاء محتملون هذا الشهر." : "No leads this month.") : (
+    <div data-testid="source-breakdown">
+      {data.leads.bySource.map((s) => (
+        <div key={s.source} style={line}><span>{sourceLabel(s.source)}</span><span className="n">{n(s.count)}</span></div>
+      ))}
+    </div>
+  );
+
+  const lost = data.closed.lostReasons.length === 0 ? emptyLine(ar ? "لم تُخسر صفقات هذا الشهر." : "No deals lost this month.") : (
+    <div data-testid="lost-reasons">
+      {data.closed.lostReasons.map((r, i) => (
+        <div key={i} style={{ ...line, justifyContent: "flex-start", gap: 10 }}>
+          <span className="n" style={{ color: "var(--status-danger)", minWidth: 18 }}>{n(r.count)}</span>
+          <span style={{ overflowWrap: "anywhere" }}>{r.reason}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const cycle = data.duration.sampleSize === 0 ? emptyLine(ar ? "لم تُغلق صفقات هذا الشهر." : "No deals closed this month.") : (
+    <div data-testid="cycle-stats">
+      <dl className="props" style={{ gridTemplateColumns: "90px minmax(0,1fr)" }}>
+        <dt>{ar ? "الوسيط" : "Median"}</dt><dd>{days(data.duration.medianDays)}</dd>
+        <dt>{ar ? "المتوسط" : "Mean"}</dt><dd>{days(data.duration.meanDays)}</dd>
+      </dl>
+      <p className="sm" style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-muted)" }}>
+        {ar
+          ? `من ${n(data.duration.sampleSize)} صفقات أُغلقت هذا الشهر. الوسيط أولًا لأن صفقة واحدة طويلة تجرّ المتوسط إلى رقم لا يعرفه أحد.`
+          : `From ${data.duration.sampleSize} deals closed this month. The median leads because one nine-month deal drags an average nobody recognises.`}
+      </p>
+    </div>
+  );
+
+  const headline = (
+    <Metrics items={[
+      {
+        label: ar ? "قيمة المسار المفتوح" : "Open pipeline", testId: "stat-pipeline",
+        value: <span className="n">{formatMoney(data.pipeline.openValue)}</span>,
+        note: ar ? `${n(data.pipeline.openCount)} صفقات` : `${data.pipeline.openCount} deals`,
+      },
+      {
+        label: ar ? "معدّل الكسب" : "Win rate", testId: "stat-winrate",
+        value: <span className="n">{pct(data.closed.winRatePercent)}</span>,
+        note: ar ? `${n(data.closed.won)} مكسوبة · ${n(data.closed.lost)} خاسرة` : `${data.closed.won} won · ${data.closed.lost} lost`,
+      },
+      {
+        label: ar ? "وسيط مدة الدورة" : "Median cycle", testId: "stat-cycle",
+        value: data.duration.medianDays === null ? "—" : (
+          <><span className="n">{n(data.duration.medianDays)}</span><span className="unit">{ar ? "يومًا" : "days"}</span></>
+        ),
+        note: ar ? "من الإنشاء إلى الإغلاق" : "from creation to close",
+      },
+      {
+        label: ar ? "نسبة التحويل" : "Conversion rate", testId: "stat-conversion",
+        value: <span className="n">{pct(data.leads.conversionRatePercent)}</span>,
+        note: ar ? `من عميل محتمل إلى صفقة · ${n(data.leads.created)} وصلوا` : `from lead to deal · ${data.leads.created} arrived`,
+      },
+    ]} />
+  );
+
+  const closing = (
+    <Metrics items={[
+      { label: ar ? "قيمة المكسوب" : "Won value", testId: "stat-won", value: <span className="n">{formatMoney(data.closed.wonValue)}</span> },
+      { label: ar ? "قيمة الخاسر" : "Lost value", testId: "stat-lost", value: <span className="n">{formatMoney(data.closed.lostValue)}</span> },
+      {
+        label: ar ? "عملاء محتملون جدد" : "New leads", testId: "stat-leads",
+        value: <span className="n">{n(data.leads.created)}</span>,
+        note: ar ? `${n(data.leads.converted)} تحوّلت` : `${data.leads.converted} converted`,
+      },
+      {
+        label: ar ? "عملاء جدد أُنشئوا" : "New customers created", testId: "stat-customers",
+        value: <span className="n">{n(data.leads.newCustomersCreated)}</span>,
+        note: ar ? "من تحويل العملاء المحتملين" : "from lead conversion",
+      },
+    ]} />
+  );
+
+  const pair = (a: ReactNode, b: ReactNode) => (
+    <div className="cols perf-cols" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 48 }}>
+      <div>{a}</div><div>{b}</div>
+    </div>
+  );
 
   return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+    <div className="pg">
+      <PerfHeader ar={ar} title={ar ? "الأداء والعمولات" : "Performance and commissions"}
+        phoneTitle={ar ? "تقارير المبيعات" : "Sales reports"} meta={meta} actions={actions} />
+      <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
 
-      <PageHeader
-        title={ar ? "تقارير المبيعات" : "Sales reports"}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{currentMonthLabel}</span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>
-              {ar ? "النطاق: " : "scope: "}
-              {data.scope === "own" ? (ar ? "أداؤك أنت" : "your own") : (ar ? "كل الفريق" : "the whole team")}
-            </span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>{ar ? "الأرقام من صافي المحصّل" : "figures are net collections"}</span>
-          </span>
-        }
-        actions={
-          <>
-            <FilterSelect
-              value={month}
-              onChange={setMonth}
-              label={ar ? "الشهر" : "Month"}
-              width="w-[180px]"
-              testId="rp-month"
-            >
-              {months.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </FilterSelect>
-            <a
-              // A real link rather than a scripted download: the browser handles the file,
-              // the Content-Disposition header names it, and it survives JavaScript failing.
-              href={`/api/sales/reports?month=${month}&format=csv`}
-              download
-              data-testid="export-report"
-              className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary"
-            >
-              <Download size={16} aria-hidden /> {ar ? "تصدير CSV" : "Export CSV"}
-            </a>
-          </>
-        }
-      />
+      <div style={{ margin: "4px 0 28px" }}>{headline}</div>
 
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
+      {pair(
+        <>{sectionHead(ar ? "المسار حسب المرحلة" : "Pipeline by stage")}{stages}</>,
+        <>{sectionHead(ar ? "مصادر العملاء المحتملين" : "Lead sources")}{sources}</>,
+      )}
+      <div className="hr" style={{ margin: "28px 0" }} />
+      {pair(
+        <>{sectionHead(ar ? "أسباب الخسارة" : "Why deals were lost")}{lost}</>,
+        <>{sectionHead(ar ? "طول دورة البيع" : "Sales cycle")}{cycle}</>,
+      )}
+      <div className="hr" style={{ margin: "28px 0" }} />
+      <div style={{ margin: "4px 0 28px" }}>{closing}</div>
 
-      {/* ── Headline figures ──────────────────────────────────────── */}
-      <StatStrip>
-        <Stat
-          label={ar ? "قيمة المسار المفتوح" : "Open pipeline"}
-          value={data.pipeline.openValue}
-          note={ar ? `${n(data.pipeline.openCount)} صفقة` : `${data.pipeline.openCount} deals`}
-          money
-          testId="stat-pipeline"
-        />
-        <Stat
-          label={ar ? "معدّل الكسب" : "Win rate"}
-          value={pct(data.closed.winRatePercent)}
-          note={
-            ar
-              ? `${n(data.closed.won)} مكسوبة · ${n(data.closed.lost)} خاسرة`
-              : `${data.closed.won} won · ${data.closed.lost} lost`
-          }
-          testId="stat-winrate"
-        />
-        <Stat
-          label={ar ? "متوسط مدة الدورة" : "Median cycle"}
-          value={
-            data.duration.medianDays === null
-              ? "—"
-              : ar
-                ? `${n(data.duration.medianDays)} يوماً`
-                : `${data.duration.medianDays} days`
-          }
-          note={ar ? "من الإنشاء إلى الإغلاق" : "from creation to close"}
-          testId="stat-cycle"
-        />
-        <Stat
-          label={ar ? "نسبة التحويل" : "Conversion rate"}
-          value={pct(data.leads.conversionRatePercent)}
-          note={
-            ar
-              ? `من عميل محتمل إلى صفقة · ${n(data.leads.created)} وصلوا`
-              : `from lead to deal · ${data.leads.created} arrived`
-          }
-          testId="stat-conversion"
-        />
-      </StatStrip>
-
-      <div className="grid lg:grid-cols-2 gap-5 items-start">
-        {/* ── Pipeline by stage ──────────────────────────────────── */}
-        <Card>
-          <SectionTitle>
-            <span className="inline-flex items-center gap-1.5">
-              <TrendingUp size={14} aria-hidden /> {ar ? "المسار حسب المرحلة" : "Pipeline by stage"}
-            </span>
-          </SectionTitle>
-          {data.pipeline.byStage.length === 0 ? (
-            <EmptyState>{ar ? "لا توجد صفقات مفتوحة." : "No open deals."}</EmptyState>
-          ) : (
-            // The design draws this as label, track, count on one line. The track's fill
-            // starts at the reading edge — the right in Arabic — so a longer bar grows the
-            // way the eye already travels.
-            <ul className="space-y-2.5" data-testid="stage-breakdown">
-              {data.pipeline.byStage.map((s) => (
-                <li key={s.stageId} className="flex items-center gap-3">
-                  <span className="w-[90px] shrink-0 text-[14px] leading-[22px] text-oo-text-primary">
-                    {ar ? s.nameAr : s.nameEn}
-                  </span>
-                  <div className="h-[10px] flex-1 overflow-hidden rounded-[10px] bg-oo-bg-subtle">
-                    <div
-                      className="h-[10px] bg-oo-status-preparing"
-                      style={{ width: `${(s.count / maxStage) * 100}%` }}
-                    />
-                  </div>
-                  <span className="w-[130px] shrink-0 text-end text-[12px] leading-[18px] text-oo-text-secondary">
-                    {n(s.count)} · <Money value={s.value} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        {/* ── Lead sources ───────────────────────────────────────── */}
-        <Card>
-          <SectionTitle>{ar ? "مصادر العملاء المحتملين" : "Lead sources"}</SectionTitle>
-          {data.leads.bySource.length === 0 ? (
-            <EmptyState>{ar ? "لا يوجد عملاء محتملون هذا الشهر." : "No leads this month."}</EmptyState>
-          ) : (
-            <ul className="space-y-2" data-testid="source-breakdown">
-              {data.leads.bySource.map((s) => (
-                <li
-                  key={s.source}
-                  className="flex items-center justify-between rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
-                >
-                  <span className="tabular-nums font-medium">{n(s.count)}</span>
-                  <span>
-                    {ar ? (SOURCE_LABELS[s.source]?.ar ?? s.source) : (SOURCE_LABELS[s.source]?.en ?? s.source)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        {/* ── Why deals were lost ────────────────────────────────── */}
-        <Card>
-          <SectionTitle>{ar ? "أسباب الخسارة" : "Why deals were lost"}</SectionTitle>
-          {data.closed.lostReasons.length === 0 ? (
-            <EmptyState>{ar ? "لم تُخسر صفقات هذا الشهر." : "No deals lost this month."}</EmptyState>
-          ) : (
-            <ul className="space-y-2" data-testid="lost-reasons">
-              {data.closed.lostReasons.map((r, i) => (
-                <li
-                  key={i}
-                  className="flex items-start justify-between gap-3 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
-                >
-                  <span className="shrink-0 tabular-nums font-medium text-oo-status-rejected">{n(r.count)}</span>
-                  <span className="break-words text-end">{r.reason}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        {/* ── Cycle length ───────────────────────────────────────── */}
-        <Card>
-          <SectionTitle>{ar ? "طول دورة البيع" : "Sales cycle"}</SectionTitle>
-          {data.duration.sampleSize === 0 ? (
-            <EmptyState>{ar ? "لم تُغلق صفقات هذا الشهر." : "No deals closed this month."}</EmptyState>
-          ) : (
-            <dl className="space-y-2" data-testid="cycle-stats">
-              {[
-                [ar ? "الوسيط" : "Median", data.duration.medianDays],
-                [ar ? "المتوسط" : "Mean", data.duration.meanDays],
-              ].map(([label_, days]) => (
-                <div
-                  key={String(label_)}
-                  className="flex items-center justify-between rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
-                >
-                  <dd className="tabular-nums font-medium">
-                    {days === null ? "—" : ar ? `${n(Number(days))} يوماً` : `${days} days`}
-                  </dd>
-                  <dt>{label_}</dt>
-                </div>
-              ))}
-              <p className="pt-1 text-[12px] leading-[18px] text-oo-text-muted">
-                {ar
-                  ? `من ${n(data.duration.sampleSize)} صفقة أُغلقت هذا الشهر. الوسيط مذكور أولاً لأن صفقة واحدة طويلة تجرّ المتوسط إلى رقم لا يعرفه أحد.`
-                  : `From ${data.duration.sampleSize} deals closed this month. The median leads because one nine-month deal drags an average nobody recognises.`}
-              </p>
-            </dl>
-          )}
-        </Card>
-      </div>
-
-      <StatStrip>
-        <Stat label={ar ? "قيمة المكسوب" : "Won value"} value={data.closed.wonValue} money testId="stat-won" />
-        <Stat label={ar ? "قيمة الخاسر" : "Lost value"} value={data.closed.lostValue} money testId="stat-lost" />
-        <Stat
-          label={ar ? "عملاء محتملون جدد" : "New leads"}
-          value={n(data.leads.created)}
-          note={ar ? `${n(data.leads.converted)} تحوّلت` : `${data.leads.converted} converted`}
-          testId="stat-leads"
-        />
-        <Stat
-          label={ar ? "عملاء جدد أُنشئوا" : "New customers created"}
-          value={n(data.leads.newCustomersCreated)}
-          note={ar ? "من تحويل العملاء المحتملين" : "from lead conversion"}
-          testId="stat-customers"
-        />
-      </StatStrip>
+      <PerfNote>
+        <span>
+          {ar
+            ? "قيم المسار والمكسوب والخاسر قيم صفقات، لا مبالغ محصّلة. التحصيل الفعلي في «التحصيلات» و«الأهداف»."
+            : "Pipeline, won and lost values are deal values, not money collected. What was actually collected is in Collections and Targets."}
+        </span>
+      </PerfNote>
     </div>
   );
 }
-

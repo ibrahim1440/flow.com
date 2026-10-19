@@ -1,0 +1,103 @@
+// The shape of GET /api/customers/[id]/account (src/app/api/customers/[id]/account/route.ts),
+// as the account page reads it. Dates arrive as ISO strings, money as fixed-point strings.
+
+export type Contact = { id: string; name: string; role: string | null; phone: string | null; email: string | null; position: number };
+
+export type RoastPreference = {
+  id: string; greenBeanId: string; profileName: string; usageType: "ESPRESSO" | "FILTER" | "BOTH"; notes: string | null;
+  greenBean: { id: string; beanType: string; serialNumber: string };
+  targetColorWhole: number | null; targetToleranceWhole: number | null;
+  targetColorGround: number | null; targetToleranceGround: number | null;
+  targetDeltaMin: number | null; targetDeltaMax: number | null;
+};
+
+export type Customer = {
+  id: string; name: string; nameAr: string | null; phone: string | null; email: string | null; address: string | null;
+  whatsappOptOut: boolean; createdAt: string;
+  commercialRegNo: string | null; vatNumber: string | null; segment: string | null; city: string | null; priceList: string | null;
+  paymentTermsDays: number | null; creditLimit: string | null;
+  accountOwner: { id: string; name: string } | null;
+  contacts: Contact[];
+  roastPreferences: RoastPreference[];
+  _count: { orders: number; roastPreferences: number };
+};
+
+export type Stage = { id: string; code: string; nameEn: string; nameAr: string; position: number };
+
+export type Activity = {
+  id: string; type: string; subject: string; body: string | null; outcome: string | null;
+  dueAt: string | null; completedAt: string | null; createdAt: string;
+  owner: { id: string; name: string }; opportunity: { id: string; title: string } | null; mine?: boolean;
+};
+
+export type Deal = {
+  id: string; title: string; outcome: "OPEN" | "WON" | "LOST"; amount: string; currency: string; probability: number;
+  expectedCloseAt: string | null; createdAt: string; closedAt: string | null; lostReason: string | null;
+  stage: Stage; owner: { id: string; name: string } | null; _count: { quotes: number; samples: number };
+};
+
+export type OpenDeal = Deal & {
+  updatedAt: string;
+  stageEvents: { id: string; fromStageId: string | null; toStageId: string | null; createdAt: string }[];
+  nextStep: Activity | null;
+};
+
+export type Quote = {
+  id: string; quoteNumber: string; revision: number; status: string; currency: string; validUntil: string | null;
+  grandTotal: string; taxTotal: string; issuedAt: string | null; acceptedAt: string | null; createdAt: string;
+  opportunity: { id: string; title: string };
+};
+
+export type Sample = {
+  id: string; description: string | null; quantity: string; unit: string; status: string; sentAt: string | null;
+  feedbackScore: number | null; createdAt: string;
+  productSku: { name: string | null; skuCode: string } | null; opportunity: { id: string; title: string };
+};
+
+export type Order = {
+  id: string; orderNumber: number; createdAt: string; status: string; approvalStatus: string; paymentStatus: string;
+  vatInvoiceStatus: string; quotationNumber: string | null; itemCount: number; totalKg: number;
+};
+
+export type Collection = {
+  id: string; status: string; amountGross: string; currency: string; paymentMethod: string; collectedAt: string;
+  referenceNumber: string | null; order: { id: string; orderNumber: number } | null; opportunity: { id: string; title: string };
+};
+
+export type TimelineEntry = { key: string; at: string; kind: string } & (
+  | { kind: "activity"; activity: Activity }
+  | { kind: "sample"; sample: { id: string; name: string | null; quantity: string; unit: string; deal: { id: string; title: string } } }
+  | { kind: "quote_issued" | "quote_accepted"; quote: { id: string; quoteNumber: string; revision: number; grandTotal: string; currency: string }; stageMove?: { from: string; to: string } | null }
+  | { kind: "order"; order: { id: string; orderNumber: number; totalKg: number; status: string; value: string | null } }
+  | { kind: "payment"; payment: { id: string; amount: string; currency: string; method: string; orderNumber: number | null } }
+);
+
+export type Account = {
+  customer: Customer;
+  source: { leadId: string; convertedAt: string; source: string; sourceNote: string | null } | null;
+  sections: { sales: boolean; orders: boolean; scope: "all" | "own" | null; files: boolean };
+  metrics: {
+    sales12m: { net: string; previousNet: string; changePercent: number | null; documents: number; currency: string } | null;
+    balance: {
+      outstanding: string; documents: number; openDocuments: number; currency: string;
+      lastPayment: { amount: string; collectedAt: string; method: string; orderNumber: number | null } | null;
+    } | null;
+    lastOrder: { id: string; orderNumber: number; createdAt: string; daysAgo: number } | null;
+    cadenceDays: number | null;
+    monthly: { month: string; kg: number; partial?: true }[] | null;
+    usualItems: { name: string; kgPerMonth: number }[] | null;
+    unpricedOrders: number | null;
+  };
+  openDeal: OpenDeal | null;
+  nextStep: Activity | null;
+  openDeals: number;
+  stages: Stage[] | null;
+  deals: Deal[] | null;
+  quotes: Quote[] | null;
+  samples: Sample[] | null;
+  orders: Order[] | null;
+  collections: Collection[] | null;
+  timeline: TimelineEntry[];
+  can: { edit: boolean; manageProfiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean };
+  now: string;
+};

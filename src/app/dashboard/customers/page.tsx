@@ -1,13 +1,28 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import {
-  Users2, Plus, Search, Pencil, Trash2, Star, X, ChevronRight,
-  Phone, Mail, MapPin, Package,
-} from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Pencil, Trash2 } from "lucide-react";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
+import { Ico } from "@/components/shell/icons";
+import { SectionPages, usePhone, useD21Phone } from "@/components/shell/page-context";
+import { Dialog, Field, HrRoot } from "@/components/hr/ui";
+import "./customers.css";
+
+/**
+ * Customers — Direction 2.1 (UI batch 2; UI batch 3: each name links to the account page
+ * /dashboard/customers/[id] (179:1312) and the preview carries «فتح الصفحة»). Figma has the customer ACCOUNT (Phase 2 CRM page
+ * 166:3352, «crm-account» 179:1312 / 390 178:1353) but no list frame, so the list is drawn like
+ * the leads list (`crm-leads` 171:2: page header, search toolbar, ledger table, docked preview)
+ * and the preview after the account frame — showing only what exists today: the contact
+ * particulars, the WhatsApp opt-out, the order count and the roast profiles. Same requests
+ * (/api/customers, /api/green-beans, /api/customers/:id[/preferences/:pid]), same payloads,
+ * same validation; the account frame's sales, balance, deals, activity and quotation blocks
+ * need data this screen does not have and are not drawn.
+ */
 
 type GreenBeanSlim = { id: string; beanType: string; serialNumber: string };
 
@@ -42,12 +57,15 @@ type Customer = {
 
 type GreenBeanFull = { id: string; beanType: string; serialNumber: string; quantityKg: number };
 
-const INPUT_CLS = "w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors";
 
 export default function CustomersPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const ar = lang === "ar";
+  const L = (a: string, e: string) => (ar ? a : e);
+  const phone = usePhone();
   const user = useUser();
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "customers", "manage");
+  useD21Phone({ title: ar ? "العملاء" : "Customers" });
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBeanFull[]>([]);
@@ -85,13 +103,27 @@ export default function CustomersPage() {
 
   useEffect(() => { loadData(); }, []);
 
+  // ?open=<id>[&tab=profiles]: the account page's «مسارات التحميص» opens this preview, where the
+  // roast profiles are managed. Applied once, by the first load of the list.
+  const search0 = useSearchParams();
+  const deepLink = useRef<{ id: string; tab: "info" | "profiles" } | null>(
+    search0.get("open") ? { id: search0.get("open")!, tab: search0.get("tab") === "profiles" ? "profiles" : "info" } : null,
+  );
+
   async function loadData() {
     setLoading(true);
     const [custRes, beanRes] = await Promise.all([
       fetch("/api/customers"),
       fetch("/api/green-beans"),
     ]);
-    if (custRes.ok) setCustomers(await custRes.json());
+    if (custRes.ok) {
+      const list = (await custRes.json()) as Customer[];
+      setCustomers(list);
+      const want = deepLink.current;
+      deepLink.current = null;
+      const found = want ? list.find((c) => c.id === want.id) : undefined;
+      if (found && want) { setSelected(found); setTab(want.tab); }
+    }
     if (beanRes.ok) setBeans(await beanRes.json());
     setLoading(false);
   }
@@ -251,398 +283,372 @@ export default function CustomersPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-10 h-10 border-4 border-orange border-t-transparent rounded-full animate-spin" />
-      </div>
+      <HrRoot>
+        <div className="pg" role="status" aria-live="polite" data-testid="customers-loading">
+          <div className="cu-skel" aria-hidden><i /><i /><i /><i /><i /></div>
+          <span className="sr-only">{L("جارٍ التحميل…", "Loading…")}</span>
+        </div>
+      </HrRoot>
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("customersTitle")}</h1>
-          <p className="text-brown text-sm font-medium">{customers.length} {t("customers")}</p>
+  const nameOf = (c: Customer) => (ar && c.nameAr ? c.nameAr : c.name);
+  // The other spelling, when there is one that differs from the name shown.
+  const otherName = (c: Customer) => {
+    const o = ar ? (c.nameAr ? c.name : null) : c.nameAr;
+    return o && o.trim() !== nameOf(c).trim() ? o : null;
+  };
+  const usage = (u: UsageType) => (u === "ESPRESSO" ? t("usageEspresso") : u === "FILTER" ? t("usageFilter") : t("usageBoth"));
+  const withProfiles = customers.filter((c) => c._count.roastPreferences > 0).length;
+  const optedOut = customers.filter((c) => c.whatsappOptOut).length;
+  const open = (c: Customer) => { setSelected(c); setTab("info"); };
+
+  const notice = toast ? (
+    <p className={`notice ${toast.type === "ok" ? "ok" : "er"}`} role={toast.type === "ok" ? "status" : "alert"} data-testid="customers-toast" style={{ marginBottom: 16 }}>
+      {toast.msg}<button type="button" onClick={() => setToast(null)} aria-label={L("إغلاق", "Dismiss")}>×</button>
+    </p>
+  ) : null;
+
+  const addButton = canManage ? (
+    <button type="button" onClick={openAddCustomer} className="btn p" data-testid="new-customer">
+      <Ico name="plus" small /> {L("عميل", "Customer")}
+    </button>
+  ) : null;
+
+  const searchBox = (
+    <label className="search" style={phone ? { flex: 1, height: 40 } : { width: 280 }}>
+      <Ico name="search" small />
+      <input value={search} onChange={(e) => setSearch(e.target.value)} data-testid="customer-search"
+        placeholder={phone ? L("الاسم أو الهاتف", "Name or phone") : L("الاسم أو الهاتف أو البريد", "Name, phone or email")}
+        aria-label={t("searchCustomers")} />
+    </label>
+  );
+
+  const empty = filteredCustomers.length === 0 ? (
+    search ? (
+      <div data-testid="customers-no-results" style={{ padding: "48px 0", textAlign: "center" }}>
+        <p>{L("لا نتائج تطابق البحث.", "No customers match this search.")}</p>
+        <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setSearch("")}>{L("مسح البحث", "Clear search")}</button>
+      </div>
+    ) : (
+      <div data-testid="customers-empty" style={{ padding: "48px 0", textAlign: "center" }}>
+        <p style={{ fontWeight: 500 }}>{t("noCustomers")}</p>
+        {canManage && <p className="lbl" style={{ fontWeight: 400 }}>{L("أضف أول عميل من زر «عميل».", "Add the first one with “Customer”.")}</p>}
+      </div>
+    )
+  ) : null;
+
+  const count = (
+    <div className="pager">
+      <span className="sm" data-testid="customers-count">
+        <span className="n">{filteredCustomers.length}</span> {L("عميل", filteredCustomers.length === 1 ? "customer" : "customers")}
+        {search ? <> {L("من", "of")} <span className="n">{customers.length}</span></> : null}
+      </span>
+    </div>
+  );
+
+  // The account preview (after crm-account 179:1312): name, the particulars it has, and its
+  // roast profiles in place of the frame's «الأصناف المعتادة». Docked from 1280, over the list
+  // from 768, a full-screen sheet on a phone.
+  const pane = selected ? (
+    <aside className="pane cu-pane" aria-label={L("بيانات العميل", "Customer")} data-testid="customer-pane">
+      <div className="pane-h">
+        <span className="lbl">{L("عميل", "Customer")}</span>
+        <span className="sp" />
+        <Link href={`/dashboard/customers/${selected.id}`} className="btn sm g" data-testid="open-account-page">
+          {L("فتح الصفحة", "Open page")}<Ico name="back" small className="cu-fwd" />
+        </Link>
+        <button type="button" className="ib" onClick={() => setSelected(null)} aria-label={L("إغلاق", "Close")} data-testid="close-customer-pane">
+          <Ico name="close" small />
+        </button>
+      </div>
+      <div className="pane-b">
+        <h2 className="pane-t" data-testid="customer-pane-name">{nameOf(selected)}</h2>
+        <div className="meta" style={{ marginTop: 0, marginBottom: 20 }}>
+          {otherName(selected) && <><bdi>{otherName(selected)}</bdi><i aria-hidden /></>}
+          <span><span className="n">{selected._count.orders}</span> {L("طلب", selected._count.orders === 1 ? "order" : "orders")}</span>
+          {selected.whatsappOptOut && <><i aria-hidden /><span className="flag wa">{L("لا يستلم واتساب", "No WhatsApp")}</span></>}
         </div>
-        {canManage && (
-          <button
-            onClick={openAddCustomer}
-            className="flex items-center gap-2 px-4 py-2.5 bg-orange text-white rounded-xl font-bold text-sm hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all duration-200"
-          >
-            <Plus size={16} /> {t("addCustomer")}
+
+        <div className="tabs" role="group" aria-label={L("أقسام العميل", "Customer sections")}>
+          <button type="button" className={tab === "info" ? "on" : undefined} aria-pressed={tab === "info"} onClick={() => setTab("info")} data-testid="customer-tab-info">
+            {L("نظرة عامة", "Overview")}
           </button>
+          <button type="button" className={tab === "profiles" ? "on" : undefined} aria-pressed={tab === "profiles"} onClick={() => setTab("profiles")} data-testid="customer-tab-profiles">
+            {t("roastProfiles")} <span className="c">{selected.roastPreferences.length}</span>
+          </button>
+        </div>
+
+        {tab === "info" ? (
+          <>
+            <div className="lbl" style={{ margin: "8px 0 12px" }}>{L("التفاصيل", "Details")}</div>
+            <dl className="props" style={{ marginBottom: 24 }}>
+              <dt>{t("customerPhone")}</dt><dd>{selected.phone ? <bdi dir="ltr" className="n">{selected.phone}</bdi> : "—"}</dd>
+              <dt>{t("customerEmail")}</dt><dd>{selected.email ? <bdi dir="ltr" style={{ overflowWrap: "anywhere" }}>{selected.email}</bdi> : "—"}</dd>
+              <dt>{t("customerAddress")}</dt><dd style={{ whiteSpace: "pre-line" }}>{selected.address || "—"}</dd>
+              <dt>{L("الطلبات", "Orders")}</dt><dd><span className="n">{selected._count.orders}</span></dd>
+              <dt>{L("واتساب", "WhatsApp")}</dt>
+              <dd data-testid="customer-whatsapp">
+                {selected.whatsappOptOut
+                  ? <span className="st wa">{L("لا يرغب برسائل النظام", "Opted out of system messages")}</span>
+                  : <span className="st ok">{L("يستلم رسائل النظام", "Receives system messages")}</span>}
+              </dd>
+            </dl>
+          </>
+        ) : (
+          <div data-testid="customer-profiles">
+            {selected.roastPreferences.length === 0 ? (
+              <p className="lbl" style={{ fontWeight: 400, margin: "8px 0 16px" }}>{t("noProfiles")}</p>
+            ) : (
+              <ul className="cu-prefs">
+                {selected.roastPreferences.map((pref) => (
+                  <li key={pref.id} data-testid={`roast-pref-${pref.id}`}>
+                    <div className="cu-pref-main">
+                      <div className="cu-pref-r1">
+                        <b>{pref.profileName}</b>
+                        <span className="st">{usage(pref.usageType)}</span>
+                      </div>
+                      <div className="cu-pref-sub"><bdi>{pref.greenBean.beanType}</bdi> · <span className="id">{pref.greenBean.serialNumber}</span></div>
+                      {(pref.targetColorWhole != null || pref.targetColorGround != null || pref.targetDeltaMin != null || pref.targetDeltaMax != null) && (
+                        <div className="cu-pref-targets">
+                          {pref.targetColorWhole != null && (
+                            <span>{L("كاملة", "Whole")} <bdi dir="ltr" className="n">{pref.targetColorWhole}{pref.targetToleranceWhole != null ? ` ±${pref.targetToleranceWhole}` : ""}</bdi></span>
+                          )}
+                          {pref.targetColorGround != null && (
+                            <span>{L("مطحون", "Ground")} <bdi dir="ltr" className="n">{pref.targetColorGround}{pref.targetToleranceGround != null ? ` ±${pref.targetToleranceGround}` : ""}</bdi></span>
+                          )}
+                          {(pref.targetDeltaMin != null || pref.targetDeltaMax != null) && (
+                            <span>Δ <bdi dir="ltr" className="n">{pref.targetDeltaMin ?? "?"} – {pref.targetDeltaMax ?? "?"}</bdi></span>
+                          )}
+                        </div>
+                      )}
+                      {pref.notes && <div className="cu-pref-sub">{pref.notes}</div>}
+                    </div>
+                    {canManage && (
+                      <div className="cu-pref-act">
+                        <button type="button" className="ib" onClick={() => openEditProfile(pref)} aria-label={`${t("editProfile")} · ${pref.profileName}`}>
+                          <Pencil size={14} aria-hidden />
+                        </button>
+                        <button type="button" className="ib cu-danger" onClick={() => handleDeleteProfile(pref)} aria-label={`${t("delete")} · ${pref.profileName}`}>
+                          <Trash2 size={14} aria-hidden />
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canManage && availableBeans.length > 0 && (
+              <button type="button" className="btn" onClick={openAddProfile} data-testid="add-roast-profile" style={{ marginTop: 12 }}>
+                <Ico name="plus" small /> {t("addProfile")}
+              </button>
+            )}
+          </div>
         )}
       </div>
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-5 ltr:right-5 rtl:left-5 z-[100] px-4 py-3 rounded-xl text-sm font-bold shadow-lg ${toast.type === "ok" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}>
-          {toast.msg}
+      {canManage && (
+        <div className="pane-f">
+          <button type="button" className="btn p" onClick={() => openEditCustomer(selected)} data-testid="edit-customer">
+            <Pencil size={14} aria-hidden /> {t("editCustomer")}
+          </button>
+          <button type="button" className="btn cu-danger" onClick={() => handleDeleteCustomer(selected)} data-testid="delete-customer">
+            <Trash2 size={14} aria-hidden /> {t("delete")}
+          </button>
         </div>
       )}
+    </aside>
+  ) : null;
 
-      <div className="flex gap-5 items-start">
-        {/* Customer list */}
-        <div className="flex-1 min-w-0 space-y-3">
-          {/* Search */}
-          <div className="relative">
-            <Search size={18} className="absolute ltr:left-3 rtl:right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder={t("searchCustomers")}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full ltr:pl-10 rtl:pr-10 pr-4 py-2.5 border-2 border-border rounded-xl bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-            />
-          </div>
+  const num = (n: number) => <span className="n">{n}</span>;
 
-          {filteredCustomers.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-2xl border border-border text-brown/40">
-              <Users2 size={36} className="mx-auto mb-3 opacity-40" />
-              <p className="font-semibold">{t("noCustomers")}</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {filteredCustomers.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => { setSelected(c); setTab("info"); }}
-                  className={`w-full text-start bg-white rounded-2xl border p-4 hover:shadow-md transition-all duration-200 ${selected?.id === c.id ? "border-orange shadow-md shadow-orange/15" : "border-border hover:border-orange/30"}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-charcoal truncate">{c.name}</p>
-                      {c.nameAr && <p className="text-sm text-brown/60 truncate">{c.nameAr}</p>}
-                      <div className="flex items-center gap-3 mt-1 text-xs text-brown/60">
-                        {c.phone && <span className="flex items-center gap-1"><Phone size={11} />{c.phone}</span>}
-                        <span>{c._count.orders} {t("customerOrdersLabel")}</span>
-                        {c._count.roastPreferences > 0 && (
-                          <span className="flex items-center gap-1 text-amber-700 font-semibold">
-                            <Star size={11} fill="currentColor" />
-                            {c._count.roastPreferences} {t("customerProfilesLabel")}
-                          </span>
-                        )}
+  return (
+    <HrRoot>
+      <div className={`split${pane ? " has-pane" : ""} cu-split`}>
+        <div className="pg">
+          {notice}
+          {phone ? (
+            <>
+              <div style={{ marginBottom: 10 }}><SectionPages className="cu-ctx" /></div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>{searchBox}{addButton}</div>
+              {empty ?? (
+                <div data-testid="customers-table">
+                  {filteredCustomers.map((c) => (
+                    <div key={c.id} className={`mrow rowlink${selected?.id === c.id ? " cu-sel" : ""}`} data-testid={`customer-${c.id}`}>
+                      <div style={{ minWidth: 0 }}>
+                        <Link href={`/dashboard/customers/${c.id}`} className="who open cu-open" data-testid={`open-customer-${c.id}`}>{nameOf(c)}</Link>
                       </div>
-                    </div>
-                    <ChevronRight size={16} className="text-brown/30 flex-shrink-0 ltr:ml-2 rtl:mr-2 rtl:rotate-180" />
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Detail panel */}
-        {selected && (
-          <div className="w-[380px] flex-shrink-0 bg-white rounded-2xl border border-border overflow-hidden">
-            {/* Panel header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-cream/50">
-              <div>
-                <p className="font-extrabold text-charcoal">{selected.name}</p>
-                {selected.nameAr && <p className="text-xs text-brown/60">{selected.nameAr}</p>}
-              </div>
-              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg text-brown/40 hover:text-charcoal hover:bg-cream transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-border">
-              {(["info", "profiles"] as const).map((t_) => (
-                <button
-                  key={t_}
-                  onClick={() => setTab(t_)}
-                  className={`flex-1 py-2.5 text-sm font-bold transition-colors ${tab === t_ ? "text-orange border-b-2 border-orange" : "text-brown hover:text-charcoal"}`}
-                >
-                  {t_ === "info" ? t("customerInfo") : t("roastProfiles")}
-                </button>
-              ))}
-            </div>
-
-            <div className="p-5">
-              {tab === "info" && (
-                <div className="space-y-4">
-                  {[
-                    { icon: Phone, label: t("customerPhone"), val: selected.phone },
-                    { icon: Mail, label: t("customerEmail"), val: selected.email },
-                    { icon: MapPin, label: t("customerAddress"), val: selected.address },
-                    { icon: Package, label: t("customerOrdersLabel"), val: String(selected._count.orders) },
-                  ].map(({ icon: Icon, label, val }) => (
-                    <div key={label} className="flex items-start gap-3">
-                      <Icon size={16} className="text-brown/40 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs text-brown/50 font-medium">{label}</p>
-                        <p className="text-sm text-charcoal font-semibold">{val || "—"}</p>
+                      <span className="sm cu-orders">{num(c._count.orders)} {L("طلب", c._count.orders === 1 ? "order" : "orders")}</span>
+                      <div className="r2">
+                        <span style={{ flex: 1, minWidth: 0 }}>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : (otherName(c) ?? "—")}</span>
+                        {c._count.roastPreferences > 0 && <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span>}
+                        {c.whatsappOptOut && <span className="flag wa">{L("بلا واتساب", "No WhatsApp")}</span>}
                       </div>
                     </div>
                   ))}
-
-                  {canManage && (
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={() => openEditCustomer(selected)}
-                        className="flex-1 flex items-center justify-center gap-2 py-2 bg-charcoal text-white rounded-xl text-sm font-bold hover:bg-charcoal/80 transition-all active:scale-[0.98]"
-                      >
-                        <Pencil size={14} /> {t("editCustomer")}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteCustomer(selected)}
-                        className="p-2 rounded-xl text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                        title={t("delete")}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  )}
+                  {count}
                 </div>
               )}
-
-              {tab === "profiles" && (
-                <div className="space-y-3">
-                  {selected.roastPreferences.length === 0 ? (
-                    <div className="text-center py-6 text-brown/40">
-                      <Star size={28} className="mx-auto mb-2 opacity-30" />
-                      <p className="text-sm font-semibold">{t("noProfiles")}</p>
-                    </div>
-                  ) : (
-                    selected.roastPreferences.map((pref) => (
-                      <div key={pref.id} className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              <Star size={12} className="text-amber-600 flex-shrink-0" fill="currentColor" />
-                              <p className="text-xs text-amber-700 font-bold truncate">{pref.greenBean.beanType}</p>
-                              <span className="text-xs text-amber-500 font-mono">({pref.greenBean.serialNumber})</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-sm font-bold text-charcoal">{pref.profileName}</p>
-                              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                                pref.usageType === "ESPRESSO" ? "bg-orange/15 text-orange-700" :
-                                pref.usageType === "FILTER"   ? "bg-blue-100 text-blue-700" :
-                                "bg-purple-100 text-purple-700"
-                              }`}>
-                                {pref.usageType === "ESPRESSO" ? t("usageEspresso") : pref.usageType === "FILTER" ? t("usageFilter") : t("usageBoth")}
-                              </span>
-                            </div>
-                            {pref.notes && <p className="text-xs text-brown/60 mt-0.5">{pref.notes}</p>}
-                            {(pref.targetColorWhole != null || pref.targetColorGround != null) && (
-                              <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono text-amber-800/70">
-                                {pref.targetColorWhole != null && (
-                                  <span>Whole: {pref.targetColorWhole}{pref.targetToleranceWhole != null ? ` ±${pref.targetToleranceWhole}` : ""}</span>
-                                )}
-                                {pref.targetColorGround != null && (
-                                  <span>Ground: {pref.targetColorGround}{pref.targetToleranceGround != null ? ` ±${pref.targetToleranceGround}` : ""}</span>
-                                )}
-                                {(pref.targetDeltaMin != null || pref.targetDeltaMax != null) && (
-                                  <span className="col-span-2">Δ: {pref.targetDeltaMin ?? "?"} – {pref.targetDeltaMax ?? "?"}</span>
-                                )}
-                              </div>
+            </>
+          ) : (
+            <>
+              <div className="ph" style={{ marginBottom: 20 }}>
+                <div>
+                  <h1>{t("customers")}</h1>
+                  <div className="meta">
+                    <span data-testid="customers-total">{num(customers.length)} {L("عميل", customers.length === 1 ? "customer" : "customers")}</span>
+                    <i />
+                    <span>{num(withProfiles)} {L("بمسارات تحميص", "with roast profiles")}</span>
+                    {optedOut > 0 && <><i /><span>{num(optedOut)} {L("بلا رسائل واتساب", "opted out of WhatsApp")}</span></>}
+                  </div>
+                </div>
+                <div className="act">
+                  <SectionPages />
+                  {addButton}
+                </div>
+              </div>
+              <div className="tool" style={{ marginBottom: 8 }}>
+                {searchBox}
+                <span className="sp" />
+                <span className="sort-note">{L("بالاسم", "By name")}</span>
+              </div>
+              {empty ?? (
+                <>
+                  <table className="t leads cu-table" data-testid="customers-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">{L("العميل", "Customer")}</th>
+                        <th scope="col">{t("customerPhone")}</th>
+                        <th scope="col" className="xl">{t("customerEmail")}</th>
+                        <th scope="col" className="num">{L("الطلبات", "Orders")}</th>
+                        <th scope="col">{t("roastProfiles")}</th>
+                        <th scope="col" className="xl">{L("واتساب", "WhatsApp")}</th>
+                        <th scope="col"><span className="sr-only">{L("الإجراء", "Action")}</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCustomers.map((c) => (
+                        <tr key={c.id} data-testid={`customer-${c.id}`} className={selected?.id === c.id ? "sel" : undefined}>
+                          <td className="cu-name">
+                            <Link href={`/dashboard/customers/${c.id}`} className="who cu-open" data-testid={`account-link-${c.id}`}>{nameOf(c)}</Link>
+                            {(otherName(c) || c.address) && (
+                              <span className="sm cu-namesub">{[otherName(c), c.address?.split("\n")[0]].filter(Boolean).join(" · ")}</span>
                             )}
-                          </div>
-                          {canManage && (
-                            <div className="flex gap-1 flex-shrink-0">
-                              <button onClick={() => openEditProfile(pref)} className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-100 transition-colors">
-                                <Pencil size={13} />
-                              </button>
-                              <button onClick={() => handleDeleteProfile(pref)} className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-
-                  {canManage && availableBeans.length > 0 && (
-                    <button
-                      onClick={openAddProfile}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-orange/40 rounded-xl text-orange text-sm font-bold hover:border-orange hover:bg-orange/5 transition-all"
-                    >
-                      <Plus size={15} /> {t("addProfile")}
-                    </button>
-                  )}
-                </div>
+                          </td>
+                          <td>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : <span className="sm">—</span>}</td>
+                          <td className="xl">{c.email ? <bdi dir="ltr" style={{ color: "var(--text-secondary)" }}>{c.email}</bdi> : <span className="sm">—</span>}</td>
+                          <td className="num">{c._count.orders}</td>
+                          <td>{c._count.roastPreferences > 0 ? <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span> : <span className="sm">—</span>}</td>
+                          <td className="xl">{c.whatsappOptOut ? <span className="st wa">{L("لا يرغب", "Opted out")}</span> : <span className="sm">{L("يستلم", "On")}</span>}</td>
+                          <td style={{ textAlign: "end" }}>
+                            <button type="button" className="btn sm" onClick={() => open(c)} aria-label={`${L("معاينة", "Preview")} · ${nameOf(c)}`} data-testid={`open-customer-${c.id}`}>{L("معاينة", "Preview")}</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {count}
+                </>
               )}
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
+        {pane}
       </div>
 
-      {/* ── Customer form modal ─────────────────────────────────────────────── */}
-      {showCustomerForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCustomerForm(false)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-extrabold text-charcoal mb-4">
-              {editingCustomer ? t("editCustomer") : t("addCustomer")}
-            </h2>
-            <form onSubmit={handleSaveCustomer} className="space-y-3">
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("customerName")} *</label>
-                <input required value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} className={INPUT_CLS} />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("customerNameAr")}</label>
-                <input value={customerForm.nameAr} onChange={(e) => setCustomerForm({ ...customerForm, nameAr: e.target.value })} className={INPUT_CLS} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">{t("customerPhone")}</label>
-                  <input value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} className={INPUT_CLS} />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">{t("customerEmail")}</label>
-                  <input type="email" value={customerForm.email} onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })} className={INPUT_CLS} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("customerAddress")}</label>
-                <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} rows={2} className={INPUT_CLS} />
-              </div>
-              <div>
-                {/* Respected by every automated WhatsApp message: the message is recorded as not
-                    sent, with the reason, instead of being sent. */}
-                <label className="flex items-center gap-2 text-sm text-charcoal cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={customerForm.whatsappOptOut}
-                    onChange={(e) => setCustomerForm({ ...customerForm, whatsappOptOut: e.target.checked })}
-                    data-testid="customer-whatsapp-optout"
-                  />
-                  {t("customerWhatsappOptOut")}
-                </label>
-              </div>
-              <div className="flex gap-3 pt-1">
-                <button type="submit" disabled={savingCustomer}
-                  className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all disabled:opacity-60">
-                  {savingCustomer ? t("saving") : t("save")}
-                </button>
-                <button type="button" onClick={() => setShowCustomerForm(false)}
-                  className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* ── Customer form ── */}
+      <Dialog open={showCustomerForm} title={editingCustomer ? t("editCustomer") : t("addCustomer")} onClose={() => setShowCustomerForm(false)} testId="customer-form"
+        actions={<>
+          <button type="submit" form="customer-form-el" className="hr-btn is-primary" disabled={savingCustomer}>{savingCustomer ? t("saving") : t("save")}</button>
+          <button type="button" className="hr-btn" onClick={() => setShowCustomerForm(false)}>{t("cancel")}</button>
+        </>}>
+        <form id="customer-form-el" onSubmit={handleSaveCustomer} className="hr-form">
+          <Field label={`${t("customerName")} *`} wide>
+            <input required value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} className="hr-input" />
+          </Field>
+          <Field label={t("customerNameAr")} wide>
+            <input value={customerForm.nameAr} onChange={(e) => setCustomerForm({ ...customerForm, nameAr: e.target.value })} className="hr-input" dir="rtl" />
+          </Field>
+          <Field label={t("customerPhone")}>
+            <input value={customerForm.phone} onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })} className="hr-input" dir="ltr" style={{ textAlign: "start" }} />
+          </Field>
+          <Field label={t("customerEmail")}>
+            <input type="email" value={customerForm.email} onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })} className="hr-input" dir="ltr" style={{ textAlign: "start" }} />
+          </Field>
+          <Field label={t("customerAddress")} wide>
+            <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} rows={2} className="hr-textarea" />
+          </Field>
+          {/* Respected by every automated WhatsApp message: the message is recorded as not
+              sent, with the reason, instead of being sent. */}
+          <label className="cu-check is-wide">
+            <input
+              type="checkbox"
+              checked={customerForm.whatsappOptOut}
+              onChange={(e) => setCustomerForm({ ...customerForm, whatsappOptOut: e.target.checked })}
+              data-testid="customer-whatsapp-optout"
+            />
+            {t("customerWhatsappOptOut")}
+          </label>
+        </form>
+      </Dialog>
 
-      {/* ── Profile form modal ──────────────────────────────────────────────── */}
-      {showProfileForm && selected && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowProfileForm(false)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-extrabold text-charcoal mb-1">
-              {editingPref ? t("editProfile") : t("addProfile")}
-            </h2>
-            <p className="text-sm text-brown font-medium mb-4">{selected.name}</p>
-            <form onSubmit={handleSaveProfile} className="space-y-3">
-              {!editingPref && (
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">{t("beanType")} *</label>
-                  <select required value={profileForm.greenBeanId}
-                    onChange={(e) => setProfileForm({ ...profileForm, greenBeanId: e.target.value })}
-                    className={INPUT_CLS}>
-                    <option value="">{t("selectBeanLabel")}</option>
-                    {availableBeans.map((b) => (
-                      <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber})</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {editingPref && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  <p className="text-xs text-amber-700 font-bold">{editingPref.greenBean.beanType}</p>
-                  <p className="text-xs text-amber-500 font-mono">{editingPref.greenBean.serialNumber}</p>
-                </div>
-              )}
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("profileNameLabel")} *</label>
-                <input required value={profileForm.profileName}
-                  onChange={(e) => setProfileForm({ ...profileForm, profileName: e.target.value })}
-                  placeholder="e.g. Dark-Gua-02"
-                  className={INPUT_CLS} />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("usageTypeLabel")} *</label>
-                <select required value={profileForm.usageType}
-                  onChange={(e) => setProfileForm({ ...profileForm, usageType: e.target.value as UsageType })}
-                  className={INPUT_CLS}>
-                  <option value="ESPRESSO">{t("usageEspresso")}</option>
-                  <option value="FILTER">{t("usageFilter")}</option>
-                  <option value="BOTH">{t("usageBoth")}</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("profileNotesLabel")}</label>
-                <textarea value={profileForm.notes}
-                  onChange={(e) => setProfileForm({ ...profileForm, notes: e.target.value })}
-                  rows={2} className={INPUT_CLS} />
-              </div>
+      {/* ── Roast profile form ── */}
+      <Dialog open={showProfileForm && !!selected} title={editingPref ? t("editProfile") : t("addProfile")} sub={selected?.name} onClose={() => setShowProfileForm(false)} testId="roast-profile-form"
+        actions={<>
+          <button type="submit" form="roast-profile-form-el" className="hr-btn is-primary" disabled={savingProfile}>{savingProfile ? t("saving") : t("save")}</button>
+          <button type="button" className="hr-btn" onClick={() => setShowProfileForm(false)}>{t("cancel")}</button>
+        </>}>
+        <form id="roast-profile-form-el" onSubmit={handleSaveProfile} className="hr-form">
+          {!editingPref ? (
+            <Field label={`${t("beanType")} *`} wide>
+              <select required value={profileForm.greenBeanId} onChange={(e) => setProfileForm({ ...profileForm, greenBeanId: e.target.value })} className="hr-select">
+                <option value="">{t("selectBeanLabel")}</option>
+                {availableBeans.map((b) => (
+                  <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber})</option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <div className="cu-bean is-wide">
+              <b>{editingPref.greenBean.beanType}</b>
+              <span className="hr-id">{editingPref.greenBean.serialNumber}</span>
+            </div>
+          )}
+          <Field label={`${t("profileNameLabel")} *`}>
+            <input required value={profileForm.profileName} onChange={(e) => setProfileForm({ ...profileForm, profileName: e.target.value })} placeholder="e.g. Dark-Gua-02" className="hr-input" />
+          </Field>
+          <Field label={`${t("usageTypeLabel")} *`}>
+            <select required value={profileForm.usageType} onChange={(e) => setProfileForm({ ...profileForm, usageType: e.target.value as UsageType })} className="hr-select">
+              <option value="ESPRESSO">{t("usageEspresso")}</option>
+              <option value="FILTER">{t("usageFilter")}</option>
+              <option value="BOTH">{t("usageBoth")}</option>
+            </select>
+          </Field>
+          <Field label={t("profileNotesLabel")} wide>
+            <textarea value={profileForm.notes} onChange={(e) => setProfileForm({ ...profileForm, notes: e.target.value })} rows={2} className="hr-textarea" />
+          </Field>
 
-              {/* Roast Standards */}
-              <div className="border-t border-border pt-3">
-                <p className="text-xs font-extrabold text-charcoal/60 uppercase tracking-widest mb-2">{t("roastStandards")}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-charcoal mb-1">{t("colorWholeLabel")}</label>
-                    <input type="number" step="0.1" min="0" max="100"
-                      value={profileForm.targetColorWhole}
-                      onChange={(e) => setProfileForm({ ...profileForm, targetColorWhole: e.target.value })}
-                      placeholder="e.g. 68" className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-charcoal mb-1">{t("toleranceLabel")} (Whole)</label>
-                    <input type="number" step="0.1" min="0"
-                      value={profileForm.targetToleranceWhole}
-                      onChange={(e) => setProfileForm({ ...profileForm, targetToleranceWhole: e.target.value })}
-                      placeholder="e.g. 2" className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-charcoal mb-1">{t("colorGroundLabel")}</label>
-                    <input type="number" step="0.1" min="0" max="100"
-                      value={profileForm.targetColorGround}
-                      onChange={(e) => setProfileForm({ ...profileForm, targetColorGround: e.target.value })}
-                      placeholder="e.g. 74" className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-charcoal mb-1">{t("toleranceLabel")} (Ground)</label>
-                    <input type="number" step="0.1" min="0"
-                      value={profileForm.targetToleranceGround}
-                      onChange={(e) => setProfileForm({ ...profileForm, targetToleranceGround: e.target.value })}
-                      placeholder="e.g. 2" className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-charcoal mb-1">{t("deltaRangeLabel")} Min</label>
-                    <input type="number" step="0.1" min="0"
-                      value={profileForm.targetDeltaMin}
-                      onChange={(e) => setProfileForm({ ...profileForm, targetDeltaMin: e.target.value })}
-                      placeholder="e.g. 4" className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-charcoal mb-1">{t("deltaRangeLabel")} Max</label>
-                    <input type="number" step="0.1" min="0"
-                      value={profileForm.targetDeltaMax}
-                      onChange={(e) => setProfileForm({ ...profileForm, targetDeltaMax: e.target.value })}
-                      placeholder="e.g. 8" className={INPUT_CLS} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-1">
-                <button type="submit" disabled={savingProfile}
-                  className="flex-1 py-2.5 bg-orange text-white rounded-xl font-bold hover:bg-orange-dark shadow-md shadow-orange/20 active:scale-[0.98] transition-all disabled:opacity-60">
-                  {savingProfile ? t("saving") : t("save")}
-                </button>
-                <button type="button" onClick={() => setShowProfileForm(false)}
-                  className="flex-1 py-2.5 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+          {/* Roast standards */}
+          <p className="cu-formsec is-wide">{t("roastStandards")}</p>
+          <Field label={t("colorWholeLabel")}>
+            <input type="number" step="0.1" min="0" max="100" value={profileForm.targetColorWhole} onChange={(e) => setProfileForm({ ...profileForm, targetColorWhole: e.target.value })} placeholder="e.g. 68" className="hr-input" dir="ltr" />
+          </Field>
+          <Field label={`${t("toleranceLabel")} (${L("كاملة", "Whole")})`}>
+            <input type="number" step="0.1" min="0" value={profileForm.targetToleranceWhole} onChange={(e) => setProfileForm({ ...profileForm, targetToleranceWhole: e.target.value })} placeholder="e.g. 2" className="hr-input" dir="ltr" />
+          </Field>
+          <Field label={t("colorGroundLabel")}>
+            <input type="number" step="0.1" min="0" max="100" value={profileForm.targetColorGround} onChange={(e) => setProfileForm({ ...profileForm, targetColorGround: e.target.value })} placeholder="e.g. 74" className="hr-input" dir="ltr" />
+          </Field>
+          <Field label={`${t("toleranceLabel")} (${L("مطحون", "Ground")})`}>
+            <input type="number" step="0.1" min="0" value={profileForm.targetToleranceGround} onChange={(e) => setProfileForm({ ...profileForm, targetToleranceGround: e.target.value })} placeholder="e.g. 2" className="hr-input" dir="ltr" />
+          </Field>
+          <Field label={`${t("deltaRangeLabel")} · ${L("الأدنى", "Min")}`}>
+            <input type="number" step="0.1" min="0" value={profileForm.targetDeltaMin} onChange={(e) => setProfileForm({ ...profileForm, targetDeltaMin: e.target.value })} placeholder="e.g. 4" className="hr-input" dir="ltr" />
+          </Field>
+          <Field label={`${t("deltaRangeLabel")} · ${L("الأعلى", "Max")}`}>
+            <input type="number" step="0.1" min="0" value={profileForm.targetDeltaMax} onChange={(e) => setProfileForm({ ...profileForm, targetDeltaMax: e.target.value })} placeholder="e.g. 8" className="hr-input" dir="ltr" />
+          </Field>
+        </form>
+      </Dialog>
+    </HrRoot>
   );
 }

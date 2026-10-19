@@ -1,0 +1,138 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Quotations on Direction 2.1 — the editor and the issued quotation (GX A-10 / A-11,
+   Figma 1230:121651 / 1230:132625, 390: 1233:24114 / 1233:24180) and the document view
+   (GX A-12, 1230:139687). Scoped to `.d21`; the page primitives (.pg .ph .btn .t .props
+   .st .flag .callout .notice .phrows .sticky-act .menu) come from components/d21/reference.css.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Title «عرض السعر Q-202610-0005»: the number in mono 12.5 beside the 28px title. */
+.d21 .q-ph h1 .id { font-size: 12.5px; font-weight: 600; vertical-align: baseline }
+.d21 .q-ph .meta .st { font-size: 12.5px }
+
+/* The two columns: lines at the start, totals and facts (320) at the end, 48 apart. */
+.d21 .q-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 48px; align-items: start }
+.d21 .q-side { display: flex; flex-direction: column; gap: 24px; min-width: 0 }
+@media (min-width: 1024px) and (max-width: 1279.98px) { .d21 .q-cols { grid-template-columns: minmax(0, 1fr) 280px; gap: 36px } }
+@media (max-width: 1023.98px) { .d21 .q-cols { grid-template-columns: minmax(0, 1fr); gap: 32px } }
+
+/* Block header: «البنود» 16/600, a muted note beside it, the text action at the far end. */
+.d21 .q-bh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap }
+.d21 .q-bh .sub { color: var(--text-muted); font-size: 13px }
+.d21 .q-bh .lk-inline { font-size: 13px }
+
+/* Properties: label column, value column (totals 182/138, facts 122/198 in the frame). */
+.d21 .q-props { display: grid; grid-template-columns: minmax(0, 1fr) 138px; gap: 12px 12px; font-size: 13.5px; line-height: 22px; margin: 0 }
+.d21 .q-props.facts { grid-template-columns: 96px minmax(0, 1fr) }
+.d21 .q-props dt { color: var(--text-muted) }
+.d21 .q-props dd { margin: 0; color: var(--text-primary); min-width: 0; font-variant-numeric: tabular-nums }
+.d21 .q-props dd.grand { font: 700 18px/22px var(--f-num) }
+.d21 .q-props dd.grand .unit { font-weight: 400; font-size: 13.5px }
+.d21 .q-props .neg { color: var(--text-primary) }
+.d21 .q-note { font-size: 12px; line-height: 18px; color: var(--text-muted); margin: 8px 0 0 }
+
+/* The discount band (warning tint, the first sentence strong). */
+.d21 .callout.wa { background: var(--status-warning-tint); color: var(--text-primary); font-size: 13.5px; line-height: 22px; padding: 12px 14px; margin-bottom: 18px }
+.d21 .callout.wa b { font-weight: 600 }
+.d21 .q-ph + .notice, .d21 .q-ph + .callout { margin-top: 0 }
+.d21 .q-stack > * + * { margin-top: 12px }
+
+/* Lines table: 44px rows in the editor, 46 issued; the product cell carries the SKU under it. */
+.d21 .t.q-lines td { height: 46px }
+.d21 .t.q-lines.ed td { height: 44px; padding-block: 4px }
+.d21 .t.q-lines .prod { white-space: normal; min-width: 180px; padding-block: 4px }
+.d21 .t.q-lines .prod b { font-weight: 500; display: block; line-height: 22px }
+.d21 .t.q-lines .prod .id { display: block; font-size: 12.5px; line-height: 18px }
+.d21 .t.q-lines td.wa { color: var(--status-warning) }
+.d21 .t.q-lines td.x, .d21 .t.q-lines th.x { width: 44px; text-align: end }
+
+/* In-place cells: read as plain text, become a control on hover and focus. */
+.d21 .qi { width: 100%; min-width: 0; height: 32px; padding: 0 6px; margin-inline: -7px; border: 1px solid transparent; border-radius: 7px; background: none; font: inherit; color: inherit; text-align: start }
+.d21 .qi.num { font-family: var(--f-num); font-variant-numeric: tabular-nums }
+.d21 .qi:hover { border-color: var(--border-control) }
+.d21 .qi:focus, .d21 .qi:focus-visible { border-color: var(--focus-ring); outline: 2px solid var(--focus-ring); outline-offset: 0 }
+.d21 select.qi { appearance: none; -webkit-appearance: none; cursor: pointer; padding-inline-end: 6px }
+.d21 .qi.prodsel { font-weight: 500 }
+.d21 .qi.desc { margin-top: 2px; font-size: 13px; color: var(--text-secondary); border-color: var(--border-subtle) }
+.d21 .q-date { height: 32px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface); font: 400 13.5px/1 var(--f-num); color: var(--text-primary); max-width: 100% }
+.d21 .q-date:focus { outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: var(--focus-ring) }
+.d21 .q-scroll { overflow-x: auto }
+
+/* Revision chain rows. */
+.d21 .q-props .st.x { font-size: 12.5px }
+.d21 .q-props a { color: var(--action-primary); text-decoration: none }
+.d21 .q-props a:hover { text-decoration: underline }
+
+/* ── Phone (390 frames): lines as rows, figures as label/value rows, a muted band. ── */
+.d21 .q-mline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle) }
+.d21 .q-mline b { font-weight: 500; font-size: 14px; line-height: 22px }
+.d21 .q-mline .r2 { grid-column: 1 / -1; display: flex; gap: 12px; font-size: 12.5px; color: var(--text-muted) }
+.d21 .q-mline .r2 .wa { color: var(--status-warning) }
+.d21 .q-band { padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font-size: 13.5px; line-height: 22px; color: var(--text-secondary); margin-top: 16px }
+.d21 .phrows .grand dd { font: 700 14.5px/22px var(--f-num) }
+.d21 .phrows .grand dt { font-weight: 600 }
+.d21 .q-mmeta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px }
+
+/* ── The document (A-12): the screen toolbar, then an A4 sheet on the canvas. ── */
+.d21 .q-doc-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: 795px; margin: 0 auto 16px }
+.d21 .q-doc-bar .num { font: 500 14px/22px var(--f-num); color: var(--text-primary); text-decoration: none }
+.d21 .q-doc-bar .num:hover { text-decoration: underline }
+.d21 .q-doc-bar .sp { flex: 1 }
+.d21 .q-doc-bar .why { font-size: 12.5px; color: var(--text-muted) }
+.d21 .q-doc-wrap { max-width: 795px; margin: 0 auto }
+.d21 .q-doc { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 60px; min-height: 1123px; color: var(--text-primary); font-size: 13.5px; line-height: 22px }
+/* Brand row: the primary logo at the start edge, 64 px (≈ 17 mm) tall; its clear space is the
+   row's bottom margin and the sheet padding. */
+.d21 .q-doc .q-doc-brand { display: flex; justify-content: flex-start; margin-bottom: 28px }
+.d21 .q-doc .q-doc-brand img { display: block; height: 64px; width: auto }
+.d21 .q-doc header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; margin-bottom: 32px }
+.d21 .q-doc h1 { font: 600 24px/1.3 var(--f-ui); margin: 0 }
+.d21 .q-doc .ref { font: 400 14px/22px var(--f-ui); color: var(--text-muted); margin-top: 6px }
+.d21 .q-doc .ref .id { font-size: 14px }
+.d21 .q-doc .facts { margin: 0; font-size: 13.5px; line-height: 22px }
+.d21 .q-doc .facts div { display: flex; gap: 4px }
+.d21 .q-doc .facts dt { color: var(--text-primary) }
+.d21 .q-doc .facts dd { margin: 0; font-family: var(--f-num) }
+.d21 .q-doc .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px }
+.d21 .q-doc .parties h2 { font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); margin: 0 0 6px }
+.d21 .q-doc .parties address { font-style: normal }
+.d21 .q-doc .parties b { font-weight: 600; font-size: 14px; display: block }
+.d21 .q-doc .parties .sub { color: var(--text-secondary) }
+.d21 .q-doc table { width: 100%; border-collapse: collapse; font-size: 14px }
+.d21 .q-doc th { font: 400 13px/22px var(--f-ui); color: var(--text-muted); text-align: start; padding: 0 12px 6px; border-bottom: 1px solid var(--border-strong); white-space: nowrap }
+.d21 .q-doc td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; white-space: nowrap }
+.d21 .q-doc tr > :first-child { padding-inline-start: 0 }
+.d21 .q-doc tr > :last-child { padding-inline-end: 0 }
+.d21 .q-doc td.num, .d21 .q-doc th.num { font-family: var(--f-num); font-variant-numeric: tabular-nums }
+.d21 .q-doc td.item { white-space: normal }
+.d21 .q-doc td.item b { font-weight: 600; display: block }
+.d21 .q-doc td.item .id { display: block; font-size: 12.5px }
+.d21 .q-doc .tot { width: 300px; max-width: 100%; margin: 24px 0 0; margin-inline-start: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; font-size: 13.5px }
+.d21 .q-doc .tot dt { color: var(--text-secondary) }
+.d21 .q-doc .tot dd { margin: 0; font-family: var(--f-num); text-align: end }
+.d21 .q-doc .tot .due { font-weight: 700; color: var(--text-primary) }
+.d21 .q-doc .terms { margin-top: 32px; font-size: 12.5px; line-height: 20px; color: var(--text-secondary) }
+.d21 .q-doc .terms p { margin: 0 }
+.d21 .q-doc .terms .er { color: var(--status-danger); font-weight: 600 }
+.d21 .q-doc .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 60px }
+.d21 .q-doc .sign div { border-top: 1px solid var(--border-strong); padding-top: 10px; font-size: 13.5px }
+@media (max-width: 767.98px) {
+  .d21 .q-doc { padding: 24px 18px; min-height: 0 }
+  .d21 .q-doc .parties { grid-template-columns: 1fr }
+  .d21 .q-doc .q-doc-brand img { height: 48px }
+  .d21 .q-doc-table { overflow-x: auto }
+  .d21 .q-doc table { min-width: 520px }
+}
+@media print {
+  .d21 .q-doc-bar { display: none }
+  .d21 .q-doc-wrap { max-width: none }
+  .d21 .q-doc { box-shadow: none; padding: 0; min-height: 0 }
+  .d21 .q-doc .q-doc-brand img { height: 17mm }
+}
+
+/* A positive flag (a discount that was approved). */
+.d21 .flag.ok { color: var(--status-success); background: var(--status-success-tint) }
+
+/* Percent cells: the figure, then «%» outside the control (the frame writes «12%»). */
+.d21 .pctw { display: inline-flex; align-items: center; width: 100%; max-width: 56px }
+.d21 .qi.pct { width: 3.2em; field-sizing: content; min-width: 2.4em; max-width: 48px; flex: none; margin-inline: -7px 0; padding-inline-end: 1px; text-align: right }
+.d21 .t.q-lines .sfx { color: inherit }

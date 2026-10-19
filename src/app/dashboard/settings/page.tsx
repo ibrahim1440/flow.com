@@ -1,17 +1,34 @@
 "use client";
-
+// Organisation settings — Direction 2.1 (UI batch 2; GX F-P01, Figma 1205:2 at 1440, EN 1212:90149,
+// 1024 1205:393, phone 1212:2694).
+//
+// Visual port only. The same requests and rules as the legacy screen: the logo (GET/PUT
+// /api/settings/logo, 2 MB limit), the cupping close minimum (E6, GET/PUT /api/settings/cupping,
+// 2–20), the factory reset (POST /api/admin/reset) and the training-data reset (POST
+// /api/admin/training-reset, only with settings.training_reset), each behind its phrase and PIN.
+// The page stays admin-only. «الجلسات والأجهزة الموثوقة» is drawn as the frame does — approved
+// Phase 7 design, not built — with nothing to open.
 import { useState, useEffect, useRef } from "react";
-import { Settings, Trash2, AlertTriangle, CheckCircle, AlertCircle, X, ShieldOff, ImagePlus, Loader2, Users } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useUser } from "@/app/dashboard/user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { PIN_LENGTH } from "@/lib/pin-policy";
+import { Btn, Field, Notice, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
+import { Dialog } from "@/components/hr/ui";
+import { Ico } from "@/components/shell/icons";
+import { routeAllowed } from "@/lib/nav/registry";
+import { useD21Phone } from "@/components/shell/page-context";
+import { Sec, SettingsFrame, useViewer } from "../_components/tools-ui";
 
 export default function SettingsPage() {
   const { t } = useI18n();
+  const L = useL();
   const router = useRouter();
   const user = useUser();
+  const viewer = useViewer();
+  useD21Phone({ title: L("المنشأة", "Organisation"), sub: L("الإعدادات", "Settings") });
 
   // ── Logo state ───────────────────────────────────────────────────────────────
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
@@ -72,7 +89,7 @@ export default function SettingsPage() {
     if (!fileInputRef.current) fileInputRef.current = e.target;
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      setLogoMsg({ ok: false, text: "File too large. Max size is 2MB." });
+      setLogoMsg({ ok: false, text: L("الملف أكبر من 2 ميغابايت.", "File too large. Max size is 2MB.") });
       return;
     }
     const reader = new FileReader();
@@ -88,9 +105,9 @@ export default function SettingsPage() {
         });
         if (!res.ok) throw new Error("Upload failed");
         setLogoBase64(base64);
-        setLogoMsg({ ok: true, text: "Logo updated successfully." });
+        setLogoMsg({ ok: true, text: L("تم تحديث الشعار.", "Logo updated successfully.") });
       } catch {
-        setLogoMsg({ ok: false, text: "Failed to save logo. Try again." });
+        setLogoMsg({ ok: false, text: L("تعذّر حفظ الشعار. حاول مرة أخرى.", "Failed to save logo. Try again.") });
       } finally {
         setLogoUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -110,9 +127,9 @@ export default function SettingsPage() {
       });
       if (!res.ok) throw new Error();
       setLogoBase64(null);
-      setLogoMsg({ ok: true, text: "Logo removed. Default logo restored." });
+      setLogoMsg({ ok: true, text: L("أُزيل الشعار وعاد الشعار الافتراضي.", "Logo removed. Default logo restored.") });
     } catch {
-      setLogoMsg({ ok: false, text: "Failed to remove logo." });
+      setLogoMsg({ ok: false, text: L("تعذّرت إزالة الشعار.", "Failed to remove logo.") });
     } finally {
       setLogoUploading(false);
     }
@@ -222,401 +239,227 @@ export default function SettingsPage() {
   // Only admin role can access this page
   if (user && user.role !== "admin") {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-center gap-4">
-        <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
-          <ShieldOff size={28} className="text-red-400" />
+      <OpsRoot className="tl-root">
+        <div className="hr-page">
+          <div className="hr-state" role="status">
+            <h3>{L("لا تملك صلاحية فتح هذه الصفحة", "Access denied")}</h3>
+            <p className="hr-caption" style={{ margin: 0 }}>{L("هذه الصفحة للمدير فقط.", "This page is restricted to Admins only.")}</p>
+            <Btn variant="primary" onClick={() => router.push("/dashboard")}>{t("dashboard")}</Btn>
+          </div>
         </div>
-        <div>
-          <p className="text-lg font-bold text-charcoal">Access Denied</p>
-          <p className="text-sm text-brown/60 mt-1">This page is restricted to Admins only.</p>
-        </div>
-        <button
-          onClick={() => router.push("/dashboard")}
-          className="mt-2 px-5 py-2 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors"
-        >
-          {t("dashboard")}
-        </button>
-      </div>
+      </OpsRoot>
     );
   }
 
+  const canTrainingReset = !!user && hasSubPrivilege(user.permissions, "settings", "training_reset");
+  const canUsers = !!viewer && routeAllowed(viewer, "/dashboard/employees");
+  const msgNotice = (m: { ok: boolean; text: string } | null) =>
+    m ? <div role={m.ok ? "status" : "alert"} className={`hr-notice tone-${m.ok ? "success" : "danger"}`}>{m.text}</div> : null;
+
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-3">
-          <Settings className="text-orange" size={28} />
-          {t("systemSettings")}
-        </h1>
-        <p className="text-brown text-sm mt-1">{t("settingsSubtitle")}</p>
-      </div>
+    <OpsRoot className="tl-root">
+      <SettingsFrame>
+        <PageHeader title={L("المنشأة", "Organisation")} />
+        <p className="tl-sub">{t("systemSettings")}<span className="tl-sep">·</span>{L("للمدير فقط", "admins only")}</p>
 
-      {/* Branding */}
-      <section className="bg-white rounded-2xl shadow-sm border border-border p-6">
-        <h2 className="text-base font-bold text-charcoal mb-1 flex items-center gap-2">
-          <ImagePlus size={18} className="text-orange" />
-          الشعار / Logo
-        </h2>
-        <p className="text-sm text-brown/60 mb-5">Upload a custom logo (PNG, JPG, SVG — max 2 MB).</p>
+        <div>
+          {/* Branding */}
+          <Sec title={L("الشعار", "Logo")} caption={L("محفوظ فقط: الواجهة والمستندات تستخدم شعار هوية حِقبة المعتمد · لا يُطبع على الملصقات", "Stored only: the app and documents use the official Hiqbah brand logo · not printed on labels")} testId="logo-section">
+            <div className="tl-logorow">
+              <div className="tl-logo">
+                {logoBase64 ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={logoBase64} alt={L("الشعار", "Logo")} />
+                ) : <span className="tl-ph" aria-hidden />}
+              </div>
+              <div className="hr-stack" style={{ gap: 8 }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/svg+xml"
+                  style={{ display: "none" }}
+                  onChange={handleFileChange}
+                />
+                <div className="tl-acts">
+                  <Btn onClick={() => fileInputRef.current?.click()} busy={logoUploading}>{L("تغيير الشعار", "Change logo")}</Btn>
+                  {logoBase64 ? <Btn variant="ghost" onClick={handleRemoveLogo} disabled={logoUploading}>{L("إزالة الشعار", "Remove logo")}</Btn> : null}
+                </div>
+                <span className="hr-caption">{L("PNG أو JPG أو SVG · حتى 2 ميغابايت · مربع يُفضَّل", "PNG, JPG or SVG · up to 2 MB · square preferred")}</span>
+              </div>
+            </div>
+            {msgNotice(logoMsg)}
+          </Sec>
 
-        <div className="flex items-center gap-5 flex-wrap">
-          {/* Preview */}
-          <div className="w-20 h-20 rounded-xl border-2 border-dashed border-border bg-cream flex items-center justify-center overflow-hidden flex-shrink-0">
-            {logoBase64 ? (
-              <img src={logoBase64} alt="Logo" className="w-full h-full object-contain p-1" />
-            ) : (
-              <span className="text-[36px] leading-none" style={{ fontFamily: "'Scheherazade New','Amiri',serif", color: "#8B9DB5" }}>ح</span>
-            )}
-          </div>
+          {/* Access and sessions */}
+          <Sec title={L("الوصول والجلسات", "Access and sessions")} caption={L("تُدار في صفحاتها المعتمدة ولا تتكرر هنا", "Managed on their own approved pages, not repeated here")}>
+            {canUsers ? (
+              <div className="tl-card">
+                <Ico name="users" />
+                <div>
+                  <strong>{L("المستخدمون والصلاحيات", "Users & permissions")}</strong>
+                  <p>{L("الحسابات والوحدات والصلاحيات وطلبات الهوية", "Accounts, modules, permissions and identity requests")}</p>
+                </div>
+                <Link href="/dashboard/employees" className="hr-btn is-sm" style={{ textDecoration: "none" }}>{L("فتح", "Open")}</Link>
+              </div>
+            ) : null}
+            <div className="tl-card">
+              <Ico name="phone" />
+              <div>
+                <strong>{L("أجهزتي وجلساتي", "My devices & sessions")}</strong>
+                <p>{L("أجهزتك وجلساتك النشطة وإنهاؤها · في «ملفي الشخصي»", "Your devices and active sessions, and ending them · in «My profile»")}</p>
+              </div>
+              <Link href="/dashboard/profile?tab=devices" className="hr-btn is-sm" style={{ textDecoration: "none" }}>{L("فتح", "Open")}</Link>
+            </div>
+          </Sec>
 
-          <div className="flex flex-col gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/svg+xml"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={logoUploading}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50"
-            >
-              {logoUploading ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
-              تعديل الشعار / Upload Logo
-            </button>
-            {logoBase64 && (
-              <button
-                onClick={handleRemoveLogo}
-                disabled={logoUploading}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm text-charcoal/60 hover:text-red-500 hover:border-red-300 transition-colors disabled:opacity-50"
-              >
-                <X size={14} />
-                Remove Logo
-              </button>
-            )}
-          </div>
-        </div>
+          {/* Cupping close policy (E6) */}
+          <Sec title={t("cuppingPolicyTitle")} caption={t("cuppingPolicyDesc")} testId="cupping-policy">
+            <form onSubmit={saveMinScorers} noValidate className="tl-acts" style={{ alignItems: "flex-end" }}>
+              <Field label={t("cuppingPolicyLabel")}>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={2}
+                  max={20}
+                  step={1}
+                  value={minScorers}
+                  onChange={(e) => setMinScorers(e.target.value)}
+                  className="hr-input"
+                  style={{ width: 120 }}
+                  data-testid="cupping-min-scorers"
+                />
+              </Field>
+              <Btn type="submit" variant="primary" disabled={cupSaving || minScorers === ""} busy={cupSaving}>{t("cuppingPolicySave")}</Btn>
+            </form>
+            {msgNotice(cupMsg)}
+          </Sec>
 
-        {logoMsg && (
-          <div className={`mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
-            logoMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-          }`}>
-            {logoMsg.ok ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
-            {logoMsg.text}
-          </div>
-        )}
-      </section>
-
-      {/* Cupping close policy (E6) */}
-      <section className="bg-white rounded-2xl shadow-sm border border-border p-6" data-testid="cupping-policy">
-        <h2 className="text-base font-bold text-charcoal mb-1 flex items-center gap-2">
-          <Users size={18} className="text-orange" aria-hidden="true" />
-          {t("cuppingPolicyTitle")}
-        </h2>
-        <p className="text-sm text-brown/60 mb-5">{t("cuppingPolicyDesc")}</p>
-        <form onSubmit={saveMinScorers} noValidate className="flex items-end gap-3 flex-wrap">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-bold text-charcoal">{t("cuppingPolicyLabel")}</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={2}
-              max={20}
-              step={1}
-              value={minScorers}
-              onChange={(e) => setMinScorers(e.target.value)}
-              className="w-28 px-3 py-2 rounded-xl border border-border text-sm text-charcoal"
-              data-testid="cupping-min-scorers"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={cupSaving || minScorers === ""}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange text-white text-sm font-bold hover:bg-orange/90 transition-colors disabled:opacity-50"
-          >
-            {cupSaving ? <Loader2 size={15} className="animate-spin" /> : null}
-            {t("cuppingPolicySave")}
-          </button>
-        </form>
-        {cupMsg && (
-          <div role={cupMsg.ok ? "status" : "alert"} className={`mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
-            cupMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-          }`}>
-            {cupMsg.ok ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
-            {cupMsg.text}
-          </div>
-        )}
-      </section>
-
-      {/* Danger Zone */}
-      <section className="bg-white rounded-2xl shadow-sm border border-red-200 p-6">
-        <h2 className="text-base font-bold text-red-600 mb-1 flex items-center gap-2">
-          <AlertTriangle size={18} />
-          {t("dangerZone")}
-        </h2>
-        <p className="text-sm text-charcoal/60 mb-5">{t("resetDesc")}</p>
-
-        <div className="flex items-center justify-between gap-4 bg-red-50 border border-red-200 rounded-xl px-5 py-4">
-          <div>
-            <p className="font-bold text-sm text-charcoal">{t("factoryReset")}</p>
-            <p className="text-xs text-red-500 mt-0.5">{t("wipeData")}</p>
-          </div>
-          <button
-            onClick={openModal}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold transition-colors flex-shrink-0"
-          >
-            <Trash2 size={16} />
-            {t("wipeData")}
-          </button>
-        </div>
-      </section>
-
-      {/* Training Data Reset — only shown to users with settings.training_reset sub-privilege */}
-      {user && hasSubPrivilege(user.permissions, "settings", "training_reset") && (
-        <section className="bg-white rounded-2xl shadow-sm border border-amber-300 p-6">
-          <h2 className="text-base font-bold text-amber-700 mb-1 flex items-center gap-2">
-            <AlertTriangle size={18} />
-            {t("trainingResetTitle")}
-          </h2>
-          <p className="text-sm text-charcoal/60 mb-3">{t("trainingResetSectionDesc")}</p>
-
-          <div className="text-xs text-charcoal/50 mb-4 space-y-0.5">
-            <p>✗ Deletes: orders, customers, batches, QC records, deliveries, inventory, purchase records</p>
-            <p>✗ Also deletes: suppliers, products, and SKUs</p>
-            <p>✓ Preserves: employees, system settings</p>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+          {/* Administration tools (danger) */}
+          <Sec title={L("أدوات الإدارة", "Administration tools")} caption={L("إجراءات لا تُعكس · تتطلب عبارة تأكيد ورمز المدير", "Irreversible actions · each needs a confirmation phrase and the admin PIN")} tone="danger">
             <div>
-              <p className="font-bold text-sm text-charcoal">{t("trainingResetTitle")}</p>
-              <p className="text-xs text-amber-600 mt-0.5">{t("trainingResetBtn")}</p>
-            </div>
-            <button
-              onClick={openTrainModal}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold transition-colors flex-shrink-0"
-            >
-              <Trash2 size={16} />
-              {t("trainingResetBtn")}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* Production Reset confirmation modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border bg-red-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-                  <AlertTriangle size={20} className="text-red-600" />
+              <div className="tl-row">
+                <div>
+                  <strong>{t("factoryReset")}</strong>
+                  <p>{t("resetDesc")}</p>
                 </div>
-                <h3 className="font-extrabold text-charcoal text-base">{t("resetConfirmTitle")}</h3>
+                <Btn variant="danger" onClick={openModal} data-testid="factory-reset">{L("مسح البيانات التشغيلية", t("wipeData"))}</Btn>
               </div>
-              <button onClick={closeModal} className="text-charcoal/40 hover:text-charcoal transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleReset} className="px-6 py-5 space-y-5">
-              {/* Warning */}
-              <p className="text-sm text-red-600 font-medium bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-                {t("resetConfirmDesc")}
-              </p>
-
-              {/* Phrase input */}
-              <div>
-                <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-                  {t("typeToConfirm")}
-                </label>
-                <input
-                  type="text"
-                  value={phrase}
-                  onChange={(e) => setPhrase(e.target.value)}
-                  placeholder={CONFIRM_PHRASE}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className={`w-full px-4 py-2.5 rounded-xl border bg-cream text-charcoal text-sm font-mono focus:outline-none focus:ring-2 ${
-                    phrase
-                      ? phraseMatch
-                        ? "border-green-400 focus:ring-green-300"
-                        : "border-red-300 focus:ring-red-200"
-                      : "border-border focus:ring-orange/40"
-                  }`}
-                />
-              </div>
-
-              {/* PIN input */}
-              <div>
-                <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-                  {t("enterPinToConfirm")}
-                </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-                  maxLength={PIN_LENGTH}
-                  required
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest"
-                />
-              </div>
-
-              {msg && (
-                <div className={`flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
-                  msg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-                }`}>
-                  {msg.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                  {msg.text}
+              {canTrainingReset ? (
+                <div className="tl-row">
+                  <div>
+                    <strong>{t("trainingResetTitle")}</strong>
+                    <p>{t("trainingResetSectionDesc")}</p>
+                    <p>{L("يحذف: الطلبات والعملاء والدفعات والجودة والتسليم والمخزون والمشتريات والموردين والمنتجات · يحفظ: الموظفين والإعدادات", "Deletes: orders, customers, batches, QC records, deliveries, inventory, purchase records, suppliers, products and SKUs · Preserves: employees, system settings")}</p>
+                  </div>
+                  <Btn variant="danger" onClick={openTrainModal} data-testid="training-reset">{L("مسح بيانات التدريب", t("trainingResetBtn"))}</Btn>
                 </div>
+              ) : null}
+            </div>
+            <Notice tone="warning">
+              {L(
+                "تعمل هذه الأدوات فقط على قاعدة بيانات مصرّح بمسحها في إعداد الخادم (تدريب أو اختبار). على قاعدة الإنتاج يرفض الخادم الطلب ولا يتغير شيء.",
+                "These tools only work on a database the server configuration allows to be wiped (training or test). On the production database the server refuses and nothing changes.",
               )}
-
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={resetting}
-                  className="flex-1 py-2.5 rounded-xl border border-border text-charcoal text-sm font-semibold hover:bg-cream transition-colors disabled:opacity-50"
-                >
-                  {t("cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!phraseMatch || !pin || resetting}
-                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
-                >
-                  {resetting ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      {t("loading")}
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 size={15} />
-                      {t("confirm")}
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
+            </Notice>
+          </Sec>
         </div>
-      )}
+      </SettingsFrame>
 
-      {/* Training Reset confirmation modal */}
-      {trainModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border bg-amber-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
-                  <AlertTriangle size={20} className="text-amber-600" />
-                </div>
-                <h3 className="font-extrabold text-charcoal text-base">{t("trainingResetConfirmTitle")}</h3>
-              </div>
-              <button onClick={closeTrainModal} className="text-charcoal/40 hover:text-charcoal transition-colors">
-                <X size={20} />
-              </button>
-            </div>
+      {/* Production Reset confirmation */}
+      <Dialog
+        open={modalOpen}
+        title={t("resetConfirmTitle")}
+        onClose={closeModal}
+        testId="reset-dialog"
+        actions={
+          <>
+            <Btn onClick={closeModal} disabled={resetting}>{t("cancel")}</Btn>
+            <Btn variant="danger" type="submit" form="reset-form" disabled={!phraseMatch || !pin || resetting} busy={resetting}>{resetting ? t("loading") : t("confirm")}</Btn>
+          </>
+        }
+      >
+        <form id="reset-form" onSubmit={handleReset} className="hr-stack" style={{ gap: 14 }}>
+          <Notice tone="danger">{t("resetConfirmDesc")}</Notice>
+          <Field label={t("typeToConfirm")}>
+            <input
+              type="text"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
+              placeholder={CONFIRM_PHRASE}
+              autoComplete="off"
+              spellCheck={false}
+              dir="ltr"
+              aria-invalid={phrase !== "" && !phraseMatch ? true : undefined}
+              className="hr-input"
+              style={{ fontFamily: "var(--f-mono)" }}
+            />
+          </Field>
+          <Field label={t("enterPinToConfirm")}>
+            <input
+              type="password"
+              inputMode="numeric"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+              maxLength={PIN_LENGTH}
+              required
+              dir="ltr"
+              className="hr-input"
+              style={{ letterSpacing: "0.3em" }}
+            />
+          </Field>
+          {msgNotice(msg)}
+        </form>
+      </Dialog>
 
-            <form onSubmit={handleTrainingReset} className="px-6 py-5 space-y-5">
-              {/* Warning */}
-              <p className="text-sm text-amber-700 font-medium bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                {t("trainingResetConfirmDesc")}
-              </p>
-
-              {/* Backup confirmation checkbox */}
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={trainBackupChecked}
-                  onChange={(e) => setTrainBackupChecked(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-amber-600 flex-shrink-0"
-                />
-                <span className="text-sm text-charcoal font-medium">{t("trainingBackupCheck")}</span>
-              </label>
-
-              {/* Phrase input */}
-              <div>
-                <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-                  {t("trainingPhraseToConfirm")}
-                </label>
-                <input
-                  type="text"
-                  value={trainPhrase}
-                  onChange={(e) => setTrainPhrase(e.target.value)}
-                  placeholder={TRAINING_PHRASE}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className={`w-full px-4 py-2.5 rounded-xl border bg-cream text-charcoal text-sm font-mono focus:outline-none focus:ring-2 ${
-                    trainPhrase
-                      ? trainPhraseMatch
-                        ? "border-green-400 focus:ring-green-300"
-                        : "border-red-300 focus:ring-red-200"
-                      : "border-border focus:ring-amber-400/40"
-                  }`}
-                />
-              </div>
-
-              {/* PIN input */}
-              <div>
-                <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-                  {t("enterPinToConfirm")}
-                </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  value={trainPin}
-                  onChange={(e) => setTrainPin(e.target.value.replace(/\D/g, ""))}
-                  maxLength={PIN_LENGTH}
-                  required
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/40 tracking-widest"
-                />
-              </div>
-
-              {trainMsg && (
-                <div className={`flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
-                  trainMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-                }`}>
-                  {trainMsg.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-                  {trainMsg.text}
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={closeTrainModal}
-                  disabled={trainResetting}
-                  className="flex-1 py-2.5 rounded-xl border border-border text-charcoal text-sm font-semibold hover:bg-cream transition-colors disabled:opacity-50"
-                >
-                  {t("cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!trainBackupChecked || !trainPhraseMatch || !trainPin || trainResetting}
-                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
-                >
-                  {trainResetting ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      {t("loading")}
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 size={15} />
-                      {t("confirm")}
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Training Reset confirmation */}
+      <Dialog
+        open={trainModalOpen}
+        title={t("trainingResetConfirmTitle")}
+        onClose={closeTrainModal}
+        testId="training-reset-dialog"
+        actions={
+          <>
+            <Btn onClick={closeTrainModal} disabled={trainResetting}>{t("cancel")}</Btn>
+            <Btn variant="danger" type="submit" form="training-reset-form" disabled={!trainBackupChecked || !trainPhraseMatch || !trainPin || trainResetting} busy={trainResetting}>{trainResetting ? t("loading") : t("confirm")}</Btn>
+          </>
+        }
+      >
+        <form id="training-reset-form" onSubmit={handleTrainingReset} className="hr-stack" style={{ gap: 14 }}>
+          <Notice tone="warning">{t("trainingResetConfirmDesc")}</Notice>
+          <label className="tl-check">
+            <input type="checkbox" checked={trainBackupChecked} onChange={(e) => setTrainBackupChecked(e.target.checked)} />
+            <span>{t("trainingBackupCheck")}</span>
+          </label>
+          <Field label={t("trainingPhraseToConfirm")}>
+            <input
+              type="text"
+              value={trainPhrase}
+              onChange={(e) => setTrainPhrase(e.target.value)}
+              placeholder={TRAINING_PHRASE}
+              autoComplete="off"
+              spellCheck={false}
+              dir="ltr"
+              aria-invalid={trainPhrase !== "" && !trainPhraseMatch ? true : undefined}
+              className="hr-input"
+              style={{ fontFamily: "var(--f-mono)" }}
+            />
+          </Field>
+          <Field label={t("enterPinToConfirm")}>
+            <input
+              type="password"
+              inputMode="numeric"
+              value={trainPin}
+              onChange={(e) => setTrainPin(e.target.value.replace(/\D/g, ""))}
+              maxLength={PIN_LENGTH}
+              required
+              dir="ltr"
+              className="hr-input"
+              style={{ letterSpacing: "0.3em" }}
+            />
+          </Field>
+          {msgNotice(trainMsg)}
+        </form>
+      </Dialog>
+    </OpsRoot>
   );
 }

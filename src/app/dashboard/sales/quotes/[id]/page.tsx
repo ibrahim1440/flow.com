@@ -2,25 +2,33 @@
 
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, Check, X, Copy, ShoppingCart, Trash2, Printer, Lock, Wallet, FileText } from "lucide-react";
+import { Printer, FileText } from "lucide-react";
 import { usePrintCertified } from "@/components/print/Certification";
 import {
-  useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, Spinner,
-  Button, Field, TextInput, TextArea, Money, Pill, Modal, TableWrap, api,
-  QuoteStatusBadge, Td, num, formatDay,
+  useLang, pick, Spinner, Button, Field, TextArea, Modal, api,
+  QUOTE_STATUS_SPECS, num, formatDay, formatMoney,
 } from "../../_components/ui";
 import { useUnsavedGuard } from "../../../_components/useUnsavedGuard";
+import { Ico } from "@/components/shell/icons";
+import { useD21Title, usePhone, useD21Phone } from "@/components/shell/page-context";
+import { splitTitle } from "@/components/d21/labels";
+import { shortDate } from "@/components/d21/format";
+import { DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 
 /**
- * The quotation editor.
+ * The quotation — editor while it is a draft (GX A-10, Figma 1230:121651 / EN 1230:147423,
+ * 390 1233:24114) and the issued record once it is not (GX A-11, 1230:132625 / 1233:70190,
+ * 390 1233:24180): header with its facts and actions, the discount band, the lines at the start
+ * and the totals, facts and revision chain at the end.
+ *
+ * Visual port only: the requests, payloads, the local preview arithmetic and every condition
+ * that decides which action is offered are the ones this screen already had. What the frames
+ * draw and the system does not have (notes to the customer) is not built.
  *
  * ── The totals shown here are the server's ──
- * The row beneath the lines is computed locally so typing feels immediate, and it is
- * replaced by the server's figures the moment the lines are saved. Where the two disagree,
- * the server wins and the screen says so: a browser that decides a price is a browser that
- * can be asked to decide a different one.
- *
- * PROVISIONAL INTERFACE — see the banner.
+ * The figures beside the lines are computed locally so typing feels immediate, and they are
+ * replaced by the server's the moment the lines are saved. Where the two disagree, the server
+ * wins: a browser that decides a price is a browser that can be asked to decide a different one.
  */
 
 type Sku = {
@@ -88,7 +96,16 @@ type Quote = {
 type State = { editable: boolean; revisable: boolean; expired: boolean; orderable: boolean };
 type Can = { write: boolean; approveDiscount: boolean; createOrder: boolean; close: boolean };
 
-
+/** Quote status → the reference status dot (`.st` + tone), as on the list. */
+const STATUS_DOT: Record<string, string> = {
+  ISSUED: "in", ACCEPTED: "ok", REJECTED: "er", EXPIRED: "wa", SUPERSEDED: "x",
+};
+/** The stored unit, as the frames write it («800 عبوة»). The value sent is unchanged. */
+const UNIT_LABELS: Record<string, { en: string; ar: string }> = {
+  KG: { en: "kg", ar: "كغ" },
+  UNIT: { en: "pack", ar: "عبوة" },
+  GRAM: { en: "g", ar: "غ" },
+};
 
 const emptyLine = (): Line => ({
   productSkuId: "",
@@ -130,6 +147,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const lang = useLang();
   const ar = lang === "ar";
+  const phone = usePhone();
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [state, setState] = useState<State | null>(null);
@@ -146,6 +164,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [dialog, setDialog] = useState<"reject" | "order" | null>(null);
+  /** Phone: the «⋯» menu of the sticky bar, and the lines opened for editing from it. */
+  const [more, setMore] = useState(false);
+  const [phoneEdit, setPhoneEdit] = useState(false);
 
   /**
    * Reload counter. The fetch lives in the effect rather than a `useCallback` it calls, so the
@@ -202,6 +223,38 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   const preview = useMemo(() => previewTotals(lines), [lines]);
   const needsApproval = preview.discountPercent > Number(threshold);
+
+  const editable = Boolean(state?.editable && can?.write);
+  const customerName = quote?.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : null;
+
+  // The last crumb of the top bar is the quotation number («المبيعات / عروض الأسعار / Q-…»).
+  useD21Title(quote?.quoteNumber);
+
+  // The phone bar carries the actions the 390 frames put at the bottom; with none, the tab bar stays.
+  const phoneBar = !!(quote && state && can) && (
+    (quote.status === "DRAFT" && can.write) ||
+    (quote.status === "ISSUED" && can.write) ||
+    (state.orderable && can.createOrder) ||
+    (state.revisable && can.write) ||
+    quote.status === "ACCEPTED" ||
+    quote.issuedSnapshot != null
+  );
+  useD21Phone({
+    title: ar ? "عرض السعر" : "Quotation",
+    sub: quote
+      ? `${quote.quoteNumber} · ${editable ? `${ar ? "المراجعة" : "revision"} ${quote.revision}` : (customerName ?? quote.opportunity.title)}`
+      : undefined,
+    back: "/dashboard/sales/quotes",
+    ownBar: phoneBar,
+  });
+  useEffect(() => {
+    if (!more) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest("[data-q-more]")) setMore(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setMore(false); };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("mousedown", close); window.removeEventListener("keydown", esc); };
+  }, [more]);
 
   function setLine(i: number, patch: Partial<Line>) {
     setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -265,598 +318,481 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     reload();
   }
 
-  if (loading) return <Spinner />;
+  async function revise() {
+    setBusy(true);
+    const res = await api<{ quote: { id: string } }>(`/api/sales/quotes/${id}/revise`, {
+      method: "POST",
+    });
+    setBusy(false);
+    if (res.ok) window.location.href = `/dashboard/sales/quotes/${res.data.quote.id}`;
+    else setError(res.data.error ?? "");
+  }
+
+  if (loading) return <div className="pg"><Spinner /></div>;
   if (!quote || !state || !can) {
     return (
-      <div className="space-y-4">
-        <Alert kind="error">{error || (ar ? "العرض غير موجود." : "Quotation not found.")}</Alert>
-        <Link href="/dashboard/sales/quotes" className="text-oo-action-primary font-bold text-sm">
+      <div className="pg">
+        <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 12 }}>
+          {error || (ar ? "العرض غير موجود." : "Quotation not found.")}
+        </p>
+        <Link href="/dashboard/sales/quotes" className="btn sm">
           {ar ? "كل عروض الأسعار" : "All quotations"}
         </Link>
       </div>
     );
   }
 
-  const editable = state.editable && can.write;
+  const statusLabel = (s: string) => pick(QUOTE_STATUS_SPECS, s, lang);
+  const unitLabel = (u: string) => (UNIT_LABELS[u] ? (ar ? UNIT_LABELS[u].ar : UNIT_LABELS[u].en) : u);
+  const pct = (v: string | number) => <bdi>{`${num(Number(v), lang)}%`}</bdi>;
+  const dealSub = splitTitle(quote.opportunity.title, customerName).sub || (customerName ? "" : quote.opportunity.title);
+  const revisionText = (n: number) => `${ar ? "المراجعة" : "Revision"} ${n}`;
 
-  return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+  // ── The figures: the local preview while lines are unsaved, otherwise the server's. ──
+  const fig = {
+    subtotal: dirty ? preview.subtotal.toFixed(2) : quote.subtotal,
+    discount: dirty ? preview.discountTotal.toFixed(2) : quote.discountTotal,
+    tax: dirty ? preview.taxTotal.toFixed(2) : quote.taxTotal,
+    grand: dirty ? preview.grandTotal.toFixed(2) : quote.grandTotal,
+  };
+  // The base VAT is charged on. The design names it, because "subtotal minus discount" is the
+  // figure a customer queries and it was only implied.
+  const taxableBase = (
+    (dirty ? preview.subtotal : Number(quote.subtotal)) -
+    (dirty ? preview.discountTotal : Number(quote.discountTotal))
+  ).toFixed(2);
+  const hasDiscount = Number(fig.discount) > 0;
+  const rates = Array.from(new Set((editable ? lines.map((l) => l.taxRatePercent) : quote.lines.map((l) => l.taxRatePercent)).map((r) => Number(r))));
+  const vatLabel = <>{ar ? "ضريبة القيمة المضافة" : "VAT"}{rates.length === 1 && <> {pct(rates[0])}</>}</>;
+  const unit = quote.currency === "SAR" ? (ar ? "ر.س" : "SAR") : quote.currency;
+  const minus = (v: string) => (Number(v) > 0 ? `−${formatMoney(v)}` : formatMoney(v));
 
-      <Link
-        href={`/dashboard/sales/deals/${quote.opportunity.id}`}
-        className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
-      >
-        <ArrowLeft size={15} className="rtl:rotate-180" aria-hidden />
-        {quote.opportunity.title}
-      </Link>
-
-      <PageHeader
-        title={`${ar ? "عرض السعر " : "Quotation "}${quote.quoteNumber}`}
-        subtitle={
-          <span className="flex items-center gap-2 flex-wrap">
-            {[
-              quote.customer
-                ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name)
-                : null,
-              quote.issuedAt ? `${ar ? "صادر" : "issued"} ${formatDay(quote.issuedAt, lang)}` : null,
-              quote.revision > 1
-                ? `${ar ? "المراجعة" : "revision"} ${num(quote.revision, lang)}`
-                : null,
-              quote.validUntil
-                ? `${ar ? "صالح حتى" : "valid until"} ${formatDay(quote.validUntil, lang)}`
-                : null,
-            ]
-              .filter(Boolean)
-              .map((part, i) => (
-                <span key={i} className="flex items-center gap-2">
-                  {i > 0 && <span aria-hidden className="text-oo-border-strong">·</span>}
-                  <span>{part}</span>
-                </span>
-              ))}
-            {state.expired && quote.status === "ISSUED" && (
-              <Pill tone="warn">{ar ? "انتهت الصلاحية" : "lapsed"}</Pill>
-            )}
-            {quote.discountApprovedAt && (
-              <Pill tone="accent">{ar ? "خصم معتمد" : "discount approved"}</Pill>
-            )}
-          </span>
-        }
-        actions={
-          <>
-            {quote.issuedSnapshot != null && <QuoteDocumentLink id={quote.id} ar={ar} />}
-            {editable && (
-              <Button onClick={save} disabled={busy || lines.length === 0} testId="save-quote">
-                {ar ? "حفظ" : "Save"}
-              </Button>
-            )}
-            {quote.status === "DRAFT" && can.write && (
-              <Button
-                variant="secondary"
-                disabled={busy || dirty || lines.length === 0}
-                title={dirty ? (ar ? "احفظ أولاً" : "Save first") : undefined}
-                onClick={() => transition("ISSUED")}
-                testId="issue-quote"
-              >
-                <Send size={15} aria-hidden /> {ar ? "إصدار" : "Issue"}
-              </Button>
-            )}
-            {quote.status === "ISSUED" && can.write && (
-              <>
-                {/* Accepting closes the deal Won, so it follows the deal-close privilege. */}
-                {can.close && (
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => transition("ACCEPTED")}
-                    testId="accept-quote"
-                  >
-                    <Check size={15} aria-hidden /> {ar ? "قَبِل العميل" : "Customer accepted"}
-                  </Button>
-                )}
-                {/* Outlined, like the deal screen's "mark lost": recording a refusal is
-                    ordinary work, and a solid red button reads as a warning about the act
-                    rather than a record of what the customer said. */}
-                <button
-                  disabled={busy}
-                  onClick={() => setDialog("reject")}
-                  data-testid="reject-quote"
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
-                >
-                  <X size={15} aria-hidden /> {ar ? "رفَضه العميل" : "Customer rejected"}
-                </button>
-              </>
-            )}
-            {state.revisable && can.write && (
-              <Button
-                variant="secondary"
-                disabled={busy}
-                testId="revise-quote"
-                onClick={async () => {
-                  setBusy(true);
-                  const res = await api<{ quote: { id: string } }>(`/api/sales/quotes/${id}/revise`, {
-                    method: "POST",
-                  });
-                  setBusy(false);
-                  if (res.ok) window.location.href = `/dashboard/sales/quotes/${res.data.quote.id}`;
-                  else setError(res.data.error ?? "");
-                }}
-              >
-                <Copy size={15} aria-hidden /> {ar ? "إنشاء مراجعة" : "Raise a revision"}
-              </Button>
-            )}
-            {state.orderable && can.createOrder && (
-              <Button disabled={busy} onClick={() => setDialog("order")} testId="create-order">
-                <ShoppingCart size={15} aria-hidden /> {ar ? "تحويل إلى طلب" : "Convert to an order"}
-              </Button>
-            )}
-            {/* An accepted quotation is the document a collection is recorded against, but
-                the collection belongs to the DEAL — one deal can have revisions, and the
-                money is owed on the deal, not on a piece of paper. So this is a route back
-                rather than a second place to record one. Offered on the quotation because
-                that is where somebody is standing when the customer pays. */}
-            {quote.status === "ACCEPTED" && (
-              <Link
-                href={`/dashboard/sales/deals/${quote.opportunity.id}#collections`}
-                data-testid="go-to-collection"
-                className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary hover:text-oo-action-primary"
-              >
-                <Wallet size={15} aria-hidden /> {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
-              </Link>
-            )}
-          </>
-        }
-      />
-
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
-
-      {/* Where the quotation stands, and what it comes to, on one line. */}
-      <Card>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-[18px] font-semibold leading-[28px]">
-            <Money value={quote.grandTotal} currency={quote.currency} strong />
-          </span>
-          <span className="flex items-center gap-2">
-            <span className="text-[14px] leading-[22px] text-oo-text-secondary">
-              {ar ? "الحالة الحالية" : "Current status"}
-            </span>
-            <QuoteStatusBadge status={quote.status} testId="quote-status" />
-          </span>
-        </div>
-      </Card>
-
-      {/* ── The revision chain ───────────────────────────────────────────────────────
-          A revision does not replace its predecessor, it supersedes it: the old quotation
-          stays, marked, because it is the document a customer was actually sent. Showing
-          the chain is how a reader knows which one that was. */}
-      {(quote.supersedes || quote.supersededBy) && (
-        <Card>
-          <SectionTitle>
-            {ar
-              ? "سجلّ المراجعات — النسخة السابقة تصبح «مستبدَل» ولا تُحذف"
-              : "Revisions — the earlier one becomes superseded, it is not deleted"}
-          </SectionTitle>
-          <ul className="space-y-2" data-testid="revision-chain">
-            {[
-              quote.supersededBy
-                ? { ...quote.supersededBy, self: false }
-                : null,
-              { id: quote.id, quoteNumber: quote.quoteNumber, revision: quote.revision, status: quote.status, self: true },
-              quote.supersedes
-                ? { ...quote.supersedes, status: "SUPERSEDED", self: false }
-                : null,
-            ]
-              .filter((r): r is NonNullable<typeof r> => r !== null)
-              .map((r) => (
-                <li
-                  key={r.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]"
-                >
-                  <QuoteStatusBadge status={r.status} />
-                  <span className="text-end">
-                    {r.self ? (
-                      <span className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
-                        {ar ? `المراجعة ${num(r.revision, lang)} — ` : `Revision ${r.revision} — `}
-                        {r.quoteNumber}
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/dashboard/sales/quotes/${r.id}`}
-                        className="text-[14px] font-medium leading-[22px] text-oo-action-primary hover:underline"
-                      >
-                        {ar ? `المراجعة ${num(r.revision, lang)} — ` : `Revision ${r.revision} — `}
-                        {r.quoteNumber}
-                      </Link>
-                    )}
-                    {r.self && (
-                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                        {ar ? "المعروضة الآن" : "the one shown here"}
-                      </span>
-                    )}
-                  </span>
-                </li>
-              ))}
-          </ul>
-        </Card>
-      )}
-      {quote.rejectionNote && (
-        <Alert kind="info">{(ar ? "سبب الرفض: " : "Rejected because: ") + quote.rejectionNote}</Alert>
-      )}
-      {quote.orderLinks.length > 0 && (
-        <Alert kind="success">
-          {ar ? "أُنشئ الطلب " : "Order raised: "}
-          {quote.orderLinks.map((l) => `#${l.order.orderNumber}`).join(", ")}
-        </Alert>
-      )}
-      {/* The design gives this its own amber card rather than a line of body text, because
-          it is the one thing on the screen that changes what the Issue button will do. */}
-      {editable && needsApproval && (
-        <div
-          className="flex items-start gap-2.5 rounded-[10px] border border-oo-status-waiting bg-oo-status-waiting-bg px-4 py-[10px]"
-          role="note"
-          data-testid="discount-approval-notice"
-        >
-          <Lock size={16} aria-hidden className="mt-0.5 shrink-0 text-oo-status-hold" />
-          <div className="flex-1">
-            <p className="text-[14px] font-medium leading-[22px] text-oo-status-hold">
-              {can.approveDiscount
-                ? (ar ? "الخصم فوق الحدّ — اعتمادك مطلوب" : "The discount is above the threshold — your approval applies")
-                : (ar ? "الخصم يتجاوز صلاحيتك — يحتاج اعتماداً" : "The discount is beyond your authority — it needs approval")}
-            </p>
-            <p className="text-[12px] leading-[18px] text-oo-status-hold">
-              {ar
-                ? `الخصم الفعّال ${preview.discountPercent.toFixed(2)}% وحدّ الاعتماد ${threshold}%. ` +
-                  (can.approveDiscount
-                    ? "الإصدار يسجّل اعتمادك على العرض."
-                    : "الإصدار يُرفض حتى يصدره مديرٌ لديه صلاحية اعتماد الخصم؛ العرض يبقى مسودة.")
-                : `The effective discount is ${preview.discountPercent.toFixed(2)}% against a ${threshold}% threshold. ` +
-                  (can.approveDiscount
-                    ? "Issuing records your approval on the quotation."
-                    : "Issuing is refused until a manager with discount approval does it; the quotation stays a draft.")}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ── The facts a quotation is written against ────────────────────────────────
-          Read-only on purpose. The customer comes from the deal, the date is when the
-          draft was raised, and the currency is fixed: `QUOTE_CURRENCY` is SAR and the
-          service refuses a collection in anything else because there is no exchange-rate
-          policy to convert it with. Rendering them as editable fields would offer three
-          choices the server does not accept. */}
-      {editable && (
-        <Card>
-          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              [
-                ar ? "العميل" : "Customer",
-                quote.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : "—",
-              ],
-              [ar ? "الصفقة" : "Deal", quote.opportunity.title],
-              [ar ? "تاريخ العرض" : "Quotation date", formatDay(quote.createdAt ?? null, lang)],
-              [
-                ar ? "العملة" : "Currency",
-                ar ? "ريال سعودي (SAR) — لا عملة أخرى" : "Saudi riyals (SAR) — no other currency",
-              ],
-            ].map(([label_, value]) => (
-              <div key={label_} className="rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]">
-                <dt className="text-[12px] leading-[18px] text-oo-text-muted">{label_}</dt>
-                <dd className="text-[14px] leading-[22px] text-oo-text-primary">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        </Card>
-      )}
-
-      {/* ── Lines ─────────────────────────────────────────────────── */}
-      <Card>
-        <SectionTitle
-          right={
-            editable ? (
-              <button
-                onClick={() => {
-                  setLines([...lines, emptyLine()]);
-                  setDirty(true);
-                }}
-                className="text-xs font-bold text-oo-action-primary hover:underline"
-                data-testid="add-line"
-              >
-                + {ar ? "بند" : "Line"}
-              </button>
-            ) : null
-          }
-        >
-          {ar ? "البنود" : "Lines"}
-        </SectionTitle>
-
-        {lines.length === 0 ? (
-          <p className="text-sm text-oo-text-muted font-semibold py-6 text-center">
-            {ar ? "لا توجد بنود. أضف بنداً لتسعير العرض." : "No lines yet. Add one to price the quotation."}
-          </p>
-        ) : !editable ? (
-          /* A quotation that can no longer be edited is a record, not a form. It was
-             rendering the editor's inputs with `disabled` on them, which looks like a form
-             that is merely broken — and the server has refused every one of those fields
-             since the moment it was issued. The figures here are the SERVER's, not the
-             local recompute the editor previews with. */
-          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
-            <table className="w-full min-w-[820px] border-collapse text-start" data-testid="quote-lines-readonly">
-              <thead>
-                <tr className="bg-oo-bg-subtle">
-                  {[
-                    [ar ? "المنتج / الوصف" : "Product / description", "min-w-[240px]"],
-                    [ar ? "الكمية" : "Qty", "w-[110px]"],
-                    [ar ? "سعر الوحدة" : "Unit price", "w-[140px]"],
-                    [ar ? "خصم" : "Discount", "w-[100px]"],
-                    [ar ? "ضريبة" : "Tax", "w-[100px]"],
-                    [ar ? "الإجمالي" : "Total", "w-[150px]"],
-                  ].map(([l, w], i) => (
-                    <th
-                      key={i}
-                      scope="col"
-                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
-                    >
-                      {l}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {quote.lines.map((l) => (
-                  <tr key={l.id} className="border-t border-oo-border-default" data-testid={`ro-line-${l.position}`}>
-                    <Td>
-                      {l.productSku?.name ?? l.description ?? "—"}
-                      {l.productSku && (
-                        <span className="block font-mono text-[12px] leading-[18px] text-oo-text-muted">
-                          {l.productSku.skuCode}
-                        </span>
-                      )}
-                    </Td>
-                    <Td>
-                      {num(Number(l.quantity), lang)} {l.unit}
-                    </Td>
-                    <Td><Money value={l.unitPrice} currency={quote.currency} /></Td>
-                    <Td>
-                      {Number(l.discountPercent) > 0
-                        ? ar
-                          ? `${num(Number(l.discountPercent), "ar")}%`
-                          : `${l.discountPercent}%`
-                        : "—"}
-                    </Td>
-                    <Td>
-                      {ar ? `${num(Number(l.taxRatePercent), "ar")}%` : `${l.taxRatePercent}%`}
-                    </Td>
-                    <Td><Money value={l.lineTotal} currency={quote.currency} /></Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <TableWrap>
-            <table className="w-full text-sm min-w-[860px]">
-              <thead>
-                <tr className="bg-oo-bg-subtle text-[12px] font-medium leading-[18px] text-oo-text-muted">
-                  <th className="pe-4 text-start py-2 w-[26%]">{ar ? "المنتج / الوصف" : "Product / description"}</th>
-                  <th className="pe-4 text-end py-2 w-[10%]">{ar ? "الكمية" : "Qty"}</th>
-                  <th className="pe-4 text-start py-2 w-[9%]">{ar ? "الوحدة" : "Unit"}</th>
-                  <th className="pe-4 text-end py-2 w-[13%]">{ar ? "سعر الوحدة" : "Unit price"}</th>
-                  <th className="pe-4 text-end py-2 w-[9%]">{ar ? "خصم %" : "Disc %"}</th>
-                  <th className="pe-4 text-end py-2 w-[9%]">{ar ? "ضريبة %" : "Tax %"}</th>
-                  <th className="pe-4 text-end py-2 w-[14%]">{ar ? "الإجمالي" : "Total"}</th>
-                  <th className="pe-4 w-[4%]" />
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l, i) => {
-                  const gross = (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0);
-                  const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
-                  const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
-                  return (
-                    <tr key={i} className="border-t border-oo-border-default align-top" data-testid={`line-${i}`}>
-                      <td className="py-2 pe-2">
-                        <select
-                          aria-label={ar ? `المنتج للبند ${i + 1}` : `Product for line ${i + 1}`}
-                          value={l.productSkuId}
-                          disabled={!editable}
-                          onChange={(e) => chooseSku(i, e.target.value)}
-                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs bg-oo-bg-default disabled:bg-oo-bg-subtle"
-                        >
-                          <option value="">{ar ? "— وصف حر —" : "— free text —"}</option>
-                          {skus.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {(ar ? s.nameAr : null) ?? s.name ?? s.skuCode}
-                            </option>
-                          ))}
-                        </select>
-                        {!l.productSkuId && (
-                          <input
-                            aria-label={ar ? `وصف البند ${i + 1}` : `Description for line ${i + 1}`}
-                            value={l.description}
-                            disabled={!editable}
-                            placeholder={ar ? "وصف البند" : "What is being quoted"}
-                            onChange={(e) => setLine(i, { description: e.target.value })}
-                            className="w-full mt-1 px-2 py-2 border border-oo-border-strong rounded-lg text-xs disabled:bg-oo-bg-subtle"
-                          />
-                        )}
-                      </td>
-                      <td className="py-2 pe-2">
-                        <input
-                          aria-label={ar ? `كمية البند ${i + 1}` : `Quantity for line ${i + 1}`}
-                          value={l.quantity}
-                          inputMode="decimal"
-                          disabled={!editable}
-                          onChange={(e) => setLine(i, { quantity: e.target.value })}
-                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
-                        />
-                      </td>
-                      <td className="py-2 pe-2">
-                        <select
-                          aria-label={ar ? `وحدة البند ${i + 1}` : `Unit for line ${i + 1}`}
-                          value={l.unit}
-                          disabled={!editable}
-                          onChange={(e) => setLine(i, { unit: e.target.value })}
-                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs disabled:bg-oo-bg-subtle"
-                        >
-                          <option value="KG">KG</option>
-                          <option value="UNIT">{ar ? "عبوة" : "UNIT"}</option>
-                          <option value="GRAM">GRAM</option>
-                        </select>
-                      </td>
-                      <td className="py-2 pe-2">
-                        <input
-                          aria-label={ar ? `سعر وحدة البند ${i + 1}` : `Unit price for line ${i + 1}`}
-                          value={l.unitPrice}
-                          inputMode="decimal"
-                          disabled={!editable}
-                          onChange={(e) => setLine(i, { unitPrice: e.target.value })}
-                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
-                        />
-                      </td>
-                      <td className="py-2 pe-2">
-                        <input
-                          aria-label={ar ? `خصم البند ${i + 1}` : `Discount for line ${i + 1}`}
-                          value={l.discountPercent}
-                          inputMode="decimal"
-                          disabled={!editable}
-                          onChange={(e) => setLine(i, { discountPercent: e.target.value })}
-                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
-                        />
-                      </td>
-                      <td className="py-2 pe-2">
-                        <input
-                          aria-label={ar ? `ضريبة البند ${i + 1}` : `Tax for line ${i + 1}`}
-                          value={l.taxRatePercent}
-                          inputMode="decimal"
-                          disabled={!editable}
-                          onChange={(e) => setLine(i, { taxRatePercent: e.target.value })}
-                          className="w-full px-2 py-2 border border-oo-border-strong rounded-lg text-xs text-end tabular-nums disabled:bg-oo-bg-subtle"
-                        />
-                      </td>
-                      <td className="pe-4 py-2 text-end" data-testid={`line-total-${i}`}>
-                        <Money value={lineTotal.toFixed(2)} currency={quote.currency} />
-                        {/* A line whose own discount is past the threshold, marked where the
-                            number is rather than only in the notice above. */}
-                        {Number(l.discountPercent) > Number(threshold) && (
-                          <span className="block text-[12px] leading-[18px] text-oo-status-rejected">
-                            {ar
-                              ? `خصم السطر فوق حدّ ${threshold}%`
-                              : `line discount is over the ${threshold}% threshold`}
-                          </span>
-                        )}
-                      </td>
-                      <td className="pe-4 py-2 text-center">
-                        {editable && (
-                          <button
-                            aria-label={ar ? `حذف البند ${i + 1}` : `Remove line ${i + 1}`}
-                            data-testid={`remove-line-${i}`}
-                            onClick={() => {
-                              setLines(lines.filter((_, j) => j !== i));
-                              setDirty(true);
-                            }}
-                            className="text-oo-text-muted hover:text-oo-status-rejected"
-                          >
-                            <Trash2 size={14} aria-hidden />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
-        )}
-
-        <div className="mt-4 grid sm:grid-cols-2 gap-4 items-start">
-          <div className="space-y-3">
-            {editable ? (
-              <Field
-                id="q-valid"
-                label={ar ? "صالح حتى" : "Valid until"}
-                hint={ar ? "مطلوب قبل الإصدار." : "Required before the quotation can be issued."}
-              >
-                <TextInput
-                  id="q-valid"
-                  type="date"
-                  value={validUntil}
-                  onChange={(v) => {
-                    setValidUntil(v);
-                    setDirty(true);
-                  }}
-                />
-              </Field>
-            ) : (
-              <div className="rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary">
-                <span className="text-oo-text-muted">{ar ? "صالح حتى: " : "Valid until: "}</span>
-                {quote.validUntil ? formatDay(quote.validUntil, lang) : "—"}
-              </div>
-            )}
-            {dirty && editable && (
-              <p className="text-[11px] text-oo-status-hold font-bold" role="status">
-                {ar ? "تغييرات غير محفوظة." : "Unsaved changes."}
-              </p>
-            )}
-          </div>
-
-          <dl className="bg-oo-bg-subtle rounded-xl p-4 space-y-2 text-sm" data-testid="quote-totals">
-            <Total
-              label={ar ? "المجموع قبل الخصم" : "Subtotal"}
-              value={dirty ? preview.subtotal.toFixed(2) : quote.subtotal}
-              currency={quote.currency}
-            />
-            <Total
-              label={ar ? "الخصم" : "Discount"}
-              value={"-" + (dirty ? preview.discountTotal.toFixed(2) : quote.discountTotal)}
-              currency={quote.currency}
-            />
-            {/* The base VAT is charged on. The design names it, because "subtotal minus
-                discount" is the figure a customer queries and it was only implied. */}
-            <Total
-              label={ar ? "الوعاء الخاضع للضريبة" : "Taxable base"}
-              value={(
-                (dirty ? preview.subtotal : Number(quote.subtotal)) -
-                (dirty ? preview.discountTotal : Number(quote.discountTotal))
-              ).toFixed(2)}
-              currency={quote.currency}
-            />
-            <Total
-              label={ar ? "ضريبة القيمة المضافة" : "VAT"}
-              value={dirty ? preview.taxTotal.toFixed(2) : quote.taxTotal}
-              currency={quote.currency}
-            />
-            <div className="border-t border-oo-border-default pt-2 flex items-baseline justify-between gap-3">
-              <dt className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
-                {ar ? "الإجمالي" : "Grand total"}
-              </dt>
-              <dd className="text-[18px] leading-[28px]">
-                <Money value={dirty ? preview.grandTotal.toFixed(2) : quote.grandTotal} currency={quote.currency} strong />
-              </dd>
-            </div>
-            {dirty && (
-              <p className="text-[10px] text-oo-text-muted font-semibold">
-                {ar
-                  ? "معاينة محلية. الأرقام المعتمدة هي التي يحسبها الخادم عند الحفظ."
-                  : "Local preview. The figures that count are the server's, computed on save."}
-              </p>
-            )}
-          </dl>
-        </div>
-      </Card>
-
-      {quote.issuedAt && (
-        <p className="text-[12px] leading-[18px] text-oo-text-muted">
-          {ar ? "صدر في " : "Issued "}
-          {formatDay(quote.issuedAt, lang)}
-          {ar
-            ? " — البنود والأسعار المُثبّتة محفوظة كما أُرسلت للعميل."
-            : " — the lines and prices sent to the customer are frozen as they were."}
+  // ── Notices ──
+  const notices = (
+    <>
+      {error && (
+        <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 16 }}>
+          {error}<button type="button" onClick={() => setError("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
         </p>
       )}
+      {success && (
+        <p className="notice ok" role="status" data-testid="alert-success" style={{ marginBottom: 16 }}>
+          {success}<button type="button" onClick={() => setSuccess("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+        </p>
+      )}
+    </>
+  );
 
+  // ── The facts under the title, each its own element so the bidi algorithm cannot move a
+  //    separator between two numerals. ──
+  const dealHref = `/dashboard/sales/deals/${quote.opportunity.id}`;
+  const meta: React.ReactNode[] = [
+    <span key="st" className={`st ${STATUS_DOT[quote.status] ?? ""}`} data-testid="quote-status">{statusLabel(quote.status)}</span>,
+    <span key="who">
+      {customerName && <bdi>{customerName}</bdi>}
+      {customerName && dealSub && " · "}
+      {dealSub && <Link href={dealHref} style={{ color: "inherit" }}><bdi>{dealSub}</bdi></Link>}
+      {customerName && !dealSub && <> · <Link href={dealHref} style={{ color: "inherit" }}>{ar ? "الصفقة" : "deal"}</Link></>}
+    </span>,
+    ...(editable || quote.revision > 1 ? [<span key="rev">{revisionText(quote.revision)}</span>] : []),
+    ...(quote.issuedAt ? [<span key="iss">{ar ? "صادر " : "Issued "}<bdi className="n">{formatDay(quote.issuedAt, lang)}</bdi></span>] : []),
+    ...(quote.validUntil ? [<span key="valid">{ar ? "صالح حتى " : "Valid until "}{shortDate(quote.validUntil, lang)}</span>] : []),
+    ...(state.expired && quote.status === "ISSUED" ? [<span key="lapsed" className="flag wa">{ar ? "انتهت الصلاحية" : "Lapsed"}</span>] : []),
+    ...(quote.discountApprovedAt ? [<span key="disc" className="flag ok">{ar ? "خصم معتمد" : "Discount approved"}</span>] : []),
+    ...(dirty && editable ? [<span key="dirty" className="flag wa" role="status">{ar ? "تغييرات غير محفوظة" : "Unsaved changes"}</span>] : []),
+  ];
+
+  // ── Actions, in the frame's order: the secondary ones first, the page's primary last. ──
+  const issueLabel = needsApproval && can.approveDiscount
+    ? (ar ? "اعتماد الخصم وإصدار العرض" : "Approve discount and issue")
+    : (ar ? "إصدار العرض" : "Issue");
+  const saveBtn = editable ? (
+    <button type="button" className="btn" onClick={save} disabled={busy || lines.length === 0} data-testid="save-quote">
+      {ar ? "حفظ" : "Save"}
+    </button>
+  ) : null;
+  const issueBtn = quote.status === "DRAFT" && can.write ? (
+    <button
+      type="button"
+      className="btn p"
+      disabled={busy || dirty || lines.length === 0}
+      title={dirty ? (ar ? "احفظ أولاً" : "Save first") : undefined}
+      onClick={() => transition("ISSUED")}
+      data-testid="issue-quote"
+    >
+      {issueLabel}
+    </button>
+  ) : null;
+  // Accepting closes the deal Won, so it follows the deal-close privilege.
+  const acceptBtn = quote.status === "ISSUED" && can.write && can.close ? (
+    <button type="button" className="btn p" disabled={busy} onClick={() => transition("ACCEPTED")} data-testid="accept-quote">
+      {ar ? "قَبِل العميل" : "Customer accepted"}
+    </button>
+  ) : null;
+  const rejectBtn = quote.status === "ISSUED" && can.write ? (
+    <button type="button" className="btn" disabled={busy} onClick={() => setDialog("reject")} data-testid="reject-quote">
+      {ar ? "رفَضه العميل" : "Customer rejected"}
+    </button>
+  ) : null;
+  const reviseBtn = state.revisable && can.write ? (
+    <button type="button" className="btn" disabled={busy} data-testid="revise-quote" onClick={revise}>
+      {ar ? "إنشاء مراجعة" : "Raise a revision"}
+    </button>
+  ) : null;
+  const orderBtn = state.orderable && can.createOrder ? (
+    <button type="button" className="btn p" disabled={busy} onClick={() => setDialog("order")} data-testid="create-order">
+      {ar ? "تحويل إلى طلب" : "Convert to an order"}
+    </button>
+  ) : null;
+  // An accepted quotation is the document a collection is recorded against, but the collection
+  // belongs to the DEAL — one deal can have revisions, and the money is owed on the deal, not on
+  // a piece of paper. So this is a route back rather than a second place to record one.
+  const collectionLink = quote.status === "ACCEPTED" ? (
+    <Link href={`${dealHref}#collections`} data-testid="go-to-collection" className="btn">
+      {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
+    </Link>
+  ) : null;
+  const docLink = quote.issuedSnapshot != null ? <QuoteDocumentLink id={quote.id} ar={ar} /> : null;
+
+  // ── Blocks ──
+  const discountBand = editable && needsApproval ? (
+    <div className="callout wa" role="note" data-testid="discount-approval-notice">
+      <span>
+        <b>
+          {can.approveDiscount
+            ? (ar ? "الخصم فوق الحدّ — اعتمادك مطلوب." : "Discount above the limit — your approval is required.")
+            : (ar ? "الخصم يتجاوز صلاحيتك — يحتاج اعتماداً." : "The discount is beyond your authority — it needs approval.")}
+        </b>{" "}
+        {ar
+          ? `الخصم الفعّال ${preview.discountPercent.toFixed(2)}% وحدّ الاعتماد ${threshold}%، ` +
+            (can.approveDiscount
+              ? "والإصدار يسجّل اعتمادك على العرض."
+              : "والإصدار يُرفض حتى يصدره مديرٌ لديه صلاحية اعتماد الخصم؛ العرض يبقى مسودة.")
+          : `The effective discount is ${preview.discountPercent.toFixed(2)}% against a ${threshold}% limit; ` +
+            (can.approveDiscount
+              ? "issuing records your approval."
+              : "issuing is refused until a manager with discount approval does it, and the quotation stays a draft.")}
+      </span>
+    </div>
+  ) : null;
+
+  const recordNotes = (
+    <>
+      {quote.rejectionNote && (
+        <p className="notice" style={{ marginBottom: 18 }}>{(ar ? "سبب الرفض: " : "Rejected because: ") + quote.rejectionNote}</p>
+      )}
+      {quote.orderLinks.length > 0 && (
+        <p className="notice ok" style={{ marginBottom: 18 }}>
+          {ar ? "أُنشئ الطلب " : "Order raised: "}
+          <bdi className="n">{quote.orderLinks.map((l) => `#${l.order.orderNumber}`).join(", ")}</bdi>
+        </p>
+      )}
+    </>
+  );
+
+  const addLine = editable && (!phone || phoneEdit) ? (
+    <button
+      type="button"
+      className="lk-inline"
+      onClick={() => { setLines([...lines, emptyLine()]); setDirty(true); }}
+      data-testid="add-line"
+    >
+      {ar ? "إضافة بند" : "Add line"}
+    </button>
+  ) : null;
+
+  const linesHeader = (
+    <div className="q-bh">
+      <h2 className="bt">{ar ? "البنود" : "Lines"}</h2>
+      {editable ? (
+        <span className="sub">
+          {ar ? `الضريبة تُحسب لكل بند بعد الخصم · خصم البند حتى ${DISCOUNT_MAX}%` : `Tax per line after discount · line discount up to ${DISCOUNT_MAX}%`}
+        </span>
+      ) : quote.issuedAt ? (
+        <span className="sub">{ar ? "مثبّتة كما أُرسلت للعميل" : "Frozen as sent to the customer"}</span>
+      ) : null}
+      {addLine}
+    </div>
+  );
+
+  const emptyLines = (
+    <p className="lbl" style={{ padding: "24px 0", textAlign: "center", fontWeight: 400 }}>
+      {ar ? "لا توجد بنود. أضف بنداً لتسعير العرض." : "No lines yet. Add one to price the quotation."}
+    </p>
+  );
+
+  const editTable = (
+    <div className="q-scroll">
+      <table className="t q-lines ed" style={{ minWidth: 700 }}>
+        <thead>
+          <tr>
+            <th scope="col">{ar ? "المنتج" : "Product"}</th>
+            <th scope="col" style={{ width: 72 }}>{ar ? "الكمية" : "Qty"}</th>
+            <th scope="col" style={{ width: 76 }}>{ar ? "الوحدة" : "Unit"}</th>
+            <th scope="col" style={{ width: 96 }}>{ar ? "سعر الوحدة" : "Unit price"}</th>
+            <th scope="col" style={{ width: 64 }}>{ar ? "خصم" : "Disc."}</th>
+            <th scope="col" style={{ width: 64 }}>{ar ? "ضريبة" : "Tax"}</th>
+            <th scope="col" style={{ width: 140 }}>{ar ? "الإجمالي شامل الضريبة" : "Total incl. VAT"}</th>
+            <th scope="col" className="x"><span className="sr-only">{ar ? "حذف" : "Remove"}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => {
+            const gross = (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0);
+            const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
+            const lineTotal = net + (net * (Number(l.taxRatePercent) || 0)) / 100;
+            const over = Number(l.discountPercent) > Number(threshold);
+            const sku = skus.find((s) => s.id === l.productSkuId);
+            return (
+              <tr key={i} data-testid={`line-${i}`}>
+                <td className="prod">
+                  <select
+                    aria-label={ar ? `المنتج للبند ${i + 1}` : `Product for line ${i + 1}`}
+                    value={l.productSkuId}
+                    onChange={(e) => chooseSku(i, e.target.value)}
+                    className="qi prodsel"
+                  >
+                    <option value="">{ar ? "— وصف حر —" : "— free text —"}</option>
+                    {skus.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {(ar ? s.nameAr : null) ?? s.name ?? s.skuCode}
+                      </option>
+                    ))}
+                  </select>
+                  {sku && <span className="id">{sku.skuCode}</span>}
+                  {!l.productSkuId && (
+                    <input
+                      aria-label={ar ? `وصف البند ${i + 1}` : `Description for line ${i + 1}`}
+                      value={l.description}
+                      placeholder={ar ? "وصف البند" : "What is being quoted"}
+                      onChange={(e) => setLine(i, { description: e.target.value })}
+                      className="qi desc"
+                    />
+                  )}
+                </td>
+                <td>
+                  <input
+                    aria-label={ar ? `كمية البند ${i + 1}` : `Quantity for line ${i + 1}`}
+                    value={l.quantity}
+                    inputMode="decimal"
+                    onChange={(e) => setLine(i, { quantity: e.target.value })}
+                    className="qi num"
+                  />
+                </td>
+                <td>
+                  <select
+                    aria-label={ar ? `وحدة البند ${i + 1}` : `Unit for line ${i + 1}`}
+                    value={l.unit}
+                    onChange={(e) => setLine(i, { unit: e.target.value })}
+                    className="qi"
+                  >
+                    <option value="KG">{unitLabel("KG")}</option>
+                    <option value="UNIT">{unitLabel("UNIT")}</option>
+                    <option value="GRAM">{unitLabel("GRAM")}</option>
+                  </select>
+                </td>
+                <td>
+                  <input
+                    aria-label={ar ? `سعر وحدة البند ${i + 1}` : `Unit price for line ${i + 1}`}
+                    value={l.unitPrice}
+                    inputMode="decimal"
+                    onChange={(e) => setLine(i, { unitPrice: e.target.value })}
+                    className="qi num"
+                  />
+                </td>
+                {/* A line whose own discount is past the threshold is marked where the number is. */}
+                <td className={over ? "wa" : undefined} title={over ? (ar ? `خصم السطر فوق حدّ ${threshold}%` : `Line discount is over the ${threshold}% threshold`) : undefined}>
+                  <span className="pctw" dir="ltr"><input
+                    aria-label={ar ? `خصم البند ${i + 1}` : `Discount for line ${i + 1}`}
+                    aria-describedby={over ? `over-${i}` : undefined}
+                    value={l.discountPercent}
+                    inputMode="decimal"
+                    onChange={(e) => setLine(i, { discountPercent: e.target.value })}
+                    className="qi num pct"
+                  /><span className="sfx" aria-hidden>%</span></span>
+                  {over && (
+                    <span id={`over-${i}`} className="sr-only">
+                      {ar ? `خصم السطر فوق حدّ ${threshold}%` : `line discount is over the ${threshold}% threshold`}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  <span className="pctw" dir="ltr"><input
+                    aria-label={ar ? `ضريبة البند ${i + 1}` : `Tax for line ${i + 1}`}
+                    value={l.taxRatePercent}
+                    inputMode="decimal"
+                    onChange={(e) => setLine(i, { taxRatePercent: e.target.value })}
+                    className="qi num pct"
+                  /><span className="sfx" aria-hidden>%</span></span>
+                </td>
+                <td data-testid={`line-total-${i}`}><bdi className="n">{formatMoney(lineTotal.toFixed(2))}</bdi></td>
+                <td className="x">
+                  <button
+                    type="button"
+                    className="ib"
+                    aria-label={ar ? `حذف البند ${i + 1}` : `Remove line ${i + 1}`}
+                    data-testid={`remove-line-${i}`}
+                    onClick={() => { setLines(lines.filter((_, j) => j !== i)); setDirty(true); }}
+                  >
+                    <Ico name="close" small />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  /* A quotation that can no longer be edited is a record, not a form, and its figures are the
+     SERVER's, not the local recompute the editor previews with. */
+  const readTable = (
+    <div className="q-scroll">
+      <table className="t q-lines" style={{ minWidth: 640 }} data-testid="quote-lines-readonly">
+        <thead>
+          <tr>
+            <th scope="col">{ar ? "المنتج" : "Product"}</th>
+            <th scope="col">{ar ? "الكمية" : "Qty"}</th>
+            <th scope="col">{ar ? "سعر الوحدة" : "Unit price"}</th>
+            <th scope="col">{ar ? "خصم" : "Disc."}</th>
+            <th scope="col">{ar ? "ضريبة" : "Tax"}</th>
+            <th scope="col">{ar ? "الإجمالي" : "Total"}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {quote.lines.map((l) => (
+            <tr key={l.id} data-testid={`ro-line-${l.position}`}>
+              <td className="prod">
+                <b>{l.productSku?.name ?? l.description ?? "—"}</b>
+                {l.productSku && <span className="id">{l.productSku.skuCode}</span>}
+              </td>
+              <td><bdi className="n">{num(Number(l.quantity), lang)}</bdi> {unitLabel(l.unit)}</td>
+              <td><bdi className="n">{formatMoney(l.unitPrice)}</bdi></td>
+              <td><bdi className="n">{Number(l.discountPercent) > 0 ? pct(l.discountPercent) : "—"}</bdi></td>
+              <td><bdi className="n">{pct(l.taxRatePercent)}</bdi></td>
+              <td><bdi className="n">{formatMoney(l.lineTotal)}</bdi></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const issuedNote = quote.issuedAt ? (
+    <p className="lbl" style={{ fontWeight: 400, marginTop: 10 }}>
+      {ar ? "صدر في " : "Issued "}
+      <bdi className="n">{formatDay(quote.issuedAt, lang)}</bdi>
+      {ar
+        ? " — البنود والأسعار المثبّتة محفوظة كما أُرسلت للعميل."
+        : " — the lines and prices sent to the customer are frozen as they were."}
+      {quote.status === "ISSUED" && (ar ? " القبول يجعل الصفقة رابحة." : " Acceptance marks the deal won.")}
+    </p>
+  ) : null;
+
+  const previewNote = dirty ? (
+    <p className="q-note">
+      {ar
+        ? "معاينة محلية. الأرقام المعتمدة هي التي يحسبها الخادم عند الحفظ."
+        : "Local preview. The figures that count are the server's, computed on save."}
+    </p>
+  ) : null;
+
+  const totals = (
+    <div>
+      <div className="q-bh"><h2 className="bt">{ar ? "الإجمالي" : "Totals"}</h2></div>
+      <dl className="q-props" data-testid="quote-totals">
+        {(editable || hasDiscount) && (
+          <>
+            <dt>{ar ? "المجموع قبل الخصم" : "Subtotal"}</dt><dd><bdi className="n">{formatMoney(fig.subtotal)}</bdi></dd>
+            <dt>{ar ? "الخصم" : "Discount"}</dt><dd><bdi className="n">{minus(fig.discount)}</bdi></dd>
+          </>
+        )}
+        <dt>{editable || hasDiscount ? (ar ? "الوعاء الخاضع للضريبة" : "Taxable base") : (ar ? "قبل الضريبة" : "Before VAT")}</dt>
+        <dd><bdi className="n">{formatMoney(taxableBase)}</bdi></dd>
+        <dt>{vatLabel}</dt><dd><bdi className="n">{formatMoney(fig.tax)}</bdi></dd>
+        <dt>{ar ? "الإجمالي" : "Total"}</dt>
+        <dd className="grand"><bdi>{formatMoney(fig.grand)}</bdi><span className="unit">{unit}</span></dd>
+      </dl>
+      {previewNote}
+    </div>
+  );
+
+  /* The facts a quotation is written against. Read-only on purpose: the customer comes from the
+     deal, the date is when the draft was raised, and the currency is fixed (SAR) — the service
+     refuses anything else. Only the validity date is the editor's. */
+  const facts = editable ? (
+    <div>
+      <div className="q-bh"><h2 className="bt">{ar ? "البيانات" : "Facts"}</h2></div>
+      <dl className="q-props facts">
+        <dt>{ar ? "العميل" : "Customer"}</dt><dd><bdi>{customerName ?? "—"}</bdi></dd>
+        <dt>{ar ? "الصفقة" : "Deal"}</dt>
+        <dd>
+          <Link href={dealHref} style={{ color: "inherit" }}><bdi>{quote.opportunity.title}</bdi></Link>
+          {quote.opportunity.owner && <> · {quote.opportunity.owner.name}</>}
+        </dd>
+        <dt>{ar ? "تاريخ العرض" : "Quote date"}</dt><dd><bdi className="n">{formatDay(quote.createdAt ?? null, lang)}</bdi></dd>
+        <dt>{ar ? "العملة" : "Currency"}</dt><dd>{ar ? "ريال سعودي (SAR) فقط" : "Saudi riyal (SAR) only"}</dd>
+        <dt><label htmlFor="q-valid">{ar ? "صالح حتى" : "Valid until"}</label></dt>
+        <dd>
+          <input
+            id="q-valid"
+            type="date"
+            className="q-date"
+            aria-describedby="q-valid-hint"
+            value={validUntil}
+            onChange={(e) => { setValidUntil(e.target.value); setDirty(true); }}
+          />
+          <span id="q-valid-hint" className="q-note" style={{ display: "block", marginTop: 4 }}>
+            {ar ? "مطلوب قبل الإصدار." : "Required before the quotation can be issued."}
+          </span>
+        </dd>
+      </dl>
+    </div>
+  ) : null;
+
+  /* ── The revision chain ──
+     A revision does not replace its predecessor, it supersedes it: the old quotation stays,
+     marked, because it is the document a customer was actually sent. */
+  const showChain = !editable || quote.supersedes != null || quote.supersededBy != null;
+  const chainLink = (r: { id: string; quoteNumber: string; revision: number }) => (
+    <Link href={`/dashboard/sales/quotes/${r.id}`}>
+      <span className="id">{r.quoteNumber}</span> · {revisionText(r.revision)}
+    </Link>
+  );
+  const chainRows: [string, React.ReactNode][] = [
+    [ar ? "الأحدث" : "Latest", quote.supersededBy
+      ? <>{chainLink(quote.supersededBy)} · <span className={`st ${STATUS_DOT[quote.supersededBy.status] ?? ""}`}>{statusLabel(quote.supersededBy.status)}</span></>
+      : "—"],
+    [ar ? "المعروضة الآن" : "Shown here",
+      <><span className="id">{quote.quoteNumber}</span> · {revisionText(quote.revision)} · {statusLabel(quote.status)}</>],
+    [ar ? "السابقة" : "Earlier", quote.supersedes
+      ? <>{chainLink(quote.supersedes)} · <span className="st x">{statusLabel("SUPERSEDED")}</span></>
+      : "—"],
+  ];
+  const chain = showChain ? (
+    <div>
+      <div className="q-bh">
+        <h2 className="bt">{ar ? "سجلّ المراجعات" : "Revisions"}</h2>
+        <span className="sub">{ar ? "السابقة تصبح «مستبدَل» ولا تُحذف" : "The earlier one becomes «superseded», not deleted"}</span>
+      </div>
+      {phone ? (
+        <dl className="phrows" data-testid="revision-chain" style={{ marginTop: 0 }}>
+          {chainRows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+        </dl>
+      ) : (
+        <dl className="q-props facts" data-testid="revision-chain">
+          {chainRows.map(([k, v]) => <span key={k} style={{ display: "contents" }}><dt>{k}</dt><dd>{v}</dd></span>)}
+        </dl>
+      )}
+    </div>
+  ) : null;
+
+  const dialogs = (
+    <>
       {dialog === "reject" && (
-        <RejectDialog ar={ar} busy={busy} onClose={() => setDialog(null)} onSubmit={(n) => transition("REJECTED", n)} />
+        <RejectDialog ar={ar} busy={busy} quoteNumber={quote.quoteNumber} customer={customerName}
+          onClose={() => setDialog(null)} onSubmit={(n) => transition("REJECTED", n)} />
       )}
       {dialog === "order" && (
         <OrderDialog
@@ -870,32 +806,178 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
           }}
         />
       )}
-    </div>
+    </>
   );
-}
 
-function Total({ label, value, currency }: { label: string; value: string; currency: string }) {
-  // Negative-signed values ("-125.00" for a discount) keep their sign through the
-  // formatter, which is why the sign is part of the string rather than part of the label.
+  // ── Phone (390): the facts line, lines as rows, figures as label/value rows, the band, and
+  //    the frame's sticky bar. Functions the 390 frames leave to the desktop stay under «⋯». ──
+  if (phone) {
+    const editingHere = editable && phoneEdit;
+    const primary = issueBtn ?? orderBtn ?? acceptBtn ?? (!rejectBtn ? reviseBtn : null);
+    const secondary = editingHere ? saveBtn : (rejectBtn ?? collectionLink);
+    const moreItems: React.ReactNode[] = [];
+    if (editable && !phoneEdit) moreItems.push(
+      <button key="edit" type="button" role="menuitem" data-testid="phone-edit-lines" onClick={() => { setMore(false); setPhoneEdit(true); }}>
+        {ar ? "تعديل البنود هنا" : "Edit the lines here"}
+      </button>,
+    );
+    if (reviseBtn && primary !== reviseBtn) moreItems.push(
+      <button key="rev" type="button" role="menuitem" disabled={busy} data-testid="revise-quote" onClick={() => { setMore(false); revise(); }}>
+        {ar ? "إنشاء مراجعة" : "Raise a revision"}
+      </button>,
+    );
+    if (collectionLink && secondary !== collectionLink) moreItems.push(
+      <Link key="col" role="menuitem" href={`${dealHref}#collections`} data-testid="go-to-collection">
+        {ar ? "تسجيل تحصيل على الصفقة" : "Record a collection on the deal"}
+      </Link>,
+    );
+    if (quote.issuedSnapshot != null) moreItems.push(
+      <Link key="doc" role="menuitem" href={`/dashboard/sales/quotes/${quote.id}/print`} data-testid="open-print">
+        {ar ? "مستند العرض" : "Quotation document"}
+      </Link>,
+    );
+    const phoneRows = editable
+      ? lines.map((l, i) => {
+          const sku = skus.find((s) => s.id === l.productSkuId);
+          const gross = (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0);
+          const net = gross - (gross * (Number(l.discountPercent) || 0)) / 100;
+          return {
+            key: String(i),
+            name: (sku ? ((ar ? sku.nameAr : null) ?? sku.name ?? sku.skuCode) : l.description) || "—",
+            qty: l.quantity, unit: l.unit, price: l.unitPrice, disc: l.discountPercent, tax: l.taxRatePercent,
+            total: formatMoney((net + (net * (Number(l.taxRatePercent) || 0)) / 100).toFixed(2)),
+          };
+        })
+      : quote.lines.map((l) => ({
+          key: l.id, name: l.productSku?.name ?? l.description ?? "—",
+          qty: l.quantity, unit: l.unit, price: l.unitPrice, disc: l.discountPercent, tax: l.taxRatePercent,
+          total: formatMoney(l.lineTotal),
+        }));
+
+    return (
+      <div className="pg">
+        {notices}
+        <div className="q-mmeta">
+          {meta.map((m, i) => <span key={i} style={{ display: "contents" }}>{i > 0 && <span aria-hidden>·</span>}{m}</span>)}
+        </div>
+        {discountBand}
+        {recordNotes}
+        {linesHeader}
+        {phoneRows.length === 0 ? emptyLines : editingHere ? (
+          <>
+            {editTable}
+            <div style={{ marginTop: 16 }}>{facts}</div>
+          </>
+        ) : (
+          <div data-testid="quote-lines-phone">
+            {phoneRows.map((r) => (
+              <div key={r.key} className="q-mline">
+                <b>{r.name}</b>
+                <span className="n">{r.total}</span>
+                <div className="r2">
+                  <span><bdi className="n">{num(Number(r.qty), lang)}</bdi> {unitLabel(r.unit)} × <bdi className="n">{formatMoney(String(r.price))}</bdi></span>
+                  {Number(r.disc) > 0
+                    ? <span className={Number(r.disc) > Number(threshold) ? "wa" : undefined}>{ar ? "خصم " : "Disc. "}{pct(r.disc)}</span>
+                    : <span>{ar ? "ضريبة " : "Tax "}{pct(r.tax)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {editingHere && phoneRows.length === 0 && <div style={{ marginTop: 16 }}>{facts}</div>}
+        <dl className="phrows" data-testid="quote-totals">
+          {(editable || hasDiscount) ? (
+            <>
+              <div><dt>{ar ? "المجموع قبل الخصم" : "Subtotal"}</dt><dd><bdi className="n">{formatMoney(fig.subtotal)}</bdi></dd></div>
+              <div><dt>{ar ? "الخصم" : "Discount"}</dt><dd><bdi className="n">{minus(fig.discount)}</bdi></dd></div>
+            </>
+          ) : (
+            <div><dt>{ar ? "قبل الضريبة" : "Before VAT"}</dt><dd><bdi className="n">{formatMoney(taxableBase)}</bdi></dd></div>
+          )}
+          <div><dt>{vatLabel}</dt><dd><bdi className="n">{formatMoney(fig.tax)}</bdi></dd></div>
+          <div className="grand"><dt>{ar ? "الإجمالي · ر.س" : "Total · SAR"}</dt><dd>{formatMoney(fig.grand)}</dd></div>
+        </dl>
+        {previewNote}
+        {issuedNote}
+        {chain && <div style={{ marginTop: 20 }}>{chain}</div>}
+        <p className="q-band">
+          {editable
+            ? (ar ? "تعديل البنود والأسعار والخصم أسهل من سطح المكتب، وهو متاح هنا من «⋯»." : "Lines, prices and discounts are easier to edit on a desktop; here they are under «⋯».")
+            : (ar ? "مستند العرض وإنشاء مراجعة من «⋯» أو من سطح المكتب." : "The document and revisions are under «⋯» or on the desktop.")}
+        </p>
+        {phoneBar && (
+          <div className="sticky-act" data-q-more>
+            {moreItems.length > 0 && (
+              <div style={{ position: "relative" }}>
+                <button type="button" className="btn" style={{ width: 44, padding: 0, justifyContent: "center" }}
+                  aria-haspopup="menu" aria-expanded={more} aria-label={ar ? "المزيد" : "More"}
+                  data-testid="quote-more" onClick={() => setMore((v) => !v)}>
+                  <Ico name="more" small />
+                </button>
+                {more && <div className="menu" role="menu" style={{ insetInlineEnd: "auto", insetInlineStart: 0 }}>{moreItems}</div>}
+              </div>
+            )}
+            {secondary}
+            {primary && <div className="grow">{primary}</div>}
+          </div>
+        )}
+        {dialogs}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-[14px] leading-[22px] text-oo-text-secondary">{label}</dt>
-      <dd className="text-[14px] leading-[22px]">
-        <Money value={value} currency={currency} />
-      </dd>
+    <div className="pg">
+      {notices}
+      <div className="ph q-ph">
+        <div style={{ minWidth: 0 }}>
+          <h1>{ar ? "عرض السعر" : "Quotation"}{" "}<span className="id">{quote.quoteNumber}</span></h1>
+          <div className="meta">
+            {meta.map((m, i) => <span key={i} style={{ display: "contents" }}>{i > 0 && <i />}{m}</span>)}
+          </div>
+        </div>
+        <div className="act">
+          {docLink}
+          {reviseBtn}
+          {collectionLink}
+          {rejectBtn}
+          {saveBtn}
+          {issueBtn}
+          {acceptBtn}
+          {orderBtn}
+        </div>
+      </div>
+
+      {discountBand}
+      {recordNotes}
+
+      <div className="q-cols">
+        <section aria-label={ar ? "البنود" : "Lines"} style={{ minWidth: 0 }}>
+          {linesHeader}
+          {(editable ? lines.length === 0 : quote.lines.length === 0) ? emptyLines : editable ? editTable : readTable}
+          {issuedNote}
+        </section>
+        <aside className="q-side">
+          {totals}
+          {facts}
+          {chain}
+        </aside>
+      </div>
+      {dialogs}
     </div>
   );
 }
 
 function RejectDialog({
-  ar, busy, onClose, onSubmit,
+  ar, busy, quoteNumber, customer, onClose, onSubmit,
 }: {
-  ar: boolean; busy: boolean; onClose: () => void; onSubmit: (note: string) => void;
+  ar: boolean; busy: boolean; quoteNumber: string; customer: string | null;
+  onClose: () => void; onSubmit: (note: string) => void;
 }) {
   const [note, setNote] = useState("");
   return (
     <Modal
-      title={ar ? "تسجيل رفض العميل" : "Record the rejection"}
+      title={ar ? "تسجيل رفض العميل" : "Record the customer's rejection"}
       onClose={onClose}
       testId="reject-dialog"
       footer={
@@ -907,11 +989,19 @@ function RejectDialog({
         </>
       }
     >
+      <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
+        <bdi className="id">{quoteNumber}</bdi>{customer && <> · <bdi>{customer}</bdi></>}
+      </p>
+      <p className="notice">
+        {ar
+          ? "تُسجَّل النتيجة على العرض ولا تُغلق الصفقة. يمكن إنشاء مراجعة جديدة لاحقًا."
+          : "The outcome is recorded on the quotation and the deal stays open. A new revision can be raised later."}
+      </p>
       <Field
         id="reject-note"
         label={ar ? "السبب" : "Reason"}
         required
-        hint={ar ? "مطلوب، للسبب نفسه الذي يجعل سبب خسارة الصفقة مطلوباً." : "Required, for the same reason a lost deal needs one."}
+        hint={ar ? "مطلوب، كما يُطلب سبب خسارة الصفقة." : "Required, for the same reason a lost deal needs one."}
       >
         <TextArea id="reject-note" value={note} onChange={setNote} rows={3} />
       </Field>
@@ -956,8 +1046,8 @@ function OrderDialog({
         </>
       }
     >
-      {err && <Alert kind="error">{err}</Alert>}
-      <p className="text-sm text-oo-text-secondary font-medium">
+      {err && <p className="notice er" role="alert">{err}</p>}
+      <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
         {ar
           ? "يُنشأ الطلب في نظام الطلبات عبر خدمة الطلبات نفسها، ببنود العرض وكمياته. الضغط مرتين لا يُنشئ طلبين."
           : "The order is created in the operational system through the order service itself, with this quotation's lines and quantities. Clicking twice does not make two orders."}
@@ -965,7 +1055,7 @@ function OrderDialog({
       <Field id="ord-notes" label={ar ? "ملاحظات الطلب" : "Order notes"}>
         <TextArea id="ord-notes" value={notes} onChange={setNotes} rows={2} />
       </Field>
-      <p className="text-[11px] text-oo-text-muted font-medium">
+      <p className="lbl" style={{ fontWeight: 400, margin: 0, fontSize: 12 }}>
         {ar
           ? "البنود ذات الوصف الحر أو الكميات الكسرية للعبوات تُرفض، ويُذكر البند بالاسم."
           : "A free-text line, or a fractional pack count, is refused with the line named — not silently dropped."}
@@ -982,14 +1072,10 @@ function OrderDialog({
 function QuoteDocumentLink({ id, ar }: { id: string; ar: boolean }) {
   const printing = usePrintCertified();
   return (
-    <Link
-      href={`/dashboard/sales/quotes/${id}/print`}
-      data-testid="open-print"
-      className="inline-flex items-center gap-2 rounded-[10px] border border-oo-border-strong bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-text-primary transition-colors hover:border-oo-action-primary"
-    >
+    <Link href={`/dashboard/sales/quotes/${id}/print`} data-testid="open-print" className="btn">
       {printing === true
-        ? <><Printer size={15} aria-hidden /> {ar ? "طباعة" : "Print"}</>
-        : <><FileText size={15} aria-hidden /> {ar ? "مستند العرض" : "Quotation document"}</>}
+        ? <><Printer size={16} aria-hidden /> {ar ? "طباعة" : "Print"}</>
+        : <><FileText size={16} aria-hidden /> {ar ? "مستند العرض" : "Quotation document"}</>}
     </Link>
   );
 }

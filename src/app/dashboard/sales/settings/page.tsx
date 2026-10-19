@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { KanbanSquare, Plus, ArrowUp, ArrowDown, EyeOff, Eye } from "lucide-react";
 import {
-  useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Button, Field, TextInput, Select, Pill, Modal, api, Td, ROW_ACTION, num, LEAD_SOURCE_LABELS,
+  useLang, Button, Field, TextInput, Modal, Alert, api, num, LEAD_SOURCE_LABELS,
 } from "../_components/ui";
+import { PerfNotice, PerfLoading, PerfNote } from "../_components/perf";
+import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/discount-limits";
 
 /**
- * Pipeline configuration.
+ * Pipeline configuration — Direction 2.1, GX A-P08 «المبيعات» settings (`1229:114164`, EN
+ * `1233:79569`, 1024 `1230:19899`, 390 `1232:39315`).
  *
  * The board's columns are data, not constants in the client — which is the only way an
  * Arabic roastery gets to rename a stage without a deployment, and the only way anybody
@@ -26,7 +27,8 @@ import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "@/lib/services/sales/
  * Retiring, never deleting: a stage is referenced by every stage event that ever mentioned
  * it, and deleting it would break the history those events exist to preserve.
  *
- * PROVISIONAL INTERFACE — see the banner.
+ * Visual port: the same requests (list, reorder, purpose, retire / restore, the stage dialog).
+ * The frame's settings navigation column (المنشأة, المستخدمون…) is not built — see the report.
  */
 
 type StagePurpose = "QUALIFICATION" | "QUOTATION";
@@ -69,6 +71,7 @@ const PURPOSE_LABELS: Record<StagePurpose, { en: string; ar: string; whenEn: str
 export default function SalesSettingsPage() {
   const lang = useLang();
   const ar = lang === "ar";
+  const phone = usePhone();
 
   const [stages, setStages] = useState<Stage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,13 +81,11 @@ export default function SalesSettingsPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Stage | null>(null);
 
+  useD21Phone({ title: ar ? "إعدادات المبيعات" : "Sales settings", sub: ar ? "الإعدادات" : "Settings" });
+
   /**
-   * Reload counter.
-   *
-   * The fetch lives in the effect instead of a `useCallback` the effect calls, because the
-   * lint rule resolves a called callback and sees setState reachable from the effect body.
-   * Mutations still need to refresh, so instead of holding a callable loader they bump this
-   * and the effect re-runs. Same refresh, one owner of the fetch.
+   * Reload counter. The fetch lives in the effect; mutations bump this and the effect re-runs.
+   * Same refresh, one owner of the fetch.
    */
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
@@ -121,10 +122,8 @@ export default function SalesSettingsPage() {
   }
 
   /**
-   * Swap two stages' positions.
-   *
-   * Both rows go in one request so the reorder is atomic: writing them separately could
-   * leave two columns sharing a position if the second call failed.
+   * Swap two stages' positions. Both rows go in one request so the reorder is atomic: writing
+   * them separately could leave two columns sharing a position if the second call failed.
    */
   async function move(index: number, direction: -1 | 1) {
     const ordered = [...stages].sort((a, b) => a.position - b.position);
@@ -148,298 +147,231 @@ export default function SalesSettingsPage() {
     else setError(res.data.error ?? "");
   }
 
-  if (loading) return <Spinner />;
+  if (loading) return <PerfLoading ar={ar} />;
 
   const ordered = [...stages].sort((a, b) => a.position - b.position);
 
-  return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+  const purposeSelect = (s: Stage) => (
+    // Saved on change rather than behind an Edit dialog: a single choice with an immediate
+    // consequence, and the server takes the purpose off whichever column held it before.
+    <span className="perf-selw">
+      <select
+        id={`purpose-${s.id}`}
+        className="perf-sel"
+        value={s.purpose ?? ""}
+        disabled={busy || !s.isActive}
+        aria-label={ar ? `أتمتة مرحلة ${s.nameAr}` : `Automation for ${s.nameEn}`}
+        onChange={(e) => {
+          const v = e.target.value;
+          patch(
+            { id: s.id, purpose: (v || null) as StagePurpose | null },
+            v
+              ? ar
+                ? `صارت هذه مرحلة ${PURPOSE_LABELS[v as StagePurpose].ar}.`
+                : `This is now the ${PURPOSE_LABELS[v as StagePurpose].en} stage.`
+              : ar
+                ? "أُلغيت الأتمتة عن هذه المرحلة."
+                : "Automation no longer points here.",
+          );
+        }}
+      >
+        <option value="">{ar ? "— لا شيء —" : "— none —"}</option>
+        {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => (
+          <option key={p} value={p}>{ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}</option>
+        ))}
+      </select>
+      <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
+    </span>
+  );
 
-      <PageHeader
-        title={ar ? "إعدادات المبيعات" : "Sales settings"}
-        subtitle={
-          <span>
-            {ar
-              ? "المراحل والمصادر وحدود الخصم — تغييرها يغيّر سلوك الشاشات فوراً"
-              : "Stages, sources and discount limits — changing these changes the screens at once"}
-          </span>
-        }
-        actions={
-          <Button onClick={() => setAdding(true)} testId="new-stage">
-            <Plus size={15} aria-hidden /> {ar ? "مرحلة جديدة" : "New stage"}
-          </Button>
-        }
-      />
+  const moveBtns = (s: Stage, i: number) => (
+    <span style={{ display: "inline-flex", gap: 2 }}>
+      <button type="button" className="btn sm g" onClick={() => move(i, -1)} disabled={busy || i === 0}
+        aria-label={ar ? `نقل ${s.nameAr} لأعلى` : `Move ${s.nameEn} up`}>↑</button>
+      <button type="button" className="btn sm g" onClick={() => move(i, 1)} disabled={busy || i === ordered.length - 1}
+        aria-label={ar ? `نقل ${s.nameAr} لأسفل` : `Move ${s.nameEn} down`}>↓</button>
+    </span>
+  );
 
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
+  const rowBtns = (s: Stage) => (
+    <span className="perf-rowbtns">
+      <button type="button" className="btn sm" onClick={() => setEditing(s)} data-testid={`edit-stage-${s.code}`}>
+        {ar ? "تعديل" : "Edit"}
+      </button>
+      {s.isActive ? (
+        <button type="button" className="btn sm" disabled={busy} data-testid={`retire-stage-${s.code}`}
+          title={(s._count?.opportunities ?? 0) > 0 ? (ar ? "انقل الصفقات أولًا" : "Move its deals first") : undefined}
+          onClick={() => patch({ id: s.id, isActive: false }, ar ? "أُخفيت المرحلة." : "Stage retired.")}>
+          {ar ? "إخفاء" : "Retire"}
+        </button>
+      ) : (
+        <button type="button" className="btn sm" disabled={busy} data-testid={`restore-stage-${s.code}`}
+          onClick={() => patch({ id: s.id, isActive: true }, ar ? "أُعيدت المرحلة." : "Stage restored.")}>
+          {ar ? "إظهار" : "Restore"}
+        </button>
+      )}
+      {!s.isActive && <span className="perf-code">{ar ? "مخفية" : "retired"}</span>}
+    </span>
+  );
 
-      <Card>
-        <SectionTitle>
-          <span className="inline-flex items-center gap-1.5">
-            <KanbanSquare size={14} aria-hidden /> {ar ? "مراحل مسار الصفقات" : "Pipeline stages"}
-          </span>
-        </SectionTitle>
+  const newStage = (
+    <button type="button" className="btn p" onClick={() => setAdding(true)} data-testid="new-stage">
+      <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+      {ar ? "مرحلة جديدة" : "New stage"}
+    </button>
+  );
 
-        {ordered.length === 0 ? (
-          <EmptyState>
-            {ar
-              ? "لا توجد مراحل. أضف واحدة على الأقل، وإلا فلا يمكن تحويل عميل محتمل إلى صفقة."
-              : "No stages. Add at least one, or a lead cannot be converted into a deal."}
-          </EmptyState>
-        ) : (
-          // Flush to the card's edges, so the tinted header band reads as part of the card
-          // rather than as a second box floating inside it.
-          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
-            <table className="w-full min-w-[760px] border-collapse text-start" data-testid="stages-table">
-              <thead>
-                <tr className="bg-oo-bg-subtle">
-                  {[
-                    [ar ? "الترتيب" : "Order", "w-[90px]"],
-                    [ar ? "الرمز" : "Code", "w-[140px]"],
-                    [ar ? "الاسم" : "Name", "min-w-[200px]"],
-                    [ar ? "الاحتمال الافتراضي" : "Default probability", "w-[150px]"],
-                    [ar ? "الأتمتة" : "Automation", "w-[190px]"],
-                    [ar ? "الصفقات" : "Deals", "w-[90px]"],
-                    ["", "w-[200px]"],
-                  ].map(([l, w], i) => (
-                    <th
-                      key={i}
-                      scope="col"
-                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
-                    >
-                      {l}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {ordered.map((s, i) => (
-                  <tr
-                    key={s.id}
-                    className={`border-t border-oo-border-default ${s.isActive ? "" : "opacity-50"}`}
-                    data-testid={`stage-row-${s.code}`}
-                  >
-                    <Td>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => move(i, -1)}
-                          disabled={busy || i === 0}
-                          aria-label={ar ? `نقل ${s.nameAr} لأعلى` : `Move ${s.nameEn} up`}
-                          className="rounded p-1 text-oo-text-muted hover:text-oo-action-primary disabled:opacity-30"
-                        >
-                          <ArrowUp size={14} aria-hidden />
-                        </button>
-                        <button
-                          onClick={() => move(i, 1)}
-                          disabled={busy || i === ordered.length - 1}
-                          aria-label={ar ? `نقل ${s.nameAr} لأسفل` : `Move ${s.nameEn} down`}
-                          className="rounded p-1 text-oo-text-muted hover:text-oo-action-primary disabled:opacity-30"
-                        >
-                          <ArrowDown size={14} aria-hidden />
-                        </button>
-                      </div>
-                    </Td>
-                    <Td>
-                      {/* The stable identity. Shown, and never editable: the label may be
-                          translated, this may not change. */}
-                      <span className="rounded-md bg-oo-bg-subtle px-1.5 py-0.5 font-mono text-[12px] leading-[18px] text-oo-text-secondary">
-                        {s.code}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="block font-medium">{ar ? s.nameAr : s.nameEn}</span>
-                      <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                        {ar ? s.nameEn : s.nameAr}
-                      </span>
-                    </Td>
-                    <Td>{ar ? `${num(s.probability, "ar")}%` : `${s.probability}%`}</Td>
-                    <Td>
-                      {/* Saved on change rather than behind an Edit dialog: this is a
-                          single choice with an immediate consequence, and the server
-                          takes the purpose off whichever column held it before. */}
-                      <Select
-                        id={`purpose-${s.id}`}
-                        value={s.purpose ?? ""}
-                        disabled={busy || !s.isActive}
-                        onChange={(v) =>
-                          patch(
-                            { id: s.id, purpose: (v || null) as StagePurpose | null },
-                            v
-                              ? ar
-                                ? `صارت هذه مرحلة ${PURPOSE_LABELS[v as StagePurpose].ar}.`
-                                : `This is now the ${PURPOSE_LABELS[v as StagePurpose].en} stage.`
-                              : ar
-                                ? "أُلغيت الأتمتة عن هذه المرحلة."
-                                : "Automation no longer points here.",
-                          )
-                        }
-                      >
-                        <option value="">{ar ? "— لا شيء —" : "— none —"}</option>
-                        {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => (
-                          <option key={p} value={p}>
-                            {ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}
-                          </option>
-                        ))}
-                      </Select>
-                    </Td>
-                    <Td>{num(s._count?.opportunities ?? 0, lang)}</Td>
-                    <Td>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <button
-                          onClick={() => setEditing(s)}
-                          data-testid={`edit-stage-${s.code}`}
-                          className={`${ROW_ACTION} text-oo-action-primary hover:border-oo-action-primary`}
-                        >
-                          {ar ? "تعديل" : "Edit"}
-                        </button>
-                        {s.isActive ? (
-                          <button
-                            disabled={busy}
-                            data-testid={`retire-stage-${s.code}`}
-                            title={
-                              (s._count?.opportunities ?? 0) > 0
-                                ? ar
-                                  ? "انقل الصفقات أولاً"
-                                  : "Move its deals first"
-                                : undefined
-                            }
-                            onClick={() =>
-                              patch(
-                                { id: s.id, isActive: false },
-                                ar ? "أُخفيت المرحلة." : "Stage retired.",
-                              )
-                            }
-                            className={`${ROW_ACTION} gap-1.5 text-oo-text-secondary hover:border-oo-action-primary disabled:opacity-50`}
-                          >
-                            <EyeOff size={14} aria-hidden /> {ar ? "إخفاء" : "Retire"}
-                          </button>
-                        ) : (
-                          <button
-                            disabled={busy}
-                            data-testid={`restore-stage-${s.code}`}
-                            onClick={() =>
-                              patch(
-                                { id: s.id, isActive: true },
-                                ar ? "أُعيدت المرحلة." : "Stage restored.",
-                              )
-                            }
-                            className={`${ROW_ACTION} gap-1.5 text-oo-text-secondary hover:border-oo-action-primary disabled:opacity-50`}
-                          >
-                            <Eye size={14} aria-hidden /> {ar ? "إظهار" : "Restore"}
-                          </button>
-                        )}
-                        {!s.isActive && <Pill tone="neutral">{ar ? "مخفية" : "retired"}</Pill>}
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+  const stagesBlock = ordered.length === 0 ? (
+    <div style={{ padding: "36px 0", textAlign: "center" }} data-testid="stages-empty">
+      <p style={{ fontWeight: 500, margin: 0 }}>
+        {ar ? "لا توجد مراحل. أضف واحدة على الأقل، وإلا فلا يمكن تحويل عميل محتمل إلى صفقة." : "No stages. Add at least one, or a lead cannot be converted into a deal."}
+      </p>
+    </div>
+  ) : phone ? (
+    <div data-testid="stages-table">
+      {ordered.map((s, i) => (
+        <div key={s.id} className="mrow" style={s.isActive ? undefined : { opacity: 0.7 }} data-testid={`stage-row-${s.code}`}>
+          <div style={{ minWidth: 0 }}>
+            <span className="who">{ar ? s.nameAr : s.nameEn}</span>{" "}
+            <span className="id">{s.code}</span>
           </div>
-        )}
-
-        <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
-          {ar
-            ? "المرحلة تُخفى ولا تُحذف: كل حركة سُجّلت في السجل تشير إليها، وحذفها يكسر التاريخ الذي وُجدت تلك الحركات لحفظه. ومرحلة بها صفقات لا يمكن إخفاؤها — انقل صفقاتها أولاً."
-            : "A stage is retired, never deleted: every stage event that ever mentioned it points here, and deleting it would break the history those events exist to preserve. A stage holding deals cannot be retired — move them first."}
-        </p>
-
-        {/* What the Automation column actually controls, and what happens when it is unset.
-            Stated here rather than only in an error message, because the person configuring
-            the board is the person who needs to know. */}
-        <div className="mt-3 rounded-xl bg-oo-bg-subtle px-4 py-3">
-          <p className="text-[12px] font-medium leading-[18px] text-oo-text-secondary">
-            {ar ? "ما تعنيه الأتمتة" : "What Automation means"}
-          </p>
-          <ul className="mt-1.5 space-y-1 text-[12px] leading-[18px] text-oo-text-muted">
-            {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => {
-              const held = stages.find((s) => s.purpose === p);
-              return (
-                <li key={p}>
-                  <span className="font-medium text-oo-text-secondary">
-                    {ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}
-                  </span>
-                  {" — "}
-                  {ar ? PURPOSE_LABELS[p].whenAr : PURPOSE_LABELS[p].whenEn}
-                  {". "}
-                  {held ? (
-                    <span className="text-oo-status-success">
-                      {ar ? `المرحلة الحالية: ${held.nameAr}` : `Currently: ${held.nameEn}`}
-                    </span>
-                  ) : (
-                    <span className="text-oo-status-hold">
-                      {p === "QUALIFICATION"
-                        ? ar
-                          ? "غير مُهيَّأة — لن يتحوّل أي عميل محتمل تلقائياً حتى تُحدَّد مرحلة."
-                          : "Not set — no lead will qualify automatically until a stage is chosen."
-                        : ar
-                          ? "غير مُهيَّأة — يُصدَر عرض السعر كالمعتاد، ولا تتحرّك بطاقة الصفقة."
-                          : "Not set — quotations are still issued, the card just does not move."}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {moveBtns(s, i)}
+          <div className="r2">
+            <span style={{ flex: 1 }}>
+              {ar ? "الاحتمال" : "Probability"} <span className="n">{s.probability}%</span> · {ar ? "الصفقات" : "Deals"} <span className="n">{num(s._count?.opportunities ?? 0, lang)}</span>
+            </span>
+          </div>
+          <div className="r2" style={{ marginTop: 6, flexWrap: "wrap" }}>{purposeSelect(s)}{rowBtns(s)}</div>
         </div>
-      </Card>
+      ))}
+    </div>
+  ) : (
+    <div className="perf-scroll">
+      <table className="t" data-testid="stages-table">
+        <thead><tr>
+          <th scope="col">{ar ? "الترتيب" : "Order"}</th>
+          <th scope="col">{ar ? "الرمز" : "Code"}</th>
+          <th scope="col">{ar ? "الاسم" : "Name"}</th>
+          <th scope="col" className="num">{ar ? "الاحتمال" : "Probability"}</th>
+          <th scope="col">{ar ? "الأتمتة" : "Automation"}</th>
+          <th scope="col" className="num">{ar ? "الصفقات" : "Deals"}</th>
+          <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>
+        </tr></thead>
+        <tbody>
+          {ordered.map((s, i) => (
+            <tr key={s.id} style={s.isActive ? undefined : { opacity: 0.7 }} data-testid={`stage-row-${s.code}`}>
+              <td>{moveBtns(s, i)}</td>
+              {/* The stable identity. Shown, and never editable. */}
+              <td className="id">{s.code}</td>
+              <td style={{ paddingBlock: 4 }}>
+                <div className="who">{ar ? s.nameAr : s.nameEn}</div>
+                <span className="perf-sub">{ar ? s.nameEn : s.nameAr}</span>
+              </td>
+              <td className="num"><span className="n">{s.probability}%</span></td>
+              <td>{purposeSelect(s)}</td>
+              <td className="num"><span className="n">{num(s._count?.opportunities ?? 0, lang)}</span></td>
+              <td style={{ textAlign: "end" }}>{rowBtns(s)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
-      {/* ── The two reference cards the design puts beside the stages ────────────────
-          Read-only on purpose. Both state values the rest of the module already enforces:
-          the seven stored lead sources, and the two discount limits the quotation service
-          applies. Neither is editable here, because neither is a settings row — changing
-          them is a code change, and a screen that implied otherwise would be lying. */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <SectionTitle>{ar ? "مصادر العملاء المحتملين" : "Lead sources"}</SectionTitle>
-          <p className="-mt-1 mb-3 text-[12px] leading-[18px] text-oo-text-secondary">
-            {ar
-              ? "القيَم المخزَّنة السبع — تظهر في مرشّح القائمة ونموذج الإنشاء"
-              : "The seven stored values — they appear in the list filter and the create form"}
-          </p>
-          <div className="flex flex-wrap gap-2" data-testid="source-chips">
+  return (
+    <div className="pg">
+      {phone ? (
+        <div className="perf-ph">
+          <div className="perf-ph-act">{newStage}</div>
+          <div className="perf-ph-meta">{ar ? "تغيير المراحل يغيّر سلوك الشاشات فورًا" : "Changing stages changes the screens at once"}</div>
+        </div>
+      ) : (
+        <div className="ph" style={{ marginBottom: 20 }}>
+          <div>
+            <h1>{ar ? "إعدادات المبيعات" : "Sales settings"}</h1>
+            <div className="meta">
+              <span>{ar ? "المراحل والمصادر وحدود الخصم — تغييرها يغيّر سلوك الشاشات فورًا" : "Stages, sources and discount limits — changing these changes the screens at once"}</span>
+            </div>
+          </div>
+          <div className="act">{newStage}</div>
+        </div>
+      )}
+
+      <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
+      <PerfNotice kind="success" ar={ar} onDismiss={() => setSuccess("")}>{success}</PerfNotice>
+
+      <div className="bh">
+        <h2 className="bt">{ar ? "مراحل مسار الصفقات" : "Pipeline stages"}</h2>
+        <span className="sub">{ar ? "تُخفى ولا تُحذف · لا تُخفى مرحلة فيها صفقات" : "retired, never deleted · a stage holding deals cannot be retired"}</span>
+      </div>
+      {stagesBlock}
+
+      {/* What the Automation column actually controls, and what happens when it is unset. */}
+      <div style={{ marginTop: 12 }}>
+        <PerfNote>
+          <div>
+            <b style={{ fontWeight: 600 }}>{ar ? "الأتمتة:" : "Automation:"}</b>
+            <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>
+              {(Object.keys(PURPOSE_LABELS) as StagePurpose[]).map((p) => {
+                const held = stages.find((s) => s.purpose === p);
+                return (
+                  <li key={p}>
+                    «{ar ? PURPOSE_LABELS[p].ar : PURPOSE_LABELS[p].en}» — {ar ? PURPOSE_LABELS[p].whenAr : PURPOSE_LABELS[p].whenEn}.{" "}
+                    {held ? (
+                      <span style={{ color: "var(--status-success)" }}>
+                        {ar ? `المرحلة الحالية: ${held.nameAr}` : `Currently: ${held.nameEn}`}
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--status-warning)" }}>
+                        {p === "QUALIFICATION"
+                          ? ar ? "غير مُهيَّأة — لن يتحوّل أي عميل محتمل تلقائيًا حتى تُحدَّد مرحلة." : "Not set — no lead will qualify automatically until a stage is chosen."
+                          : ar ? "غير مُهيَّأة — يُصدَر عرض السعر كالمعتاد، ولا تتحرّك بطاقة الصفقة." : "Not set — quotations are still issued, the card just does not move."}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <span style={{ display: "block", marginTop: 4, color: "var(--text-muted)", fontSize: 12.5 }}>
+              {ar ? "كل غرض لمرحلة واحدة. المرحلة تُخفى ولا تُحذف: كل حركة سُجّلت تشير إليها." : "Each purpose belongs to one stage. A stage is retired, never deleted: every stage event that mentioned it points here."}
+            </span>
+          </div>
+        </PerfNote>
+      </div>
+
+      <div className="hr" style={{ margin: "28px 0" }} />
+
+      {/* Read-only on purpose: the seven stored lead sources, and the discount limits the
+          quotation service applies. Neither is a settings row — changing them is a code change. */}
+      <div className="cols perf-cols" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 40 }}>
+        <div>
+          <div className="bh">
+            <h2 className="bt">{ar ? "مصادر العملاء المحتملين" : "Lead sources"}</h2>
+            <span className="sub">{ar ? "ثابتة في النظام · للعرض" : "fixed in the system · for reference"}</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} data-testid="source-chips">
             {Object.entries(LEAD_SOURCE_LABELS).map(([code, l]) => (
-              <span
-                key={code}
-                className="rounded-[10px] border border-oo-border-strong bg-oo-bg-subtle px-3 py-[5px] text-[12px] leading-[18px] text-oo-text-primary"
-              >
-                {ar ? l.ar : l.en}
-              </span>
+              <span key={code} className="chip">{ar ? l.ar : l.en}</span>
             ))}
           </div>
-        </Card>
-
-        <Card>
-          <SectionTitle>{ar ? "حدود الخصم والصلاحيات" : "Discount limits"}</SectionTitle>
-          <p className="-mt-1 mb-3 text-[12px] leading-[18px] text-oo-text-secondary">
-            {ar
-              ? "تجاوز الحدّ يحوّل «إصدار العرض» إلى «طلب اعتماد الخصم»"
-              : "Past the threshold, “Issue” becomes “Ask for discount approval”"}
+        </div>
+        <div>
+          <div className="bh">
+            <h2 className="bt">{ar ? "حدود الخصم والصلاحيات" : "Discount limits"}</h2>
+            <span className="sub">{ar ? "ثابتة في النظام · للعرض" : "fixed in the system · for reference"}</span>
+          </div>
+          <dl className="props" style={{ gridTemplateColumns: "140px minmax(0,1fr)" }} data-testid="discount-limits">
+            <dt>{ar ? "بلا اعتماد" : "Without approval"}</dt>
+            <dd>{ar ? `حتى ${num(DISCOUNT_APPROVAL_THRESHOLD, "ar")}%` : `up to ${DISCOUNT_APPROVAL_THRESHOLD}%`}</dd>
+            <dt>{ar ? "باعتماد الخصم" : "With discount approval"}</dt>
+            <dd>{ar ? `حتى ${num(DISCOUNT_MAX, "ar")}%` : `up to ${DISCOUNT_MAX}%`}</dd>
+            <dt>{ar ? "فوق ذلك" : "Above that"}</dt>
+            <dd>{ar ? "مرفوض" : "refused"}</dd>
+          </dl>
+          <p className="sm" style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-muted)" }}>
+            {ar ? "تجاوز الحدّ يحوّل «إصدار العرض» إلى «طلب اعتماد الخصم»." : "Past the threshold, “Issue” becomes “Ask for discount approval”."}
           </p>
-          <div className="space-y-2" data-testid="discount-limits">
-            {[
-              [
-                ar ? "بلا اعتماد" : "Without approval",
-                ar ? `حتى ${num(DISCOUNT_APPROVAL_THRESHOLD, "ar")}%` : `up to ${DISCOUNT_APPROVAL_THRESHOLD}%`,
-              ],
-              [
-                ar ? "باعتماد الخصم" : "With the discount-approval privilege",
-                ar ? `حتى ${num(DISCOUNT_MAX, "ar")}%` : `up to ${DISCOUNT_MAX}%`,
-              ],
-              [ar ? "فوق ذلك" : "Above that", ar ? "مرفوض" : "refused"],
-            ].map(([who, limit]) => (
-              <div
-                key={who}
-                className="flex items-center justify-between rounded-[10px] bg-oo-bg-subtle px-3 py-[9px] text-[14px] leading-[22px] text-oo-text-primary"
-              >
-                <span className="font-medium">{limit}</span>
-                <span>{who}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        </div>
       </div>
 
       {(adding || editing) && (

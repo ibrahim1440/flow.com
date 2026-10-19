@@ -512,7 +512,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       {customerName ? (
         <>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            <Link href="/dashboard/customers" style={{ color: "inherit", textDecoration: "none" }}>{customerName}</Link>
+            <Link href={`/dashboard/customers/${deal.customer!.id}`} style={{ color: "inherit", textDecoration: "none" }} data-testid="deal-customer-link">{customerName}</Link>
           </div>
           {/* CRM.md backend dependencies: no customer AR balance, open-order query or
               contacts relation exists yet, so these say so rather than show a figure. */}

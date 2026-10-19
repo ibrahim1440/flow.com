@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useLang, Alert, Spinner, Card, api } from "../../_components/ui";
+import { useLang, Spinner, api } from "../../_components/ui";
 
 /**
  * Raise a draft quotation and open its editor.
@@ -66,10 +66,10 @@ export default function NewQuotePage() {
 
   if (error) {
     return (
-      <Card>
-        <Alert kind="error">{error}</Alert>
-      </Card>
+      <div className="pg">
+        <p className="notice er" role="alert" data-testid="alert-error">{error}</p>
+      </div>
     );
   }
-  return <Spinner />;
+  return <div className="pg"><Spinner /></div>;
 }

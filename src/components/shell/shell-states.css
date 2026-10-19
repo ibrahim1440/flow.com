@@ -1,0 +1,29 @@
+/*
+ * The two screens the dashboard layout draws before it knows which shell a route gets (UI batch 2):
+ * the session check («جارٍ التحميل…») and the MFA-required enrolment
+ * (AUTH_MFA_MODE=required). Every route shows the first one, the migrated ones included, so it is
+ * drawn in Direction 2.1 rather than in the legacy cream / purple. Tokens come from the `.d21`
+ * root (direction-2.1.css); nothing here defines a colour.
+ */
+.d21.d21-state { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--canvas); }
+.d21-state-load { display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--text-muted); font: 400 13.5px/22px var(--f-ui); }
+.d21-state-mark { width: 40px; height: 40px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sheet); display: grid; place-items: center; overflow: hidden; }
+/* The brand «ح» (components/brand/BrandMark); the spinner ring sits under it. */
+.d21-state-mark img, .d21-mfa-brand .mark img { display: block; width: 100%; height: 100%; }
+.d21-state-ring { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--action-primary); animation: d21-state-spin .9s linear infinite; }
+@keyframes d21-state-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .d21-state-ring { animation-duration: 2.4s; } }
+
+/* MFA required: brand row, title and reason, the enrolment card, sign out. */
+.d21.d21-state.is-mfa { align-items: flex-start; }
+@media (min-width: 640px) { .d21.d21-state.is-mfa { align-items: center; } }
+.d21-mfa { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 16px; }
+.d21-mfa-brand { display: flex; align-items: center; gap: 12px; }
+.d21-mfa-brand .mark { width: 34px; height: 34px; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-sheet); flex: none; display: grid; place-items: center; overflow: hidden; }
+.d21-mfa-brand b { display: block; font: 600 14px/20px var(--f-ui); color: var(--text-primary); }
+.d21-mfa-brand span { display: block; font: 400 12.5px/20px var(--f-ui); color: var(--text-muted); }
+.d21-mfa h1 { margin: 0; font: 600 22px/28.6px var(--f-ui); color: var(--text-primary); }
+.d21-mfa > p { margin: 0; font: 400 13.5px/22px var(--f-ui); color: var(--text-muted); }
+.d21-mfa-out { align-self: flex-start; appearance: none; border: 0; background: none; padding: 0; font: 500 13px/22px var(--f-ui); color: var(--text-secondary); cursor: pointer; }
+.d21-mfa-out:hover { color: var(--text-primary); text-decoration: underline; }
+.d21-mfa-out:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }

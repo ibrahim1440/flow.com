@@ -60,6 +60,9 @@ model Employee {
   authSessions      AuthSession[]
   authMfa           AuthMfa?
   authRecoveryCodes AuthRecoveryCode[]
+
+  // Customer account (additive): the accounts this employee is responsible for.
+  customerAccounts Customer[] @relation("CustomerAccountOwner")
 }
 
 /// One signed-in session; the token names it (jti). Valid only while not revoked and within
@@ -82,6 +85,9 @@ model AuthSession {
   revokedReason String?
   ipHash        String?
   userAgent     String?
+  /// The browser the session was opened from: an opaque random id from the httpOnly hq_device
+  /// cookie (not a credential). Groups the own profile's device list; null = before 20261019120000.
+  deviceId      String?
 
   @@index([employeeId])
   @@index([expiresAt])
@@ -132,6 +138,52 @@ model Customer {
   /// WhatsApp automation (additive, defaulted): the customer asked not to receive WhatsApp
   /// messages. Every automated message to this customer is recorded as SKIPPED instead.
   whatsappOptOut Boolean @default(false)
+
+  // ─── Customer account (additive, migration 20261019120000_customer_account) ───────────
+  // The account page (Figma crm-account 179:1312) shows particulars the system had no source
+  // of truth for. Each is a NULLABLE column an administrator edits; none has a default, so
+  // every existing row reads "not set" and no figure is invented. Nothing reads them in a
+  // calculation: the credit limit is shown, not enforced (no enforcement rule is decided).
+  /// Commercial registration number (السجل التجاري), digits only; shown as «CR-…».
+  commercialRegNo  String?
+  /// VAT registration number (الرقم الضريبي): 15 digits, starting and ending with 3.
+  vatNumber        String?
+  /// Account category code: WHOLESALE | RETAIL | CAFE | DISTRIBUTOR | OTHER (validated by the API).
+  segment          String?
+  city             String?
+  /// The price list / tier the customer is on, as text («جملة · فئة أ»). There is no
+  /// price-list model; this records the agreement, it prices nothing.
+  priceList        String?
+  /// Agreed payment terms in days (0–365).
+  paymentTermsDays Int?
+  /// Agreed credit limit in SAR. Displayed only.
+  creditLimit      Decimal?          @db.Decimal(18, 2)
+  /// The employee responsible for the account («المسؤول»).
+  accountOwnerId   String?
+  accountOwner     Employee?         @relation("CustomerAccountOwner", fields: [accountOwnerId], references: [id], onDelete: SetNull)
+  contacts         CustomerContact[]
+
+  @@index([accountOwnerId])
+}
+
+/// A person at a customer (Figma crm-account «جهات الاتصال»): a café has a buyer, an
+/// accountant and an owner, and none of them is the customer. Customer.phone / email stay the
+/// customer's own particulars; contacts are additional.
+model CustomerContact {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  /// Free text: «مدير المشتريات», «المالية».
+  role       String?
+  phone      String?
+  email      String?
+  /// Display order within the customer (ascending).
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([customerId, position])
 }
 
 model GreenBean {
@@ -1833,6 +1885,8 @@ model Activity {
   @@index([ownerId, completedAt, dueAt])
   @@index([leadId])
   @@index([opportunityId])
+  /// Customer account timeline (additive, migration 20261019120000_customer_account).
+  @@index([customerId])
 }
 
 enum QuoteStatus {
@@ -3462,14 +3516,14 @@ model HrEmployee {
   advances           HrAdvance[]
   assetAssignments   HrAssetAssignment[]
   trainings          HrTraining[]
-  reviews            HrReview[]               @relation("HrReviewSubject")
+  reviews            HrReview[]                   @relation("HrReviewSubject")
   incidents          HrIncident[]
   separations        HrSeparation[]
   finalSettlements   HrFinalSettlement[]
   gosiInvoiceLines   HrGosiInvoiceLine[]
   gosiSettlements    HrGosiSettlement[]
   gosiAdjustments    HrGosiAdjustment[]
-  hiredFrom         HrApplicant?             @relation("HrApplicantHire")
+  hiredFrom          HrApplicant?                 @relation("HrApplicantHire")
 
   @@index([status])
   @@index([branchId])
@@ -3505,23 +3559,23 @@ model HrEmployeePrivate {
 }
 
 model HrDocument {
-  id           String     @id @default(cuid())
-  employeeId   String
-  employee     HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  category     String // CONTRACT | IDENTITY | CERTIFICATE | MEDICAL | OTHER
-  title        String
-  fileName     String
-  mimeType     String
-  sizeBytes    Int
-  sha256       String
-  content      Bytes
-  confidential Boolean    @default(true)
-  expiresOn    DateTime?  @db.Date
-  uploadedBy   String
-  createdAt    DateTime   @default(now())
+  id                 String              @id @default(cuid())
+  employeeId         String
+  employee           HrEmployee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  category           String // CONTRACT | IDENTITY | CERTIFICATE | MEDICAL | OTHER
+  title              String
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
+  sha256             String
+  content            Bytes
+  confidential       Boolean             @default(true)
+  expiresOn          DateTime?           @db.Date
+  uploadedBy         String
+  createdAt          DateTime            @default(now())
   /// Soft delete: the bytes stay for audit; the document disappears from lists.
-  deletedAt    DateTime?
-  deletedBy    String?
+  deletedAt          DateTime?
+  deletedBy          String?
   settlementCalcs    HrFinalSettlement[] @relation("HrSettlementCalcDoc")
   settlementPayments HrFinalSettlement[] @relation("HrSettlementProofDoc")
 
@@ -3813,29 +3867,29 @@ enum HrPolicyStatus {
 /// Effective-dated payroll policy. Activation needs a second person (four-eyes). A run
 /// records the policy it used, so later edits never restate a paid month.
 model HrPayrollPolicy {
-  id                    String               @id @default(cuid())
-  version               Int                  @unique
-  effectiveFrom         DateTime             @db.Date
-  status                HrPolicyStatus       @default(DRAFT)
-  dayBasis              HrDayBasis
-  standardDailyHours    Decimal              @db.Decimal(5, 2)
-  overtimeMultiplier    Decimal              @db.Decimal(5, 2)
+  id                           String               @id @default(cuid())
+  version                      Int                  @unique
+  effectiveFrom                DateTime             @db.Date
+  status                       HrPolicyStatus       @default(DRAFT)
+  dayBasis                     HrDayBasis
+  standardDailyHours           Decimal              @db.Decimal(5, 2)
+  overtimeMultiplier           Decimal              @db.Decimal(5, 2)
   /// Cap on deductions as a percentage of gross for one payslip.
-  maxDeductionPercent   Decimal              @db.Decimal(5, 2)
+  maxDeductionPercent          Decimal              @db.Decimal(5, 2)
   /// Components (BASIC, HOUSING, TRANSPORT, OTHER) used for unpaid-leave deduction and
   /// for the overtime hourly rate.
-  unpaidLeaveComponents String[]
-  overtimeComponents    String[]
-  timezone              String               @default("Asia/Riyadh")
+  unpaidLeaveComponents        String[]
+  overtimeComponents           String[]
+  timezone                     String               @default("Asia/Riyadh")
   /// 0 = Sunday … 6 = Saturday.
-  weekendDays           Int[]
+  weekendDays                  Int[]
   /// Values are an unconfirmed proposal until the owner/accountant says otherwise.
-  isProposal            Boolean              @default(true)
-  notes                 String?
-  createdBy             String
-  createdAt             DateTime             @default(now())
-  activatedBy           String?
-  activatedAt           DateTime?
+  isProposal                   Boolean              @default(true)
+  notes                        String?
+  createdBy                    String
+  createdAt                    DateTime             @default(now())
+  activatedBy                  String?
+  activatedAt                  DateTime?
   // ── P-2 findings 2/3 (migration 20261017100000_hr_p2_settlements). Accountant decisions:
   // every value below is NULL / empty until the accountant decides it, and payroll refuses to
   // build a run under a version where any is unset. `maxDeductionPercent` above is the OVERALL
@@ -3843,16 +3897,16 @@ model HrPayrollPolicy {
   // deductions apply in, what happens when a cap is exceeded, and the deferral escalation count.
   /// false (default): the cap base is guaranteed pay only — commission, overtime and one-off
   /// earning adjustments are excluded. true only when the policy explicitly says so.
-  capBaseIncludesVariable      Boolean  @default(false)
+  capBaseIncludesVariable      Boolean              @default(false)
   /// Per-category caps, % of the cap base. NULL = not decided (payroll refuses to run).
-  deductionCapUnearnedPercent  Decimal? @db.Decimal(5, 2)
-  deductionCapLoanPercent      Decimal? @db.Decimal(5, 2)
-  deductionCapStatutoryPercent Decimal? @db.Decimal(5, 2)
-  deductionCapOtherPercent     Decimal? @db.Decimal(5, 2)
+  deductionCapUnearnedPercent  Decimal?             @db.Decimal(5, 2)
+  deductionCapLoanPercent      Decimal?             @db.Decimal(5, 2)
+  deductionCapStatutoryPercent Decimal?             @db.Decimal(5, 2)
+  deductionCapOtherPercent     Decimal?             @db.Decimal(5, 2)
   /// Categories the overall cap (maxDeductionPercent) covers. Empty = not decided.
-  deductionOverallCovers       String[] @default([])
+  deductionOverallCovers       String[]             @default([])
   /// All four categories in the order they apply. Empty = not decided.
-  deductionPriority            String[] @default([])
+  deductionPriority            String[]             @default([])
   /// WARN | BLOCK when a non-deferrable category exceeds its cap. NULL = not decided.
   deductionCapAction           String?
   /// CONSECUTIVE deferrals of one advance (approved runs) after which a review item is raised. NULL = not decided.
@@ -3860,8 +3914,8 @@ model HrPayrollPolicy {
   /// P-2 review P2-B7 (migration 20261017130000): the cap base is the wage due AFTER unearned pay
   /// (true) or before it (false). NULL = not decided (payroll refuses to run).
   capBaseAfterUnearned         Boolean?
-  contributionRules     HrContributionRule[]
-  runs                  HrPayrollRun[]
+  contributionRules            HrContributionRule[]
+  runs                         HrPayrollRun[]
 
   @@index([status, effectiveFrom])
 }
@@ -3887,20 +3941,20 @@ model HrContributionRule {
 }
 
 model HrSettings {
-  id                String   @id @default("singleton")
+  id                    String   @id @default("singleton")
   /// When false, HR money events are recorded without journals and say so on every record.
-  accountingEnabled Boolean  @default(true)
+  accountingEnabled     Boolean  @default(true)
   /// Phase 1 payroll lock (decision C GAP-9): live payroll. Off by default and in every seed /
   /// fixture end state; while off the payroll money actions are refused (application and DB). Turned
   /// on only by an applied two-person PAYROLL_LIVE_SET change while the readiness check is clean.
-  payrollLive         Boolean @default(false)
-  payrollLiveChangeId String?
+  payrollLive           Boolean  @default(false)
+  payrollLiveChangeId   String?
   /// Phase 1 (owner decision D1, Option B): manual journals disabled — off by default, fail-closed;
   /// while off only the automatic HR posting workflow writes the ledger. Not writable by the runtime
   /// role (grant-hr-runtime.sql); enabled only by an owner-run Phase 2 migration.
-  manualJournalsEnabled Boolean @default(false)
-  updatedBy         String?
-  updatedAt         DateTime @updatedAt
+  manualJournalsEnabled Boolean  @default(false)
+  updatedBy             String?
+  updatedAt             DateTime @updatedAt
 }
 
 enum HrConfigChangeKind {
@@ -4053,16 +4107,16 @@ model HrPayrollAccount {
 
 /// Idempotency for every journal HR posts: one journal per (source, purpose).
 model HrJournalLink {
-  id             String       @id @default(cuid())
+  id             String                 @id @default(cuid())
   sourceType     String // PAYROLL_RUN | ADVANCE | ADVANCE_REPAYMENT
   sourceId       String
   purpose        String // ACCRUAL | PAYMENT | REVERSAL | DISBURSEMENT | REPAYMENT
-  journalEntryId String       @unique
-  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
+  journalEntryId String                 @unique
+  journalEntry   JournalEntry           @relation(fields: [journalEntryId], references: [id])
   /// P-2 / E-3: what the journal posted, per posting key and account, frozen with the link
   /// (null on links written before 20261017090000). Verified before the journal is relied on.
   postedLines    Json?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime               @default(now())
   /// P-2 review P2-A4: the migration-time baseline of a link written before posted lines existed.
   baseline       HrJournalLinkBaseline?
 
@@ -4098,21 +4152,21 @@ enum HrPayrollRunStatus {
 }
 
 model HrPayrollRun {
-  id                     String                    @id @default(cuid())
-  runNo                  Int                       @unique @default(autoincrement())
+  id                     String                       @id @default(cuid())
+  runNo                  Int                          @unique @default(autoincrement())
   /// "YYYY-MM"
   periodMonth            String
-  periodStart            DateTime                  @db.Date
-  periodEnd              DateTime                  @db.Date
-  kind                   String                    @default("REGULAR") // REGULAR | CORRECTION
+  periodStart            DateTime                     @db.Date
+  periodEnd              DateTime                     @db.Date
+  kind                   String                       @default("REGULAR") // REGULAR | CORRECTION
   correctsRunId          String?
   /// Branch scope of the run; "COMPANY" = every person regardless of branch.
-  branchKey              String                    @default("COMPANY")
-  status                 HrPayrollRunStatus        @default(DRAFT)
+  branchKey              String                       @default("COMPANY")
+  status                 HrPayrollRunStatus           @default(DRAFT)
   policyId               String
-  policy                 HrPayrollPolicy           @relation(fields: [policyId], references: [id])
+  policy                 HrPayrollPolicy              @relation(fields: [policyId], references: [id])
   preparedBy             String
-  preparedAt             DateTime                  @default(now())
+  preparedAt             DateTime                     @default(now())
   submittedBy            String?
   submittedAt            DateTime?
   approvedAt             DateTime?
@@ -4120,15 +4174,15 @@ model HrPayrollRun {
   cancelledBy            String?
   cancelledAt            DateTime?
   cancelReason           String?
-  totalGross             Decimal                   @default(0) @db.Decimal(18, 2)
-  totalDeductions        Decimal                   @default(0) @db.Decimal(18, 2)
-  totalNet               Decimal                   @default(0) @db.Decimal(18, 2)
-  totalEmployer          Decimal                   @default(0) @db.Decimal(18, 2)
-  accountingSkipped      Boolean                   @default(false)
+  totalGross             Decimal                      @default(0) @db.Decimal(18, 2)
+  totalDeductions        Decimal                      @default(0) @db.Decimal(18, 2)
+  totalNet               Decimal                      @default(0) @db.Decimal(18, 2)
+  totalEmployer          Decimal                      @default(0) @db.Decimal(18, 2)
+  accountingSkipped      Boolean                      @default(false)
   /// P-2 review P1-A1: the PAYROLL_CONTROL_ATTEST (proposal correction) this run relies on. Unique:
   /// an attestation serves one run and expires with it (a cancelled run spends it).
-  controlAttestationId   String?                   @unique
-  version                Int                       @default(1)
+  controlAttestationId   String?                      @unique
+  version                Int                          @default(1)
   lines                  HrPayrollLine[]
   payments               HrPayrollPayment[]
   paymentAllocations     HrPayrollPaymentAllocation[]
@@ -4142,21 +4196,21 @@ model HrPayrollRun {
 }
 
 model HrPayrollLine {
-  id          String          @id @default(cuid())
+  id          String                       @id @default(cuid())
   runId       String
-  run         HrPayrollRun    @relation(fields: [runId], references: [id], onDelete: Restrict)
+  run         HrPayrollRun                 @relation(fields: [runId], references: [id], onDelete: Restrict)
   employeeId  String
-  employee    HrEmployee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee    HrEmployee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   /// Every input the calculation used (compensation versions, days, policy, rates), so a
   /// payslip can be explained years later without recomputing anything.
   snapshot    Json
-  payableDays Decimal         @db.Decimal(6, 2)
-  gross       Decimal         @db.Decimal(18, 2)
-  deductions  Decimal         @db.Decimal(18, 2)
-  net         Decimal         @db.Decimal(18, 2)
-  employer    Decimal         @default(0) @db.Decimal(18, 2)
+  payableDays Decimal                      @db.Decimal(6, 2)
+  gross       Decimal                      @db.Decimal(18, 2)
+  deductions  Decimal                      @db.Decimal(18, 2)
+  net         Decimal                      @db.Decimal(18, 2)
+  employer    Decimal                      @default(0) @db.Decimal(18, 2)
   exceptions  Json
-  blocking    Boolean         @default(false)
+  blocking    Boolean                      @default(false)
   approvedBy  String?
   approvedAt  DateTime?
   items       HrPayrollItem[]
@@ -4189,47 +4243,47 @@ model HrPayrollItem {
 
 /// One-off earning or deduction for a person in a DRAFT run (bonus, penalty, correction).
 model HrPayrollAdjustment {
-  id         String       @id @default(cuid())
-  runId      String
-  run        HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
-  employeeId String
-  employee   HrEmployee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  kind       String // EARNING | DEDUCTION
-  amount     Decimal      @db.Decimal(18, 2)
-  reason     String
+  id                String       @id @default(cuid())
+  runId             String
+  run               HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  employeeId        String
+  employee          HrEmployee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  kind              String // EARNING | DEDUCTION
+  amount            Decimal      @db.Decimal(18, 2)
+  reason            String
   /// P-2 review P1-B2: a category from a CLOSED list (DB CHECK, src/lib/hr/adjustment-categories.ts).
   /// Never end of service / leave encashment / final settlement. Rows from before: OTHER_WITH_MEMO.
-  category   String
+  category          String
   /// P-2 rev3 item 5 (migration 20261017190000): PRIOR_PERIOD_ARREARS / COMMISSION_TRUE_UP only — the
   /// document the amount rests on and the earlier period (YYYY-MM) it is owed for (DB CHECK).
   documentReference String?
   relatedPeriod     String?
-  createdBy  String
-  createdAt  DateTime     @default(now())
+  createdBy         String
+  createdAt         DateTime     @default(now())
 
   @@index([runId])
 }
 
 /// Recorded payment of a run. The system never moves money.
 model HrPayrollPayment {
-  id         String       @id @default(cuid())
-  runId      String
-  run        HrPayrollRun @relation(fields: [runId], references: [id], onDelete: Restrict)
-  amount     Decimal      @db.Decimal(18, 2)
-  paidOn     DateTime     @db.Date
-  method     String // BANK_TRANSFER | CASH | CHEQUE
-  reference  String
-  recordedBy String
+  id             String                       @id @default(cuid())
+  runId          String
+  run            HrPayrollRun                 @relation(fields: [runId], references: [id], onDelete: Restrict)
+  amount         Decimal                      @db.Decimal(18, 2)
+  paidOn         DateTime                     @db.Date
+  method         String // BANK_TRANSFER | CASH | CHEQUE
+  reference      String
+  recordedBy     String
   /// P-2: a retried request with the same key returns the payment already recorded.
   idempotencyKey String?
   /// P-2: the payslip line this payment settles (per-employee settlement), or null for a whole-run
   /// payment. A run is paid one way or the other, never both (DB trigger).
-  lineId     String?
-  line       HrPayrollLine? @relation(fields: [lineId], references: [id], onDelete: Restrict)
-  createdAt  DateTime     @default(now())
-  allocations HrPayrollPaymentAllocation[]
-  returns     HrPayrollPaymentReturn[]
-  bankImports HrPayrollBankImport[]
+  lineId         String?
+  line           HrPayrollLine?               @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  createdAt      DateTime                     @default(now())
+  allocations    HrPayrollPaymentAllocation[]
+  returns        HrPayrollPaymentReturn[]
+  bankImports    HrPayrollBankImport[]
 
   @@unique([runId, idempotencyKey])
   @@index([lineId])
@@ -4419,23 +4473,23 @@ enum HrAdvanceStatus {
 }
 
 model HrAdvance {
-  id                    String                 @id @default(cuid())
-  advanceNo             String                 @unique
+  id                    String                     @id @default(cuid())
+  advanceNo             String                     @unique
   employeeId            String
-  employee              HrEmployee             @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  amount                Decimal                @db.Decimal(18, 2)
+  employee              HrEmployee                 @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  amount                Decimal                    @db.Decimal(18, 2)
   installmentCount      Int
   firstInstallmentMonth String
   reason                String
-  status                HrAdvanceStatus        @default(REQUESTED)
+  status                HrAdvanceStatus            @default(REQUESTED)
   requestedBy           String
-  createdAt             DateTime               @default(now())
+  createdAt             DateTime                   @default(now())
   decidedBy             String?
   decidedAt             DateTime?
   decisionNote          String?
   disbursedBy           String?
   disbursedAt           DateTime?
-  disbursedOn           DateTime?              @db.Date
+  disbursedOn           DateTime?                  @db.Date
   disbursementRef       String?
   closedBy              String?
   closedAt              DateTime?
@@ -4462,10 +4516,10 @@ model HrAdvanceInstallment {
   status            String    @default("SCHEDULED") // SCHEDULED | RESERVED | SETTLED | COVERED | RESCHEDULED | HELD
   /// The approved recovery request that created, replaced or held this installment.
   recoveryRequestId String?
-  payrollRunId  String?
-  payrollLineId String?
-  settledAt     DateTime?
-  updatedAt     DateTime  @updatedAt
+  payrollRunId      String?
+  payrollLineId     String?
+  settledAt         DateTime?
+  updatedAt         DateTime  @updatedAt
 
   @@unique([advanceId, seq])
   @@index([status, dueMonth])
@@ -4536,24 +4590,24 @@ model HrAdvanceReviewItem {
 /// A GOSI invoice as received, per period (P-2 finding 4). Entered by hand or imported from
 /// CSV; never edited — a wrong one is VOIDed (with a reason) and entered again.
 model HrGosiInvoice {
-  id            String              @id @default(cuid())
-  periodMonth   String
+  id                    String                 @id @default(cuid())
+  periodMonth           String
   /// GOSI invoice number. Unique among live invoices; never reused for another month (DB).
-  reference     String
-  source        String // MANUAL | CSV
-  status        String              @default("ACTIVE") // ACTIVE | VOID
-  totalEmployee Decimal             @db.Decimal(18, 2)
-  totalEmployer Decimal             @db.Decimal(18, 2)
-  notes         String?
-  enteredBy     String
-  enteredAt     DateTime            @default(now())
-  voidedBy      String?
-  voidedAt      DateTime?
-  voidReason    String?
+  reference             String
+  source                String // MANUAL | CSV
+  status                String                 @default("ACTIVE") // ACTIVE | VOID
+  totalEmployee         Decimal                @db.Decimal(18, 2)
+  totalEmployer         Decimal                @db.Decimal(18, 2)
+  notes                 String?
+  enteredBy             String
+  enteredAt             DateTime               @default(now())
+  voidedBy              String?
+  voidedAt              DateTime?
+  voidReason            String?
   // ── P-2 review P2-B4 (migration 20261017130000): lifecycle and source file ──
   /// ENTERED → RECONCILED (every difference explained) → APPROVED (second person) → PAID (bank
   /// reference + payment journal) → CLOSED (every decision resolved). VOID only before APPROVED.
-  stage                 String    @default("ENTERED")
+  stage                 String                 @default("ENTERED")
   reconciledBy          String?
   reconciledAt          DateTime?
   reconcileDigest       String?
@@ -4562,10 +4616,10 @@ model HrGosiInvoice {
   approvalNote          String?
   paidBy                String?
   paidAt                DateTime?
-  paidOn                DateTime? @db.Date
-  paidAmount            Decimal?  @db.Decimal(18, 2)
+  paidOn                DateTime?              @db.Date
+  paidAmount            Decimal?               @db.Decimal(18, 2)
   paymentReference      String?
-  paymentJournalEntryId String?   @unique
+  paymentJournalEntryId String?                @unique
   closedBy              String?
   closedAt              DateTime?
   /// A void is requested by one person and decided by another.
@@ -4576,10 +4630,10 @@ model HrGosiInvoice {
   sourceFileName        String?
   sourceFileSha256      String?
   sourceContent         String?
-  lines         HrGosiInvoiceLine[]
-  settlements   HrGosiSettlement[]
+  lines                 HrGosiInvoiceLine[]
+  settlements           HrGosiSettlement[]
   /// P-2 rev3 item 3: what was actually paid to GOSI (bank reality), one row per transfer.
-  payments      HrGosiInvoicePayment[]
+  payments              HrGosiInvoicePayment[]
 
   @@index([periodMonth, status])
 }
@@ -4877,24 +4931,24 @@ model HrOffer {
 // ── Offboarding ─────────────────────────────────────────────────────────────────────
 
 model HrSeparation {
-  id                  String     @id @default(cuid())
+  id                  String              @id @default(cuid())
   employeeId          String
-  employee            HrEmployee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  employee            HrEmployee          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   type                String // RESIGNATION | TERMINATION | END_OF_CONTRACT | OTHER
-  noticeDate          DateTime   @db.Date
-  lastWorkingDay      DateTime   @db.Date
+  noticeDate          DateTime            @db.Date
+  lastWorkingDay      DateTime            @db.Date
   reason              String
-  status              String     @default("INITIATED") // INITIATED | COMPLETED | CANCELLED
+  status              String              @default("INITIATED") // INITIATED | COMPLETED | CANCELLED
   /// Entered, never computed: no end-of-service formula ships until it is approved.
-  eosAmount           Decimal?   @db.Decimal(18, 2)
+  eosAmount           Decimal?            @db.Decimal(18, 2)
   eosBasisNote        String?
-  leaveEncashmentDays Decimal?   @db.Decimal(6, 2)
-  otherSettlement     Decimal?   @db.Decimal(18, 2)
+  leaveEncashmentDays Decimal?            @db.Decimal(6, 2)
+  otherSettlement     Decimal?            @db.Decimal(18, 2)
   settlementNotes     String?
   finalSettlements    HrFinalSettlement[]
-  deactivateAccount   Boolean    @default(true)
+  deactivateAccount   Boolean             @default(true)
   initiatedBy         String
-  createdAt           DateTime   @default(now())
+  createdAt           DateTime            @default(now())
   completedBy         String?
   completedAt         DateTime?
   cancelledBy         String?
@@ -4911,29 +4965,29 @@ model HrSeparation {
 ///   DRAFT…APPROVED → CANCELLED. CALCULATED → DRAFT when the reviewer returns it.
 /// DB: evidence per status (CHECKs), forward-only transitions, evidence frozen once reviewed, no delete.
 model HrFinalSettlement {
-  id                     String       @id @default(cuid())
-  settlementNo           String       @unique
+  id                     String                 @id @default(cuid())
+  settlementNo           String                 @unique
   separationId           String
-  separation             HrSeparation @relation(fields: [separationId], references: [id], onDelete: Restrict)
+  separation             HrSeparation           @relation(fields: [separationId], references: [id], onDelete: Restrict)
   employeeId             String
-  employee               HrEmployee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  status                 String       @default("DRAFT")
+  employee               HrEmployee             @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  status                 String                 @default("DRAFT")
   preparedBy             String
-  createdAt              DateTime     @default(now())
+  createdAt              DateTime               @default(now())
   // CALCULATED (manual)
-  eosAmount              Decimal?     @db.Decimal(18, 2)
-  leaveEncashmentDays    Decimal?     @db.Decimal(6, 2)
-  leaveEncashmentAmount  Decimal?     @db.Decimal(18, 2)
-  totalAmount            Decimal?     @db.Decimal(18, 2)
+  eosAmount              Decimal?               @db.Decimal(18, 2)
+  leaveEncashmentDays    Decimal?               @db.Decimal(6, 2)
+  leaveEncashmentAmount  Decimal?               @db.Decimal(18, 2)
+  totalAmount            Decimal?               @db.Decimal(18, 2)
   /// Service dates, wage used, separation type, days… exactly as the preparer used them.
   calcInputs             Json?
   calcMethodNote         String?
   calcReference          String?
   calcDocumentId         String?
-  calcDocument           HrDocument?  @relation("HrSettlementCalcDoc", fields: [calcDocumentId], references: [id], onDelete: Restrict)
+  calcDocument           HrDocument?            @relation("HrSettlementCalcDoc", fields: [calcDocumentId], references: [id], onDelete: Restrict)
   /// A recognised liability (provision) the settlement is booked against, if one exists.
-  eosProvisionAmount     Decimal?     @db.Decimal(18, 2)
-  leaveProvisionAmount   Decimal?     @db.Decimal(18, 2)
+  eosProvisionAmount     Decimal?               @db.Decimal(18, 2)
+  leaveProvisionAmount   Decimal?               @db.Decimal(18, 2)
   provisionReference     String?
   calculatedBy           String?
   calculatedAt           DateTime?
@@ -4947,16 +5001,16 @@ model HrFinalSettlement {
   approvalNote           String?
   // POSTED
   postingMode            String? // SYSTEM | MANUAL
-  journalEntryId         String?      @unique
+  journalEntryId         String?                @unique
   postedBy               String?
   postedAt               DateTime?
   // PAID
-  paidAmount             Decimal?     @db.Decimal(18, 2)
-  paidOn                 DateTime?    @db.Date
+  paidAmount             Decimal?               @db.Decimal(18, 2)
+  paidOn                 DateTime?              @db.Date
   paymentReference       String?
   paymentProofDocumentId String?
-  paymentProofDocument   HrDocument?  @relation("HrSettlementProofDoc", fields: [paymentProofDocumentId], references: [id], onDelete: Restrict)
-  paymentJournalEntryId  String?      @unique
+  paymentProofDocument   HrDocument?            @relation("HrSettlementProofDoc", fields: [paymentProofDocumentId], references: [id], onDelete: Restrict)
+  paymentJournalEntryId  String?                @unique
   paidBy                 String?
   paidAt                 DateTime?
   // CLOSED / CANCELLED
@@ -5037,27 +5091,27 @@ model PrintProfile {
 
 /// A saved label-content configuration for one template (fields shown and their order, language).
 model PrintTemplatePreset {
-  id            String        @id @default(cuid())
-  name          String
+  id                        String        @id @default(cuid())
+  name                      String
   /// COFFEE_ORIGIN | CUPPING_RESULTS
-  templateKey   String
+  templateKey               String
   /// AR | EN | BI
-  language      String
+  language                  String
   /// [{ key, show }] in print order
-  fields        Json
+  fields                    Json
   /// null = by label size (3 per language bilingual, 2 single-language, 2 on 50 × 30, 6 on A4 plain)
-  notesMaxLines Int?
-  showLogo      Boolean       @default(true)
+  notesMaxLines             Int?
+  showLogo                  Boolean       @default(true)
   /// Owner decision 2.1: named scorer attribution needs the labels.cupping_named_scorers
   /// permission AND this privacy confirmation on the preset (who confirmed, when). Null = anonymous.
   namedScorersConfirmedAt   DateTime?
   namedScorersConfirmedById String?
-  profileId     String?
-  profile       PrintProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  ownerId       String?
-  ownerName     String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  profileId                 String?
+  profile                   PrintProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  ownerId                   String?
+  ownerName                 String?
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
 
   @@index([templateKey])
 }

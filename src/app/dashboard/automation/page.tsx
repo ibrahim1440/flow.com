@@ -3,18 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Zap } from "lucide-react";
-import {
-  Alert, Button, Card, DataTable, EmptyState, PageHeader, Spinner, Td, Tr, ROW_ACTION, api, useLang,
-} from "../sales/_components/ui";
+import { Btn, Dot, Empty, OpsBanner, OpsLoading, OpsRoot, useL } from "@/components/ops/ui";
+import { useD21Phone } from "@/components/shell/page-context";
+import { api, useLang } from "../sales/_components/ui";
 import { EVENT_GROUPS, getEvent, RECIPIENT_LABELS, type RecipientKind } from "@/lib/automation/catalog";
-import { Badge, SEND_MODE_LABELS, useAutomationAbilities } from "./_components/shared";
+import { AutomationHeader, type Connection, useAutomationAbilities } from "./_components/shared";
+import { PlusIco, SettingsFrame } from "../_components/tools-ui";
 
 /**
- * Automation rules: what the system sends on WhatsApp, and when.
+ * Automation rules: what the system sends on WhatsApp, and when — Direction 2.1 (UI batch 2;
+ * GX E-P01, Figma 1219:92499 at 1440, EN 1229:113163, 1024 1219:93946, phone 1228:123991).
  *
  * Each row reads as a sentence — when <event>, send to <recipients> — with what it sent in
- * the last 30 days, so a rule that has quietly stopped matching is visible from here.
+ * the last 30 days, so a rule that has quietly stopped matching is visible from here. Visual
+ * port only: the same requests (GET rules + connection, PATCH isActive) and the same gates.
  */
 
 type Row = {
@@ -29,11 +31,10 @@ type Row = {
   last30Days: Record<string, number>;
 };
 
-type Connection = { sendMode: string; effectiveMode: string; effectiveNote: string | null; state: string | null; configured: boolean };
-
 export default function AutomationRulesPage() {
   const lang = useLang();
   const ar = lang === "ar";
+  const L = useL();
   const router = useRouter();
   const { canManageRules } = useAutomationAbilities();
 
@@ -41,6 +42,8 @@ export default function AutomationRulesPage() {
   const [conn, setConn] = useState<Connection | null>(null);
   const [error, setError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
+
+  useD21Phone({ title: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp", sub: ar ? "الإعدادات" : "Settings" });
 
   useEffect(() => {
     let cancelled = false;
@@ -62,119 +65,109 @@ export default function AutomationRulesPage() {
     setReloadToken((t) => t + 1);
   }
 
-  if (!rows && !error) return <Spinner />;
-
-  const mode = conn ? SEND_MODE_LABELS[conn.effectiveMode] : null;
+  const status = (r: Row) => <Dot tone={r.isActive ? "success" : "neutral"}>{r.isActive ? L("مفعّلة", "Active") : L("متوقفة", "Off")}</Dot>;
 
   return (
-    <div className="space-y-[18px]">
-      <PageHeader
-        title={ar ? "قواعد الأتمتة" : "Automation rules"}
-        subtitle={ar ? "رسائل واتساب ترسل تلقائيا عند أحداث النظام." : "WhatsApp messages sent automatically on system events."}
-        actions={
-          canManageRules ? (
-            <Button onClick={() => router.push("/dashboard/automation/rules/new")} testId="new-rule">
-              <Plus size={15} aria-hidden /> {ar ? "قاعدة جديدة" : "New rule"}
-            </Button>
-          ) : undefined
-        }
-      />
+    <OpsRoot className="tl-root">
+      <SettingsFrame>
+        <AutomationHeader
+          lang={lang}
+          conn={conn}
+          ruleCount={rows?.length}
+          actions={canManageRules ? (
+            <Btn variant="primary" onClick={() => router.push("/dashboard/automation/rules/new")} data-testid="new-rule">
+              <PlusIco /> {L("قاعدة جديدة", "New rule")}
+            </Btn>
+          ) : undefined}
+        />
 
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
+        {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
 
-      {conn && mode && (
-        <Card className="flex flex-wrap items-center gap-3">
-          <Badge tone={mode.tone}>{ar ? mode.ar : mode.en}</Badge>
-          <span className="text-[13px] text-oo-text-secondary">
-            {conn.effectiveMode === "OFF"
-              ? ar
-                ? "القواعد تعمل وتسجل ما كانت سترسله، لكن لا يرسل شيء."
-                : "Rules run and record what they would send; nothing is sent."
-              : conn.effectiveMode === "TEST"
-                ? ar
-                  ? "كل الرسائل تذهب لرقم التجربة فقط."
-                  : "Every message goes to the test number only."
-                : ar
-                  ? "الرسائل تذهب للمستلمين الفعليين."
-                  : "Messages go to the real recipients."}
-            {conn.state && conn.state !== "open" && (ar ? " الواتساب غير متصل الآن." : " WhatsApp is not connected.")}
-          </span>
-          <Link href="/dashboard/automation/whatsapp" className={`${ROW_ACTION} ms-auto hover:border-oo-action-primary`}>
-            {ar ? "إعدادات الإرسال" : "Sending settings"}
-          </Link>
-        </Card>
-      )}
-
-      {rows && rows.length === 0 ? (
-        <Card>
-          <EmptyState>
-            <Zap size={28} aria-hidden className="mx-auto mb-2 text-oo-text-muted" />
-            {ar ? "لا توجد قواعد بعد. أنشئ أول قاعدة لترسل رسالة عند حدث في النظام." : "No rules yet."}
-          </EmptyState>
-        </Card>
-      ) : (
-        rows && (
-          <DataTable
-            testId="rules-table"
-            minWidth={860}
-            cols={[
-              { label: ar ? "القاعدة" : "Rule", w: "min-w-[220px]" },
-              { label: ar ? "عند" : "When", w: "w-[200px]" },
-              { label: ar ? "ترسل إلى" : "Sends to", w: "w-[180px]" },
-              { label: ar ? "آخر 30 يوما" : "Last 30 days", w: "w-[170px]" },
-              { label: ar ? "الحالة" : "Status", w: "w-[130px]" },
-            ]}
-          >
-            {rows.map((r) => {
-              const ev = getEvent(r.eventType);
-              const group = EVENT_GROUPS.find((g) => g.key === ev?.group);
-              const recipients = [...new Set(r.steps.filter((s) => s.type === "whatsapp" && s.to).map((s) => s.to!.kind))];
-              const sent = r.last30Days.SENT ?? 0;
-              const failed = r.last30Days.FAILED ?? 0;
-              const skipped = r.last30Days.SKIPPED ?? 0;
-              return (
-                <Tr key={r.id} testId={`rule-${r.id}`}>
-                  <Td>
-                    <Link href={`/dashboard/automation/rules/${r.id}`} className="font-medium text-oo-text-primary hover:underline">
-                      {r.name}
-                    </Link>
-                    {r.description && <span className="block text-[12px] leading-[18px] text-oo-text-muted">{r.description}</span>}
-                  </Td>
-                  <Td>
-                    <span className="block">{ev ? (ar ? ev.ar : ev.en) : r.eventType}</span>
-                    <span className="block text-[12px] text-oo-text-muted">
-                      {group ? (ar ? group.ar : group.en) : ""}
-                      {r.conditions.length > 0 && (ar ? ` · ${r.conditions.length} شرط` : ` · ${r.conditions.length} condition(s)`)}
-                    </span>
-                  </Td>
-                  <Td>{recipients.map((k) => (ar ? RECIPIENT_LABELS[k]?.ar : RECIPIENT_LABELS[k]?.en) ?? k).join(ar ? "، " : ", ")}</Td>
-                  <Td>
-                    <span className="text-[13px]">
-                      {ar ? `أرسلت ${sent}` : `${sent} sent`}
-                      {failed > 0 && <span className="text-oo-status-blocked">{ar ? ` · فشلت ${failed}` : ` · ${failed} failed`}</span>}
-                      {skipped > 0 && <span className="text-oo-text-muted">{ar ? ` · لم ترسل ${skipped}` : ` · ${skipped} skipped`}</span>}
-                    </span>
-                  </Td>
-                  <Td>
-                    {canManageRules ? (
-                      <button
-                        type="button"
-                        onClick={() => toggle(r)}
-                        data-testid={`toggle-${r.id}`}
-                        className={`${ROW_ACTION} ${r.isActive ? "border-oo-status-success text-oo-status-success" : "text-oo-text-secondary"}`}
-                      >
-                        {r.isActive ? (ar ? "مفعلة" : "Active") : ar ? "متوقفة" : "Off"}
-                      </button>
-                    ) : (
-                      <span>{r.isActive ? (ar ? "مفعلة" : "Active") : ar ? "متوقفة" : "Off"}</span>
-                    )}
-                  </Td>
-                </Tr>
-              );
-            })}
-          </DataTable>
-        )
-      )}
-    </div>
+        {!rows && !error ? <OpsLoading /> : rows && rows.length === 0 ? (
+          <Empty
+            title={L("لا توجد قواعد بعد", "No rules yet")}
+            body={L("أنشئ أول قاعدة لترسل رسالة عند حدث في النظام.", "Create a first rule to send a message when something happens.")}
+            action={canManageRules ? <Btn variant="primary" onClick={() => router.push("/dashboard/automation/rules/new")}><PlusIco /> {L("قاعدة جديدة", "New rule")}</Btn> : undefined}
+          />
+        ) : rows ? (
+          <>
+            <div className="hr-tablewrap">
+              <table className="hr-table is-mrow" aria-label={L("القواعد", "Rules")} data-testid="rules-table">
+                <thead>
+                  <tr>
+                    <th>{L("القاعدة", "Rule")}</th>
+                    <th>{L("عند", "When")}</th>
+                    <th className="hr-hide-compact">{L("تُرسل إلى", "Sends to")}</th>
+                    <th>{L("آخر 30 يومًا", "Last 30 days")}</th>
+                    <th>{L("الحالة", "Status")}</th>
+                    {canManageRules ? <th><span className="hr-sr">{L("إجراء", "Action")}</span></th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const ev = getEvent(r.eventType);
+                    const group = EVENT_GROUPS.find((g) => g.key === ev?.group);
+                    const recipients = [...new Set(r.steps.filter((s) => s.type === "whatsapp" && s.to).map((s) => s.to!.kind))];
+                    const to = recipients.map((k) => (ar ? RECIPIENT_LABELS[k]?.ar : RECIPIENT_LABELS[k]?.en) ?? k).join(ar ? "، " : ", ");
+                    const sent = r.last30Days.SENT ?? 0;
+                    const failed = r.last30Days.FAILED ?? 0;
+                    const skipped = r.last30Days.SKIPPED ?? 0;
+                    const evName = ev ? (ar ? ev.ar : ev.en) : r.eventType;
+                    return (
+                      <tr key={r.id} data-testid={`rule-${r.id}`}>
+                        <td className="m-title">
+                          <Link href={`/dashboard/automation/rules/${r.id}`} className="strong" style={{ fontWeight: 600, color: "var(--text-primary)", textDecoration: "none" }}>
+                            {r.name}
+                          </Link>
+                          {r.description && <span className="stk-sub hr-desktop-only">{r.description}</span>}
+                          <span className="hr-msub">{evName}{to ? ` · ${to}` : ""}</span>
+                        </td>
+                        <td>
+                          <span style={{ display: "block", fontWeight: 500 }}>{evName}</span>
+                          <span className="stk-sub">
+                            {group ? (ar ? group.ar : group.en) : ""}
+                            {" · "}
+                            {r.conditions.length > 0
+                              ? (ar ? `${r.conditions.length} شرط` : `${r.conditions.length} condition(s)`)
+                              : L("بلا شروط", "no conditions")}
+                          </span>
+                        </td>
+                        <td className="hr-hide-compact">{to}</td>
+                        <td>
+                          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                            {ar ? `أرسلت ${sent}` : `${sent} sent`}
+                            {failed > 0 && <span style={{ color: "var(--status-danger)" }}>{ar ? ` · ${failed} فشلت` : ` · ${failed} failed`}</span>}
+                            {skipped > 0 && <span>{ar ? ` · لم ترسل ${skipped}` : ` · ${skipped} skipped`}</span>}
+                          </span>
+                        </td>
+                        <td className="m-end">
+                          {status(r)}
+                          {canManageRules ? (
+                            <span className="hr-mobile-only">
+                              <Btn size="sm" onClick={() => toggle(r)}>{r.isActive ? L("إيقاف", "Turn off") : L("تفعيل", "Turn on")}</Btn>
+                            </span>
+                          ) : null}
+                        </td>
+                        {canManageRules ? (
+                          <td style={{ textAlign: "end", width: 1 }}>
+                            <Btn size="sm" onClick={() => toggle(r)} data-testid={`toggle-${r.id}`} aria-label={`${r.isActive ? L("إيقاف", "Turn off") : L("تفعيل", "Turn on")} — ${r.name}`}>
+                              {r.isActive ? L("إيقاف", "Turn off") : L("تفعيل", "Turn on")}
+                            </Btn>
+                          </td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="tl-foot tl-hide-phone">{L("المفعّلة أولًا ثم الأحدث تعديلًا · الإيقاف والتفعيل فوريان", "Active first, then most recently edited · turning a rule off or on is immediate")}</p>
+            <div className="tl-note tl-hide-phone">
+              {L("القاعدة المتوقفة لا تنشئ رسائل. الرسائل التي لم تُرسل بعد لا تُلغى عند الإيقاف؛ تُلغى عند حذف القاعدة.", "A rule that is off creates no messages. Messages not yet sent are not cancelled when it is turned off; they are cancelled when the rule is deleted.")}
+            </div>
+          </>
+        ) : null}
+      </SettingsFrame>
+    </OpsRoot>
   );
 }

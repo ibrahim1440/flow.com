@@ -4,7 +4,9 @@
 // a manual key, confirmation with a first code, and the ten recovery codes — shown ONCE.
 import { useCallback, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { ShieldCheck, ShieldAlert, Copy, Check } from "lucide-react";
+import { Copy, Check } from "lucide-react";
+import "@/components/hr/hr.css";
+import "./mfa.css";
 
 type Status = { configured: boolean; mode: "enrolled" | "required"; enrolled: boolean; enrolledAt: string | null; pending: boolean; recoveryCodesRemaining: number; privileged: boolean; enrollmentRequired: boolean };
 
@@ -65,55 +67,66 @@ export function MfaEnrollment({ lang, onEnrolled }: { lang: "ar" | "en"; onEnrol
 
   if (!status) return null;
   const groups = setup ? setup.secret.match(/.{1,4}/g)?.join(" ") : "";
+  // Direction 2.1 (UI batch 2): drawn with the shared HR kit classes, so it needs a
+  // `[data-hr-root]` ancestor inside a `.d21` root — the profile page (HrRoot in the shell) and
+  // the MFA-required screen of the dashboard layout both provide one. Same requests, same states.
   return (
-    <section className="rounded-2xl border border-border bg-white p-5" data-testid="mfa-section" aria-labelledby="mfa-title">
-      <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-        <h2 id="mfa-title" className="font-bold text-charcoal flex items-center gap-2">{status.enrolled ? <ShieldCheck size={18} className="text-success" /> : <ShieldAlert size={18} className="text-orange" />}{t.title}</h2>
-        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${status.enrolled ? "bg-success-bg text-success" : "bg-cream text-brown"}`} data-testid="mfa-status">{status.enrolled ? t.on : t.off}</span>
+    <section className="mfa-card" data-testid="mfa-section" aria-labelledby="mfa-title">
+      <div className="mfa-head">
+        <h2 id="mfa-title" className="hr-section">{t.title}</h2>
+        <span className={`hr-dot tone-${status.enrolled ? "success" : "neutral"}`} data-testid="mfa-status"><span>{status.enrolled ? t.on : t.off}</span></span>
       </div>
 
       {codes ? (
-        <div data-testid="mfa-recovery-codes">
-          <h3 className="font-bold text-charcoal mb-1">{t.codesTitle}</h3>
-          <p className="text-sm text-brown/70 mb-3">{t.codesHint}</p>
-          <ol dir="ltr" className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2 font-mono text-sm mb-3">
-            {codes.map((c) => <li key={c} className="px-3 py-2 bg-cream rounded-lg text-center tracking-wider">{c}</li>)}
+        <div className="hr-stack" data-testid="mfa-recovery-codes">
+          <h3 className="mfa-sub">{t.codesTitle}</h3>
+          <p className="hr-caption" style={{ margin: 0 }}>{t.codesHint}</p>
+          <ol dir="ltr" className="mfa-codes">
+            {codes.map((c) => <li key={c}>{c}</li>)}
           </ol>
-          <button type="button" onClick={() => { navigator.clipboard?.writeText(codes.join("\n")).then(() => setCopied(true)).catch(() => {}); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-charcoal border-2 border-border rounded-xl px-3 py-2 mb-3">{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? t.copied : t.copy}</button>
-          <label className="flex items-center gap-2 text-sm text-charcoal mb-3"><input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} data-testid="mfa-codes-saved" />{t.saved}</label>
-          <button type="button" disabled={!saved} onClick={finish} className="px-5 py-2.5 bg-orange text-white font-bold rounded-xl disabled:opacity-40" data-testid="mfa-codes-done">{t.done}</button>
+          <div>
+            <button type="button" onClick={() => { navigator.clipboard?.writeText(codes.join("\n")).then(() => setCopied(true)).catch(() => {}); }} className="hr-btn is-sm">{copied ? <Check aria-hidden /> : <Copy aria-hidden />}{copied ? t.copied : t.copy}</button>
+          </div>
+          <label className="mfa-check"><input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} data-testid="mfa-codes-saved" />{t.saved}</label>
+          <div>
+            <button type="button" disabled={!saved} onClick={finish} className="hr-btn is-primary" data-testid="mfa-codes-done">{t.done}</button>
+          </div>
         </div>
       ) : status.enrolled ? (
-        <div className="text-sm text-brown/80 space-y-1">
-          {status.enrolledAt && <p>{t.enrolledAt}: <bdi dir="ltr">{new Date(status.enrolledAt).toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-latn" : "en-GB")}</bdi></p>}
-          <p>{t.remaining}: <b>{status.recoveryCodesRemaining}</b></p>
-          <p className="text-xs text-brown/60 pt-2">{t.lost}</p>
+        <div className="hr-stack">
+        <dl className="hr-kv">
+          {status.enrolledAt && <div><dt>{t.enrolledAt}</dt><dd><bdi dir="ltr" className="hr-num">{new Date(status.enrolledAt).toLocaleDateString(lang === "ar" ? "ar-SA-u-nu-latn" : "en-GB")}</bdi></dd></div>}
+          <div><dt>{t.remaining}</dt><dd className="hr-num">{status.recoveryCodesRemaining}</dd></div>
+        </dl>
+          <p className="hr-caption" style={{ margin: 0 }}>{t.lost}</p>
         </div>
       ) : !status.configured ? (
-        <p className="text-sm text-brown/70">{t.notConfigured}</p>
+        <p className="hr-caption" style={{ margin: 0 }}>{t.notConfigured}</p>
       ) : setup ? (
-        <div data-testid="mfa-setup">
-          <p className="text-sm text-charcoal mb-3">{t.step1}</p>
-          <div className="flex flex-col sm:flex-row gap-4 items-start mb-4">
-            <div className="p-3 bg-white border border-border rounded-xl" data-testid="mfa-qr"><QRCodeSVG value={setup.otpauth} size={168} /></div>
-            <div className="min-w-0">
-              <p className="text-xs text-brown/70 mb-1">{t.manual}</p>
-              <code dir="ltr" className="block font-mono text-sm bg-cream rounded-lg px-3 py-2 break-all select-all" data-testid="mfa-manual-key">{groups}</code>
+        <div className="hr-stack" data-testid="mfa-setup">
+          <p style={{ margin: 0 }}>{t.step1}</p>
+          <div className="mfa-qrrow">
+            <div className="mfa-qr" data-testid="mfa-qr"><QRCodeSVG value={setup.otpauth} size={168} /></div>
+            <div style={{ minWidth: 0 }}>
+              <p className="hr-caption" style={{ margin: "0 0 4px" }}>{t.manual}</p>
+              <code dir="ltr" className="mfa-key" data-testid="mfa-manual-key">{groups}</code>
             </div>
           </div>
-          <p className="text-sm text-charcoal mb-2">{t.step2}</p>
-          <div className="flex gap-2 flex-wrap">
-            <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirm()} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" className="w-40 px-3 py-2.5 border-2 border-border rounded-xl text-center tracking-[3px] focus:border-orange outline-none" data-testid="mfa-confirm-code" />
-            <button type="button" onClick={confirm} disabled={busy || !code.trim()} className="px-5 py-2.5 bg-orange text-white font-bold rounded-xl disabled:opacity-40" data-testid="mfa-confirm">{t.confirm}</button>
+          <p style={{ margin: 0 }}>{t.step2}</p>
+          <div className="mfa-confirm">
+            <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirm()} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" className="hr-input mfa-code" aria-label={t.step2} data-testid="mfa-confirm-code" />
+            <button type="button" onClick={confirm} disabled={busy || !code.trim()} className="hr-btn is-primary" data-testid="mfa-confirm">{t.confirm}</button>
           </div>
         </div>
       ) : (
-        <div>
-          <p className="text-sm text-brown/80 mb-3">{status.enrollmentRequired ? t.required : status.privileged ? t.recommended : t.optional}</p>
-          <button type="button" onClick={start} disabled={busy} className="px-5 py-2.5 bg-orange text-white font-bold rounded-xl disabled:opacity-40" data-testid="mfa-start">{t.start}</button>
+        <div className="hr-stack">
+          <p className={status.enrollmentRequired || status.privileged ? undefined : "hr-caption"} style={{ margin: 0 }}>{status.enrollmentRequired ? t.required : status.privileged ? t.recommended : t.optional}</p>
+          <div>
+            <button type="button" onClick={start} disabled={busy} className="hr-btn is-primary" data-testid="mfa-start">{t.start}</button>
+          </div>
         </div>
       )}
-      {error && <div role="alert" className="bg-danger-bg text-danger px-3 py-2 rounded-xl text-sm font-semibold mt-3">{error}</div>}
+      {error && <div role="alert" className="hr-notice tone-danger">{error}</div>}
     </section>
   );
 }

@@ -2,15 +2,18 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Wallet, Paperclip, Check, X, RotateCcw, Clock } from "lucide-react";
+import { Paperclip } from "lucide-react";
 import {
-  useLang, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner, SectionTitle,
-  StatStrip, Stat, DataTable, Tr, Td, Toolbar, FilterSelect, Modal, Field, TextArea,
-  Button, Money, Num, ROW_ACTION, api, formatDay, num, moneyText,
+  useLang, Spinner, Modal, Field, TextArea, Button, FocusDialog, api, formatDay, formatMoney, num, moneyText,
 } from "../_components/ui";
+import { Ico } from "@/components/shell/icons";
+import { usePhone, useD21Phone } from "@/components/shell/page-context";
+import { splitTitle } from "@/components/d21/labels";
 
 /**
- * Collections — one screen, two jobs.
+ * Collections — one screen, two jobs, built to GX A-01 (Figma 1459:15522, EN 1459:16043; the
+ * opened collection 1460:15742; 390 1459:17412): header, three figures, the status segments,
+ * the ledger, the rules, and the opened collection as a drawer at the sheet's end.
  *
  * A salesperson opens it to see what they recorded and where it got to. Finance opens it to
  * work the verification queue. It is deliberately not two routes: the records are the same
@@ -20,6 +23,10 @@ import {
  *
  * Nothing here is a bank feed. A collection is a claim that money arrived; Finance either
  * agrees or does not, and only agreement creates commission. The screen says so.
+ *
+ * Visual port only: requests, payloads and every figure are the ones this screen already had.
+ * What the frames draw and the system does not have (the bank-line match in the drawer) is not
+ * built.
  */
 
 type Accrual = { amount: string; status: string; employee: { id: string; name: string } };
@@ -100,24 +107,21 @@ type Payload = {
   can: { submit: boolean; verify: boolean; reject: boolean; reverse: boolean };
 };
 
-const STATUS: Record<string, { en: string; ar: string; tone: string; Icon: React.ElementType }> = {
-  PENDING_VERIFICATION: {
-    en: "Awaiting verification", ar: "بانتظار التحقق",
-    tone: "border-oo-status-waiting bg-oo-status-waiting-bg text-oo-status-hold", Icon: Clock,
-  },
-  APPROVED: {
-    en: "Approved", ar: "معتمَد",
-    tone: "border-oo-status-success bg-oo-status-success-bg text-oo-status-success", Icon: Check,
-  },
-  REJECTED: {
-    en: "Rejected", ar: "مرفوض",
-    tone: "border-oo-status-rejected bg-oo-status-rejected-bg text-oo-status-rejected", Icon: X,
-  },
-  REVERSED: {
-    en: "Reversed", ar: "معكوس",
-    tone: "border-oo-border-strong bg-oo-bg-subtle text-oo-text-secondary", Icon: RotateCcw,
-  },
+/** Status → its word and the reference status dot (`.st` + tone). */
+const STATUS: Record<string, { en: string; ar: string; dot: string }> = {
+  PENDING_VERIFICATION: { en: "Awaiting verification", ar: "بانتظار التحقق", dot: "wa" },
+  APPROVED: { en: "Approved", ar: "معتمَد", dot: "ok" },
+  REJECTED: { en: "Rejected", ar: "مرفوض", dot: "er" },
+  REVERSED: { en: "Reversed", ar: "معكوس", dot: "x" },
 };
+/** The segments, in the frame's order. The server filters; the shorter names are the frame's. */
+const SEGMENTS: { value: string; ar: string; en: string }[] = [
+  { value: "", ar: "الكل", en: "All" },
+  { value: "PENDING_VERIFICATION", ar: "بانتظار التحقق", en: "Awaiting verification" },
+  { value: "APPROVED", ar: "معتمَد", en: "Approved" },
+  { value: "REJECTED", ar: "مرفوض", en: "Rejected" },
+  { value: "REVERSED", ar: "معكوس", en: "Reversed" },
+];
 
 const METHODS: Record<string, { en: string; ar: string }> = {
   BANK_TRANSFER: { en: "Bank transfer", ar: "تحويل بنكي" },
@@ -127,14 +131,11 @@ const METHODS: Record<string, { en: string; ar: string }> = {
   OTHER: { en: "Other", ar: "أخرى" },
 };
 
-function StatusBadge({ status, ar }: { status: string; ar: boolean }) {
+function StatusDot({ status, ar }: { status: string; ar: boolean }) {
   const s = STATUS[status] ?? STATUS.PENDING_VERIFICATION;
   return (
-    <span
-      className={`inline-flex h-7 items-center gap-2 rounded-md border px-2.5 py-1 text-[12px] font-medium leading-[18px] ${s.tone}`}
-      data-testid={`collection-status-${status}`}
-    >
-      {ar ? s.ar : s.en} <s.Icon size={16} aria-hidden />
+    <span className={`st ${s.dot}`} data-testid={`collection-status-${status}`}>
+      {ar ? s.ar : s.en}
     </span>
   );
 }
@@ -142,6 +143,7 @@ function StatusBadge({ status, ar }: { status: string; ar: boolean }) {
 export default function CollectionsPage() {
   const lang = useLang();
   const ar = lang === "ar";
+  const phone = usePhone();
 
   const [data, setData] = useState<Payload | null>(null);
   const [status, setStatus] = useState("");
@@ -153,6 +155,8 @@ export default function CollectionsPage() {
   /** The row a reviewer has opened to look at properly before deciding. */
   const [detail, setDetail] = useState<Collection | null>(null);
   const [reason, setReason] = useState("");
+
+  useD21Phone({ title: ar ? "التحصيلات" : "Collections", sub: ar ? "الفواتير والتحصيل" : "Invoicing & collections" });
 
   /**
    * Reload counter. The fetch lives in the effect rather than a `useCallback` it calls, so
@@ -213,8 +217,8 @@ export default function CollectionsPage() {
     reload();
   }
 
-  if (loading) return <Spinner />;
-  if (!data) return <Alert kind="error">{error}</Alert>;
+  if (loading) return <div className="pg"><Spinner /></div>;
+  if (!data) return <div className="pg"><p className="notice er" role="alert" data-testid="alert-error">{error}</p></div>;
 
   const rows = data.rows;
   const eligible = data.eligibleDeals ?? [];
@@ -239,7 +243,7 @@ export default function CollectionsPage() {
    *
    * Only for rows still open to a decision — a settled row needs no explanation for why it
    * has no buttons — and only for reasons somebody can act on. NOT_PENDING and NOT_APPROVED
-   * are states the status badge already communicates.
+   * are states the status already communicates.
    */
   function blockedReason(r: Collection): string | null {
     const d = decisionFor(r);
@@ -259,497 +263,499 @@ export default function CollectionsPage() {
   // person looking at it rather than showing everyone the same title.
   const isFinance = data.can.verify || data.can.reject || data.can.reverse;
 
-  return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+  const customerOf = (r: Collection) => (r.customer ? (ar ? (r.customer.nameAr ?? r.customer.name) : r.customer.name) : null);
+  /** «بن الشرق · طلبية سبتمبر»: the customer, then what is left of the deal's name. */
+  const dealText = (r: Collection) => {
+    const c = customerOf(r);
+    if (!r.opportunity) return c ?? "—";
+    const sub = splitTitle(r.opportunity.title, c).sub;
+    return c ? (sub ? `${c} · ${sub}` : c) : r.opportunity.title;
+  };
+  const methodText = (m: string) => (ar ? (METHODS[m]?.ar ?? m) : (METHODS[m]?.en ?? m));
+  const unit = ar ? "ر.س" : "SAR";
 
-      <PageHeader
-        title={ar ? "التحصيلات" : "Collections"}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>
-              {isFinance
-                ? (ar ? "قائمة التحقق المالي" : "the finance verification queue")
-                : (ar ? "تحصيلاتك وحالتها" : "your collections and where they got to")}
-            </span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>
-              {ar
-                ? "تحقّق مالي يدوي — ليست تسوية بنكية ولا ربطاً محاسبياً"
-                : "manual finance verification — not a bank settlement and not an accounting integration"}
-            </span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>{ar ? "الاعتماد وحده يُنشئ العمولة" : "approval alone creates commission"}</span>
-          </span>
-        }
-      />
+  // Per-segment counts are exact only on «الكل», where every row (up to the server's 200) is
+  // loaded; on a filtered view only the active segment's own count is known.
+  const counts: Record<string, number> = {};
+  if (status === "") for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
 
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
-
-      <StatStrip cols={3}>
-        <Stat
-          label={ar ? "بانتظار التحقق" : "Awaiting verification"}
-          value={moneyText(sum(pending, "amountGross"), "SAR", lang)}
-          note={ar ? `${num(pending.length, lang)} تحصيل — لم يُنشئ عمولة` : `${pending.length} — no commission yet`}
-          testId="stat-pending"
-        />
-        <Stat
-          label={ar ? "معتمَد" : "Approved"}
-          value={moneyText(sum(approved, "amountGross"), "SAR", lang)}
-          note={ar ? `الأساس الصافي ${moneyText(sum(approved, "amountNet"), "SAR", lang)}` : `net basis ${moneyText(sum(approved, "amountNet"), "SAR", lang)}`}
-          tone="action"
-          testId="stat-approved"
-        />
-        <Stat
-          label={ar ? "الإجمالي المعروض" : "Shown here"}
-          value={num(rows.length, lang)}
-          note={data.scope === "all" ? (ar ? "كل التحصيلات" : "all collections") : (ar ? "تحصيلاتك أنت" : "your own only")}
-          testId="stat-count"
-        />
-      </StatStrip>
-
-      <Toolbar>
-        <FilterSelect value={status} onChange={setStatus} label={ar ? "الحالة" : "Status"}>
-          <option value="">{ar ? "كل الحالات" : "All statuses"}</option>
-          {Object.keys(STATUS).map((s) => (
-            <option key={s} value={s}>{ar ? STATUS[s].ar : STATUS[s].en}</option>
-          ))}
-        </FilterSelect>
-      </Toolbar>
-
-      {rows.length === 0 ? (
-        <Card>
-          <EmptyState>
-            <Wallet size={28} className="mx-auto mb-2 opacity-40" aria-hidden />
-            {ar
-              ? "لا توجد تحصيلات. يُسجَّل التحصيل من صفحة الصفقة بعد قبول عرض السعر."
-              : "No collections. One is recorded from a deal, once its quotation has been accepted."}
-          </EmptyState>
-
-          {/* "Nothing here" is true but useless on its own when the reason is that the
-              person is looking in the wrong place. If they hold the privilege and own a
-              deal with money still outstanding, the empty state says so and takes them
-              there. If they hold it and own nothing eligible, it says that instead. */}
-          {data.can.submit && eligible.length > 0 && (
-            <div className="mx-auto mt-1 max-w-[560px]" data-testid="eligible-deals">
-              <p className="mb-2 text-center text-[12px] leading-[18px] text-oo-text-secondary">
-                {ar
-                  ? "صفقات يمكنك التسجيل عليها الآن:"
-                  : "Deals you can record against right now:"}
-              </p>
-              <ul className="space-y-1.5">
-                {eligible.map((d) => (
-                  <li key={d.id}>
-                    <Link
-                      href={`/dashboard/sales/deals/${d.id}#collections`}
-                      data-testid={`eligible-deal-${d.id}`}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-oo-border-default bg-oo-bg-subtle px-3.5 py-2.5 transition-colors hover:border-oo-action-primary"
-                    >
-                      <span className="text-[13px] font-medium leading-[20px] text-oo-action-primary">
-                        {d.title}
-                      </span>
-                      <span className="text-[12px] leading-[18px] text-oo-text-muted">
-                        <Num>{d.quoteNumber}</Num>
-                        {" · "}
-                        {/* This list answers "what can I still submit against?", so it
-                            shows capacity, and says so rather than saying "outstanding". */}
-                        {ar ? "المتاح لتسجيل تحصيل إضافي " : "available to submit "}
-                        <Money value={d.availableToSubmit} currency={d.currency} />
-                        {" · "}
-                        {ar ? "غير المسدد " : "unpaid "}
-                        <Money value={d.unpaid} currency={d.currency} />
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.can.submit && eligible.length === 0 && (
-            <p
-              data-testid="no-eligible-deals"
-              className="mt-1 text-center text-[12px] leading-[18px] text-oo-text-muted"
-            >
-              {ar
-                ? "لا توجد لديك صفقة بعرض سعر مقبول وعليها متبقٍّ. سجّل قبول العميل على عرض سعر أولاً."
-                : "You have no deal with an accepted quotation and an outstanding balance. Record a customer's acceptance first."}
-            </p>
-          )}
-          {!data.can.submit && (
-            <p
-              data-testid="cannot-submit"
-              className="mt-1 text-center text-[12px] leading-[18px] text-oo-text-muted"
-            >
-              {ar
-                ? "لا تملك صلاحية تسجيل التحصيل؛ هذه الشاشة للعرض فقط بالنسبة لك."
-                : "You do not have the collection-submit permission; this screen is read-only for you."}
-            </p>
-          )}
-        </Card>
-      ) : (
-        <DataTable
-          testId="collections-table"
-          minWidth={1240}
-          cols={[
-            { label: ar ? "الصفقة" : "Deal", w: "min-w-[200px]" },
-            { label: ar ? "المبلغ" : "Amount", w: "w-[170px]" },
-            { label: ar ? "الأساس الصافي" : "Net basis", w: "w-[150px]" },
-            { label: ar ? "التاريخ" : "Date", w: "w-[120px]" },
-            { label: ar ? "الطريقة" : "Method", w: "w-[120px]" },
-            { label: ar ? "الحالة" : "Status", w: "w-[170px]" },
-            { label: ar ? "العمولة" : "Commission", w: "w-[150px]" },
-            { label: <span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span>, w: "w-[230px]" },
-          ]}
-        >
-          {rows.map((r) => {
-            const accruals = r.collectionEvent?.accruals ?? [];
-            return (
-              <Tr key={r.id} testId={`collection-${r.id}`}>
-                <Td>
-                  {r.opportunity ? (
-                    <Link
-                      href={`/dashboard/sales/deals/${r.opportunity.id}`}
-                      className="font-medium text-oo-action-primary hover:underline"
-                    >
-                      {r.opportunity.title}
-                    </Link>
-                  ) : "—"}
-                  <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                    {[
-                      r.customer ? (ar ? (r.customer.nameAr ?? r.customer.name) : r.customer.name) : null,
-                      r.quote ? r.quote.quoteNumber : null,
-                      r.submittedBy?.name,
-                    ].filter(Boolean).join(" · ")}
-                  </span>
-                </Td>
-                <Td>
-                  <Money value={r.amountGross} currency={r.currency} />
-                  {r.referenceNumber && (
-                    <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                      <Num>{r.referenceNumber}</Num>
-                    </span>
-                  )}
-                </Td>
-                <Td>
-                  <Money value={r.amountNet} currency={r.currency} />
-                  <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                    {ar ? "ضريبة " : "tax "}
-                    <Num>{Number(r.amountTax).toFixed(2)}</Num>
-                  </span>
-                </Td>
-                <Td><Num>{formatDay(r.collectedAt)}</Num></Td>
-                <Td>{ar ? (METHODS[r.paymentMethod]?.ar ?? r.paymentMethod) : (METHODS[r.paymentMethod]?.en ?? r.paymentMethod)}</Td>
-                <Td>
-                  <StatusBadge status={r.status} ar={ar} />
-                  {(r.decisionReason || r.reversalReason) && (
-                    <span className="mt-1 block text-[12px] leading-[18px] text-oo-text-muted">
-                      {r.reversalReason ?? r.decisionReason}
-                    </span>
-                  )}
-                </Td>
-                <Td>
-                  {/* Pending is shown as an estimate and is NEVER added to anything. */}
-                  {r.status === "PENDING_VERIFICATION" ? (
-                    <span className="text-[12px] leading-[18px] text-oo-text-muted" data-testid={`commission-pending-${r.id}`}>
-                      {ar ? "بانتظار الاعتماد" : "pending approval"}
-                    </span>
-                  ) : accruals.length === 0 ? (
-                    <span className="text-oo-text-muted">—</span>
-                  ) : (
-                    accruals.map((a, i) => (
-                      <span key={i} className="block text-[12px] leading-[18px]">
-                        <Money value={a.amount} currency={r.currency} />
-                        <span className="text-oo-text-muted"> · {a.employee.name}</span>
-                      </span>
-                    ))
-                  )}
-                </Td>
-                <Td>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      onClick={() => setDetail(r)}
-                      data-testid={`open-${r.id}`}
-                      className={`${ROW_ACTION} text-oo-action-primary hover:border-oo-action-primary`}
-                    >
-                      {ar ? "فتح" : "Open"}
-                    </button>
-                    {r._count.evidence > 0 && (
-                      <span
-                        className="inline-flex items-center gap-1 text-[12px] leading-[18px] text-oo-text-muted"
-                        data-testid={`evidence-count-${r.id}`}
-                      >
-                        <Paperclip size={13} aria-hidden /> <Num>{r._count.evidence}</Num>
-                      </span>
-                    )}
-                    {decisionFor(r).approve.allowed && (
-                      <button
-                        disabled={busy}
-                        onClick={() => decide(r, "approve", "")}
-                        data-testid={`approve-${r.id}`}
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50"
-                      >
-                        <Check size={14} aria-hidden /> {ar ? "اعتماد التحصيل" : "Approve collection"}
-                      </button>
-                    )}
-                    {decisionFor(r).reject.allowed && (
-                      <button
-                        disabled={busy}
-                        onClick={() => { setDialog({ kind: "reject", row: r }); setReason(""); }}
-                        data-testid={`reject-${r.id}`}
-                        className={`${ROW_ACTION} text-oo-status-rejected hover:bg-oo-status-rejected-bg`}
-                      >
-                        {ar ? "رفض التحصيل" : "Reject collection"}
-                      </button>
-                    )}
-                    {decisionFor(r).reverse.allowed && (
-                      <button
-                        disabled={busy}
-                        onClick={() => { setDialog({ kind: "reverse", row: r }); setReason(""); }}
-                        data-testid={`reverse-${r.id}`}
-                        className={`${ROW_ACTION} text-oo-status-rejected hover:bg-oo-status-rejected-bg`}
-                      >
-                        {ar ? "عكس التحصيل" : "Reverse collection"}
-                      </button>
-                    )}
-                    {/* Why there is no button, when the row is still open to a decision.
-                        An empty cell cannot distinguish "not your job", "not your
-                        privilege" and "you recorded this one". */}
-                    {blockedReason(r) && (
-                      <span
-                        data-testid={`decision-blocked-${r.id}`}
-                        data-reason={blockedReason(r)}
-                        className="text-[12px] leading-[18px] text-oo-status-hold"
-                      >
-                        {ar ? WHY_NOT[blockedReason(r)!].ar : WHY_NOT[blockedReason(r)!].en}
-                      </span>
-                    )}
-                  </div>
-                </Td>
-              </Tr>
-            );
-          })}
-        </DataTable>
+  const notices = (
+    <>
+      {error && (
+        <p className="notice er" role="alert" data-testid="alert-error" style={{ marginBottom: 16 }}>
+          {error}<button type="button" onClick={() => setError("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+        </p>
       )}
-
-      <Card>
-        <SectionTitle>{ar ? "قواعد هذه الشاشة" : "The rules this screen enforces"}</SectionTitle>
-        <ul className="space-y-1.5 text-[12px] leading-[18px] text-oo-text-secondary">
-          {(ar
-            ? [
-                "التحصيل المسجَّل «بانتظار التحقق» لا يُنشئ أي عمولة. التقدير المعروض تقدير فقط ولا يدخل في أي مجموع.",
-                "الاعتماد المالي وحده يُنشئ استحقاق العمولة، وأساسه صافي المحصَّل بعد الضريبة.",
-                "من سجّل التحصيل لا يعتمده، مهما كانت صلاحياته. لا استثناء في هذا الإصدار.",
-                "العكس لا يحذف شيئاً: القيد الأصلي يبقى كما اعتُمد، وتُكتب فوقه تسوية سالبة مرتبطة به.",
-                "المتبقي غير المسدد هو قيمة العرض ناقص المعتمَد. المتاح لتسجيل تحصيل إضافي هو غير المسدد ناقص ما هو بانتظار التحقق، ولا يمكن تجاوزه.",
-              ]
-            : [
-                "A collection awaiting verification creates no commission. The estimate shown is an estimate and is in no total.",
-                "Finance approval alone creates the entitlement, and its basis is the net collected after tax.",
-                "Whoever recorded a collection does not approve it, whatever privileges they hold. No exception in this release.",
-                "A reversal deletes nothing: the original stays exactly as approved, with a linked negative adjustment on top.",
-                "The unpaid balance is the quotation less what is approved. What is available to submit is the unpaid balance less what is awaiting verification, and a collection cannot exceed it.",
-              ]
-          ).map((rule, i) => (
-            <li key={i} className="flex gap-2">
-              <span aria-hidden className="text-oo-border-strong">•</span>
-              <span>{rule}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      {dialog && (
-        <Modal
-          title={
-            dialog.kind === "reject"
-              ? (ar ? "رفض التحصيل" : "Reject the collection")
-              : (ar ? "عكس تحصيل معتمَد" : "Reverse an approved collection")
-          }
-          onClose={() => setDialog(null)}
-          testId="collection-decision-dialog"
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setDialog(null)}>{ar ? "إلغاء" : "Cancel"}</Button>
-              <Button
-                variant="danger"
-                disabled={busy || reason.trim().length < 3}
-                testId="confirm-decision"
-                onClick={() => decide(dialog.row, dialog.kind, reason)}
-              >
-                {dialog.kind === "reject" ? (ar ? "رفض" : "Reject") : (ar ? "عكس" : "Reverse")}
-              </Button>
-            </>
-          }
-        >
-          <p className="mb-3 text-[12px] leading-[18px] text-oo-text-secondary">
-            {dialog.kind === "reject"
-              ? (ar
-                  ? "لن تُنشأ أي عمولة. السبب يظهر للمندوب الذي سجّل التحصيل."
-                  : "No commission will be created. The reason is shown to the rep who recorded it.")
-              : (ar
-                  ? "القيد الأصلي يبقى كما هو، وتُكتب تسوية سالبة مرتبطة به تُنقص العمولة بالمقدار نفسه."
-                  : "The original stays as approved; a linked negative adjustment reduces the commission by the same amount.")}
-          </p>
-          <Field id="decision-reason" label={ar ? "السبب" : "Reason"} hint={ar ? "مطلوب." : "Required."}>
-            <TextArea id="decision-reason" value={reason} onChange={setReason} rows={3} />
-          </Field>
-        </Modal>
+      {success && (
+        <p className="notice ok" role="status" data-testid="alert-success" style={{ marginBottom: 16 }}>
+          {success}<button type="button" onClick={() => setSuccess("")} aria-label={ar ? "إغلاق" : "Dismiss"}>×</button>
+        </p>
       )}
+    </>
+  );
 
-      {/* ── One collection, opened to be decided ────────────────────
-          Everything a finance decision rests on, in one place: what arrived, how much of
-          it is tax, what the commission is actually computed on, what approving would be
-          worth, and the evidence itself. Approving from a table row alone is approving a
-          figure nobody opened. */}
-      {detail && (
-        <Modal
-          title={ar ? "تفاصيل التحصيل" : "Collection detail"}
-          onClose={() => setDetail(null)}
-          testId="collection-detail"
-          footer={
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" onClick={() => setDetail(null)}>
-                {ar ? "إغلاق" : "Close"}
-              </Button>
-              {decisionFor(detail).approve.allowed && (
-                <Button
-                  disabled={busy}
-                  testId="detail-approve"
-                  onClick={() => { const r = detail; setDetail(null); decide(r, "approve", ""); }}
-                >
-                  <Check size={15} aria-hidden /> {ar ? "اعتماد التحصيل" : "Approve collection"}
-                </Button>
-              )}
-              {decisionFor(detail).reject.allowed && (
-                <button
-                  disabled={busy}
-                  data-testid="detail-reject"
-                  onClick={() => { setDialog({ kind: "reject", row: detail }); setReason(""); setDetail(null); }}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
-                >
-                  {ar ? "رفض التحصيل" : "Reject collection"}
-                </button>
-              )}
-              {decisionFor(detail).reverse.allowed && (
-                <button
-                  disabled={busy}
-                  data-testid="detail-reverse"
-                  onClick={() => { setDialog({ kind: "reverse", row: detail }); setReason(""); setDetail(null); }}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-bg-default px-[18px] py-[10px] text-[14px] font-medium leading-[22px] text-oo-status-rejected transition-colors hover:bg-oo-status-rejected-bg disabled:opacity-50"
-                >
-                  <RotateCcw size={15} aria-hidden /> {ar ? "عكس التحصيل" : "Reverse collection"}
-                </button>
-              )}
-            </div>
-          }
-        >
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <StatusBadge status={detail.status} ar={ar} />
-            <span className="text-[12px] leading-[18px] text-oo-text-muted">
-              {[detail.opportunity?.title, detail.quote?.quoteNumber, detail.submittedBy?.name]
-                .filter(Boolean).join(" · ")}
-            </span>
-          </div>
+  const segments = (
+    <div role="group" aria-label={ar ? "الحالة" : "Status"} className={phone ? "segs" : "seg"} data-testid="collection-status-filter">
+      {SEGMENTS.map((s) => {
+        const on = status === s.value;
+        const n = s.value === "" ? null : status === "" ? (counts[s.value] ?? 0) : on ? rows.length : null;
+        return (
+          <button key={s.value || "ALL"} type="button" aria-pressed={on} className={on ? "on" : undefined}
+            data-testid={`collection-tab-${s.value || "ALL"}`} onClick={() => setStatus(s.value)}>
+            {ar ? s.ar : s.en}
+            {n !== null && <span className="n">{n}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
 
-          <dl className="rounded-xl border border-oo-border-default" data-testid="detail-figures">
-            {[
-              [ar ? "المبلغ المستلم (إجمالي)" : "Amount received (gross)", detail.amountGross, "text-oo-text-primary"],
-              [ar ? "منه ضريبة" : "of which tax", detail.amountTax, "text-oo-text-secondary"],
-              [ar ? "الأساس الصافي للعمولة" : "Net basis for commission", detail.amountNet, "text-oo-action-primary"],
-            ].map(([label, value, tone], k) => (
-              <div
-                key={k}
-                className={`flex items-center justify-between gap-3 px-4 py-2.5 ${k > 0 ? "border-t border-oo-border-default" : ""}`}
-              >
-                <dt className="text-[13px] leading-[20px] text-oo-text-secondary">{label as string}</dt>
-                <dd className={`text-[13px] font-medium leading-[20px] ${tone as string}`}>
-                  <Money value={value as string} currency={detail.currency} />
-                </dd>
-              </div>
+  /* "Nothing here" is true but useless on its own when the reason is that the person is
+     looking in the wrong place. If they hold the privilege and own a deal with money still
+     outstanding, the empty state says so and takes them there. If they hold it and own nothing
+     eligible, it says that instead. */
+  const empty = (
+    <div className="c-empty">
+      <b>{ar ? "لا توجد تحصيلات." : "No collections."}</b>
+      <p>
+        {ar
+          ? "يُسجَّل التحصيل من صفحة الصفقة بعد قبول عرض السعر."
+          : "One is recorded from a deal, once its quotation has been accepted."}
+      </p>
+      {data.can.submit && eligible.length > 0 && (
+        <div data-testid="eligible-deals">
+          <p style={{ marginTop: 16 }}>{ar ? "صفقات يمكنك التسجيل عليها الآن:" : "Deals you can record against right now:"}</p>
+          <ul className="c-elig">
+            {eligible.map((d) => (
+              <li key={d.id}>
+                <Link href={`/dashboard/sales/deals/${d.id}#collections`} data-testid={`eligible-deal-${d.id}`}>
+                  <span style={{ fontWeight: 500 }}>{d.title}</span>
+                  <span className="sm">
+                    <bdi className="id">{d.quoteNumber}</bdi>
+                    {" · "}
+                    {/* This list answers "what can I still submit against?", so it shows
+                        capacity, and says so rather than saying "outstanding". */}
+                    {ar ? "المتاح لتسجيل تحصيل إضافي " : "available to submit "}
+                    <bdi className="n">{moneyText(d.availableToSubmit, d.currency, lang)}</bdi>
+                    {" · "}
+                    {ar ? "غير المسدد " : "unpaid "}
+                    <bdi className="n">{moneyText(d.unpaid, d.currency, lang)}</bdi>
+                  </span>
+                </Link>
+              </li>
             ))}
-            <div className="flex items-center justify-between gap-3 border-t border-oo-border-default px-4 py-2.5">
-              <dt className="text-[13px] leading-[20px] text-oo-text-secondary">
+          </ul>
+        </div>
+      )}
+      {data.can.submit && eligible.length === 0 && (
+        <p data-testid="no-eligible-deals" style={{ marginTop: 10 }}>
+          {ar
+            ? "لا توجد لديك صفقة بعرض سعر مقبول وعليها متبقٍّ. سجّل قبول العميل على عرض سعر أولاً."
+            : "You have no deal with an accepted quotation and an outstanding balance. Record a customer's acceptance first."}
+        </p>
+      )}
+      {!data.can.submit && (
+        <p data-testid="cannot-submit" style={{ marginTop: 10 }}>
+          {ar
+            ? "لا تملك صلاحية تسجيل التحصيل؛ هذه الشاشة للعرض فقط بالنسبة لك."
+            : "You do not have the collection-submit permission; this screen is read-only for you."}
+        </p>
+      )}
+    </div>
+  );
+
+  const commissionCell = (r: Collection) => {
+    const accruals = r.collectionEvent?.accruals ?? [];
+    // Pending is shown as an estimate and is NEVER added to anything.
+    if (r.status === "PENDING_VERIFICATION") {
+      return (
+        <span className="wa" data-testid={`commission-pending-${r.id}`}>
+          {ar ? "بانتظار الاعتماد" : "pending approval"}
+        </span>
+      );
+    }
+    if (accruals.length === 0) return <span className="sm">—</span>;
+    return accruals.map((a, i) => (
+      <span key={i} style={{ display: "block" }}>
+        <span className="l1"><bdi className="n">{formatMoney(a.amount)}</bdi></span>
+        <span className="sm">{a.employee.name}</span>
+      </span>
+    ));
+  };
+
+  const rowActions = (r: Collection) => {
+    const d = decisionFor(r);
+    const why = blockedReason(r);
+    return (
+      <div className="acts">
+        {why && (
+          <span className="why" data-testid={`decision-blocked-${r.id}`} data-reason={why}>
+            {ar ? WHY_NOT[why].ar : WHY_NOT[why].en}
+          </span>
+        )}
+        {r._count.evidence > 0 && (
+          <span className="clip" data-testid={`evidence-count-${r.id}`} title={ar ? "إثباتات مرفقة" : "Evidence attached"}>
+            <Paperclip size={13} aria-hidden /> <bdi className="n">{r._count.evidence}</bdi>
+          </span>
+        )}
+        <button type="button" className="btn sm g" onClick={() => setDetail(r)} data-testid={`open-${r.id}`}>
+          {ar ? "فتح" : "Open"}
+        </button>
+        {d.approve.allowed && (
+          <button type="button" className="btn sm p" disabled={busy} onClick={() => decide(r, "approve", "")} data-testid={`approve-${r.id}`}>
+            {ar ? "اعتماد التحصيل" : "Approve collection"}
+          </button>
+        )}
+        {d.reject.allowed && (
+          <button type="button" className="btn sm" disabled={busy} data-testid={`reject-${r.id}`}
+            onClick={() => { setDialog({ kind: "reject", row: r }); setReason(""); }}>
+            {ar ? "رفض التحصيل" : "Reject collection"}
+          </button>
+        )}
+        {d.reverse.allowed && (
+          <button type="button" className="btn sm" disabled={busy} data-testid={`reverse-${r.id}`}
+            onClick={() => { setDialog({ kind: "reverse", row: r }); setReason(""); }}>
+            {ar ? "عكس التحصيل" : "Reverse collection"}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const table = (
+    <div style={{ overflowX: "auto" }}>
+      <table className="t coll" data-testid="collections-table" style={{ minWidth: 1000 }}>
+        <thead>
+          <tr>
+            <th scope="col">{ar ? "الصفقة" : "Deal"}</th>
+            <th scope="col">{ar ? "المبلغ" : "Amount"}</th>
+            <th scope="col">{ar ? "الأساس الصافي" : "Net basis"}</th>
+            <th scope="col">{ar ? "التاريخ" : "Date"}</th>
+            <th scope="col">{ar ? "الطريقة" : "Method"}</th>
+            <th scope="col">{ar ? "الحالة" : "Status"}</th>
+            <th scope="col">{ar ? "العمولة" : "Commission"}</th>
+            <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} data-testid={`collection-${r.id}`} className={detail?.id === r.id ? "sel" : undefined}>
+              <td style={{ whiteSpace: "normal", minWidth: 200 }}>
+                {r.opportunity ? (
+                  <Link href={`/dashboard/sales/deals/${r.opportunity.id}`} style={{ display: "block" }}>
+                    <b className="who"><bdi>{dealText(r)}</bdi></b>
+                  </Link>
+                ) : <b className="who">{dealText(r)}</b>}
+                <span className="sm">
+                  {r.quote && <bdi className="id" style={{ fontSize: 12 }}>{r.quote.quoteNumber}</bdi>}
+                  {r.quote && r.submittedBy && " · "}
+                  {r.submittedBy?.name}
+                </span>
+              </td>
+              <td>
+                <span className="l1"><bdi className="n">{formatMoney(r.amountGross)}</bdi></span>
+                {r.referenceNumber && <span className="sm"><bdi className="id" style={{ fontSize: 12 }}>{r.referenceNumber}</bdi></span>}
+              </td>
+              <td>
+                <span className="l1"><bdi className="n">{formatMoney(r.amountNet)}</bdi></span>
+                <span className="sm">{ar ? "ضريبة " : "tax "}<bdi className="n">{formatMoney(Number(r.amountTax).toFixed(2))}</bdi></span>
+              </td>
+              <td><bdi className="n">{formatDay(r.collectedAt)}</bdi></td>
+              <td>{methodText(r.paymentMethod)}</td>
+              <td style={{ whiteSpace: "normal" }}>
+                <StatusDot status={r.status} ar={ar} />
+                {(r.decisionReason || r.reversalReason) && (
+                  <span className="sm">{r.reversalReason ?? r.decisionReason}</span>
+                )}
+              </td>
+              <td>{commissionCell(r)}</td>
+              <td style={{ textAlign: "end" }}>{rowActions(r)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const rules = (
+    <section className="c-rules" aria-labelledby="c-rules-h">
+      <div className="bh"><h2 className="bt" id="c-rules-h">{ar ? "قواعد هذه الشاشة" : "The rules this screen enforces"}</h2></div>
+      <ul>
+        {(ar
+          ? [
+              "التحصيل المسجَّل «بانتظار التحقق» لا يُنشئ أي عمولة. التقدير المعروض تقدير فقط ولا يدخل في أي مجموع.",
+              "الاعتماد المالي وحده يُنشئ استحقاق العمولة، وأساسه صافي المحصَّل بعد الضريبة.",
+              "من سجّل التحصيل لا يعتمده، مهما كانت صلاحياته. لا استثناء في هذا الإصدار.",
+              "العكس لا يحذف شيئاً: القيد الأصلي يبقى كما اعتُمد، وتُكتب فوقه تسوية سالبة مرتبطة به.",
+              "المتبقي غير المسدد هو قيمة العرض ناقص المعتمَد. المتاح لتسجيل تحصيل إضافي هو غير المسدد ناقص ما هو بانتظار التحقق، ولا يمكن تجاوزه.",
+              "تحقّق مالي يدوي — ليس تسوية بنكية ولا ربطاً محاسبياً.",
+            ]
+          : [
+              "A collection awaiting verification creates no commission. The estimate shown is an estimate and is in no total.",
+              "Finance approval alone creates the entitlement, and its basis is the net collected after tax.",
+              "Whoever recorded a collection does not approve it, whatever privileges they hold. No exception in this release.",
+              "A reversal deletes nothing: the original stays exactly as approved, with a linked negative adjustment on top.",
+              "The unpaid balance is the quotation less what is approved. What is available to submit is the unpaid balance less what is awaiting verification, and a collection cannot exceed it.",
+              "Manual finance verification — not a bank settlement and not an accounting integration.",
+            ]
+        ).map((rule, i) => <li key={i}>{rule}</li>)}
+      </ul>
+    </section>
+  );
+
+  const decisionDialog = dialog ? (
+    <Modal
+      title={
+        dialog.kind === "reject"
+          ? (ar ? "رفض التحصيل" : "Reject the collection")
+          : (ar ? "عكس تحصيل معتمَد" : "Reverse an approved collection")
+      }
+      onClose={() => setDialog(null)}
+      testId="collection-decision-dialog"
+      footer={
+        <>
+          <Button variant="secondary" onClick={() => setDialog(null)}>{ar ? "إلغاء" : "Cancel"}</Button>
+          <Button
+            variant="danger"
+            disabled={busy || reason.trim().length < 3}
+            testId="confirm-decision"
+            onClick={() => decide(dialog.row, dialog.kind, reason)}
+          >
+            {dialog.kind === "reject" ? (ar ? "رفض" : "Reject") : (ar ? "عكس" : "Reverse")}
+          </Button>
+        </>
+      }
+    >
+      <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
+        <bdi>{dealText(dialog.row)}</bdi> · <bdi className="n">{moneyText(dialog.row.amountGross, dialog.row.currency, lang)}</bdi>
+      </p>
+      <p className="notice">
+        {dialog.kind === "reject"
+          ? (ar
+              ? "لن تُنشأ أي عمولة. السبب يظهر للمندوب الذي سجّل التحصيل."
+              : "No commission will be created. The reason is shown to the rep who recorded it.")
+          : (ar
+              ? "القيد الأصلي يبقى كما هو، وتُكتب تسوية سالبة مرتبطة به تُنقص العمولة بالمقدار نفسه."
+              : "The original stays as approved; a linked negative adjustment reduces the commission by the same amount.")}
+      </p>
+      <Field id="decision-reason" label={ar ? "السبب" : "Reason"} hint={ar ? "مطلوب." : "Required."}>
+        <TextArea id="decision-reason" value={reason} onChange={setReason} rows={3} />
+      </Field>
+    </Modal>
+  ) : null;
+
+  /* ── One collection, opened to be decided ──
+     Everything a finance decision rests on, in one place: what arrived, how much of it is tax,
+     what the commission is actually computed on, what approving would be worth, and the
+     evidence itself. Approving from a table row alone is approving a figure nobody opened. */
+  const drawer = detail ? (() => {
+    const d = decisionFor(detail);
+    const why = blockedReason(detail);
+    const accruals = detail.collectionEvent?.accruals ?? [];
+    return (
+      <div className="c-scrim" role="presentation" onClick={() => setDetail(null)}>
+        <FocusDialog onClose={() => setDetail(null)} className="c-drawer" testId="collection-detail" labelledBy="c-detail-h">
+          <div className="hd">
+            <div style={{ minWidth: 0 }}>
+              <h2 id="c-detail-h">{ar ? "تفاصيل التحصيل" : "Collection detail"}</h2>
+              <div className="sub">
+                <bdi>{dealText(detail)}</bdi>
+                {detail.quote && <> · <bdi className="id" style={{ fontSize: 12 }}>{detail.quote.quoteNumber}</bdi></>}
+              </div>
+              <StatusDot status={detail.status} ar={ar} />
+            </div>
+            <button type="button" className="ib" onClick={() => setDetail(null)} aria-label={ar ? "إغلاق" : "Close"}>
+              <Ico name="close" />
+            </button>
+          </div>
+          <div className="bd">
+            <dl className="c-figs" data-testid="detail-figures">
+              <dt>{ar ? "المبلغ المستلم (إجمالي)" : "Amount received (gross)"}</dt>
+              <dd><bdi className="n">{formatMoney(detail.amountGross)}</bdi> {unit}</dd>
+              <dt>{ar ? "منه ضريبة" : "of which tax"}</dt>
+              <dd><bdi className="n">{formatMoney(detail.amountTax)}</bdi></dd>
+              <dt>{ar ? "الأساس الصافي للعمولة" : "Net basis for commission"}</dt>
+              <dd className="net"><bdi className="n">{formatMoney(detail.amountNet)}</bdi></dd>
+              <dt>
                 {detail.status === "PENDING_VERIFICATION"
                   ? (ar ? "أثر العمولة عند الاعتماد" : "Commission effect if approved")
                   : (ar ? "أثر العمولة" : "Commission effect")}
               </dt>
-              <dd className="text-[13px] font-medium leading-[20px]" data-testid="detail-commission">
+              <dd data-testid="detail-commission">
                 {detail.status === "PENDING_VERIFICATION" ? (
                   data.projectedCommission?.[detail.id] ? (
-                    <span className="text-oo-status-hold">
-                      <Money value={data.projectedCommission[detail.id]} currency={detail.currency} />
-                      <span className="text-oo-text-muted">
-                        {" "}{ar ? "· تقدير، لا يدخل أي مجموع قبل الاعتماد" : "· estimate, in no total until approved"}
-                      </span>
-                    </span>
+                    <>
+                      <bdi className="n est">{formatMoney(data.projectedCommission[detail.id])}</bdi>
+                      <span className="mut">{" · "}{ar ? "تقدير، لا يدخل أي مجموع قبل الاعتماد" : "estimate, in no total until approved"}</span>
+                    </>
                   ) : (
-                    <span className="text-oo-text-muted">{ar ? "لا خطة عمولة سارية" : "no active commission plan"}</span>
+                    <span className="mut">{ar ? "لا خطة عمولة سارية" : "no active commission plan"}</span>
                   )
-                ) : (detail.collectionEvent?.accruals ?? []).length === 0 ? (
-                  <span className="text-oo-text-muted">—</span>
+                ) : accruals.length === 0 ? (
+                  <span className="mut">—</span>
                 ) : (
-                  (detail.collectionEvent?.accruals ?? []).map((a, k) => (
-                    <span key={k} className="block">
-                      <Money value={a.amount} currency={detail.currency} />
-                      <span className="text-oo-text-muted"> · {a.employee.name}</span>
+                  accruals.map((a, k) => (
+                    <span key={k} style={{ display: "block" }}>
+                      <bdi className="n">{formatMoney(a.amount)}</bdi>
+                      <span className="mut"> · {a.employee.name}</span>
                     </span>
                   ))
                 )}
               </dd>
-            </div>
-          </dl>
+              <dt>{ar ? "الطريقة · المرجع" : "Method · reference"}</dt>
+              <dd>
+                {methodText(detail.paymentMethod)}
+                {detail.referenceNumber && <> · <bdi className="id">{detail.referenceNumber}</bdi></>}
+              </dd>
+              <dt>{ar ? "سجّله" : "Recorded by"}</dt>
+              <dd>
+                {detail.submittedBy?.name ?? "—"} · <bdi className="n">{formatDay(detail.collectedAt)}</bdi>
+              </dd>
+            </dl>
 
-          {(detail.decisionReason || detail.reversalReason) && (
-            <p className="mt-3 rounded-xl bg-oo-bg-subtle px-4 py-2.5 text-[12px] leading-[18px] text-oo-text-secondary">
-              {detail.reversalReason ?? detail.decisionReason}
-            </p>
-          )}
+            {(detail.decisionReason || detail.reversalReason) && (
+              <p className="c-reason">{detail.reversalReason ?? detail.decisionReason}</p>
+            )}
 
-          <p className="mt-4 mb-1.5 text-[12px] font-medium leading-[18px] text-oo-text-secondary">
-            {ar ? "الإثبات" : "Evidence"}
-          </p>
-          {(detail.evidence ?? []).length === 0 ? (
-            <p className="text-[12px] leading-[18px] text-oo-text-muted" data-testid="detail-no-evidence">
-              {ar ? "لم يُرفق أي إثبات بهذا التحصيل." : "No evidence was attached to this collection."}
-            </p>
-          ) : (
-            <ul className="space-y-1.5" data-testid="detail-evidence">
-              {(detail.evidence ?? []).map((e) => (
-                <li key={e.id}>
-                  {/* The one route that returns the bytes. It re-checks the session and the
-                      same visibility rule, and answers as an attachment with no-store. */}
-                  <a
-                    href={`/api/sales/collections/${detail.id}/evidence/${e.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    data-testid={`detail-evidence-${e.id}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-oo-border-default px-3.5 py-2.5 transition-colors hover:border-oo-action-primary"
-                  >
-                    <span className="inline-flex items-center gap-1.5 text-[13px] leading-[20px] text-oo-action-primary">
-                      <Paperclip size={13} aria-hidden /> {e.filename}
-                    </span>
-                    <span className="text-[12px] leading-[18px] text-oo-text-muted">
-                      {e.mimeType} · <Num>{Math.max(1, Math.round(e.byteSize / 1024))}</Num>{" "}
-                      {ar ? "كيلوبايت" : "KB"}
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
+            <p className="c-ev-h">{ar ? "الإثبات" : "Evidence"}</p>
+            {(detail.evidence ?? []).length === 0 ? (
+              <p className="lbl" style={{ fontWeight: 400, margin: 0 }} data-testid="detail-no-evidence">
+                {ar ? "لم يُرفق أي إثبات بهذا التحصيل." : "No evidence was attached to this collection."}
+              </p>
+            ) : (
+              <ul className="c-ev" data-testid="detail-evidence">
+                {(detail.evidence ?? []).map((e) => (
+                  <li key={e.id}>
+                    {/* The one route that returns the bytes. It re-checks the session and the
+                        same visibility rule, and answers as an attachment with no-store. */}
+                    <a href={`/api/sales/collections/${detail.id}/evidence/${e.id}`} target="_blank" rel="noreferrer"
+                      data-testid={`detail-evidence-${e.id}`}>
+                      <Ico name="note" small />
+                      <span className="t">
+                        <b>{e.filename}</b>
+                        <span>{e.mimeType} · <bdi className="n">{Math.max(1, Math.round(e.byteSize / 1024))}</bdi> {ar ? "كيلوبايت" : "KB"}</span>
+                      </span>
+                      <span className="btn sm" aria-hidden>{ar ? "فتح" : "Open"}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          {blockedReason(detail) && (
-            <p
-              data-testid="detail-blocked"
-              data-reason={blockedReason(detail)}
-              className="mt-4 rounded-xl border border-oo-status-waiting bg-oo-status-waiting-bg px-3.5 py-2.5 text-[12px] leading-[18px] text-oo-status-hold"
-            >
-              {ar ? WHY_NOT[blockedReason(detail)!].ar : WHY_NOT[blockedReason(detail)!].en}
+            {why && (
+              <p className="c-blocked" data-testid="detail-blocked" data-reason={why}>
+                {ar ? WHY_NOT[why].ar : WHY_NOT[why].en}
+              </p>
+            )}
+          </div>
+          <div className="ft">
+            {d.approve.allowed && (
+              <button type="button" className="btn p" disabled={busy} data-testid="detail-approve"
+                onClick={() => { const r = detail; setDetail(null); decide(r, "approve", ""); }}>
+                {ar ? "اعتماد التحصيل" : "Approve collection"}
+              </button>
+            )}
+            {d.reject.allowed && (
+              <button type="button" className="btn" disabled={busy} data-testid="detail-reject"
+                onClick={() => { setDialog({ kind: "reject", row: detail }); setReason(""); setDetail(null); }}>
+                {ar ? "رفض التحصيل" : "Reject collection"}
+              </button>
+            )}
+            {d.reverse.allowed && (
+              <button type="button" className="btn" disabled={busy} data-testid="detail-reverse"
+                onClick={() => { setDialog({ kind: "reverse", row: detail }); setReason(""); setDetail(null); }}>
+                {ar ? "عكس التحصيل" : "Reverse collection"}
+              </button>
+            )}
+            <button type="button" className="btn g end" onClick={() => setDetail(null)}>{ar ? "إغلاق" : "Close"}</button>
+          </div>
+        </FocusDialog>
+      </div>
+    );
+  })() : null;
+
+  if (phone) {
+    return (
+      <div className="pg">
+        {notices}
+        {segments}
+        {rows.length === 0 ? empty : (
+          <div data-testid="collections-table">
+            {rows.map((r) => (
+              <div key={r.id} className="c-mrow" data-testid={`collection-${r.id}`}>
+                <b><bdi>{customerOf(r) ?? dealText(r)}</bdi></b>
+                <span className="n" style={{ fontSize: 14.5 }}>{formatMoney(r.amountGross)}</span>
+                <span className="r2">
+                  {r.quote && <bdi className="id" style={{ fontSize: 12 }}>{r.quote.quoteNumber}</bdi>}
+                  {r.quote && " · "}
+                  <bdi className="n">{formatDay(r.collectedAt).slice(0, 5)}</bdi>
+                </span>
+                <StatusDot status={r.status} ar={ar} />
+                <button type="button" className="open" onClick={() => setDetail(r)} data-testid={`open-${r.id}`}
+                  aria-label={`${ar ? "فتح" : "Open"} ${dealText(r)}`} />
+              </div>
+            ))}
+            <p className="lbl" style={{ fontWeight: 400, marginTop: 12 }}>
+              {ar ? `يُعرض ${num(rows.length, lang)} تحصيل · الأحدث أولًا` : `${rows.length} shown · newest first`}
             </p>
-          )}
-        </Modal>
-      )}
+          </div>
+        )}
+        {decisionDialog}
+        {drawer}
+      </div>
+    );
+  }
+
+  return (
+    <div className="pg">
+      {notices}
+      <div className="ph">
+        <div>
+          <h1>{ar ? "التحصيلات" : "Collections"}</h1>
+          <div className="meta">
+            <span>
+              {isFinance
+                ? (ar ? "قائمة التحقق المالي" : "The finance verification queue")
+                : (ar ? "تحصيلاتك وحالتها" : "Your collections and where they got to")}
+            </span>
+            <i />
+            <span>{ar ? "الاعتماد وحده يُنشئ العمولة" : "Approval alone creates commission"}</span>
+          </div>
+        </div>
+      </div>
+
+      <dl className="metrics c-metrics">
+        <div data-testid="stat-pending">
+          <dt>{ar ? "بانتظار التحقق" : "Awaiting verification"}</dt>
+          <dd className="mid"><bdi className="n">{formatMoney(sum(pending, "amountGross"))}</bdi></dd>
+          <dd className="d">
+            {ar ? `${num(pending.length, lang)} تحصيل — لم يُنشئ عمولة` : `${pending.length} — no commission yet`}
+          </dd>
+        </div>
+        <div data-testid="stat-approved">
+          <dt>{ar ? "معتمَد" : "Approved"}</dt>
+          <dd className="mid"><bdi className="n">{formatMoney(sum(approved, "amountGross"))}</bdi></dd>
+          <dd className="d">
+            {ar ? "الأساس الصافي " : "Net basis "}<bdi className="n">{formatMoney(sum(approved, "amountNet"))}</bdi>
+          </dd>
+        </div>
+        <div data-testid="stat-count">
+          <dt>{ar ? "الإجمالي المعروض" : "Shown here"}</dt>
+          <dd className="mid"><bdi className="n">{num(rows.length, lang)}</bdi></dd>
+          <dd className="d">{data.scope === "all" ? (ar ? "كل التحصيلات" : "All collections") : (ar ? "تحصيلاتك أنت" : "Your own only")}</dd>
+        </div>
+      </dl>
+
+      <div className="c-tool">
+        {segments}
+        <span className="sp" />
+        <span className="sort-note">{ar ? "الأحدث أولًا · حتى 200 تحصيل" : "Newest first · up to 200"}</span>
+      </div>
+
+      {rows.length === 0 ? empty : table}
+      {rules}
+      {decisionDialog}
+      {drawer}
     </div>
   );
 }

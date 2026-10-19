@@ -11,10 +11,11 @@ import { prisma } from "@/lib/db";
 import { createSession, revokeSession, setSessionCookie, type SessionMethod } from "@/lib/auth/session";
 
 export async function setFreshSession(response: NextResponse, employeeId: string, previous: { sessionId: string; sessionMethod: SessionMethod }): Promise<NextResponse> {
-  const old = await prisma.authSession.findUniqueOrThrow({ where: { id: previous.sessionId }, select: { authTime: true, authFactor: true, mfa: true, expiresAt: true } });
+  const old = await prisma.authSession.findUniqueOrThrow({ where: { id: previous.sessionId }, select: { authTime: true, authFactor: true, mfa: true, expiresAt: true, deviceId: true, ipHash: true, userAgent: true } });
   await revokeSession(previous.sessionId, "CREDENTIAL_CHANGE_SELF");
-  const s = await createSession(employeeId, previous.sessionMethod, old.mfa);
-  const inherited = await prisma.authSession.update({ where: { id: s.id }, data: { authTime: old.authTime, authFactor: old.authFactor, expiresAt: old.expiresAt }, select: { id: true, expiresAt: true } });
+  // Same browser: the replacement keeps the replaced session's device id, address and agent.
+  const s = await createSession(employeeId, previous.sessionMethod, old.mfa, undefined, prisma, { deviceId: old.deviceId, ipHash: old.ipHash, userAgent: old.userAgent });
+  const inherited = await prisma.authSession.update({ where: { id: s.id }, data: { authTime: old.authTime, authFactor: old.authFactor, expiresAt: old.expiresAt }, select: { id: true, expiresAt: true, deviceId: true } });
   return setSessionCookie(response, employeeId, inherited);
 }
 

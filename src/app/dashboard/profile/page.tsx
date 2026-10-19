@@ -1,65 +1,129 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { UserCircle, Phone, Globe, Lock, CheckCircle, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "@/app/dashboard/user-context";
 import { PIN_LENGTH } from "@/lib/pin-policy";
+import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
+import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
+import { Btn, Dot, Field, Notice, OpsRoot, Tabs, OpsError, OpsLoading, useL, type Tone } from "@/components/ops/ui";
+import { Dialog } from "@/components/hr/ui";
+import { useD21Title } from "@/components/shell/page-context";
+import type { DeviceInfo } from "@/lib/auth/device";
+import "./profile.css";
+
+/**
+ * «ملفي الشخصي» — the signed-in account's own page. Direction 2.1, UI batch 3, built on the
+ * approved Figma frames for an account's profile and security (file 1JbZgpMqmPkUVne8ms9Ozz):
+ *   · UR-02 «ملف المستخدم — نظرة عامة» (597:759; 390: 613:7053) — identity header (avatar, name,
+ *     username · status · role), the underline tabs, the account facts;
+ *   · UR-02d «الأجهزة والجلسات» (598:966) — «الجلسات النشطة» with «إنهاء الجلسة» per row and
+ *     «إنهاء كل الجلسات» in the block header, and its footnote;
+ *   · TD-11 «أجهزتي» (1440: 556:4350, 390: 551:3547) — the signed-in user's OWN devices table
+ *     (الجهاز · الفئة · المنصة · آخر دخول ناجح · آخر نشاط · الدخول السريع · الحالة), «هذا الجهاز»,
+ *     the header actions «سجل نشاط الدخول» / danger outline, and «النشاط الأخير»;
+ *   · TD-12b «تأكيد إلغاء الثقة» (390: 552:3429, 1180: 555:4176) — the confirmation of an end action.
+ * Data: GET /api/profile/security; DELETE /api/profile/sessions[/ref]; PUT /api/profile/password;
+ * and the existing PATCH / PUT /api/profile (phone and language, PIN) and MFA enrolment.
+ */
+
+type Session = { ref: string; current: boolean; method: string; mfa: boolean; createdAt: string; lastSeenAt: string; expiresAt: string; device: DeviceInfo };
+type Device = { ref: string; current: boolean; device: DeviceInfo; firstSeenAt: string; lastSignInAt: string | null; lastSignInMethod: string | null; lastSeenAt: string; liveSessions: number };
+type Activity = { at: string; action: string; result: string; reasonCode: string | null; device: DeviceInfo };
+type SignIn = { at: string; method: string; device: DeviceInfo } | null;
+type Security = {
+  account: { name: string; username: string | null; role: string; createdAt: string; hasPassword: boolean; passwordChangedAt: string | null; pinChangedAt: string | null; mfaEnrolledAt: string | null; phoneNumber: string; preferredLanguage: "ar" | "en" };
+  currentSignIn: SignIn; previousSignIn: SignIn;
+  sessions: Session[]; devices: Device[]; activity: Activity[]; activityMore: boolean;
+};
+type TabKey = "overview" | "security" | "devices" | "activity";
+const TABS: TabKey[] = ["overview", "security", "devices", "activity"];
+type Msg = { ok: boolean; text: string } | null;
+
+/** «اليوم 10:42», «أمس 08:02», «5 أكتوبر 18:55», «20/09/2026» — the frames' date forms, Latin digits. */
+function useWhen() {
+  const { lang } = useI18n();
+  return useCallback((iso: string | null | undefined, opts: { time?: boolean } = {}) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const ar = lang === "ar";
+    const loc = ar ? "ar-SA-u-nu-latn-ca-gregory" : "en-GB";
+    const hm = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const time = opts.time !== false;
+    const today = new Date();
+    const day = (x: Date) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+    const yest = new Date(today.getTime() - 86400000);
+    if (day(d) === day(today)) return time ? `${ar ? "اليوم" : "Today"} ${hm}` : ar ? "اليوم" : "Today";
+    if (day(d) === day(yest)) return time ? `${ar ? "أمس" : "Yesterday"} ${hm}` : ar ? "أمس" : "Yesterday";
+    if (d.getFullYear() === today.getFullYear()) {
+      const dm = d.toLocaleDateString(loc, { day: "numeric", month: "long" });
+      return time ? `${dm} ${hm}` : dm;
+    }
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+  }, [lang]);
+}
 
 export default function ProfilePage() {
   const { t, lang } = useI18n();
+  const L = useL();
+  const ar = lang === "ar";
   const user = useUser();
+  const when = useWhen();
+  const router = useRouter();
+  const params = useSearchParams();
+  const tabParam = params.get("tab") as TabKey | null;
+  const [tab, setTabState] = useState<TabKey>(tabParam && TABS.includes(tabParam) ? tabParam : "overview");
+  const setTab = (k: TabKey) => {
+    setTabState(k);
+    router.replace(k === "overview" ? "/dashboard/profile" : `/dashboard/profile?tab=${k}`, { scroll: false });
+  };
 
-  // ── Personal info ──────────────────────────────────────────────────────────
+  const [data, setData] = useState<Security | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const activityN = tab === "activity" ? 50 : 6;
+
+  // ── Preferences (phone, language): same request and messages as before ───────────────────
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [preferredLanguage, setPreferredLanguage] = useState<"ar" | "en">("ar");
+  const [preferredLanguage, setPreferredLanguage] = useState<"ar" | "en">(ar ? "ar" : "en");
+  const prefsLoaded = useRef(false);
   const [infoSaving, setInfoSaving] = useState(false);
-  const [infoMsg, setInfoMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [infoMsg, setInfoMsg] = useState<Msg>(null);
 
-  // ── PIN change ─────────────────────────────────────────────────────────────
-  const [currentPin, setCurrentPin] = useState("");
-  const [newPin, setNewPin] = useState("");
-  const [confirmPin, setConfirmPin] = useState("");
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [pinSaving, setPinSaving] = useState(false);
-  const [pinMsg, setPinMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  // Pre-fill from profile API
-  useEffect(() => {
-    fetch("/api/profile")
-      .then((r) => r.ok ? r.json() : null)
+  const load = useCallback(() => {
+    return fetch(`/api/profile/security?activity=${activityN}`, { cache: "no-store" })
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() as Promise<Security>; })
       .then((d) => {
-        if (!d) return;
-        if (d.phoneNumber !== undefined) setPhoneNumber(d.phoneNumber ?? "");
-        if (d.preferredLanguage) setPreferredLanguage(d.preferredLanguage);
+        setData(d);
+        setLoadError(false);
+        // The form starts from the saved values once; a later reload never overwrites typing.
+        if (!prefsLoaded.current) {
+          prefsLoaded.current = true;
+          setPhoneNumber(d.account.phoneNumber ?? "");
+          setPreferredLanguage(d.account.preferredLanguage);
+        }
       })
-      .catch(() => {/* silently ignore prefill errors */});
-  }, []);
+      .catch(() => setLoadError(true));
+  }, [activityN]);
+  useEffect(() => { void load(); }, [load]);
+
+  useD21Title(t("myProfile"));
 
   async function saveInfo(e: React.FormEvent) {
     e.preventDefault();
     setInfoSaving(true);
     setInfoMsg(null);
     try {
-      const res = await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phoneNumber, preferredLanguage }),
-      });
-      // Safely parse — guard against empty / non-JSON responses
+      const res = await fetch("/api/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phoneNumber, preferredLanguage }) });
       const text = await res.text();
-      let data: { error?: string; success?: boolean } = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { /* ignore parse error */ }
-
-      if (!res.ok) throw new Error(data.error ?? t("error"));
+      let body: { error?: string } = {};
+      try { body = text ? JSON.parse(text) : {}; } catch { /* not JSON */ }
+      if (!res.ok) throw new Error(body.error ?? t("error"));
       setInfoMsg({ ok: true, text: t("profileSaved") });
       // Full reload so the root layout picks up the new JWT lang/dir
-      if (preferredLanguage !== lang) {
-        setTimeout(() => window.location.reload(), 600);
-      }
+      if (preferredLanguage !== lang) setTimeout(() => window.location.reload(), 600);
     } catch (err: unknown) {
       setInfoMsg({ ok: false, text: err instanceof Error ? err.message : t("error") });
     } finally {
@@ -67,30 +131,25 @@ export default function ProfilePage() {
     }
   }
 
+  // ── PIN change (unchanged requests and messages) ─────────────────────────────────────────
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [shown, setShown] = useState<Record<string, boolean>>({});
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinMsg, setPinMsg] = useState<Msg>(null);
   async function savePin(e: React.FormEvent) {
     e.preventDefault();
     setPinMsg(null);
-    if (newPin !== confirmPin) {
-      setPinMsg({ ok: false, text: t("pinMismatch") });
-      return;
-    }
+    if (newPin !== confirmPin) { setPinMsg({ ok: false, text: t("pinMismatch") }); return; }
     setPinSaving(true);
     try {
-      const res = await fetch("/api/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPin, newPin }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        const msg =
-          res.status === 401 ? t("wrongCurrentPin") :
-          res.status === 409 ? t("pinTaken") :
-          data.error ?? t("error");
-        throw new Error(msg);
-      }
+      const res = await fetch("/api/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPin, newPin }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status === 401 ? t("wrongCurrentPin") : res.status === 409 ? t("pinTaken") : body.error ?? t("error"));
       setPinMsg({ ok: true, text: t("pinUpdated") });
       setCurrentPin(""); setNewPin(""); setConfirmPin("");
+      load();
     } catch (err: unknown) {
       setPinMsg({ ok: false, text: err instanceof Error ? err.message : t("error") });
     } finally {
@@ -98,209 +157,387 @@ export default function ProfilePage() {
     }
   }
 
+  // ── Password change ──────────────────────────────────────────────────────────────────────
+  const [curPw, setCurPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confPw, setConfPw] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState<Msg>(null);
+  const pwShort = !!newPw && newPw.length < PASSWORD_MIN;
+  const pwMismatch = !!confPw && confPw !== newPw;
+  async function savePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwMsg(null);
+    if (pwShort || pwMismatch) return;
+    setPwSaving(true);
+    try {
+      const res = await fetch("/api/profile/password", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: curPw, newPassword: newPw }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((ar ? body.error : body.errorEn ?? body.error) ?? t("error"));
+      const n = Number(body.otherSessionsEnded ?? 0);
+      setPwMsg({ ok: true, text: n > 0 ? L(`تغيّرت كلمة المرور. أُنهيت جلساتك الأخرى (${n}): ادخل بكلمة المرور الجديدة على أجهزتك الأخرى.`, `Password changed. Your other sessions (${n}) were ended: sign in with the new password on your other devices.`) : L("تغيّرت كلمة المرور.", "Password changed.") });
+      setCurPw(""); setNewPw(""); setConfPw("");
+      load();
+    } catch (err: unknown) {
+      setPwMsg({ ok: false, text: err instanceof Error ? err.message : t("error") });
+    } finally {
+      setPwSaving(false);
+    }
+  }
+
+  // ── Ending sessions (confirmed first, TD-12b; the step-up dialog asks for the password) ───
+  const [confirm, setConfirm] = useState<{ kind: "one"; s: Session } | { kind: "others" } | null>(null);
+  const [ending, setEnding] = useState(false);
+  const [endMsg, setEndMsg] = useState<Msg>(null);
+  async function doEnd() {
+    if (!confirm) return;
+    setEnding(true);
+    setEndMsg(null);
+    try {
+      const res = await fetch(confirm.kind === "one" ? `/api/profile/sessions/${confirm.s.ref}` : "/api/profile/sessions", { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((ar ? body.error : body.errorEn ?? body.error) ?? t("error"));
+      const n = Number(body.ended ?? 0);
+      setEndMsg({ ok: true, text: confirm.kind === "one" ? L("أُنهيت الجلسة.", "The session was ended.") : n > 0 ? L(`أُنهيت جلساتك الأخرى (${n}).`, `Your other sessions were ended (${n}).`) : L("لا توجد جلسات أخرى.", "No other sessions.") });
+      setConfirm(null);
+      load();
+    } catch (err: unknown) {
+      setEndMsg({ ok: false, text: err instanceof Error ? err.message : t("error") });
+      setConfirm(null);
+    } finally {
+      setEnding(false);
+    }
+  }
+
+  // ── Labels ───────────────────────────────────────────────────────────────────────────────
+  const methodLabel = (m: string | null | undefined) =>
+    m === "PASSWORD" ? L("كلمة المرور", "Password") : m === "USERNAME_PIN" ? L("اسم المستخدم والرمز", "Username + PIN") : m === "PIN" ? L("الرمز", "PIN") : "—";
+  const deviceName = (d: DeviceInfo) => (d.browser ? `${L("متصفح ", "")}${d.browser}${d.os ? ` · ${d.os}` : ""}` : d.os ?? L("متصفح غير معروف", "Unknown browser"));
+  const categoryLabel = (d: DeviceInfo) => (d.category === "phone" ? L("هاتف", "Phone") : d.category === "tablet" ? L("جهاز لوحي", "Tablet") : L("حاسوب", "Computer"));
+  const sessionName = (d: DeviceInfo) => `${L("ويب", "Web")}${d.browser ? ` · ${d.browser}` : ""}${d.os ? ` ${L("على", "on")} ${d.os}` : ""}`;
+  const activityText = (a: Activity): [string, Tone] => {
+    const dev = a.device.browser ? ` · ${deviceName(a.device)}` : "";
+    const ok = a.result === "SUCCESS";
+    switch (a.action) {
+      case "SIGN_IN":
+        if (ok) return [`${L("دخول ب", "Signed in with ")}${a.reasonCode === "PASSWORD" ? L("كلمة المرور", "password") : a.reasonCode === "USERNAME_PIN" ? L("اسم المستخدم والرمز", "username + PIN") : L("الرمز", "PIN")}${dev}`, "success"];
+        if (a.result === "FAILURE") return [a.reasonCode === "PASSWORD" ? L("كلمة مرور غير صحيحة", "Wrong password") : L("رمز غير صحيح", "Wrong PIN"), "warning"];
+        return [L("رُفض الدخول", "Sign-in refused"), "warning"];
+      case "MFA_SIGN_IN": return ok ? [L("دخول بالتحقق بخطوتين", "Signed in with two-step verification"), "success"] : [L("رمز تحقق غير صحيح", "Wrong verification code"), "warning"];
+      case "MFA_RECOVERY_CODE_USED": return [L("استُخدم رمز استرداد", "A recovery code was used"), "warning"];
+      case "STEP_UP": return ok ? [L("تأكيد الهوية", "Identity confirmed"), "success"] : [L("تأكيد هوية غير صحيح", "Identity confirmation failed"), "warning"];
+      case "SIGN_OUT": return [`${L("تسجيل الخروج", "Signed out")}${dev}`, "neutral"];
+      case "PRIVILEGED_PIN_ONLY_REFUSED": return [L("رُفض الدخول بالرمز وحده", "PIN-only sign-in refused"), "warning"];
+      case "MFA_ENROLLED": return [L("فُعّل التحقق بخطوتين", "Two-step verification turned on"), "success"];
+      case "SESSION_ENDED_SELF": return [L("أنهيت جلسة", "You ended a session"), "neutral"];
+      case "OTHER_SESSIONS_ENDED_SELF": return [L("أنهيت جلساتك الأخرى", "You ended your other sessions"), "neutral"];
+      case "PASSWORD_CHANGED_SELF": return [L("غيّرت كلمة المرور", "You changed your password"), "success"];
+      case "PASSWORD_CHANGE_SELF": return [L("كلمة المرور الحالية غير صحيحة", "Wrong current password"), "warning"];
+      default: return [a.action, "neutral"];
+    }
+  };
+
+  const others = useMemo(() => (data?.sessions ?? []).filter((s) => !s.current).length, [data]);
   if (!user) return null;
+  const role = (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) ?? user.role;
+  const initials = user.name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("");
+  const msg = (m: Msg) => (m ? <Notice tone={m.ok ? "success" : "danger"}><span role={m.ok ? "status" : undefined}>{m.text}</span></Notice> : null);
+  // Arabic number agreement: 1 «جلسة واحدة», 2 «جلستان», 3–10 «3 جلسات», 11+ «11 جلسة».
+  const plural = (n: number, ar1: string, ar2: string, arN: string, arMany: string, en: string) =>
+    ar ? (n === 1 ? ar1 : n === 2 ? ar2 : n >= 3 && n <= 10 ? `${n} ${arN}` : `${n} ${arMany}`) : `${n} ${en}${n === 1 ? "" : "s"}`;
+
+  const secret = (id: string, label: string, value: string, set: (v: string) => void, extra: { pin?: boolean; error?: string | null; autoComplete?: string; minLength?: number } = {}) => (
+    <Field label={label} error={extra.error ?? null}>
+      <span className="pf-secret">
+        <input
+          id={id}
+          type={shown[id] ? "text" : "password"}
+          inputMode={extra.pin ? "numeric" : undefined}
+          dir="ltr"
+          value={value}
+          onChange={(e) => set(extra.pin ? e.target.value.replace(/\D/g, "") : e.target.value)}
+          maxLength={extra.pin ? PIN_LENGTH : PASSWORD_MAX}
+          minLength={extra.minLength}
+          autoComplete={extra.autoComplete ?? "off"}
+          required
+          aria-invalid={!!extra.error || undefined}
+          className={`hr-input${extra.pin ? " pf-pin" : ""}`}
+        />
+        <button type="button" className="hr-btn is-ghost hr-iconbtn" onClick={() => setShown((s) => ({ ...s, [id]: !s[id] }))} aria-label={shown[id] ? L("إخفاء", "Hide") : L("إظهار", "Show")} aria-pressed={!!shown[id]}>
+          {shown[id] ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+        </button>
+      </span>
+    </Field>
+  );
+
+  const block = (id: string, title: string, caption: ReactNode, action: ReactNode, children: ReactNode) => (
+    <section className="pf-block" aria-labelledby={id}>
+      <div className="pf-bhead">
+        <h2 id={id}>{title}</h2>
+        {caption ? <span className="pf-bcap">{caption}</span> : null}
+        {action ? <span className="pf-bact">{action}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+
+  const activityList = (rows: Activity[]) => (
+    <ul className="pf-activity" data-testid="pf-activity">
+      {rows.map((a, i) => {
+        const [text, tone] = activityText(a);
+        return (
+          <li key={`${a.at}-${i}`}>
+            <Dot tone={tone}>{text}</Dot>
+            <time className="pf-when" dateTime={a.at}>{when(a.at)}</time>
+          </li>
+        );
+      })}
+    </ul>
+  );
+  const noActivity = <p className="hr-caption pf-empty">{L("لا يوجد نشاط مسجّل بعد.", "No activity recorded yet.")}</p>;
+
+  const a = data?.account;
+  const pwState = !a ? "" : !a.hasPassword ? L("غير معيّنة", "Not set") : a.passwordChangedAt ? `${L("غُيّرت في", "Changed on")} ${when(a.passwordChangedAt, { time: false })}` : L("معيّنة", "Set");
+  const pinState = !a ? "" : a.pinChangedAt ? `${L("غُيّر في", "Changed on")} ${when(a.pinChangedAt, { time: false })}` : L("معيّن", "Set");
+  const facts: [string, ReactNode][] = a ? [
+    [L("الاسم المعروض", "Display name"), <bdi key="n">{a.name}</bdi>],
+    [L("اسم المستخدم", "Username"), a.username ? <bdi key="u" dir="ltr" className="pf-latin">{a.username}</bdi> : "—"],
+    [L("الدور", "Role"), role],
+    [L("أُنشئ", "Created"), when(a.createdAt, { time: false })],
+    [L("آخر دخول", "Last sign-in"), data?.previousSignIn ? `${when(data.previousSignIn.at)} · ${methodLabel(data.previousSignIn.method)} · ${L("ويب", "Web")}` : L("هذا أول دخول مسجّل", "This is the first recorded sign-in")],
+    [L("كلمة المرور", "Password"), pwState],
+    [L("التحقق بخطوتين", "Two-step verification"), a.mfaEnrolledAt ? <Dot key="m" tone="success">{L("مفعّل", "On")}</Dot> : <Dot key="m" tone="neutral">{L("غير مفعّل", "Off")}</Dot>],
+    [L("الرمز الشخصي", "PIN"), pinState],
+  ] : [];
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-extrabold text-charcoal flex items-center gap-3">
-          <UserCircle className="text-orange" size={28} />
-          {t("myProfile")}
-        </h1>
-        <p className="text-brown text-sm mt-1">{t("profileSubtitle")}</p>
+    <OpsRoot>
+      <div className="hr-page pf-page" data-testid="profile-page">
+        {/* Identity header (UR-02 Page header): avatar, name, username · status · role; TD-11 actions. */}
+        <header className="pf-header">
+          <div className="pf-id">
+            <span className="pf-avatar" aria-hidden>{initials}</span>
+            <div className="pf-idtext">
+              <h1 className="hr-title">{user.name}</h1>
+              <div className="pf-meta">
+                {a?.username ? <><bdi dir="ltr" className="pf-latin">{a.username}</bdi><i aria-hidden /></> : null}
+                <Dot tone="success">{L("نشط", "Active")}</Dot>
+                <i aria-hidden />
+                <span>{role}</span>
+                <i aria-hidden className="pf-hide-phone" />
+                <span className="pf-hide-phone">{L("الحساب · الأمان", "Account · Security")}</span>
+              </div>
+            </div>
+          </div>
+          <div className="pf-actions">
+            <Btn onClick={() => setTab("activity")} data-testid="pf-open-log">{L("سجل نشاط الدخول", "Sign-in activity")}</Btn>
+            <Btn className="pf-danger" disabled={!data || others === 0} title={data && others === 0 ? L("لا توجد جلسات أخرى", "No other sessions") : undefined} onClick={() => setConfirm({ kind: "others" })} data-testid="pf-end-others">
+              {L("إنهاء الجلسات الأخرى", "End other sessions")}
+            </Btn>
+          </div>
+        </header>
+
+        <Tabs<TabKey>
+          label={L("أقسام الملف", "Profile sections")}
+          value={tab}
+          onChange={setTab}
+          items={[
+            { key: "overview", label: L("نظرة عامة", "Overview") },
+            { key: "security", label: L("الأمان", "Security") },
+            { key: "devices", label: L("الأجهزة والجلسات", "Devices & sessions"), count: data ? data.sessions.length : undefined },
+            { key: "activity", label: L("سجل الدخول", "Sign-in log") },
+          ]}
+        />
+
+        {msg(endMsg)}
+        {loadError && !data ? <OpsError message={L("تعذّر تحميل بيانات الحساب.", "Could not load your account.")} onRetry={load} /> : null}
+        {!data && !loadError ? <OpsLoading rows={5} /> : null}
+
+        {data && a && tab === "overview" ? (
+          <div className="pf-tabbody" data-testid="pf-overview">
+            <div className="pf-cols">
+              <dl className="pf-props">
+                {facts.map(([k, v]) => (
+                  <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+                ))}
+              </dl>
+              <form onSubmit={saveInfo} className="pf-form" aria-labelledby="pf-prefs-h">
+                <span className="pf-group" id="pf-prefs-h">{t("personalInfo")}</span>
+                <Field label={t("phoneNumber")}>
+                  <input type="tel" dir="auto" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder={t("phonePlaceholder")} className="hr-input pf-ltr" />
+                </Field>
+                <div className="hr-field">
+                  <span className="hr-label" id="pf-lang">{t("language")}</span>
+                  <span className="ops-seg pf-seg" role="group" aria-labelledby="pf-lang">
+                    {(["ar", "en"] as const).map((lng) => (
+                      <button key={lng} type="button" aria-pressed={preferredLanguage === lng} lang={lng} onClick={() => setPreferredLanguage(lng)}>
+                        {lng === "ar" ? "العربية" : "English"}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                {msg(infoMsg)}
+                <div className="pf-formacts">
+                  <Btn type="submit" variant="primary" disabled={infoSaving}>{infoSaving ? t("saving") : t("save")}</Btn>
+                </div>
+              </form>
+            </div>
+            {block("pf-recent", L("النشاط الأخير", "Recent activity"), null, <button type="button" className="pf-link" onClick={() => setTab("activity")}>{L("السجل الكامل", "Full log")}</button>,
+              data.activity.length ? activityList(data.activity) : noActivity)}
+          </div>
+        ) : null}
+
+        {data && a && tab === "security" ? (
+          <div className="pf-tabbody" data-testid="pf-security">
+            <div className="pf-cols">
+              {block("pf-pw-h", L("كلمة المرور", "Password"), a.hasPassword ? pwState : null, null,
+                a.hasPassword ? (
+                  <form onSubmit={savePassword} className="pf-form" data-testid="pf-password-form">
+                    {secret("pf-cur-pw", L("كلمة المرور الحالية", "Current password"), curPw, setCurPw, { autoComplete: "current-password" })}
+                    {secret("pf-new-pw", L("كلمة المرور الجديدة", "New password"), newPw, setNewPw, { autoComplete: "new-password", minLength: PASSWORD_MIN, error: pwShort ? L(`${PASSWORD_MIN} أحرف على الأقل.`, `At least ${PASSWORD_MIN} characters.`) : null })}
+                    {secret("pf-conf-pw", L("تأكيد كلمة المرور", "Confirm password"), confPw, setConfPw, { autoComplete: "new-password", error: pwMismatch ? L("كلمتا المرور غير متطابقتين.", "The passwords do not match.") : null })}
+                    <p className="hr-caption pf-note">{L("بعد التغيير تنتهي جلساتك على الأجهزة الأخرى، وتبقى هذه الجلسة.", "After the change your sessions on other devices end; this one stays.")}</p>
+                    {msg(pwMsg)}
+                    <div className="pf-formacts">
+                      <Btn type="submit" variant="primary" disabled={pwSaving || pwShort || pwMismatch || !curPw || !newPw || !confPw} data-testid="pf-password-save">{pwSaving ? t("saving") : L("تغيير كلمة المرور", "Change password")}</Btn>
+                    </div>
+                  </form>
+                ) : <Notice tone="info">{L("لا توجد كلمة مرور لهذا الحساب: يعيّنها مسؤول المستخدمين.", "This account has no password: an account editor sets it.")}</Notice>)}
+
+              {block("pf-pin-h", t("changePin"), pinState, null,
+                <form onSubmit={savePin} className="pf-form" data-testid="pf-pin-form">
+                  {secret("pf-current", t("currentPin"), currentPin, setCurrentPin, { pin: true })}
+                  {secret("pf-new", t("newPin"), newPin, setNewPin, { pin: true, minLength: PIN_LENGTH })}
+                  {secret("pf-confirm", t("confirmNewPin"), confirmPin, setConfirmPin, { pin: true, error: confirmPin && confirmPin !== newPin ? t("pinMismatch") : null })}
+                  {msg(pinMsg)}
+                  <div className="pf-formacts">
+                    <Btn type="submit" variant="primary" disabled={pinSaving || (!!confirmPin && confirmPin !== newPin)}>{pinSaving ? t("saving") : t("changePin")}</Btn>
+                  </div>
+                </form>)}
+            </div>
+            <div id="mfa" className="pf-mfa"><MfaEnrollment lang={ar ? "ar" : "en"} onEnrolled={load} /></div>
+          </div>
+        ) : null}
+
+        {data && tab === "devices" ? (
+          <div className="pf-tabbody" data-testid="pf-devices">
+            <p className="pf-lead">{L("الأجهزة التي دخلت منها خلال آخر 90 يومًا. الثقة لا تُمنح لمتصفح أو نظام لمجرد التعرف عليه: الدخول من المتصفح بكلمة المرور دائمًا.", "The devices you signed in from in the last 90 days. Trust is never given to a browser or system just because it is recognised: a browser always signs in with the password.")}</p>
+            {block("pf-dev-h", L("أجهزتي", "My devices"), `${plural(data.devices.length, "جهاز واحد", "جهازان", "أجهزة", "جهازًا", "device")} · ${L("آخر 90 يومًا", "last 90 days")}`, null, (
+              <>
+                <div className="hr-tablewrap pf-wide">
+                  <table className="hr-table pf-table" data-testid="pf-device-table">
+                    <thead><tr>
+                      <th>{L("الجهاز", "Device")}</th>
+                      <th>{L("الفئة · المنصة", "Category · platform")}</th>
+                      <th>{L("آخر دخول ناجح", "Last successful sign-in")}</th>
+                      <th>{L("آخر نشاط", "Last activity")}</th>
+                      <th>{L("الدخول السريع", "Quick sign-in")}</th>
+                      <th>{L("الحالة", "Status")}</th>
+                    </tr></thead>
+                    <tbody>
+                      {data.devices.map((d) => (
+                        <tr key={d.ref} data-current={d.current || undefined}>
+                          <td className="pf-two">
+                            <div className="pf-devname">
+                              <span className="pf-strong"><bdi>{deviceName(d.device)}</bdi></span>
+                              {d.current ? <span className="pf-here"><Dot tone="info">{L("هذا الجهاز", "This device")}</Dot></span> : null}
+                            </div>
+                            <div className="pf-sub">{L("غير مسجّل · كلمة المرور فقط", "Not registered · password only")}</div>
+                          </td>
+                          <td>{categoryLabel(d.device)} · {L("متصفح ويب", "Web browser")}</td>
+                          <td>{d.lastSignInAt ? `${when(d.lastSignInAt)} · ${methodLabel(d.lastSignInMethod)}` : "—"}</td>
+                          <td>{when(d.lastSeenAt)}</td>
+                          <td>—</td>
+                          <td><Dot tone="neutral">{L("غير موثوق", "Not trusted")}</Dot></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <ul className="pf-rows pf-narrow" data-testid="pf-device-list">
+                  {data.devices.map((d) => (
+                    <li key={d.ref}>
+                      <div className="pf-rowtop">
+                        <span className="pf-strong"><bdi>{deviceName(d.device)}</bdi></span>
+                        {d.current ? <span className="pf-here"><Dot tone="info">{L("هذا الجهاز", "This device")}</Dot></span> : null}
+                        <span className="pf-push"><Dot tone="neutral">{L("غير موثوق", "Not trusted")}</Dot></span>
+                      </div>
+                      <div className="pf-sub"><span>{categoryLabel(d.device)} · {L("متصفح ويب", "Web browser")}</span>{d.lastSignInAt ? <span>{L("آخر دخول", "Last sign-in")} {when(d.lastSignInAt)} · {methodLabel(d.lastSignInMethod)}</span> : null}</div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ))}
+
+            {block("pf-sess-h", L("الجلسات النشطة", "Active sessions"), `${plural(data.sessions.length, "جلسة واحدة", "جلستان", "جلسات", "جلسة", "session")} · ${L("تنتهي من الخادم فور الإنهاء", "ended on the server at once")}`,
+              <button type="button" className="pf-link" disabled={others === 0} onClick={() => setConfirm({ kind: "others" })} data-testid="pf-end-others-link">{L("إنهاء كل الجلسات الأخرى", "End all other sessions")}</button>, (
+              <>
+                <div className="hr-tablewrap pf-wide">
+                  <table className="hr-table pf-table" data-testid="pf-session-table">
+                    <thead><tr>
+                      <th>{L("الجلسة", "Session")}</th>
+                      <th>{L("طريقة الدخول", "Sign-in method")}</th>
+                      <th>{L("بدأت", "Started")}</th>
+                      <th>{L("آخر نشاط", "Last activity")}</th>
+                      <th><span className="hr-sr">{L("إجراء", "Action")}</span></th>
+                    </tr></thead>
+                    <tbody>
+                      {data.sessions.map((s) => (
+                        <tr key={s.ref} data-testid="pf-session-row" data-current={s.current || undefined}>
+                          <td className="pf-strong"><bdi>{sessionName(s.device)}</bdi></td>
+                          <td>{methodLabel(s.method)}{s.mfa ? L(" · تحقق بخطوتين", " · 2-step") : ""}</td>
+                          <td>{when(s.createdAt)}</td>
+                          <td>{when(s.lastSeenAt)}</td>
+                          <td className="pf-act">{s.current ? <span className="pf-tag">{L("هذه الجلسة", "This session")}</span> : <Btn size="sm" onClick={() => setConfirm({ kind: "one", s })} data-testid="pf-end-session">{L("إنهاء الجلسة", "End session")}</Btn>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <ul className="pf-rows pf-narrow">
+                  {data.sessions.map((s) => (
+                    <li key={s.ref}>
+                      <div className="pf-rowtop">
+                        <span className="pf-strong"><bdi>{sessionName(s.device)}</bdi></span>
+                        <span className="pf-push">{s.current ? <span className="pf-tag">{L("هذه الجلسة", "This session")}</span> : <Btn size="sm" onClick={() => setConfirm({ kind: "one", s })}>{L("إنهاء الجلسة", "End session")}</Btn>}</span>
+                      </div>
+                      <div className="pf-sub"><span>{methodLabel(s.method)}</span><span>{L("بدأت", "Started")} {when(s.createdAt)}</span><span>{L("آخر نشاط", "Last activity")} {when(s.lastSeenAt)}</span></div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ))}
+            <p className="pf-foot">{L("كل إنهاء يتطلب تأكيد هويتك بكلمة المرور ويُسجَّل باسمك. تنتهي الجلسة بعد 4 ساعات دون نشاط، أو بعد 12 ساعة من الدخول.", "Every end needs you to confirm your identity with your password and is recorded under your name. A session ends after 4 hours without activity, or 12 hours after sign-in.")}</p>
+          </div>
+        ) : null}
+
+        {data && tab === "activity" ? (
+          <div className="pf-tabbody" data-testid="pf-log">
+            {block("pf-log-h", L("سجل نشاط الدخول", "Sign-in activity"), L("آخر 50 حدثًا: الدخول وتأكيد الهوية وتسجيل الخروج وتغييرات الأمان", "The last 50 events: sign-ins, identity confirmations, sign-outs and security changes"), null,
+              data.activity.length ? activityList(data.activity) : noActivity)}
+          </div>
+        ) : null}
       </div>
 
-      {/* Personal Information */}
-      <section className="bg-white rounded-2xl shadow-sm border border-border p-6">
-        <h2 className="text-base font-bold text-charcoal mb-5 flex items-center gap-2">
-          <Globe size={18} className="text-orange" />
-          {t("personalInfo")}
-        </h2>
-
-        <form onSubmit={saveInfo} className="space-y-5">
-          {/* Display Name (read-only) */}
-          <div>
-            <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-              {t("displayName")}
-            </label>
-            <input
-              type="text"
-              value={user.name}
-              disabled
-              className="w-full px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal/50 text-sm cursor-not-allowed"
-            />
-          </div>
-
-          {/* Phone Number */}
-          <div>
-            <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-              {t("phoneNumber")}
-            </label>
-            <div className="relative">
-              <Phone size={16} className="absolute top-1/2 -translate-y-1/2 ltr:left-3 rtl:right-3 text-brown/50" />
-              <input
-                type="tel"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                placeholder={t("phonePlaceholder")}
-                className="w-full ltr:pl-9 rtl:pr-9 pr-4 pl-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40"
-              />
-            </div>
-          </div>
-
-          {/* Language */}
-          <div>
-            <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-              {t("language")}
-            </label>
-            <div className="flex gap-3">
-              {(["ar", "en"] as const).map((lng) => (
-                <button
-                  key={lng}
-                  type="button"
-                  onClick={() => setPreferredLanguage(lng)}
-                  className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-all ${
-                    preferredLanguage === lng
-                      ? "bg-orange text-white border-orange shadow-sm"
-                      : "border-border text-charcoal bg-cream hover:border-orange/40"
-                  }`}
-                >
-                  {lng === "ar" ? "العربية" : "English"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {infoMsg && (
-            <div className={`flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
-              infoMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-            }`}>
-              {infoMsg.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-              {infoMsg.text}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={infoSaving}
-            className="w-full py-2.5 rounded-xl bg-orange text-white font-bold text-sm hover:bg-orange/90 disabled:opacity-60 transition-colors"
-          >
-            {infoSaving ? t("saving") : t("save")}
-          </button>
-        </form>
-      </section>
-
-      {/* Two-step verification (owner security decision) */}
-      <div id="mfa"><MfaEnrollment lang={lang === "en" ? "en" : "ar"} /></div>
-
-      {/* Change PIN */}
-      <section className="bg-white rounded-2xl shadow-sm border border-border p-6">
-        <h2 className="text-base font-bold text-charcoal mb-5 flex items-center gap-2">
-          <Lock size={18} className="text-orange" />
-          {t("changePin")}
-        </h2>
-
-        <form onSubmit={savePin} className="space-y-4">
-          {/* Current PIN */}
-          <div>
-            <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-              {t("currentPin")}
-            </label>
-            <div className="relative">
-              <input
-                type={showCurrent ? "text" : "password"}
-                inputMode="numeric"
-                value={currentPin}
-                onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))}
-                maxLength={PIN_LENGTH}
-                required
-                className="w-full ltr:pr-10 rtl:pl-10 px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest"
-              />
-              <button
-                type="button"
-                onClick={() => setShowCurrent(!showCurrent)}
-                className="absolute top-1/2 -translate-y-1/2 ltr:right-3 rtl:left-3 text-brown/50 hover:text-brown"
-              >
-                {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-
-          {/* New PIN */}
-          <div>
-            <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-              {t("newPin")}
-            </label>
-            <div className="relative">
-              <input
-                type={showNew ? "text" : "password"}
-                inputMode="numeric"
-                value={newPin}
-                onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
-                maxLength={PIN_LENGTH}
-                minLength={PIN_LENGTH}
-                required
-                className="w-full ltr:pr-10 rtl:pl-10 px-4 py-2.5 rounded-xl border border-border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest"
-              />
-              <button
-                type="button"
-                onClick={() => setShowNew(!showNew)}
-                className="absolute top-1/2 -translate-y-1/2 ltr:right-3 rtl:left-3 text-brown/50 hover:text-brown"
-              >
-                {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Confirm PIN */}
-          <div>
-            <label className="block text-xs font-semibold text-brown uppercase tracking-wide mb-1.5">
-              {t("confirmNewPin")}
-            </label>
-            <div className="relative">
-              <input
-                type={showConfirm ? "text" : "password"}
-                inputMode="numeric"
-                value={confirmPin}
-                onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))}
-                maxLength={PIN_LENGTH}
-                required
-                className={`w-full ltr:pr-10 rtl:pl-10 px-4 py-2.5 rounded-xl border bg-cream text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-orange/40 tracking-widest ${
-                  confirmPin && confirmPin !== newPin ? "border-red-400" : "border-border"
-                }`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute top-1/2 -translate-y-1/2 ltr:right-3 rtl:left-3 text-brown/50 hover:text-brown"
-              >
-                {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-            {confirmPin && confirmPin !== newPin && (
-              <p className="text-red-500 text-xs mt-1">{t("pinMismatch")}</p>
-            )}
-          </div>
-
-          {pinMsg && (
-            <div className={`flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl ${
-              pinMsg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
-            }`}>
-              {pinMsg.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-              {pinMsg.text}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={pinSaving || (!!confirmPin && confirmPin !== newPin)}
-            className="w-full py-2.5 rounded-xl bg-orange text-white font-bold text-sm hover:bg-orange/90 disabled:opacity-60 transition-colors"
-          >
-            {pinSaving ? t("saving") : t("changePin")}
-          </button>
-        </form>
-      </section>
-    </div>
+      {/* TD-12b: what ending does, then the action. The step-up dialog asks for the password when needed. */}
+      <Dialog
+        open={!!confirm}
+        onClose={() => { if (!ending) setConfirm(null); }}
+        title={confirm?.kind === "one" ? L("إنهاء هذه الجلسة؟", "End this session?") : L("إنهاء كل الجلسات الأخرى؟", "End all other sessions?")}
+        testId="pf-confirm"
+        actions={<>
+          <Btn variant="primary" className="pf-confirm-danger" busy={ending} onClick={doEnd} data-testid="pf-confirm-end">{confirm?.kind === "one" ? L("إنهاء الجلسة", "End session") : L("إنهاء الجلسات", "End sessions")}</Btn>
+          <Btn variant="ghost" disabled={ending} onClick={() => setConfirm(null)}>{L("تراجع", "Cancel")}</Btn>
+        </>}
+      >
+        {confirm?.kind === "one" ? <p className="pf-dlgname"><bdi>{sessionName(confirm.s.device)}</bdi> · {L("بدأت", "started")} {when(confirm.s.createdAt)}</p> : null}
+        <ul className="pf-bullets">
+          <li>{confirm?.kind === "one" ? L("تنتهي الجلسة على ذلك الجهاز فورًا.", "The session on that device ends at once.") : L(`تنتهي جلساتك على الأجهزة الأخرى فورًا (${others}).`, `Your sessions on other devices end at once (${others}).`)}</li>
+          <li>{L("يلزم الدخول بكلمة المرور لأي استخدام قادم منه.", "Any later use there needs the password again.")}</li>
+          <li>{L("تبقى هذه الجلسة.", "This session stays.")}</li>
+        </ul>
+        <p className="hr-caption" style={{ margin: 0 }}>{L("للتأكيد قد يُطلب منك إدخال كلمة المرور.", "You may be asked for your password to confirm.")}</p>
+      </Dialog>
+    </OpsRoot>
   );
 }

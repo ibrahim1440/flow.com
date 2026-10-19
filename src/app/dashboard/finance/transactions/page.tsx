@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Upload, Plus, ArrowLeftRight, Search, X, Paperclip, Trash2, Link2, CheckCircle2, Scale } from "lucide-react";
 import { useUser } from "../../user-context";
 import { ALL_CLASSES, CLASS_LABELS, classDirection, isAllocatableClass, SETTLEMENT_CLASSES, type TxnClass } from "@/lib/finance/classes";
 import { parseMoney } from "@/lib/finance/money";
 import { riyadhDateString } from "@/lib/finance/dates";
-import { Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, LoadingState, Notice, Section, Segmented, Table, Td, Th, api, useApi, useFinance, useHasSub, useIdempotencyKey, useL, withBranch, type Tone } from "../_components/ui";
+import { OpsPane } from "@/components/ops/ui";
+import { Badge, Button, Card, CardTitle, Dialog, EmptyState, ErrorState, Field, INPUT, Kpi, LoadingState, Metrics, Notice, Section, Segmented, Status, Table, Td, Th, api, useApi, useFinance, useHasSub, useIdempotencyKey, useL, withBranch, type Tone } from "../_components/ui";
 import { ImportDialog } from "./import-dialog";
 
 type Account = { id: string; code: string; nameEn: string; nameAr: string | null; branchKey: string; isRestricted: boolean; type?: string };
@@ -64,71 +64,74 @@ export default function TransactionsPage() {
   const done = () => { list.reload(); counts.reload(); pend.reload(); refresh(); };
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Segmented value={filter} onChange={(v) => { setFilter(v); setSkip(0); }} options={[
+    <>
+      <div className="fin-tool">
+        <Segmented label={L("تصفية السطور", "Filter lines")} value={filter} onChange={(v) => { setFilter(v); setSkip(0); }} options={[
           { value: "all", label: L("الكل", "All") },
-          { value: "review", label: L(`بحاجة لمراجعة (${counts.data?.total ?? 0})`, `Needs review (${counts.data?.total ?? 0})`) },
-          { value: "pending", label: L(`معلّقة (${pend.data?.total ?? 0})`, `Pending (${pend.data?.total ?? 0})`) },
+          { value: "review", label: L(`بحاجة لمراجعة ${counts.data?.total ?? 0}`, `Needs review ${counts.data?.total ?? 0}`) },
+          { value: "pending", label: L(`معلّقة ${pend.data?.total ?? 0}`, `Pending ${pend.data?.total ?? 0}`) },
         ]} />
-        <select aria-label={L("الحساب", "Account")} className={`${INPUT} !w-auto`} value={accountId} onChange={(e) => { setAccountId(e.target.value); setSkip(0); }}>
+        <select aria-label={L("الحساب", "Account")} className="hr-select fin-input is-auto" value={accountId} onChange={(e) => { setAccountId(e.target.value); setSkip(0); }}>
           <option value="">{L("كل الحسابات", "All accounts")}</option>
           {accounts.data?.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}
         </select>
-        <div className="relative flex-1 min-w-[220px]">
-          <Search size={14} className="absolute top-1/2 -translate-y-1/2 start-3 text-brown-light" />
-          <input className={`${INPUT} ps-8`} placeholder={L("بحث بالوصف أو المرجع أو الطرف", "Search description, reference or counterparty")} value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        <input type="search" className="hr-input hr-search" aria-label={L("بحث", "Search")} placeholder={L("بحث بالوصف أو المرجع أو الطرف", "Search description, reference or counterparty")} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      <div className={`grid gap-4 items-start ${selected ? "grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px]" : "grid-cols-1"}`}>
-        <Card pad="p-4">
+      <div className={`hr-split fin-split${selected ? " has-preview" : ""}`}>
+        <Card>
           <CardTitle
             title={L("السطور البنكية والنقدية", "Bank and cash lines")}
             sub={L(`${list.data?.total ?? 0} سطراً · بحاجة لمراجعة ${counts.data?.total ?? 0} · معلّقة ${pend.data?.total ?? 0}`, `${list.data?.total ?? 0} lines · needs review ${counts.data?.total ?? 0} · pending ${pend.data?.total ?? 0}`)}
             right={canEnter && <>
-              <Button kind="primary" icon={Upload} onClick={() => setDialog("import")}>{L("استيراد CSV", "Import CSV")}</Button>
-              <Button icon={Plus} onClick={() => setDialog("manual")}>{L("قيد يدوي", "Manual entry")}</Button>
-              <Button icon={ArrowLeftRight} onClick={() => setDialog("transfer")}>{L("تحويل", "Transfer")}</Button>
+              <Button size="sm" onClick={() => setDialog("transfer")}>{L("تحويل", "Transfer")}</Button>
+              <Button size="sm" onClick={() => setDialog("manual")}>{L("قيد يدوي", "Manual entry")}</Button>
+              <Button size="sm" kind="primary" onClick={() => setDialog("import")}>{L("استيراد CSV", "Import CSV")}</Button>
             </>}
           />
           {list.loading && !list.data ? <LoadingState /> : list.error ? <ErrorState error={list.error} onRetry={list.reload} /> : list.data && list.data.rows.length === 0 ? (
             <EmptyState title={filter === "all" && !qDebounced ? L("لا توجد سطور بعد", "No lines yet") : L("لا توجد سطور مطابقة", "No matching lines")} body={filter === "all" && !qDebounced ? L("استورد كشفاً بنكياً أو أضف قيداً يدوياً.", "Import a bank statement or add a manual entry.") : undefined} />
           ) : list.data && (
             <>
-              <Table>
-                <thead><tr><Th>{L("التاريخ", "Date")}</Th><Th>{L("الوصف", "Description")}</Th><Th>{L("التصنيف", "Classification")}</Th><Th>{L("المراجعة", "Review")}</Th><Th num>{L("المبلغ", "Amount")}</Th></tr></thead>
+              <Table className="is-mrow" label={L("السطور البنكية والنقدية", "Bank and cash lines")}>
+                <thead><tr><Th>{L("التاريخ", "Date")}</Th><Th>{L("الوصف", "Description")}</Th><Th className="hr-hide-preview">{L("التصنيف", "Classification")}</Th><Th>{L("المراجعة", "Review")}</Th><Th num>{L("المبلغ", "Amount")}</Th></tr></thead>
                 <tbody>
                   {list.data.rows.map((r) => {
                     const [ar, en, tone] = reviewTone(r);
                     const amt = toMinor(r.amount);
+                    const open = () => setSelected(r.id);
                     return (
-                      <tr key={r.id} onClick={() => setSelected(r.id)} className={`cursor-pointer ${selected === r.id ? "bg-orange-light" : "hover:bg-cream"}`}>
-                        <Td className="text-brown whitespace-nowrap">{r.txnDate.slice(0, 10)}</Td>
-                        <Td className="max-w-[1px] w-full">
-                          <p className="font-medium truncate">{r.description ?? "—"}</p>
-                          <p className="text-[11px] text-brown-light truncate">{r.cashAccount.code}{r.bankReference ? ` · ${r.bankReference}` : ""}{r.possibleDuplicateOfId ? ` · ${L("تكرار محتمل", "possible duplicate")}` : ""}</p>
+                      <tr key={r.id} onClick={open} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }} aria-selected={selected === r.id} className="is-clickable">
+                        <Td className="hr-num fin-t2">{r.txnDate.slice(0, 10)}</Td>
+                        <Td className="m-title fin-wrap">
+                          <span className="strong">{r.description ?? "—"}</span>
+                          <span className="fin-sub is-mono">{r.cashAccount.code}{r.bankReference ? ` · ${r.bankReference}` : ""}{r.possibleDuplicateOfId ? <span className="fin-warning"> · {L("تكرار محتمل", "possible duplicate")}</span> : null}</span>
+                          <span className="hr-msub"><Status tone={tone}>{L(ar, en)}</Status></span>
                         </Td>
-                        <Td className="whitespace-nowrap">{r.classification === "UNCLASSIFIED" ? <Badge tone="warn">{L("غير مصنفة", "Unclassified")}</Badge> : L(CLASS_LABELS[r.classification].ar, CLASS_LABELS[r.classification].en)}</Td>
-                        <Td><Badge tone={tone}>{L(ar, en)}</Badge></Td>
-                        <Td num className={`font-bold ${r.status === "VOID" ? "line-through text-brown-light" : amt > 0 ? "text-green-600" : "text-charcoal"}`}>{money(amt)}</Td>
+                        <Td className="hr-hide-preview">{r.classification === "UNCLASSIFIED" ? <Badge tone="warn">{L("غير مصنفة", "Unclassified")}</Badge> : L(CLASS_LABELS[r.classification].ar, CLASS_LABELS[r.classification].en)}</Td>
+                        <Td><Status tone={tone}>{L(ar, en)}</Status></Td>
+                        <Td num className={`m-end ${r.status === "VOID" ? "fin-strike" : amt > 0 ? "fin-success" : "fin-t1"}`}>{money(amt, { sign: amt > 0 })}</Td>
                       </tr>
                     );
                   })}
                 </tbody>
               </Table>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-brown">{L(`عرض ${Math.min(skip + 1, list.data.total)}–${Math.min(skip + 10, list.data.total)} من ${list.data.total}`, `Showing ${Math.min(skip + 1, list.data.total)}–${Math.min(skip + 10, list.data.total)} of ${list.data.total}`)}</span>
-                <div className="flex gap-1.5">
-                  <Button disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - 10))}>{L("السابق", "Previous")}</Button>
-                  <Button disabled={skip + 10 >= list.data.total} onClick={() => setSkip(skip + 10)}>{L("التالي", "Next")}</Button>
+              <div className="fin-row" style={{ justifyContent: "space-between" }}>
+                <span className="fin-cap">{L(`عرض ${Math.min(skip + 1, list.data.total)}–${Math.min(skip + 10, list.data.total)} من ${list.data.total}`, `Showing ${Math.min(skip + 1, list.data.total)}–${Math.min(skip + 10, list.data.total)} of ${list.data.total}`)}</span>
+                <div className="fin-row">
+                  <Button size="sm" disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - 10))}>{L("السابق", "Previous")}</Button>
+                  <Button size="sm" disabled={skip + 10 >= list.data.total} onClick={() => setSkip(skip + 10)}>{L("التالي", "Next")}</Button>
                 </div>
               </div>
             </>
           )}
         </Card>
 
-        {selected && <ReviewPanel id={selected} finCats={setup.data?.finCategories ?? []} canEnter={canEnter} onClose={() => setSelected(null)} onChanged={done} />}
+        {selected && (
+          <OpsPane testId="review-panel" label={L("مراجعة سطر بنكي", "Review bank line")} title={L("مراجعة سطر بنكي", "Review bank line")} phone="page" onClose={() => setSelected(null)}>
+            <ReviewPanel id={selected} finCats={setup.data?.finCategories ?? []} canEnter={canEnter} onClose={() => setSelected(null)} onChanged={done} />
+          </OpsPane>
+        )}
       </div>
 
       <ReconciliationCard accounts={accounts.data ?? []} canRecon={canRecon} onDone={done} />
@@ -136,7 +139,7 @@ export default function TransactionsPage() {
       <ManualDialog open={dialog === "manual"} onClose={() => setDialog(null)} accounts={accounts.data ?? []} onDone={done} />
       <TransferDialog open={dialog === "transfer"} onClose={() => setDialog(null)} accounts={accounts.data ?? []} onDone={done} />
       <ImportDialog open={dialog === "import"} onClose={() => setDialog(null)} accounts={accounts.data ?? []} onDone={done} branch={branch} />
-    </div>
+    </>
   );
 }
 
@@ -154,8 +157,8 @@ function ReviewPanel(props: PanelProps) {
   return <ReviewForm key={`${t.id}:${t.status}:${t.reviewStatus}:${t.classification}:${d.data.audits[0]?.id ?? ""}`} {...props} data={d.data} reload={d.reload} />;
 }
 
-function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }: PanelProps & { data: Detail; reload: () => void }) {
-  const { L, name, money, sar } = useL();
+function ReviewForm({ id, finCats, canEnter, onChanged, data, reload }: PanelProps & { data: Detail; reload: () => void }) {
+  const { L, name, money } = useL();
   const user = useUser();
   const { branch } = useFinance();
   const canAllocate = useHasSub(user?.permissions, "allocate");
@@ -219,14 +222,13 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
   const custName = (c: CollectionCand) => L(c.customerAr ?? c.customer ?? "—", c.customer ?? c.customerAr ?? "—");
   const cv = coll.data;
   return (
-    <Card>
-      <CardTitle title={L("مراجعة سطر بنكي", "Review bank line")} sub={`${d.data.transaction.cashAccount.code} · ${t.txnDate.slice(0, 10)}${t.bankReference ? ` · ${L("المرجع", "Ref")} ${t.bankReference}` : ""}`}
-        right={<button type="button" onClick={onClose} aria-label={L("إغلاق", "Close")} className="text-brown-light hover:text-charcoal"><X size={16} /></button>} />
-      <div className={`rounded-xl px-3.5 py-3 ${amount > 0 ? "bg-green-100" : "bg-cream-dark"}`}>
-        <div className="flex items-center gap-2"><p className={`text-xs font-bold ${amount > 0 ? "text-green-700" : "text-brown"}`}>{amount > 0 ? L("وارد", "Money in") : L("صادر", "Money out")} · {L(t.status === "CONFIRMED" ? "مؤكد" : t.status === "PENDING" ? "معلّق" : "ملغى", t.status === "CONFIRMED" ? "confirmed" : t.status === "PENDING" ? "pending" : "void")}</p><span data-testid="review-status"><Badge tone={rtone}>{L(rar, ren)}</Badge></span></div>
-        <p className={`text-2xl font-extrabold tabular-nums ${amount > 0 ? "text-green-700" : "text-charcoal"}`}>{sar(amount)}</p>
-        {t.grossAmount && <p className="text-xs text-brown">{L("الإجمالي", "Gross")} {money(toMinor(t.grossAmount))} − {L("الرسوم", "fees")} {money(toMinor(t.feeAmount ?? 0))} = {L("صافي الإيداع", "net deposit")} {money(amount)}</p>}
-        <p className="text-xs text-charcoal mt-1">{t.description}</p>
+    <div className="fin-stack" style={{ gap: 14 }}>
+      <p className="fin-cap"><span className="fin-num">{t.txnDate.slice(0, 10)}</span> · {d.data.transaction.cashAccount.code}{t.bankReference ? ` · ${L("المرجع", "Ref")} ${t.bankReference}` : ""}</p>
+      <div className="fin-stack" style={{ gap: 4 }}>
+        <div className="fin-row"><span className="fin-t2" style={{ fontSize: 13 }}>{amount > 0 ? L("وارد", "Money in") : L("صادر", "Money out")} · {L(t.status === "CONFIRMED" ? "مؤكد" : t.status === "PENDING" ? "معلّق" : "ملغى", t.status === "CONFIRMED" ? "confirmed" : t.status === "PENDING" ? "pending" : "void")}</span><span data-testid="review-status"><Status tone={rtone}>{L(rar, ren)}</Status></span></div>
+        <span className={`fin-amt ${amount > 0 ? "is-in" : ""}`}><span className="fin-num">{money(amount, { sign: amount > 0 })}</span><span className="stk-unit">{L("ر.س", "SAR")}</span></span>
+        {t.grossAmount && <p className="fin-cap">{L("الإجمالي", "Gross")} {money(toMinor(t.grossAmount))} − {L("الرسوم", "fees")} {money(toMinor(t.feeAmount ?? 0))} = {L("صافي الإيداع", "net deposit")} {money(amount)}</p>}
+        <p className="fin-t1" style={{ margin: 0, fontSize: 13.5 }}>{t.description}</p>
       </div>
 
       {d.data.possibleDuplicate && t.status !== "VOID" && (
@@ -236,29 +238,28 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
           {canEnter && t.source === "CSV_IMPORT" && <Button kind="secondary" busy={busy} className="mt-2" onClick={() => act(`/api/finance/transactions/${id}/resolve-duplicate`, { keepId: d.data!.possibleDuplicate!.id })}>{L("نفس المبلغ المسجّل — دمج", "Same money as the recorded line — merge")}</Button>}
         </Notice>
       )}
-      {t.statementConfirmedAt && <Notice tone="ok" icon={CheckCircle2}>{L(`أكّده كشف البنك في ${t.statementConfirmedAt.slice(0, 10)} (دون إنشاء سطر جديد).`, `Confirmed by the bank statement on ${t.statementConfirmedAt.slice(0, 10)} (no new line created).`)}</Notice>}
+      {t.statementConfirmedAt && <Notice tone="ok">{L(`أكّده كشف البنك في ${t.statementConfirmedAt.slice(0, 10)} (دون إنشاء سطر جديد).`, `Confirmed by the bank statement on ${t.statementConfirmedAt.slice(0, 10)} (no new line created).`)}</Notice>}
       {t.classification === "UNCLASSIFIED" && amount > 0 && !isVoid && (
         <Notice tone="warn">{L("مصدر الإيداع غير معروف: لا يُعامل كتحصيل مبيعات ولا يُخصص قبل تصنيفه ومراجعته.", "Unknown source: not treated as a sales receipt and not allocated until it is classified and reviewed.")}</Notice>
       )}
       {t.reconciliationId && <Notice tone="info">{L("السطر ضمن تسوية مكتملة؛ لا يمكن إلغاؤه.", "This line is in a completed reconciliation; it cannot be voided.")}</Notice>}
 
       {cv?.linked && (
-        <div data-testid="collection-linked" className="rounded-lg bg-green-100 px-3 py-2 text-xs flex items-start gap-2">
-          <Link2 size={14} className="mt-0.5 text-green-700 flex-shrink-0" />
+        <div data-testid="collection-linked" className="fin-box tone-success">
           <div>
-            <p className="font-bold text-green-700">{L("مرتبط بتحصيل مبيعات معتمد", "Linked to an approved Sales collection")}</p>
+            <p className="font-semibold fin-success">{L("مرتبط بتحصيل مبيعات معتمد", "Linked to an approved Sales collection")}</p>
             <p>{custName(cv.linked)} · {money(cv.linked.amountGross)} ({L("منها ضريبة", "incl. VAT")} {money(cv.linked.amountTax)}){cv.linked.referenceNumber && <> · <bdi dir="ltr" className="whitespace-nowrap">{cv.linked.referenceNumber}</bdi></>}</p>
-            <p className="text-brown-light">{L("الربط لا يُنشئ نقداً ولا تخصيصاً إضافياً؛ هذا السطر هو النقد.", "The link adds no cash and no allocation; this bank line is the cash.")}</p>
+            <p className="fin-mut">{L("الربط لا يُنشئ نقداً ولا تخصيصاً إضافياً؛ هذا السطر هو النقد.", "The link adds no cash and no allocation; this bank line is the cash.")}</p>
           </div>
         </div>
       )}
       {!cv?.linked && cv?.decision && cv.decision.kind !== "NONE" && cv.candidates.length > 0 && !isVoid && (
-        <div data-testid="collection-suggestion" className="rounded-lg border-2 border-orange px-3 py-2 text-xs flex flex-col gap-1.5">
-          <p className="font-bold">{cv.decision.kind === "MATCH" ? L("تحصيل مبيعات مقترح لهذا الإيصال", "Suggested Sales collection for this receipt") : cv.decision.kind === "AMBIGUOUS" ? L("أكثر من تحصيل مطابق — اختر الصحيح", "More than one matching collection — choose the right one") : L("تحصيل مطابق بانتظار تحقق المبيعات", "A matching collection is awaiting verification in Sales")}</p>
+        <div data-testid="collection-suggestion" className="fin-box tone-info">
+          <p className="font-semibold">{cv.decision.kind === "MATCH" ? L("تحصيل مبيعات مقترح لهذا الإيصال", "Suggested Sales collection for this receipt") : cv.decision.kind === "AMBIGUOUS" ? L("أكثر من تحصيل مطابق — اختر الصحيح", "More than one matching collection — choose the right one") : L("تحصيل مطابق بانتظار تحقق المبيعات", "A matching collection is awaiting verification in Sales")}</p>
           {cv.candidates.map((c) => (
             <div key={c.id} className="flex items-center justify-between gap-2">
               <span>{custName(c)} · {money(c.amountGross)} ({L("ضريبة", "VAT")} {money(c.amountTax)}){c.referenceNumber && <> · <bdi dir="ltr" className="whitespace-nowrap">{c.referenceNumber}</bdi></>} · <bdi dir="ltr" className="whitespace-nowrap">{c.collectedAt.slice(0, 10)}</bdi>{cv.decision?.kind === "MATCH" ? ` · ${cv.decision.basis === "REFERENCE" ? L("بالمرجع", "by reference") : L("بالمبلغ والتاريخ", "by amount and date")}` : ""}</span>
-              {canEnter && c.status === "APPROVED" && <Button kind="primary" busy={busy} onClick={() => act(`/api/finance/transactions/${id}/collection`, { collectionId: c.id })}>{L("ربط التحصيل", "Link collection")}</Button>}
+              {canEnter && c.status === "APPROVED" && <Button size="sm" busy={busy} onClick={() => act(`/api/finance/transactions/${id}/collection`, { collectionId: c.id })}>{L("ربط التحصيل", "Link collection")}</Button>}
             </div>
           ))}
         </div>
@@ -271,7 +272,7 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
       </Field>
 
       {settlement && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="fin-grid is-keep">
           <Field label={L("إجمالي المبيعات", "Gross proceeds")}><input className={INPUT} disabled={locked} value={gross} onChange={(e) => setGross(e.target.value)} inputMode="decimal" /></Field>
           <Field label={L("رسوم البوابة/الشبكة", "Gateway / network fee")}><input className={INPUT} disabled={locked} value={fee} onChange={(e) => setFee(e.target.value)} inputMode="decimal" /></Field>
         </div>
@@ -279,32 +280,32 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
 
       {cls !== "INTERNAL_TRANSFER" && (
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-bold text-brown">{L("التوزيع على بنود الميزانية", "Budget classification")}</span>
+          <span className="hr-label">{L("التوزيع على بنود الميزانية", "Budget classification")}</span>
           {splits.map((s, i) => (
             <div key={i} className="flex gap-2 items-center">
               <select aria-label={L("بند الميزانية", "Budget category")} className={INPUT} disabled={locked} value={s.finCategoryId} onChange={(e) => setSplits(splits.map((x, j) => (j === i ? { ...x, finCategoryId: e.target.value } : x)))}>
                 <option value="">{L("اختر بنداً…", "Choose a category…")}</option>
                 {finCats.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{name(c)}</option>)}
               </select>
-              <input aria-label={L("المبلغ", "Amount")} className={`${INPUT} !w-[110px] font-bold tabular-nums`} disabled={locked} value={s.amount} onChange={(e) => setSplits(splits.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} inputMode="decimal" />
-              {splits.length > 1 && !locked && <button type="button" onClick={() => setSplits(splits.filter((_, j) => j !== i))} className="text-brown-light hover:text-red-600" aria-label={L("حذف", "Remove")}><Trash2 size={14} /></button>}
+              <input aria-label={L("المبلغ", "Amount")} className={`${INPUT} !w-[110px] font-semibold tabular-nums`} disabled={locked} value={s.amount} onChange={(e) => setSplits(splits.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} inputMode="decimal" />
+              {splits.length > 1 && !locked && <button type="button" onClick={() => setSplits(splits.filter((_, j) => j !== i))} className="hr-btn is-ghost is-sm" aria-label={L("حذف", "Remove")}>✕</button>}
             </div>
           ))}
           <div className="flex justify-between text-xs">
-            {!locked ? <button type="button" className="font-bold text-orange" onClick={() => setSplits([...splits, { finCategoryId: "", amount: "0.00" }])}>{L("+ إضافة بند", "+ Add split")}</button> : <span />}
-            <span className={`font-bold tabular-nums ${splitSum === amount ? "text-green-600" : "text-red-600"}`}>{L("المجموع", "Total")} {money(splitSum)} {L("من", "of")} {money(amount)} {splitSum === amount ? "✓" : ""}</span>
+            {!locked ? <button type="button" className="font-semibold fin-link" onClick={() => setSplits([...splits, { finCategoryId: "", amount: "0.00" }])}>{L("+ إضافة بند", "+ Add split")}</button> : <span />}
+            <span className={`font-semibold tabular-nums ${splitSum === amount ? "fin-success" : "fin-danger"}`}>{L("المجموع", "Total")} {money(splitSum)} {L("من", "of")} {money(amount)} {splitSum === amount ? "✓" : ""}</span>
           </div>
-          {settlement && <p className="text-[11px] text-brown-light">{L("للتسويات: البند الأول بالإجمالي، وبند الرسوم بالسالب، ليساوي المجموع صافي الإيداع دون ازدواج.", "For settlements: gross on the sales category and the fee as a negative split, so the total equals the net deposit without double counting.")}</p>}
+          {settlement && <p className="text-xs fin-mut">{L("للتسويات: البند الأول بالإجمالي، وبند الرسوم بالسالب، ليساوي المجموع صافي الإيداع دون ازدواج.", "For settlements: gross on the sales category and the fee as a negative split, so the total equals the net deposit without double counting.")}</p>}
         </div>
       )}
 
       <div className="flex flex-col gap-1.5">
         {d.data.attachments.map((a) => (
-          <a key={a.id} href={withBranch(`/api/finance/attachments/${a.id}`, branch)} className="flex items-center gap-2 text-xs text-orange font-bold"><Paperclip size={12} />{a.fileName}</a>
+          <a key={a.id} href={withBranch(`/api/finance/attachments/${a.id}`, branch)} className="fin-lk">{a.fileName}</a>
         ))}
         {canEnter && !isVoid && (
-          <label className="flex items-center gap-2 px-3 py-2.5 rounded-[10px] border border-border text-xs text-brown cursor-pointer hover:bg-cream">
-            <Paperclip size={16} />{L("إرفاق مستند (PDF أو صورة، حتى 5 ميغابايت)", "Attach a document (PDF or image, up to 5 MB)")}
+          <label className="fin-box is-line" style={{ cursor: "pointer" }}>
+            {L("إرفاق مستند (PDF أو صورة، حتى 5 ميغابايت)", "Attach a document (PDF or image, up to 5 MB)")}
             <input type="file" className="hidden" accept="application/pdf,image/png,image/jpeg,image/webp,text/csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
           </label>
         )}
@@ -312,27 +313,27 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
 
       <Section testId="section-link" title={L("الربط بمستند", "Link to a document")} summary={activeMatches.length ? L(`${activeMatches.length} مرتبط`, `${activeMatches.length} linked`) : L("لا يوجد", "none")}>
         {activeMatches.map((m) => (
-          <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-cream-dark px-3 py-2 text-xs">
-            <span><Link2 size={12} className="inline me-1" />{m.targetType === "SALES_COLLECTION" ? L("تحصيل مبيعات", "Sales collection") : m.targetType} · {money(toMinor(m.amount))}{toMinor(m.taxAmount) > 0 ? ` · ${L("ضريبة", "VAT")} ${money(toMinor(m.taxAmount))}` : ""}</span>
-            {canEnter && <button type="button" className="text-red-600 font-bold" onClick={() => { const r = prompt(L("سبب إلغاء الربط", "Reason for unlinking")); if (r) act(`/api/finance/matches/${m.id}/remove`, { reason: r }); }}>{L("إلغاء الربط", "Unlink")}</button>}
+          <div key={m.id} className="fin-box fin-row" style={{ justifyContent: "space-between" }}>
+            <span>{m.targetType === "SALES_COLLECTION" ? L("تحصيل مبيعات", "Sales collection") : m.targetType} · {money(toMinor(m.amount))}{toMinor(m.taxAmount) > 0 ? ` · ${L("ضريبة", "VAT")} ${money(toMinor(m.taxAmount))}` : ""}</span>
+            {canEnter && <button type="button" className="fin-danger font-semibold" onClick={() => { const r = prompt(L("سبب إلغاء الربط", "Reason for unlinking")); if (r) act(`/api/finance/matches/${m.id}/remove`, { reason: r }); }}>{L("إلغاء الربط", "Unlink")}</button>}
           </div>
         ))}
         {canEnter && !isVoid && (
           <>
             <input className={INPUT} placeholder={amount > 0 ? L("رقم الطلب أو اسم العميل", "Order number or customer") : L("وصف الالتزام أو الطرف", "Obligation or counterparty")} value={matchQ} onChange={(e) => setMatchQ(e.target.value)} />
             {cands && cands.rows.length > 0 && !matchPick && (
-              <ul className="max-h-40 overflow-y-auto rounded-lg border border-border divide-y divide-border-light">
+              <ul className="fin-box is-line" style={{ maxHeight: 160, overflowY: "auto", listStyle: "none", margin: 0, padding: 4 }}>
                 {cands.rows.map((c) => (
-                  <li key={c.id}><button type="button" className="w-full text-start px-3 py-2 text-xs hover:bg-cream" onClick={() => { setMatchPick({ id: c.id, label: (L(c.labelAr ?? c.label, c.label)) }); setMatchAmt(money(Math.min(Math.abs(amount), c.amount ?? Math.abs(amount))).replace(/[⁦⁩,−]/g, "")); }}>
+                  <li key={c.id}><button type="button" className="w-full text-start px-3 py-2 text-xs " onClick={() => { setMatchPick({ id: c.id, label: (L(c.labelAr ?? c.label, c.label)) }); setMatchAmt(money(Math.min(Math.abs(amount), c.amount ?? Math.abs(amount))).replace(/[⁦⁩,−]/g, "")); }}>
                     {L(c.labelAr ?? c.label, c.label)}{c.matched !== undefined ? ` · ${L("مطابق سابقاً", "already matched")} ${money(c.matched)}` : ""}{c.dueDate ? ` · ${c.dueDate}` : ""}
                   </button></li>
                 ))}
               </ul>
             )}
             {matchPick && (
-              <div className="rounded-lg border-2 border-orange p-2.5 flex flex-col gap-2">
-                <p className="text-xs font-bold">{matchPick.label}</p>
-                <div className="grid grid-cols-2 gap-2">
+              <div className="fin-box is-pick">
+                <p className="text-xs font-semibold">{matchPick.label}</p>
+                <div className="fin-grid is-keep">
                   <Field label={L("المبلغ المطبق", "Amount applied")}><input className={INPUT} value={matchAmt} onChange={(e) => setMatchAmt(e.target.value)} inputMode="decimal" /></Field>
                   {amount > 0 && <Field label={L("ضريبة القيمة المضافة من الفاتورة", "VAT from the invoice")}><input className={INPUT} value={matchTax} onChange={(e) => setMatchTax(e.target.value)} inputMode="decimal" placeholder="0.00" /></Field>}
                 </div>
@@ -342,8 +343,8 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
                 </div>
               </div>
             )}
-            {cands?.note && <p className="text-[11px] text-brown-light">{L("طلبات البيع لا تحمل قيمة فاتورة بعد، لذا يُعرض ما سبق مطابقته فقط.", cands.note)}</p>}
-            <p className="text-[11px] text-brown">{L("الربط لا يُنشئ إيصالاً جديداً. أدخل ضريبة القيمة المضافة من الفاتورة ليُحتجز في احتياطي الضريبة.", "Linking never creates a new receipt. Enter the invoice VAT so it is held in the tax reserve.")}</p>
+            {cands?.note && <p className="text-xs fin-mut">{L("طلبات البيع لا تحمل قيمة فاتورة بعد، لذا يُعرض ما سبق مطابقته فقط.", cands.note)}</p>}
+            <p className="text-xs fin-t2">{L("الربط لا يُنشئ إيصالاً جديداً. أدخل ضريبة القيمة المضافة من الفاتورة ليُحتجز في احتياطي الضريبة.", "Linking never creates a new receipt. Enter the invoice VAT so it is held in the tax reserve.")}</p>
           </>
         )}
       </Section>
@@ -361,29 +362,29 @@ function ReviewForm({ id, finCats, canEnter, onClose, onChanged, data, reload }:
         </Notice>
       )}
       {((canEnter && !isVoid) || canAllocateNow) && (
-        <div className="flex gap-2 flex-wrap" data-testid="review-actions">
-          {canEnter && !isVoid && <Button kind="primary" icon={CheckCircle2} busy={busy} disabled={cls === "UNCLASSIFIED" || !splitsOk} onClick={() => save(true)}>{L("حفظ ووضع علامة مُراجعة", "Save and mark reviewed")}</Button>}
+        <div className="fin-row" data-testid="review-actions">
+          {canEnter && !isVoid && <Button kind="primary" busy={busy} disabled={cls === "UNCLASSIFIED" || !splitsOk} onClick={() => save(true)}>{L("حفظ ووضع علامة مُراجعة", "Save and mark reviewed")}</Button>}
           {canEnter && !isVoid && <Button busy={busy} onClick={() => save(false)}>{L("حفظ دون مراجعة", "Save without review")}</Button>}
           {canEnter && t.status === "PENDING" && <Button busy={busy} onClick={() => act(`/api/finance/transactions/${id}/confirm`)}>{L("تأكيد السطر", "Confirm line")}</Button>}
           {canAllocateNow && <Button kind="primary" busy={busy} onClick={() => act("/api/finance/allocations/run", { txnId: id })}>{L("تخصيص حسب القواعد المعتمدة", "Allocate by approved rules")}</Button>}
         </div>
       )}
       {canEnter && !isVoid && !t.reconciliationId && (
-        <button type="button" className="text-xs font-bold text-red-600 self-start" onClick={() => { const r = prompt(L("سبب إلغاء السطر", "Reason for voiding")); if (r) act(`/api/finance/transactions/${id}/void`, { reason: r }); }}>{L("إلغاء السطر", "Void line")}</button>
+        <button type="button" className="hr-btn is-danger is-sm" style={{ alignSelf: "flex-start" }} onClick={() => { const r = prompt(L("سبب إلغاء السطر", "Reason for voiding")); if (r) act(`/api/finance/transactions/${id}/void`, { reason: r }); }}>{L("إلغاء السطر", "Void line")}</button>
       )}
 
       {amount > 0 && t.status === "CONFIRMED" && (
         <Section testId="section-allocated" title={L("التخصيص من هذا الإيصال", "Allocated from this receipt")} summary={d.data.entries.length === 0 ? L("لم يُخصص بعد", "not allocated yet") : L(`غير مخصص ${money(d.data.unallocated)}`, `unallocated ${money(d.data.unallocated)}`)}>
-          {d.data.entries.length === 0 ? <p className="text-xs text-brown-light">{L("لم يُخصص بعد.", "Not allocated yet.")}</p> : d.data.entries.map((e) => (
-            <div key={e.id} className="flex justify-between text-xs"><span>{name(e.category)} · {e.entryType === "ALLOCATION" ? L("تخصيص", "allocation") : L("عكس", "reversal")}</span><span className="tabular-nums font-bold">{money(toMinor(e.amount) * (e.entryType === "ALLOCATION" ? 1 : -1))}</span></div>
+          {d.data.entries.length === 0 ? <p className="text-xs fin-mut">{L("لم يُخصص بعد.", "Not allocated yet.")}</p> : d.data.entries.map((e) => (
+            <div key={e.id} className="flex justify-between text-xs"><span>{name(e.category)} · {e.entryType === "ALLOCATION" ? L("تخصيص", "allocation") : L("عكس", "reversal")}</span><span className="tabular-nums font-semibold">{money(toMinor(e.amount) * (e.entryType === "ALLOCATION" ? 1 : -1))}</span></div>
           ))}
-          <p className="text-xs text-brown">{L("غير مخصص من الإيصال", "Unallocated from receipt")}: <b className="tabular-nums">{money(d.data.unallocated)}</b></p>
+          <p className="fin-cap">{L("غير مخصص من الإيصال", "Unallocated from receipt")}: <b className="fin-num">{money(d.data.unallocated)}</b></p>
         </Section>
       )}
       <Section testId="section-history" title={L("السجل", "History")} summary={L(`${d.data.audits.length} حدث`, `${d.data.audits.length} events`)}>
-        {d.data.audits.slice(0, 5).map((a) => <p key={a.id} className="text-[11px] text-brown-light">{a.createdAt.slice(0, 16).replace("T", " ")} · {a.action} · {person(a.userId)}{a.reason ? ` · ${a.reason}` : ""}</p>)}
+        {d.data.audits.slice(0, 5).map((a) => <p key={a.id} className="text-xs fin-mut">{a.createdAt.slice(0, 16).replace("T", " ")} · {a.action} · {person(a.userId)}{a.reason ? ` · ${a.reason}` : ""}</p>)}
       </Section>
-    </Card>
+    </div>
   );
 }
 // ─── Reconciliation ──────────────────────────────────────────────────────────
@@ -408,24 +409,24 @@ function ReconciliationCard({ accounts, canRecon, onDone }: { accounts: Account[
     try { const r = await api<{ status: string }>(withBranch("/api/finance/reconciliations", branch), { method: "POST", json: { cashAccountId: acc, statementDate: date, statementBalance: bal } }); setMsg(r.status === "COMPLETED" ? L("اكتملت التسوية.", "Reconciliation completed.") : L("حُفظت كمسودة تُظهر الفرق.", "Saved as a draft showing the difference.")); onDone(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   return (
-    <Card>
+    <Card className="is-ruled">
       <CardTitle title={L("التسوية مع كشف البنك", "Reconcile with the bank statement")} sub={L("رصيد الدفتر = الرصيد الافتتاحي + السطور المؤكدة حتى التاريخ. السطور المعلّقة تُعرض ولا تُحتسب.", "Book balance = opening balance + confirmed lines to the date. Pending lines are shown, not counted.")} />
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end">
+      <div className="fin-grid" style={{ ["--fin-cols" as string]: 3 }}>
         <Field label={L("الحساب", "Account")}><select className={INPUT} value={acc} onChange={(e) => setAcc(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
         <Field label={L("تاريخ الكشف", "Statement date")}><input type="date" className={INPUT} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label={L("رصيد الكشف", "Statement balance")}><input className={`${INPUT} font-bold`} value={bal} onChange={(e) => setBal(e.target.value)} inputMode="decimal" placeholder="0.00" /></Field>
-        {canRecon && <Button kind="primary" icon={Scale} busy={busy} disabled={!prev} onClick={save}>{L("حفظ التسوية", "Save reconciliation")}</Button>}
+        <Field label={L("رصيد الكشف", "Statement balance")}><input className={`${INPUT} font-semibold`} value={bal} onChange={(e) => setBal(e.target.value)} inputMode="decimal" placeholder="0.00" /></Field>
       </div>
       {prev && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-xl bg-cream-dark px-3.5 py-3"><p className="text-xs font-bold text-brown">{L("رصيد الدفتر", "Book balance")}</p><p className="text-lg font-extrabold tabular-nums">{money(prev.ledgerBalance)}</p></div>
-          <div className="rounded-xl bg-cream-dark px-3.5 py-3"><p className="text-xs font-bold text-brown">{L("المعلّق حتى التاريخ (غير محتسب)", "Pending to date (not counted)")}</p><p className="text-lg font-extrabold tabular-nums">{money(prev.pendingTotal)}</p></div>
-          <div className={`rounded-xl px-3.5 py-3 ${prev.difference === 0 ? "bg-green-100" : "bg-red-100"}`}><p className="text-xs font-bold text-brown">{L("الفرق", "Difference")}</p><p className={`text-lg font-extrabold tabular-nums ${prev.difference === 0 ? "text-green-700" : "text-red-600"}`}>{money(prev.difference)}</p></div>
-        </div>
+        <Metrics cols={3}>
+          <Kpi label={L("رصيد الدفتر", "Book balance")} value={money(prev.ledgerBalance)} />
+          <Kpi label={L("المعلّق حتى التاريخ (غير محتسب)", "Pending to date (not counted)")} value={money(prev.pendingTotal)} />
+          <Kpi label={L("الفرق", "Difference")} value={money(prev.difference)} valueClass={prev.difference === 0 ? "is-success" : "is-danger"} />
+        </Metrics>
       )}
-      {prev && prev.difference !== 0 && <p className="text-xs text-brown">{L("لا يمكن إكمال التسوية بفرق. تُحفظ كمسودة تُظهر الفرق حتى يُعالج.", "A reconciliation cannot be completed with a difference. It is saved as a draft that shows the gap until it is resolved.")}{prev.difference === prev.pendingTotal ? L(" (هنا يطابق الفرق السطور المعلّقة.)", " (Here the difference equals the pending lines.)") : ""}</p>}
+      {prev && prev.difference !== 0 && <p className="text-xs fin-t2">{L("لا يمكن إكمال التسوية بفرق. تُحفظ كمسودة تُظهر الفرق حتى يُعالج.", "A reconciliation cannot be completed with a difference. It is saved as a draft that shows the gap until it is resolved.")}{prev.difference === prev.pendingTotal ? L(" (هنا يطابق الفرق السطور المعلّقة.)", " (Here the difference equals the pending lines.)") : ""}</p>}
       {err && <Notice tone="bad">{err}</Notice>}
-      {msg && <Notice tone="ok" icon={CheckCircle2}>{msg}</Notice>}
+      {msg && <Notice tone="ok">{msg}</Notice>}
+      {canRecon && <div className="fin-row"><Button kind="primary" busy={busy} disabled={!prev} onClick={save}>{L("حفظ التسوية", "Save reconciliation")}</Button></div>}
     </Card>
   );
 }
@@ -460,24 +461,24 @@ function ManualDialog({ open, onClose, accounts, onDone }: { open: boolean; onCl
   return (
     <Dialog open={open} onClose={onClose} title={L("قيد يدوي", "Manual entry")} sub={L("سطر بنكي أو نقدي فعلي. للمبالغ الصادرة استخدم إشارة سالبة.", "An actual bank or cash line. Use a negative amount for money out.")}>
       <Field label={L("الحساب", "Account")}><select className={INPUT} value={f.cashAccountId} onChange={set("cashAccountId")}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="fin-grid">
         <Field label={L("المبلغ (سالب للمبالغ الصادرة)", "Amount (negative for money out)")} error={err.amount}><input className={`${INPUT} ${err.amount ? "!border-red-600" : ""}`} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
         <Field label={L("التاريخ", "Date")} error={err.txnDate}><input type="date" className={`${INPUT} ${err.txnDate ? "!border-red-600" : ""}`} value={f.txnDate} onChange={set("txnDate")} /></Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="fin-grid">
         <Field label={L("الحالة", "Status")}><select className={INPUT} value={f.status} onChange={set("status")}><option value="CONFIRMED">{L("مؤكد", "Confirmed")}</option><option value="PENDING">{L("معلّق", "Pending")}</option></select></Field>
         <Field label={L("المرجع البنكي", "Bank reference")}><input className={INPUT} value={f.bankReference} onChange={set("bankReference")} /></Field>
       </div>
       {sameRef.data && sameRef.data.total > 0 && (
         <Notice tone="warn">
-          <p className="font-bold">{L("يوجد سطر بالمرجع نفسه في هذا الحساب", "A line with the same reference exists on this account")}</p>
+          <p className="font-semibold">{L("يوجد سطر بالمرجع نفسه في هذا الحساب", "A line with the same reference exists on this account")}</p>
           <p className="text-xs">{L("سيُحفظ ويُعلَّم للمراجعة كتكرار محتمل — لا يُرفض تلقائياً.", "It will be saved and flagged for review as a possible duplicate — not rejected automatically.")}</p>
         </Notice>
       )}
       <Field label={L("الوصف", "Description")}><input className={INPUT} value={f.description} onChange={set("description")} /></Field>
       <Field label={L("الطرف", "Counterparty")}><input className={INPUT} value={f.counterparty} onChange={set("counterparty")} /></Field>
       {serverErr && <Notice tone="bad">{serverErr}</Notice>}
-      <div className="flex gap-2"><Button kind="primary" busy={busy} onClick={submit}>{L("حفظ", "Save")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
+      <div className="fin-row"><Button kind="primary" busy={busy} onClick={submit}>{L("حفظ", "Save")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
     </Dialog>
   );
 }
@@ -495,7 +496,7 @@ function TransferDialog({ open, onClose, accounts, onDone }: { open: boolean; on
   }
   return (
     <Dialog open={open} onClose={onClose} title={L("تحويل بين حسابات الشركة", "Transfer between company accounts")} sub={L("ليس إيراداً ولا مصروفاً، ولا يغيّر النقد الموحد.", "Neither revenue nor expense; consolidated cash does not change.")}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="fin-grid">
         <Field label={L("من", "From")}><select className={INPUT} value={f.fromAccountId} onChange={set("fromAccountId")}><option value="">—</option>{opts}</select></Field>
         <Field label={L("إلى", "To")}><select className={INPUT} value={f.toAccountId} onChange={set("toAccountId")}><option value="">—</option>{opts}</select></Field>
         <Field label={L("المبلغ", "Amount")}><input className={INPUT} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
@@ -503,7 +504,7 @@ function TransferDialog({ open, onClose, accounts, onDone }: { open: boolean; on
       </div>
       <Field label={L("الوصف", "Description")}><input className={INPUT} value={f.description} onChange={set("description")} /></Field>
       {err && <Notice tone="bad">{err}</Notice>}
-      <div className="flex gap-2"><Button kind="primary" busy={busy} onClick={submit}>{L("تسجيل التحويل", "Record transfer")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
+      <div className="fin-row"><Button kind="primary" busy={busy} onClick={submit}>{L("تسجيل التحويل", "Record transfer")}</Button><Button onClick={onClose}>{L("إلغاء", "Cancel")}</Button></div>
     </Dialog>
   );
 }

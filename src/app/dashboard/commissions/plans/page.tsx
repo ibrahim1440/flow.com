@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Percent, Plus, Lock, UserPlus } from "lucide-react";
+import { Plus } from "lucide-react";
 import {
-  useLang, ProvisionalBanner, PageHeader, Alert, Card, SectionTitle, EmptyState, Spinner,
-  Button, Field, TextInput, Select, TextArea, Pill, Modal, api,
-  Td, ROW_ACTION, num, formatDay, formatMoney,
+  useLang, Button, Field, TextInput, Select, TextArea, Modal, Alert, api, num, formatDay, formatMoney,
 } from "../../sales/_components/ui";
+import { PerfHeader, PerfNotice, PerfLoading, PerfNote } from "../../sales/_components/perf";
 
 /**
- * Commission plan administration.
+ * Commission plan administration — Direction 2.1, GX A-P07 «خطط العمولات» (`1228:113728`,
+ * EN `1232:34685`, 1024 `1228:117242`, 390 `1232:39222`).
  *
  * ── Why there is no "edit this version" button ──
  * A plan version is immutable once anything has accrued against it. Editing a live rule in
@@ -19,18 +19,18 @@ import {
  *
  * ── Tiers are percentage POINTS on a slice ──
  * "1% plus 0.5 points on 100k–120k" pays 1,150 on a base of 110,000 — an effective
- * 1.045455% — not 1.5%. The form says so next to the field, because the difference is
+ * 1.045455% — not 1.5%. The table says so in its last column, because the difference is
  * thousands of riyals on the same numbers and it is invisible in a table of percentages.
  *
- * PROVISIONAL INTERFACE — see the banner.
+ * Visual port: the plans, versions, tiers, assignments and the three dialogs (new plan,
+ * new version, assign) send exactly what they sent before.
  */
 
 type Tier = { id?: string; fromAmount: string; toAmount: string | null; ratePercent: string };
 
 /**
- * One version of a plan, laid out the way the design explains a tier: the bands as a table
- * whose last column states the rate that actually applies to that slice, a worked example,
- * and the two constraints this release enforces.
+ * One version of a plan, laid out the way the frame explains a tier: the bands as a table
+ * whose last column states the rate that actually applies to that slice, and a worked example.
  */
 function PlanVersion({
   ar, lang, plan, version: v,
@@ -41,23 +41,21 @@ function PlanVersion({
   version: Version;
 }) {
   const frozen = v._count.accruals > 0;
+  // Two places as the frame writes a rate («2.50%»), more only when the stored rate has them —
+  // a rate is never shown rounded.
   const rate = (x: string | number) => {
-    const s = Number(x).toFixed(6);
-    return ar ? `${s}%` : `${s}%`;
+    const n = Number(x);
+    return `${Number(n.toFixed(2)) === Number(n.toFixed(6)) ? n.toFixed(2) : String(Number(n.toFixed(6)))}%`;
   };
-  const amount = (x: string | number) => {
-    const s = formatMoney(String(x), 0);
-    return ar ? s : s;
-  };
+  const exact = (x: string | number) => `${Number(x).toFixed(6)}%`;
+  const amount = (x: string | number) => formatMoney(String(x), 0);
+  const money = (x: string | number) => formatMoney(String(x));
   const base = Number(v.baseRatePercent);
 
   /**
    * An illustration, computed the way `commissionOnCumulativeBase` computes the real thing:
    * the base rate on everything, then each band's POINTS on the slice of base inside it.
-   *
-   * It exists because "1% plus 0.5 points on 100k–120k" reads to most people as 1.5% on the
-   * whole base, which is a different number by thousands of riyals. The example is taken
-   * from the plan's own bands so it can never describe a tier the plan does not have.
+   * Taken from the plan's own bands so it can never describe a tier the plan does not have.
    */
   const example = (() => {
     const second = v.tiers[1];
@@ -67,7 +65,7 @@ function PlanVersion({
     const at = Math.round((from + (to - from) / 2) / 1000) * 1000;
     if (!(at > from)) return null;
     let total = (at * base) / 100;
-    const parts = [`${amount(at)} × ${rate(base)} = ${amount(((at * base) / 100).toFixed(2))}`];
+    const parts = [`${amount(at)} × ${exact(base)} = ${amount(((at * base) / 100).toFixed(2))}`];
     for (const t of v.tiers) {
       const bFrom = Number(t.fromAmount);
       if (at <= bFrom) continue;
@@ -76,82 +74,62 @@ function PlanVersion({
       if (slice <= 0 || Number(t.ratePercent) === 0) continue;
       const add = (slice * Number(t.ratePercent)) / 100;
       total += add;
-      parts.push(`${amount(slice)} × ${rate(t.ratePercent)} = ${amount(add.toFixed(2))}`);
+      parts.push(`${amount(slice)} × ${exact(t.ratePercent)} = ${amount(add.toFixed(2))}`);
     }
     const effective = ((total / at) * 100).toFixed(6);
     return { at, parts, total, effective };
   })();
 
+  const ended = !!v.effectiveTo;
   return (
-    <div className="mt-3 first:mt-0" data-testid={`version-${plan.code}-${v.version}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="perf-card" data-testid={`version-${plan.code}-${v.version}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ fontWeight: 600 }}>
+          {ar ? (plan.nameAr ?? plan.name) : plan.name} · {ar ? `النسخة ${num(v.version, "ar")}` : `version ${v.version}`}
+        </b>
+        <span className={`st ${ended ? "" : "ok"}`} style={{ fontSize: 12.5 }}>
+          {ended ? (ar ? "منتهية" : "ended") : (ar ? "سارية" : "in force")}
+        </span>
+        <span style={{ flex: 1 }} />
         {frozen ? (
-          <span className="inline-flex items-center gap-1.5 rounded-[10px] border border-oo-status-hold bg-oo-status-hold-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-hold">
-            <Lock size={12} aria-hidden />
-            {ar ? "مجمَّدة — لها استحقاقات" : "frozen — it has accruals"}
-          </span>
+          <span className="st in" style={{ fontSize: 12.5 }}>{ar ? "مجمَّدة — لها استحقاقات" : "frozen — it has accruals"}</span>
         ) : (
-          <span className="text-[12px] leading-[18px] text-oo-text-muted">
-            {num(v._count.assignments, lang)} {ar ? "إسناد" : "assigned"}
+          <span className="st" style={{ fontSize: 12.5 }}>
+            {num(v._count.assignments, lang)} {ar ? "إسناد" : v._count.assignments === 1 ? "assignment" : "assignments"}
           </span>
         )}
-        <p className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
-          {ar ? (plan.nameAr ?? plan.name) : plan.name}
-          {" · "}
-          {ar ? `النسخة ${num(v.version, "ar")}` : `version ${v.version}`}
-          {" — "}
-          {v.effectiveTo ? (ar ? "منتهية" : "ended") : (ar ? "سارية" : "in force")}
-        </p>
       </div>
-      <p className="mt-1 text-[12px] leading-[18px] text-oo-text-secondary">
+      <div className="sm" style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
         {ar ? "الأساس: صافي المحصّل بعد الضريبة وغير المؤهّل" : "Basis: net collected after tax and non-qualifying"}
-        {" · "}
-        {ar ? "النسبة الأساس" : "base rate"} {rate(base)}
+        {" · "}{ar ? "النسبة الأساس" : "base rate"} <span className="n">{rate(base)}</span>
         {" · "}
         {v.tierMode === "INCREMENTAL"
           ? (ar ? "الشرائح تراكمية" : "tiers are incremental")
-          : (ar ? "بلا شرائح" : "no tiers")}
-        {" · "}
-        {ar ? "سريان من" : "from"} {formatDay(v.effectiveFrom, lang)}
-        {" · "}
-        {v.effectiveTo ? formatDay(v.effectiveTo, lang) : (ar ? "مفتوح" : "open")}
-      </p>
+          : (ar ? "بلا شرائح — نسبة ثابتة" : "no tiers — a flat rate")}
+        {" · "}{ar ? "سريان من" : "from"} <span className="n">{formatDay(v.effectiveFrom, lang)}</span>
+        {" "}{ar ? "حتى" : "until"} {v.effectiveTo ? <span className="n">{formatDay(v.effectiveTo, lang)}</span> : (ar ? "مفتوح" : "open")}
+      </div>
 
       {v.tiers.length > 0 && (
-        <div className="mt-2 overflow-x-auto rounded-2xl border border-oo-border-default">
-          <table className="w-full min-w-[560px] border-collapse text-start">
-            <thead>
-              <tr className="bg-oo-bg-subtle">
-                {[ar ? "من" : "From", ar ? "إلى" : "To", ar ? "نقاط تُضاف" : "Points added", ar ? "الأثر" : "Effect"].map(
-                  (l) => (
-                    <th
-                      key={l}
-                      scope="col"
-                      className="px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted"
-                    >
-                      {l}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
+        <div className="perf-scroll">
+          <table className="t dense">
+            <thead><tr>
+              <th scope="col" className="num">{ar ? "من" : "From"}</th>
+              <th scope="col" className="num">{ar ? "إلى" : "To"}</th>
+              <th scope="col" className="num">{ar ? "نقاط تُضاف" : "Points added"}</th>
+              <th scope="col">{ar ? "الأثر" : "Effect"}</th>
+            </tr></thead>
             <tbody>
               {v.tiers.map((t, i) => (
-                <tr key={i} className="border-t border-oo-border-default">
-                  <Td>{amount(t.fromAmount)}</Td>
-                  <Td>{t.toAmount === null ? (ar ? "ما فوق" : "and above") : amount(t.toAmount)}</Td>
-                  <Td>
-                    {Number(t.ratePercent) === 0
-                      ? "—"
-                      : `+ ${ar ? Number(t.ratePercent).toFixed(2) : Number(t.ratePercent).toFixed(2)}`}
-                  </Td>
+                <tr key={i}>
+                  <td className="num">{money(t.fromAmount)}</td>
+                  <td className="num">{t.toAmount === null ? (ar ? "ما فوق" : "and above") : money(t.toAmount)}</td>
+                  <td className="num">{Number(t.ratePercent) === 0 ? "—" : <span className="n">+{Number(t.ratePercent).toFixed(2)}</span>}</td>
                   {/* The column that stops "1% + 0.5 points" being read as 1.5% on everything. */}
-                  <Td>
-                    {rate(base + Number(t.ratePercent))}{" "}
-                    {i === 0
-                      ? (ar ? "على هذا الجزء" : "on this slice")
-                      : (ar ? "على هذا الجزء فقط" : "on this slice only")}
-                  </Td>
+                  <td className="sm">
+                    <span className="n">{rate(base + Number(t.ratePercent))}</span>{" "}
+                    {i === 0 ? (ar ? "على هذا الجزء" : "on this slice") : (ar ? "على هذا الجزء فقط" : "on this slice only")}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -160,24 +138,12 @@ function PlanVersion({
       )}
 
       {example && (
-        <p
-          className="mt-2 rounded-[10px] border border-oo-status-ready bg-oo-status-ready-bg px-3 py-[9px] text-[12px] leading-[18px] text-oo-status-ready"
-          data-testid={`tier-example-${plan.code}-${v.version}`}
-        >
-          {ar ? "مثال: أساس" : "Example: a base of"} {amount(example.at)} → {example.parts.join(" · ")} ·{" "}
-          {ar ? "المجموع" : "total"} {amount(example.total.toFixed(2))} {ar ? "ر.س، بنسبة فعّالة" : "SAR, an effective"}{" "}
-          {rate(example.effective)} — {ar ? "لا" : "not"} {rate(base + Number(v.tiers[1].ratePercent))}.
+        <p className="sm" style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }} data-testid={`tier-example-${plan.code}-${v.version}`}>
+          {ar ? "مثال: أساس" : "Example: a base of"} <span className="n">{amount(example.at)}</span> → {example.parts.join(" · ")} ·{" "}
+          {ar ? "المجموع" : "total"} <span className="n">{amount(example.total.toFixed(2))}</span> {ar ? "ر.س، بنسبة فعّالة" : "SAR, an effective"}{" "}
+          <span className="n">{exact(example.effective)}</span> — {ar ? "لا" : "not"} <span className="n">{exact(base + Number(v.tiers[1].ratePercent))}</span>.
         </p>
       )}
-
-      <p className="mt-2 flex items-start gap-2 rounded-[10px] border border-oo-status-rejected bg-oo-status-rejected-bg px-3 py-[9px] text-[12px] leading-[18px] text-oo-status-rejected">
-        <Lock size={13} aria-hidden className="mt-0.5 shrink-0" />
-        <span>
-          {ar
-            ? "الشرائح بأثر رجعي مرفوضة في هذا الإصدار — تُعطي مبالغ مختلفة جذرياً على الأرقام نفسها، والخطأ يظهر في قسيمة راتب. العملة الريال السعودي حصراً: لا سياسة صرف عملات."
-            : "Retroactive tiers are refused in this release — they give radically different amounts on the same figures, and the mistake surfaces on a payslip. Saudi riyals only: there is no exchange-rate policy."}
-        </span>
-      </p>
     </div>
   );
 }
@@ -232,12 +198,8 @@ export default function CommissionPlansPage() {
   >(null);
 
   /**
-   * Reload counter.
-   *
-   * The fetch lives in the effect rather than in a `useCallback` the effect calls: the lint
-   * rule resolves a called callback and sees setState reachable from the effect body, and
-   * inlining puts the first `await` before any state write. Mutations refresh by bumping this
-   * instead of holding a callable loader, so the refresh behaviour is unchanged.
+   * Reload counter. The fetch lives in the effect; mutations refresh by bumping this instead of
+   * holding a callable loader, so the refresh behaviour is unchanged.
    */
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
@@ -263,197 +225,132 @@ export default function CommissionPlansPage() {
     return () => { cancelled = true; };
   }, [ar, reloadToken]);
 
-  if (loading) return <Spinner />;
+  if (loading) return <PerfLoading ar={ar} />;
+
+  const live = assignments.filter((a) => a.live).length;
+  const done = (msg: string) => { setDialog(null); setSuccess(msg); reload(); };
+
+  const actions = (
+    <>
+      <button type="button" className="btn" onClick={() => setDialog({ kind: "assign" })} data-testid="new-assignment">
+        {ar ? "إسناد موظّف إلى خطة" : "Assign someone to a plan"}
+      </button>
+      <button type="button" className="btn p" onClick={() => setDialog({ kind: "plan" })} data-testid="new-plan">
+        <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+        {ar ? "خطة جديدة" : "New plan"}
+      </button>
+    </>
+  );
 
   return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+    <div className="pg">
+      <PerfHeader ar={ar} title={ar ? "الأداء والعمولات" : "Performance and commissions"}
+        phoneTitle={ar ? "خطط العمولات" : "Commission plans"}
+        meta={[
+          ar ? "النسخة تُجمَّد عند أول استحقاق" : "A version freezes at its first accrual",
+          <>{num(plans.length, lang)} {ar ? "خطة" : plans.length === 1 ? "plan" : "plans"} · {num(live, lang)} {ar ? "إسناد ساري" : "live assignments"}</>,
+        ]}
+        actions={actions} />
 
-      <PageHeader
-        title={ar ? "خطط العمولة والإسناد" : "Commission plans and assignments"}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{ar ? "النسخة تُجمَّد عند أول استحقاق" : "A version freezes at its first accrual"}</span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>{ar ? "الإسناد يُنهى ولا يُحذف" : "an assignment is ended, never deleted"}</span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>
-              {num(plans.length, lang)} {ar ? "خطة" : "plans"} ·{" "}
-              {num(assignments.filter((a) => a.live).length, lang)}{" "}
-              {ar ? "إسناد ساري" : "live assignments"}
-            </span>
-          </span>
-        }
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setDialog({ kind: "assign" })} testId="new-assignment">
-              <UserPlus size={15} aria-hidden /> {ar ? "إسناد موظّف إلى خطة" : "Assign someone to a plan"}
-            </Button>
-            <Button onClick={() => setDialog({ kind: "plan" })} testId="new-plan">
-              <Plus size={15} aria-hidden /> {ar ? "خطة جديدة" : "New plan"}
-            </Button>
-          </>
-        }
-      />
-
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
+      <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
+      <PerfNotice kind="success" ar={ar} onDismiss={() => setSuccess("")}>{success}</PerfNotice>
 
       {plans.length === 0 ? (
-        <Card>
-          <EmptyState>
-            <Percent size={28} className="mx-auto mb-2 opacity-40" aria-hidden />
-            {ar ? "لا توجد خطط عمولات بعد." : "No commission plans yet."}
-          </EmptyState>
-        </Card>
+        <div style={{ padding: "40px 0", textAlign: "center" }} data-testid="plans-empty">
+          <p style={{ fontWeight: 500, margin: 0 }}>{ar ? "لا توجد خطط عمولات بعد." : "No commission plans yet."}</p>
+        </div>
       ) : (
-        <div className="space-y-4">
+        <div className="cols perf-cols" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 40 }}>
           {plans.map((plan) => (
-            <Card key={plan.id}>
-              <SectionTitle
-                right={
-                  <Button
-                    variant="ghost"
-                    onClick={() => setDialog({ kind: "version", plan })}
-                    testId={`new-version-${plan.code}`}
-                  >
-                    + {ar ? "إصدار جديد" : "New version"}
-                  </Button>
-                }
-              >
-                <span className="inline-flex items-center gap-2">
-                  <span className="font-mono text-xs bg-oo-bg-subtle px-1.5 py-0.5 rounded">{plan.code}</span>
-                  {ar ? (plan.nameAr ?? plan.name) : plan.name}
-                  {!plan.isActive && <Pill tone="neutral">{ar ? "غير نشطة" : "inactive"}</Pill>}
-                </span>
-              </SectionTitle>
-
-              {plan.description && (
-                <p className="mb-3 text-[12px] leading-[18px] text-oo-text-secondary">{plan.description}</p>
-              )}
-
+            <div key={plan.id} style={{ display: "grid", gap: 10, alignContent: "start", minWidth: 0 }} data-testid={`plan-${plan.code}`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span className="perf-code">{plan.code}</span>
+                <b style={{ fontWeight: 600, fontSize: 15 }}>{ar ? (plan.nameAr ?? plan.name) : plan.name}</b>
+                {plan.description && <span className="sm" style={{ color: "var(--text-muted)", fontSize: 12.5 }}>{plan.description}</span>}
+                {!plan.isActive && <span className="perf-code">{ar ? "غير نشطة" : "inactive"}</span>}
+                <span style={{ flex: 1 }} />
+                <button type="button" className="btn g sm" onClick={() => setDialog({ kind: "version", plan })} data-testid={`new-version-${plan.code}`}>
+                  <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+                  {ar ? "إصدار جديد" : "New version"}
+                </button>
+              </div>
               {plan.versions.map((v) => (
                 <PlanVersion key={v.id} ar={ar} lang={lang} plan={plan} version={v} />
               ))}
-            </Card>
+            </div>
           ))}
         </div>
       )}
 
-      {/* ── Assignments ───────────────────────────────────────────── */}
-      <Card>
-        <SectionTitle>
-          {ar ? "إسناد الموظّفين — لكل موظّف نسخة وفترة سريان" : "Assignments — each person has a version and a period"}
-        </SectionTitle>
-        {assignments.length === 0 ? (
-          <EmptyState>{ar ? "لم يُعيَّن أحد بعد." : "Nobody is assigned yet."}</EmptyState>
-        ) : (
-          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
-            <table className="w-full min-w-[720px] border-collapse text-start" data-testid="assignments-table">
-              <thead>
-                <tr className="bg-oo-bg-subtle">
-                  {[
-                    [ar ? "الموظّف" : "Employee", "min-w-[200px]"],
-                    [ar ? "النسخة" : "Version", "w-[200px]"],
-                    [ar ? "سريان من" : "From", "w-[150px]"],
-                    [ar ? "سريان حتى" : "Until", "w-[150px]"],
-                    ["", "w-[160px]"],
-                  ].map(([l, w], i) => (
-                    <th
-                      key={i}
-                      scope="col"
-                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
-                    >
-                      {l}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {assignments.map((a) => (
-                  <tr
-                    key={a.id}
-                    className="border-t border-oo-border-default"
-                    data-testid={`assignment-${a.employeeId}`}
-                  >
-                    <Td>
-                      {a.employee.name}
-                      {!a.employee.active && (
-                        <Pill tone="neutral">{ar ? "غير نشط" : "inactive"}</Pill>
-                      )}
-                    </Td>
-                    <Td>
-                      {a.plan.name}
-                      {" · "}
-                      {ar ? `ن${num(a.planVersion.version, "ar")}` : `v${a.planVersion.version}`}
-                    </Td>
-                    <Td>{formatDay(a.effectiveFrom, lang)}</Td>
-                    <Td>{a.effectiveTo ? formatDay(a.effectiveTo, lang) : (ar ? "مفتوح" : "open")}</Td>
-                    <Td>
-                      {a.live ? (
-                        <EndAssignmentButton
-                          ar={ar}
-                          assignmentId={a.id}
-                          onDone={(msg) => {
-                            setSuccess(msg);
-                            reload();
-                          }}
-                          onError={setError}
-                        />
-                      ) : (
-                        <span className={`${ROW_ACTION} cursor-not-allowed text-oo-text-muted`}>
-                          {ar ? "منتهٍ" : "ended"}
-                        </span>
-                      )}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
-          {ar
-            ? "لا يستطيع أحد تعيين نفسه على خطة، مهما كانت صلاحياته — لأن صلاحية إدارة الخطط قد تكون بيد مدير مبيعات هو نفسه على خطة."
-            : "Nobody can put themselves on a plan, whatever their privileges: plan administration can legitimately belong to a sales manager who is on a plan themselves."}
-        </p>
-      </Card>
+      <div className="hr" style={{ margin: "28px 0" }} />
 
-      {dialog?.kind === "plan" && (
-        <PlanDialog
-          ar={ar}
-          onClose={() => setDialog(null)}
-          onDone={(m) => {
-            setDialog(null);
-            setSuccess(m);
-            reload();
-          }}
-        />
+      {/* ── Assignments ───────────────────────────────────────────── */}
+      <div className="bh">
+        <h2 className="bt">{ar ? "إسناد الموظّفين" : "Assignments"}</h2>
+        <span className="sub">{ar ? "لكل موظّف نسخة وفترة سريان" : "each person has a version and a period"}</span>
+      </div>
+      {assignments.length === 0 ? (
+        <p className="sm" style={{ color: "var(--text-muted)", fontSize: 13.5 }}>{ar ? "لم يُعيَّن أحد بعد." : "Nobody is assigned yet."}</p>
+      ) : (
+        <div className="perf-scroll">
+          <table className="t" data-testid="assignments-table">
+            <thead><tr>
+              <th scope="col">{ar ? "الموظّف" : "Employee"}</th>
+              <th scope="col">{ar ? "النسخة" : "Version"}</th>
+              <th scope="col">{ar ? "سريان من" : "From"}</th>
+              <th scope="col">{ar ? "سريان حتى" : "Until"}</th>
+              <th scope="col"><span className="sr-only">{ar ? "الإجراء" : "Action"}</span></th>
+            </tr></thead>
+            <tbody>
+              {assignments.map((a) => (
+                <tr key={a.id} data-testid={`assignment-${a.employeeId}`}>
+                  <td>
+                    <span className="who"><bdi>{a.employee.name}</bdi></span>
+                    {!a.employee.active && <span className="perf-code" style={{ marginInlineStart: 8 }}>{ar ? "غير نشط" : "inactive"}</span>}
+                  </td>
+                  <td><span dir="ltr" style={{ unicodeBidi: "isolate" }}>{a.plan.code} v{a.planVersion.version}</span></td>
+                  <td className="n">{formatDay(a.effectiveFrom, lang)}</td>
+                  <td>{a.effectiveTo ? <span className="n">{formatDay(a.effectiveTo, lang)}</span> : (ar ? "مفتوح" : "open")}</td>
+                  <td style={{ textAlign: "end" }}>
+                    {a.live ? (
+                      <EndAssignmentButton
+                        ar={ar}
+                        assignmentId={a.id}
+                        onDone={(msg) => { setSuccess(msg); reload(); }}
+                        onError={setError}
+                      />
+                    ) : (
+                      <button type="button" className="btn sm" disabled>{ar ? "منتهٍ" : "ended"}</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr><td colSpan={5}>
+                {ar
+                  ? "الإسنادات لا تتداخل · تُنهى ولا تُحذف · لا يُسند أحد نفسه إلى خطة، مهما كانت صلاحياته"
+                  : "Assignments do not overlap · they are ended, never deleted · nobody can put themselves on a plan, whatever their privileges"}
+              </td></tr>
+            </tfoot>
+          </table>
+        </div>
       )}
-      {dialog?.kind === "version" && (
-        <PlanDialog
-          ar={ar}
-          plan={dialog.plan}
-          onClose={() => setDialog(null)}
-          onDone={(m) => {
-            setDialog(null);
-            setSuccess(m);
-            reload();
-          }}
-        />
-      )}
+
+      <div style={{ marginTop: 14 }}>
+        <PerfNote>
+          <span>
+            {ar
+              ? "الشرائح بأثر رجعي مرفوضة في هذا الإصدار — تُعطي مبالغ مختلفة جذريًا على الأرقام نفسها. العملة الريال السعودي حصرًا: لا سياسة صرف عملات."
+              : "Retroactive tiers are refused in this release — they give radically different amounts on the same figures. Saudi riyals only: there is no exchange-rate policy."}
+          </span>
+        </PerfNote>
+      </div>
+
+      {dialog?.kind === "plan" && <PlanDialog ar={ar} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === "version" && <PlanDialog ar={ar} plan={dialog.plan} onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === "assign" && (
-        <AssignDialog
-          ar={ar}
-          plans={plans}
-          employees={employees}
-          onClose={() => setDialog(null)}
-          onDone={(m) => {
-            setDialog(null);
-            setSuccess(m);
-            reload();
-          }}
-        />
+        <AssignDialog ar={ar} plans={plans} employees={employees} onClose={() => setDialog(null)} onDone={done} />
       )}
     </div>
   );
@@ -473,7 +370,8 @@ function EndAssignmentButton({
       <button
         onClick={() => setOpen(true)}
         data-testid={`end-${assignmentId}`}
-        className={`${ROW_ACTION} text-oo-text-primary hover:border-oo-action-primary`}
+        className="btn sm"
+        type="button"
       >
         {ar ? "إنهاء الإسناد" : "End the assignment"}
       </button>

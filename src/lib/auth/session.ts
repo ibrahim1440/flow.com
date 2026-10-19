@@ -16,6 +16,7 @@ import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 import { simpleModePermissions } from "@/lib/simple-mode";
 
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MS } from "./session-policy";
+import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, deviceIdFromCookieHeader, newDeviceId, validDeviceId } from "./device";
 
 export { SESSION_IDLE_MS, SESSION_ABSOLUTE_MS };
 /** lastSeenAt is written at most this often (not on every request). */
@@ -24,17 +25,23 @@ const TOUCH_MS = 60 * 1000;
 export type SessionMethod = "PIN" | "USERNAME_PIN" | "PASSWORD";
 type Db = typeof prisma | Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-export async function createSession(employeeId: string, method: SessionMethod, mfa: boolean, request?: Request, db: Db = prisma) {
+export async function createSession(employeeId: string, method: SessionMethod, mfa: boolean, request?: Request, db: Db = prisma, device?: { deviceId: string | null; ipHash: string | null; userAgent: string | null }) {
   const id = randomBytes(24).toString("base64url");
   const now = Date.now();
+  // Own profile (Figma TD-11): the browser this session is opened from — the hq_device cookie it
+  // already holds, or a new id the response sets (setSessionCookie). A session that replaces
+  // another (a self credential change) inherits the replaced one's browser, address and agent.
+  const deviceId = device ? device.deviceId : request ? (deviceIdFromCookieHeader(request.headers.get("cookie")) ?? newDeviceId()) : null;
+  const ipHash = device ? device.ipHash : request ? hashRateLimitKey(extractIp(request)) : null;
+  const userAgent = device ? device.userAgent : request?.headers.get("user-agent")?.slice(0, 300) ?? null;
   return db.authSession.create({
     // Owner decision 4: the secret this sign-in used (a step-up overwrites it with its own).
-    data: { id, employeeId, method, mfa, authFactor: method === "PASSWORD" ? "PASSWORD" : "PIN", expiresAt: new Date(now + SESSION_ABSOLUTE_MS), ipHash: request ? hashRateLimitKey(extractIp(request)) : null, userAgent: request?.headers.get("user-agent")?.slice(0, 300) ?? null },
+    data: { id, employeeId, method, mfa, authFactor: method === "PASSWORD" ? "PASSWORD" : "PIN", expiresAt: new Date(now + SESSION_ABSOLUTE_MS), ipHash, userAgent, deviceId },
   });
 }
 
 /** The cookie for a session: the token names the row; it never outlives the absolute deadline. */
-export async function setSessionCookie(response: NextResponse, employeeId: string, session: { id: string; expiresAt: Date }) {
+export async function setSessionCookie(response: NextResponse, employeeId: string, session: { id: string; expiresAt: Date; deviceId?: string | null }) {
   // Loaded here, not at the top: the revocation helpers below are used by HR services that also
   // run outside the Next.js server (integration tests), where "server-only" cannot load.
   const { signToken, parsePermissions, buildDefaultPermissions } = await import("@/lib/auth");
@@ -45,6 +52,8 @@ export async function setSessionCookie(response: NextResponse, employeeId: strin
   const token = await signToken({ id: e.id, name: e.name, role: e.role, permissions, preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar", cv: credentialVersion({ id: e.id, username: e.username, pin: e.pin, password: e.password }), sid: session.id }, session.expiresAt);
   const maxAge = Math.max(1, Math.floor((session.expiresAt.getTime() - Date.now()) / 1000));
   response.cookies.set("token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge, path: "/" });
+  // The browser id outlives the session (it names the browser, not the sign-in); never a credential.
+  if (validDeviceId(session.deviceId)) response.cookies.set(DEVICE_COOKIE, session.deviceId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: DEVICE_COOKIE_MAX_AGE, path: "/" });
   return response;
 }
 

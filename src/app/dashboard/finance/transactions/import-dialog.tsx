@@ -80,53 +80,53 @@ function ImportDialogBody({ open, onClose, accounts, onDone, branch }: Props) {
   const importable = preview ? preview.summary.new + preview.summary.flagged + preview.summary.existing : 0;
   return (
     <Dialog open={open} onClose={onClose} width="max-w-[760px]" title={L("استيراد كشف بنكي (CSV)", "Import bank statement (CSV)")} sub={L("معاينة قبل الحفظ · لا يُرفض سطر لمجرد تطابق التاريخ والمبلغ", "Preview before saving · no line is rejected just because its date and amount match")}>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="fin-grid" style={{ ["--fin-cols" as string]: 3 }}>
         <Field label={L("الحساب", "Account")}><select className={INPUT} value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</select></Field>
-        <Field label={L("الملف", "File")}><input type="file" accept=".csv,text/csv" className={`${INPUT} !py-1.5`} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} /></Field>
+        <Field label={L("الملف", "File")}><input type="file" accept=".csv,text/csv" className={INPUT} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} /></Field>
         <Field label={L("صيغة التاريخ", "Date format")}><select className={INPUT} value={fmt} onChange={(e) => setFmt(e.target.value)}><option>YYYY-MM-DD</option><option>DD/MM/YYYY</option><option>MM/DD/YYYY</option></select></Field>
       </div>
       {header.length > 0 && (
         <>
-          <h3 className="text-[13px] font-extrabold">{L("ربط الأعمدة", "Column mapping")}</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <h3 className="hr-label" style={{ margin: 0 }}>{L("ربط الأعمدة", "Column mapping")}</h3>
+          <div className="fin-grid" style={{ ["--fin-cols" as string]: 5 }}>
             {col("date", L("التاريخ", "Date"))}
             {col("amount", L("المبلغ (موجب/سالب)", "Amount (signed)"))}
             {col("reference", L("المرجع", "Reference"))}
             {col("description", L("الوصف", "Description"))}
             {col("account", L("الحساب (اختياري)", "Account (optional)"))}
           </div>
-          {!map.amount && <div className="grid grid-cols-2 gap-3">{col("debit", L("عمود المدين", "Debit column"))}{col("credit", L("عمود الدائن", "Credit column"))}</div>}
+          {!map.amount && <div className="fin-grid">{col("debit", L("عمود المدين", "Debit column"))}{col("credit", L("عمود الدائن", "Credit column"))}</div>}
         </>
       )}
       {preview && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {[[L("جديد", "New"), preview.summary.new, "bg-green-100"], [L("يؤكد سطراً مسجّلاً", "Confirms a recorded line"), preview.summary.existing, "bg-orange-light"], [L("مكرر (يُتجاهل)", "Duplicate (skipped)"), preview.summary.duplicate, "bg-cream-dark"], [L("للمراجعة (تطابق محتمل)", "To review (possible match)"), preview.summary.flagged, "bg-amber-100"], [L("أخطاء", "Errors"), preview.summary.errors, "bg-red-100"]].map(([l, v, c]) => (
-              <div key={String(l)} className={`rounded-[10px] px-3 py-2.5 ${c}`}><p className="text-[11px] font-bold text-brown">{l}</p><p className="text-lg font-extrabold tabular-nums">{v}</p></div>
+          <div className="fin-tiles" style={{ ["--fin-cols" as string]: 5 }}>
+            {[[L("جديد", "New"), preview.summary.new, "tone-success"], [L("يؤكد سطراً مسجّلاً", "Confirms a recorded line"), preview.summary.existing, "tone-info"], [L("مكرر (يُتجاهل)", "Duplicate (skipped)"), preview.summary.duplicate, ""], [L("للمراجعة (تطابق محتمل)", "To review (possible match)"), preview.summary.flagged, "tone-warning"], [L("أخطاء", "Errors"), preview.summary.errors, "tone-danger"]].map(([l, v, c]) => (
+              <div key={String(l)} className={`fin-box ${c}`}><p className="fin-cap fin-t2">{l}</p><p className="fin-tile-v">{v}</p></div>
             ))}
           </div>
           {preview.errors.length > 0 && (
-            <div className="rounded-[10px] bg-red-100 p-3 flex flex-col gap-1.5 max-h-40 overflow-y-auto">
-              <p className="text-xs font-extrabold text-red-600">{L("تقرير الأخطاء", "Error report")}</p>
-              {preview.errors.map((e, i) => <p key={i} className="text-xs text-red-600">{e.rowNo ? L(`السطر ${e.rowNo}`, `Row ${e.rowNo}`) : L("الربط", "Mapping")} · {FIELD[e.field] ? L(FIELD[e.field][0], FIELD[e.field][1]) : e.field}: «{e.raw}» — {rowError(e)}</p>)}
+            <div className="fin-box tone-danger" style={{ maxHeight: 160, overflowY: "auto" }}>
+              <p className="fin-strong fin-danger" style={{ margin: 0 }}>{L("تقرير الأخطاء", "Error report")}</p>
+              {preview.errors.map((e, i) => <p key={i} className="fin-cap fin-danger">{e.rowNo ? L(`السطر ${e.rowNo}`, `Row ${e.rowNo}`) : L("الربط", "Mapping")} · {FIELD[e.field] ? L(FIELD[e.field][0], FIELD[e.field][1]) : e.field}: «{e.raw}» — {rowError(e)}</p>)}
             </div>
           )}
           {preview.rows.filter((r) => r.status === "FLAGGED").length > 0 && (
-            <div className="rounded-[10px] bg-amber-100 p-3 flex flex-col gap-1 max-h-32 overflow-y-auto">
-              {preview.rows.filter((r) => r.status === "FLAGGED").map((r) => <p key={r.rowNo} className="text-xs text-amber-700">{L(`السطر ${r.rowNo}`, `Row ${r.rowNo}`)} · {r.txnDate} · {r.description}: {r.flaggedReason}</p>)}
+            <div className="fin-box tone-warning" style={{ maxHeight: 128, overflowY: "auto" }}>
+              {preview.rows.filter((r) => r.status === "FLAGGED").map((r) => <p key={r.rowNo} className="fin-cap fin-warning">{L(`السطر ${r.rowNo}`, `Row ${r.rowNo}`)} · {r.txnDate} · {r.description}: {r.flaggedReason}</p>)}
             </div>
           )}
         </>
       )}
       {err && <Notice tone="bad">{err}</Notice>}
       {done && <Notice tone="ok">{done}</Notice>}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="fin-row">
         {!preview ? <Button kind="primary" busy={busy} disabled={!csv || !map.date || (!map.amount && !(map.debit && map.credit))} onClick={doPreview}>{L("معاينة", "Preview")}</Button>
           : <Button kind="primary" busy={busy} disabled={importable === 0} onClick={commit}>{L(`استيراد ${importable} سطراً`, `Import ${importable} lines`)}</Button>}
         <Button onClick={onClose}>{L("إغلاق", "Close")}</Button>
-        <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={pending} onChange={(e) => setPending(e.target.checked)} />{L("استيراد كمعلّق", "Import as pending")}</label>
+        <label className="fin-check"><input type="checkbox" checked={pending} onChange={(e) => setPending(e.target.checked)} />{L("استيراد كمعلّق", "Import as pending")}</label>
       </div>
-      <p className="text-xs text-brown">{L("تُدخل الأسطر الجديدة والمحتملة التكرار إلى قائمة المراجعة ولا تُخصص قبل تصنيفها. السطر الذي يطابق دفعة أو إيصالاً مسجّلاً مسبقاً (المبلغ نفسه والمرجع نفسه، أو خلال 3 أيام قبل و7 بعد) يؤكّده ولا يُنشئ سطراً ثانياً.", "New and possibly duplicate lines enter the review queue and are not allocated before they are classified. A line that matches a payment or receipt already recorded (same amount and reference, or within 3 days before / 7 after) confirms it instead of creating a second line.")}</p>
+      <p className="fin-cap">{L("تُدخل الأسطر الجديدة والمحتملة التكرار إلى قائمة المراجعة ولا تُخصص قبل تصنيفها. السطر الذي يطابق دفعة أو إيصالاً مسجّلاً مسبقاً (المبلغ نفسه والمرجع نفسه، أو خلال 3 أيام قبل و7 بعد) يؤكّده ولا يُنشئ سطراً ثانياً.", "New and possibly duplicate lines enter the review queue and are not allocated before they are classified. A line that matches a payment or receipt already recorded (same amount and reference, or within 3 days before / 7 after) confirms it instead of creating a second line.")}</p>
     </Dialog>
   );
 }

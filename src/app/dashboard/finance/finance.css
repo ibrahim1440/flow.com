@@ -1,15 +1,229 @@
 /*
- * Finance section typography, matched to the agreed Figma frames (page "15 — Finance").
+ * Finance · cash & budget — Direction 2.1 (UI batch 2, GX B-P01…B-P07, Figma
+ * 1JbZgpMqmPkUVne8ms9Ozz). Replaces the old FIN-01…06 typography patch.
  *
- * Every text layer in those frames uses Figma's "Auto" line height, which renders Tajawal at
- * 1.2 × the font size (measured: 11→13, 12→14, 13→16, 14→17, 15→18, 20→24, 24→29 px). The
- * shell's Tailwind base sets 1.5, which made every text-bearing block in the section taller
- * than the design (tabs +5 px, KPI cards +5 px, the alerts card +62 px); the browser's
- * `normal` is taller still for Tajawal, so the measured ratio is used. Scoped to the Finance
- * root so no other module changes; unlayered on purpose so it wins over Tailwind's layered
- * utilities.
+ * The six screens render inside the operations scope (OpsRoot: [data-hr-root] [data-ops-root])
+ * and use the shared HR / operations primitives and the stock metric strip (stock.css
+ * .stk-metrics). This file only adds what the GX frames draw that the kits do not have: the
+ * link tab bar, the section head with an inline caption, the hero figure, the allocation
+ * equation and its bar, chips, the label · value disclosure rows and a handful of text tones.
+ * Every value is a Direction 2.1 token; no colour, size or pattern is new. The fin-* classes are
+ * not scoped to the page root because the HR Dialog renders them outside it.
  */
-[data-finance-root],
-[data-finance-root] * {
-  line-height: 1.2;
+
+/* Page rhythm: blocks separated by a hairline, 24 px apart (GX: «hairline between sections»). */
+[data-fin-root] { display: flex; flex-direction: column; gap: 20px; }
+[data-fin-root] .fin-body { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.fin-sec { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.fin-sec.is-ruled { border-top: 1px solid var(--border-subtle); padding-top: 24px; }
+.fin-stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fin-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fin-center { justify-content: center; }
+.fin-grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+.fin-grid-aside { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.72fr); gap: 40px; align-items: start; }
+@media (max-width: 1279px) { .fin-grid-2, .fin-grid-aside { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+
+/* Link tab bar (Tab 10:74, underline): the six areas are pages, so the tabs are links and the
+   current one carries aria-current; drawn exactly as .hr-tab[aria-selected]. */
+.fin-tabs .hr-tab { text-decoration: none; }
+.fin-tabs .hr-tab[aria-current="page"] { color: var(--hr-text); font-weight: 500; box-shadow: inset 0 -1.5px 0 var(--hr-primary); }
+@media (max-width: 767px) {
+  .fin-tabs .hr-tab[aria-current="page"] { background: var(--hr-text); color: var(--hr-inverse); box-shadow: none; }
+  .fin-tabs .hr-tab[aria-current="page"] .hr-count { color: inherit; }
+}
+
+/* Section head (Block header): title 16/600, an inline muted caption, the end actions. */
+.fin-head { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.fin-head h2 { font: 600 16px/20.8px var(--f-ui); margin: 0; color: var(--text-primary); }
+.fin-head .hr-caption { margin: 0; }
+.fin-head-end { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-inline-start: auto; }
+.fin-head-end .ops-lk, .fin-lk { font-size: 13px; font-weight: 500; color: var(--text-link, var(--action-primary)); text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; }
+
+/* Hero figure (B-01: «النقد المؤكد في الحسابات 412,900.00 ر.س»). */
+.fin-hero { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fin-hero .stk-lbl { font-size: 12.5px; line-height: 18px; font-weight: 500; color: var(--text-muted); }
+.fin-hero-v { font: 300 52px/1.05 var(--f-num); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text-primary); white-space: nowrap; }
+.fin-hero-v .stk-unit { font: 500 13px/1 var(--f-ui); color: var(--text-muted); margin-inline-start: 6px; letter-spacing: 0; }
+.fin-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); gap: 32px; align-items: end; }
+.fin-metrics { margin: 0; }
+.fin-metrics .stk-mid.is-danger { color: var(--status-danger); }
+.fin-metrics .stk-mid.is-success { color: var(--status-success); }
+@media (max-width: 1279px) { .fin-top { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+@media (max-width: 767px) { .fin-hero-v { font-size: 40px; } }
+
+/* Allocation equation (B-03: eligible = allocated + unallocated) and its two-part bar. */
+.fin-eq { display: flex; align-items: flex-end; gap: 4px 20px; flex-wrap: wrap; }
+.fin-eq > div { display: flex; flex-direction: column; gap: 6px; }
+.fin-eq .fin-eq-op { font: 300 28px/1 var(--f-num); color: var(--text-muted); padding-bottom: 4px; }
+.fin-eq .stk-mid { font: 400 26px/1.1 var(--f-num); font-variant-numeric: tabular-nums; margin: 0; color: var(--text-primary); }
+.fin-eq .stk-mid.is-danger { color: var(--status-danger); }
+.fin-eq-end { margin-inline-start: auto; display: flex; gap: 8px; flex-wrap: wrap; align-self: center; }
+.fin-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--surface-selected); }
+.fin-bar > span { display: block; height: 100%; }
+.fin-bar > .is-a { background: var(--action-primary); }
+.fin-bar > .is-b { background: var(--border-strong); flex: 1; }
+.fin-notes { display: flex; gap: 4px 16px; flex-wrap: wrap; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+
+/* Chips (Badge): tinted, 12 px medium — «غير مصنفة», «28 سبتمبر», policy «حد 50,000.00». */
+.fin-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; line-height: 18px; font-weight: 500; padding: 1px 7px; border-radius: 5px; white-space: nowrap; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.fin-chip.tone-neutral { color: var(--text-secondary); background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.fin-chip.tone-info { color: var(--text-secondary); background: var(--surface-selected); }
+.fin-chip.tone-success { color: var(--status-success); background: var(--status-success-tint); }
+.fin-chip.tone-warning { color: var(--status-warning); background: var(--status-warning-tint); }
+.fin-chip.tone-danger { color: var(--status-danger); background: var(--status-danger-tint); }
+
+/* Alerts list (B-01): a dot, the alert and its line, the area at the end; hairline rows. */
+.fin-alerts { list-style: none; margin: 0; padding: 0; }
+.fin-alerts > li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.fin-alerts > li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-top: 8px; background: var(--text-muted); }
+.fin-alerts > li.tone-danger::before { background: var(--status-danger); }
+.fin-alerts > li.tone-warning::before { background: var(--status-warning); }
+.fin-alerts .fin-a-t { font-size: 14px; line-height: 22px; font-weight: 500; color: var(--text-primary); }
+.fin-alerts .fin-a-s { display: block; font-size: 12.5px; line-height: 18px; color: var(--text-secondary); }
+.fin-alerts .fin-a-m { font-size: 12.5px; line-height: 22px; color: var(--text-muted); white-space: nowrap; }
+
+/* Chart (recharts) frame: the plot keeps LTR geometry; the legend sits under it. */
+.fin-chart { height: 270px; margin-inline: -8px; }
+.fin-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; line-height: 18px; color: var(--text-secondary); }
+.fin-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--action-primary); vertical-align: middle; margin-inline-end: 6px; }
+.fin-legend i.is-dash { border-top: 2px dashed var(--border-strong); }
+.fin-legend i.is-box { width: 10px; height: 10px; border: 0; border-radius: 2px; background: var(--action-primary); }
+.fin-legend i.is-box.is-plan { background: var(--border-strong); }
+.fin-legend i.is-box.is-over { background: var(--status-danger); }
+
+/* Tables: the HR hairline table; a total row, a group row, a selected row, wrapped sub lines. */
+.fin-table .fin-sub { display: block; font-size: 12px; line-height: 17px; color: var(--text-muted); font-weight: 400; white-space: normal; margin-top: 1px; }
+.fin-table .fin-sub.is-mono { font-family: var(--f-mono, var(--f-num)); letter-spacing: 0.02em; }
+.fin-table tr.fin-total td { font-weight: 600; color: var(--text-primary); background: var(--surface-subtle); }
+.fin-table tr.fin-group td { height: 32px; background: var(--surface-subtle); font-size: 12.5px; color: var(--text-muted); font-weight: 500; }
+.fin-table tr.is-clickable { cursor: pointer; }
+.fin-table tr.is-clickable:hover td { background: var(--surface-hover, var(--surface-subtle)); }
+.fin-table tr[aria-selected="true"] td, .fin-table tr.is-hl td { background: var(--surface-selected); }
+.fin-table td.fin-wrap { white-space: normal; min-width: 180px; }
+.fin-table td.fin-acts { text-align: end; white-space: nowrap; width: 1%; }
+.fin-table td.fin-acts .hr-btn + .hr-btn { margin-inline-start: 4px; }
+.fin-tablewrap { overflow-x: auto; }
+.fin-foot { font-size: 12.5px; line-height: 18px; color: var(--text-muted); margin: 0; }
+
+/* Text tones (for figures and short lines; tokens only). */
+.fin-t1 { color: var(--text-primary); }
+.fin-t2 { color: var(--text-secondary); }
+.fin-mut { color: var(--text-muted); }
+.fin-danger { color: var(--status-danger); }
+.fin-success { color: var(--status-success); }
+.fin-warning { color: var(--status-warning); }
+.fin-link { color: var(--text-link, var(--action-primary)); }
+.fin-strike { text-decoration: line-through; color: var(--text-muted); }
+.fin-num { font-family: var(--f-num); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.fin-strong { font-weight: 600; }
+.fin-cap { font-size: 12.5px; line-height: 18px; color: var(--text-muted); margin: 0; }
+.fin-small { font-size: 12px; line-height: 17px; }
+
+/* Boxes: subtle panel (rules base, memo), tinted panels (a suggestion, a summary tile). */
+.fin-box { border-radius: 9px; background: var(--surface-subtle); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.fin-box.is-line { background: none; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.fin-box.is-pick { background: none; box-shadow: inset 0 0 0 1px var(--border-strong); }
+.fin-box.tone-success { background: var(--status-success-tint); }
+.fin-box.tone-warning { background: var(--status-warning-tint); }
+.fin-box.tone-danger { background: var(--status-danger-tint); }
+.fin-box.tone-info { background: var(--surface-selected); }
+.fin-tiles { display: grid; grid-template-columns: repeat(var(--fin-cols, 3), minmax(0, 1fr)); gap: 10px; }
+.fin-tiles > .fin-box .fin-tile-v { margin: 0; font: 500 18px/1.2 var(--f-num); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+@media (max-width: 767px) { .fin-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Numbered list (allocation rules: «1 ضريبة القيمة المضافة … · احتياطي الضريبة»). */
+.fin-steps { list-style: none; margin: 0; padding: 0; counter-reset: fin; }
+.fin-steps > li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13.5px; counter-increment: fin; }
+.fin-steps > li::before { content: counter(fin); font-family: var(--f-num); color: var(--text-muted); font-size: 13px; }
+.fin-steps .fin-step-c { font-size: 12.5px; color: var(--text-muted); text-align: end; }
+
+/* Key · value list (variance explanation, phone summaries). */
+.fin-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 32px; margin: 0; font-size: 13.5px; }
+.fin-kv dt { color: var(--text-muted); }
+.fin-kv dd { margin: 0; color: var(--text-primary); }
+
+/* Disclosure rows (B-02 review pane: «الربط بمستند · لا يوجد», «السجل · حدثان»). */
+.fin-disclose { border-bottom: 1px solid var(--border-subtle); }
+.fin-disclose > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 0; cursor: pointer; list-style: none; font-size: 13.5px; color: var(--text-primary); }
+.fin-disclose > summary::-webkit-details-marker { display: none; }
+.fin-disclose > summary::after { content: ""; width: 7px; height: 7px; border-inline-end: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted); transform: rotate(45deg); margin-top: -4px; flex: none; order: 3; }
+.fin-disclose[open] > summary::after { transform: rotate(-135deg); margin-top: 3px; }
+.fin-disclose .fin-disclose-sum { margin-inline-start: auto; font-size: 12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.fin-disclose-body { display: flex; flex-direction: column; gap: 8px; padding: 0 0 12px; font-size: 13px; }
+
+/* Review pane head figure (B-02: «+15,000.00 ر.س», «وارد · غير مؤكد • بحاجة لمراجعة»). */
+.fin-amt { font: 300 34px/1.1 var(--f-num); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.fin-amt.is-in { color: var(--status-success); }
+.fin-amt .stk-unit { font: 500 13px/1 var(--f-ui); color: var(--text-muted); margin-inline-start: 6px; }
+
+/* Inputs: the HR control; a small inline select and a suffix (%) inside the control. */
+.fin-input:disabled { background: var(--hr-disabled-bg); color: var(--hr-disabled); }
+textarea.fin-input { height: auto; padding-block: 8px; min-height: 64px; }
+input[type="file"].fin-input { padding-top: 6px; }
+.fin-input.is-auto { width: auto; }
+.fin-input.is-num { font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.fin-suffix { position: relative; display: block; }
+.fin-suffix > span { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); font-size: 12.5px; color: var(--text-muted); pointer-events: none; }
+.fin-suffix > .hr-input { padding-inline-end: 28px; }
+.fin-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-primary); }
+.fin-grid { display: grid; grid-template-columns: repeat(var(--fin-cols, 2), minmax(0, 1fr)); gap: 12px; align-items: end; }
+@media (max-width: 767px) { .fin-grid { grid-template-columns: minmax(0, 1fr); } .fin-grid.is-keep { grid-template-columns: repeat(var(--fin-cols, 2), minmax(0, 1fr)); } }
+.fin-editrow { display: grid; gap: 8px; align-items: center; }
+@media (max-width: 767px) { .fin-editrow { grid-template-columns: minmax(0, 1fr) !important; padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle); } }
+
+/* Toolbar (B-02 / B-04): segmented filter, chips, search; an end group. */
+.fin-tool { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fin-tool .hr-search { flex: 0 1 300px; min-width: 200px; }
+.fin-tool .fin-sp { flex: 1; }
+.fin-seg { flex-wrap: wrap; }
+.fin-seg > button { padding: 0 12px; }
+@media (max-width: 767px) { .fin-tool .hr-search { flex: 1 1 100%; } }
+
+/* Wider HR dialogs for the forms that were wide before (rules editor, budget lines, ledger). */
+.hr-dialog.fin-dlg-md { width: min(640px, 100%); }
+.hr-dialog.fin-dlg-lg { width: min(760px, 100%); }
+.hr-dialog.fin-dlg-xl { width: min(1000px, 100%); }
+
+/* Errors under the localised card: the server detail line. */
+.fin-errdetail { margin: 0; }
+
+/* Phone (390): tables become list rows (.is-mrow in hr.css); wide grids scroll in their box. */
+@media (max-width: 767px) {
+  [data-fin-root] { gap: 12px; }
+  [data-fin-root] .fin-body { gap: 20px; }
+  .fin-sec.is-ruled { padding-top: 16px; }
+  .fin-eq .fin-eq-op { display: none; }
+  .fin-eq > div { flex: 1 1 40%; }
+  .fin-eq-end { margin-inline-start: 0; width: 100%; }
+  .fin-alerts > li { grid-template-columns: auto minmax(0, 1fr); }
+  .fin-alerts .fin-a-m { display: none; }
+  .fin-chart { height: 220px; }
+  .fin-kv { gap: 6px 16px; }
+}
+
+/* Surface and line tones for the remaining inline blocks (tokens only). */
+.fin-subtle { background: var(--surface-subtle); }
+.fin-selbg { background: var(--surface-selected); }
+.fin-tint-success { background: var(--status-success-tint); }
+.fin-tint-warning { background: var(--status-warning-tint); }
+.fin-tint-danger { background: var(--status-danger-tint); }
+.fin-bd { border-color: var(--border-subtle); }
+.fin-bd-strong { border-color: var(--border-strong); }
+.fin-r { border-radius: 9px; }
+.hr-split.fin-split { min-height: 0; }
+
+/* Approvals queue (B-P07): a request row opens to the decision note and the two decisions. */
+.fin-appr-head { appearance: none; background: none; border: 0; padding: 0; font: inherit; text-align: start; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; cursor: pointer; color: inherit; }
+.fin-eq > .fin-eq-end { flex-direction: row; align-items: center; }
+.fin-table td.is-stack { min-width: 170px; }
+@media (min-width: 768px) { .fin-table td.is-stack .fin-sub { white-space: normal; } }
+
+/* Phone (B-01…B-06 390): the shell's phone header names the area, so the page's own title and
+   basis line are not drawn a second time (the h1 stays for assistive technology); a zero
+   actual's verification note stays on the wide table and in the line detail. */
+@media (max-width: 767px) {
+  [data-fin-root] > .hr-pagehead > .hr-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  [data-fin-root] > .hr-meta { display: none; }
+  .hr-table.is-mrow td.is-stack .fin-sub { display: none; }
+  .hr-table.is-mrow .hr-msub { white-space: normal; }
 }

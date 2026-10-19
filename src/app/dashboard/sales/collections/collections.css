@@ -1,0 +1,86 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Collections on Direction 2.1 (GX A-01, Figma 1459:15522 / EN 1459:16043, detail 1460:15742,
+   390 1459:17412). Scoped to `.d21`; page primitives come from components/d21/reference.css.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.d21 .c-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 28px }
+.d21 .c-metrics dt { font-size: 13px; color: var(--text-secondary) }
+.d21 .c-metrics .mid { font-size: 26px }
+
+.d21 .c-tool { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px }
+.d21 .c-tool .sp { flex: 1 }
+.d21 .c-tool .seg > button { white-space: nowrap }
+.d21 .c-tool .seg .n { color: var(--text-muted) }
+
+/* The ledger: two lines per cell (figure, then the muted detail under it). */
+.d21 .t.coll td { height: 46px; padding-block: 3px; vertical-align: middle }
+.d21 .t.coll td > b, .d21 .t.coll td > .l1 { display: block; font-weight: 500; line-height: 22px; color: var(--text-primary) }
+.d21 .t.coll td > b { font-weight: 500 }
+.d21 .t.coll .l1.n { font-weight: 400 }
+.d21 .t.coll .sm:not(.btn) { display: block; line-height: 18px }
+.d21 .t.coll .wa { color: var(--status-warning) }
+.d21 .t.coll tr.sel td { background: var(--surface-subtle) }
+.d21 .t.coll .acts { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; white-space: normal }
+.d21 .t.coll .why { font-size: 12px; line-height: 18px; color: var(--status-warning); max-width: 260px; text-align: start }
+.d21 .t.coll .clip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--text-muted) }
+.d21 .t.coll .st.x { text-decoration: none }
+
+.d21 .c-rules { margin-top: 32px }
+.d21 .c-rules ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13.5px; line-height: 22px; color: var(--text-secondary) }
+.d21 .c-rules li::before { content: "·"; margin-inline-end: 6px; color: var(--text-muted) }
+
+.d21 .c-empty { text-align: center; padding: 40px 0 24px }
+.d21 .c-empty b { display: block; font-weight: 600; font-size: 15px; margin-bottom: 6px }
+.d21 .c-empty p { margin: 0; color: var(--text-muted); font-size: 13.5px }
+.d21 .c-elig { max-width: 560px; margin: 16px auto 0; display: grid; gap: 8px; list-style: none; padding: 0 }
+.d21 .c-elig a { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-radius: 10px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); text-decoration: none; color: var(--text-primary) }
+.d21 .c-elig a:hover { box-shadow: inset 0 0 0 1px var(--action-primary) }
+.d21 .c-elig .sm { font-size: 12.5px; color: var(--text-muted) }
+
+/* ── Detail drawer (A-01a): at the sheet's inline end, header / figures / evidence / actions. ── */
+.d21 .c-scrim { position: fixed; inset: 0; background: rgb(40 36 26 / .16); z-index: 80; animation: d21-fade .2s var(--ease) }
+.d21 .c-drawer { position: fixed; top: 8px; bottom: 8px; inset-inline-end: 8px; width: 460px; max-width: calc(100vw - 16px); background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; z-index: 81; outline: 0 }
+.d21 .c-drawer > .hd { display: flex; align-items: flex-start; gap: 12px; padding: 20px 24px 16px; border-bottom: 1px solid var(--border-subtle); flex: none }
+.d21 .c-drawer > .hd h2 { font: 600 18px/26px var(--f-ui); margin: 0 }
+.d21 .c-drawer > .hd .sub { font-size: 12.5px; line-height: 18px; color: var(--text-muted) }
+.d21 .c-drawer > .hd .st { font-size: 12.5px; margin-top: 2px }
+.d21 .c-drawer > .hd .ib { margin-inline-start: auto; flex: none }
+.d21 .c-drawer > .bd { flex: 1; overflow-y: auto; padding: 20px 24px; min-height: 0 }
+.d21 .c-drawer > .ft { display: flex; gap: 8px; align-items: center; padding: 16px 24px; border-top: 1px solid var(--border-subtle); flex: none; flex-wrap: wrap }
+.d21 .c-drawer > .ft .end { margin-inline-start: auto }
+.d21 .c-figs { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; margin: 0; font-size: 13.5px; line-height: 22px }
+.d21 .c-figs dt { color: var(--text-secondary) }
+.d21 .c-figs dd { margin: 0; color: var(--text-primary) }
+.d21 .c-figs dd .n { font-family: var(--f-num) }
+.d21 .c-figs .net { color: var(--action-primary); font-weight: 600 }
+.d21 .c-figs .est { color: var(--status-warning) }
+.d21 .c-figs .mut { color: var(--text-muted) }
+.d21 .c-ev-h { font-size: 13.5px; color: var(--text-secondary); margin: 24px 0 10px }
+.d21 .c-ev { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0 }
+.d21 .c-ev a { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border-subtle); text-decoration: none; color: var(--text-primary) }
+.d21 .c-ev a:hover { box-shadow: inset 0 0 0 1px var(--border-strong) }
+.d21 .c-ev .t { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.d21 .c-ev .t b { font-weight: 500; font-size: 14px; overflow-wrap: anywhere }
+.d21 .c-ev .t span { font-size: 12.5px; color: var(--text-muted) }
+.d21 .c-ev .btn { pointer-events: none }
+.d21 .c-reason { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font-size: 13px; line-height: 20px; color: var(--text-secondary) }
+.d21 .c-blocked { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--status-warning-tint); font-size: 13px; line-height: 20px; color: var(--text-primary) }
+
+/* ── Phone (390): rows, the segments, and the drawer as a bottom sheet. ── */
+.d21 .c-mrow { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 14px 0; border-bottom: 1px solid var(--border-subtle) }
+.d21 .c-mrow b { font-weight: 500; font-size: 14.5px; line-height: 22px }
+.d21 .c-mrow .r2 { font-size: 12.5px; color: var(--text-muted) }
+.d21 .c-mrow .st { justify-self: end; font-size: 12.5px }
+.d21 .c-mrow button.open { all: unset; position: absolute; inset: 0; cursor: pointer }
+.d21 .c-mrow button.open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px }
+@media (max-width: 767.98px) {
+  .d21 .c-scrim { background: rgb(40 36 26 / .32) }
+  .d21 .c-drawer { top: auto; bottom: 0; inset-inline: 0; width: 100%; max-width: none; max-height: calc(100dvh - 56px); border-radius: 20px 20px 0 0 }
+  .d21 .c-drawer > .hd { padding: 14px 16px 12px }
+  .d21 .c-drawer > .bd { padding: 16px }
+  .d21 .c-drawer > .ft { padding: 12px 16px 26px }
+  .d21 .c-drawer > .ft .btn { height: 44px; flex: 1; justify-content: center }
+  .d21 .c-figs { grid-template-columns: 130px minmax(0, 1fr) }
+}
+.d21 .t.coll .acts { flex-wrap: nowrap }
+.d21 .t.coll td:last-child { white-space: nowrap }

@@ -1,0 +1,106 @@
+/*
+ * Customer account (crm-account 179:1312 / 180:1470 / 178:1353). The page uses the reference
+ * primitives (components/d21/reference.css: .ph .metrics .tabs .track .callout .tl .props .t);
+ * this file adds only the account's own arrangements and values from the frame. No colour is
+ * defined here — tokens only.
+ */
+.d21 .acc .ph { margin-bottom: 22px }
+.d21 .acc .ph .meta { gap: 8px }
+.d21 .acc .acc-meta-item { display: inline-flex; align-items: center; gap: 8px }
+.d21 .acc .acc-meta-item > i { width: 3px; height: 3px; border-radius: 50%; background: var(--border-control); display: inline-block }
+
+/* Five figures (the frame: repeat(5, 1fr), 8px above, 36px below). */
+.d21 .acc-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 8px 0 36px }
+.d21 .acc-metrics .d { line-height: 18px }
+.d21 .acc-metrics .acc-warn, .d21 .acc-phone .acc-warn .n { color: var(--status-warning) }
+.d21 .acc-terms { font: 500 22px/1.1 var(--f-ui) !important; margin-top: 12px !important }
+.d21 .acc-terms .n { font-family: var(--f-num) }
+.d21 .acc-spark { margin: 8px 0 6px !important; max-width: 180px }
+.d21 .delta { white-space: nowrap }
+.d21 .delta.up { color: var(--status-success); font-weight: 500 }
+.d21 .delta.down { color: var(--status-danger); font-weight: 500 }
+.d21 .acc-muted { color: var(--text-muted); font-size: 13px }
+.d21 .acc-note { color: var(--text-muted); font-size: 12.5px; margin: -24px 0 22px; max-width: 80ch }
+.d21 .acc .acc-note:last-child { margin: 10px 0 0 }
+
+/* Tabs: an unavailable tab is drawn muted and says why in its tooltip. */
+.d21 .acc-tabs { margin-bottom: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none }
+.d21 .acc-tabs > button.acc-off { color: var(--text-disabled) }
+.d21 .acc-tabs > button[aria-disabled="true"] { cursor: not-allowed }
+.d21 .acc-cols { grid-template-columns: minmax(0, 1fr) 320px; gap: 64px; margin-top: 28px }
+.d21 .acc-tabbody { margin-top: 24px }
+.d21 .acc-scroll { overflow-x: auto }
+.d21 .acc-empty { padding: 32px 0 }
+.d21 .acc-info { display: block; font-size: 13.5px; line-height: 22px; color: var(--text-secondary); max-width: 90ch; margin: 0 }
+
+/* The open deal: the value beside the track (frame: align end, 40px gap, track ≤ 460px). */
+.d21 .acc-deal { display: flex; align-items: flex-end; gap: 40px; margin-bottom: 22px }
+.d21 .acc-big { font: 400 34px/1.1 var(--f-num); letter-spacing: -.01em }
+.d21 .acc-deal .unit { font-size: 13px }
+.d21 .acc-deal-d { font-size: 12.5px; color: var(--text-muted); margin-top: 6px }
+.d21 .acc-track { flex: 1; max-width: 460px; margin-inline-start: auto }
+.d21 .acc-track .track > li { padding-top: 18px }
+.d21 .acc-step { display: block; padding-inline-end: 8px }
+.d21 .acc-chev { margin-inline-start: 2px }
+[dir="rtl"] .d21 .acc-chev, .d21[dir="rtl"] .acc-chev { transform: scaleX(-1) }
+.d21 .acc .callout { margin-bottom: 32px }
+.d21 .acc-more-deals { display: block; margin: -22px 0 0 }
+
+/* The composer (frame: 44px, 10px radius, inset border, note icon, Kbd «N»). */
+.d21 .acc-composer { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px 0 14px; padding-inline: 14px 8px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--text-muted); margin-bottom: 24px; background: var(--surface) }
+.d21 .acc-composer:focus-within { box-shadow: inset 0 0 0 1.5px var(--action-primary) }
+.d21 .acc-composer input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: 400 14px/22px var(--f-ui); color: var(--text-primary) }
+.d21 .acc-composer input::placeholder { color: var(--text-muted) }
+.d21 .acc-composer .kbd { margin-inline-start: 0 }
+
+/* Timeline lines wrap to two lines (EN review item 4); dates stay at the end. */
+.d21 .acc-tl .row { display: flex; gap: 12px; align-items: baseline }
+.d21 .acc-tl .acc-tl-t { min-width: 0 }
+.d21 .acc-tl .acc-tl-t b { font-weight: 600 }
+.d21 .acc-tl .when { margin-inline-start: auto; white-space: nowrap }
+.d21 .acc-tl .acc-tl-d { color: var(--text-secondary); margin-top: 4px; max-width: 60ch; overflow-wrap: anywhere }
+.d21 .acc-tl .diff { display: inline-block; margin-top: 8px; font-size: 12.5px; color: var(--text-secondary); padding: 2px 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--border-strong) }
+
+/* Side column. */
+.d21 .acc-side-h { display: flex; align-items: baseline; margin-bottom: 12px }
+.d21 .acc-rule { height: 1px; background: var(--border-subtle); margin-bottom: 24px }
+.d21 .acc-contacts { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px }
+.d21 .acc-contacts > li { display: flex; gap: 10px; align-items: center }
+.d21 .acc-contact-main { min-width: 0 }
+.d21 .acc-contact-name { font-weight: 500; color: var(--text-primary); background: none; border: 0; padding: 0; font: inherit; font-weight: 500; cursor: pointer; text-align: start }
+button.acc-contact-name:hover { text-decoration: underline }
+.d21 .acc-contact-sub { font-size: 12.5px; color: var(--text-muted) }
+.d21 .acc-contact-sub a { color: inherit; text-decoration: none }
+.d21 .acc-contact-role { margin-inline-start: auto; font-size: 12px; color: var(--text-muted); text-align: end }
+.d21 .acc-usual { font-size: 13.5px }
+.d21 .acc-profiles ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px }
+.d21 .acc-profiles b { font-weight: 500 }
+.d21 .acc-props { margin-top: 0 }
+
+/* Forms (HR kit dialog) — a form-level error line. */
+[data-hr-root] .hr-form > .hr-err { font-size: 13px; color: var(--hr-danger); margin: 0 }
+[data-hr-root] .hr-form > .hr-help { font-size: 12.5px; color: var(--hr-muted) }
+
+/* 768–1279: one column, figures in a 3 + 2 grid (the 1024 frame 180:1470). */
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .d21 .acc-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 22px }
+  .d21 .acc-metrics > div:nth-child(4) { padding-inline-start: 0; border-inline-start: 0 }
+  .d21 .acc-cols { grid-template-columns: minmax(0, 1fr) !important }
+  .d21 .acc-deal { flex-wrap: wrap; gap: 20px }
+  .d21 .acc-track { max-width: none; flex-basis: 100% }
+}
+
+/* Phone (178:1353). */
+.d21 .acc-phone { padding-bottom: 96px }
+.d21 .acc-subline { color: var(--text-secondary); font-size: 13px; margin: 0 0 4px }
+.d21 .acc-phone .phrows dd { font-size: 15px }
+.d21 .acc-phone .phrows .unit { font-size: 12px }
+.d21 .acc-ph-deal { margin-bottom: 20px }
+.d21 .acc-ph-dealrow { color: inherit; text-decoration: none }
+.d21 .acc-phone .acc-cols { margin-top: 20px }
+.d21 .acc-phone .acc-tabs { margin-top: 8px; margin-bottom: 18px }
+.d21 .acc-phone .acc-contacts > li { padding-bottom: 14px; border-bottom: 1px solid var(--border-subtle) }
+.d21 .acc-phone .acc-tl .row { flex-wrap: wrap; row-gap: 0 }
+.d21 .acc-phone .acc-tl .when { white-space: normal }
+.d21 .acc-phone .acc-note { margin: 8px 0 0 }
+.d21 .acc-today { font-family: var(--f-ui); font-size: 22px }

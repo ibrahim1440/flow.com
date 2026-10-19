@@ -2,12 +2,13 @@
 
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Printer } from "lucide-react";
 import {
-  useLang, Alert, Spinner, Button, api, moneyText, num, formatDay,
+  useLang, Spinner, api, formatMoney, num, formatDay,
 } from "../../../_components/ui";
+import { useD21Title, useD21Phone } from "@/components/shell/page-context";
 import { usePrintCertified } from "@/components/print/Certification";
 import { PRINT_PHASE1_NOTE, QUOTATION_PDF_WHEN_PRINT_OFF } from "@/lib/print/certification";
+import { BRAND_PRIMARY_SRC, BRAND_PRIMARY_VIEWBOX } from "@/components/brand/BrandMark";
 
 /**
  * The quotation as a document.
@@ -23,8 +24,9 @@ import { PRINT_PHASE1_NOTE, QUOTATION_PDF_WHEN_PRINT_OFF } from "@/lib/print/cer
  * looks. Adding a renderer would put a second layout in the codebase that nobody looks at
  * until a customer complains the total is in the wrong place.
  *
- * PROVISIONAL INTERFACE — the banner is deliberately screen-only; a customer document does
- * not carry our internal review notes.
+ * ── Layout ──
+ * Built to GX A-12 (Figma 1230:139687, EN 1233:78380): a screen toolbar (number, what the current
+ * version leaves out, the gated action) over an A4 sheet. Only the sheet reaches paper.
  */
 
 type SnapshotLine = {
@@ -113,33 +115,50 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
     });
   }, [id, ar]);
 
-  if (loading) return <Spinner />;
-  if (!quote) return <Alert kind="error">{error}</Alert>;
+  // The last crumb of the top bar is the quotation number, as on the quotation itself.
+  useD21Title(quote?.quoteNumber);
+  useD21Phone({
+    title: ar ? "مستند العرض" : "Quotation document",
+    sub: quote?.quoteNumber,
+    back: `/dashboard/sales/quotes/${id}`,
+  });
+
+  if (loading) return <div className="pg"><Spinner /></div>;
+  if (!quote) return <div className="pg"><p className="notice er" role="alert" data-testid="alert-error">{error}</p></div>;
 
   const snap = quote.issuedSnapshot;
-  /** Every figure on the document, in the reader's own numerals and currency word. */
-  const money = (v: string) => moneyText(v, quote.currency, lang);
+  /** Every figure on the document: Latin digits, grouped, two places; the currency is stated once. */
+  const money = (v: string) => formatMoney(v);
+  const issuedOn = formatDay(quote.issuedAt ?? snap?.frozenAt ?? null, lang);
+  const customerName = quote.customer ? (ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name) : null;
+  const contactLine = [quote.customer?.address, quote.customer?.phone].filter(Boolean);
 
   return (
-    <div className="space-y-4">
-      {/* Screen-only chrome. None of this appears on paper. */}
-      <div className="print:hidden flex items-center justify-between gap-3 flex-wrap">
-        <Link
-          href={`/dashboard/sales/quotes/${quote.id}`}
-          className="inline-flex items-center gap-1.5 text-sm font-bold text-oo-text-secondary hover:text-oo-action-primary"
-        >
-          <ArrowLeft size={15} className="rtl:rotate-180" aria-hidden />
-          {quote.quoteNumber}
-        </Link>
+    <div className="pg">
+      {/* Screen-only chrome (A-12 toolbar). None of this appears on paper. */}
+      <div className="q-doc-bar print:hidden">
+        <Link href={`/dashboard/sales/quotes/${quote.id}`} className="num">{quote.quoteNumber}</Link>
+        <span className="sp" />
         {snap && (
-          <Button onClick={() => { if (actionOn) window.print(); }} testId={printing === true ? "print-quote" : "save-quote-pdf"} disabled={!actionOn}>
-            <Printer size={15} aria-hidden /> {printing === true ? (ar ? "طباعة / حفظ PDF" : "Print / save as PDF") : (ar ? "حفظ كملف PDF" : "Save as PDF")}
-          </Button>
+          <>
+            <span className="why">
+              {ar ? "بلا رقم ضريبي ولا QR في النسخة الحالية" : "No VAT number or QR in the current version"}
+            </span>
+            <button
+              type="button"
+              className="btn p"
+              onClick={() => { if (actionOn) window.print(); }}
+              data-testid={printing === true ? "print-quote" : "save-quote-pdf"}
+              disabled={!actionOn}
+            >
+              {printing === true ? (ar ? "طباعة / حفظ PDF" : "Print / save as PDF") : (ar ? "حفظ كملف PDF" : "Save as PDF")}
+            </button>
+          </>
         )}
       </div>
       {snap && printing === false && (
-        <div className="print:hidden" data-testid="print-phase1-note">
-          <Alert kind="info">
+        <div className="q-doc-wrap print:hidden" data-testid="print-phase1-note" style={{ marginBottom: 16 }}>
+          <p className="notice">
             {ar ? PRINT_PHASE1_NOTE.ar : PRINT_PHASE1_NOTE.en}
             {" — "}
             {pdfOnly
@@ -147,121 +166,111 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
                 ? "لإرسال العرض إلى العميل: «حفظ كملف PDF» ثم اختر «حفظ كـ PDF» وجهةً في النافذة."
                 : "To send the quotation to the customer: «Save as PDF», then choose «Save as PDF» as the destination in the dialog.")
               : (ar ? "يعود الزر بعد اعتماد الطباعة." : "The action returns once printing is approved.")}
-          </Alert>
+          </p>
         </div>
       )}
 
       {!snap ? (
-        <div className="print:hidden">
-          <Alert kind="info">
+        <div className="q-doc-wrap print:hidden">
+          <p className="notice">
             {ar
               ? "لا يوجد مستند بعد: العرض ما زال مسودة. المستند يُثبَّت عند الإصدار، وهو ما يضمن أن المطبوع هو ما أُرسل للعميل فعلاً."
               : "There is no document yet: this quotation is still a draft. The document is frozen at issue, which is what makes the printed copy the thing the customer was actually sent."}
-          </Alert>
+          </p>
         </div>
       ) : (
-        <article
-          data-testid="quote-document"
-          className="bg-oo-bg-default text-oo-text-primary rounded-2xl border border-oo-border-default p-8 print:border-0 print:rounded-none print:p-0"
-        >
-          <header className="flex items-start justify-between gap-6 flex-wrap border-b-2 border-oo-text-primary pb-4 mb-6">
-            <div>
-              <h1 className="text-2xl font-extrabold">{ar ? "عرض سعر" : "Quotation"}</h1>
-              <p className="text-sm font-bold mt-1 tabular-nums">
-                {snap.quoteNumber}
-                {snap.revision > 1 && (
-                  <span className="text-oo-text-secondary">
-                    {" "}
-                    · {ar ? "مراجعة" : "revision"} {snap.revision}
-                  </span>
-                )}
-              </p>
+        <div className="q-doc-wrap">
+          <article data-testid="quote-document" className="q-doc">
+            {/* The brand logo (guideline v003 primary, olive-clay, for white paper): an <img>, so it
+                reaches paper and «Save as PDF» without "print backgrounds". */}
+            <div className="q-doc-brand">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={BRAND_PRIMARY_SRC} alt={ar ? "حِقبة" : "Hiqbah"} data-testid="quote-logo"
+                width={Math.round(64 * BRAND_PRIMARY_VIEWBOX.w / BRAND_PRIMARY_VIEWBOX.h)} height={64} />
             </div>
-            <dl className="text-xs space-y-0.5 text-end">
+            <header>
               <div>
-                <dt className="inline font-bold text-oo-text-secondary">{ar ? "التاريخ: " : "Issued: "}</dt>
-                <dd className="inline">{formatDay(quote.issuedAt ?? snap.frozenAt, lang)}</dd>
+                <h1>{ar ? "عرض سعر" : "Quotation"}</h1>
+                <p className="ref">
+                  <bdi className="id">{snap.quoteNumber}</bdi>
+                  {snap.revision > 1 && <> · {ar ? "مراجعة" : "revision"} {snap.revision}</>}
+                </p>
               </div>
-              <div>
-                <dt className="inline font-bold text-oo-text-secondary">{ar ? "صالح حتى: " : "Valid until: "}</dt>
-                <dd className="inline">{formatDay(snap.validUntil, lang)}</dd>
-              </div>
-              <div>
-                <dt className="inline font-bold text-oo-text-secondary">{ar ? "العملة: " : "Currency: "}</dt>
-                <dd className="inline">{ar ? "ريال سعودي (SAR)" : snap.currency}</dd>
-              </div>
-            </dl>
-          </header>
+              <dl className="facts">
+                <div>
+                  <dt>{ar ? "التاريخ:" : "Issued:"}</dt>
+                  <dd>{issuedOn}</dd>
+                </div>
+                <div>
+                  <dt>{ar ? "صالح حتى:" : "Valid until:"}</dt>
+                  <dd>{formatDay(snap.validUntil, lang)}</dd>
+                </div>
+                <div>
+                  <dt>{ar ? "العملة:" : "Currency:"}</dt>
+                  <dd>{ar ? "ريال سعودي (SAR)" : `Saudi riyal (${snap.currency})`}</dd>
+                </div>
+              </dl>
+            </header>
 
-          <section className="grid sm:grid-cols-2 gap-6 mb-6 text-sm">
-            <div>
-              <h2 className="text-[11px] uppercase font-bold text-oo-text-muted tracking-wide mb-1">
-                {ar ? "إلى" : "For"}
-              </h2>
-              {quote.customer ? (
-                <address className="not-italic">
-                  <p className="font-bold">{ar ? (quote.customer.nameAr ?? quote.customer.name) : quote.customer.name}</p>
-                  {quote.customer.address && <p className="text-oo-text-secondary">{quote.customer.address}</p>}
-                  {quote.customer.phone && <p className="text-oo-text-secondary tabular-nums" dir="ltr">{quote.customer.phone}</p>}
-                  {quote.customer.email && <p className="text-oo-text-secondary" dir="ltr">{quote.customer.email}</p>}
-                </address>
-              ) : (
-                <p className="text-oo-text-muted">—</p>
-              )}
-            </div>
-            <div className="sm:text-end">
-              <h2 className="text-[11px] uppercase font-bold text-oo-text-muted tracking-wide mb-1">
-                {ar ? "جهة الاتصال" : "Prepared by"}
-              </h2>
-              <p className="font-bold">{quote.opportunity.owner?.name ?? "—"}</p>
-            </div>
-          </section>
-
-          {/* On paper the table has the page's full width; on a phone it does not, so it
-              scrolls inside its own box rather than dragging the document sideways. */}
-          <div className="mb-6 overflow-x-auto print:overflow-visible">
-          <table className="w-full min-w-[520px] text-sm">
-            <thead>
-              <tr className="border-b-2 border-oo-text-primary text-[11px] uppercase font-bold text-oo-text-secondary">
-                <th className="pe-4 text-start py-2">{ar ? "البند" : "Item"}</th>
-                <th className="pe-4 text-end py-2">{ar ? "الكمية" : "Qty"}</th>
-                <th className="pe-4 text-end py-2">{ar ? "السعر" : "Unit price"}</th>
-                <th className="pe-4 text-end py-2">{ar ? "خصم" : "Disc"}</th>
-                <th className="pe-4 text-end py-2">{ar ? "ضريبة" : "Tax"}</th>
-                <th className="pe-4 text-end py-2">{ar ? "الإجمالي" : "Total"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snap.lines.map((l) => (
-                <tr key={l.position} className="border-b border-oo-border-default align-top">
-                  <td className="pe-4 py-2.5">
-                    {/* The name as it stood when the offer was made. */}
-                    <span className="font-semibold">
-                      {(ar ? l.nameAr : null) ?? l.name ?? l.description ?? "—"}
-                    </span>
-                    {l.skuCode && (
-                      <span className="block text-[11px] text-oo-text-muted font-mono">{l.skuCode}</span>
+            <section className="parties">
+              <div>
+                <h2>{ar ? "إلى" : "To"}</h2>
+                {quote.customer ? (
+                  <address>
+                    <b>{customerName}</b>
+                    {contactLine.length > 0 && (
+                      <span className="sub" style={{ display: "block" }}>
+                        {quote.customer.address}
+                        {quote.customer.address && quote.customer.phone && " · "}
+                        {quote.customer.phone && <bdi dir="ltr">{quote.customer.phone}</bdi>}
+                      </span>
                     )}
-                  </td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums">
-                    {num(Number(l.quantity), lang)} <span className="text-[10px] text-oo-text-muted">{l.unit}</span>
-                  </td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums">{money(l.unitPrice)}</td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums">
-                    {Number(l.discountAmount) > 0 ? money(l.discountAmount) : "—"}
-                  </td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums">
-                    {Number(l.lineTax) > 0 ? money(l.lineTax) : "—"}
-                  </td>
-                  <td className="pe-4 py-2.5 text-end tabular-nums font-bold">{money(l.lineTotal)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
+                    {quote.customer.email && <span className="sub" style={{ display: "block" }}><bdi dir="ltr">{quote.customer.email}</bdi></span>}
+                  </address>
+                ) : (
+                  <p style={{ margin: 0 }}>—</p>
+                )}
+              </div>
+              <div>
+                <h2>{ar ? "أعدّه" : "Prepared by"}</h2>
+                <b>{quote.opportunity.owner?.name ?? "—"}</b>
+              </div>
+            </section>
 
-          <div className="flex justify-end">
-            <dl className="w-full sm:w-72 space-y-1.5 text-sm">
+            {/* On paper the table has the page's full width; on a phone it does not, so it
+                scrolls inside its own box rather than dragging the document sideways. */}
+            <div className="q-doc-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{ar ? "البند" : "Item"}</th>
+                    <th className="num">{ar ? "الكمية" : "Qty"}</th>
+                    <th className="num">{ar ? "السعر" : "Price"}</th>
+                    <th className="num">{ar ? "خصم" : "Disc."}</th>
+                    <th className="num">{ar ? "ضريبة" : "Tax"}</th>
+                    <th className="num">{ar ? "الإجمالي" : "Total"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snap.lines.map((l) => (
+                    <tr key={l.position}>
+                      <td className="item">
+                        {/* The name as it stood when the offer was made. */}
+                        <b>{(ar ? l.nameAr : null) ?? l.name ?? l.description ?? "—"}</b>
+                        {l.skuCode && <span className="id">{l.skuCode}</span>}
+                      </td>
+                      <td className="num">{num(Number(l.quantity), lang)}</td>
+                      <td className="num">{money(l.unitPrice)}</td>
+                      <td className="num">{Number(l.discountAmount) > 0 ? money(l.discountAmount) : "—"}</td>
+                      <td className="num">{Number(l.lineTax) > 0 ? money(l.lineTax) : "—"}</td>
+                      <td className="num">{money(l.lineTotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <dl className="tot">
               <Row label={ar ? "الإجمالي قبل الخصم" : "Subtotal"} value={money(snap.totals.subtotal)} />
               {Number(snap.totals.discountTotal) > 0 && (
                 <Row label={ar ? "الخصم" : "Discount"} value={`-${money(snap.totals.discountTotal)}`} />
@@ -272,49 +281,38 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
                 label={ar ? "الوعاء الخاضع للضريبة" : "Taxable base"}
                 value={money((Number(snap.totals.subtotal) - Number(snap.totals.discountTotal)).toFixed(2))}
               />
-              <Row
-                label={ar ? "ضريبة القيمة المضافة" : "VAT"}
-                value={money(snap.totals.taxTotal)}
-              />
-              <div className="flex items-baseline justify-between gap-3 border-t-2 border-oo-text-primary pt-2 mt-1">
-                <dt className="font-extrabold">{ar ? "الإجمالي المستحق" : "Total due"}</dt>
-                <dd className="font-extrabold tabular-nums text-lg">
-                  {money(snap.totals.grandTotal)}
-                </dd>
-              </div>
+              <Row label={ar ? "ضريبة القيمة المضافة" : "VAT"} value={money(snap.totals.taxTotal)} />
+              <dt className="due">{ar ? "الإجمالي المستحق" : "Total due"}</dt>
+              <dd className="due">{money(snap.totals.grandTotal)}</dd>
             </dl>
-          </div>
 
-          <footer className="mt-8 pt-4 border-t border-oo-border-default text-[11px] text-oo-text-secondary leading-relaxed">
-            <p>
-              {ar
-                ? `هذه الأسعار مثبّتة كما صدرت في ${formatDay(quote.issuedAt ?? snap.frozenAt, lang)} وتبقى سارية حتى ${formatDay(snap.validUntil, lang)}.`
-                : `These prices are as issued on ${formatDay(quote.issuedAt ?? snap.frozenAt, lang)} and hold until ${formatDay(snap.validUntil, lang)}.`}
-            </p>
-            {quote.status === "SUPERSEDED" && (
-              <p className="font-bold text-oo-status-rejected mt-1">
+            <div className="terms">
+              <p>
                 {ar
-                  ? "استُبدل هذا العرض بمراجعة أحدث. لا تُرسله إلى العميل."
-                  : "This quotation has been superseded by a later revision. Do not send it to the customer."}
+                  ? "الشروط: الأسعار بالريال السعودي وتشمل التسليم داخل المدينة. العرض صالح حتى التاريخ المذكور. تُحتسب ضريبة القيمة المضافة وفق النظام السعودي."
+                  : "Terms: prices are in Saudi riyals and include delivery within the city. The offer holds until the date above. VAT is charged under the Saudi regime."}
               </p>
-            )}
-            <p className="mt-2">
-              {ar
-                ? "الشروط: الأسعار بالريال السعودي وتشمل التسليم داخل المدينة. العرض صالح حتى التاريخ المذكور. تُحتسب ضريبة القيمة المضافة وفق النظام السعودي."
-                : "Terms: prices are in Saudi riyals and include delivery within the city. The offer holds until the date above. VAT is charged under the Saudi regime."}
-            </p>
+              <p>
+                {ar
+                  ? `الأسعار مثبّتة كما صدرت في ${issuedOn} وتبقى سارية حتى ${formatDay(snap.validUntil, lang)}.`
+                  : `Prices are as issued on ${issuedOn} and hold until ${formatDay(snap.validUntil, lang)}.`}
+              </p>
+              {quote.status === "SUPERSEDED" && (
+                <p className="er">
+                  {ar
+                    ? "استُبدل هذا العرض بمراجعة أحدث. لا تُرسله إلى العميل."
+                    : "This quotation has been superseded by a later revision. Do not send it to the customer."}
+                </p>
+              )}
+            </div>
 
             {/* The two signature blocks the design ends on: a quotation is signed back. */}
-            <div className="mt-8 grid grid-cols-2 gap-10">
-              {[ar ? "عن المؤسسة" : "For the company", ar ? "توقيع العميل" : "Customer signature"].map((l) => (
-                <div key={l}>
-                  <p className="text-oo-text-secondary">{l}</p>
-                  <div className="mt-8 border-t border-oo-border-strong" />
-                </div>
-              ))}
+            <div className="sign">
+              <div>{ar ? "عن المؤسسة" : "For the company"}</div>
+              <div>{ar ? "توقيع العميل" : "Customer signature"}</div>
             </div>
-          </footer>
-        </article>
+          </article>
+        </div>
       )}
 
 {/* The print rules, kept with the document they shape rather than in a global sheet where
@@ -328,9 +326,9 @@ export default function QuotePrintPage({ params }: { params: Promise<{ id: strin
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-oo-text-secondary">{label}</dt>
-      <dd className="tabular-nums font-semibold">{value}</dd>
-    </div>
+    <>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </>
   );
 }

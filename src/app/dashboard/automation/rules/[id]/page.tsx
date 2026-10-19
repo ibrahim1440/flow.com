@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { Alert, Spinner, api, useLang } from "../../../sales/_components/ui";
+import { Notice, OpsLoading, OpsRoot } from "@/components/ops/ui";
+import { api, useLang } from "../../../sales/_components/ui";
 import { RuleEditor, type StoredRule } from "../../_components/RuleEditor";
 
 export default function EditAutomationRulePage({ params }: { params: Promise<{ id: string }> }) {
@@ -22,7 +23,11 @@ export default function EditAutomationRulePage({ params }: { params: Promise<{ i
     };
   }, [id, ar]);
 
-  if (error) return <Alert kind="error">{error}</Alert>;
-  if (!rule) return <Spinner />;
-  return <RuleEditor key={rule.id} rule={rule} />;
+  return (
+    <OpsRoot className="tl-root">
+      <div className="hr-page">
+        {error ? <Notice tone="danger">{error}</Notice> : !rule ? <OpsLoading /> : <RuleEditor key={rule.id} rule={rule} />}
+      </div>
+    </OpsRoot>
+  );
 }

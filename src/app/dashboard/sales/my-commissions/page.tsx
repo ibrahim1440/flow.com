@@ -1,27 +1,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronUp, Percent } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
+import { ACCRUAL_STATUS_SPECS, formatMoney, formatDay, num, api } from "../_components/ui";
 import {
-  AccrualStatusBadge, ACCRUAL_STATUS_SPECS, ProvisionalBanner, PageHeader, SandboxBanner,
-  Alert, Card, EmptyState, Spinner, SectionTitle, StatStrip, Stat, DataTable, Tr, Td,
-  FilterSelect, ROW_ACTION, formatMoney, formatDay, num, api, monthOptions,
-} from "../_components/ui";
+  PerfHeader, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
+} from "../_components/perf";
 
 /**
- * My commissions — SC-01 in the Sales Screens design.
+ * My commissions — Direction 2.1, GX A-P05 «أهدافي وعمولاتي» (`1225:3172` / EN `1230:128990`,
+ * 1024 `1228:3326`, 390 `1230:143595`).
  *
  * The one thing this screen must not do is show a final number nobody can check. Each
  * accrual carries the collection it came from, the base that collection left after tax and
  * non-qualifying amounts, the share that base was split by and the rate applied — in the
  * order the engine applies them, not a reordering that happens to reach the same total.
  *
- * The statement strip and the ledger are shown together on purpose: the strip is a summary
+ * The statement and the ledger are shown together on purpose: the statement is a summary
  * of the ledger, and a reader who doubts the summary can add the ledger up.
  *
- * PROVISIONAL INTERFACE — see the banner.
+ * Visual port: the same request (`/api/commissions/me`), the same figures as the server
+ * sends them; the arithmetic restated on each card is the restatement the screen already made.
  */
 
 type Accrual = {
@@ -122,13 +122,8 @@ export default function MyCommissionsPage() {
   const [openCalc, setOpenCalc] = useState<Record<string, boolean>>({});
 
   /**
-   * Loads the selected period.
-   *
-   * Inlined rather than a named `load` called from here, because the two lint rules that
-   * govern this shape cannot both be satisfied while it is separate: declared after the
-   * effect it is a use-before-declaration, and declared before it the rule resolves the
-   * call and sees a state write reachable from the effect body. Inlining puts the first
-   * `await` ahead of every state write, which is the property the rule is asking for.
+   * Loads the selected period. Inlined in the effect so the first `await` precedes every state
+   * write; `cancelled` stops a slow response for an old month landing after a newer one.
    */
   useEffect(() => {
     let cancelled = false;
@@ -150,368 +145,264 @@ export default function MyCommissionsPage() {
     ar ? (map[k]?.ar ?? k) : (map[k]?.en ?? k);
 
   /** A bare amount — no currency — for the places the design writes a running sum. */
-  const bare = (v: string) => (ar ? formatMoney(v) : formatMoney(v));
-  const money = (v: string, ccy = "SAR") =>
-    `${bare(v)} ${ar ? (ccy === "SAR" ? "ر.س" : ccy) : ccy}`;
-  const pct = (v: string) => {
-    const trimmed = Number(v).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
-    return ar ? `${trimmed}%` : `${trimmed}%`;
-  };
-  const months = monthOptions(month, lang);
+  const bare = (v: string) => formatMoney(v);
+  const ccyText = (ccy = "SAR") => (ar ? (ccy === "SAR" ? "ر.س" : ccy) : ccy);
+  const money = (v: string, ccy = "SAR") => `${bare(v)} ${ccyText(ccy)}`;
+  const pct = (v: string) => `${Number(v).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}%`;
+
+  const meta = [
+    <>{user?.name}{user?.role ? ` · ${user.role}` : ""}</>,
+    ...(data?.target
+      ? [
+          <span key="t">
+            {t("commissionTargetLbl")} <span className="n">{money(data.target.targetAmount, data.target.currency)}</span>
+            {Number(data.target.bonusAmount) > 0 && (
+              <> · {ar ? "مكافأة" : "bonus"} <span className="n">{money(data.target.bonusAmount, data.target.currency)}</span></>
+            )}
+          </span>,
+        ]
+      : []),
+  ];
+
+  const header = (
+    <PerfHeader ar={ar} title={ar ? "أهدافي وعمولاتي" : "My targets and commissions"} phoneTitle={t("commissionsTitle")}
+      meta={meta}
+      actions={
+        <MonthChip value={month} lang={lang} testId="mc-month"
+          label={ar ? "الفترة — بتوقيت الرياض" : "Period — Riyadh time"}
+          onChange={(v) => { setLoading(true); setError(""); setMonth(v); }} />
+      } />
+  );
+
+  if (loading && !data) return <PerfLoading ar={ar} />;
 
   return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
-
-      <PageHeader
-        title={t("commissionsTitle")}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{user?.name}</span>
-            {user?.role && (
-              <>
-                <span aria-hidden className="text-oo-border-strong">·</span>
-                <span>{user.role}</span>
-              </>
-            )}
-          </span>
-        }
-        actions={
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] leading-[18px] text-oo-text-secondary">
-              {ar ? "فترة الاحتساب — شهر ميلادي بتوقيت الرياض" : "Period — a calendar month, Riyadh time"}
-            </span>
-            <FilterSelect
-              value={month}
-              onChange={(v) => { setLoading(true); setError(""); setMonth(v); }}
-              label={t("commissionPeriod")}
-              width="w-[200px]"
-              testId="mc-month"
-            >
-              {months.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </FilterSelect>
-          </label>
-        }
-      />
+    <div className="pg">
+      {header}
 
       {/* The most important statement on the page. A commission figure that looks settled
           when no money has moved is the single most misleading thing this screen could do. */}
-      {data?.sandbox && <SandboxBanner notice={data.notice} />}
+      {data?.sandbox && <PerfSandbox notice={data.notice} ar={ar} />}
+      <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
 
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-
-      {loading ? (
-        <Spinner />
-      ) : !data ? null : (
+      {loading ? <PerfLoading ar={ar} /> : !data ? null : (
         <>
-          {/* ── What the reader came for ──────────────────────────────────────────── */}
-          <Card>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex items-center gap-2" data-testid="statement-badges">
+          {/* ── What the reader came for, and the statement that produced it ──────── */}
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "20px 40px", flexWrap: "wrap", margin: "4px 0 22px" }}>
+            <div>
+              <div className="lbl">{ar ? "المتبقّي لك عن هذه الفترة" : "Outstanding to you for this period"}</div>
+              <div style={{ marginTop: 10 }} data-testid="outstanding">
+                <span className="big n" style={{ color: "var(--action-primary)" }}>{bare(data.statement.outstanding)}</span>
+                <span className="unit">{ccyText()}</span>
+              </div>
+              <div className="sm" style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-muted)" }}>
+                {ar
+                  ? `من إجمالي مستحق ${bare(data.statement.accrued)} · صُرف منها ${bare(data.statement.paid)}`
+                  : `of ${bare(data.statement.accrued)} accrued · ${bare(data.statement.paid)} already paid`}
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }} data-testid="statement-badges">
                 {["PAID", "ACCRUED"]
                   .filter((s) => data.accruals.some((a) => a.status === s))
-                  .map((s) => (
-                    <AccrualStatusBadge key={s} status={s} />
-                  ))}
-              </div>
-              <div className="text-end">
-                <p className="text-[12px] leading-[18px] text-oo-text-secondary">
-                  {ar ? "المتبقّي لك عن هذه الفترة" : "Outstanding to you for this period"}
-                </p>
-                <p
-                  className="text-[32px] font-bold leading-[44px] text-oo-action-primary tabular-nums"
-                  data-testid="outstanding"
-                >
-                  {money(data.statement.outstanding)}
-                </p>
-                <p className="text-[12px] leading-[18px] text-oo-text-muted">
-                  {ar
-                    ? `من إجمالي مستحق ${money(data.statement.accrued)} · صُرف منها ${bare(data.statement.paid)}`
-                    : `of ${money(data.statement.accrued)} accrued · ${bare(data.statement.paid)} already paid`}
-                </p>
+                  .map((s) => <AccrualDot key={s} status={s} lang={lang} />)}
               </div>
             </div>
-          </Card>
-
-          {/* ── The statement, and the sum that produced it ───────────────────────── */}
-          <div>
-            <SectionTitle>{ar ? "كشف الفترة" : "This period's statement"}</SectionTitle>
-            <StatStrip>
-              <Stat
-                label={t("commissionAccrued")}
-                value={money(data.statement.accrued)}
-                note={ar ? "قيود الاستحقاق + العكوس" : "accrual entries plus reversals"}
-                testId="stat-accrued"
-              />
-              <Stat
-                label={t("commissionAdjustments")}
-                value={money(data.statement.adjustments)}
-                note={ar ? "مجموع قيود التسوية" : "sum of adjustment entries"}
-                testId="stat-adjustments"
-              />
-              <Stat
-                label={t("commissionPaid")}
-                value={money(data.statement.paid)}
-                note={ar ? "مجموع قيود الصرف" : "sum of payout entries"}
-                testId="stat-paid"
-              />
-              <Stat
-                label={t("commissionOutstanding")}
-                value={money(data.statement.outstanding)}
-                note={ar ? "مستحق + تسويات − مدفوع" : "accrued + adjustments − paid"}
-                tone="action"
-                testId="stat-outstanding"
-              />
-            </StatStrip>
-            <p className="mt-2 text-[12px] leading-[18px] text-oo-text-muted" data-testid="statement-formula">
-              <span dir="ltr" className="tabular-nums">
-                {bare(data.statement.accrued)} + {bare(data.statement.adjustments)} −{" "}
-                {bare(data.statement.paid)} = {bare(data.statement.outstanding)}
-              </span>
-              {" — "}
-              {ar
-                ? "الكشف يُحسب من قيود السجل لا من البطاقات، والمبلغ المصروف جزء من المستحق لا إضافة عليه."
-                : "The statement is computed from the ledger, not from the cards; a payout is part of what was accrued, not an addition to it."}
-            </p>
+            <div style={{ marginInlineStart: "auto", minWidth: 0, flex: "1 1 520px", maxWidth: 760 }}>
+              <Metrics items={[
+                { label: t("commissionAccrued"), testId: "stat-accrued", value: <span className="n">{bare(data.statement.accrued)}</span>,
+                  note: ar ? "قيود الاستحقاق والعكوس" : "accrual entries and reversals" },
+                { label: t("commissionAdjustments"), testId: "stat-adjustments", value: <span className="n">{bare(data.statement.adjustments)}</span>,
+                  note: ar ? "مجموع قيود التسوية" : "sum of adjustment entries" },
+                { label: t("commissionPaid"), testId: "stat-paid", value: <span className="n">{bare(data.statement.paid)}</span>,
+                  note: ar ? "مجموع قيود الصرف" : "sum of payout entries" },
+                { label: t("commissionOutstanding"), testId: "stat-outstanding", value: <span className="n">{bare(data.statement.outstanding)}</span>,
+                  note: ar ? "مستحق + تسويات − مدفوع" : "accrued + adjustments − paid", tone: "action" },
+              ]} />
+              <p className="sm" style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-muted)" }} data-testid="statement-formula">
+                <bdi dir="ltr" className="n">
+                  {bare(data.statement.accrued)} + {bare(data.statement.adjustments)} − {bare(data.statement.paid)} = {bare(data.statement.outstanding)}
+                </bdi>
+                {" — "}
+                {ar
+                  ? "الكشف يُحسب من قيود السجل، والمبلغ المصروف جزء من المستحق لا إضافة عليه."
+                  : "The statement is computed from the ledger; a payout is part of what was accrued, not an addition to it."}
+              </p>
+            </div>
           </div>
 
-          {data.target && (
-            <p className="text-[12px] leading-[18px] text-oo-text-muted">
-              {t("commissionTargetLbl")}:{" "}
-              <span className="tabular-nums">{money(data.target.targetAmount, data.target.currency)}</span>
-              {Number(data.target.bonusAmount) > 0 && (
-                <>
-                  {" · "}
-                  {ar ? "مكافأة التحقيق" : "Achievement bonus"}:{" "}
-                  <span className="tabular-nums">{money(data.target.bonusAmount, data.target.currency)}</span>
-                </>
-              )}
-            </p>
-          )}
-
-          {/* ── What each status means ────────────────────────────────────────────── */}
-          <Card>
-            <SectionTitle>
-              {ar ? "معنى كل حالة — ولماذا لا يُجمع شيء مرتين" : "What each status means — and why nothing is counted twice"}
-            </SectionTitle>
-            <ul className="space-y-2" data-testid="status-legend">
-              {/* In the order a reader meets them, ending with the one nothing writes —
-                  not in whatever order the badge map happens to declare. */}
-              {["ACCRUED", "APPROVED", "PAID", "REVERSED", "PREVIEW"]
-                .filter((s) => s in ACCRUAL_STATUS_SPECS)
-                .map((status) => (
-                  <li key={status} className="flex flex-wrap items-center justify-between gap-3">
-                    <span className="text-[12px] leading-[18px] text-oo-text-secondary">
-                      {label(STATUS_NOTES, status)}
-                    </span>
-                    <AccrualStatusBadge status={status} />
-                  </li>
-                ))}
-            </ul>
-          </Card>
-
-          {/* ── The accruals themselves ───────────────────────────────────────────── */}
-          {data.accruals.length === 0 ? (
-            <Card>
-              <EmptyState>
-                <Percent size={28} className="mx-auto mb-2 opacity-40" aria-hidden />
-                {t("commissionEmpty")}
-              </EmptyState>
-            </Card>
-          ) : (
+          <div className="cols perf-cols" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 40 }}>
+            {/* ── The accruals themselves ───────────────────────────────────────── */}
             <div>
-              <SectionTitle>
-                {ar
-                  ? `${num(data.accruals.length, "ar")} حركات استحقاق — مجموعها يساوي «مستحق» أعلاه`
-                  : `${data.accruals.length} accruals — they add up to “accrued” above`}
-              </SectionTitle>
-              <div className="space-y-3">
-                {data.accruals.map((a) => {
-                  // Restated on the row so the reader can check the figure rather than trust it.
-                  const net =
-                    Number(a.collectionEvent.amountGross) -
-                    Number(a.collectionEvent.amountTax) -
-                    Number(a.collectionEvent.amountNonQualifying);
-                  const split = Number(a.sharePercent) < 100;
-                  const open = !!openCalc[a.id];
-                  return (
-                    <div
-                      key={a.id}
-                      data-testid={`accrual-${a.id}`}
-                      className="rounded-2xl border border-oo-border-default bg-oo-bg-default p-5"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="text-[14px] leading-[22px] tabular-nums text-oo-text-primary">
-                          {money(a.amount, a.currency)}
-                          <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                            {ar ? "تدخل في «مستحق»" : "counts toward “accrued”"}
-                          </span>
-                        </div>
-                        <div className="min-w-0 text-end">
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <AccrualStatusBadge status={a.status} testId={`accrual-status-${a.id}`} />
-                            <p className="text-[14px] font-medium leading-[22px] text-oo-text-primary">
-                              {a.collectionEvent.customer?.name ?? (ar ? "بدون عميل" : "No customer")}
+              {data.accruals.length === 0 ? (
+                <div style={{ padding: "36px 0", textAlign: "center" }} data-testid="accruals-empty">
+                  <p style={{ fontWeight: 500, margin: 0 }}>{t("commissionEmpty")}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="bh">
+                    <h2 className="bt">
+                      {ar ? `${num(data.accruals.length, "ar")} حركات استحقاق` : `${data.accruals.length} accruals`}
+                    </h2>
+                    <span className="sub">{ar ? "مجموعها يساوي «المستحق»" : "they add up to “accrued”"}</span>
+                  </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {data.accruals.map((a) => {
+                      // Restated on the card so the reader can check the figure rather than trust it.
+                      const net =
+                        Number(a.collectionEvent.amountGross) -
+                        Number(a.collectionEvent.amountTax) -
+                        Number(a.collectionEvent.amountNonQualifying);
+                      const split = Number(a.sharePercent) < 100;
+                      const open = !!openCalc[a.id];
+                      const planName = ar && a.planVersion.plan.nameAr ? a.planVersion.plan.nameAr : a.planVersion.plan.name;
+                      return (
+                        <div key={a.id} className="perf-card" data-testid={`accrual-${a.id}`}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                            <span className="mid n" style={{ fontSize: 20 }}>{bare(a.amount)}</span>
+                            {a.currency !== "SAR" && <span className="unit">{a.currency}</span>}
+                            <AccrualDot status={a.status} lang={lang} testId={`accrual-status-${a.id}`} />
+                            <span style={{ flex: 1 }} />
+                            <span className="sm" style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
+                              <bdi>{a.collectionEvent.customer?.name ?? (ar ? "بدون عميل" : "No customer")}</bdi>
+                              {" · "}
+                              <span dir="ltr" title={planName} style={{ unicodeBidi: "isolate" }}>{a.planVersion.plan.code} v{a.planVersion.version}</span>
+                            </span>
+                          </div>
+
+                          {/* The arithmetic, in the reader's own terms. Collapsed by default so the
+                              page leads with amounts and status, but one click away. */}
+                          <div id={`calc-${a.id}`} hidden={!open} className="perf-calc">
+                            <div>
+                              <span>{ar ? "إجمالي − ضريبة − غير مؤهّل = الصافي" : "gross − tax − non-qualifying = net"}</span>
+                              <span dir={ar ? "rtl" : "ltr"} style={{ unicodeBidi: "isolate" }}>
+                                <span className="n">{bare(a.collectionEvent.amountGross)}</span> − <span className="n">{bare(a.collectionEvent.amountTax)}</span>
+                                {" "}− <span className="n">{bare(a.collectionEvent.amountNonQualifying)}</span> = <span className="n">{bare(String(net))}</span>
+                              </span>
+                            </div>
+                            {/* Only when the deal is shared: the share divides the BASE. */}
+                            {split && (
+                              <div>
+                                <span>{ar ? "الصافي × حصة الملكية = الأساس المؤهّل" : "net × your share = qualifying base"}</span>
+                                <span dir={ar ? "rtl" : "ltr"} style={{ unicodeBidi: "isolate" }}>
+                                  <span className="n">{bare(String(net))}</span> × <span className="n">{pct(a.sharePercent)}</span> = <span className="n">{bare(a.qualifyingBase)}</span>
+                                </span>
+                              </div>
+                            )}
+                            <div>
+                              <span>{ar ? "الأساس × النسبة الفعّالة = العمولة" : "base × effective rate = commission"}</span>
+                              <span dir={ar ? "rtl" : "ltr"} style={{ unicodeBidi: "isolate" }}>
+                                <span className="n">{bare(a.qualifyingBase)}</span> × <span className="n">{pct(a.effectiveRatePercent)}</span> = <span className="n">{bare(a.amount)}</span>
+                              </span>
+                            </div>
+                            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
+                              {ar
+                                ? "حصة الملكية تقسم الأساس المؤهّل قبل حساب النسبة، لا العمولة بعده. النسبة الفعّالة يشتقّها النظام من الشرائح ولا تُدخل يدويًا."
+                                : "The ownership share divides the qualifying base before the rate is applied, not the finished commission after it. The effective rate is derived from the tiers, never typed in."}
                             </p>
                           </div>
-                          <p className="text-[12px] leading-[18px] text-oo-text-muted">
-                            {ar && a.planVersion.plan.nameAr ? a.planVersion.plan.nameAr : a.planVersion.plan.name}
-                            {" · "}
-                            {ar ? `نسخة ${num(a.planVersion.version, "ar")}` : `v${a.planVersion.version}`}
-                          </p>
+
+                          <div className="sm" style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                            {ar ? "مرجع التحصيل" : "Collection reference"} <span className="id">{a.collectionEvent.externalRef}</span>
+                            {" · "}<span className="n">{formatDay(a.collectionEvent.collectedAt, lang)}</span>{" · "}
+                            <button
+                              type="button"
+                              className="perf-link"
+                              onClick={() => setOpenCalc((s) => ({ ...s, [a.id]: !s[a.id] }))}
+                              aria-expanded={open}
+                              aria-controls={`calc-${a.id}`}
+                              data-testid={`toggle-calc-${a.id}`}
+                            >
+                              {open
+                                ? (ar ? "إخفاء الحساب" : "Hide the calculation")
+                                : (ar ? "عرض الحساب والتحقّق منه" : "Show the calculation and check it")}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-
-                      {/* The arithmetic, in the reader's own terms.
-                          Collapsed by default so the page leads with amounts, period and
-                          status rather than four rows of intermediate figures per accrual —
-                          but one click away, never behind a different screen, because a
-                          commission figure nobody can check is not an explanation. */}
-                      <button
-                        type="button"
-                        onClick={() => setOpenCalc((s) => ({ ...s, [a.id]: !s[a.id] }))}
-                        aria-expanded={open}
-                        aria-controls={`calc-${a.id}`}
-                        data-testid={`toggle-calc-${a.id}`}
-                        className={`${ROW_ACTION} mt-3 gap-1.5 text-oo-action-primary hover:border-oo-action-primary`}
-                      >
-                        {open ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
-                        {open
-                          ? (ar ? "إخفاء الحساب" : "Hide the calculation")
-                          : (ar ? "عرض الحساب والتحقّق منه" : "Show the calculation and check it")}
-                      </button>
-
-                      <div id={`calc-${a.id}`} hidden={!open} className="mt-3 space-y-2">
-                        {/* Step one: what the collection left behind. */}
-                        <CalcRow
-                          cells={[
-                            [ar ? "إجمالي المقبوض" : "Collected", money(a.collectionEvent.amountGross), ""],
-                            [ar ? "ضريبة" : "tax", money(a.collectionEvent.amountTax), "−"],
-                            [ar ? "غير مؤهّل" : "non-qualifying", money(a.collectionEvent.amountNonQualifying), "−"],
-                            [ar ? "صافي التحصيل" : "net collection", money(String(net)), "="],
-                          ]}
-                        />
-                        {/* Step two, only when the deal is shared: the share divides the BASE. */}
-                        {split && (
-                          <CalcRow
-                            cells={[
-                              [ar ? "صافي التحصيل" : "net collection", money(String(net)), ""],
-                              [ar ? "حصة الملكية" : "your share", pct(a.sharePercent), "×"],
-                              [ar ? "الأساس المؤهّل" : "qualifying base", money(a.qualifyingBase), "="],
-                            ]}
-                          />
-                        )}
-                        {/* Step three: the rate on that base. */}
-                        <CalcRow
-                          cells={[
-                            [ar ? "الأساس المؤهّل" : "qualifying base", money(a.qualifyingBase), ""],
-                            [ar ? "النسبة الفعّالة" : "effective rate", pct(a.effectiveRatePercent), "×"],
-                            [ar ? "العمولة" : "commission", money(a.amount, a.currency), "="],
-                          ]}
-                        />
-                        <p className="text-[12px] leading-[18px] text-oo-text-muted">
-                          {ar
-                            ? "حصة الملكية تقسم الأساس المؤهّل قبل حساب النسبة، لا العمولة بعده. النسبة الفعّالة نتيجة يشتقّها النظام من الشرائح ولا تُدخل يدوياً."
-                            : "The ownership share divides the qualifying base before the rate is applied, not the finished commission after it. The effective rate is derived from the tiers, never typed in."}
-                        </p>
-                      </div>
-
-                      <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
-                        {ar ? "مرجع التحصيل" : "Collection reference"}: {a.collectionEvent.externalRef}
-                        {" · "}
-                        {formatDay(a.collectionEvent.collectedAt, lang)}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
-          )}
 
-          {/* ── The ledger the statement is computed from ─────────────────────────── */}
-          {data.ledger.length > 0 && (
+            {/* ── The ledger the statement is computed from ─────────────────────── */}
             <div>
-              <SectionTitle>
-                {ar ? "سجلّ القيود — مصدر أرقام الكشف" : "The ledger — where the statement's figures come from"}
-              </SectionTitle>
-              <DataTable
-                testId="ledger-table"
-                minWidth={720}
-                cols={[
-                  { label: ar ? "التاريخ" : "Date", w: "w-[140px]" },
-                  { label: ar ? "نوع القيد" : "Entry", w: "w-[150px]" },
-                  { label: ar ? "البيان" : "Description", w: "min-w-[240px]" },
-                  { label: ar ? "المبلغ" : "Amount", w: "w-[160px]", align: "end" },
-                ]}
-              >
-                {data.ledger.map((l) => (
-                  <Tr key={l.id}>
-                    <Td>{formatDay(l.createdAt, lang)}</Td>
-                    <Td>{label(LEDGER_LABELS, l.type)}</Td>
-                    <Td className="text-oo-text-secondary">{l.reason ?? "—"}</Td>
-                    <Td align="end">
-                      {/* A payout is STORED positive and SUBTRACTED by the statement
-                          (outstanding = accrued + adjustments − paid), so the ledger shows it
-                          as the subtraction it is. A reversal is already stored negative and
-                          needs no help. Getting this wrong makes the column fail to add up to
-                          the figure directly above it, which is the one thing this table is
-                          here to let a reader check. */}
-                      {(() => {
+              <div className="bh">
+                <h2 className="bt">{ar ? "سجلّ القيود" : "The ledger"}</h2>
+                <span className="sub">{ar ? "مصدر أرقام الكشف" : "where the statement's figures come from"}</span>
+              </div>
+              {data.ledger.length === 0 ? (
+                <p className="sm" style={{ color: "var(--text-muted)", fontSize: 13.5 }}>{ar ? "لا قيود في هذه الفترة." : "No entries in this period."}</p>
+              ) : (
+                <div className="perf-scroll">
+                  <table className="t dense" data-testid="ledger-table">
+                    <thead><tr>
+                      <th scope="col">{ar ? "التاريخ" : "Date"}</th>
+                      <th scope="col">{ar ? "نوع القيد" : "Entry"}</th>
+                      <th scope="col">{ar ? "البيان" : "Description"}</th>
+                      <th scope="col" className="num">{ar ? "المبلغ" : "Amount"}</th>
+                    </tr></thead>
+                    <tbody>
+                      {data.ledger.map((l) => {
+                        // A payout is STORED positive and SUBTRACTED by the statement
+                        // (outstanding = accrued + adjustments − paid), so the ledger shows it as
+                        // the subtraction it is. A reversal is already stored negative.
                         const raw = Number(l.amount);
                         const reduces = l.type === "PAYOUT" || raw < 0;
                         return (
-                          <span
-                            className={`tabular-nums ${reduces ? "text-oo-status-rejected" : "text-oo-text-primary"}`}
-                          >
-                            {reduces ? "−" : "+"} {bare(String(Math.abs(raw)))}
-                          </span>
+                          <tr key={l.id}>
+                            <td className="n">{formatDay(l.createdAt, lang)}</td>
+                            <td>{label(LEDGER_LABELS, l.type)}</td>
+                            <td className="sm wrap">{l.reason ?? "—"}</td>
+                            <td className="num" style={reduces ? { color: "var(--status-danger)" } : undefined}>
+                              {reduces ? "−" : "+"}<span className="n">{bare(String(Math.abs(raw)))}</span>
+                            </td>
+                          </tr>
                         );
-                      })()}
-                    </Td>
-                  </Tr>
-                ))}
-                {/* The line that ties the ledger to the strip above it. */}
-                <Tr testId="ledger-total">
-                  <Td className="text-oo-text-muted">—</Td>
-                  <Td className="font-medium">{ar ? "المحصّلة" : "Net"}</Td>
-                  <Td className="text-oo-text-secondary">
-                    {ar
-                      ? `المتبقّي = ${bare(data.statement.accrued)} مستحق + ${bare(data.statement.adjustments)} تسويات − ${bare(data.statement.paid)} مدفوع`
-                      : `outstanding = ${bare(data.statement.accrued)} accrued + ${bare(data.statement.adjustments)} adjustments − ${bare(data.statement.paid)} paid`}
-                  </Td>
-                  <Td align="end">
-                    <span className="tabular-nums font-medium">= {bare(data.statement.outstanding)}</span>
-                  </Td>
-                </Tr>
-              </DataTable>
+                      })}
+                    </tbody>
+                    <tfoot>
+                      {/* The line that ties the ledger to the statement above it. */}
+                      <tr data-testid="ledger-total">
+                        <td colSpan={3}>
+                          {ar ? "المحصّلة" : "Net"} · {ar ? "سجل إضافي فقط، لا يُعدَّل" : "append-only, never edited"}
+                        </td>
+                        <td className="num" style={{ color: "var(--text-primary)", fontWeight: 500 }}>= <span className="n">{bare(data.statement.outstanding)}</span></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+
+              {/* What each status means, and why nothing is counted twice. */}
+              <details style={{ marginTop: 18 }} data-testid="status-legend">
+                <summary className="perf-link" style={{ fontSize: 13, cursor: "pointer" }}>
+                  {ar ? "معنى كل حالة — ولماذا لا يُجمع شيء مرتين" : "What each status means — and why nothing is counted twice"}
+                </summary>
+                <dl className="props" style={{ gridTemplateColumns: "96px minmax(0,1fr)", marginTop: 10, fontSize: 13 }}>
+                  {["ACCRUED", "APPROVED", "PAID", "REVERSED", "PREVIEW"]
+                    .filter((s) => s in ACCRUAL_STATUS_SPECS)
+                    .map((status) => (
+                      <div key={status} style={{ display: "contents" }}>
+                        <dt><AccrualDot status={status} lang={lang} /></dt>
+                        <dd style={{ color: "var(--text-secondary)" }}>{label(STATUS_NOTES, status)}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </details>
             </div>
-          )}
+          </div>
+
+          <div style={{ marginTop: 24 }}>
+            <PerfNote>
+              <span>
+                {ar
+                  ? "«مستحق» يُحسب من قيود السجل. الاعتماد لا يغيّره، والصرف المسجَّل يُطرح منه ولا يُضاف إليه. الصرف تسجيل ولا يحرّك مالًا."
+                  : "“Accrued” is computed from the ledger. Approval does not change it, and a recorded payout is subtracted from it, never added. A payout is a record; it moves no money."}
+              </span>
+            </PerfNote>
+          </div>
         </>
       )}
-    </div>
-  );
-}
-
-/**
- * One line of the arithmetic: a row of labelled figures joined by operators.
- *
- * The operator belongs to the cell that FOLLOWS it, so the row reads the same way in both
- * directions without a second layout.
- */
-function CalcRow({ cells }: { cells: [string, string, string][] }) {
-  return (
-    <div className="flex flex-wrap items-end gap-x-4 gap-y-2 rounded-[10px] bg-oo-bg-subtle px-3 py-[9px]">
-      {cells.map(([label_, value, op], i) => (
-        <div key={i} className="flex items-end gap-2">
-          {op && <span className="pb-px text-[14px] leading-[22px] text-oo-text-muted">{op}</span>}
-          <span className="block text-end">
-            <span className="block text-[12px] leading-[18px] text-oo-text-muted">{label_}</span>
-            <span className="block text-[14px] leading-[22px] tabular-nums text-oo-text-primary">{value}</span>
-          </span>
-        </div>
-      ))}
     </div>
   );
 }

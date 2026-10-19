@@ -1,0 +1,316 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Dialog, Field } from "@/components/hr/ui";
+import { api } from "../../sales/_components/ui";
+import { ACTIVITY_LABELS, OUTCOME_LABELS } from "@/components/d21/labels";
+import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
+import type { Contact, Customer, Deal } from "./types";
+
+/**
+ * The account page's forms, in the HR kit dialog the customers list already uses. Each sends
+ * exactly one request to an endpoint that re-checks the permission; the page only decides
+ * whether to offer the button.
+ */
+
+const errorOf = (d: { error?: string; errorEn?: string }, ar: boolean, fallback: string) =>
+  (ar ? d.error : d.errorEn ?? d.error) || fallback;
+
+export const SEGMENT_LABELS: Record<string, { ar: string; en: string }> = {
+  WHOLESALE: { ar: "جملة", en: "Wholesale" },
+  RETAIL: { ar: "تجزئة", en: "Retail" },
+  CAFE: { ar: "مقهى", en: "Café" },
+  DISTRIBUTOR: { ar: "موزّع", en: "Distributor" },
+  OTHER: { ar: "أخرى", en: "Other" },
+};
+
+function Err({ text }: { text: string }) {
+  return text ? <p className="hr-err is-wide" role="alert" data-testid="dialog-error" style={{ gridColumn: "1 / -1" }}>{text}</p> : null;
+}
+
+// ── «تسجيل نشاط» ─────────────────────────────────────────────────────────────────────────
+export function ActivityDialog({ ar, customerId, deals, defaultDealId, onClose, onDone }: {
+  ar: boolean; customerId: string; deals: Pick<Deal, "id" | "title">[]; defaultDealId?: string | null;
+  onClose: () => void; onDone: () => void;
+}) {
+  const L = (a: string, e: string) => (ar ? a : e);
+  const [type, setType] = useState("CALL");
+  const [outcome, setOutcome] = useState("NOTE_ONLY");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [completed, setCompleted] = useState(true);
+  const [dealId, setDealId] = useState(defaultDealId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const isTask = type === "TASK";
+  const ready = subject.trim().length >= 2 && (!isTask || !!dueAt);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true); setErr("");
+    const res = await api(`/api/customers/${customerId}/activities`, {
+      method: "POST",
+      body: {
+        type, subject, body, opportunityId: dealId || null,
+        outcome: isTask ? undefined : outcome,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+        completed: isTask ? false : completed,
+      },
+    });
+    setBusy(false);
+    if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
+  }
+
+  return (
+    <Dialog open title={L("تسجيل نشاط", "Log activity")} onClose={onClose} testId="activity-dialog"
+      actions={<>
+        <button type="submit" form="acc-activity" className="hr-btn is-primary" disabled={!ready || busy} data-testid="save-activity">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
+        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
+      </>}>
+      <form id="acc-activity" className="hr-form" onSubmit={save}>
+        <Err text={err} />
+        <Field label={L("النوع", "Type")}>
+          <select className="hr-select" value={type} onChange={(e) => setType(e.target.value)} data-testid="activity-type">
+            {Object.keys(ACTIVITY_LABELS).map((k) => <option key={k} value={k}>{ar ? ACTIVITY_LABELS[k].ar : ACTIVITY_LABELS[k].en}</option>)}
+          </select>
+        </Field>
+        {!isTask ? (
+          <Field label={L("ماذا حدث؟", "What happened?")}>
+            <select className="hr-select" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+              {ACTIVITY_OUTCOMES.map((o) => <option key={o} value={o}>{ar ? OUTCOME_LABELS[o].ar : OUTCOME_LABELS[o].en}</option>)}
+            </select>
+          </Field>
+        ) : <span />}
+        <Field label={`${L("الموضوع", "Subject")} *`} wide>
+          <input className="hr-input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={500} data-testid="activity-subject" />
+        </Field>
+        <Field label={L("التفاصيل", "Details")} wide>
+          <textarea className="hr-textarea" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
+        </Field>
+        <Field label={L("الصفقة", "Deal")} help={L("اختياري: يُسجَّل على العميل وحده إن لم تُختر صفقة.", "Optional: without a deal it is recorded on the customer itself.")}>
+          <select className="hr-select" value={dealId} onChange={(e) => setDealId(e.target.value)} data-testid="activity-deal">
+            <option value="">{L("العميل فقط", "The customer only")}</option>
+            {deals.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+          </select>
+        </Field>
+        <Field label={`${L("موعد الاستحقاق", "Due")}${isTask ? " *" : ""}`} help={isTask ? L("المهمة بلا موعد لا تظهر في المتأخرات أبدًا.", "A task with no due date never appears as overdue.") : undefined}>
+          <input className="hr-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} dir="ltr" />
+        </Field>
+        {!isTask && (
+          <label className="cu-check is-wide">
+            <input type="checkbox" checked={completed} onChange={(e) => setCompleted(e.target.checked)} />
+            {L("حدث بالفعل", "This already happened")}
+          </label>
+        )}
+        <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }}>
+          {L("هذا تسجيل لما حدث. لا يُرسل بريدًا ولا رسالة.", "This records that contact happened. It does not send an email or a message.")}
+        </p>
+      </form>
+    </Dialog>
+  );
+}
+
+// ── «عرض سعر»: a quotation belongs to a deal — pick an open one or open a new one ─────────
+export function QuoteDialog({ ar, customer, openDeals, canCreateDeal, onClose }: {
+  ar: boolean; customer: Pick<Customer, "id" | "name" | "nameAr">; openDeals: Pick<Deal, "id" | "title" | "stage" | "amount">[];
+  canCreateDeal: boolean; onClose: () => void;
+}) {
+  const L = (a: string, e: string) => (ar ? a : e);
+  const router = useRouter();
+  const [choice, setChoice] = useState<string>(openDeals[0]?.id ?? (canCreateDeal ? "new" : ""));
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function go(e: React.FormEvent) {
+    e.preventDefault();
+    if (!choice || busy) return;
+    setErr("");
+    let dealId = choice;
+    if (choice === "new") {
+      setBusy(true);
+      const res = await api<{ opportunityId: string }>(`/api/customers/${customer.id}/deals`, { method: "POST", body: { title: title.trim() || undefined } });
+      setBusy(false);
+      if (!res.ok) { setErr(errorOf(res.data as never, ar, L("تعذّر فتح الصفقة.", "Could not open the deal."))); return; }
+      dealId = res.data.opportunityId;
+    }
+    // The existing quotation flow: it raises a draft on the deal and opens its editor.
+    router.push(`/dashboard/sales/quotes/new?opportunityId=${encodeURIComponent(dealId)}`);
+  }
+
+  const nothing = openDeals.length === 0 && !canCreateDeal;
+  return (
+    <Dialog open title={L("عرض سعر جديد", "New quotation")} sub={ar ? customer.nameAr ?? customer.name : customer.name} onClose={onClose} testId="quote-dialog"
+      actions={<>
+        <button type="submit" form="acc-quote" className="hr-btn is-primary" disabled={!choice || busy || nothing} data-testid="quote-continue">{busy ? L("جارٍ…", "Working…") : L("متابعة", "Continue")}</button>
+        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
+      </>}>
+      <form id="acc-quote" className="hr-form" onSubmit={go}>
+        <Err text={err} />
+        <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }}>
+          {L("عرض السعر يُنشأ من صفقة. اختر صفقة مفتوحة لهذا العميل أو افتح صفقة جديدة.", "A quotation is raised from a deal. Choose an open deal of this customer or open a new one.")}
+        </p>
+        {nothing && (
+          <p className="hr-err is-wide" style={{ gridColumn: "1 / -1" }} data-testid="quote-no-deal">
+            {L("لا توجد صفقة مفتوحة يمكنك تسعيرها، ولا تملك صلاحية فتح صفقة (تحويل العملاء المحتملين).", "There is no open deal you can quote, and you may not open one (the lead-conversion permission).")}
+          </p>
+        )}
+        <div className="is-wide" style={{ gridColumn: "1 / -1", display: "grid", gap: 8 }} role="radiogroup" aria-label={L("الصفقة", "Deal")}>
+          {openDeals.map((d) => (
+            <label key={d.id} className="cu-check" style={{ alignItems: "flex-start" }}>
+              <input type="radio" name="deal" value={d.id} checked={choice === d.id} onChange={() => setChoice(d.id)} data-testid={`quote-deal-${d.id}`} />
+              <span><b style={{ fontWeight: 500 }}>{d.title}</b><br /><span className="hr-help">{ar ? d.stage.nameAr : d.stage.nameEn}</span></span>
+            </label>
+          ))}
+          {canCreateDeal && (
+            <label className="cu-check">
+              <input type="radio" name="deal" value="new" checked={choice === "new"} onChange={() => setChoice("new")} data-testid="quote-deal-new" />
+              {L("صفقة جديدة لهذا العميل", "A new deal for this customer")}
+            </label>
+          )}
+        </div>
+        {choice === "new" && (
+          <Field label={L("اسم الصفقة", "Deal name")} wide help={L("تبدأ في مرحلة التأهيل وتكون أنت مالكها.", "It starts in the Qualification stage, owned by you.")}>
+            <input className="hr-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={ar ? customer.nameAr ?? customer.name : customer.name} maxLength={200} data-testid="quote-deal-title" />
+          </Field>
+        )}
+      </form>
+    </Dialog>
+  );
+}
+
+// ── The customer's particulars and account details ────────────────────────────────────────
+export function DetailsDialog({ ar, customer, onClose, onDone }: {
+  ar: boolean; customer: Customer; onClose: () => void; onDone: () => void;
+}) {
+  const L = (a: string, e: string) => (ar ? a : e);
+  const [f, setF] = useState({
+    name: customer.name, nameAr: customer.nameAr ?? "", phone: customer.phone ?? "", email: customer.email ?? "",
+    address: customer.address ?? "", whatsappOptOut: customer.whatsappOptOut,
+    commercialRegNo: customer.commercialRegNo ?? "", vatNumber: customer.vatNumber ?? "", segment: customer.segment ?? "",
+    city: customer.city ?? "", priceList: customer.priceList ?? "",
+    paymentTermsDays: customer.paymentTermsDays != null ? String(customer.paymentTermsDays) : "",
+    creditLimit: customer.creditLimit ?? "", accountOwnerId: customer.accountOwner?.id ?? "",
+  });
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    // The roster: id, name, role and active for anyone signed in (GET /api/employees).
+    api<{ id: string; name: string; active: boolean }[]>("/api/employees").then((r) => {
+      if (r.ok && Array.isArray(r.data)) setEmployees(r.data.filter((e) => e.active !== false).map((e) => ({ id: e.id, name: e.name })));
+    });
+  }, []);
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setF({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value });
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!f.name.trim() || busy) return;
+    setBusy(true); setErr("");
+    const res = await api(`/api/customers/${customer.id}`, { method: "PUT", body: f });
+    setBusy(false);
+    if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
+  }
+
+  return (
+    <Dialog open title={L("بيانات العميل", "Customer details")} onClose={onClose} testId="details-dialog"
+      actions={<>
+        <button type="submit" form="acc-details" className="hr-btn is-primary" disabled={busy || !f.name.trim()} data-testid="save-details">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
+        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
+      </>}>
+      <form id="acc-details" className="hr-form" onSubmit={save}>
+        <Err text={err} />
+        <Field label={`${L("الاسم", "Name")} *`}><input className="hr-input" required value={f.name} onChange={set("name")} /></Field>
+        <Field label={L("الاسم بالعربية", "Arabic name")}><input className="hr-input" dir="rtl" value={f.nameAr} onChange={set("nameAr")} /></Field>
+        <Field label={L("الهاتف", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} /></Field>
+        <Field label={L("البريد", "Email")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="email" value={f.email} onChange={set("email")} /></Field>
+        <Field label={L("التوصيل (العنوان)", "Delivery (address)")} wide><textarea className="hr-textarea" rows={2} value={f.address} onChange={set("address")} /></Field>
+        <p className="cu-formsec is-wide">{L("الحساب", "Account")}</p>
+        <Field label={L("الفئة", "Category")}>
+          <select className="hr-select" value={f.segment} onChange={set("segment")} data-testid="details-segment">
+            <option value="">{L("غير محددة", "Not set")}</option>
+            {Object.entries(SEGMENT_LABELS).map(([k, v]) => <option key={k} value={k}>{ar ? v.ar : v.en}</option>)}
+          </select>
+        </Field>
+        <Field label={L("المدينة", "City")}><input className="hr-input" value={f.city} onChange={set("city")} maxLength={80} /></Field>
+        <Field label={L("المسؤول", "Account owner")}>
+          <select className="hr-select" value={f.accountOwnerId} onChange={set("accountOwnerId")} data-testid="details-owner">
+            <option value="">{L("بلا مسؤول", "None")}</option>
+            {customer.accountOwner && !employees.some((x) => x.id === customer.accountOwner!.id) && <option value={customer.accountOwner.id}>{customer.accountOwner.name}</option>}
+            {employees.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </Field>
+        <Field label={L("السجل التجاري", "Commercial registration")} help={L("10 أرقام", "10 digits")}>
+          <input className="hr-input" dir="ltr" style={{ textAlign: "start" }} inputMode="numeric" value={f.commercialRegNo} onChange={set("commercialRegNo")} data-testid="details-cr" />
+        </Field>
+        <Field label={L("الرقم الضريبي", "VAT number")} help={L("15 رقمًا، يبدأ بـ 3 وينتهي بـ 3", "15 digits, starting and ending with 3")}>
+          <input className="hr-input" dir="ltr" style={{ textAlign: "start" }} inputMode="numeric" value={f.vatNumber} onChange={set("vatNumber")} data-testid="details-vat" />
+        </Field>
+        <Field label={L("قائمة الأسعار", "Price list")} help={L("نص يصف الاتفاق، لا يغيّر أي سعر.", "Text recording the agreement; it changes no price.")}>
+          <input className="hr-input" value={f.priceList} onChange={set("priceList")} maxLength={80} />
+        </Field>
+        <Field label={L("شروط الدفع (أيام)", "Payment terms (days)")}>
+          <input className="hr-input" dir="ltr" inputMode="numeric" value={f.paymentTermsDays} onChange={set("paymentTermsDays")} data-testid="details-terms" />
+        </Field>
+        <Field label={L("حد الائتمان (ر.س)", "Credit limit (SAR)")} help={L("للعرض فقط؛ لا يُطبَّق على الطلبات.", "Shown only; not enforced on orders.")}>
+          <input className="hr-input" dir="ltr" inputMode="decimal" value={f.creditLimit} onChange={set("creditLimit")} data-testid="details-credit" />
+        </Field>
+        <label className="cu-check is-wide">
+          <input type="checkbox" checked={f.whatsappOptOut} onChange={set("whatsappOptOut")} />
+          {L("لا يرغب برسائل واتساب من النظام", "Opted out of system WhatsApp messages")}
+        </label>
+      </form>
+    </Dialog>
+  );
+}
+
+// ── A contact ─────────────────────────────────────────────────────────────────────────────
+export function ContactDialog({ ar, customerId, contact, onClose, onDone }: {
+  ar: boolean; customerId: string; contact: Contact | null; onClose: () => void; onDone: () => void;
+}) {
+  const L = (a: string, e: string) => (ar ? a : e);
+  const [f, setF] = useState({ name: contact?.name ?? "", role: contact?.role ?? "", phone: contact?.phone ?? "", email: contact?.email ?? "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!f.name.trim() || busy) return;
+    setBusy(true); setErr("");
+    const res = contact
+      ? await api(`/api/customers/${customerId}/contacts/${contact.id}`, { method: "PUT", body: f })
+      : await api(`/api/customers/${customerId}/contacts`, { method: "POST", body: f });
+    setBusy(false);
+    if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحفظ.", "Could not save.")));
+  }
+  async function remove() {
+    if (!contact || busy) return;
+    if (!confirm(L(`حذف ${contact.name} من جهات الاتصال؟`, `Remove ${contact.name} from the contacts?`))) return;
+    setBusy(true);
+    const res = await api(`/api/customers/${customerId}/contacts/${contact.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (res.ok) onDone(); else setErr(errorOf(res.data as never, ar, L("تعذّر الحذف.", "Could not remove.")));
+  }
+
+  return (
+    <Dialog open title={contact ? L("تعديل جهة اتصال", "Edit contact") : L("جهة اتصال جديدة", "New contact")} onClose={onClose} testId="contact-dialog"
+      actions={<>
+        <button type="submit" form="acc-contact" className="hr-btn is-primary" disabled={busy || !f.name.trim()} data-testid="save-contact">{busy ? L("جارٍ الحفظ…", "Saving…") : L("حفظ", "Save")}</button>
+        {contact && <button type="button" className="hr-btn is-danger" onClick={remove} disabled={busy} data-testid="delete-contact">{L("حذف", "Remove")}</button>}
+        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
+      </>}>
+      <form id="acc-contact" className="hr-form" onSubmit={save}>
+        <Err text={err} />
+        <Field label={`${L("الاسم", "Name")} *`}><input className="hr-input" required value={f.name} onChange={set("name")} maxLength={120} data-testid="contact-name" /></Field>
+        <Field label={L("الدور", "Role")}><input className="hr-input" value={f.role} onChange={set("role")} maxLength={80} placeholder={L("مدير المشتريات", "Purchasing manager")} data-testid="contact-role" /></Field>
+        <Field label={L("الهاتف", "Phone")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} value={f.phone} onChange={set("phone")} maxLength={40} data-testid="contact-phone" /></Field>
+        <Field label={L("البريد", "Email")}><input className="hr-input" dir="ltr" style={{ textAlign: "start" }} type="email" value={f.email} onChange={set("email")} maxLength={160} /></Field>
+      </form>
+    </Dialog>
+  );
+}

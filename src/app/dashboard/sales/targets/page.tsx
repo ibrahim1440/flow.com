@@ -1,24 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Target } from "lucide-react";
 import {
-  useLang, ProvisionalBanner, PageHeader, Alert, Card, EmptyState, Spinner, SandboxBanner,
-  Button, Field, TextInput, Select, TextArea, Money, Modal, api,
-  DataTable, Tr, Td, ProgressBar, ROW_ACTION, num, FilterSelect, formatMoney, monthOptions,
+  useLang, Button, Field, TextInput, Select, TextArea, Modal, Alert, api, num, formatMoney, monthOptions,
 } from "../_components/ui";
+import { PerfHeader, MonthChip, Bar, PerfNote, PerfNotice, PerfSandbox, PerfLoading } from "../_components/perf";
+import { usePhone } from "@/components/shell/page-context";
 import { useUser } from "../../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 
 /**
- * Monthly sales targets and progress.
+ * Monthly sales targets and progress — Direction 2.1, GX A-P03 «الأهداف» (`1220:94392`, EN
+ * `1233:60338`, 1024 `1220:94655`, 390 `1432:16430`).
  *
  * Progress is measured against COLLECTIONS, not against deal value, because that is what
  * the commission is measured against. A target tracked on pipeline value next to a
  * commission paid on cash collected disagree for months at a time, and the rep is looking
  * at the wrong one at exactly the moment they care most.
  *
- * PROVISIONAL INTERFACE — see the banner.
+ * Visual port: the request, the figures the server computes and the set / edit / remove
+ * dialog are the ones this screen already had.
  */
 
 type Row = {
@@ -45,6 +46,7 @@ export default function TargetsPage() {
   const lang = useLang();
   const ar = lang === "ar";
   const user = useUser();
+  const phone = usePhone();
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "sales", "lead_assign");
 
   const [month, setMonth] = useState(thisMonth());
@@ -85,150 +87,137 @@ export default function TargetsPage() {
     return () => { cancelled = true; };
   }, [month, ar, reloadToken]);
 
-  if (loading) return <Spinner />;
+  if (loading) return <PerfLoading ar={ar} />;
 
-  // "سبتمبر ٢٠٢٦" — the period the table is showing, in the reader's own calendar names.
-  const months = monthOptions(month, lang);
-  const monthLabel = months.find((o) => o.value === month)?.label ?? month;
+  // "سبتمبر 2026" — the period the table is showing, in the reader's own calendar names.
+  const monthLabel = monthOptions(month, lang).find((o) => o.value === month)?.label ?? month;
+  const sar = (v: string, ccy: string) => `${formatMoney(v, 0)} ${ar ? (ccy === "SAR" ? "ر.س" : ccy) : ccy}`;
+  const pctText = (r: Row) => `${num(Math.round(Number(r.achievedPercent)), lang)}%`;
+  const caption = (r: Row) => (
+    <>
+      {ar ? "تحقّق" : "Achieved"} <span className="n">{pctText(r)}</span>
+      {!r.met && <> · {ar ? "المتبقي" : "shortfall"} {sar(r.shortfall, r.currency)}</>}
+    </>
+  );
+  const standing = (r: Row) =>
+    r.note ?? (r.met ? (Number(r.achievedPercent) > 100 ? (ar ? "فوق الهدف" : "Above target") : (ar ? "حقّق الهدف" : "Target met")) : "—");
+  const bonus = (r: Row) => (Number(r.bonusAmount) > 0 ? <span className="n">{formatMoney(r.bonusAmount)}</span> : <span className="sm">—</span>);
+
+  const actions = (
+    <>
+      <MonthChip value={month} onChange={setMonth} lang={lang} testId="tg-month" />
+      {canManage && (
+        <button type="button" className="btn p" onClick={() => setEditing("new")} data-testid="new-target">
+          <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+          {ar ? "تعيين هدف" : "Set a target"}
+        </button>
+      )}
+    </>
+  );
+
+  const meta = [
+    monthLabel,
+    ar ? "يُقاس على صافي المحصّل، لا على قيمة الطلبات" : "measured on net collections, not on order value",
+    ...(scope === "own" ? [ar ? "هدفك فقط" : "your own target only"] : []),
+  ];
+
+  const empty = (
+    <div data-testid="targets-empty" style={{ padding: "48px 0", textAlign: "center" }}>
+      <p style={{ fontWeight: 500, margin: 0 }}>{ar ? "لم تُعيَّن أهداف لهذا الشهر." : "No targets set for this month."}</p>
+      {canManage && (
+        <p className="lbl" style={{ fontWeight: 400, marginTop: 6 }}>
+          {ar ? "«تعيين هدف» يضيف هدف موظّف لهذا الشهر." : "“Set a target” adds one for this month."}
+        </p>
+      )}
+    </div>
+  );
 
   return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+    <div className="pg">
+      <PerfHeader ar={ar} title={ar ? "الأداء والعمولات" : "Performance and commissions"}
+        phoneTitle={ar ? "الأهداف" : "Targets"} meta={meta} actions={actions} />
 
-      <PageHeader
-        title={ar ? "أهداف المبيعات" : "Sales targets"}
-        subtitle={
-          <span className="flex items-center gap-2 flex-wrap">
-            <span>{monthLabel}</span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>
-              {ar
-                ? "الهدف يُقاس على صافي المحصّل، لا على قيمة الطلبات"
-                : "measured on net collections, not on order value"}
-            </span>
-            {scope === "own" && (
-              <>
-                <span aria-hidden className="text-oo-border-strong">·</span>
-                <span>{ar ? "هدفك فقط" : "your own target only"}</span>
-              </>
-            )}
-          </span>
-        }
-        actions={
-          <>
-            {/* The design's actions slot is a period control and a create button. The period
-                control here lists months rather than stepping back one, because the screen
-                already supports jumping to any month and a one-step button would take that
-                away — and a select rather than <input type="month">: the native control
-                renders its
-                month name in the BROWSER's locale, so an Arabic page was showing
-                "September 2026". The choice on offer is the same — any of the last year, or
-                next month — and now it reads in the page's own language. */}
-            <FilterSelect
-              value={month}
-              onChange={setMonth}
-              label={ar ? "الشهر" : "Month"}
-              width="w-[180px]"
-              testId="tg-month"
-            >
-              {months.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </FilterSelect>
-            {canManage && (
-              <Button onClick={() => setEditing("new")} testId="new-target">
-                <Target size={15} aria-hidden /> {ar ? "تعيين هدف" : "Set a target"}
-              </Button>
-            )}
-          </>
-        }
-      />
+      <PerfSandbox notice={notice} ar={ar} />
+      <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
+      <PerfNotice kind="success" ar={ar} onDismiss={() => setSuccess("")}>{success}</PerfNotice>
 
-      <SandboxBanner notice={notice} />
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
-
-      {rows.length === 0 ? (
-        <Card>
-          <EmptyState>
-            {ar ? "لم تُعيَّن أهداف لهذا الشهر." : "No targets set for this month."}
-          </EmptyState>
-        </Card>
-      ) : (
-        <DataTable
-          testId="targets-table"
-          minWidth={canManage ? 880 : 780}
-          cols={[
-            { label: ar ? "الموظّف" : "Employee", w: "min-w-[180px]" },
-            { label: ar ? "الهدف" : "Target", w: "w-[170px]" },
-            { label: ar ? "المحقّق" : "Collected", w: "w-[170px]" },
-            { label: ar ? "التقدّم" : "Progress", w: "w-[240px]" },
-            { label: ar ? "مكافأة التحقيق" : "Bonus", w: "w-[150px]" },
-            ...(canManage ? [{ label: <span className="sr-only">{ar ? "تعديل" : "Edit"}</span>, w: "w-[100px]" }] : []),
-          ]}
-        >
-          {rows.map((r) => {
-            const pct = Number(r.achievedPercent);
-            return (
-              <Tr key={r.id} testId={`target-${r.employeeId}`}>
-                <Td>
-                  <span className="block">{r.employee.name}</span>
-                  {r.note && (
-                    <span className="block text-[12px] leading-[18px] text-oo-text-muted">{r.note}</span>
-                  )}
-                </Td>
-                <Td>
-                  <Money value={r.targetAmount} currency={r.currency} />
-                </Td>
-                <Td>
-                  <Money value={r.achieved} currency={r.currency} />
-                </Td>
-                <Td>
-                  {/* The shortfall rides in the bar's own caption rather than on a second
-                      line, so every row is the same height the design gives it and the
-                      figure a rep actually wants is still on the screen. */}
-                  <ProgressBar
-                    percent={pct}
-                    testId={`progress-${r.employeeId}`}
-                    label={
-                      (ar ? `تحقّق ${num(Math.round(pct), "ar")}%` : `${Math.round(pct)}% achieved`) +
-                      (r.met
-                        ? ""
-                        : ` · ${ar ? "المتبقي" : "shortfall"} ${
-                            ar ? formatMoney(r.shortfall, 0) : formatMoney(r.shortfall, 0)
-                          } ${ar ? "ر.س" : r.currency}`)
-                    }
-                  />
-                </Td>
-                <Td>
-                  {Number(r.bonusAmount) > 0 ? (
-                    <Money value={r.bonusAmount} currency={r.currency} />
-                  ) : (
-                    <span className="text-oo-text-muted">—</span>
-                  )}
-                </Td>
+      {rows.length === 0 ? empty : phone ? (
+        <div data-testid="targets-table">
+          {rows.map((r) => (
+            <div key={r.id} className="mrow" data-testid={`target-${r.employeeId}`}>
+              <span className="who"><bdi>{r.employee.name}</bdi></span>
+              <span className="n">{formatMoney(r.achieved)}</span>
+              <Bar percent={Number(r.achievedPercent)} testId={`progress-${r.employeeId}`}
+                label={`${ar ? "تحقّق" : "Achieved"} ${pctText(r)}`} />
+              <div className="r2">
+                <span style={{ flex: 1 }}>{caption(r)}</span>
+                <span>{ar ? "الهدف" : "Target"} <span className="n">{formatMoney(r.targetAmount)}</span></span>
+              </div>
+              <div className="r2">
+                <span style={{ flex: 1 }}>
+                  {ar ? "مكافأة التحقيق" : "Bonus"} {bonus(r)}
+                  {standing(r) !== "—" && <> · {standing(r)}</>}
+                </span>
                 {canManage && (
-                  <Td>
-                    <button
-                      onClick={() => setEditing(r)}
-                      data-testid={`edit-target-${r.employeeId}`}
-                      className={`${ROW_ACTION} text-oo-action-primary hover:border-oo-action-primary`}
-                    >
-                      {ar ? "تعديل" : "Edit"}
-                    </button>
-                  </Td>
+                  <button type="button" className="btn sm" onClick={() => setEditing(r)} data-testid={`edit-target-${r.employeeId}`}>
+                    {ar ? "تعديل" : "Edit"}
+                  </button>
                 )}
-              </Tr>
-            );
-          })}
-        </DataTable>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="perf-scroll">
+          <table className="t" data-testid="targets-table">
+            <thead><tr>
+              <th scope="col">{ar ? "الموظّف" : "Employee"}</th>
+              <th scope="col" className="num">{ar ? "الهدف" : "Target"}</th>
+              <th scope="col" className="num">{ar ? "المحقّق" : "Collected"}</th>
+              <th scope="col">{ar ? "التقدّم" : "Progress"}</th>
+              <th scope="col" className="num">{ar ? "مكافأة التحقيق" : "Bonus"}</th>
+              {canManage && <th scope="col"><span className="sr-only">{ar ? "تعديل" : "Edit"}</span></th>}
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} data-testid={`target-${r.employeeId}`}>
+                  <td style={{ paddingBlock: 4 }}>
+                    <div className="who"><bdi>{r.employee.name}</bdi></div>
+                    <span className="perf-sub">{standing(r)}</span>
+                  </td>
+                  <td className="num">{formatMoney(r.targetAmount)}{r.currency !== "SAR" && <span className="unit">{r.currency}</span>}</td>
+                  <td className="num">{formatMoney(r.achieved)}</td>
+                  <td>
+                    <div style={{ display: "grid", gap: 4, minWidth: 200 }}>
+                      <Bar percent={Number(r.achievedPercent)} testId={`progress-${r.employeeId}`}
+                        label={`${ar ? "تحقّق" : "Achieved"} ${pctText(r)}`} />
+                      <span className="sm">{caption(r)}</span>
+                    </div>
+                  </td>
+                  <td className="num">{bonus(r)}</td>
+                  {canManage && (
+                    <td style={{ textAlign: "end" }}>
+                      <button type="button" className="btn sm" onClick={() => setEditing(r)} data-testid={`edit-target-${r.employeeId}`}>
+                        {ar ? "تعديل" : "Edit"}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      <p className="text-[12px] leading-[18px] text-oo-text-muted">
-        {ar
-          ? "الهدف ليس نسبة عمولة. تحقيقه قد يستحق مكافأة، لكن المكافأة رقم يُقرّر ويُسجَّل، ولا يضيفه محرك العمولات إلى النسبة."
-          : "A target is not a commission rate. Hitting it may pay a bonus, but the bonus is a figure someone decides and records — the accrual engine never adds it to a rate."}
-      </p>
+      <div style={{ marginTop: 16 }}>
+        <PerfNote>
+          <span>
+            {ar
+              ? "الهدف ليس نسبة عمولة. تحقيقه قد يستحق مكافأة، لكن المكافأة رقم يُقرَّر ويُسجَّل ولا يُدفع تلقائيًا، ولا يضيفه محرك العمولات إلى النسبة."
+              : "A target is not a commission rate. Hitting it may pay a bonus, but the bonus is a figure someone decides and records — it is not paid automatically, and the accrual engine never adds it to a rate."}
+          </span>
+        </PerfNote>
+      </div>
 
       {editing && (
         <TargetDialog

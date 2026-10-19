@@ -5,10 +5,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Circle, LogOut, UserRound } from "lucide-react";
 import {
-  NAV, SHELL_GROUPS, SHELL_GROUP_ORDER, visibleNav, presentTree, resolveActive, resolveHighlight, firstDestination, breadcrumb,
+  NAV, SHELL_GROUP_ORDER, MENU_ORDER, visibleNav, presentTree, resolveActive, resolveHighlight, firstDestination, breadcrumb,
+  shellText, crumbText, groupText, shellTrail, dedupeTrail,
   type NavNode, type Viewer,
 } from "@/lib/nav/registry";
 import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { Ico } from "./icons";
 import { createActions } from "./creates";
 import { PhoneContext, SectionPagesContext, TitleContext, type PhoneHeader, type SectionPages } from "./page-context";
@@ -37,7 +39,8 @@ import "./direction-2.1.css";
 
 export type ShellUser = { id: string; name: string; role: string };
 
-const text = (n: NavNode, lang: string) => (lang === "ar" ? (n.shell?.ar ?? n.ar) : (n.shell?.en ?? n.en));
+/** A node as this shell names it — for this viewer when given (`shellText`, the GX rep wording). */
+const text = (n: NavNode, lang: string, viewer?: Viewer) => shellText(n, lang, viewer);
 /** The full registry as this shell presents it (see `presentTree`); WHERE a path is resolves here. */
 const SHELL_NAV = presentTree(NAV);
 const pagesOf = (n: NavNode | undefined): NavNode[] => (n?.children ?? []).filter((c) => c.href);
@@ -62,24 +65,21 @@ type Dest = { id: string; href: string; text: string; context: string | null; no
 /**
  * The sidebar as the approved frame draws it: ungrouped entries, then flat groups. A module
  * is a group; a hint may move its subunits under another group («التشغيل» holds stock) or a
- * top-level entry into one («الموظفون» in «الفريق»), or take an entry out to the gear menu.
+ * top-level entry into one («الموظفون» in «الفريق»), take an entry — or a whole module, as
+ * one entry — out to the gear menu, or keep it out of both (`place: "none"`, the global
+ * history: reached from the quick jump, lighting «لوحة التشغيل»).
  */
 function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof resolveActive>, viewer: Viewer): { top: Item[]; groups: Group[]; menu: Item[] } {
   const top: Item[] = [];
   const menu: Item[] = [];
   const groups = new Map<string, Group>();
-  const labelOf = (gid: string): string | null => {
-    const mod = NAV.find((n) => n.id === gid);
-    if (mod) return text(mod, lang);
-    const g = SHELL_GROUPS[gid];
-    return g ? (lang === "ar" ? g.ar : g.en) : null;
-  };
   const into = (gid: string, item: Item) => {
     let g = groups.get(gid);
-    if (!g) { g = { id: gid, label: labelOf(gid), items: [] }; groups.set(gid, g); }
+    if (!g) { g = { id: gid, label: groupText(gid, lang), items: [] }; groups.set(gid, g); }
     g.items.push(item);
   };
   for (const n of tree) {
+    if (n.shell?.place === "none") continue;
     if (!n.children) {
       const item: Item = { node: n, href: n.href!, current: active.leaf?.id === n.id ? "page" : undefined };
       if (n.shell?.place === "menu") menu.push(item);
@@ -87,8 +87,14 @@ function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof 
       else top.push(item);
       continue;
     }
+    if (n.shell?.place === "menu") {
+      const href = firstDestination(viewer, n);
+      if (href) menu.push({ node: n, href, current: active.group?.id === n.id ? "true" : undefined });
+      continue;
+    }
     const gid = n.shell?.group ?? n.id;
     for (const sub of n.children) {
+      if (sub.shell?.place === "none") continue;
       const href = firstDestination(viewer, sub);
       if (!href) continue;
       const item: Item = { node: sub, href, current: active.subunit?.id === sub.id ? (sub.href ? "page" : "true") : undefined };
@@ -98,17 +104,19 @@ function sidebarGroups(tree: NavNode[], lang: string, active: ReturnType<typeof 
   }
   const rank = (id: string) => { const i = SHELL_GROUP_ORDER.indexOf(id); return i === -1 ? SHELL_GROUP_ORDER.length : i; };
   const ordered = [...groups.values()].filter((g) => g.items.length > 0).sort((a, b) => rank(a.id) - rank(b.id));
+  const menuRank = (id: string) => { const i = MENU_ORDER.indexOf(id); return i === -1 ? MENU_ORDER.length : i; };
+  menu.sort((a, b) => menuRank(a.node.id) - menuRank(b.node.id));
   return { top, groups: ordered, menu };
 }
 
-function destinations(tree: NavNode[], lang: string): Dest[] {
+function destinations(tree: NavNode[], lang: string, viewer: Viewer): Dest[] {
   const out: Dest[] = [];
   const seen = new Set<string>();
   const walk = (nodes: NavNode[], ctx: NavNode | null) => {
     for (const n of nodes) {
       if (n.href && !seen.has(n.href)) {
         seen.add(n.href);
-        out.push({ id: n.id, href: n.href, text: text(n, lang), context: ctx ? text(ctx, lang) : null, node: n, ctx });
+        out.push({ id: n.id, href: n.href, text: text(n, lang, viewer), context: ctx ? text(ctx, lang, viewer) : null, node: n, ctx });
       }
       if (n.children) walk(n.children, ctx ?? n);
     }
@@ -118,12 +126,11 @@ function destinations(tree: NavNode[], lang: string): Dest[] {
 }
 
 export function AppShell({
-  user, viewer, lang, logo, allowed, onLogout, deniedTitle, deniedBody, homeLabel, children,
+  user, viewer, lang, allowed, onLogout, deniedTitle, deniedBody, homeLabel, children,
 }: {
   user: ShellUser;
   viewer: Viewer;
   lang: string;
-  logo: string | null;
   allowed: boolean;
   onLogout: () => void;
   deniedTitle: string;
@@ -148,11 +155,14 @@ export function AppShell({
     const own = resolveActive(pathname, tree);
     return own.leaf && full.leaf && own.leaf.href === full.leaf.href ? tree : SHELL_NAV;
   }, [pathname, tree]);
-  const active = useMemo(() => resolveActive(pathname, locus), [pathname, locus]);
+  // The signed-in user's own account («ملفي الشخصي») belongs to no module: Figma TD-11 (556:4350)
+  // lights no sidebar entry and names it «الحساب / …» in the trail (the page names the last crumb).
+  const ownAccount = pathname === "/dashboard/profile" || pathname.startsWith("/dashboard/profile/");
+  const active = useMemo(() => (ownAccount ? {} : resolveActive(pathname, locus)), [pathname, locus, ownAccount]);
   // What the sidebar (and so the rail) and «المزيد» highlight: the same trail as `active` unless
   // the page's node names `highlightAs` (G-11). The breadcrumb and the page tabs keep `active`.
   const lit = useMemo(() => resolveHighlight(active, tree), [active, tree]);
-  const crumbs = useMemo(() => breadcrumb(pathname, locus), [pathname, locus]);
+  const crumbs = useMemo(() => (ownAccount ? [] : breadcrumb(pathname, locus)), [pathname, locus, ownAccount]);
   const visibleSub = useMemo(() => (active.subunit ? tree.flatMap((n) => n.children ?? []).find((c) => c.id === active.subunit!.id) : undefined), [active.subunit, tree]);
   const pages = pagesOf(visibleSub);
   const leafIsPage = !!active.leaf && pages.some((p) => p.id === active.leaf!.id);
@@ -168,28 +178,25 @@ export function AppShell({
   // crumb even with the section's pages in the Segmented control («المبيعات / العملاء / العملاء
   // المحتملون», N-17); a record page ends with the record's own name instead of the page
   // («المبيعات / الصفقات / محمصة النخبة — …»).
+  // A node naming `shell.trailRoot` starts the trail with that group's label (a label, not a
+  // link): «التشغيل / لوحة التشغيل» (20:236 top bar 101:6411), «التشغيل / السجل العام» (GX D-P02),
+  // «الإعدادات / الأتمتة والواتساب / القواعد» (GX E-P01). A part repeating the one before it is
+  // dropped — «المبيعات / عروض الأسعار», never «… / عروض الأسعار / عروض الأسعار».
   const trail = useMemo(() => {
     const base = showSeg && leafIsPage && title ? crumbs.slice(0, -1) : crumbs;
-    const parts: { key: string; text: string; href: string | null }[] = base.map((c, i) => ({
-      key: c.id, text: text(c, lang), href: i === base.length - 1 && !title ? null : firstDestination(viewer, c),
+    const shown = shellTrail(base, lang);
+    const parts: { key: string; text: string; href: string | null }[] = shown.map((p, i) => ({
+      key: p.key, text: p.text, href: !p.node || (i === shown.length - 1 && !title) ? null : firstDestination(viewer, p.node),
     }));
+    if (ownAccount && title) parts.push({ key: "account", text: lang === "ar" ? "الحساب" : "Account", href: null });
     if (title) parts.push({ key: "title", text: title, href: null });
-    // A top-level entry the frames list under a group names that group first (shell.trailGroup):
-    // «التشغيل / لوحة التشغيل» (20:236 top bar 101:6411). The group is a label, not a link.
-    const head = base[0];
-    if (head?.shell?.trailGroup && head.shell.group) {
-      const mod = NAV.find((n) => n.id === head.shell!.group);
-      const g = SHELL_GROUPS[head.shell.group];
-      const label = mod ? text(mod, lang) : g ? (lang === "ar" ? g.ar : g.en) : null;
-      if (label) parts.unshift({ key: `grp-${head.shell.group}`, text: label, href: null });
-    }
-    return parts;
-  }, [crumbs, showSeg, leafIsPage, title, active.leaf, pathname, lang, viewer]);
+    return dedupeTrail(parts);
+  }, [crumbs, showSeg, leafIsPage, title, lang, viewer, ownAccount]);
 
   const sectionPages: SectionPages = useMemo(() => showSeg ? {
     label: ar ? "صفحات القسم" : "Section pages",
-    pages: pages.map((p) => ({ id: p.id, href: p.href!, text: text(p, lang), current: active.leaf?.id === p.id })),
-  } : null, [showSeg, pages, ar, lang, active.leaf]);
+    pages: pages.map((p) => ({ id: p.id, href: p.href!, text: text(p, lang, viewer), current: active.leaf?.id === p.id })),
+  } : null, [showSeg, pages, ar, lang, active.leaf, viewer]);
 
   const [palette, setPalette] = useState(false);
   const [more, setMore] = useState(false);
@@ -265,7 +272,7 @@ export function AppShell({
   const { top, groups, menu: menuItems } = useMemo(() => sidebarGroups(tree, lang, lit, viewer), [tree, lang, lit, viewer]);
   const roleLabel = (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) || user.role;
   const navItem = (it: Item, parent?: NavNode) => {
-    const label = text(it.node, lang);
+    const label = text(it.node, lang, viewer);
     return (
       <li key={it.node.id}>
         <Link href={it.href} className="d21-nav" aria-current={it.current} data-testid={`nav-${it.node.id}`} title={label}>
@@ -278,11 +285,11 @@ export function AppShell({
 
   const groupHref = active.group ? firstDestination(viewer, active.group) : null;
   const meNode = tree.find((n) => n.id === "me");
-  const dests = useMemo(() => destinations(tree, lang), [tree, lang]);
+  const dests = useMemo(() => destinations(tree, lang, viewer), [tree, lang, viewer]);
   // The phone header keeps naming the section on a list page with a Segmented control (reference
   // crm-390: «الصفقات» over the pipeline); otherwise it names the last crumb.
   const sectionCrumbs = showSeg && leafIsPage && !title && active.leaf?.href && pathname === active.leaf.href ? crumbs.slice(0, -1) : null;
-  const lastCrumb = sectionCrumbs?.length ? text(sectionCrumbs[sectionCrumbs.length - 1], lang) : trail.length ? trail[trail.length - 1].text : "";
+  const lastCrumb = sectionCrumbs?.length ? crumbText(sectionCrumbs[sectionCrumbs.length - 1], lang) : trail.length ? trail[trail.length - 1].text : "";
   const phoneTitle = phoneHeader?.title ?? title ?? lastCrumb;
 
   const createMenu = (dir: "down" | "up") => (
@@ -305,10 +312,7 @@ export function AppShell({
       <div className="d21-app" inert={palette || more}>
         <aside className="d21-side" aria-label={ar ? "القائمة الجانبية" : "Sidebar"}>
           <div className="d21-brandbar">
-            <span className={`d21-mark${logo ? " has-logo" : ""}`}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              {logo ? <img src={logo} alt="" /> : null}
-            </span>
+            <span className="d21-mark"><BrandMark /></span>
             {/* The EN frames write the name in Latin letters (N-18); the Arabic shell keeps «حِقبة». */}
             <div className="t"><b>{ar ? "حِقبة" : "Hiqbah"}</b><span>{ar ? "مقهى ومحمصة" : "Café & roastery"}</span></div>
           </div>
@@ -343,9 +347,9 @@ export function AppShell({
             </button>
             {menu ? (
               <div className="d21-menu" role="menu">
-                <Link role="menuitem" href="/dashboard/profile" onClick={() => setMenu(false)}>{ar ? "الملف الشخصي" : "Profile"}</Link>
+                {/* The profile, then the settings screens (registry MENU_ORDER, GX F-P01). */}
                 {menuItems.map((it) => (
-                  <Link key={it.node.id} role="menuitem" href={it.href} data-testid={`nav-${it.node.id}`} onClick={() => setMenu(false)}>{text(it.node, lang)}</Link>
+                  <Link key={it.node.id} role="menuitem" href={it.href} data-testid={`nav-${it.node.id}`} onClick={() => setMenu(false)}>{text(it.node, lang, viewer)}</Link>
                 ))}
                 <button role="menuitem" type="button" className="danger" onClick={onLogout}>{ar ? "تسجيل الخروج" : "Sign out"}</button>
               </div>
@@ -356,10 +360,7 @@ export function AppShell({
         {/* The phone header (reference `.ph-top`): the mark, the page title, the search — or a
             record page's back arrow and the page's own action. */}
         <header className="d21-mtop">
-          <span className={`d21-mark sm${logo ? " has-logo" : ""}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            {logo ? <img src={logo} alt="" /> : null}
-          </span>
+          <span className="d21-mark sm"><BrandMark /></span>
           {phoneHeader?.back ? (
             <Link href={phoneHeader.back} className="d21-ib back" aria-label={ar ? "رجوع" : "Back"}><Ico name="back" /></Link>
           ) : null}
@@ -455,13 +456,12 @@ export function AppShell({
             const parent = mod ? NAV.find((n) => n.id === mod.id) : undefined;
             return (
               <Link key={it.node.id} href={it.href} className="d21-more-row" aria-current={it.current ? "page" : undefined} data-testid={`more-${it.node.id}`}>
-                <NodeIcon node={it.node} fallback={parent} /><span>{text(it.node, lang)}</span><Ico name="chev" small className="chev" />
+                <NodeIcon node={it.node} fallback={parent} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" />
               </Link>
             );
           })}
-          <Link href="/dashboard/profile" className="d21-more-row"><UserRound aria-hidden /><span>{ar ? "الملف الشخصي" : "Profile"}</span><Ico name="chev" small className="chev" /></Link>
           {menuItems.map((it) => (
-            <Link key={it.node.id} href={it.href} className="d21-more-row"><NodeIcon node={it.node} /><span>{text(it.node, lang)}</span><Ico name="chev" small className="chev" /></Link>
+            <Link key={it.node.id} href={it.href} className="d21-more-row"><NodeIcon node={it.node} /><span>{text(it.node, lang, viewer)}</span><Ico name="chev" small className="chev" /></Link>
           ))}
           <button type="button" className="d21-more-row danger" onClick={onLogout}><LogOut aria-hidden /><span>{ar ? "تسجيل الخروج" : "Sign out"}</span></button>
         </MoreSheet>

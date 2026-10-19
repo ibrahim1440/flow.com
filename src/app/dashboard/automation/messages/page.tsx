@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import {
-  Alert, Button, Card, DataTable, EmptyState, FilterSelect, PageHeader, SearchField, Spinner, Td, Toolbar, Tr, ROW_ACTION, api, useLang,
-} from "../../sales/_components/ui";
+import { Btn, Empty, OpsBanner, OpsLoading, OpsRoot } from "@/components/ops/ui";
+import { useD21Phone } from "@/components/shell/page-context";
+import { api, useLang } from "../../sales/_components/ui";
 import { getEvent, RECIPIENT_LABELS, type RecipientKind } from "@/lib/automation/catalog";
-import { MESSAGE_STATUS, MessageStatusBadge, Note, Phone, noteText, useAutomationAbilities, when } from "../_components/shared";
+import { AutomationHeader, MESSAGE_STATUS, MessageStatusBadge, Note, Phone, noteText, useAutomationAbilities, when, whenParts } from "../_components/shared";
+import { SettingsFrame } from "../../_components/tools-ui";
 
 /**
  * Every WhatsApp message the system produced: sent, waiting, failed, or deliberately not sent
  * and why. "Not sent" is shown, not hidden — a rule that skips every customer because none
  * has a phone number is a problem somebody should see.
+ *
+ * Direction 2.1 (UI batch 2; GX E-P03, Figma 1228:101517 at 1440, EN 1230:134545, 1024
+ * 1228:104573, phone 1429:8620). Visual port only: the same list request (page, status, q), the
+ * same retry / cancel actions and the same «process now» dispatch, behind the same gates.
  */
 
 type Row = {
@@ -49,6 +53,8 @@ export default function AutomationMessagesPage() {
   const [busy, setBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
+
+  useD21Phone({ title: ar ? "سجل الرسائل" : "Message log", sub: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp" });
 
   useEffect(() => {
     let cancelled = false;
@@ -89,127 +95,140 @@ export default function AutomationMessagesPage() {
     reload();
   }
 
-  if (!data && !error) return <Spinner />;
   const pages = data ? Math.max(1, Math.ceil(data.total / data.perPage)) : 1;
+  const L = (a: string, e: string) => (ar ? a : e);
 
   return (
-    <div className="space-y-[18px]">
-      <PageHeader
-        title={ar ? "سجل الرسائل" : "Message log"}
-        subtitle={ar ? "كل رسالة أنشأتها القواعد: ما أرسل، وما ينتظر، وما فشل أو لم يرسل ولماذا." : "Every message the rules produced, and what happened to it."}
-        actions={
-          canManageMessages ? (
-            <Button variant="secondary" onClick={runNow} disabled={busy} testId="run-dispatch">
-              <RefreshCw size={15} aria-hidden className={busy ? "animate-spin" : ""} /> {ar ? "معالجة الآن" : "Process now"}
-            </Button>
-          ) : undefined
-        }
-      />
+    <OpsRoot className="tl-root">
+      <SettingsFrame>
+        <AutomationHeader lang={lang} />
 
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {info && <Alert kind="info" onDismiss={() => setInfo("")}>{info}</Alert>}
+        {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
+        {info && <OpsBanner tone="info" onClose={() => setInfo("")}>{info}</OpsBanner>}
 
-      <Toolbar>
-        <SearchField value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder={ar ? "ابحث باسم أو رقم أو قاعدة" : "Search a name, number or rule"} label={ar ? "بحث" : "Search"} testId="msg-search" />
-        <FilterSelect value={status} onChange={(v) => { setStatus(v); setPage(1); }} label={ar ? "الحالة" : "Status"} testId="msg-status">
-          <option value="">{ar ? "كل الحالات" : "All statuses"}</option>
-          {Object.entries(MESSAGE_STATUS).map(([k, s]) => (
-            <option key={k} value={k}>
-              {(ar ? s.ar : s.en) + (data?.counts[k] ? ` (${data.counts[k]})` : "")}
-            </option>
-          ))}
-        </FilterSelect>
-      </Toolbar>
-
-      {data && data.rows.length === 0 ? (
-        <Card>
-          <EmptyState>{ar ? "لا توجد رسائل." : "No messages."}</EmptyState>
-        </Card>
-      ) : (
-        data && (
-          <DataTable
-            testId="messages-table"
-            minWidth={980}
-            cols={[
-              { label: ar ? "الوقت" : "Time", w: "w-[150px]" },
-              { label: ar ? "القاعدة" : "Rule", w: "w-[190px]" },
-              { label: ar ? "المستلم" : "Recipient", w: "w-[200px]" },
-              { label: ar ? "الرسالة" : "Message", w: "min-w-[260px]" },
-              { label: ar ? "الحالة" : "Status", w: "w-[200px]" },
-              ...(canManageMessages ? [{ label: <span className="sr-only">{ar ? "إجراء" : "Action"}</span>, w: "w-[110px]" }] : []),
-            ]}
-          >
-            {data.rows.map((m) => {
-              const ev = m.eventType ? getEvent(m.eventType) : null;
-              const kind = RECIPIENT_LABELS[m.recipientKind as RecipientKind];
-              const open = expanded === m.id;
-              return (
-                <Tr key={m.id} testId={`msg-${m.id}`}>
-                  <Td className="text-[13px]">
-                    {/* Sent: when it went. Waiting: when it is due. Anything else: when it was decided. */}
-                    <span className="block">{when(m.status === "SENT" ? m.sentAt : m.status === "QUEUED" ? m.scheduledAt : m.createdAt, lang)}</span>
-                    {m.status === "QUEUED" && new Date(m.scheduledAt) > new Date() && (
-                      <span className="block text-[12px] text-oo-text-muted">{ar ? "مجدولة" : "scheduled"}</span>
-                    )}
-                    {m.attempts > 1 && <span className="block text-[12px] text-oo-text-muted">{ar ? `${m.attempts} محاولات` : `${m.attempts} attempts`}</span>}
-                  </Td>
-                  <Td className="text-[13px]">
-                    <span className="block">{m.recipientKind === "test" ? (ar ? "رسالة تجريبية" : "Test message") : m.ruleName ?? "—"}</span>
-                    {ev && <span className="block text-[12px] text-oo-text-muted">{ar ? ev.ar : ev.en}</span>}
-                  </Td>
-                  <Td className="text-[13px]">
-                    <span className="block">{m.recipientName || (kind ? (ar ? kind.ar : kind.en) : m.recipientKind)}</span>
-                    <span className="block text-[12px] text-oo-text-muted">
-                      <Phone value={m.phone} />
-                      {m.intendedPhone && (
-                        <>
-                          {" "}
-                          {ar ? "بدلا من" : "instead of"} <Phone value={m.intendedPhone} />
-                        </>
-                      )}
-                    </span>
-                  </Td>
-                  <Td className="text-[13px]">
-                    <button type="button" onClick={() => setExpanded(open ? null : m.id)} className="text-start w-full" dir="auto">
-                      <span className={`block whitespace-pre-wrap break-words ${open ? "" : "line-clamp-2"}`}>{m.body}</span>
-                    </button>
-                  </Td>
-                  <Td>
-                    <MessageStatusBadge status={m.status} lang={lang} testId={`msg-status-${m.id}`} />
-                    <Note note={m.statusNote} lang={lang} className="mt-1 block text-[12px] leading-[18px] text-oo-text-muted" />
-                  </Td>
-                  {canManageMessages && (
-                    <Td>
-                      {m.status === "FAILED" && m.phone && (
-                        <button type="button" onClick={() => act(m.id, "retry")} className={`${ROW_ACTION} hover:border-oo-action-primary`} data-testid={`retry-${m.id}`}>
-                          {ar ? "إعادة" : "Retry"}
-                        </button>
-                      )}
-                      {m.status === "QUEUED" && (
-                        <button type="button" onClick={() => act(m.id, "cancel")} className={`${ROW_ACTION} hover:border-oo-status-blocked`} data-testid={`cancel-${m.id}`}>
-                          {ar ? "إلغاء" : "Cancel"}
-                        </button>
-                      )}
-                    </Td>
-                  )}
-                </Tr>
-              );
-            })}
-          </DataTable>
-        )
-      )}
-
-      {pages > 1 && (
-        <div className="flex items-center justify-center gap-3 text-[13px]">
-          <Button variant="secondary" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-            {ar ? "السابق" : "Previous"}
-          </Button>
-          <span>{ar ? `صفحة ${page} من ${pages}` : `Page ${page} of ${pages}`}</span>
-          <Button variant="secondary" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page >= pages}>
-            {ar ? "التالي" : "Next"}
-          </Button>
+        <div className="tl-tool">
+          <input
+            type="search"
+            className="hr-input hr-search"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+            placeholder={L("ابحث باسم أو رقم أو قاعدة", "Search a name, number or rule")}
+            aria-label={L("بحث", "Search")}
+            data-testid="msg-search"
+          />
+          <div className="tl-seg" role="group" aria-label={L("الحالة", "Status")} data-testid="msg-status">
+            <button type="button" aria-pressed={status === ""} onClick={() => { setStatus(""); setPage(1); }}>{L("الكل", "All")}</button>
+            {Object.entries(MESSAGE_STATUS).map(([k, s]) => (
+              <button key={k} type="button" aria-pressed={status === k} onClick={() => { setStatus(k); setPage(1); }} data-testid={`msg-status-${k}`}>
+                {ar ? s.ar : s.en}
+                {data?.counts[k] ? <span className="hr-count">{data.counts[k]}</span> : null}
+              </button>
+            ))}
+          </div>
+          <span className="tl-sp" />
+          {canManageMessages ? (
+            <Btn onClick={runNow} disabled={busy} busy={busy} data-testid="run-dispatch">{L("معالجة الآن", "Process now")}</Btn>
+          ) : null}
         </div>
-      )}
-    </div>
+
+        {!data && !error ? <OpsLoading /> : data && data.rows.length === 0 ? (
+          <Empty title={L("لا توجد رسائل.", "No messages.")} body={status || q ? L("لا رسالة تطابق البحث أو الحالة.", "No message matches the search or status.") : undefined} />
+        ) : data ? (
+          <div className="hr-tablewrap">
+            <table className="hr-table is-mrow" aria-label={L("سجل الرسائل", "Message log")} data-testid="messages-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 100 }}>{L("الوقت", "Time")}</th>
+                  <th style={{ minWidth: 170 }}>{L("القاعدة", "Rule")}</th>
+                  <th style={{ minWidth: 150 }}>{L("المستلم", "Recipient")}</th>
+                  <th className="hr-hide-compact" style={{ minWidth: 220 }}>{L("الرسالة", "Message")}</th>
+                  <th style={{ width: 170, minWidth: 150 }}>{L("الحالة", "Status")}</th>
+                  {canManageMessages ? <th style={{ width: 1 }}><span className="hr-sr">{L("إجراء", "Action")}</span></th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((m) => {
+                  const ev = m.eventType ? getEvent(m.eventType) : null;
+                  const kind = RECIPIENT_LABELS[m.recipientKind as RecipientKind];
+                  const open = expanded === m.id;
+                  // Sent: when it went. Waiting: when it is due. Anything else: when it was decided.
+                  const at = m.status === "SENT" ? m.sentAt : m.status === "QUEUED" ? m.scheduledAt : m.createdAt;
+                  const [day, time] = whenParts(at);
+                  const ruleName = m.recipientKind === "test" ? L("رسالة تجريبية", "Test message") : m.ruleName ?? "—";
+                  const who = m.recipientName || (kind ? (ar ? kind.ar : kind.en) : m.recipientKind);
+                  return (
+                    <tr key={m.id} data-testid={`msg-${m.id}`} className={m.status === "FAILED" ? "tl-hl" : undefined}>
+                      <td title={when(at, lang)} style={{ whiteSpace: "nowrap" }}>
+                        <span className="hr-num" style={{ display: "block", fontWeight: 500 }}>{day}</span>
+                        <span className="hr-num stk-sub">{time}</span>
+                        {m.status === "QUEUED" && new Date(m.scheduledAt) > new Date() && (
+                          <span className="stk-sub">{L("مجدولة", "scheduled")}</span>
+                        )}
+                        {m.attempts > 1 && <span className="stk-sub">{ar ? `${m.attempts} محاولات` : `${m.attempts} attempts`}</span>}
+                      </td>
+                      <td className="m-title">
+                        <span className="hr-desktop-only" style={{ display: "block", fontWeight: 500 }}>{ruleName}</span>
+                        {ev && <span className="stk-sub hr-desktop-only">{ar ? ev.ar : ev.en}</span>}
+                        <span className="hr-mobile-only" style={{ fontWeight: 600 }}>{who}</span>
+                        <span className="hr-msub">{ruleName} · <span className="hr-num">{day.slice(0, 5)} {time}</span></span>
+                      </td>
+                      <td>
+                        <span style={{ display: "block", fontWeight: 500 }}>{who}</span>
+                        <span className="stk-sub hr-num">
+                          {m.phone ? <Phone value={m.phone} /> : "—"}
+                          {m.intendedPhone && (
+                            <>
+                              {" "}
+                              {L("بدلا من", "instead of")} <Phone value={m.intendedPhone} />
+                            </>
+                          )}
+                        </span>
+                      </td>
+                      <td className="hr-hide-compact">
+                        <button type="button" onClick={() => setExpanded(open ? null : m.id)} className="tl-body-btn" dir="auto" aria-expanded={open}>
+                          <span className={open ? "" : "tl-clamp"} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 13.5 }}>{m.body}</span>
+                        </button>
+                      </td>
+                      <td className="m-end is-stack">
+                        <MessageStatusBadge status={m.status} lang={lang} testId={`msg-status-${m.id}`} />
+                        <Note note={m.statusNote} lang={lang} className="stk-sub hr-desktop-only" />
+                        {canManageMessages && ((m.status === "FAILED" && m.phone) || m.status === "QUEUED") ? (
+                          <span className="hr-mobile-only">
+                            {m.status === "FAILED" ? <Btn size="sm" onClick={() => act(m.id, "retry")}>{L("إعادة", "Retry")}</Btn> : <Btn size="sm" onClick={() => act(m.id, "cancel")}>{L("إلغاء", "Cancel")}</Btn>}
+                          </span>
+                        ) : null}
+                      </td>
+                      {canManageMessages ? (
+                        <td style={{ textAlign: "end" }}>
+                          {m.status === "FAILED" && m.phone && (
+                            <Btn size="sm" onClick={() => act(m.id, "retry")} data-testid={`retry-${m.id}`}>{L("إعادة", "Retry")}</Btn>
+                          )}
+                          {m.status === "QUEUED" && (
+                            <Btn size="sm" onClick={() => act(m.id, "cancel")} data-testid={`cancel-${m.id}`}>{L("إلغاء", "Cancel")}</Btn>
+                          )}
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {data ? (
+          <p className="tl-foot">
+            {L(`الأحدث أولًا · ${data.perPage} لكل صفحة · صفحة ${page} من ${pages} · لا تُجمع إيصالات التسليم أو القراءة`, `Newest first · ${data.perPage} per page · page ${page} of ${pages} · delivery and read receipts are not collected`)}
+          </p>
+        ) : null}
+        {pages > 1 && (
+          <div className="tl-pager">
+            <Btn size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>{L("السابق", "Previous")}</Btn>
+            <span>{ar ? `صفحة ${page} من ${pages}` : `Page ${page} of ${pages}`}</span>
+            <Btn size="sm" onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page >= pages}>{L("التالي", "Next")}</Btn>
+          </div>
+        )}
+      </SettingsFrame>
+    </OpsRoot>
   );
 }

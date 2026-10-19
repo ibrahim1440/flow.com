@@ -8,12 +8,13 @@ import { ROLE_LABELS } from "@/lib/auth-shared";
 import { routeAllowed, type Viewer } from "@/lib/nav/registry";
 import { SidebarNav, ContextualNav, Breadcrumbs, useDrawerFocus } from "./_components/Nav";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
-import { UserContext, useLogo, type User } from "./user-context";
+import { UserContext, type User } from "./user-context";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { AppShell } from "@/components/shell/AppShell";
 import { usesDirection21 } from "@/components/shell/routes";
 import { LegacyFonts } from "@/components/LegacyFonts";
 import { StepUpProvider } from "@/components/auth/StepUp";
-import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
+import { ShellLoading, MfaRequiredScreen } from "@/components/shell/ShellStates";
 import { SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
 import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 
@@ -33,7 +34,6 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
   const { lang, t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
-  const logoBase64 = useLogo();
 
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useDrawerFocus(sidebarOpen, menuButtonRef);
@@ -89,7 +89,6 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
         user={user}
         viewer={viewer}
         lang={lang}
-        logo={logoBase64}
         allowed={allowed}
         onLogout={handleLogout}
         deniedTitle={t("accessDeniedTitle")}
@@ -121,16 +120,10 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-white/10 rounded-xl flex flex-col items-center justify-center shadow-lg flex-shrink-0 overflow-hidden">
-              {logoBase64 ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoBase64} alt="Logo" className="w-full h-full object-contain p-1" />
-              ) : (
-                <>
-                  <span className="text-[22px] text-white/90 leading-none" style={{ fontFamily: "'Scheherazade New', 'Amiri', serif" }}>ح</span>
-                  <span className="block w-4 h-[3px] rounded-full mt-0.5" style={{ backgroundColor: "#7C3AED" }} />
-                </>
-              )}
+            {/* The brand mark (olive-clay) on a sand tile: the legacy sidebar is dark, and the
+                guideline keeps the olive «ح» on light grounds. */}
+            <div className="w-11 h-11 rounded-xl flex-shrink-0 overflow-hidden shadow-lg" style={{ backgroundColor: "#EBE2CB" }}>
+              <BrandMark size={44} />
             </div>
             <div>
               <h2 className="font-extrabold text-sm tracking-widest text-white">HIQBAH</h2>
@@ -238,21 +231,18 @@ function DashboardShell({ user, children }: { user: User; children: React.ReactN
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/auth/me").then(async (r) => {
+    // The uploaded Settings logo is no longer fetched here: the UI chrome shows the brand mark.
+    fetch("/api/auth/me")
+      .then(async (r) => {
         if (!r.ok) throw new Error(r.status === 401 && (await r.json().catch(() => null))?.code === "SESSION_ENDED" ? "ended" : "failed");
         return r.json();
-      }),
-      fetch("/api/settings/logo").then((r) => r.json()).catch(() => ({ logoBase64: null })),
-    ])
-      .then(([meData, logoData]) => {
+      })
+      .then((meData) => {
         setUser(meData.user);
-        setLogoBase64(logoData.logoBase64 ?? null);
       })
       // A cookie that no longer names a live session (idle 4 h, absolute 12 h, logout,
       // revocation — SESSION_ENDED): the sign-in screen says so in both languages. No cookie
@@ -261,31 +251,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       .finally(() => setLoading(false));
   }, [router]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-cream">
-        <div className="text-center">
-          <div className="w-14 h-14 border-4 border-orange border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-charcoal font-semibold text-lg">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  // The session check every route shows first, the Direction 2.1 ones included: drawn in
+  // Direction 2.1 (UI batch 2), not in the legacy cream / purple.
+  if (loading) return <ShellLoading />;
 
   if (!user) return null;
 
   return (
-    <UserContext value={{ user, logoBase64 }}>
+    <UserContext value={{ user }}>
       <LanguageProvider lang={user.preferredLanguage ?? "ar"}>
         <StepUpProvider lang={user.preferredLanguage === "en" ? "en" : "ar"} privileged={!!user.privileged}>
           {user.mfaEnrollmentRequired ? (
             // AUTH_MFA_MODE=required: a privileged account without two-step verification may only enroll.
-            <div dir={user.preferredLanguage === "en" ? "ltr" : "rtl"} className="min-h-screen bg-cream flex items-start sm:items-center justify-center p-4">
-              <div className="w-full max-w-xl" data-testid="mfa-required-screen">
-                <MfaEnrollment lang={user.preferredLanguage === "en" ? "en" : "ar"} onEnrolled={() => window.location.reload()} />
-                <button type="button" onClick={async () => { await fetch("/api/auth/me", { method: "DELETE" }); window.location.href = "/login"; }} className="mt-3 text-sm text-brown/70 hover:text-orange">{user.preferredLanguage === "en" ? "Sign out" : "تسجيل الخروج"}</button>
-              </div>
-            </div>
+            <MfaRequiredScreen lang={user.preferredLanguage === "en" ? "en" : "ar"} />
           ) : (
             <DashboardShell user={user}>{children}</DashboardShell>
           )}

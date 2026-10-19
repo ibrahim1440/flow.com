@@ -1,13 +1,8 @@
 import type { ReactNode } from "react";
-import { LegacyFonts } from "@/components/LegacyFonts";
 
-// A legacy surface (Tajawal): the face is loaded here, not in the root layout, so the
-// Direction 2.1 routes never fetch it (HR-D13).
-export default function LegacyFontLayout({ children }: { children: ReactNode }) {
-  return (
-    <>
-      <LegacyFonts />
-      {children}
-    </>
-  );
+// Guest QC is Direction 2.1 (UI batch 2): it renders in the guest frame (guest-cupping/GuestShell),
+// which links IBM Plex from public/fonts and carries the shared tokens (direction-2.1.css); the
+// legacy Tajawal face is no longer loaded here.
+export default function GuestQcLayout({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

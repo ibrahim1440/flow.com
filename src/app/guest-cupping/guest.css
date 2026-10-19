@@ -8,9 +8,10 @@
 .gc { min-height: 100dvh; background: var(--canvas); display: flex; flex-direction: column; }
 .gc-top { display: flex; align-items: center; gap: 12px; height: 80px; padding: 20px 40px; }
 .gc-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-/* BrandMark slot (10:54): the official ح mark is not in the repository; the dashed slot stands in. */
-.gc-mark { width: 34px; height: 34px; border-radius: 10px; border: 1px dashed var(--border-control); background: var(--surface); flex: none; display: grid; place-items: center; }
-.gc-mark::after { content: ""; width: 12px; height: 12px; border-radius: 6px; border: 1px solid var(--border-control); }
+/* BrandMark slot (10:54, 34×34): the official «ح» mark (components/brand/BrandMark, olive-clay)
+   on a white tile, as in the shell sidebar. */
+.gc-mark { width: 34px; height: 34px; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-sheet); flex: none; display: grid; place-items: center; overflow: hidden; }
+.gc-mark img { display: block; width: 100%; height: 100%; }
 .gc-brand > div > b { display: block; font: 600 14px/20px var(--f-ui); color: var(--text-primary); }
 .gc-brand > div > span { display: block; font: 400 12.5px/20px var(--f-ui); color: var(--text-muted); }
 .gc-spacer { flex: 1 1 auto; }

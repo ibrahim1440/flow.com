@@ -1,0 +1,83 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Direction 2.1 · «الأداء والعمولات» and sales settings (GX A-P03…A-P08).
+
+   The few frame classes these pages use that reference.css does not carry yet, copied from
+   the frames' own stylesheet (direction.css: `.bar`, `.big`, `.t tfoot`, `.hide-c`) plus the
+   phone layout of 390c/390d. Scoped to `.d21`, which only the Direction 2.1 shell sets; the
+   values are the reference's and every colour is a shell token.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.d21 .bar { height: 6px; border-radius: 3px; background: var(--border-subtle); overflow: hidden; display: flex }
+.d21 .bar i { display: block; height: 100%; background: var(--action-primary) }
+.d21 .big { font: 300 52px/1 var(--f-num); letter-spacing: -.02em; font-variant-numeric: tabular-nums }
+.d21 .t tfoot td { border-bottom: 0; color: var(--text-muted); font-size: 13px; height: 44px; white-space: normal }
+.d21 .t td.wrap { white-space: normal }
+.d21 .notice.wa { background: var(--status-warning-tint); box-shadow: none; color: var(--status-warning) }
+.d21 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
+
+/* The period chip holds a real select. */
+.d21 .perf-chip { cursor: pointer; padding-inline-end: 8px }
+.d21 .perf-chip select { padding-inline-end: 2px; max-width: 220px; color: var(--text-primary) }
+.d21 .perf-chip select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px }
+.d21 .perf-chip .ico { color: var(--text-muted); pointer-events: none }
+
+/* The closing note of each frame. */
+.d21 .perf-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; background: var(--surface-subtle); font-size: 13.5px; line-height: 22px; color: var(--text-primary) }
+.d21 .perf-note > * { flex: 1; min-width: 0 }
+
+/* A record card (my commissions' accruals, a plan version). */
+.d21 .perf-card { padding: 14px 16px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border-subtle); display: grid; gap: 8px; min-width: 0 }
+.d21 .perf-calc { display: grid; gap: 4px; padding: 10px 12px; border-radius: 9px; background: var(--surface-subtle); font-size: 13px }
+.d21 .perf-calc > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap }
+.d21 .perf-code { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 12px; font-weight: 500; color: var(--text-secondary); background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); white-space: nowrap; direction: ltr; unicode-bidi: isolate }
+.d21 .perf-link { font: inherit; font-size: 12px; color: var(--action-primary); background: none; border: 0; padding: 0; cursor: pointer }
+.d21 .perf-link:hover { text-decoration: underline }
+.d21 .perf-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px }
+.d21 .perf-rowbtns { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap }
+.d21 .t tr.on td { background: var(--surface-selected) }
+.d21 .perf-who { all: unset; cursor: pointer; font-weight: 500; color: var(--text-primary) }
+.d21 .perf-who:hover { text-decoration: underline }
+.d21 .perf-who:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px }
+.d21 .perf-sub { display: block; line-height: 18px; margin-top: 2px; font-size: 12.5px; color: var(--text-muted) }
+.d21 .perf-sel { appearance: none; -webkit-appearance: none; height: 32px; padding: 0 30px 0 10px; border-radius: 9px; border: 1px solid var(--border-control); background: var(--surface); font: inherit; font-size: 13.5px; color: var(--text-primary); min-width: 150px }
+[dir="rtl"] .d21 .perf-sel, [dir="rtl"].d21 .perf-sel { padding: 0 10px 0 30px }
+.d21 .perf-sel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0 }
+.d21 .perf-sel:disabled { background: var(--surface-disabled); color: var(--text-disabled); border-color: var(--border-disabled) }
+.d21 .perf-selw { position: relative; display: inline-block }
+.d21 .perf-selw > .ico { position: absolute; inset-inline-end: 9px; top: 8px; color: var(--text-muted); pointer-events: none }
+
+/* Loading. */
+.d21 .perf-loading { display: grid; place-items: center; height: 240px }
+.d21 .perf-spin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-subtle); border-top-color: var(--brand-signature); animation: perf-spin .8s linear infinite }
+@keyframes perf-spin { to { transform: rotate(360deg) } }
+
+/* Compact (768–1279, the rail): the frames' 1024 drops the secondary columns (`.hide-c`). */
+@media (max-width: 1279.98px) {
+  .d21 .t .hide-c { display: none }
+  .d21 .perf-metrics.m4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; row-gap: 20px }
+  .d21 .perf-metrics.m4 > div:nth-child(3) { padding-inline-start: 0; border-inline-start: 0 }
+  .d21 .perf-cols { grid-template-columns: minmax(0, 1fr) !important; gap: 32px !important }
+}
+
+/* Phone (390c / 390d): the page names itself in the shell's header; the period chip and the
+   facts open the sheet, figures stack two by two, tables scroll inside their own box. */
+.d21 .perf-ph { display: grid; gap: 8px; margin-bottom: 14px }
+.d21 .perf-ph-act { display: flex; gap: 8px; flex-wrap: wrap; align-items: center }
+.d21 .perf-ph-meta { display: flex; gap: 4px 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted) }
+.d21 .perf-scroll { overflow-x: auto; max-width: 100% }
+@media (max-width: 767.98px) {
+  .d21 .perf-metrics, .d21 .perf-metrics.m4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 16px 0; margin: 0 0 20px !important }
+  .d21 .perf-metrics > div { padding-inline-start: 14px }
+  .d21 .perf-metrics > div:nth-child(odd) { padding-inline-start: 0; border-inline-start: 0 }
+  .d21 .perf-metrics .mid { font-size: 20px }
+  .d21 .big { font-size: 40px }
+  .d21 .ph .act .btn { height: 40px }
+  .d21 .perf-chip select { max-width: 160px }
+  .d21 .mrow .bar { grid-column: 1 / -1; margin: 6px 0 2px }
+}
+
+/* A ghost button that is unavailable (the first «↑», the last «↓») stays a ghost. */
+.d21 .btn.g:disabled { background: none; box-shadow: none; color: var(--text-disabled) }
+/* The chip's select is as wide as the month it shows. */
+.d21 .perf-chip select { field-sizing: content }
+@media (max-width: 767.98px) { .d21 .bh { flex-wrap: wrap; row-gap: 2px } }

@@ -6,9 +6,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Hiqbah Coffee | محمصة حِقبة",
   description: "Internal production management system for Hiqbah Coffee Roasters",
+  // Brand guideline v003: the «ح» mark (olive «ح», clay stroke) on a sand tile, so it reads on
+  // light and dark tab bars. `app/favicon.ico` (16/32/48) is rendered from the same SVG.
   icons: {
-    icon: "/logo.svg",
-    apple: "/logo.svg",
+    icon: [{ url: "/brand/hiqbah-app-icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/brand/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
 

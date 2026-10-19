@@ -1,0 +1,24 @@
+/*
+ * Two-step verification card (MfaEnrollment) — Direction 2.1, UI batch 2. Drawn with the shared
+ * HR kit (hr.css) inside a `[data-hr-root]`; this adds only the card's own layout. Visual language
+ * of Figma UR-02d «الأجهزة والجلسات» (598:966): a section title with its status dot, the facts as
+ * a key/value ledger, outlined secondary and Olive primary controls.
+ */
+[data-hr-root] .mfa-card { background: var(--hr-surface); border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-lg); padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+[data-hr-root] .mfa-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+[data-hr-root] .mfa-sub { margin: 0; font-size: 14px; font-weight: 600; line-height: 22px; }
+[data-hr-root] .mfa-codes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+[data-hr-root] .mfa-codes > li { font: 400 13.5px/22px var(--hr-mono); letter-spacing: .06em; text-align: center; padding: 6px 10px; border-radius: var(--hr-r-sm); background: var(--hr-subtle); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+[data-hr-root] .mfa-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+[data-hr-root] .mfa-check input { width: 16px; height: 16px; accent-color: var(--hr-primary); }
+[data-hr-root] .mfa-qrrow { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+[data-hr-root] .mfa-qr { padding: 12px; background: var(--hr-surface); border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); line-height: 0; }
+[data-hr-root] .mfa-key { display: block; font: 400 13.5px/22px var(--hr-mono); background: var(--hr-subtle); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); border-radius: var(--hr-r-sm); padding: 6px 10px; word-break: break-all; user-select: all; }
+[data-hr-root] .mfa-confirm { display: flex; gap: 8px; flex-wrap: wrap; }
+[data-hr-root] .mfa-code { width: 160px; text-align: center; letter-spacing: 3px; font-family: var(--hr-num); }
+@media (max-width: 419px) { [data-hr-root] .mfa-codes { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 767px) {
+  [data-hr-root] .mfa-card { padding: 16px; }
+  [data-hr-root] .mfa-confirm .hr-btn { height: 44px; }
+  [data-hr-root] .mfa-code { height: 44px; flex: 1 1 140px; width: auto; }
+}

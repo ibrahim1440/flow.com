@@ -1,0 +1,124 @@
+/*
+ * «ملفي الشخصي» — Direction 2.1, UI batch 3. Page-local layout on top of the HR / operations kit
+ * (hr.css, ops.css); every colour is a kit token. Measurements from the approved frames:
+ *   UR-02 597:759 (header, tabs, account facts), UR-02d 598:966 (block headers, sessions table,
+ *   footnote), TD-11 556:4350 / 551:3547 (devices table and phone rows, «النشاط الأخير»),
+ *   TD-12b 552:3429 / 555:4176 (confirmation).
+ */
+[data-hr-root] .pf-page { gap: 20px; }
+@media (min-width: 1200px) { [data-hr-root] .pf-page { padding: 16px 48px 48px; } }
+
+/* Page header (UR-02 «Page header» 63 px: avatar 48 · gap 14 · title 28/35 + meta 13.5/22; actions 34 px, bottom-aligned as TD-11). */
+[data-hr-root] .pf-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+[data-hr-root] .pf-id { display: flex; align-items: center; gap: 14px; min-width: 0; }
+[data-hr-root] .pf-avatar { width: 48px; height: 48px; border-radius: 14px; background: var(--hr-selected); color: var(--hr-primary); font-size: 13px; font-weight: 600; line-height: 1; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+[data-hr-root] .pf-idtext { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+[data-hr-root] .pf-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; line-height: 22px; color: var(--hr-muted); }
+[data-hr-root] .pf-meta > i { width: 3px; height: 3px; border-radius: 1.5px; background: var(--hr-border-control); flex: none; }
+[data-hr-root] .pf-meta .hr-dot { font-size: 12.5px; }
+[data-hr-root] .pf-meta .hr-dot > span { color: var(--hr-text-2); font-weight: 600; }
+[data-hr-root] .pf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+[data-hr-root] .hr-btn.pf-danger { color: var(--hr-danger); } /* Button «Danger outline»: border/strong, danger label */
+[data-hr-root] .hr-btn.pf-danger:disabled { color: var(--hr-disabled); }
+[data-hr-root] .pf-latin { font-family: var(--hr-num); }
+
+/* Tab bodies */
+[data-hr-root] .pf-tabbody { display: flex; flex-direction: column; gap: 32px; min-width: 0; padding-top: 4px; }
+[data-hr-root] .pf-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+
+/* Account facts (UR-02 «Properties»: label column 162, rows 33, 13.5/22). */
+[data-hr-root] .pf-props { margin: 0; display: flex; flex-direction: column; gap: 11px; }
+[data-hr-root] .pf-props > div { display: grid; grid-template-columns: 162px minmax(0, 1fr); align-items: center; min-height: 22px; font-size: 13.5px; line-height: 22px; }
+[data-hr-root] .pf-props dt { color: var(--hr-muted); }
+[data-hr-root] .pf-props dd { margin: 0; color: var(--hr-text); min-width: 0; overflow-wrap: anywhere; }
+[data-hr-root] .pf-props .hr-dot { font-size: 13.5px; }
+
+/* Forms */
+[data-hr-root] .pf-form { display: flex; flex-direction: column; gap: 14px; max-width: 420px; min-width: 0; }
+[data-hr-root] .pf-group { font-size: 12.5px; font-weight: 500; line-height: 22px; color: var(--hr-muted); } /* UR-02 «يستطيع» label */
+[data-hr-root] .pf-formacts { display: flex; gap: 8px; }
+[data-hr-root] .pf-note { margin: 0; }
+[data-hr-root] .pf-ltr { text-align: start; }
+[data-hr-root] .pf-seg { align-self: flex-start; }
+[data-hr-root] .pf-secret { display: flex; align-items: center; gap: 4px; }
+[data-hr-root] .pf-secret .hr-input { flex: 1 1 auto; min-width: 0; }
+[data-hr-root] .pf-pin { letter-spacing: .3em; font-family: var(--hr-num); }
+
+/* Block header (UR-02d: title 16/20.8 SemiBold · caption 13 muted · end link 13 Medium). */
+[data-hr-root] .pf-block { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+[data-hr-root] .pf-bhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-height: 22px; }
+[data-hr-root] .pf-bhead h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 20.8px; color: var(--hr-text); }
+[data-hr-root] .pf-bcap { font-size: 13px; line-height: 22px; color: var(--hr-muted); }
+[data-hr-root] .pf-bact { margin-inline-start: auto; }
+[data-hr-root] .pf-link { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-size: 13px; font-weight: 500; line-height: 22px; color: var(--hr-primary); cursor: pointer; }
+[data-hr-root] .pf-link:hover:not(:disabled) { text-decoration: underline; }
+[data-hr-root] .pf-link:disabled { color: var(--hr-disabled); cursor: not-allowed; }
+[data-hr-root] .pf-lead { margin: 0 0 -16px; font-size: 13.5px; line-height: 22px; color: var(--hr-text-2); }
+[data-hr-root] .pf-foot { margin: -16px 0 0; font-size: 12.5px; line-height: 20px; color: var(--hr-muted); }
+[data-hr-root] .pf-empty { margin: 0; }
+
+/* Tables (UR-02d rows 46; TD-11 two-line device rows 54). */
+[data-hr-root] .pf-table td { white-space: nowrap; }
+[data-hr-root] .pf-table td.pf-two { height: 54px; padding-block: 6px; }
+[data-hr-root] .pf-devname { display: flex; align-items: center; gap: 12px; }
+[data-hr-root] .pf-here .hr-dot { font-size: 12px; }
+[data-hr-root] .pf-here .hr-dot > span { color: var(--hr-text-2); }
+[data-hr-root] .pf-strong { font-weight: 500; color: var(--hr-text); }
+[data-hr-root] .pf-sub { font-size: 12.5px; line-height: 20px; color: var(--hr-muted); }
+[data-hr-root] .pf-table .pf-two .pf-strong { line-height: 20px; }
+[data-hr-root] .pf-act { text-align: end; width: 1%; }
+[data-hr-root] .pf-tag { font-size: 12.5px; color: var(--hr-muted); }
+[data-hr-root] .pf-narrow { display: none; }
+
+/* «النشاط الأخير» (TD-11: 640 wide, rows 43 = 10 + 22 + 11, time 13 muted at the end). */
+[data-hr-root] .pf-activity { list-style: none; margin: 0; padding: 0; max-width: 640px; }
+[data-hr-root] .pf-activity > li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0 10px; border-bottom: 1px solid var(--hr-border-subtle); }
+[data-hr-root] .pf-activity .hr-dot { font-size: 13px; white-space: normal; }
+[data-hr-root] .pf-activity .hr-dot.tone-success > span { font-weight: 600; color: var(--hr-text-2); }
+[data-hr-root] .pf-when { font-size: 13px; line-height: 22px; color: var(--hr-muted); white-space: nowrap; flex: none; }
+
+/* Two-step verification sits flat on the sheet like the other blocks. */
+[data-hr-root] .pf-mfa .mfa-card { border: 0; padding: 0; background: none; border-radius: 0; max-width: 640px; }
+
+/* TD-12b confirmation */
+.pf-bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; line-height: 22px; }
+.pf-bullets > li { position: relative; padding-inline-start: 16px; }
+.pf-bullets > li::before { content: ""; position: absolute; inset-inline-start: 2px; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--hr-primary); }
+.pf-dlgname { margin: 0; font-weight: 500; }
+.hr-btn.pf-confirm-danger { background: var(--hr-danger); border-color: var(--hr-danger); color: var(--hr-inverse); }
+.hr-btn.pf-confirm-danger:hover:not(:disabled) { background: var(--hr-danger-hover); }
+
+@media (max-width: 1023px) {
+  [data-hr-root] .pf-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+
+/* Phone (UR-02 390 613:7053, TD-11 390 551:3547) */
+@media (max-width: 767px) {
+  [data-hr-root] .pf-page { gap: 14px; }
+  [data-hr-root] .pf-header { align-items: stretch; flex-direction: column; gap: 12px; }
+  [data-hr-root] .pf-avatar { width: 40px; height: 40px; border-radius: 12px; font-size: 12px; }
+  [data-hr-root] .pf-id { gap: 12px; }
+  [data-hr-root] .pf-idtext { gap: 2px; }
+  [data-hr-root] .pf-id .hr-title { font-size: 18px; line-height: 26px; }
+  [data-hr-root] .pf-meta { font-size: 12.5px; gap: 6px; }
+  [data-hr-root] .pf-hide-phone { display: none; }
+  [data-hr-root] .pf-actions { flex-wrap: nowrap; }
+  [data-hr-root] .pf-actions .hr-btn { flex: 1 1 0; min-width: 0; height: 40px; padding: 0 8px; font-size: 13px; }
+  [data-hr-root] .pf-tabbody { gap: 24px; padding-top: 0; }
+  [data-hr-root] .pf-props { gap: 0; }
+  [data-hr-root] .pf-props > div { grid-template-columns: 120px minmax(0, 1fr); padding: 6px 0; }
+  [data-hr-root] .pf-form { max-width: none; }
+  [data-hr-root] .pf-formacts .hr-btn { flex: 1; height: 44px; }
+  [data-hr-root] .pf-seg { align-self: stretch; }
+  [data-hr-root] .pf-seg > button { flex: 1; height: 38px; }
+  [data-hr-root] .pf-secret .hr-iconbtn { width: 44px; height: 44px; }
+  [data-hr-root] .pf-lead, [data-hr-root] .pf-foot { margin: 0; }
+  [data-hr-root] .pf-wide { display: none; }
+  [data-hr-root] .pf-narrow { display: block; }
+  [data-hr-root] .pf-rows { list-style: none; margin: 0; padding: 0; }
+  [data-hr-root] .pf-rows > li { padding: 12px 0 13px; border-bottom: 1px solid var(--hr-border-subtle); display: flex; flex-direction: column; gap: 2px; }
+  [data-hr-root] .pf-rowtop { display: flex; align-items: center; gap: 10px; min-height: 22px; font-size: 14px; }
+  [data-hr-root] .pf-push { margin-inline-start: auto; }
+  [data-hr-root] .pf-rows .pf-sub { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: 12.5px; line-height: 22px; }
+  [data-hr-root] .pf-activity > li { align-items: flex-start; }
+}

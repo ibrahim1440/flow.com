@@ -8,6 +8,7 @@ import { PIN_LENGTH } from "@/lib/pin-policy";
 import { cameForExpiredSession, SESSION_EXPIRED_AR, SESSION_EXPIRED_EN } from "@/lib/session-expired";
 import { DesktopRecommendedNotice } from "@/components/shell/DesktopRecommendedNotice";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
+import { BrandMark } from "@/components/brand/BrandMark";
 import "@/components/shell/direction-2.1.css";
 import "./login.css";
 
@@ -72,7 +73,6 @@ const T = {
 } as const;
 
 export default function LoginPage() {
-  const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [lang, setLang] = useState<Lang>("ar");
   // SIMPLE MODE: username + password is the only method shown, and the default (SHOW_PIN_SIGN_IN).
   const [mode, setMode] = useState<Mode>(SHOW_PIN_SIGN_IN ? "pin" : "password");
@@ -177,10 +177,6 @@ export default function LoginPage() {
     if (r === "refused") { if (lastAttempt.step === "mfa") setCode(""); else if (lastAttempt.step !== "password") setPin(""); }
   }
 
-  useEffect(() => {
-    fetch("/api/settings/logo").then((r) => r.json()).then((d) => setLogoBase64(d.logoBase64 ?? null)).catch(() => {});
-  }, []);
-
   // Auto-submit on the last digit (PIN only, or username + PIN once a username is typed).
   useEffect(() => {
     if (challenge || mode === "password" || pin.length !== PIN_AUTO_SUBMIT_LENGTH) return;
@@ -238,10 +234,8 @@ export default function LoginPage() {
           <span className="lg-ring r1" aria-hidden />
           <span className="lg-ring r2" aria-hidden />
           <span className="lg-node" aria-hidden />
-          <span className={`lg-mark${logoBase64 ? " has-logo" : ""}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            {logoBase64 ? <img src={logoBase64} alt="Logo" /> : null}
-          </span>
+          {/* The brand mark on the olive panel: the beige «ح» with the clay stroke (guideline v003). */}
+          <span className="lg-mark"><BrandMark tone="olive" alt={lang === "ar" ? "حِقبة" : "Hiqbah"} /></span>
           <div className="lg-moment">
             <p className="q" lang="ar" dir="rtl">كل عملية بوضوح.<br />كل تفصيل بإتقان.</p>
             <i aria-hidden />

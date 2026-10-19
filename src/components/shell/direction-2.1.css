@@ -115,13 +115,10 @@
 .d21-brandbar .t b { display: block; font-weight: 600; font-size: 14.5px; }
 /* Figma brand row (HR-02 449:20852, G-07 1230:134283): name SemiBold 14.5/18.1, subtitle Regular 14/17.5. */
 .d21-brandbar .t span { font-size: 14px; color: var(--text-muted); }
-/* Brand mark slot (rc.css .mark-slot): the official secondary ح SVG goes here (asset not in the
-   repository), or the logo uploaded in Settings when there is one. */
-.d21-mark { width: 34px; height: 34px; border-radius: 10px; border: 1px dashed var(--border-control); background: var(--surface); flex: none; display: grid; place-items: center; overflow: hidden; }
-.d21-mark::after { content: ""; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border-strong); }
-.d21-mark.has-logo { border: 0; box-shadow: var(--shadow-sheet); }
-.d21-mark.has-logo::after { display: none; }
-.d21-mark img { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
+/* Brand mark slot (rc.css .mark-slot, Figma BrandMark 34×34): the official «ح» mark
+   (components/brand/BrandMark, olive-clay) on a white tile. The SVG carries its own clear space. */
+.d21-mark { width: 34px; height: 34px; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-sheet); flex: none; display: grid; place-items: center; overflow: hidden; }
+.d21-mark img { display: block; width: 100%; height: 100%; }
 .d21-mark.sm { width: 28px; height: 28px; border-radius: 8px; }
 .d21-find { appearance: none; border: 0; font: inherit; cursor: pointer; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 9px; color: var(--text-muted); font-size: 13.5px; margin-bottom: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); width: 100%; text-align: start; }
 .d21-find:hover { background: var(--surface-subtle); }

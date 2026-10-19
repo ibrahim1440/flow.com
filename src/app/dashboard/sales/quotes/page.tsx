@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useLang, pick, Spinner, api, formatMoney, num } from "../../_components/ui";
+import { useLang, pick, Spinner, api, formatMoney, num } from "../_components/ui";
 import { Ico } from "@/components/shell/icons";
 import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { initials } from "@/components/d21/labels";

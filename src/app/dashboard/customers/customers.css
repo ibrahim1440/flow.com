@@ -1,0 +1,72 @@
+/*
+ * Customers — Direction 2.1 (UI batch 2). The list uses the reference primitives of the leads
+ * list (components/d21/reference.css: .pg .ph .tool .search .t .split .pane), the forms the HR
+ * kit dialog (hr.css). This file adds only what the customer screen has and leads does not:
+ * the roast-profile rows of the account preview (drawn like «الأصناف المعتادة» in 179:1312),
+ * the phone sheet and the form's checkbox. No colour is defined here.
+ */
+.d21 .cu-open { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-weight: 500; color: var(--text-primary); text-align: start; cursor: pointer; overflow-wrap: anywhere; }
+.d21 .cu-open:hover { text-decoration: underline; }
+.d21 .cu-table td { height: 52px; }
+.d21 .cu-danger { color: var(--status-danger); }
+.d21 .btn.cu-danger:hover { background: var(--status-danger-tint); }
+.d21 .pane-f .btn.cu-danger { flex: none; }
+.d21 .cu-sel { background: var(--surface-selected); }
+.d21 .cu-orders { white-space: nowrap; font-size: 12.5px; color: var(--text-muted); }
+
+/* Roast profiles: one row each, name and usage over the bean and the colour targets. */
+.d21 .cu-prefs { list-style: none; margin: 4px 0 0; padding: 0; }
+.d21 .cu-prefs > li { display: flex; align-items: flex-start; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.d21 .cu-pref-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.d21 .cu-pref-r1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.d21 .cu-pref-r1 b { font-weight: 500; font-size: 14px; color: var(--text-primary); overflow-wrap: anywhere; }
+.d21 .cu-pref-sub { font-size: 12.5px; line-height: 18px; color: var(--text-muted); overflow-wrap: anywhere; }
+.d21 .cu-pref-targets { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 12.5px; line-height: 20px; color: var(--text-secondary); }
+.d21 .cu-pref-act { display: flex; gap: 2px; flex: none; }
+.d21 .cu-pane .tabs { margin-bottom: 12px; }
+
+/* The customer form (HR kit dialog). */
+[data-hr-root] .cu-check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+[data-hr-root] .cu-check input { width: 16px; height: 16px; accent-color: var(--hr-primary); flex: none; }
+[data-hr-root] .cu-check.is-wide, [data-hr-root] .cu-bean.is-wide, [data-hr-root] .cu-formsec.is-wide { grid-column: 1 / -1; }
+[data-hr-root] .cu-bean { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border-radius: var(--hr-r-md); background: var(--hr-subtle); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+[data-hr-root] .cu-bean b { font-weight: 500; }
+[data-hr-root] .cu-formsec { margin: 4px 0 0; padding-top: 12px; border-top: 1px solid var(--hr-border-subtle); font-size: 13px; font-weight: 600; color: var(--hr-text-2); }
+
+/* Skeleton while the list loads. */
+.d21 .cu-skel { display: flex; flex-direction: column; gap: 14px; padding-top: 24px; }
+.d21 .cu-skel > i { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-subtle), var(--border-subtle), var(--surface-subtle)); background-size: 200% 100%; animation: cu-shimmer 1.4s infinite; }
+.d21 .cu-skel > i:nth-child(1) { width: 34%; height: 22px; }
+.d21 .cu-skel > i:nth-child(2) { width: 88%; }
+.d21 .cu-skel > i:nth-child(3) { width: 76%; }
+.d21 .cu-skel > i:nth-child(4) { width: 82%; }
+.d21 .cu-skel > i:nth-child(5) { width: 70%; }
+@keyframes cu-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .d21 .cu-skel > i { animation: none; } }
+
+/* Phone: the preview is a full-screen sheet over the list (crm-account 390, 178:1353), its
+   footer actions 44 px. The leads preview is not shown on a phone; the customer's is the only
+   place its particulars and roast profiles can be read and changed, so it stays. */
+@media (max-width: 767.98px) {
+  .d21 .cu-pane { display: flex; position: fixed; inset: 0; width: auto; height: auto; z-index: 75; border: 0; border-radius: 0; box-shadow: none; }
+  .d21 .cu-pane .pane-h { padding: 0 16px; }
+  .d21 .cu-pane .pane-b { padding: 16px; }
+  .d21 .cu-pane .pane-t { font-size: 22px; line-height: 28.6px; }
+  .d21 .cu-pane .pane-f { padding: 12px 16px max(16px, env(safe-area-inset-bottom)); }
+  .d21 .cu-pane .pane-f .btn { height: 44px; }
+  .d21 .cu-pane .props { grid-template-columns: 96px minmax(0, 1fr); }
+  .d21 .cu-pane .ib { width: 44px; height: 44px; }
+  .d21 .cu-ctx { overflow-x: auto; max-width: 100%; }
+}
+
+/* The customer column: the name on one line, the other spelling and the address under it, cut. */
+.d21 .cu-table td.cu-name { padding-block: 8px; max-width: 320px; }
+.d21 .cu-table .cu-name .cu-open { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d21 .cu-table .cu-namesub { display: block; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* With the preview docked beside it, the list keeps the columns the leads list keeps at 1024. */
+.d21 .split.has-pane .cu-table .xl { display: none; }
+
+/* UI batch 3: the preview's «فتح الصفحة» (forward arrow: mirrored in RTL) and the name link. */
+.d21 a.cu-open { text-decoration: none }
+.d21 a.cu-open:hover { text-decoration: underline }
+[dir="rtl"] .d21 .cu-fwd, .d21[dir="rtl"] .cu-fwd { transform: scaleX(-1) }

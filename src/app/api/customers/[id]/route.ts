@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { parseAccountFields } from "@/lib/services/customers/fields";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { user, error } = await requireAnyModule("customers", "orders");
@@ -40,6 +41,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (body.whatsappOptOut !== undefined && typeof body.whatsappOptOut !== "boolean") {
       return NextResponse.json({ error: "whatsappOptOut must be true or false" }, { status: 400 });
     }
+    // The account particulars (customer account page; migration 20261019120000). Same gate as
+    // the rest of this record: customers at edit. Absent keys are unchanged; "" clears one.
+    const account = parseAccountFields(body as Record<string, unknown>);
+    if (!account.ok) return NextResponse.json({ error: account.errorAr, errorEn: account.error }, { status: 400 });
+    if (account.data.accountOwnerId) {
+      const owner = await prisma.employee.findFirst({ where: { id: account.data.accountOwnerId, active: true }, select: { id: true } });
+      if (!owner) return NextResponse.json({ error: "المسؤول غير موجود أو غير نشط.", errorEn: "The account owner is not an active employee." }, { status: 400 });
+    }
 
     const customer = await prisma.customer.update({
       where: { id },
@@ -50,6 +59,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...(body.email !== undefined && { email: body.email.trim() || null }),
         ...(body.address !== undefined && { address: body.address.trim() || null }),
         ...(body.whatsappOptOut !== undefined && { whatsappOptOut: body.whatsappOptOut }),
+        ...account.data,
       },
     });
     return NextResponse.json(customer);

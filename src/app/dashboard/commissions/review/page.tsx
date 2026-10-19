@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle2, AlertTriangle, Banknote, Scale } from "lucide-react";
 import {
-  useLang, ProvisionalBanner, SandboxBanner, PageHeader, Alert, Card, SectionTitle,
-  EmptyState, Spinner, Button, Field, TextInput, TextArea, Money, Pill, Modal, api,
-  AccrualStatusBadge, DataTable, Tr, Td, StatStrip, Stat, FilterSelect, ROW_ACTION,
-  monthOptions, formatDay, num,
+  useLang, Button, Field, TextInput, TextArea, Money, Modal, Alert, api, monthOptions, formatDay, formatMoney, num,
 } from "../../sales/_components/ui";
+import {
+  PerfHeader, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
+} from "../../sales/_components/perf";
+import { usePhone } from "@/components/shell/page-context";
 
 /**
- * Commission review and approval.
+ * Commission review and approval — Direction 2.1, GX A-P06 «مراجعة العمولات» (`1228:103105`,
+ * EN `1230:135223`, 1024 `1228:105114`, 390 `1232:39133`).
  *
  * ── Two figures, from two places, on purpose ──
  * The statement comes from the append-only ledger and is the authority on what is owed. The
@@ -23,7 +24,8 @@ import {
  * Approving sets a status. A correction appends an adjustment carrying a reason and an
  * actor. A payout appends a payout entry. The approved number stays exactly as approved.
  *
- * PROVISIONAL INTERFACE — see the banner.
+ * Visual port: the request, the three actions and what each sends, and the conditions that
+ * offer them (`can.approve`, `can.recordPayout`, pending / outstanding) are unchanged.
  */
 
 type EmployeeRow = {
@@ -91,6 +93,7 @@ function thisMonth(): string {
 export default function CommissionReviewPage() {
   const lang = useLang();
   const ar = lang === "ar";
+  const phone = usePhone();
 
   const [month, setMonth] = useState(thisMonth());
   const [data, setData] = useState<Review | null>(null);
@@ -102,12 +105,9 @@ export default function CommissionReviewPage() {
   const [dialog, setDialog] = useState<{ kind: "adjust" | "payout"; row: EmployeeRow } | null>(null);
 
   /**
-   * Reload counter.
-   *
-   * The fetch lives in the effect rather than in a `useCallback` the effect calls: the
-   * lint rule resolves a called callback and sees setState reachable from the effect
-   * body. Mutations still refresh by bumping this, so the behaviour is unchanged and the
-   * fetch has one owner. `cancelled` stops a slow response landing after a newer one.
+   * Reload counter. The fetch lives in the effect; mutations refresh by bumping this, so the
+   * behaviour is unchanged and the fetch has one owner. `cancelled` stops a slow response
+   * landing after a newer one.
    */
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => setReloadToken((t) => t + 1);
@@ -150,306 +150,225 @@ export default function CommissionReviewPage() {
     reload();
   }
 
-  if (loading) return <Spinner />;
-  if (!data) return <Alert kind="error">{error}</Alert>;
+  if (loading) return <PerfLoading ar={ar} />;
+  if (!data) return <div className="pg"><PerfNotice kind="error" ar={ar}>{error}</PerfNotice></div>;
 
   const unreconciled = data.employees.filter((e) => !e.reconciled);
+  const monthLabel = monthOptions(month, lang).find((o) => o.value === month)?.label ?? month;
+  const m = (v: string) => <span className="n">{formatMoney(v)}</span>;
+
+  const planOf = (e: EmployeeRow) => {
+    // The plan is not on the employee row; it is on that employee's accruals, which is where
+    // the reviewer would look for it anyway.
+    const pv = data.accruals.find((a) => a.employeeId === e.employeeId)?.planVersion;
+    return pv ? <span dir="ltr" style={{ unicodeBidi: "isolate" }}>{pv.plan.code} v{pv.version}</span> : "—";
+  };
+  const counts = (e: EmployeeRow) =>
+    [
+      e.pendingCount > 0 ? `${num(e.pendingCount, lang)} ${ar ? "بانتظار الاعتماد" : "awaiting approval"}` : null,
+      e.approvedCount > 0 ? `${num(e.approvedCount, lang)} ${ar ? "معتمدة" : "approved"}` : null,
+    ].filter(Boolean).join(" · ") || (ar ? "لا حركات" : "no accruals");
+
+  /** The row's actions, in the order the frame gives them: the one to take first, then the
+   *  others in place — a disabled «صرف» while approval is pending shows the sequence. */
+  const rowActions = (e: EmployeeRow) => {
+    const canPay = data.can.recordPayout && Number(e.outstanding) > 0 && e.pendingCount === 0;
+    return (
+      <span className="perf-rowbtns">
+        {data.can.approve && e.pendingCount > 0 ? (
+          <button type="button" className="btn p sm" disabled={busy} onClick={() => approve(e)} data-testid={`approve-${e.employeeId}`}>
+            {ar ? "اعتماد المستحق" : "Approve accrued"}
+          </button>
+        ) : canPay ? (
+          <button type="button" className="btn sm" disabled={busy} onClick={() => setDialog({ kind: "payout", row: e })} data-testid={`payout-${e.employeeId}`}>
+            {ar ? "صرف المعتمد" : "Pay approved"}
+          </button>
+        ) : null}
+        {data.can.approve && (
+          <button type="button" className="btn sm" disabled={busy} onClick={() => setDialog({ kind: "adjust", row: e })} data-testid={`adjust-${e.employeeId}`}>
+            {ar ? "تسوية" : "Adjust"}
+          </button>
+        )}
+        {e.pendingCount > 0 && (
+          <button type="button" className="btn sm" disabled title={ar ? "الصرف بعد الاعتماد" : "Payout comes after approval"}>
+            {ar ? "صرف" : "Payout"}
+          </button>
+        )}
+      </span>
+    );
+  };
+
+  const outstandingCell = (e: EmployeeRow) => (
+    <>
+      <b className="n" style={{ fontWeight: 600 }}>{formatMoney(e.outstanding)}</b>
+      {/* Only the exception is worth a flag: a "matches" on every row is noise. */}
+      {!e.reconciled && (
+        <span className="flag" data-testid={`reconciled-${e.employeeId}`} style={{ marginInlineStart: 8 }}>
+          {ar ? "فرق " : "off by "}<span className="n">{e.reconciliationDifference}</span>
+        </span>
+      )}
+    </>
+  );
+  const accruedCell = (e: EmployeeRow) => (
+    <>
+      {m(e.accrued)}
+      {/* A reversal is shown rather than buried inside the net figure. */}
+      {Number(e.reversals) !== 0 && (
+        <span data-testid={`reversals-${e.employeeId}`} className="perf-sub" style={{ color: "var(--status-danger)" }}>
+          {ar ? "بعد عكس " : "after reversals of "}<span className="n">{formatMoney(e.reversals)}</span>
+        </span>
+      )}
+    </>
+  );
+  const nameBtn = (e: EmployeeRow) => (
+    <button type="button" className="perf-who" aria-expanded={expanded === e.employeeId}
+      onClick={() => setExpanded(expanded === e.employeeId ? null : e.employeeId)} data-testid={`expand-${e.employeeId}`}>
+      <bdi>{e.name}</bdi>
+    </button>
+  );
+
+  // «2.00%» as the frame writes it; a stored rate with more places is shown in full, never rounded.
+  const pctText = (v: string) => {
+    const n = Number(v);
+    return `${Number(n.toFixed(2)) === Number(n.toFixed(6)) ? n.toFixed(2) : String(Number(n.toFixed(6)))}%`;
+  };
+  const shareText = (v: string) => `${Number(Number(v).toFixed(6))}%`;
+  const detailRows = expanded ? data.accruals.filter((a) => a.employeeId === expanded) : [];
 
   return (
-    <div className="space-y-[18px]">
-      <ProvisionalBanner />
+    <div className="pg">
+      <PerfHeader ar={ar} title={ar ? "الأداء والعمولات" : "Performance and commissions"}
+        phoneTitle={ar ? "مراجعة العمولات" : "Commission review"}
+        meta={[monthLabel, ar ? "الاعتماد يشمل كل المستحق · الصرف للمعتمد فقط" : "approval covers all accrued · payout covers approved only"]}
+        actions={<MonthChip value={month} onChange={setMonth} lang={lang} testId="cr-month" />} />
 
-      <PageHeader
-        title={ar ? "مراجعة العمولات" : "Commission review"}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>
-              {ar
-                ? "الاعتماد يشمل كل ما هو «مستحق» للموظّف في الفترة"
-                : "Approving covers everything accrued for that employee in the period"}
-            </span>
-            <span aria-hidden className="text-oo-border-strong">·</span>
-            <span>{ar ? "الصرف يشمل «معتمَد» فقط" : "a payout covers approved rows only"}</span>
-          </span>
-        }
-        actions={
-          <FilterSelect
-            value={month}
-            onChange={setMonth}
-            label={ar ? "الشهر" : "Month"}
-            width="w-[180px]"
-            testId="cr-month"
-          >
-            {monthOptions(month, lang).map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </FilterSelect>
-        }
-      />
-
-      <SandboxBanner notice={data.notice} />
-      {error && <Alert kind="error" onDismiss={() => setError("")}>{error}</Alert>}
-      {success && <Alert kind="success" onDismiss={() => setSuccess("")}>{success}</Alert>}
+      <PerfSandbox notice={data.notice} ar={ar} />
+      <PerfNotice kind="error" ar={ar} onDismiss={() => setError("")}>{error}</PerfNotice>
+      <PerfNotice kind="success" ar={ar} onDismiss={() => setSuccess("")}>{success}</PerfNotice>
 
       {unreconciled.length > 0 && (
-        <Alert kind="error">
-          <span className="inline-flex items-center gap-1.5">
-            <AlertTriangle size={15} aria-hidden />
-            {ar
-              ? `${unreconciled.length} سجل لا يتطابق فيه دفتر القيود مع صفوف الاستحقاق. لا تعتمد قبل فهم السبب.`
-              : `${unreconciled.length} rows where the ledger and the accrual rows disagree. Do not approve before understanding why.`}
-          </span>
-        </Alert>
+        <p className="notice er" role="alert" style={{ marginBottom: 16 }}>
+          {ar
+            ? `${unreconciled.length} سجل لا يتطابق فيه دفتر القيود مع صفوف الاستحقاق. لا تعتمد قبل فهم السبب.`
+            : `${unreconciled.length} rows where the ledger and the accrual rows disagree. Do not approve before understanding why.`}
+        </p>
       )}
 
-      {/* The period's totals. Not in the design's frame, which goes straight to the table —
-          kept because a reviewer approving a period needs to see what the period comes to. */}
-      <StatStrip>
-        <Stat label={ar ? "المستحق" : "Accrued"} value={data.totals.accrued} money />
-        <Stat label={ar ? "التسويات" : "Adjustments"} value={data.totals.adjustments} money />
-        <Stat label={ar ? "المدفوع" : "Paid"} value={data.totals.paid} money />
-        <Stat
-          label={ar ? "المتبقّي" : "Outstanding"}
-          value={data.totals.outstanding}
-          money
-          tone="action"
-        />
-      </StatStrip>
+      <div style={{ margin: "4px 0 28px" }}>
+        <Metrics items={[
+          { label: ar ? "المستحق" : "Accrued", value: m(data.totals.accrued) },
+          { label: ar ? "التسويات" : "Adjustments", value: m(data.totals.adjustments) },
+          { label: ar ? "المدفوع" : "Paid", value: m(data.totals.paid) },
+          { label: ar ? "المتبقّي" : "Outstanding", value: m(data.totals.outstanding) },
+        ]} />
+      </div>
 
       {data.employees.length === 0 ? (
-        <Card>
-          <EmptyState>{ar ? "لا توجد استحقاقات في هذا الشهر." : "No accruals in this period."}</EmptyState>
-        </Card>
+        <div style={{ padding: "40px 0", textAlign: "center" }} data-testid="review-empty">
+          <p style={{ fontWeight: 500, margin: 0 }}>{ar ? "لا توجد استحقاقات في هذا الشهر." : "No accruals in this period."}</p>
+        </div>
+      ) : phone ? (
+        <div data-testid="review-table">
+          {data.employees.map((e) => (
+            <div key={e.employeeId} className="mrow" data-testid={`review-row-${e.employeeId}`}>
+              <div style={{ minWidth: 0 }}>{nameBtn(e)}</div>
+              <span>{outstandingCell(e)}</span>
+              <div className="r2"><span style={{ flex: 1 }}>{counts(e)}</span>{planOf(e)}</div>
+              <div className="r2">
+                <span style={{ flex: 1 }}>{ar ? "مستحق" : "Accrued"} {accruedCell(e)} · {ar ? "مدفوع" : "Paid"} {m(e.paid)}</span>
+              </div>
+              <div className="r2" style={{ marginTop: 6 }}>{rowActions(e)}</div>
+            </div>
+          ))}
+        </div>
       ) : (
-        <DataTable
-          testId="review-table"
-          minWidth={1180}
-          cols={[
-            { label: ar ? "الموظّف" : "Employee", w: "min-w-[190px]" },
-            { label: ar ? "الخطة" : "Plan", w: "w-[160px]" },
-            { label: ar ? "مستحق" : "Accrued", w: "w-[140px]" },
-            { label: ar ? "تسويات" : "Adjustments", w: "w-[130px]" },
-            { label: ar ? "مدفوع" : "Paid", w: "w-[130px]" },
-            { label: ar ? "المتبقّي" : "Outstanding", w: "w-[160px]" },
-            { label: ar ? "الإجراءات" : "Actions", w: "w-[270px]" },
-          ]}
-        >
-          {data.employees.map((e) => {
-            // The plan is not on the employee row; it is on that employee's accruals, which
-            // is where the reviewer would look for it anyway.
-            const pv = data.accruals.find((a) => a.employeeId === e.employeeId)?.planVersion;
-            const canPay =
-              data.can.recordPayout && Number(e.outstanding) > 0 && e.pendingCount === 0;
-            return (
-              <Tr key={e.employeeId} testId={`review-row-${e.employeeId}`}>
-                <Td>
-                  <button
-                    onClick={() => setExpanded(expanded === e.employeeId ? null : e.employeeId)}
-                    className="text-start font-medium hover:text-oo-action-primary"
-                    aria-expanded={expanded === e.employeeId}
-                    data-testid={`expand-${e.employeeId}`}
-                  >
-                    {e.name}
-                  </button>
-                  <span className="block text-[12px] leading-[18px] text-oo-text-muted">
-                    {[
-                      e.pendingCount > 0
-                        ? `${num(e.pendingCount, lang)} ${ar ? "بانتظار الاعتماد" : "awaiting approval"}`
-                        : null,
-                      e.approvedCount > 0
-                        ? `${num(e.approvedCount, lang)} ${ar ? "معتمدة" : "approved"}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || (ar ? "لا حركات" : "no accruals")}
-                  </span>
-                </Td>
-                <Td className="text-oo-text-secondary">
-                  {pv
-                    ? `${ar && pv.plan.nameAr ? pv.plan.nameAr : pv.plan.name} · ${
-                        ar ? `ن${num(pv.version, "ar")}` : `v${pv.version}`
-                      }`
-                    : "—"}
-                </Td>
-                <Td>
-                  <Money value={e.accrued} />
-                  {/* A reversal is shown here rather than buried inside the net figure.
-                      "50.00, of which 200.00 was taken back" is a different conversation
-                      from "50.00", and the reviewer is the person who needs to have it. */}
-                  {Number(e.reversals) !== 0 && (
-                    <span
-                      data-testid={`reversals-${e.employeeId}`}
-                      className="block text-[12px] leading-[18px] text-oo-status-rejected"
-                    >
-                      {ar ? "بعد عكس " : "after reversals of "}
-                      <Money value={e.reversals} />
-                    </span>
-                  )}
-                </Td>
-                <Td><Money value={e.adjustments} /></Td>
-                <Td><Money value={e.paid} /></Td>
-                <Td>
-                  <Money value={e.outstanding} strong />
-                  {/* Only the exception is worth a chip. A green "matches" on every row is
-                      noise the reviewer learns to stop reading. */}
-                  {!e.reconciled && (
-                    <span
-                      data-testid={`reconciled-${e.employeeId}`}
-                      className="mt-1 inline-flex items-center gap-1 rounded-[10px] border border-oo-status-blocked bg-oo-status-blocked-bg px-2 py-[3px] text-[12px] leading-[18px] text-oo-status-blocked"
-                    >
-                      <Scale size={12} aria-hidden /> {ar ? "فرق " : "off by "}
-                      {e.reconciliationDifference}
-                    </span>
-                  )}
-                </Td>
-                <Td>
-                  {/* The design puts the one action a reviewer should take first and shows
-                      the others in place, disabled — so the sequence approve → pay is
-                      visible without reading the rules card. */}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {data.can.approve && e.pendingCount > 0 ? (
-                      <button
-                        disabled={busy}
-                        onClick={() => approve(e)}
-                        data-testid={`approve-${e.employeeId}`}
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50"
-                      >
-                        <CheckCircle2 size={14} aria-hidden /> {ar ? "اعتماد المستحق" : "Approve accrued"}
-                      </button>
-                    ) : canPay ? (
-                      <button
-                        disabled={busy}
-                        onClick={() => setDialog({ kind: "payout", row: e })}
-                        data-testid={`payout-${e.employeeId}`}
-                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-oo-action-primary px-3 py-[7px] text-[12px] leading-[18px] text-white transition-colors hover:bg-oo-action-primary-hover disabled:opacity-50"
-                      >
-                        <Banknote size={14} aria-hidden /> {ar ? "صرف المعتمد" : "Pay approved"}
-                      </button>
-                    ) : null}
-                    {data.can.approve && (
-                      <button
-                        disabled={busy}
-                        onClick={() => setDialog({ kind: "adjust", row: e })}
-                        data-testid={`adjust-${e.employeeId}`}
-                        className={`${ROW_ACTION} text-oo-text-primary hover:border-oo-action-primary disabled:opacity-50`}
-                      >
-                        {ar ? "تسوية" : "Adjust"}
-                      </button>
-                    )}
-                    {e.pendingCount > 0 && (
-                      <span
-                        className={`${ROW_ACTION} cursor-not-allowed text-oo-text-muted`}
-                        title={ar ? "الصرف بعد الاعتماد" : "Payout comes after approval"}
-                      >
-                        {ar ? "صرف" : "Payout"}
-                      </span>
-                    )}
-                  </div>
-                </Td>
-              </Tr>
-            );
-          })}
-        </DataTable>
+        <div className="perf-scroll">
+          <table className="t" data-testid="review-table">
+            <thead><tr>
+              <th scope="col">{ar ? "الموظّف" : "Employee"}</th>
+              <th scope="col" className="hide-c">{ar ? "الخطة" : "Plan"}</th>
+              <th scope="col" className="num">{ar ? "مستحق" : "Accrued"}</th>
+              <th scope="col" className="num hide-c">{ar ? "تسويات" : "Adjustments"}</th>
+              <th scope="col" className="num">{ar ? "مدفوع" : "Paid"}</th>
+              <th scope="col" className="num">{ar ? "المتبقّي" : "Outstanding"}</th>
+              <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>
+            </tr></thead>
+            <tbody>
+              {data.employees.map((e) => (
+                <tr key={e.employeeId} className={expanded === e.employeeId ? "on" : undefined} data-testid={`review-row-${e.employeeId}`}>
+                  <td style={{ paddingBlock: 4 }}>
+                    {nameBtn(e)}
+                    <span className="perf-sub">{counts(e)}</span>
+                  </td>
+                  <td className="hide-c">{planOf(e)}</td>
+                  <td className="num">{accruedCell(e)}</td>
+                  <td className="num hide-c">{m(e.adjustments)}</td>
+                  <td className="num">{m(e.paid)}</td>
+                  <td className="num">{outstandingCell(e)}</td>
+                  <td style={{ textAlign: "end" }}>{rowActions(e)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      {/* ── The rules this screen enforces ──────────────────────────────────────── */}
-      <Card>
-        <SectionTitle>{ar ? "قواعد هذه الشاشة" : "The rules this screen enforces"}</SectionTitle>
-        <ul className="space-y-1.5 text-[12px] leading-[18px] text-oo-text-secondary">
-          {(ar
-            ? [
-                "«اعتماد المستحق» يعتمد كل حركة حالتها «مستحق» في هذه الفترة لهذا الموظّف — لا اعتماد جزئي لحركة واحدة.",
-                "«صرف المعتمد» متاح بعد الاعتماد فقط، ويكتب قيد صرف. الحركات تصبح «مدفوع» ويبقى «مستحق» كما هو.",
-                "«تسوية» تكتب قيد تسوية موجباً أو سالباً بسبب إلزامي — ولا تعدّل حركة استحقاق قائمة.",
-                "«المتبقّي» = مستحق + تسويات − مدفوع، محسوباً من قيود السجلّ. لا يُجمع المدفوع فوق المستحق.",
-              ]
-            : [
-                "“Approve accrued” approves every ACCRUED row for this employee in this period — there is no partial approval of one row.",
-                "“Pay approved” is available only after approval and writes a payout entry. The rows become PAID; what is accrued does not change.",
-                "“Adjust” writes a positive or negative adjustment entry with a mandatory reason — it never edits an existing accrual.",
-                "Outstanding = accrued + adjustments − paid, computed from the ledger. A payout is not added on top of what was accrued.",
-              ]
-          ).map((rule, i) => (
-            <li key={i} className="flex gap-2">
-              <span aria-hidden className="text-oo-border-strong">•</span>
-              <span>{rule}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-
       {expanded && (
-        <Card>
-          <SectionTitle>
-            {ar ? "الاستحقاقات التفصيلية" : "The accruals behind the figure"} —{" "}
-            {data.employees.find((e) => e.employeeId === expanded)?.name}
-          </SectionTitle>
-          <div className="-mx-5 mt-3 overflow-x-auto border-y border-oo-border-default">
-            <table className="w-full min-w-[900px] border-collapse text-start" data-testid="accrual-detail">
-              <thead>
-                <tr className="bg-oo-bg-subtle">
-                  {[
-                    [ar ? "التحصيل" : "Collection", "min-w-[190px]"],
-                    [ar ? "العميل" : "Customer", "w-[160px]"],
-                    [ar ? "الأساس المؤهّل" : "Qualifying base", "w-[150px]"],
-                    [ar ? "الحصة" : "Share", "w-[90px]"],
-                    [ar ? "النسبة الفعّالة" : "Effective rate", "w-[130px]"],
-                    [ar ? "المبلغ" : "Amount", "w-[140px]"],
-                    [ar ? "الخطة" : "Plan", "w-[140px]"],
-                    [ar ? "الحالة" : "Status", "w-[150px]"],
-                  ].map(([l, w], i) => (
-                    <th
-                      key={i}
-                      scope="col"
-                      className={`${w} px-4 py-[11px] text-start text-[12px] font-medium leading-[18px] text-oo-text-muted`}
-                    >
-                      {l}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
+        <div style={{ marginTop: 24 }}>
+          <div className="bh">
+            <h2 className="bt">
+              {ar ? "الاستحقاقات التفصيلية" : "The accruals behind the figure"} — <bdi>{data.employees.find((e) => e.employeeId === expanded)?.name}</bdi>
+            </h2>
+          </div>
+          <div className="perf-scroll">
+            <table className="t dense" data-testid="accrual-detail">
+              <thead><tr>
+                <th scope="col">{ar ? "التحصيل" : "Collection"}</th>
+                <th scope="col">{ar ? "العميل" : "Customer"}</th>
+                <th scope="col" className="num">{ar ? "الأساس المؤهّل" : "Qualifying base"}</th>
+                <th scope="col" className="num">{ar ? "الحصة" : "Share"}</th>
+                <th scope="col" className="num">{ar ? "النسبة" : "Rate"}</th>
+                <th scope="col" className="num">{ar ? "المبلغ" : "Amount"}</th>
+                <th scope="col">{ar ? "الحالة" : "Status"}</th>
+              </tr></thead>
               <tbody>
-                {data.accruals
-                  .filter((a) => a.employeeId === expanded)
-                  .map((a) => (
-                    <tr key={a.id} className="border-t border-oo-border-default" data-testid={`accrual-${a.id}`}>
-                      <Td>
-                        <span className="block font-mono text-[12px] leading-[18px]">
-                          {a.collectionEvent.externalRef}
-                        </span>
-                        <span className="text-[12px] leading-[18px] text-oo-text-muted">
-                          {formatDay(a.collectionEvent.collectedAt, lang)}
-                        </span>
-                        {a.collectionEvent.sourceSystem === "SANDBOX" && (
-                          <Pill tone="neutral">{ar ? "تجريبي" : "sandbox"}</Pill>
-                        )}
-                      </Td>
-                      <Td>{a.collectionEvent.customer?.name ?? "—"}</Td>
-                      <Td><Money value={a.qualifyingBase} /></Td>
-                      <Td>{ar ? `${num(Number(a.sharePercent), "ar")}%` : `${a.sharePercent}%`}</Td>
-                      <Td>{ar ? `${num(Number(a.effectiveRatePercent), "ar")}%` : `${a.effectiveRatePercent}%`}</Td>
-                      <Td><Money value={a.amount} currency={a.currency} /></Td>
-                      <Td>
-                        <span className="font-mono text-[12px] leading-[18px]">{a.planVersion.plan.code}</span>
-                        {" "}
-                        {ar ? `ن${num(a.planVersion.version, "ar")}` : `v${a.planVersion.version}`}
-                      </Td>
-                      <Td>
-                        <AccrualStatusBadge status={a.status} />
-                      </Td>
-                    </tr>
-                  ))}
+                {detailRows.map((a) => (
+                  <tr key={a.id} data-testid={`accrual-${a.id}`}>
+                    <td>
+                      <span className="id">{a.collectionEvent.externalRef}</span>{" "}
+                      <span className="sm">{formatDay(a.collectionEvent.collectedAt, lang)}</span>
+                      {a.collectionEvent.sourceSystem === "SANDBOX" && (
+                        <span className="flag wa" style={{ marginInlineStart: 6 }}>{ar ? "تجريبي" : "sandbox"}</span>
+                      )}
+                    </td>
+                    <td><bdi>{a.collectionEvent.customer?.name ?? "—"}</bdi></td>
+                    <td className="num">{m(a.qualifyingBase)}</td>
+                    <td className="num"><span className="n">{shareText(a.sharePercent)}</span></td>
+                    <td className="num"><span className="n">{pctText(a.effectiveRatePercent)}</span></td>
+                    <td className="num">{m(a.amount)}{a.currency !== "SAR" && <span className="unit">{a.currency}</span>}</td>
+                    <td><AccrualDot status={a.status} lang={lang} /></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-[12px] leading-[18px] text-oo-text-muted">
+          <p className="sm" style={{ marginTop: 10, fontSize: 12.5, color: "var(--text-muted)" }}>
             {ar
-              ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة الفعلية هي ما يشرح سبب اختلاف المبلغ عن الأساس × النسبة الأساسية بعد تجاوز شريحة."
-              : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The effective rate is what explains why the amount is not simply base × base rate once a tier has been crossed."}
+              ? "كل صف يحمل مساهمة حدث التحصيل الخاص به — لا المجموع الجاري — فمجموع الصفوف يساوي مستحق الفترة. والنسبة الفعّالة تشرح اختلاف المبلغ عن الأساس × النسبة الأساس بعد تجاوز شريحة."
+              : "Each row carries its own collection event's contribution, not the running total, so the rows sum to the period's accrued figure. The effective rate explains why the amount is not simply base × base rate once a tier has been crossed."}
           </p>
-        </Card>
+        </div>
       )}
+
+      <div style={{ marginTop: 20 }}>
+        <PerfNote>
+          <span>
+            {ar
+              ? "الاعتماد يشمل كل ما هو «مستحق» للموظف في الفترة — لا اعتماد جزئي لحركة واحدة. الصرف يشمل «المعتمَد» فقط، وهو تسجيل بأن الصرف تم ولا يحرّك مالًا. «تسوية» تكتب قيدًا موجبًا أو سالبًا بسبب إلزامي ولا تعدّل حركة قائمة. «المتبقّي» = مستحق + تسويات − مدفوع، من قيود السجل."
+              : "Approval covers everything accrued for the employee in the period — there is no partial approval of one row. A payout covers approved rows only; it records that a payment was made and moves no money. “Adjust” writes a positive or negative entry with a mandatory reason and never edits an existing row. Outstanding = accrued + adjustments − paid, from the ledger."}
+          </span>
+        </PerfNote>
+      </div>
 
       {dialog && (
         <ActionDialog
@@ -458,9 +377,9 @@ export default function CommissionReviewPage() {
           row={dialog.row}
           month={month}
           onClose={() => setDialog(null)}
-          onDone={(m) => {
+          onDone={(msg) => {
             setDialog(null);
-            setSuccess(m);
+            setSuccess(msg);
             reload();
           }}
         />

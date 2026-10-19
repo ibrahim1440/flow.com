@@ -1,86 +1,146 @@
 "use client";
-
+// Global history — Direction 2.1 (UI batch 2; GX D-P02, Figma 1494:3302 at 1440, EN 1494:3687,
+// 1024 1498:3322, phone 1500:3362).
+//
+// Visual port only: the same four requests (orders, roasting batches, QC records, deliveries),
+// the same merge and newest-first sort, the same type and date filters, and the same CSV export
+// (GET /api/export?type=…, identical columns, values and file name). The record lines are now
+// written in the viewer's language. A source that does not load (e.g. a module the viewer lacks)
+// no longer empties the whole page: the others are shown and the gap is named (D-J02 «partial»).
+// The export panel states plainly that the files ignore the filters on screen (GX-D2, a known
+// server-side defect, not changed here).
 import { useState, useEffect } from "react";
-import { History, Filter, Download, FileSpreadsheet, FileText } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { Btn, Empty, Notice, OpsBanner, OpsLoading, OpsRoot, PageHeader, countNoun, useL } from "@/components/ops/ui";
+import { dateTimeIn } from "@/components/hr/ui";
+import { useD21Phone } from "@/components/shell/page-context";
 import { useI18n } from "@/lib/i18n/context";
+import { DownloadIco } from "../_components/tools-ui";
 
+type HistoryType = "Order" | "Production" | "QC" | "Delivery";
+type Line = { ar: string; en: string };
 type HistoryItem = {
-  type: string; date: string; description: string; details: string;
+  type: HistoryType; date: string; description: Line; details: Line; mono?: string;
 };
 
+const RECORD_FORMS: [string, string, string, string, string, string] = ["سجل واحد", "سجلان", "سجلات", "سجلًا", "record", "records"];
+const LINE_FORMS: [string, string, string, string, string, string] = ["بند واحد", "بندان", "بنود", "بندًا", "line", "lines"];
+
+/** dd/mm/yyyy in Riyadh time (the frame's date column). */
+function dmy(d: string): string {
+  const s = dateTimeIn(d);
+  return s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "—";
+}
+
+const PAYMENT_AR: Record<string, string> = { "paid": "مدفوع", "not paid": "غير مدفوع", "partial paid": "مدفوع جزئيًا", "partial": "جزئي" };
+
 export default function HistoryPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const L = useL();
+  const ar = lang === "ar";
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState<HistoryType[]>([]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => { loadHistory(); }, []);
+  useD21Phone({ title: t("history"), sub: L("التشغيل", "Operations") });
 
-  async function loadHistory() {
-    const [ordersRes, batchesRes, qcRes, deliveriesRes] = await Promise.all([
-      fetch("/api/orders"), fetch("/api/roasting-batches"),
-      fetch("/api/qc-records"), fetch("/api/deliveries"),
-    ]);
+  useEffect(() => {
+    async function loadHistory() {
+      const [ordersRes, batchesRes, qcRes, deliveriesRes] = await Promise.all([
+        fetch("/api/orders"), fetch("/api/roasting-batches"),
+        fetch("/api/qc-records"), fetch("/api/deliveries"),
+      ]);
 
-    const orders = await ordersRes.json();
-    const batches = await batchesRes.json();
-    const qcRecords = await qcRes.json();
-    const deliveries = await deliveriesRes.json();
+      const read = async (r: Response) => { const j = await r.json().catch(() => null); return Array.isArray(j) ? j : null; };
+      const orders = await read(ordersRes);
+      const batches = await read(batchesRes);
+      const qcRecords = await read(qcRes);
+      const deliveries = await read(deliveriesRes);
+      const gaps: HistoryType[] = [];
+      if (!orders) gaps.push("Order");
+      if (!batches) gaps.push("Production");
+      if (!qcRecords) gaps.push("QC");
+      if (!deliveries) gaps.push("Delivery");
 
-    const history: HistoryItem[] = [];
+      const history: HistoryItem[] = [];
 
-    for (const o of orders) {
-      const totalKg = o.items.reduce((s: number, i: { quantityKg: number }) => s + i.quantityKg, 0);
-      history.push({
-        type: "Order",
-        date: o.createdAt,
-        description: `Order #${o.orderNumber} — ${o.customer.name}`,
-        details: `${o.items.length} item(s), ${totalKg}kg total, Payment: ${o.paymentStatus}`,
-      });
+      for (const o of orders ?? []) {
+        const totalKg = o.items.reduce((s: number, i: { quantityKg: number }) => s + i.quantityKg, 0);
+        const pay = String(o.paymentStatus ?? "");
+        history.push({
+          type: "Order",
+          date: o.createdAt,
+          mono: `#${o.orderNumber}`,
+          description: { ar: `الطلب #${o.orderNumber} · ${o.customer.name}`, en: `Order #${o.orderNumber} · ${o.customer.name}` },
+          details: {
+            ar: `${countNoun(o.items.length, "ar", LINE_FORMS)} · ${totalKg} كغ · الدفع: ${PAYMENT_AR[pay.toLowerCase()] ?? pay}`,
+            en: `${countNoun(o.items.length, "en", LINE_FORMS)} · ${totalKg} kg · payment: ${pay}`,
+          },
+        });
+      }
+
+      for (const b of batches ?? []) {
+        const bean = b.orderItem?.beanTypeName;
+        history.push({
+          type: "Production",
+          date: b.date,
+          description: { ar: `الدفعة ${b.batchNumber} · ${bean || "غير معروف"}`, en: `Batch ${b.batchNumber} · ${bean || "Unknown"}` },
+          details: {
+            ar: `${b.greenBeanQuantity} كغ أخضر ← ${b.roastedBeanQuantity} كغ محمص · فاقد ${b.wasteQuantity} كغ`,
+            en: `${b.greenBeanQuantity} kg green → ${b.roastedBeanQuantity} kg roasted · ${b.wasteQuantity} kg loss`,
+          },
+        });
+      }
+
+      for (const r of qcRecords ?? []) {
+        history.push({
+          type: "QC",
+          date: r.date,
+          description: { ar: `جودة: ${r.coffeeOrigin} (${r.processing})`, en: `QC: ${r.coffeeOrigin} (${r.processing})` },
+          details: {
+            ar: `${r.onProfile ? "ضمن الملف" : "خارج الملف"} · ${r.remarks || "بلا ملاحظات"}`,
+            en: `${r.onProfile ? "On profile" : "Off profile"} · ${r.remarks || "no remarks"}`,
+          },
+        });
+      }
+
+      for (const d of deliveries ?? []) {
+        const who = d.orderItem?.order?.customer?.name;
+        const num = d.orderItem?.order?.orderNumber || "?";
+        const full = d.deliveryType === "full";
+        history.push({
+          type: "Delivery",
+          date: d.date,
+          description: { ar: `تسليم إلى ${who || "غير معروف"} (#${num})`, en: `Delivery to ${who || "Unknown"} (#${num})` },
+          details: {
+            ar: `${d.quantityKg} كغ · ${full ? "تسليم كامل" : "تسليم جزئي"}`,
+            en: `${d.quantityKg} kg · ${full ? "full" : "partial"} delivery`,
+          },
+        });
+      }
+
+      history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setItems(history);
+      setMissing(gaps);
+      setLoading(false);
     }
-
-    for (const b of batches) {
-      history.push({
-        type: "Production",
-        date: b.date,
-        description: `Batch ${b.batchNumber} — ${b.orderItem?.beanTypeName || "Unknown"}`,
-        details: `${b.greenBeanQuantity}kg green → ${b.roastedBeanQuantity}kg roasted (${b.wasteQuantity}kg waste)`,
-      });
-    }
-
-    for (const r of qcRecords) {
-      history.push({
-        type: "QC",
-        date: r.date,
-        description: `QC: ${r.coffeeOrigin} (${r.processing})`,
-        details: `${r.onProfile ? "On Profile" : "Off Profile"} — ${r.remarks || "No remarks"}`,
-      });
-    }
-
-    for (const d of deliveries) {
-      history.push({
-        type: "Delivery",
-        date: d.date,
-        description: `Delivery to ${d.orderItem?.order?.customer?.name || "Unknown"} (#${d.orderItem?.order?.orderNumber || "?"})`,
-        details: `${d.quantityKg}kg — ${d.deliveryType === "full" ? "Full" : "Partial"} delivery`,
-      });
-    }
-
-    history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    setItems(history);
-  }
+    loadHistory();
+  }, []);
 
   const [exporting, setExporting] = useState(false);
 
   async function handleExport(exportType: string) {
     setExporting(true);
+    setNotice(null);
     try {
       const res = await fetch(`/api/export?type=${exportType}`);
       const data = await res.json();
       if (!Array.isArray(data) || data.length === 0) {
-        alert("No data to export");
+        setNotice(L("لا توجد بيانات للتصدير.", "No data to export"));
         return;
       }
 
@@ -198,90 +258,124 @@ export default function HistoryPage() {
     return true;
   });
 
-  const typeColors: Record<string, string> = {
-    Order: "bg-blue-100 text-blue-700",
-    Production: "bg-orange-100 text-orange-700",
-    QC: "bg-purple-100 text-purple-700",
-    Delivery: "bg-green-100 text-green-700",
-  };
+  const TYPES: { key: string; label: string }[] = [
+    { key: "all", label: L("الكل", "All") },
+    { key: "Order", label: L("طلبات", "Orders") },
+    { key: "Production", label: L("إنتاج", "Production") },
+    { key: "QC", label: L("جودة", "QC") },
+    { key: "Delivery", label: L("تسليم", "Deliveries") },
+  ];
+  const typeLabel: Record<HistoryType, string> = { Order: t("typeOrder"), Production: t("typeProduction"), QC: t("typeQc"), Delivery: t("typeDelivery") };
+  const filtering = typeFilter !== "all" || !!dateFrom || !!dateTo;
+  const EXPORTS: { type: string; label: string }[] = [
+    { type: "orders", label: t("orders") },
+    { type: "production", label: t("production") },
+    { type: "qc", label: t("qc") },
+    { type: "deliveries", label: t("deliveries") },
+    { type: "inventory", label: t("inventory") },
+  ];
+
+  const exportPanel = (
+    <aside className="tl-panel" aria-label={L("تصدير CSV", "Export CSV")} data-testid="history-export">
+      <div>
+        <h2>{L("تصدير CSV · نطاق ثابت", "Export CSV · fixed scope")}</h2>
+        <p className="hr-caption" style={{ margin: "2px 0 0" }}>{L("ملف لكل نوع · آخر 500 سجل", "One file per dataset · latest 500 records")}</p>
+      </div>
+      <Notice tone="warning">
+        <strong>{L("لا يطابق الفلاتر المعروضة.", "Doesn't match the filters shown.")}</strong>{" "}
+        {L(
+          "كل ملف يحوي آخر 500 سجل من نوعه بغض النظر عن النوع والتاريخ المختارين أعلاه. هذا عيب معروف وإصلاحه في الخادم.",
+          "Each file holds the latest 500 records of its dataset, whatever type and dates are selected above. This is a known defect; the fix is server-side.",
+        )}
+      </Notice>
+      <div className="tl-acts">
+        {EXPORTS.map((e) => (
+          <Btn key={e.type} size="sm" onClick={() => handleExport(e.type)} disabled={exporting} data-testid={`export-${e.type}`}>
+            <DownloadIco />{e.label}
+          </Btn>
+        ))}
+      </div>
+      <p className="tl-foot">{L("المخزون: البن الأخضر فقط (200 صف) · UTF-8", "Inventory: green coffee only (200 rows) · UTF-8")}</p>
+    </aside>
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-charcoal">{t("history")}</h1>
-          <p className="text-brown text-sm font-medium">{filtered.length} records</p>
-        </div>
-      </div>
+    <OpsRoot className="tl-root">
+      <div className="hr-page">
+        <PageHeader title={t("history")} />
+        <p className="tl-sub">
+          <span>{loading ? "…" : countNoun(filtered.length, lang, RECORD_FORMS)}</span>
+          <span className="tl-sep">•</span>
+          {L("الطلبات والإنتاج والجودة والتسليم", "Orders, production, QC and deliveries")}
+        </p>
 
-      <div className="bg-white rounded-2xl border border-border p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Download size={16} className="text-gray-400" />
-          <span className="text-sm font-medium text-gray-600">Export Data (CSV)</span>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {[
-            { type: "orders", labelKey: "orders", icon: FileText },
-            { type: "production", labelKey: "production", icon: FileSpreadsheet },
-            { type: "qc", labelKey: "qc", icon: FileSpreadsheet },
-            { type: "deliveries", labelKey: "deliveries", icon: FileText },
-            { type: "inventory", labelKey: "inventory", icon: FileSpreadsheet },
-          ].map(({ type, labelKey, icon: Icon }) => (
-            <button key={type} onClick={() => handleExport(type)} disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2 bg-orange text-white rounded-lg text-sm hover:bg-orange-dark disabled:opacity-50 shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold">
-              <Icon size={14} />{t(labelKey as any)}
-            </button>
-          ))}
-        </div>
-      </div>
+        {notice ? <OpsBanner tone="info" onClose={() => setNotice(null)}>{notice}</OpsBanner> : null}
+        {missing.length > 0 ? (
+          <Notice tone="warning">
+            {L("لم تُحمَّل بعض المصادر، فالسجل جزئي: ", "Some sources did not load, so the history is partial: ")}
+            {missing.map((m) => typeLabel[m]).join(ar ? "، " : ", ")}
+          </Notice>
+        ) : null}
 
-      <div className="bg-white rounded-2xl border border-border p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Filter size={16} className="text-gray-400" />
-          <span className="text-sm font-medium text-gray-600">{t("search")}</span>
-        </div>
-        <div className="flex gap-3 flex-wrap">
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
-            className="px-3 py-2 border-2 border-border rounded-xl text-sm bg-white focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
-            <option value="all">{t("allTypes")}</option>
-            <option value="Order">{t("typeOrder")}</option>
-            <option value="Production">{t("typeProduction")}</option>
-            <option value="QC">{t("typeQc")}</option>
-            <option value="Delivery">{t("typeDelivery")}</option>
-          </select>
-          <div className="flex items-center gap-2">
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-              className="px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
-            <span className="text-gray-400">{t("to")}</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-              className="px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
-          </div>
-          {(typeFilter !== "all" || dateFrom || dateTo) && (
-            <button onClick={() => { setTypeFilter("all"); setDateFrom(""); setDateTo(""); }}
-              className="px-3 py-2 text-sm text-brown hover:underline">{t("cancel")}</button>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {filtered.map((item, idx) => (
-          <div key={idx} className="bg-white rounded-2xl border border-border p-4 flex items-start gap-4">
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${typeColors[item.type] || "bg-gray-100 text-gray-700"}`}>
-              {item.type}
+        <div className="tl-hist">
+          <div className="hr-stack" style={{ gap: 12, minWidth: 0 }}>
+            <div className="tl-tool">
+              <div className="tl-seg" role="group" aria-label={L("النوع", "Type")} data-testid="history-type">
+                {TYPES.map((x) => (
+                  <button key={x.key} type="button" aria-pressed={typeFilter === x.key} onClick={() => setTypeFilter(x.key)}>{x.label}</button>
+                ))}
+              </div>
+              <label className={`tl-date${dateFrom ? " is-set" : ""}`}>
+                <span>{L("من", "From")}</span>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label={L("من تاريخ", "From date")} />
+                {dateFrom ? <button type="button" aria-label={L("مسح تاريخ البداية", "Clear start date")} onClick={() => setDateFrom("")}>×</button> : null}
+              </label>
+              <label className={`tl-date${dateTo ? " is-set" : ""}`}>
+                <span>{t("to")}</span>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label={L("إلى تاريخ", "To date")} />
+                {dateTo ? <button type="button" aria-label={L("مسح تاريخ النهاية", "Clear end date")} onClick={() => setDateTo("")}>×</button> : null}
+              </label>
+              {filtering ? <Btn variant="ghost" size="sm" onClick={() => { setTypeFilter("all"); setDateFrom(""); setDateTo(""); }}>{L("مسح الفلاتر", "Clear filters")}</Btn> : null}
+              <span className="tl-sp" />
+              <span className="hr-caption tl-hide-phone">{L("الأحدث أولًا", "Newest first")}</span>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm">{item.description}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{item.details}</p>
-            </div>
-            <div className="text-xs text-gray-400 whitespace-nowrap">{formatDate(item.date)}</div>
+
+            {loading ? <OpsLoading /> : filtered.length === 0 ? (
+              <Empty title={t("noHistoryFound")} body={filtering ? L("لا سجل يطابق الفلاتر. امسحها لعرض كل السجلات.", "Nothing matches the filters. Clear them to see every record.") : undefined} />
+            ) : (
+              <div className="hr-tablewrap">
+                <table className="hr-table is-mrow" aria-label={t("history")} data-testid="history-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 120 }}>{L("النوع", "Type")}</th>
+                      <th>{L("السجل", "Record")}</th>
+                      <th style={{ width: 140 }}>{L("التاريخ", "Date")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((item, idx) => (
+                      <tr key={idx}>
+                        <td><span className={`tl-type t-${item.type}`}><span>{typeLabel[item.type]}</span></span></td>
+                        <td className="m-title">
+                          <span className="strong" style={{ fontWeight: 500 }} dir="auto">{ar ? item.description.ar : item.description.en}</span>
+                          <span className="stk-sub hr-desktop-only" style={{ fontSize: 13, color: "var(--text-muted)", display: "block" }}>{ar ? item.details.ar : item.details.en}</span>
+                          <span className="hr-msub">{ar ? item.details.ar : item.details.en}</span>
+                        </td>
+                        <td className="m-end is-stack">
+                          <span className="hr-num" style={{ color: "var(--text-secondary)" }}>{dmy(item.date)}</span>
+                          <span className="hr-mobile-only"><span className={`tl-type t-${item.type}`}><span>{typeLabel[item.type]}</span></span></span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="tl-foot">{L("حركات المخزون ليست في هذا السجل · راجعها في المخزون › سجل الحركات", "Stock movements are not in this history · see Inventory › Movements")}</p>
           </div>
-        ))}
-        {filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border">
-            <History size={40} className="mx-auto mb-2" /><p>{t("noHistoryFound")}</p>
-          </div>
-        )}
+          {exportPanel}
+        </div>
       </div>
-    </div>
+    </OpsRoot>
   );
 }

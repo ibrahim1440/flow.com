@@ -1,7 +1,7 @@
 import type { ElementType } from "react";
 import {
   LayoutDashboard, Package, ShoppingCart, Factory, ClipboardCheck, Box, Truck, History,
-  TrendingUp, Tag, Users, Settings, FlaskConical, Users2, ShoppingBag, Wallet, PackageCheck,
+  Tag, Users, Settings, FlaskConical, Users2, ShoppingBag, PackageCheck,
   ClipboardList, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3,
   ScrollText, Briefcase, Landmark, Boxes, Workflow, Zap, MessageSquareText, QrCode,
   Contact, UserRound, CalendarDays, Banknote, Laptop,
@@ -33,6 +33,17 @@ import type { D21IconName } from "@/components/shell/icons";
 /** A single permission requirement. `sub` omitted means "any access to the module". */
 export type Ability = { module: string; sub?: string };
 
+/**
+ * One way to qualify for a node: a single ability, or several that must ALL be held.
+ *
+ * The conjunction exists for the screens Figma lists once but two audiences reach for
+ * different reasons. Commission review is a sales manager's (`view_team`, inside Sales) and
+ * Finance's (`approve` / `record_payout`, with no sales module at all). They used to be two
+ * placements, one under each group, so the administrator met it twice; one entry under
+ * «المالية» now carries both reasons, unchanged, as `[[view_team, sales], approve, payout]`.
+ */
+export type Requirement = Ability | Ability[];
+
 export type NavNode = {
   /** Stable across renames and re-orderings. Used by tests and by active resolution. */
   id: string;
@@ -46,16 +57,11 @@ export type NavNode = {
    * of their own. Without these a deal page highlights nothing and shows no breadcrumb.
    */
   alsoMatches?: string[];
-  /** Visible when the caller holds ANY of these. Empty or absent means "always". */
-  anyOf?: Ability[];
+  /** Visible when the caller meets ANY of these. Empty or absent means "always". */
+  anyOf?: Requirement[];
   /**
    * ALSO required, all of them, for the node to appear AT THIS POSITION in the tree.
-   *
-   * The commission screens are the reason. They belong to Sales for a sales manager and to
-   * Finance for a finance user, and Finance deliberately holds no sales module. Without
-   * this, Finance would see a Sales group containing nothing but commission links — the
-   * same destinations their own Finance group already offers. This scopes a placement
-   * without touching who may reach the page.
+   * Scopes a placement without touching who may reach the page (the route guard ignores it).
    */
   requiresAll?: Ability[];
   /**
@@ -74,18 +80,20 @@ export type NavNode = {
   /**
    * The sidebar entry to HIGHLIGHT on this destination's pages, when it is not this node
    * (G-11, owner-approved interim): Preparation and Dispatch highlight «الطلبات» while the
-   * breadcrumb still names the real page. The first id the viewer's tree contains wins; if it
-   * contains none, the node highlights itself, as every node without this field does.
+   * breadcrumb still names the real page; the global history highlights «لوحة التشغيل»
+   * (GX D-P02). The first id the viewer's tree contains wins; if it contains none, the node
+   * highlights itself, as every node without this field does.
    */
   highlightAs?: string[];
   children?: NavNode[];
   /**
    * How the Direction 2.1 shell PRESENTS this node — never what it is or who may see it.
    *
-   * The approved frames (`erp/docs/design/direction-2.1-rc`, CRM.md D5) name and group the
-   * sidebar differently from the registry's own labels: «التشغيل» holds orders, production
-   * and stock together, «العملاء» stands for customer management, «الصفقات» for the pipeline.
-   * The legacy shell ignores every field here, so nothing outside a Direction 2.1 route moves.
+   * The approved frames (`erp/docs/design/direction-2.1-rc`, CRM.md D5, the GX frames of
+   * Figma 1JbZgpMqmPkUVne8ms9Ozz) name and group the sidebar differently from the registry's
+   * own labels: «التشغيل» holds orders, production and stock together, «العملاء» stands for
+   * customer management, «الصفقات» for the pipeline, «الأداء» for performance & commissions.
+   * The legacy shell ignores every field here.
    */
   shell?: ShellHints;
 };
@@ -94,14 +102,37 @@ export type ShellHints = {
   /** The approved sidebar wording, when the frame names the entry differently. */
   ar?: string;
   en?: string;
+  /**
+   * The breadcrumb wording, when the frame's top bar names the entry differently from its
+   * sidebar item: the sidebar's «الأداء» is «الأداء والعمولات» in the trail (GX A-P06 /
+   * D-P01), «النقد والبنوك» is «النقد والميزانية» (GX B-P01).
+   */
+  crumb?: { ar: string; en: string };
+  /**
+   * The sidebar wording for a viewer who holds NONE of `unlessAny` — the rep sidebar of the GX
+   * frames (TS-N14, A-05 rep 1458:15314): «التحصيل» and «أهدافي وعمولاتي» for somebody who
+   * neither decides collections nor manages anyone's commission.
+   */
+  own?: { ar: string; en: string; unlessAny: Ability[] };
   /** The reference icon (screens.py ICONS); lucide stays the fallback (register row A-18). */
   icon?: D21IconName;
   /** List under this group instead of under its own module (a module id or a SHELL_GROUPS key). */
   group?: string;
-  /** Reached from the user block's gear menu, not from the sidebar. */
-  place?: "menu";
-  /** The top-bar trail starts with the group it is listed under («التشغيل / لوحة التشغيل», 101:6411). */
-  trailGroup?: boolean;
+  /**
+   * "menu": reached from the user block's gear menu, not from the sidebar (a group placed
+   * there is ONE menu entry, opening onto its first permitted page).
+   * "none": drawn neither in the sidebar nor in the menu — reached from its section, its
+   * highlighted entry and the quick jump (Ctrl K), as the frame draws it (GX D-P02: the
+   * global history has no sidebar item; it highlights «لوحة التشغيل»).
+   */
+  place?: "menu" | "none";
+  /**
+   * The top-bar trail starts with this group's label (a module id or a SHELL_GROUPS key)
+   * instead of this node's registry ancestors: «التشغيل / لوحة التشغيل» (20:236, 101:6411),
+   * «التشغيل / السجل العام» (GX D-P02), «الإعدادات / الأتمتة والواتساب / القواعد» (GX E-P01),
+   * «الإعدادات / المبيعات» (GX A-P08). The group is a label, not a link.
+   */
+  trailRoot?: string;
   /**
    * Shown — and resolved — as that registry node instead (see `presentTree`). The approved
    * frames put «الطلبات» under «التشغيل» for every persona (orders-1440, crumb «التشغيل /
@@ -115,13 +146,30 @@ export const SHELL_GROUPS: Record<string, { ar: string; en: string }> = {
   team: { ar: "الفريق", en: "Team" },
 };
 
-/** The approved order of the sidebar groups; a group not listed follows, in registry order. */
-export const SHELL_GROUP_ORDER = ["operations", "sales", "finance", "team", "hr", "insights", "automation"];
+/**
+ * The approved order of the sidebar groups (20:236: «التشغيل · المبيعات · المالية · الفريق»);
+ * a group not listed follows, in registry order.
+ */
+export const SHELL_GROUP_ORDER = ["operations", "sales", "finance", "team", "hr"];
+
+/**
+ * The gear menu, in this order (GX F-P01 settings navigation: «المنشأة · المستخدمون والصلاحيات ·
+ * … · المبيعات · … · الأتمتة والواتساب»), after the profile. An entry not listed follows.
+ */
+export const MENU_ORDER = ["profile", "settings", "employees", "sales.settings", "automation"];
 
 const sales = (sub?: string): Ability => ({ module: "sales", ...(sub ? { sub } : {}) });
 const commissions = (sub?: string): Ability => ({ module: "commissions", ...(sub ? { sub } : {}) });
 const IN_SALES: Ability[] = [sales()];
 const hr = (sub?: string): Ability => ({ module: "hr", ...(sub ? { sub } : {}) });
+const FINANCE: Ability = { module: "finance" };
+const ACCOUNTING: Ability = { module: "accounting" };
+/** Who decides a collection (verify, reject, reverse) — Finance's half of the queue. */
+const DECIDES_COLLECTIONS: Ability[] = [
+  commissions("collection_verify"),
+  commissions("collection_reject"),
+  commissions("collection_reverse"),
+];
 
 /**
  * ── Three levels ──
@@ -131,12 +179,36 @@ const hr = (sub?: string): Ability => ({ module: "hr", ...(sub ? { sub } : {}) }
  *
  * A subunit with a single destination carries an `href` and no children: there is nothing
  * for a contextual bar to offer, and a tab strip with one tab is noise.
+ *
+ * ── Figma is the source of truth (owner) ──
+ * The sidebar of every approved frame (20:236 and the GX frames) is
+ *   التشغيل: لوحة التشغيل · الطلبات · الإنتاج والتحميص · الجودة والتذوق · المخزون · المشتريات · المنتجات
+ *   المبيعات: العملاء · الصفقات · عروض الأسعار
+ *   المالية:  النقد والبنوك · الفواتير والتحصيل · الأداء
+ * Collections and the whole performance & commissions hub live under «المالية» for EVERY
+ * viewer (GX A-05 rep frame 1458:15314 draws a salesperson's «المالية» with «التحصيل» and
+ * «أهدافي وعمولاتي»), so nothing of it is listed under «المبيعات» any more and nobody meets
+ * one of these screens twice. Analytics is a tab of that hub (GX D-P01 trail «المالية / الأداء
+ * والعمولات / التحليلات التنبؤية»); the global history sits under the operations dashboard
+ * (GX D-P02 «التشغيل / السجل العام»); automation and the settings screens are reached from
+ * the gear, under «الإعدادات» (GX E-P01, F-P01, A-P08).
  */
 export const NAV: NavNode[] = [
   // Figma is the source of truth (owner): the approved sidebar lists the dashboard as «لوحة التشغيل»
   // / "Operations dashboard" first in «التشغيل», and the top bar reads «التشغيل / لوحة التشغيل»
   // (20:236: sidebar I20:585;249:368, top bar 101:6411; EN shells e.g. I1560:158819).
-  { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", group: "operations", trailGroup: true } },
+  { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", group: "operations", trailRoot: "operations" } },
+  {
+    // GX D-P02 (1494:3302): no sidebar item of its own; «لوحة التشغيل» is highlighted and the
+    // trail reads «التشغيل / السجل العام». Reached from the quick jump and the dashboard's area.
+    id: "history",
+    ar: "السجل", en: "History",
+    icon: History,
+    href: "/dashboard/history",
+    anyOf: [{ module: "history" }],
+    highlightAs: ["dashboard"],
+    shell: { ar: "السجل العام", en: "Global history", icon: "note", group: "operations", place: "none", trailRoot: "operations" },
+  },
 
   {
     id: "sales",
@@ -158,13 +230,13 @@ export const NAV: NavNode[] = [
             anyOf: IN_SALES,
           },
           {
+            // The one customers entry, for everyone who holds the module (20:236: «المبيعات ›
+            // العملاء»). Somebody without the Sales CRM — the legacy order-taking role holds
+            // `customers` and no `sales` — meets the same «العملاء» item, opening on this page.
             id: "sales.customers.accounts",
             ar: "العملاء", en: "Customers",
             href: "/dashboard/customers",
             anyOf: [{ module: "customers" }],
-            // The CRM framing. The plain top-level entry near the bottom of this file is
-            // the same screen for somebody who has no Sales CRM; the two never coexist.
-            requiresAll: IN_SALES,
           },
         ],
       },
@@ -218,51 +290,108 @@ export const NAV: NavNode[] = [
         ],
       },
       {
-        id: "sales.collections",
-        ar: "التحصيلات",
-        en: "Collections",
-        icon: Wallet,
-        shell: { icon: "wallet" },
-        href: "/dashboard/sales/collections",
-        // Any sales user, exactly as before: the screen itself shows a rep their own
-        // history and says plainly when they may not record one.
-        anyOf: IN_SALES,
+        // GX A-P08 (1229:114164): the gear → «الإعدادات › المبيعات», trail «الإعدادات / المبيعات».
+        id: "sales.settings",
+        ar: "إعدادات المبيعات",
+        en: "Sales settings",
+        icon: Settings,
+        href: "/dashboard/sales/settings",
+        anyOf: [sales("stage_manage")],
+        shell: { place: "menu", icon: "settings", trailRoot: "settings", crumb: { ar: "المبيعات", en: "Sales" } },
+      },
+    ],
+  },
+
+  {
+    // «المالية» (20:236: «النقد والبنوك · الفواتير والتحصيل · الأداء»). No gate on the group
+    // itself any more: it shows whenever one of its pages does, so a salesperson meets their
+    // collections and commissions here too (GX A-05 rep), and nobody meets them under Sales.
+    // Finance still holds no sales module and still cannot read the pipeline.
+    id: "finance",
+    ar: "المالية",
+    en: "Finance",
+    icon: Landmark,
+    children: [
+      {
+        // Cash management, receipt allocation and the monthly cash budget. Its six areas are
+        // tabs inside the page. The sidebar reads «النقد والبنوك» and the trail and the page
+        // «النقد والميزانية», exactly as GX B-P01 (1247:11423) draws them (NAV-B, gap-closure §8).
+        id: "finance.cash",
+        ar: "النقد والميزانية", en: "Cash & budget",
+        href: "/dashboard/finance",
+        anyOf: [FINANCE],
+        shell: { ar: "النقد والبنوك", en: "Cash & banks", crumb: { ar: "النقد والميزانية", en: "Cash & budget" }, icon: "wallet" },
       },
       {
-        id: "sales.performance",
+        // ONE screen and ONE set of records: a salesperson records a receipt and sees their own
+        // history; Finance decides it. Any sales user, exactly as before, or anyone who decides.
+        id: "finance.collections",
+        ar: "التحصيلات", en: "Collections",
+        href: "/dashboard/sales/collections",
+        anyOf: [sales(), ...DECIDES_COLLECTIONS],
+        shell: {
+          ar: "الفواتير والتحصيل", en: "Invoices & collections", icon: "invoice",
+          own: { ar: "التحصيل", en: "Collections", unlessAny: DECIDES_COLLECTIONS },
+        },
+      },
+      {
+        // The performance & commissions hub (GX A-P03…A-P08, D-P01): its pages are the tabs
+        // «الأهداف · تقارير المبيعات · التحليلات التنبؤية · عمولاتي · مراجعة العمولات · خطط العمولات».
+        id: "finance.performance",
         ar: "الأداء والعمولات",
         en: "Performance and commissions",
         icon: BarChart3,
-        shell: { icon: "chart" },
+        shell: {
+          ar: "الأداء", en: "Performance", icon: "chart",
+          crumb: { ar: "الأداء والعمولات", en: "Performance & commissions" },
+          own: {
+            ar: "أهدافي وعمولاتي", en: "My targets & commissions",
+            unlessAny: [commissions("view_team"), commissions("approve"), commissions("record_payout"), commissions("manage_plans"), { module: "analytics" }],
+          },
+        },
         children: [
           {
-            id: "sales.performance.targets",
+            id: "finance.performance.targets",
             ar: "الأهداف", en: "Targets",
             href: "/dashboard/sales/targets",
             anyOf: IN_SALES,
           },
           {
-            id: "sales.performance.reports",
+            id: "finance.performance.reports",
             ar: "تقارير المبيعات", en: "Sales reports",
             href: "/dashboard/sales/reports",
             anyOf: IN_SALES,
           },
           {
-            id: "sales.performance.mine",
+            id: "finance.performance.analytics",
+            ar: "التحليلات", en: "Analytics",
+            href: "/dashboard/analytics",
+            anyOf: [{ module: "analytics" }],
+            shell: { ar: "التحليلات التنبؤية", en: "Predictive analytics", icon: "chart" },
+          },
+          {
+            // Their own earnings. The conditions are exactly the two placements this replaces:
+            // a salesperson's (commissions + sales) and Finance's (commissions + any finance
+            // ability), so nobody gains or loses the entry.
+            id: "finance.performance.mine",
             ar: "عمولاتي", en: "My commissions",
             href: "/dashboard/sales/my-commissions",
-            anyOf: [commissions()],
-            requiresAll: IN_SALES,
+            anyOf: [
+              [commissions(), sales()],
+              commissions("approve"), commissions("record_payout"), ...DECIDES_COLLECTIONS,
+              [commissions(), FINANCE], [commissions(), ACCOUNTING],
+            ],
           },
           {
-            id: "sales.performance.review",
+            // A sales manager's team view (`view_team`, inside Sales) and Finance's approval and
+            // payout — one entry for both, as the two placements it replaces admitted them.
+            id: "finance.performance.review",
             ar: "مراجعة العمولات", en: "Commission review",
             href: "/dashboard/commissions/review",
-            anyOf: [commissions("view_team")],
-            requiresAll: IN_SALES,
+            anyOf: [[commissions("view_team"), sales()], commissions("approve"), commissions("record_payout")],
           },
           {
-            id: "sales.performance.plans",
+            id: "finance.performance.plans",
             ar: "خطط العمولات", en: "Commission plans",
             href: "/dashboard/commissions/plans",
             anyOf: [commissions("manage_plans")],
@@ -271,84 +400,10 @@ export const NAV: NavNode[] = [
         ],
       },
       {
-        id: "sales.settings",
-        ar: "إعدادات المبيعات",
-        en: "Sales settings",
-        icon: Settings,
-        href: "/dashboard/sales/settings",
-        anyOf: [sales("stage_manage")],
-        shell: { place: "menu", icon: "settings" },
-      },
-    ],
-  },
-
-  {
-    // Finance holds no sales module on purpose — they must not read the pipeline — so this
-    // is how they reach the work that is theirs. Same routes, same records, same services.
-    id: "finance",
-    ar: "المالية",
-    en: "Finance",
-    icon: Landmark,
-    // The group itself, not just its contents. A sales manager holds `view_team` and none
-    // of these, so they meet the commission screens under Sales and never see a Finance
-    // heading; Finance meets them here and never sees a Sales one.
-    anyOf: [
-      commissions("approve"),
-      commissions("record_payout"),
-      commissions("collection_verify"),
-      commissions("collection_reject"),
-      commissions("collection_reverse"),
-      // Cash & budget and Accounting holders reach their screens through this group too;
-      // without these an accounting-only or finance-only user would lose the whole group.
-      { module: "finance" },
-      { module: "accounting" },
-    ],
-    children: [
-      {
-        // Cash management, receipt allocation and the monthly cash budget. Its six areas are
-        // tabs inside the page.
-        id: "finance.cash",
-        ar: "النقد والميزانية", en: "Cash & budget",
-        href: "/dashboard/finance",
-        anyOf: [{ module: "finance" }],
-        shell: { icon: "wallet" },
-      },
-      {
-        id: "finance.collections",
-        ar: "التحصيلات", en: "Collections",
-        href: "/dashboard/sales/collections",
-        shell: { ar: "الفواتير والتحصيل", en: "Invoices & collections", icon: "invoice" },
-        anyOf: [
-          commissions("collection_verify"),
-          commissions("collection_reject"),
-          commissions("collection_reverse"),
-        ],
-      },
-      {
-        id: "finance.commissions",
-        ar: "مراجعة العمولات", en: "Commission review",
-        href: "/dashboard/commissions/review",
-        shell: { icon: "chart" },
-        // The finance half of commission work — approving a period and paying it out. A
-        // sales manager holds `view_team` and neither of these, so they see this under
-        // Sales and never see a Finance group at all.
-        anyOf: [commissions("approve"), commissions("record_payout")],
-      },
-      {
-        // Their own earnings. Reachable before the restructuring through the flat sidebar,
-        // so it stays reachable — the group gate above is what keeps it from leaking to
-        // people who are not Finance.
-        id: "finance.mine",
-        ar: "عمولاتي", en: "My commissions",
-        href: "/dashboard/sales/my-commissions",
-        anyOf: [commissions()],
-        shell: { icon: "chart" },
-      },
-      {
         id: "finance.accounting",
         ar: "المحاسبة", en: "Accounting",
         href: "/dashboard/accounting",
-        anyOf: [{ module: "accounting" }],
+        anyOf: [ACCOUNTING],
         shell: { icon: "invoice" },
       },
     ],
@@ -477,47 +532,14 @@ export const NAV: NavNode[] = [
   },
 
   {
-    id: "insights",
-    ar: "التقارير والسجل",
-    en: "Reports and history",
-    icon: TrendingUp,
-    children: [
-      {
-        id: "insights.analytics",
-        ar: "التحليلات", en: "Analytics",
-        href: "/dashboard/analytics",
-        anyOf: [{ module: "analytics" }],
-        shell: { icon: "chart" },
-      },
-      {
-        id: "insights.history",
-        ar: "السجل", en: "History",
-        href: "/dashboard/history",
-        anyOf: [{ module: "history" }],
-        shell: { icon: "note" },
-      },
-    ],
-  },
-
-  {
-    // Where the customer list lives for somebody without the Sales CRM — the legacy
-    // order-taking role holds `customers` and no `sales`. It was a top-level entry before
-    // the restructuring and stays one for them, rather than becoming a Sales group of one.
-    id: "customers",
-    ar: "العملاء", en: "Customers",
-    icon: Users2,
-    href: "/dashboard/customers",
-    anyOf: [{ module: "customers" }],
-    unlessAny: [sales()],
-    // The approved sidebar's «العملاء» entry, in «المبيعات», for somebody without the CRM.
-    shell: { group: "sales", icon: "users" },
-  },
-  {
     // WhatsApp messages sent by rules on ERP events. Its own module, because who may decide
-    // what customers are sent is not a sales, orders or settings question alone.
+    // what customers are sent is not a sales, orders or settings question alone. Presented as
+    // GX E-P01…E-P04 draw it: «الأتمتة والواتساب» under «الإعدادات» (the gear menu, and the
+    // settings navigation of the page), trail «الإعدادات / الأتمتة والواتساب / القواعد».
     id: "automation",
     ar: "الأتمتة", en: "Automation",
     icon: Workflow,
+    shell: { ar: "الأتمتة والواتساب", en: "Automation & WhatsApp", icon: "bell", place: "menu", trailRoot: "settings" },
     children: [
       {
         id: "automation.rules",
@@ -526,6 +548,7 @@ export const NAV: NavNode[] = [
         href: "/dashboard/automation",
         alsoMatches: ["/dashboard/automation/rules"],
         anyOf: [{ module: "automation" }],
+        shell: { ar: "القواعد", en: "Rules" },
       },
       {
         id: "automation.messages",
@@ -594,24 +617,35 @@ export const NAV: NavNode[] = [
     href: "/dashboard/me",
   },
   {
+    // The signed-in person's own profile (language, PIN, two-step verification): every login,
+    // from the gear menu. Without an entry of its own the page fell through to /dashboard —
+    // the sidebar lit «لوحة التشغيل» and the trail read «التشغيل / لوحة التشغيل / ملفي».
+    id: "profile",
+    ar: "الملف الشخصي", en: "Profile",
+    icon: UserRound,
+    href: "/dashboard/profile",
+    shell: { place: "menu", crumb: { ar: "ملفي الشخصي", en: "My Profile" } },
+  },
+  {
     id: "employees",
     ar: "الموظفون", en: "Employees",
     icon: Users,
     href: "/dashboard/employees",
     anyOf: [{ module: "employees" }],
     // The system users and their access, not HR's «الموظفون» (parity N-19): the reference
-    // reaches it under Settings as «المستخدمون والصلاحيات» (users.py ur_shell), so in the
-    // Direction 2.1 shell it sits in the gear menu under that name.
-    shell: { place: "menu", icon: "users", ar: "المستخدمون والصلاحيات", en: "Users & permissions" },
+    // reaches it under Settings as «المستخدمون والصلاحيات» (users.py ur_shell; GX F-P01), so in
+    // the Direction 2.1 shell it sits in the gear menu under that name.
+    shell: { place: "menu", icon: "users", ar: "المستخدمون والصلاحيات", en: "Users & permissions", trailRoot: "settings" },
   },
   {
+    // GX F-P01 (1205:2): the gear → «الإعدادات», trail «الإعدادات / المنشأة».
     id: "settings",
     ar: "الإعدادات", en: "Settings",
     icon: Settings,
     href: "/dashboard/settings",
     anyOf: [{ module: "settings" }],
     adminOnly: true,
-    shell: { place: "menu", icon: "settings" },
+    shell: { place: "menu", icon: "settings", trailRoot: "settings", crumb: { ar: "المنشأة", en: "Organisation" } },
   },
 ];
 
@@ -628,13 +662,23 @@ function holds(v: Viewer, a: Ability): boolean {
     : hasModuleAccess(v.permissions, a.module);
 }
 
+/** A requirement is met when its ability — or every ability of a conjunction — is held. */
+function meets(v: Viewer, r: Requirement): boolean {
+  return Array.isArray(r) ? r.every((a) => holds(v, a)) : holds(v, r);
+}
+
+/** The same, at MODULE level only — what the route guard checks (see `routeAllowed`). */
+function meetsModule(v: Viewer, r: Requirement): boolean {
+  return (Array.isArray(r) ? r : [r]).every((a) => hasModuleAccess(v.permissions, a.module));
+}
+
 /** Whether this node itself is permitted, ignoring its children. */
 export function nodePermitted(v: Viewer, n: NavNode): boolean {
   if (n.adminOnly && v.role !== "admin") return false;
   if (n.requiresAll && !n.requiresAll.every((a) => holds(v, a))) return false;
   if (n.unlessAny && n.unlessAny.some((a) => holds(v, a))) return false;
   if (!n.anyOf || n.anyOf.length === 0) return true;
-  return n.anyOf.some((a) => holds(v, a));
+  return n.anyOf.some((r) => meets(v, r));
 }
 
 /**
@@ -653,6 +697,57 @@ export function visibleNav(v: Viewer, tree: NavNode[] = NAV): NavNode[] {
     out.push({ ...n, children });
   }
   return out;
+}
+
+// ── Direction 2.1 presentation helpers (labels and the top-bar trail) ──
+
+/** A module id or a SHELL_GROUPS key, as the sidebar names it. */
+export function groupText(id: string, lang: string): string | null {
+  const mod = NAV.find((n) => n.id === id);
+  if (mod) return shellText(mod, lang);
+  const g = SHELL_GROUPS[id];
+  return g ? (lang === "ar" ? g.ar : g.en) : null;
+}
+
+/**
+ * The label the Direction 2.1 sidebar, menu and quick jump draw for a node. With a viewer, a
+ * node carrying `shell.own` reads its own-work wording for somebody who holds none of its
+ * abilities (the GX rep sidebar). Presentation only: it never decides what is shown.
+ */
+export function shellText(n: NavNode, lang: string, v?: Viewer): string {
+  const own = n.shell?.own;
+  if (own && v && !own.unlessAny.some((a) => holds(v, a))) return lang === "ar" ? own.ar : own.en;
+  return lang === "ar" ? (n.shell?.ar ?? n.ar) : (n.shell?.en ?? n.en);
+}
+
+/** The label the Direction 2.1 top-bar trail draws for a node (`shell.crumb`, else its sidebar label). */
+export function crumbText(n: NavNode, lang: string): string {
+  const c = n.shell?.crumb;
+  return c ? (lang === "ar" ? c.ar : c.en) : shellText(n, lang);
+}
+
+export type TrailPart = { key: string; text: string; node: NavNode | null };
+
+/**
+ * The Direction 2.1 trail for a list of registry crumbs (see `breadcrumb`): the deepest node
+ * naming `shell.trailRoot` replaces everything above it with that group's label — «الإعدادات /
+ * الأتمتة والواتساب / القواعد», «التشغيل / السجل العام» — and a part that repeats the text of the
+ * one before it is dropped, so a section and its only page never read «عروض الأسعار / عروض
+ * الأسعار». The root is a label (`node: null`), not a link.
+ */
+export function shellTrail(crumbs: NavNode[], lang: string): TrailPart[] {
+  let from = 0;
+  let root: string | null = null;
+  crumbs.forEach((c, i) => { if (c.shell?.trailRoot) { from = i; root = c.shell.trailRoot; } });
+  const parts: TrailPart[] = crumbs.slice(from).map((c) => ({ key: c.id, text: crumbText(c, lang), node: c }));
+  const label = root ? groupText(root, lang) : null;
+  if (root && label) parts.unshift({ key: `grp-${root}`, text: label, node: null });
+  return dedupeTrail(parts);
+}
+
+/** Drops a trail part whose text repeats the part before it. */
+export function dedupeTrail<T extends { text: string }>(parts: T[]): T[] {
+  return parts.filter((p, i) => i === 0 || p.text !== parts[i - 1].text);
 }
 
 /** Every node in the tree, depth-first, with its ancestors. */
@@ -801,7 +896,7 @@ export function routeAllowed(v: Viewer, pathname: string): boolean {
   return claims.some((n) => {
     if (n.adminOnly && v.role !== "admin") return false;
     if (!n.anyOf || n.anyOf.length === 0) return true;
-    return n.anyOf.some((a) => hasModuleAccess(v.permissions, a.module));
+    return n.anyOf.some((r) => meetsModule(v, r));
   });
 }
 
