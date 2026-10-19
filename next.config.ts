@@ -30,7 +30,7 @@ import path from "path";
  *
  * ── What the Report-Only policy allows, and why ────────────────────────────
  * Audited against what the application actually loads:
- *   - fonts are self-hosted (public/fonts: IBM Plex and Tajawal stylesheets and .woff2), so this
+ *   - fonts are self-hosted (public/fonts: IBM Plex and Amiri stylesheets and .woff2), so this
  *     Report-Only policy's style-src and font-src name no third-party origin. Only the
  *     Report-Only policy changed with self-hosting: the enforced policy below has no style-src or
  *     font-src at all and is unchanged.

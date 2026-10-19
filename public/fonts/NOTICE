@@ -25,17 +25,13 @@ IBM Plex Mono          "Copyright 2017 IBM Corp. All rights reserved."
                        Reserved Font Name "Plex". Version 2.3.
                        Licence: ibm-plex-mono/OFL.txt
                        Upstream: https://github.com/IBM/plex
-Tajawal                "(c) 2017 by Boutros International. All rights reserved."
-                       Version 1.700.
-                       Licence: tajawal/OFL.txt
-                       Upstream: https://github.com/google/fonts/tree/main/ofl/tajawal
 Amiri                  "Copyright 2010-2022 The Amiri Project Authors (https://github.com/aliftype/amiri)."
                        Version 1.002. Bold (700) only.
                        Licence: amiri/OFL.txt
                        Upstream: https://github.com/aliftype/amiri
 
 Distributed via Google Fonts (https://fonts.google.com); OFL sources:
-https://github.com/google/fonts/tree/main/ofl/{ibmplexsansarabic,ibmplexsans,ibmplexmono,tajawal,amiri}
+https://github.com/google/fonts/tree/main/ofl/{ibmplexsansarabic,ibmplexsans,ibmplexmono,amiri}
 
 "IBM Plex" is a trademark of IBM Corp. The IBM Plex files keep the Reserved Font Name "Plex" in
 their family names as Google publishes them; whether that redistribution needs IBM's written

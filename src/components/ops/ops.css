@@ -14,30 +14,19 @@
   /* Legacy semantic palette → Direction 2.1 */
   --orange: var(--action-primary);
   --orange-dark: var(--action-primary-hover);
-  --orange-light: var(--action-primary-tint);
   --charcoal: var(--text-primary);
   --brown: var(--text-secondary);
-  --brown-light: var(--text-muted);
   --slate: var(--text-muted);
-  --slate-light: var(--text-disabled);
-  --slate-dark: var(--text-secondary);
   --cream: var(--surface-subtle);
-  --cream-dark: var(--surface-hover);
   --background: var(--surface);
   --foreground: var(--text-primary);
-  --card: var(--surface);
-  --card-hover: var(--surface-hover);
   --border: var(--border-subtle);
-  --border-light: var(--border-subtle);
   --muted: var(--surface-subtle);
   --muted-foreground: var(--text-muted);
-  --success: var(--status-success);
   --success-bg: var(--status-success-tint);
-  --warning: var(--status-warning);
   --warning-bg: var(--status-warning-tint);
   --danger: var(--status-danger);
   --danger-bg: var(--status-danger-tint);
-  --info: var(--status-info);
   --info-bg: var(--status-info-tint);
 
   /* The `oo-*` order-operations palette used by the shared lifecycle components */
@@ -46,7 +35,6 @@
   --oo-text-muted: var(--text-muted);
   --oo-bg-default: var(--surface);
   --oo-bg-subtle: var(--surface-subtle);
-  --oo-bg-elevated: var(--surface);
   --oo-border-default: var(--border-subtle);
   --oo-border-strong: var(--border-strong);
   --oo-action-primary: var(--action-primary);

@@ -3,7 +3,7 @@
 import { Select as HqSelect } from "@/components/ui/Select";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-  FlaskConical, Ban, Check, ChevronDown, Circle, CircleDashed, Clock, FileText,
+  Ban, Check, Circle, CircleDashed, Clock, FileText,
   MessageSquare, PackageCheck, RotateCcw, Save, Search, XCircle, type LucideIcon,
 } from "lucide-react";
 import { useUser } from "../../user-context";
@@ -148,30 +148,6 @@ export function pick(
   lang: "ar" | "en",
 ): string {
   return lang === "ar" ? (map[key]?.ar ?? key) : (map[key]?.en ?? key);
-}
-
-/**
- * The sandbox notice, shown wherever money figures come from the sandbox collection source.
- *
- * Deliberately not subtle. Everything downstream of it is arithmetic on payments that were
- * typed in for testing, and a commission screen that does not say so reads as a payable.
- */
-export function SandboxBanner({ notice }: { notice?: string | null }) {
-  const lang = useLang();
-  if (!notice) return null;
-  return (
-    <div
-      className="flex items-center gap-2.5 rounded-[10px] border-2 border-oo-status-hold bg-oo-status-hold-bg px-4 py-[10px]"
-      role="note"
-      data-testid="sandbox-banner"
-    >
-      <p className="flex-1 text-[14px] font-medium leading-[22px] text-oo-status-hold">
-        {lang === "ar" ? "مصدر تجريبي: " : "Sandbox source: "}
-        {notice}
-      </p>
-      <FlaskConical size={16} className="shrink-0 text-oo-status-hold" aria-hidden />
-    </div>
-  );
 }
 
 export function PageHeader({
@@ -691,24 +667,8 @@ export const ACCRUAL_STATUS_SPECS: Record<string, Spec> = {
   REVERSED: { en: "Reversed", ar: "معكوس",  tone: "cancelled", Icon: RotateCcw },
 };
 
-/** `OpportunityOutcome` — outcome is not a stage, and this badge sits beside one rather than replacing it. */
-export const DEAL_OUTCOME_SPECS: Record<string, Spec> = {
-  OPEN: { en: "Open", ar: "مفتوح", tone: "preparing", Icon: Circle },
-  WON:  { en: "Won",  ar: "رابح",  tone: "success",   Icon: Check },
-  LOST: { en: "Lost", ar: "خاسر",  tone: "cancelled", Icon: XCircle },
-};
-
 export function LeadStatusBadge({ status, testId }: { status: string; testId?: string }) {
   return <StatusBadge spec={LEAD_STATUS_SPECS[status]} testId={testId} />;
-}
-export function QuoteStatusBadge({ status, testId }: { status: string; testId?: string }) {
-  return <StatusBadge spec={QUOTE_STATUS_SPECS[status]} testId={testId} />;
-}
-export function AccrualStatusBadge({ status, testId }: { status: string; testId?: string }) {
-  return <StatusBadge spec={ACCRUAL_STATUS_SPECS[status]} testId={testId} />;
-}
-export function DealOutcomeBadge({ outcome, testId }: { outcome: string; testId?: string }) {
-  return <StatusBadge spec={DEAL_OUTCOME_SPECS[outcome]} testId={testId} />;
 }
 
 /**
@@ -857,18 +817,6 @@ export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto -mx-5 px-5">{children}</div>;
 }
 
-/**
- * The filter bar above a list.
- *
- * In an RTL document the first child sits on the right. The design puts the search there
- * and the filters on the left, with the magnifier against the search box's leading edge and
- * each chevron against its select's trailing edge — so both icons use logical `start`/`end`
- * rather than a hard side, and the same markup is correct in English.
- */
-export function Toolbar({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-2.5">{children}</div>;
-}
-
 const CONTROL =
   "w-full rounded-[10px] border border-oo-border-strong bg-oo-bg-default py-2.5 text-[14px] " +
   "leading-[22px] text-oo-text-primary outline-none focus:border-oo-action-primary " +
@@ -906,102 +854,6 @@ export function SearchField({
   );
 }
 
-export function FilterSelect({
-  value,
-  onChange,
-  label,
-  width = "w-[200px]",
-  testId,
-  children,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  label: string;
-  width?: string;
-  testId?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div data-ui="filter" className={`relative ${width} shrink-0`}>
-      <ChevronDown
-        size={14}
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 end-3.5 my-auto text-oo-text-secondary"
-      />
-      <HqSelect
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-        data-testid={testId}
-        className={`${CONTROL} appearance-none ps-3.5 pe-9`}
-      >
-        {children}
-      </HqSelect>
-    </div>
-  );
-}
-
-export type Col = {
-  label: ReactNode;
-  /** A width utility — `w-[150px]`, `min-w-[240px]`. The design fixes most columns and lets
-   *  exactly one take the slack, so widths belong with the column, not in the cells. */
-  w?: string;
-  align?: "start" | "end";
-};
-
-/**
- * The module's one table shell: the bordered, rounded card IS the table in this design —
- * there is no padded card around it, and the header is a tinted band flush with the edge.
- *
- * Every Sales list was previously a `<Card>` wrapping a bare `<table>` with no cell padding,
- * which is why adjacent headers ran into each other. Putting the geometry here means a route
- * cannot get the density wrong by forgetting a class.
- */
-export function DataTable({
-  cols,
-  minWidth,
-  testId,
-  children,
-}: {
-  cols: Col[];
-  minWidth: number;
-  testId?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div data-ui="table" className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-bg-default">
-      {/* The page body must never scroll sideways; the overflow lives on the one element
-          that is genuinely too wide. */}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-start" style={{ minWidth }} data-testid={testId}>
-          <thead>
-            <tr className="bg-oo-bg-subtle">
-              {cols.map((c, i) => (
-                <th
-                  key={i}
-                  scope="col"
-                  /* `relative`, because an action column's heading is an `sr-only` span and
-                     `sr-only` is absolutely positioned. Without a positioned ancestor it
-                     lands against the initial containing block — off the left edge of an
-                     RTL page — and makes the whole document scroll sideways by however far
-                     the table has been shifted. One pixel of invisible text, ninety pixels
-                     of horizontal scroll. */
-                  className={`${c.w ?? ""} relative px-4 py-[11px] text-[12px] font-medium leading-[18px] text-oo-text-muted ${
-                    c.align === "end" ? "text-end" : "text-start"
-                  }`}
-                >
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>{children}</tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 /** A body row. The separator is a top border so the header band needs no bottom edge. */
 export function Tr({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
@@ -1028,23 +880,6 @@ export function Td({
     >
       {children}
     </td>
-  );
-}
-
-/**
- * The design's headline strip: one bordered box divided into equal cells.
- *
- * The dividers are a 1px grid gap showing the border colour through, rather than
- * `divide-x`, so they land correctly in both directions without a direction-specific
- * utility.
- */
-export function StatStrip({ children, cols = 4 }: { children: ReactNode; cols?: 3 | 4 }) {
-  return (
-    <div data-ui="stats" className="overflow-hidden rounded-2xl border border-oo-border-default bg-oo-border-default">
-      <div className={`grid gap-px sm:grid-cols-2 ${cols === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
-        {children}
-      </div>
-    </div>
   );
 }
 

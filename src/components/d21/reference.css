@@ -5,7 +5,7 @@
    approved Figma frames were built from (FIGMA.md: 1:1 parity). The class names, the values
    and the selectors are the reference's own, so a screen can be checked against
    `screens/crm-*.html` element by element. Everything is scoped under `.d21`, which only the
-   Direction 2.1 shell sets (`@/components/shell/routes`); no other page can match a rule here.
+   Direction 2.1 shell (`@/components/shell/AppShell`) sets; no other page can match a rule here.
 
    This file holds the page primitives only (page header, buttons, tables, timeline, board,
    list screens, phone rows). The shell chrome — canvas, sidebar, rail, sheet, top bar, phone

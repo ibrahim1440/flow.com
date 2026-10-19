@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   Direction 2.1 — scoped to the migrated routes only (src/components/shell/routes.ts).
+   Direction 2.1 — scoped to the dashboard shell (src/components/shell/AppShell).
 
    Source of truth: docs/design/direction-2.1-rc/src/direction.css + rc.css (frozen CRM
    references, CRM.md), whose tokens are defined once in components/shell/direction-2.1.css.
@@ -60,7 +60,6 @@
   --oo-text-muted: var(--d-text-muted);
   --oo-bg-default: var(--d-surface);
   --oo-bg-subtle: var(--d-surface-subtle);
-  --oo-bg-elevated: var(--d-surface);
   --oo-border-default: var(--d-border-subtle);
   --oo-border-strong: var(--d-border-strong);
   --oo-action-primary: var(--d-action);
@@ -75,17 +74,13 @@
   --oo-status-cancelled: var(--d-text-muted);  --oo-status-cancelled-bg: var(--d-surface-disabled);
 
   --orange: var(--d-action);
-  --orange-light: var(--d-action-tint);
   --orange-dark: var(--d-action-hover);
   --cream: var(--d-canvas);
-  --cream-dark: var(--d-surface-hover);
   --charcoal: var(--d-text-primary);
   --brown: var(--d-text-muted);
-  --brown-light: var(--d-text-disabled);
   --background: var(--d-canvas);
   --foreground: var(--d-text-primary);
   --border: var(--d-border-subtle);
-  --border-light: var(--d-border-subtle);
   --muted: var(--d-surface-subtle);
   --muted-foreground: var(--d-text-muted);
   --brand-mark: var(--d-signature);
@@ -158,33 +153,15 @@
 .d21 [data-ui="input"][aria-invalid="true"] { border-color: var(--d-danger); box-shadow: inset 0 0 0 .5px var(--d-danger); }
 .d21 [data-ui="input"]:disabled { background: var(--d-surface-disabled); border-color: var(--d-border-disabled); color: var(--d-text-disabled); }
 
-/* Toolbar search and filter controls: 34px, control border. */
-.d21 [data-ui="search"] input,
-.d21 [data-ui="filter"] select {
+/* Toolbar search control: 34px, control border. */
+.d21 [data-ui="search"] input {
   height: 34px; padding-block: 0; border-radius: 9px; font-size: 13.5px; line-height: 1;
   border: 1px solid var(--d-border-control); background: var(--d-surface); color: var(--d-text-primary);
   box-shadow: none;
 }
-.d21 [data-ui="search"] input:focus, .d21 [data-ui="filter"] select:focus {
+.d21 [data-ui="search"] input:focus {
   border-color: var(--d-focus); outline: 2px solid var(--d-focus); outline-offset: 0; box-shadow: none;
 }
-
-/* ── Tables · the ledger table: no card, hairlines, 36/46 rhythm ───────── */
-.d21 [data-ui="table"] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
-.d21 [data-ui="table"] > div { overflow-x: auto; }
-.d21 [data-ui="table"] thead tr { background: var(--d-surface); }
-.d21 [data-ui="table"] th {
-  height: 36px; padding: 0 12px; font-size: 12.5px; font-weight: 500; line-height: 18px;
-  color: var(--d-text-muted); border-bottom: 1px solid var(--d-border-strong); white-space: nowrap;
-}
-.d21 [data-ui="table"] tbody tr { border-top: 0; }
-.d21 [data-ui="table"] td {
-  height: 46px; padding: 6px 12px; font-size: 14px; line-height: 20px;
-  border-bottom: 1px solid var(--d-border-subtle);
-}
-.d21 [data-ui="table"] tr > :first-child { padding-inline-start: 0; }
-.d21 [data-ui="table"] tr > :last-child { padding-inline-end: 0; }
-.d21 [data-ui="table"] tbody tr:hover td { background: var(--d-surface-hover); }
 
 /* ── Status: a dot and a word, not a bordered chip ─────────────────────── */
 .d21 [data-ui="status"] {
@@ -216,8 +193,6 @@
 .d21 [data-ui="empty"] { color: var(--d-text-muted); font-size: 13.5px; }
 
 /* Metrics: columns divided by a hairline, no box. */
-.d21 [data-ui="stats"] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
-.d21 [data-ui="stats"] > div { gap: 20px 0; }
 .d21 [data-ui="stat"] { padding: 0 24px; background: transparent; border-inline-start: 1px solid var(--d-border-subtle); }
 .d21 [data-ui="stat"]:first-child { padding-inline-start: 0; border-inline-start: 0; }
 .d21 [data-ui="stat"] > p:first-child { font-family: var(--d-f-num); font-size: 26px; line-height: 1.15; font-weight: 400; letter-spacing: -.01em; }
@@ -238,21 +213,3 @@
 /* ── Spinner ───────────────────────────────────────────────────────────── */
 .d21 [data-ui="spinner"] > div { border-width: 2px; border-color: var(--d-border-subtle); border-top-color: var(--d-signature); width: 22px; height: 22px; }
 
-/* ── Stacked rows on a phone: one table, reflowed (no second DOM tree) ──── */
-@media (max-width: 767px) {
-  .d21 [data-ui="table"][data-stack] table,
-  .d21 [data-ui="table"][data-stack] tbody { display: block; width: 100%; }
-  .d21 [data-ui="table"][data-stack] thead { display: none; }
-  .d21 [data-ui="table"][data-stack] tbody tr {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "main st" "main due";
-    column-gap: 12px; row-gap: 4px; padding: 12px 0;
-    border-bottom: 1px solid var(--d-border-subtle);
-  }
-  .d21 [data-ui="table"][data-stack] tbody tr:hover td { background: none; }
-  .d21 [data-ui="table"][data-stack] tbody td { display: block; height: auto; padding: 0; border: 0; }
-  .d21 [data-ui="table"][data-stack] td[data-m="main"] { grid-area: main; align-self: center; min-width: 0; }
-  .d21 [data-ui="table"][data-stack] td[data-m="st"] { grid-area: st; justify-self: end; }
-  .d21 [data-ui="table"][data-stack] td[data-m="due"] { grid-area: due; justify-self: end; font-size: 12.5px; }
-  .d21 [data-ui="table"][data-stack] td[data-m="hide"] { display: none; }
-}

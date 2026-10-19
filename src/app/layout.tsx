@@ -26,8 +26,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={lang} dir={dir} className="h-full antialiased">
       <head>
         {/* Fonts are self-hosted (public/fonts) and loaded where they are used: IBM Plex by the
-            Direction 2.1 shell (components/shell/AppShell), Tajawal (the legacy face) by the legacy
-            surfaces (components/LegacyFonts). No third-party font origin is contacted. */}
+            Direction 2.1 shell (components/shell/AppShell). No third-party font origin is contacted. */}
       </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

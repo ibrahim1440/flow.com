@@ -6,7 +6,6 @@ origin (no fonts.googleapis.com, no fonts.gstatic.com).
 | Stylesheet | Loaded by | Families and weights |
 |---|---|---|
 | `ibm-plex.css` | `src/components/shell/AppShell.tsx` (every Direction 2.1 route) and `src/app/login/page.tsx` (sign-in) | IBM Plex Sans Arabic 400 / 500 / 600 / 700 · IBM Plex Sans 300 / 400 / 500 / 600 / 700 (one variable file per subset, wght 100–700) · IBM Plex Mono 400 / 500 |
-| `tajawal.css` | `src/components/LegacyFonts.tsx` (legacy dashboard shell and guest pages) | Tajawal 300 / 400 / 500 / 700 / 800 / 900 |
 | `amiri.css` | `src/app/login/page.tsx` (the sign-in screen's brand line, Figma text style Brand/Moment) | Amiri 700 |
 
 ## What was copied, and how to check it
@@ -17,8 +16,7 @@ glyph shapes, metrics, kerning and line boxes are unchanged:
 - Each stylesheet is the Google Fonts CSS for the URL the app used to link
   (`ibm-plex.css`: `https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap`
   (the 700 weights were added for the Figma Bold styles — G-20 labels; the stylesheet without them
-  is byte-identical to what the app linked from Google before self-hosting);
-  `tajawal.css`: `https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap`),
+  is byte-identical to what the app linked from Google before self-hosting)),
   fetched with a current Chrome user agent (WOFF2). It is byte-identical to the stylesheet the
   integrator recorded in `tests/hr/visual/fixtures/google-fonts.har` (integration/d21 @ 88789425).
   Only each `src: url(...)` was rewritten to the local path; `font-family`, `font-style`,
@@ -38,7 +36,7 @@ The files are served with `Cache-Control: public, max-age=31536000, immutable`
 
 ## Licences
 
-All five families are under the SIL Open Font License 1.1. The licence text ships next to the
+All four families are under the SIL Open Font License 1.1. The licence text ships next to the
 files of each family (`<family>/OFL.txt`); see also `NOTICE`.
 
 The copyright column quotes the name table of the bundled files themselves (name ID 0); the
@@ -49,7 +47,6 @@ The copyright column quotes the name table of the bundled files themselves (name
 | IBM Plex Sans Arabic | "Copyright 2019 IBM Corp. All rights reserved." | "Plex" | 1.101 | `ibm-plex-sans-arabic/OFL.txt` | https://github.com/IBM/plex · https://github.com/google/fonts/tree/main/ofl/ibmplexsansarabic |
 | IBM Plex Sans | "Copyright 2019 IBM Corp. All rights reserved." | "Plex" | 3.201 (variable, wght 100–700) | `ibm-plex-sans/OFL.txt` | https://github.com/IBM/plex · https://github.com/google/fonts/tree/main/ofl/ibmplexsans |
 | IBM Plex Mono | "Copyright 2017 IBM Corp. All rights reserved." | "Plex" | 2.3 | `ibm-plex-mono/OFL.txt` | https://github.com/IBM/plex · https://github.com/google/fonts/tree/main/ofl/ibmplexmono |
-| Tajawal | "(c) 2017 by Boutros International. All rights reserved." | — | 1.700 | `tajawal/OFL.txt` | https://github.com/google/fonts/tree/main/ofl/tajawal |
 | Amiri | "Copyright 2010-2022 The Amiri Project Authors (https://github.com/aliftype/amiri)." | — | 1.002 | `amiri/OFL.txt` | https://github.com/aliftype/amiri · https://github.com/google/fonts/tree/main/ofl/amiri |
 
 **Open owner decision — Reserved Font Name "Plex".** Google's files are Modified Versions under
@@ -95,22 +92,9 @@ the pixel and metric verification would have to be repeated).
 | `ibm-plex-sans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxaKYbABA.woff2` | IBM Plex Sans · 300 · cyrillic<br>IBM Plex Sans · 400 · cyrillic<br>IBM Plex Sans · 500 · cyrillic<br>IBM Plex Sans · 600 · cyrillic<br>IBM Plex Sans · 700 · cyrillic | 29512 | `9409ee21811f0f5272b7e1d828fe8838005b0573481ef906e7e55b63f6610ab0` | https://fonts.gstatic.com/s/ibmplexsans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxaKYbABA.woff2 |
 | `ibm-plex-sans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxdKYbABA.woff2` | IBM Plex Sans · 300 · greek<br>IBM Plex Sans · 400 · greek<br>IBM Plex Sans · 500 · greek<br>IBM Plex Sans · 600 · greek<br>IBM Plex Sans · 700 · greek | 19500 | `f598dd0700f155e2facfaa8ecfacace397d4c2c153e9ce37ab7ad310e8505bc2` | https://fonts.gstatic.com/s/ibmplexsans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxdKYbABA.woff2 |
 | `ibm-plex-sans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxeKYY.woff2` | IBM Plex Sans · 300 · latin<br>IBM Plex Sans · 400 · latin<br>IBM Plex Sans · 500 · latin<br>IBM Plex Sans · 600 · latin<br>IBM Plex Sans · 700 · latin | 45712 | `e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470` | https://fonts.gstatic.com/s/ibmplexsans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxeKYY.woff2 |
-| `tajawal/v12/Iura6YBj_oCad4k1nzGBCw.woff2` | Tajawal · 400 · latin | 10256 | `b081f7bf790678b56a2c0502651d6873cbabc09e78fe40655df15f918b1e369b` | https://fonts.gstatic.com/s/tajawal/v12/Iura6YBj_oCad4k1nzGBCw.woff2 |
-| `tajawal/v12/Iura6YBj_oCad4k1nzSBC45I.woff2` | Tajawal · 400 · arabic | 8932 | `6c9081fd00db08800850fa7d214593aa94992be5159e97557aa60197252cb95a` | https://fonts.gstatic.com/s/tajawal/v12/Iura6YBj_oCad4k1nzSBC45I.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l4qkHrFpiQ.woff2` | Tajawal · 700 · latin | 9996 | `de8f431c146ab1feb612cb7ced0842ae5c4e2f12067d13db0badeca73977200b` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l4qkHrFpiQ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l4qkHrRpiYlJ.woff2` | Tajawal · 700 · arabic | 9024 | `fa5e72326681abee3a4952be582e1c2c2abb27932ef262610c078ce89541f919` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l4qkHrRpiYlJ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l5anHrFpiQ.woff2` | Tajawal · 800 · latin | 10584 | `00241262004f96088a827ad4c5d423dbbc0648224e1cd990e5e5ff8e912157c9` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l5anHrFpiQ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l5anHrRpiYlJ.woff2` | Tajawal · 800 · arabic | 9448 | `5fa525682b4805d95c59943bc4405b993dc9e028fd93cb96f4b50911f3b428b7` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l5anHrRpiYlJ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l5qjHrFpiQ.woff2` | Tajawal · 300 · latin | 9896 | `d2c657214a232704251c3ad2733fefde88159c61e9b30b424502acabd6ff7427` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l5qjHrFpiQ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l5qjHrRpiYlJ.woff2` | Tajawal · 300 · arabic | 8296 | `5d193428e0bb76ca068ded1de74c6365adf14390d69dba944061ff6969a72977` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l5qjHrRpiYlJ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l7KmHrFpiQ.woff2` | Tajawal · 900 · latin | 10224 | `518d9efed800bdd33e0b5b09b2fe59debfff6656e5ea6e3b7169b26cbad269bc` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l7KmHrFpiQ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l7KmHrRpiYlJ.woff2` | Tajawal · 900 · arabic | 8700 | `4d7f3fca4a75b2bd4291bf1b8c2fddfd86170993938a8a9b436fc0d7ec9ae3ae` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l7KmHrRpiYlJ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l8KiHrFpiQ.woff2` | Tajawal · 500 · latin | 9900 | `9986de5db80ec050300f1cea25d651a5779ae62b91a39b5667ac23d0c7668cbb` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l8KiHrFpiQ.woff2 |
-| `tajawal/v12/Iurf6YBj_oCad4k1l8KiHrRpiYlJ.woff2` | Tajawal · 500 · arabic | 8940 | `4255019c1cd986f7cda7869df69baf72730d61304ae14baba4acfeb13085da54` | https://fonts.gstatic.com/s/tajawal/v12/Iurf6YBj_oCad4k1l8KiHrRpiYlJ.woff2 |
 | `ibm-plex-sans-arabic/OFL.txt` | licence | 4456 | `7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da` | https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/OFL.txt |
 | `ibm-plex-sans/OFL.txt` | licence | 4456 | `7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da` | https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/OFL.txt |
 | `ibm-plex-mono/OFL.txt` | licence | 4456 | `7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da` | https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/OFL.txt |
-| `tajawal/OFL.txt` | licence | 4464 | `9b584984f9db0ee30347391a76eff9c0a6b03dc450c3c6afe3757a2cb3a4db87` | https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/OFL.txt |
 
 ## Updating
 | `amiri/v30/J7acnpd8CGxBHp2VkaY6zp5yGw.woff2` | Amiri · 700 · arabic | 99968 | `c775d9f8c3a7cf0d0c2bb5246dd699e8c09bf6f8758e1be0b98939331b18bcce` | https://fonts.gstatic.com/s/amiri/v30/J7acnpd8CGxBHp2VkaY6zp5yGw.woff2 |
@@ -121,3 +105,4 @@ To take a newer upstream version: fetch the same stylesheet URLs with a current 
 download every `fonts.gstatic.com` file it names into `<family>/<version>/` under its own name,
 rewrite the `src` URLs to `/fonts/<family>/<version>/<file>`, regenerate `SHA256SUMS` and this
 table, and run the visual suites (any metric change shows up there).
+

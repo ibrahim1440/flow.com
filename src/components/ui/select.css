@@ -204,8 +204,6 @@ select.hq-native.hq-native {
 /* The CRM period chip. */
 .d21 .perf-chip .hq-trigger { border: 0; background: none; min-height: 0; padding: 0; padding-inline-end: 2px; max-width: 220px; color: var(--text-primary); }
 @media (max-width: 767px) { .d21 .perf-chip .hq-trigger { max-width: 160px; } }
-/* Toolbar filter (`[data-ui="filter"] select`). */
-.d21 [data-ui="filter"] .hq-trigger { height: 34px; min-height: 34px; padding-block: 0; border-radius: 9px; font-size: 13.5px; line-height: 1; border: 1px solid var(--d-border-control, var(--border-control)); background: var(--d-surface, var(--surface)); color: var(--d-text-primary, var(--text-primary)); box-shadow: none; }
 /* Ops pages: the legacy-control normalisation that applied to select. */
 [data-ops-root] .hq-trigger:not(.hr-input) { border-color: var(--border-control); border-radius: 8px; font: inherit; font-size: 14px; background-color: var(--surface); color: var(--text-primary); }
 /* HR: 16 px controls on phones (no iOS zoom; same size as the inputs beside them). */
@@ -213,5 +211,3 @@ select.hq-native.hq-native {
 .hr-dialog .hq-trigger { scroll-margin-block: 8px 72px; }
 /* Quote line inline select. */
 .d21 .hq-trigger.qi { padding-inline-end: 6px; }
-/* The CRM toolbar filter draws its own chevron. */
-.d21 [data-ui="filter"] .hq-trigger > .hq-chev { display: none; }
