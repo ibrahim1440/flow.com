@@ -112,13 +112,17 @@ export default function HistoryPage() {
         const who = d.orderItem?.order?.customer?.name;
         const num = d.orderItem?.order?.orderNumber || "?";
         const full = d.deliveryType === "full";
+        // Phase D: which lots the delivery drew from (DeliveryLine, or the ledger for older ones).
+        const lots = (d.lots ?? []).map((x: { batchNumber: string | null }) => x.batchNumber).filter(Boolean).join("، ");
+        const qtyAr = d.quantityUnits != null ? `${d.quantityUnits} وحدة` : `${d.quantityKg} كغ`;
+        const qtyEn = d.quantityUnits != null ? `${d.quantityUnits} units` : `${d.quantityKg} kg`;
         history.push({
           type: "Delivery",
           date: d.date,
           description: { ar: `تسليم إلى ${who || "غير معروف"} (#${num})`, en: `Delivery to ${who || "Unknown"} (#${num})` },
           details: {
-            ar: `${d.quantityKg} كغ · ${full ? "تسليم كامل" : "تسليم جزئي"}`,
-            en: `${d.quantityKg} kg · ${full ? "full" : "partial"} delivery`,
+            ar: `${qtyAr} · ${full ? "تسليم كامل" : "تسليم جزئي"}${lots ? ` · اللوتات: ${lots}` : ""}`,
+            en: `${qtyEn} · ${full ? "full" : "partial"} delivery${lots ? ` · lots: ${lots.replace(/، /g, ", ")}` : ""}`,
           },
         });
       }
@@ -207,7 +211,11 @@ export default function HistoryPage() {
             Customer: d.orderItem?.order?.customer?.name || "",
             "Bean Type": d.orderItem?.beanTypeName || "",
             "Quantity (kg)": d.quantityKg,
+            "Quantity (units)": d.quantityUnits ?? "",
             "Delivery Type": d.deliveryType,
+            // Phase D: «batch (qty)» per lot the delivery drew from.
+            Lots: (d.lots ?? []).map((x: { batchNumber: string | null; quantityUnits: number | null; quantityKg: number }) =>
+              `${x.batchNumber ?? "?"} (${x.quantityUnits ?? x.quantityKg})`).join("; "),
             Notes: d.notes || "",
           });
         }

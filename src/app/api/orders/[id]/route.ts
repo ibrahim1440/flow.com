@@ -1,3 +1,5 @@
+import { withdrawProvisionalPlansInTx } from "@/lib/services/production-schedule";
+import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
@@ -153,6 +155,24 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         });
         const liveById = new Map<string, LiveLine>(live.map((l) => [l.id, l]));
 
+        // ── Production simplification C: provisional plans give way ───────────
+        // A line whose quantity or product changes, and a line being removed, first loses the
+        // automatic production order nothing was roasted against — it is the system's own
+        // provisional record, not history, and it must not freeze a fresh order. Under the
+        // 7762 keys and after the OrderItem locks above (ProductionOrder's canonical place).
+        // The automatic preparation after this commit schedules whatever is still short.
+        const reshaped = [
+          ...resolved.filter((l) => {
+            if (!l.id) return false;
+            const cur = liveById.get(l.id);
+            return !!cur && (cur.quantityUnits !== l.quantityUnits || (cur.productSkuId ?? null) !== (l.productSkuId ?? null));
+          }).map((l) => l.id!),
+          ...toRemove,
+        ];
+        if (reshaped.length > 0) {
+          await withdrawProvisionalPlansInTx(tx, reshaped, id, { id: user.id, name: user.name });
+        }
+
         // ── Validate everything BEFORE mutating anything ──────────────────────
         for (const line of resolved) {
           if (!line.id) continue;
@@ -243,6 +263,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       });
     }, TX_OPTS);
 
+    // A structural edit changes demand: the order is prepared again after the commit (shelf
+    // topped up, status derived, production scheduled for what is still short).
+    if (editingItems) await autoPrepareOrder(id, "order_edited", { id: user.id, name: user.name });
+
     return NextResponse.json(result);
   } catch (err) {
     if (err && typeof err === "object" && "_appCode" in err) {
@@ -291,6 +315,9 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
           productSkuId: true, productId: true,
         },
       });
+
+      // An automatic plan with nothing roasted against it is not history (Phase C item 3).
+      await withdrawProvisionalPlansInTx(tx, itemIds, id, { id: null, name: "System" }, "the order's deletion");
 
       // Validate every line first, so a single line with history refuses the whole delete
       // rather than the order being half dismantled.

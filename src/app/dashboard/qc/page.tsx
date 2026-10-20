@@ -2,7 +2,7 @@
 
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, Coffee, CheckCircle2, XCircle, Link2, AlertTriangle, Loader2, Trash2, CalendarDays } from "lucide-react";
+import { Plus, Coffee, CheckCircle2, XCircle, AlertTriangle, Loader2, Trash2, CalendarDays } from "lucide-react";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { useUser } from "../user-context";
@@ -11,9 +11,12 @@ import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import toast from "react-hot-toast";
-import { Btn, KV, Notice, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, Kg, kg, opsDate, countNoun, BATCH_FORMS, CUP_FORMS, SCORE_FORMS } from "@/components/ops/ui";
+import { Btn, KV, Notice, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, Kg, kg, opsDate, countNoun, BATCH_FORMS, CUP_FORMS, SCORE_FORMS } from "@/components/ops/ui";
 
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
+import { EvalSheet } from "./_parts/eval-sheet";
+import { PanelSheet } from "./_parts/panel-sheet";
+import "@/components/ops/station.css";
 type CustomerPref = {
   id: string;
   greenBeanId: string;
@@ -83,6 +86,14 @@ type Batch = {
   qcRecords: TesterRecord[];
   childBatches: { id: string; batchNumber: string }[];
   parentBatch: { id: string; batchNumber: string } | null;
+  /** Unpacked roasted kilograms (written off as loss when the batch is rejected). */
+  roastedAvailableKg?: number;
+  /** Guests invited to the panel who have not evaluated yet (QcInvite, PENDING). */
+  qcInvites?: { id: string; name: string; channel: string }[];
+  qcFinalDecisionReason?: string | null;
+  /** D2: decided with fewer evaluators than the minimum. */
+  qcOverride?: boolean | null;
+  qcOverrideReason?: string | null;
 };
 
 type LegacyRecord = {
@@ -219,6 +230,8 @@ export default function QCPage() {
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "qc", "create_record");
   const canManage = hasSubPrivilege(user?.permissions ?? {}, "qc", "manage");
   const canEditRecord = hasSubPrivilege(user?.permissions ?? {}, "qc", "edit_record");
+  // D2: the exceptional approval with fewer evaluators than the minimum (privileged, step-up).
+  const canOverride = hasSubPrivilege(user?.permissions ?? {}, "qc", "finalize_override");
   const canCancelBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
   const canEditDate = hasSubPrivilege(user?.permissions ?? {}, "production", "edit_date");
   const canOverrideInventory = hasSubPrivilege(user?.permissions ?? {}, "inventory", "override");
@@ -256,14 +269,18 @@ export default function QCPage() {
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
 
   // Finalize modal (single batch)
-  const [finalizeBatch, setFinalizeBatch] = useState<Batch | null>(null);
-  const [finalizeOutcome, setFinalizeOutcome] = useState<"Passed" | "Rejected" | "">("");
-  const [finalizeReason, setFinalizeReason] = useState("");
-  const [finalizing, setFinalizing] = useState(false);
+  // The evaluator panel and decision (production simplification item 5): the row it belongs to.
+  const [finalizeBatchId, setFinalizeBatchId] = useState<string | null>(null);
+  // The one-tap evaluation sheet.
+  const [evalBatchId, setEvalBatchId] = useState<string | null>(null);
+  // D1: the minimum number of evaluators (Settings › Production › QC; the built-in 2 until loaded).
+  const [qcMin, setQcMin] = useState(2);
+  useEffect(() => {
+    fetch("/api/settings/production/qc", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null))
+      .then((j: { effectiveMinEvaluators?: number } | null) => { if (j?.effectiveMinEvaluators) setQcMin(j.effectiveMinEvaluators); }).catch(() => {});
+  }, []);
 
   // Invite link modal
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [generatingInvite, setGeneratingInvite] = useState<string | null>(null);
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
   const [cancelling, setCancelling] = useState(false);
   // The restock reason belongs to the batch being cancelled: opening another batch starts empty.
@@ -279,6 +296,9 @@ export default function QCPage() {
   const [bulkOutcome, setBulkOutcome] = useState<"Passed" | "Rejected">("Passed");
   const [bulkFinalizeReason, setBulkFinalizeReason] = useState("");
   const [isBulkFinalizing, setIsBulkFinalizing] = useState(false);
+  // D2 in bulk: an exceptional approval of the selected batches below the minimum.
+  const [bulkOverride, setBulkOverride] = useState(false);
+  const [bulkAck, setBulkAck] = useState(false);
 
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -359,18 +379,6 @@ export default function QCPage() {
     } finally {
       setLoadingCorrectionId(null);
     }
-  }
-
-  function startQcForBatch(batch: Batch) {
-    setEditingRecordId(null);
-    setForm({
-      ...BLANK_FORM,
-      batchId: batch.id,
-      coffeeOrigin: batch.greenBean?.beanType || (batch.orderItem?.beanTypeName ?? ""),
-      processing: batch.greenBean?.process || "",
-      serialNumber: batch.batchNumber,
-    });
-    setShowForm(true);
   }
 
   function startEditRecord(record: TesterRecord, batch: Batch) {
@@ -469,27 +477,6 @@ export default function QCPage() {
     }
   }
 
-  async function handleFinalize(batch: Batch, outcome: "Passed" | "Rejected", reason: string) {
-    setFinalizing(true);
-    try {
-      const res = await fetch(`/api/qc/${batch.id}/finalize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outcome, ...(reason.trim() ? { finalDecisionReason: reason.trim() } : {}) }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || t("error")); return; }
-      toast.success(`${data.status}: ${data.acceptCount}/${data.total} ${t("accepted")}`);
-      setFinalizeBatch(null);
-      setFinalizeOutcome("");
-      setFinalizeReason("");
-      loadBacklog();
-      if (historyLoaded) loadHistory();
-    } finally {
-      setFinalizing(false);
-    }
-  }
-
   function toggleBatch(id: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -500,7 +487,8 @@ export default function QCPage() {
 
   function handleBulkFinalizeClick() {
     const selected = filteredBacklog.filter((b) => selectedIds.has(b.id));
-    const hasLowTesters = selected.some((b) => b.qcRecords.length <= 1);
+    // D1: below the minimum the server refuses unless the decision is an exceptional approval.
+    const hasLowTesters = selected.some((b) => b.qcRecords.length < qcMin);
     if (hasLowTesters) {
       setShowBulkWarning(true);
     } else {
@@ -518,54 +506,28 @@ export default function QCPage() {
           batchIds: Array.from(selectedIds),
           outcome: bulkOutcome,
           ...(bulkFinalizeReason.trim() ? { finalDecisionReason: bulkFinalizeReason.trim() } : {}),
+          ...(bulkOverride ? { override: true, overrideReason: bulkFinalizeReason.trim(), confirmed: bulkAck } : {}),
         }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error || t("error")); return; }
+      if (!res.ok) {
+        // The refusal names every batch it refused and why; nothing was decided.
+        const which = Array.isArray(data.refused) ? data.refused.map((r: { batchNumber: string }) => r.batchNumber).join("، ") : "";
+        toast.error(`${(lang === "ar" ? data.error : data.errorEn ?? data.error) || t("error")}${which ? ` (${which})` : ""}`);
+        return;
+      }
+      if (Array.isArray(data.skipped) && data.skipped.length) toast(lang === "ar" ? `${data.skipped.length} دفعة اعتمدها غيرك في الأثناء ولم تتغير` : `${data.skipped.length} batch(es) were decided by someone else meanwhile and were left unchanged`);
       toast.success(t("bulkDone").replace("{n}", String(data.finalized)));
       setSelectedIds(new Set());
       setShowBulkModal(false);
       setShowBulkWarning(false);
       setBulkFinalizeReason("");
+      setBulkOverride(false); setBulkAck(false);
       loadBacklog();
       if (historyLoaded) loadHistory();
     } finally {
       setIsBulkFinalizing(false);
     }
-  }
-
-  async function handleGenerateInvite(batchId: string) {
-    setGeneratingInvite(batchId);
-    try {
-      const res = await fetch(`/api/qc/${batchId}/invite`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || t("error")); return; }
-      const link = `${window.location.origin}/guest-qc/${batchId}/${data.token}`;
-      setInviteLink(link);
-    } finally {
-      setGeneratingInvite(null);
-    }
-  }
-
-  function copyToClipboard(text: string) {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text)
-        .then(() => toast.success(t("copyLink")))
-        .catch(() => fallbackCopy(text));
-    } else {
-      fallbackCopy(text);
-    }
-  }
-
-  function fallbackCopy(text: string) {
-    const el = document.createElement("textarea");
-    el.value = text;
-    el.style.position = "fixed"; el.style.opacity = "0";
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand("copy");
-    document.body.removeChild(el);
-    toast.success(t("copyLink"));
   }
 
   // N-10 (prd-qc-closed-1024): the page meta is the queue — «4 دفعات بانتظار القرار · 17.03 كغ».
@@ -632,11 +594,13 @@ export default function QCPage() {
   }
 
   const tone = (d: string) => (d === "Accept" ? "success" : "danger");
+  const finalizeBatch = finalizeBatchId ? backlogBatches.find((b) => b.id === finalizeBatchId) ?? null : null;
+  const evalBatch = evalBatchId ? backlogBatches.find((b) => b.id === evalBatchId) ?? null : null;
   const allSelected = filteredBacklog.length > 0 && filteredBacklog.every((b) => selectedIds.has(b.id));
 
   return (
     <OpsRoot>
-    <div className={`hr-split${finalizeBatch ? " has-preview" : ""}`}>
+    <div className={`hr-split${finalizeBatch || evalBatch ? " has-preview" : ""}`}>
     <div className="hr-page">
       <PageHeader
         title={t("opsQcTitle")}
@@ -756,11 +720,12 @@ export default function QCPage() {
                   const cols = canManage ? 7 : 6;
                   // prd-qc: with the decision pane open, choosing another row moves the pane to it —
                   // by mouse, or by keyboard (Q-2: the row takes focus, Enter / Space pick it).
-                  const pickable = !!finalizeBatch && canManage && total > 0 && finalizeBatch.id !== batch.id && !finalizing;
-                  const pick = () => { setFinalizeBatch(batch); setFinalizeOutcome(""); setFinalizeReason(""); };
+                  const pickable = !!finalizeBatch && finalizeBatch.id !== batch.id;
+                  const pick = () => setFinalizeBatchId(batch.id);
+                  const pending = batch.qcInvites ?? [];
                   return (
                     <tbody key={batch.id} data-testid={`qc-batch-${batch.batchNumber}`}>
-                      <tr aria-selected={isExpanded || finalizeBatch?.id === batch.id} className={`${dl?.isOverdue ? "is-overdue" : ""}${finalizeBatch && canManage && total > 0 ? " ops-rowpick" : ""}`}
+                      <tr aria-selected={isExpanded || finalizeBatch?.id === batch.id} className={`${dl?.isOverdue ? "is-overdue" : ""}${finalizeBatch ? " ops-rowpick" : ""}`}
                         tabIndex={pickable ? 0 : undefined}
                         onKeyDown={pickable ? (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pick(); } } : undefined}
                         onClick={pickable ? pick : undefined}>
@@ -799,23 +764,28 @@ export default function QCPage() {
                               : <span>{dl.label}</span>
                           ) : <span className="hr-muted">—</span>}
                         </td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          <span className="hr-num">{total}</span> {total !== 1 ? t("testers") : t("tester")}
+                        <td style={{ whiteSpace: "nowrap" }} data-testid="qc-dots">
+                          {/* D1: one dot per evaluation, a hollow slot for each still missing to the
+                              minimum, an ellipsis for an invited guest who has not evaluated yet. */}
+                          <span className="st-dots" aria-label={lang === "ar" ? `${total} من ${qcMin} تقييمات` : `${total} of ${qcMin} evaluations`}>
+                            {batch.qcRecords.map((r) => <span key={r.id} className={`st-dot ${r.decision === "Accept" ? "is-ok" : "is-bad"}`} aria-hidden="true">{r.decision === "Accept" ? "✓" : "✕"}</span>)}
+                            {pending.map((g) => <span key={g.id} className="st-dot is-pend" aria-hidden="true">…</span>)}
+                            {Array.from({ length: Math.max(0, qcMin - total - pending.length) }, (_, k) => <span key={k} className="st-dot is-slot" aria-hidden="true" />)}
+                          </span>{" "}
+                          <span className="hr-caption"><bdi dir="ltr"><span className="hr-num">{total}</span>/<span className="hr-num">{qcMin}</span></bdi></span>
                           {total > 0 ? <span className="hr-caption hr-hide-preview"> · <span style={{ color: "var(--status-success)" }}>{acceptCount} {t("accept")}</span> · <span style={{ color: rejectCount ? "var(--status-danger)" : undefined }}>{rejectCount} {t("reject")}</span></span> : null}
                         </td>
                         <td className="m-end ops-actions hr-hide-preview">
+                          {/* One tap to evaluate; one place for the evaluators, the guests and the decision. */}
                           {canCreate && !alreadySubmitted && (
-                            <Btn size="sm" variant="primary" onClick={() => startQcForBatch(batch)}>{t("addMyRecord")}</Btn>
+                            <Btn size="sm" variant="primary" data-testid="qc-evaluate" onClick={() => setEvalBatchId(batch.id)}>{lang === "ar" ? "قيّم" : "Evaluate"}</Btn>
                           )}
                           {canCreate && alreadySubmitted && (
                             <span className="hr-dot tone-success"><span>{t("submitted")}</span></span>
                           )}
-                          {canManage && total > 0 && (
-                            <Btn size="sm" onClick={() => { setFinalizeBatch(batch); setFinalizeOutcome(""); setFinalizeReason(""); }}>{t("finalizeQc")}</Btn>
-                          )}
-                          {canManage && (
-                            <Btn size="sm" variant="ghost" onClick={() => handleGenerateInvite(batch.id)} busy={generatingInvite === batch.id}>{t("guestLink")}</Btn>
-                          )}
+                          <Btn size="sm" variant={canManage && total >= qcMin ? "primary" : "secondary"} data-testid="qc-open-panel" onClick={() => setFinalizeBatchId(batch.id)}>
+                            {canManage ? (lang === "ar" ? "المقيّمون والقرار" : "Evaluators & decision") : (lang === "ar" ? "المقيّمون" : "Evaluators")}
+                          </Btn>
                           <Btn size="sm" variant="ghost" aria-expanded={isExpanded} onClick={() => setExpandedId(isExpanded ? null : batch.id)}>
                             {isExpanded ? t("collapse") : t("panel")}
                           </Btn>
@@ -992,6 +962,8 @@ export default function QCPage() {
                       </td>
                       <td className="m-end is-stack">
                         <StatusDot map={{ Passed: [statusBadgeLabel("Passed"), "success"], Rejected: [statusBadgeLabel("Rejected"), "danger"], Blended: [statusBadgeLabel("Blended"), "neutral"] }} value={batch.status} />
+                        {/* D2: an exceptional approval stays visible on the batch's history. */}
+                        {batch.qcOverride ? <span className="hr-flag tone-warning" data-testid="qc-override-flag"><span>{lang === "ar" ? "اعتماد استثنائي" : "Exceptional approval"}</span></span> : null}
                       </td>
                       <td>{batch.qcRecords.length > 0 ? <span className="hr-caption">{t("panel")}: <span className="hr-num">{acceptCount}</span> {t("accept")} · <span className="hr-num">{rejectCount}</span> {t("reject")}</span> : <span className="hr-muted">—</span>}</td>
                       <td>{opsDate(batch.date, lang)}</td>
@@ -1010,6 +982,8 @@ export default function QCPage() {
                               [t("date"), opsDate(batch.date, lang)],
                               ...(batch.roastProfile ? [[t("roastProfileLabel"), batch.roastProfile] as [string, string]] : []),
                               ...(batch.childBatches.length > 0 ? [[t("sourceBatches"), batch.childBatches.map((c) => c.batchNumber).join(", ")] as [string, string]] : []),
+                              ...(batch.qcFinalDecisionReason ? [[lang === "ar" ? "سبب القرار" : "Decision reason", batch.qcFinalDecisionReason] as [string, string]] : []),
+                              ...(batch.qcOverride ? [[lang === "ar" ? "اعتماد استثنائي" : "Exceptional approval", batch.qcOverrideReason ?? ""] as [string, string]] : []),
                             ]} />
                             {batch.qcRecords.length > 0 && (() => {
                               const batchGbId = (batch.orderItem?.greenBeanId ?? null);
@@ -1284,33 +1258,6 @@ export default function QCPage() {
         </div>
       )}
 
-      {/* Invite link modal */}
-      {inviteLink && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setInviteLink(null)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-4">
-              <Link2 size={20} className="text-orange" />
-              <h2 className="text-lg font-extrabold text-charcoal">{t("externalTesterLink")}</h2>
-            </div>
-            <p className="text-sm text-brown/70 mb-3">{t("guestLinkHint")}</p>
-            <div className="bg-cream rounded-xl p-3 break-all text-xs font-mono text-charcoal border border-border mb-4">
-              {inviteLink}
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => copyToClipboard(inviteLink)}
-                className="flex-1 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark font-bold text-sm"
-              >
-                {t("copyLink")}
-              </button>
-              <button onClick={() => setInviteLink(null)} className="flex-1 py-2 border rounded-lg hover:bg-gray-50 text-sm">
-                {t("close")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Cancel Batch Modal */}
       {cancelBatch && (() => {
         const isPendingQc = cancelBatch.status === "Pending QC";
@@ -1423,28 +1370,52 @@ export default function QCPage() {
                 {t("bulkFailAll")}
               </button>
             </div>
-            {bulkOutcome === "Passed" && (() => {
+            {(() => {
+              // The rules of the single decision, for every selected batch (the server re-checks):
+              // a decision against any evaluator needs a reason (D3 / G26, both directions), and a
+              // batch below the minimum needs the exceptional approval (D2).
               const selectedBatches = filteredBacklog.filter((b) => selectedIds.has(b.id));
-              const hasAnyReject = selectedBatches.some((b) => b.qcRecords.some((r) => r.decision === "Reject"));
+              const disagrees = selectedBatches.some((b) => bulkOutcome === "Passed" ? b.qcRecords.some((r) => r.decision === "Reject") : b.qcRecords.some((r) => r.decision === "Accept"));
+              const below = selectedBatches.filter((b) => b.qcRecords.length < qcMin);
+              const reasonRequired = disagrees || bulkOverride;
               return (
-                <div className="mb-5">
-                  <label className="block text-sm font-semibold text-charcoal mb-1">
-                    {hasAnyReject ? "Override reason (required)" : "Decision notes (optional)"}
+                <div className="mb-5" style={{ display: "grid", gap: 10 }}>
+                  {below.length > 0 ? (
+                    <div className="st-warnbox" data-testid="bulk-below-min">
+                      <b>{lang === "ar" ? `${below.length} دفعة أقل من الحد الأدنى (${qcMin} مقيّمين)` : `${below.length} batch(es) below the minimum (${qcMin} evaluators)`}</b>
+                      {canOverride ? (
+                        <label className="st-check"><input type="checkbox" checked={bulkOverride} onChange={(e) => { setBulkOverride(e.target.checked); setBulkAck(false); }} />
+                          <span>{lang === "ar" ? "اعتماد استثنائي بأقل من الحد الأدنى" : "Exceptional approval below the minimum"}</span></label>
+                      ) : <span>{lang === "ar" ? "أزلها من التحديد، أو اطلب صلاحية «اعتماد استثنائي بأقل من الحد الأدنى»." : "Unselect them, or ask for the «exceptional approval» permission."}</span>}
+                    </div>
+                  ) : null}
+                  <label className="block text-sm font-semibold text-charcoal">
+                    {reasonRequired ? (lang === "ar" ? "السبب (مطلوب)" : "Reason (required)") : (lang === "ar" ? "ملاحظات القرار (اختياري)" : "Decision notes (optional)")}
+                    <textarea
+                      value={bulkFinalizeReason}
+                      onChange={(e) => setBulkFinalizeReason(e.target.value)}
+                      rows={2}
+                      placeholder={reasonRequired ? (lang === "ar" ? "لماذا هذا القرار؟" : "Why this decision?") : "…"}
+                      className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm resize-none"
+                    />
                   </label>
-                  <textarea
-                    value={bulkFinalizeReason}
-                    onChange={(e) => setBulkFinalizeReason(e.target.value)}
-                    rows={2}
-                    placeholder={hasAnyReject ? "State reason for passing despite rejected records…" : "Optional notes…"}
-                    className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors text-sm resize-none"
-                  />
+                  {bulkOverride ? (
+                    <label className="st-check"><input type="checkbox" checked={bulkAck} onChange={(e) => setBulkAck(e.target.checked)} />
+                      <span>{lang === "ar" ? "أتحمّل مسؤولية اعتماد هذه الدفعات بأقل من الحد الأدنى" : "I take responsibility for approving these batches below the minimum"}</span></label>
+                  ) : null}
+                  {bulkOutcome === "Rejected" ? <p className="st-note">{lang === "ar" ? "يُسجَّل المحمّص غير المعبّأ لكل دفعة فاقدًا تلقائيًا." : "Each batch's unpacked roasted coffee is written off as loss."}</p> : null}
                 </div>
               );
             })()}
             <div className="flex gap-3">
               <button
                 onClick={executeBulkFinalize}
-                disabled={isBulkFinalizing || (bulkOutcome === "Passed" && filteredBacklog.filter((b) => selectedIds.has(b.id)).some((b) => b.qcRecords.some((r) => r.decision === "Reject")) && !bulkFinalizeReason.trim())}
+                disabled={isBulkFinalizing || (() => {
+                  const sel = filteredBacklog.filter((b) => selectedIds.has(b.id));
+                  const disagrees = sel.some((b) => bulkOutcome === "Passed" ? b.qcRecords.some((r) => r.decision === "Reject") : b.qcRecords.some((r) => r.decision === "Accept"));
+                  const below = sel.some((b) => b.qcRecords.length < qcMin);
+                  return ((disagrees || bulkOverride) && !bulkFinalizeReason.trim()) || (below && !(bulkOverride && bulkAck));
+                })()}
                 className="flex-1 py-3 bg-charcoal text-white rounded-xl font-bold hover:bg-charcoal/80 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-all flex items-center justify-center gap-2"
               >
                 {isBulkFinalizing ? <><Loader2 size={16} className="animate-spin" />{t("bulkFinalizing")}</> : t("confirm")}
@@ -1488,81 +1459,34 @@ export default function QCPage() {
     {/* prd-qc 315:2095 / 318:2258 / 347:3558: the final decision is a pane beside the queue
         at 1440, a drawer at 1024 and a bottom sheet on the phone. Same state, validation and
         request as the dialog it replaces. */}
-    {finalizeBatch && (() => {
-      const fb = finalizeBatch;
-      const fbAccept = fb.qcRecords.filter((r) => r.decision === "Accept").length;
-      const fbReject = fb.qcRecords.filter((r) => r.decision === "Reject").length;
-      const fbTotal = fb.qcRecords.length;
-      const reasonRequired = finalizeOutcome === "Passed" && fbReject > 0;
-      const canConfirm = finalizeOutcome !== "" && !(reasonRequired && !finalizeReason.trim());
-      const product = fb.greenBean?.beanType || fb.orderItem?.beanTypeName || "";
-      const outcomeLabel = finalizeOutcome === "Passed" ? t("accept") : finalizeOutcome === "Rejected" ? t("reject") : null;
-      return (
-        <OpsPane
-          testId="qc-finalize-pane"
-          label={t("finalizeQc")}
-          title={<><span className="ops-serial">{fb.batchNumber}</span> <span>{product}</span></>}
-          sub={t("finalizeQc")}
-          busy={finalizing}
-          onClose={() => setFinalizeBatch(null)}
-          footer={
-            <>
-              <Btn variant="primary" onClick={() => handleFinalize(fb, finalizeOutcome as "Passed" | "Rejected", finalizeReason)} disabled={!canConfirm} busy={finalizing}>
-                {finalizing ? t("finalizing") : outcomeLabel ? `${t("qcFinishInspection")} · ${outcomeLabel}` : t("qcFinishInspection")}
-              </Btn>
-              <Btn onClick={() => setFinalizeBatch(null)} disabled={finalizing}>{t("cancel")}</Btn>
-            </>
-          }
-        >
-          <dl className="ops-props ops-qc-props" style={{ gridTemplateColumns: "110px minmax(0, 1fr)" }}>
-            <dt>{t("opsOrderCol")}</dt>
-            <dd>{fb.orderItem ? <><span className="hr-id">#{fb.orderItem.order.orderNumber}</span> · {fb.orderItem.order.customer.name}</> : t("stockBatchLabel")}</dd>
-            <dt>{t("opsRoastedOutCol")}</dt>
-            <dd><Kg v={fb.roastedBeanQuantity} /></dd>
-            <dt>{t("opsDeadlineCol")}</dt>
-            <dd>{fb.qcDeadline ? <span className="hr-num">{opsDate(fb.qcDeadline, lang, true)}</span> : <span className="hr-muted">—</span>}</dd>
-          </dl>
-
-          <div>
-            <p className="ops-lbl">{t("opsRecordsCol")} · <span className="hr-num">{fbTotal}</span> · <span style={{ color: "var(--status-success)" }}><span className="hr-num">{fbAccept}</span> {t("accept")}</span> · <span style={{ color: fbReject ? "var(--status-danger)" : undefined }}><span className="hr-num">{fbReject}</span> {t("reject")}</span></p>
-            <ul className="ops-recs">
-              {fb.qcRecords.map((r) => (
-                <li key={r.id}>
-                  <span>{r.employee?.name ?? r.testerName ?? "—"}</span>
-                  <span className="hr-num">{r.colorWhole ?? r.color ?? "—"}{r.colorGround != null ? <> / {r.colorGround}</> : null}</span>
-                  <span className={`hr-dot tone-${r.decision === "Accept" ? "success" : "danger"}`}><span>{r.decision === "Accept" ? t("accept") : t("reject")}</span></span>
-                  <span className="ops-recs-sub">{r.isExternal ? t("guestLink") : null}{r.isExternal ? " · " : null}{opsDate(r.date, lang, true)}</span>
-                </li>
-              ))}
-            </ul>
-            {fbTotal === 1 ? <p className="ops-hint ops-onetester">{t("oneTesterWarning")}</p> : null}
-          </div>
-
-          <div>
-            <p className="ops-lbl" id="qc-final-decision">{t("qcFinalDecision")}</p>
-            <div className="ops-seg" role="group" aria-labelledby="qc-final-decision">
-              <button type="button" aria-pressed={finalizeOutcome === "Passed"} onClick={() => setFinalizeOutcome("Passed")} data-autofocus="">{t("accept")}</button>
-              <button type="button" aria-pressed={finalizeOutcome === "Rejected"} className="is-negative" onClick={() => setFinalizeOutcome("Rejected")}>{t("reject")}</button>
-            </div>
-            <p className="ops-hint">{t("qcFinalizeHint")}</p>
-          </div>
-
-          {finalizeOutcome === "Passed" && (
-            <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span className="hr-caption">{reasonRequired ? t("qcOverrideReasonRequired") : t("qcDecisionNotesOptional")}</span>
-              <textarea
-                value={finalizeReason}
-                onChange={(e) => setFinalizeReason(e.target.value)}
-                rows={2}
-                placeholder={reasonRequired ? t("qcOverrideReasonPlaceholder") : t("qcDecisionNotesPlaceholder")}
-                className="hr-input"
-                style={{ height: "auto", padding: "8px 10px", resize: "none" }}
-              />
-            </label>
-          )}
-        </OpsPane>
-      );
-    })()}
+    {finalizeBatch ? (
+      <PanelSheet
+        key={`${finalizeBatch.id}:${finalizeBatch.qcRecords.length}`}
+        batch={{
+          id: finalizeBatch.id, batchNumber: finalizeBatch.batchNumber,
+          product: finalizeBatch.greenBean?.beanType || finalizeBatch.orderItem?.beanTypeName || "",
+          roastedKg: finalizeBatch.roastedBeanQuantity, roastedAvailableKg: finalizeBatch.roastedAvailableKg ?? null,
+          qcRecords: finalizeBatch.qcRecords, qcInvites: finalizeBatch.qcInvites ?? [],
+        }}
+        min={qcMin}
+        me={user?.id ?? null}
+        canCreate={canCreate}
+        canManage={canManage}
+        canOverride={canOverride}
+        onClose={() => setFinalizeBatchId(null)}
+        onEvaluate={() => { setEvalBatchId(finalizeBatch.id); setFinalizeBatchId(null); }}
+        onChanged={(msg) => { toast.success(msg); loadBacklog(); }}
+        onDecided={(msg) => { toast.success(msg, { duration: 6000 }); setFinalizeBatchId(null); loadBacklog(); if (historyLoaded) loadHistory(); }}
+      />
+    ) : null}
+    {evalBatch ? (
+      <EvalSheet
+        batch={{ id: evalBatch.id, batchNumber: evalBatch.batchNumber, product: evalBatch.greenBean?.beanType || evalBatch.orderItem?.beanTypeName || "", count: evalBatch.qcRecords.length }}
+        min={qcMin}
+        onClose={() => setEvalBatchId(null)}
+        onSaved={(msg) => { toast.success(msg); setEvalBatchId(null); loadBacklog(); }}
+      />
+    ) : null}
     </div>
     </OpsRoot>
   );

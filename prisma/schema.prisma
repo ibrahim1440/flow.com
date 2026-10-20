@@ -432,6 +432,18 @@ model RoastingBatch {
   qcClosedById          String?
   qcFinalDecisionReason String?
 
+  // ─── QC exceptional approval (additive, migration 20261023090000_production_qc_simplify) ───
+  /// Owner decision D2: true when the QC decision was taken with fewer evaluators than the minimum
+  /// in force (SystemConfig.qcMinEvaluators, default 2), by a holder of qc › finalize_override, with
+  /// a written reason and an explicit confirmation. NULL = no exceptional approval (every batch
+  /// before this column, and every normal decision). CHECK: true ⇒ reason, actor and time present.
+  qcOverride         Boolean?
+  qcOverrideReason   String?
+  qcOverrideById     String?
+  qcOverrideAt       DateTime?
+  /// The minimum in force when the exceptional approval was taken (the setting may change later).
+  qcOverrideMin      Int?
+
   productionOrderId String?
   productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
 
@@ -448,6 +460,7 @@ model RoastingBatch {
   /// originally filled from a different roast.
   packagingSources      PackagingSource[]     @relation("PackagingSourceBatch")
   serialHistory         BatchSerialHistory[]
+  qcInvites             QcInvite[]
   packagingOperations   PackagingOperation[]
 
   @@unique([greenBeanId, batchNumber])
@@ -495,6 +508,33 @@ model QcRecord {
   @@index([batchId, date])
 }
 
+/// A guest evaluator invited to a batch's QC panel (owner decision D4, migration
+/// 20261023090000_production_qc_simplify). Only qc › manage invites. PRESENT = evaluates on the
+/// inviting device; LINK = sent the batch's guest link (WhatsApp under AutomationSettings.sendMode,
+/// or copied). PENDING until a guest record with the same name arrives (DONE), or the panel is
+/// finalized / the invite withdrawn (CANCELLED). Holds no customer or order data.
+model QcInvite {
+  id          String        @id @default(cuid())
+  batchId     String
+  batch       RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  /// PRESENT | LINK
+  channel     String
+  name        String
+  /// Normalised international digits when a WhatsApp number was given.
+  phone       String?
+  /// PENDING | DONE | CANCELLED
+  status      String        @default("PENDING")
+  /// The guest QcRecord that completed the invite.
+  qcRecordId  String?
+  /// The WhatsAppMessage queued for a LINK invite with a phone (ids only, audit convention).
+  messageId   String?
+  createdById String?
+  createdAt   DateTime      @default(now())
+  completedAt DateTime?
+
+  @@index([batchId, status])
+}
+
 model Delivery {
   id           String    @id @default(cuid())
   orderItemId  String
@@ -520,7 +560,32 @@ model Delivery {
   /// carrying a different intent is a client error, not a second shipment.
   intentHash String?
 
+  /// Which finished-goods lots this dispatch drew from (production simplification Phase D, gap
+  /// G09). One row per lot; the rows' quantities sum to this delivery's quantityUnits /
+  /// quantityKg. Empty on deliveries recorded before 20261023100000_delivery_lines: those carry
+  /// their single lot only on the ledger (InventoryMovement OUT, sourceDocType DELIVERY,
+  /// sourceDocId = this id), and readers fall back to it (services/delivery-lots.ts).
+  lines DeliveryLine[]
+
   @@index([date])
+}
+
+/// One lot's share of one Delivery. Written in the same transaction as the Delivery and the
+/// InventoryMovement OUT of that lot, never edited afterwards.
+model DeliveryLine {
+  id                 String           @id @default(cuid())
+  deliveryId         String
+  delivery           Delivery         @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  finishedGoodsLotId String
+  finishedGoodsLot   FinishedGoodsLot @relation(fields: [finishedGoodsLotId], references: [id])
+  /// Whole units drawn from this lot (SKU lines); null on a kilogram line.
+  quantityUnits      Int?
+  /// Kilograms drawn from this lot — derived from units on a SKU line, as on Delivery.
+  quantityKg         Float
+  createdAt          DateTime         @default(now())
+
+  @@unique([deliveryId, finishedGoodsLotId])
+  @@index([finishedGoodsLotId])
 }
 
 model CuppingSession {
@@ -665,6 +730,12 @@ model SystemConfig {
   /// Settings › Invoicing & tax: the VAT percent a NEW quotation line starts with. NULL = the
   /// built-in 15%. Issued documents keep the rate each line carries. CHECK 0–100.
   invoiceDefaultVatPercent     Decimal? @db.Decimal(5, 2)
+
+  // ─── QC (additive, migration 20261023090000_production_qc_simplify) ─────────────────────
+  /// Settings › Production & roasting › QC: the minimum number of evaluators a batch needs before
+  /// the QC decision (owner decision D1). NULL = not set by the owner: the built-in 2 applies.
+  /// CHECK 1–10. Fewer than this is an exceptional approval (qc › finalize_override, D2).
+  qcMinEvaluators              Int?
 }
 
 /// Settings › Production & roasting › Roasters (Figma 377:2, ROASTERS.md §4; RM1–RM5). Machine
@@ -1118,6 +1189,9 @@ model FinishedGoodsLot {
   /// draw from a different batch than the original fill, so lineage cannot be a single
   /// column — packedFromBatchId still names the first roast, and this carries the full story.
   sources PackagingSource[]
+
+  /// Deliveries that drew from this lot (Phase D; empty for dispatches before DeliveryLine).
+  deliveryLines DeliveryLine[]
 
   @@index([status])
   @@index([createdAt])

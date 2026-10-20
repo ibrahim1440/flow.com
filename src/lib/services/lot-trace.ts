@@ -99,8 +99,19 @@ export async function lotTrace(id: string) {
     events.push({ at: a.createdAt, kind: "RESERVED", text: { units: a.quantityUnits, kg: a.quantityKg, order: a.orderItem.order.orderNumber }, by: who(a.createdById) });
     if (a.status === "RELEASED") events.push({ at: a.updatedAt, kind: "RELEASED", text: { units: a.quantityUnits, order: a.orderItem.order.orderNumber }, by: null });
   }
-  for (const m of movements.filter((x) => x.category === "FINISHED_GOODS" && x.sourceDocType === "DELIVERY")) {
-    events.push({ at: m.timestamp, kind: "DELIVERED", text: { kg: -m.quantityChanged, note: m.notes }, by: who(m.userId) });
+  // One ledger row per lot per delivery (Phase D writes one for every lot a dispatch draws on),
+  // so this lot's DELIVERED events are its own share. The order and units come from the
+  // DeliveryLine where there is one; a delivery recorded before Phase D has only the ledger row.
+  const deliveryMoves = movements.filter((x) => x.category === "FINISHED_GOODS" && x.sourceDocType === "DELIVERY");
+  const deliveryIds = [...new Set(deliveryMoves.map((m) => m.sourceDocId).filter((x): x is string => !!x))];
+  const deliveryRows = deliveryIds.length ? await prisma.delivery.findMany({
+    where: { id: { in: deliveryIds } },
+    select: { id: true, orderItem: { select: { order: { select: { orderNumber: true } } } }, lines: { where: { finishedGoodsLotId: lot.id }, select: { quantityUnits: true } } },
+  }) : [];
+  const deliveryOf = new Map(deliveryRows.map((d) => [d.id, d]));
+  for (const m of deliveryMoves) {
+    const d = m.sourceDocId ? deliveryOf.get(m.sourceDocId) : undefined;
+    events.push({ at: m.timestamp, kind: "DELIVERED", text: { kg: -m.quantityChanged, note: m.notes, order: d?.orderItem.order.orderNumber ?? null, units: d?.lines[0]?.quantityUnits ?? null }, by: who(m.userId) });
   }
   for (const o of lot.packagingOperations) events.push({ at: o.createdAt, kind: "PACKED", text: { units: o.quantityUnits, kg: o.quantityKg, sku: lot.productSku?.skuCode ?? null }, by: who(o.userId) });
   if (!lot.packagingOperations.length) events.push({ at: lot.createdAt, kind: "PACKED", text: { units: lot.unitsProduced, kg: lot.quantityKg, sku: lot.productSku?.skuCode ?? null }, by: null });

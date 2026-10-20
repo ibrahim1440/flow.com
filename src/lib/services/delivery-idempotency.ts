@@ -67,8 +67,10 @@ export const roundKg = (v: number): number => Number(v.toFixed(3));
 
 export type DeliveryIntent = {
   orderItemId: string;
-  finishedGoodsLotId: string;
-  deliveryType: string;
+  /** Null on a lot-less dispatch (Phase D): the server picks the lots. */
+  finishedGoodsLotId: string | null;
+  /** As the caller sent it, or null when omitted. The persisted type is derived from quantity. */
+  deliveryType: string | null;
   quantityUnits: number | null;
   quantityKg: number | null;
   notes: string | null;
@@ -92,16 +94,26 @@ export function normalizeDeliveryIntent(body: Record<string, unknown>): IntentDe
   const orderItemId = typeof body.orderItemId === "string" ? body.orderItemId.trim() : "";
   if (!orderItemId) return { ok: false, message: "orderItemId is required." };
 
-  const finishedGoodsLotId =
-    typeof body.finishedGoodsLotId === "string" ? body.finishedGoodsLotId.trim() : "";
-  if (!finishedGoodsLotId) {
-    return { ok: false, message: "A finished goods lot is required for all deliveries." };
+  // Phase D (dispatch without lots): the lot is OPTIONAL. Omitted, null or blank means the
+  // server picks — the line's reservations first, then free stock, oldest lot first, across as
+  // many lots as needed. A named lot keeps the single-lot behaviour exactly, for the callers that
+  // predate this change.
+  if (body.finishedGoodsLotId !== undefined && body.finishedGoodsLotId !== null && typeof body.finishedGoodsLotId !== "string") {
+    return { ok: false, message: "finishedGoodsLotId must be a string when it is given." };
   }
+  const rawLot = typeof body.finishedGoodsLotId === "string" ? body.finishedGoodsLotId.trim() : "";
+  const finishedGoodsLotId = rawLot === "" ? null : rawLot;
 
-  const deliveryType =
-    typeof body.deliveryType === "string" ? body.deliveryType.trim().toLowerCase() : "";
-  if (deliveryType !== "full" && deliveryType !== "partial") {
-    return { ok: false, message: 'deliveryType must be either "full" or "partial".' };
+  // Optional too: full / partial is derived from the quantity (it is "full" when this dispatch
+  // completes the line). A value that IS sent must still be one of the two, and stays part of
+  // the intent so a retry of an older client's request hashes exactly as it did before.
+  let deliveryType: string | null = null;
+  if (body.deliveryType !== undefined && body.deliveryType !== null && body.deliveryType !== "") {
+    const t = typeof body.deliveryType === "string" ? body.deliveryType.trim().toLowerCase() : "";
+    if (t !== "full" && t !== "partial") {
+      return { ok: false, message: 'deliveryType must be either "full" or "partial".' };
+    }
+    deliveryType = t;
   }
 
   const hasUnits = body.quantityUnits !== undefined && body.quantityUnits !== null;

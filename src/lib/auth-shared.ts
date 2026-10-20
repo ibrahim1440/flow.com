@@ -140,6 +140,11 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "edit_record", label: "Edit QC records" },
     { key: "view_records", label: "View QC history" },
     { key: "manage", label: "Finalize QC panel / generate guest links" },
+    // Owner decision D2 (production simplification): approving a batch with fewer evaluators than
+    // the minimum (Settings › Production › QC, default 2) is an exceptional approval — a written
+    // reason, an explicit confirmation, recorded on the batch. Privileged with a step-up
+    // (src/lib/auth/privileged.ts) and therefore NOT part of the qc role's defaults.
+    { key: "finalize_override", label: "Exceptional approval with fewer evaluators than the minimum" },
   ],
   dispatch: [
     { key: "mark_delivered", label: "Mark as delivered" },
@@ -303,7 +308,9 @@ export function buildDefaultPermissions(role: string): Permissions {
     case "qc":
       return {
         dashboard: allEdit("dashboard"), inventory: none(), orders: none(),
-        production: none(), qc: allEdit("qc"), packaging: none(),
+        // qc › finalize_override withheld (owner decision D2): it is privileged, so granting it by
+        // default would make every QC account privileged (username + PIN). Granted individually.
+        production: none(), qc: allEdit("qc", ["finalize_override"]), packaging: none(),
         dispatch: none(), history: none(), analytics: none(),
         labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),
         customers: none(),

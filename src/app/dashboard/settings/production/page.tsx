@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Metrics, OpsLoading, OpsRoot } from "@/components/ops/ui";
 import { useD21Phone, useD21Title, usePhone } from "@/components/shell/page-context";
 import { SettingsFrame } from "../../_components/tools-ui";
+import { QcMinSection } from "./_parts/qc-min";
 import {
   BASE, CapacityNote, N, Plus, ReadOnlyNote, Retry, RoastersHead, StatusText, TYPE, dayLabel, useLang, useOverview, windowText,
   type Roaster,
@@ -135,6 +136,7 @@ export default function RoastersPage() {
               <div className="ss-bh"><h2>{L("محامص العينات", "Sample roasters")}</h2></div>
               {samples.length === 0 ? empty : phone ? list(samples) : table(samples, L("محامص العينات", "Sample roasters"))}
             </section>
+            <QcMinSection />
             <CapacityNote short={phone} />
             {data.can.edit ? null : <ReadOnlyNote />}
           </div>

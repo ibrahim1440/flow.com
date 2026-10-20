@@ -1,3 +1,5 @@
+import { autoCloseAfterDelivery, autoPrepareOrder } from "@/lib/services/orders/preparation";
+import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
@@ -11,6 +13,9 @@ import {
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { consumeShelfStock, lotMatchFilter, roundKg, trimReservationToDemand } from "@/lib/services/shelf-allocation";
 import { consumeFinishedUnits, kgForUnits, trimUnitReservationToDemand } from "@/lib/services/finished-products";
+import {
+  kgCandidateLotIds, kgPlanCandidates, planDispatch, splitKg, unitCandidateLotIds, unitPlanCandidates, withDeliveryLots,
+} from "@/lib/services/delivery-lots";
 import {
   DELIVERY_ALLOWED_STATUSES,
   isDeliveryAllowedFrom,
@@ -36,7 +41,9 @@ export async function GET() {
       orderItem: { include: { order: { include: { customer: customerContact ? true : { select: CUSTOMER_DELIVERY_SELECT } } } } },
     },
   });
-  return NextResponse.json(deliveries);
+  // Phase D: each row also carries `lots` — its DeliveryLine rows, or for a delivery recorded
+  // before them, the single lot its ledger row names.
+  return NextResponse.json(await withDeliveryLots(prisma, deliveries));
 }
 
 const IDEMPOTENCY_MISMATCH =
@@ -54,7 +61,16 @@ function isRequestKeyConflict(err: unknown): boolean {
 }
 
 /** A replay carries the original row; a fresh dispatch is created. 200 vs 201 says which. */
-type DeliveryOutcome = { delivery: unknown; replayed: boolean };
+type DeliveryOutcome = { delivery: { id: string }; replayed: boolean; orderId?: string; closed?: boolean };
+
+/**
+ * The response is the Delivery row as before, plus `lots`: which lots it drew from (read-only
+ * detail for the dispatcher, Phase D). A replay answers with the same lots as the original.
+ */
+async function withLines<T extends { id: string }>(delivery: T) {
+  const [row] = await withDeliveryLots(prisma, [delivery]);
+  return row;
+}
 
 export async function POST(request: Request) {
   // Authorization first, before the key is even read: possession of an Idempotency-Key
@@ -77,7 +93,7 @@ export async function POST(request: Request) {
 
   // Everything below reads the canonical intent, never the raw body — the values that are
   // hashed are the values that get executed and persisted.
-  const { orderItemId, finishedGoodsLotId, deliveryType, notes } = intent;
+  const { orderItemId, finishedGoodsLotId, notes } = intent;
 
   // ── Fast replay probe ───────────────────────────────────────────────────
   // An optimisation, not the concurrency control: it spares the ordinary retry from
@@ -88,7 +104,7 @@ export async function POST(request: Request) {
     if (alreadyDone.intentHash !== intentHash) {
       return NextResponse.json({ error: IDEMPOTENCY_MISMATCH }, { status: 422 });
     }
-    return NextResponse.json(alreadyDone, { status: 200 });
+    return NextResponse.json(await withLines(alreadyDone), { status: 200 });
   }
 
   try {
@@ -102,28 +118,34 @@ export async function POST(request: Request) {
       });
       if (!orderItem) throw { _appCode: 404, message: "Order item not found" };
 
+      const unitLine = orderItem.quantityUnits !== null && !!orderItem.productSku;
+
+      // ── Which lots this dispatch may touch ───────────────────────────────
+      // A named lot (the request shape before Phase D) is the only one. A lot-less dispatch may
+      // draw from every lot of the line's coffee that still holds stock, plus the lots the line
+      // holds a reservation on — the server picks among them below. Read unlocked: this is only
+      // the set to lock; every balance is re-read after the locks are held.
+      const lockSet: string[] = finishedGoodsLotId
+        ? [finishedGoodsLotId]
+        : unitLine
+        ? await unitCandidateLotIds(tx, orderItemId, orderItem.productSku!.id)
+        : await kgCandidateLotIds(tx, orderItem);
+
       // ── Canonical lock order ──────────────────────────────────────────────
-      // This route used to claim the OrderItem first and only then consume allocations and
-      // the lot, which is OrderItem → ALLOC — the exact reverse of preparation review, and
-      // a deadlock whenever a dispatcher shipped a line while preparation re-reviewed the
-      // same order. Taking the allocation and lot locks here, before the claim, puts
-      // dispatch on the shared ALLOC → OrderItem → Order order.
-      //
-      // Scoped to this line and this lot rather than the whole order, so two lines of one
-      // order can still be dispatched at the same time.
-      await lockDeliveryResources(tx, orderItemId, finishedGoodsLotId);
+      // StockAllocation → FinishedGoodsLot (id ASC) → OrderItem → Order, the shared order of
+      // every lifecycle transaction (order-operations.ts). The allocation and lot locks are
+      // taken here, before the claim on the OrderItem, so dispatch never reaches backwards for
+      // a lot while holding the line — whether it ships from one lot or from several. Scoped to
+      // this line and its lots rather than the whole order, so two lines of one order can still
+      // be dispatched at the same time.
+      await lockDeliveryResources(tx, orderItemId, lockSet);
 
       // ── Post-lock replay probe ──────────────────────────────────────────
-      // Mandatory, and it must run BEFORE any state-dependent rejection.
-      //
-      // Two identical requests can both pass the fast probe. One wins the lot lock; the
-      // other waits. When the winner commits, the loser is granted the lock and — under
-      // READ COMMITTED, where each statement takes a fresh snapshot — its next statement
-      // sees the winner's committed Delivery. Without this probe the loser would instead
-      // walk into the outstanding-quantity check, find nothing left to ship because the
-      // winner just shipped it, and return 409: a retry of a dispatch that succeeded,
-      // told it failed. The lot is always locked by both (it is part of the intent), so
-      // this ordering is guaranteed rather than hoped for.
+      // Mandatory, and before any state-dependent rejection: a retry that waited on the
+      // winner's locks must be told the dispatch happened, not that nothing is left to ship.
+      // A named-lot retry always shares that lot with the winner; a lot-less retry shares the
+      // line's reservations and shelf lots, and in the worst case reaches the unique index on
+      // requestKey, which converts the conflict into the same replay below.
       const committed = await tx.delivery.findUnique({ where: { requestKey } });
       if (committed) {
         if (committed.intentHash !== intentHash) {
@@ -132,12 +154,8 @@ export async function POST(request: Request) {
         return { delivery: committed, replayed: true };
       }
 
-      // Shipping is an order-level decision, not a line-level one. Without this check the
-      // route would record a delivery against any order at all: one still Waiting Approval,
-      // one a manager put On Hold, one already Cancelled or Rejected. Coffee physically
-      // leaves the shelf in every case, and for a cancelled order it leaves against
-      // reservations the cancellation has already handed back — so the same units can be
-      // promised to somebody else and shipped here at the same time.
+      // Shipping is an order-level decision, not a line-level one: never against an order
+      // still Waiting Approval, On Hold, Cancelled or Rejected.
       if (!isDeliveryAllowedFrom(orderItem.order.status as OrderStatus)) {
         throw {
           _appCode: 409,
@@ -145,11 +163,7 @@ export async function POST(request: Request) {
         };
       }
 
-      // Blocking a line is the operator saying this item cannot be prepared. It receives no
-      // allocation and it holds the order out of Ready for Shipping — but the order itself
-      // stays in "Preparing", which the status check above allows, so without this a blocked
-      // line on an otherwise live order could still be dispatched. Line-level, because
-      // blocking is a line-level decision.
+      // A blocked line receives no allocation and must not ship either.
       if (orderItem.preparationDecision === "Blocked") {
         throw {
           _appCode: 409,
@@ -158,16 +172,9 @@ export async function POST(request: Request) {
       }
 
       // ── SKU lines ship whole units ────────────────────────────────────────
-      // The kilogram path below draws on availableQty/reservedQty, which stay at 0 on a
-      // unit-tracked lot — so it could never ship a SKU line at all, and the units the
-      // preparation review had reserved would sit there forever. Everything here is in
-      // units; quantityKg is written alongside as the derived equivalent, because the
-      // ledger, recalcOrderItemStatus and every dispatch report read it.
-      if (orderItem.quantityUnits !== null && orderItem.productSku) {
-        const sku = orderItem.productSku;
-        // The axis is decided by the line, not by the caller. An irrelevant field is
-        // refused rather than ignored: two bodies describing one dispatch would otherwise
-        // hash differently and defeat the key.
+      if (unitLine) {
+        const sku = orderItem.productSku!;
+        // The axis is decided by the line, not by the caller.
         if (intent.quantityUnits === null) {
           throw {
             _appCode: 400,
@@ -176,7 +183,8 @@ export async function POST(request: Request) {
         }
         const units = intent.quantityUnits;
 
-        const outstandingUnits = orderItem.quantityUnits - orderItem.deliveredUnits;
+        // Over-delivery guard (read): the conditional increment below is the enforcement.
+        const outstandingUnits = (orderItem.quantityUnits ?? 0) - orderItem.deliveredUnits;
         if (outstandingUnits <= 0) {
           throw { _appCode: 400, message: "This order item has already been delivered in full." };
         }
@@ -187,35 +195,46 @@ export async function POST(request: Request) {
           };
         }
 
-        const lot = await tx.finishedGoodsLot.findUnique({
-          where: { id: finishedGoodsLotId },
-          select: { id: true, productSkuId: true, isUnitTracked: true },
-        });
-        if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
-        if (!lot.isUnitTracked || lot.productSkuId !== sku.id) {
-          throw {
-            _appCode: 409,
-            message: `Selected lot does not hold units of ${sku.skuCode}.`,
-          };
+        // ── The lots, and how much from each ───────────────────────────────
+        let plan: { lotId: string; units: number }[];
+        if (finishedGoodsLotId) {
+          const lot = await tx.finishedGoodsLot.findUnique({
+            where: { id: finishedGoodsLotId },
+            select: { id: true, productSkuId: true, isUnitTracked: true },
+          });
+          if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
+          if (!lot.isUnitTracked || lot.productSkuId !== sku.id) {
+            throw { _appCode: 409, message: `Selected lot does not hold units of ${sku.skuCode}.` };
+          }
+          plan = [{ lotId: finishedGoodsLotId, units }];
+        } else {
+          const picked = planDispatch(await unitPlanCandidates(tx, orderItemId, sku.id, lockSet), units);
+          if (picked.covered < units) {
+            throw {
+              _appCode: 409,
+              message: `Only ${picked.ready} unit(s) of ${sku.skuCode} are ready to ship for this line (its reservations plus free stock). Nothing was delivered.`,
+            };
+          }
+          plan = picked.lots.map((l) => ({ lotId: l.lotId, units: l.quantity }));
         }
 
         const shippedKg = kgForUnits(sku, units);
 
-        // The claim, and the first write of the transaction: the unique index on
-        // requestKey is the final arbiter for two requests that both passed the probes,
-        // and placing it before any consumption means the loser aborts having spent
-        // nothing.
+        // The claim, and the first write of the transaction: the unique index on requestKey is
+        // the final arbiter for two requests that both passed the probes. The type is
+        // provisional until the claim below says whether this dispatch completes the line.
         const newDelivery = await tx.delivery.create({
           data: {
-            orderItemId, quantityUnits: units, quantityKg: shippedKg, deliveryType, notes,
+            orderItemId, quantityUnits: units, quantityKg: shippedKg,
+            deliveryType: units >= outstandingUnits ? "full" : "partial", notes,
             requestKey, intentHash,
           },
         });
 
-        // Conditional increment, same reasoning as the kilogram path: the outstanding
-        // check above was an unlocked read, so two dispatchers could both pass it.
+        // Over-delivery guard (write): conditional increment, so two dispatchers that both
+        // passed the unlocked outstanding check cannot both ship.
         const claimed = await tx.orderItem.updateMany({
-          where: { id: orderItemId, deliveredUnits: { lte: orderItem.quantityUnits - units } },
+          where: { id: orderItemId, deliveredUnits: { lte: (orderItem.quantityUnits ?? 0) - units } },
           data: { deliveredUnits: { increment: units }, deliveredQty: { increment: shippedKg } },
         });
         if (claimed.count === 0) {
@@ -229,44 +248,60 @@ export async function POST(request: Request) {
           where: { id: orderItemId },
           select: { deliveredUnits: true, quantityUnits: true },
         });
+        const lineDone = (updated.quantityUnits ?? 0) - updated.deliveredUnits <= 0;
         await tx.orderItem.update({
           where: { id: orderItemId },
-          data: {
-            deliveryStatus:
-              (updated.quantityUnits ?? 0) - updated.deliveredUnits <= 0 ? "Delivered" : "Partial Delivered",
-          },
+          data: { deliveryStatus: lineDone ? "Delivered" : "Partial Delivered" },
         });
+        // Derived from the quantity, never taken from the caller: full = this dispatch
+        // completed the line.
+        const derivedType = lineDone ? "full" : "partial";
+        const delivery = derivedType === newDelivery.deliveryType
+          ? newDelivery
+          : await tx.delivery.update({ where: { id: newDelivery.id }, data: { deliveryType: derivedType } });
 
-        const shipped = await consumeFinishedUnits(tx, orderItem, finishedGoodsLotId, units, user.id);
-        if (!shipped) {
-          throw {
-            _appCode: 409,
-            message: "Insufficient free units on the selected lot — they may be reserved for another order.",
-          };
+        // ── Ship lot by lot: reservation first, then free units (consumeFinishedUnits) ──
+        const kgShares = splitKg(shippedKg, plan.map((p) => kgForUnits(sku, p.units)));
+        const lines: { lotId: string; batchNumber: string; units: number; kg: number }[] = [];
+        for (const [i, p] of plan.entries()) {
+          const shipped = await consumeFinishedUnits(tx, orderItem, p.lotId, p.units, user.id);
+          if (!shipped) {
+            throw {
+              _appCode: 409,
+              message: finishedGoodsLotId
+                ? "Insufficient free units on the selected lot — they may be reserved for another order."
+                : "The ready units changed while this delivery was being recorded. Please reload and retry.",
+            };
+          }
+          const lot = await tx.finishedGoodsLot.update({
+            where: { id: p.lotId },
+            data: { status: shipped.newUnits <= 0 ? "SHIPPED" : "AVAILABLE" },
+            select: { batchNumber: true },
+          });
+          // One ledger row per lot: the inventory ledger records every lot this dispatch drew on.
+          await tx.inventoryMovement.create({
+            data: {
+              type: "OUT",
+              category: "FINISHED_GOODS",
+              referenceEntityId: p.lotId,
+              quantityChanged: -kgShares[i],
+              previousQuantity: kgForUnits(sku, shipped.previousUnits),
+              newQuantity: kgForUnits(sku, shipped.newUnits),
+              sourceDocType: "DELIVERY",
+              sourceDocId: delivery.id,
+              userId: user.id,
+              notes: `${p.units} x ${sku.skuCode}`,
+            },
+          });
+          lines.push({ lotId: p.lotId, batchNumber: lot.batchNumber, units: p.units, kg: kgShares[i] });
         }
-
-        await tx.finishedGoodsLot.update({
-          where: { id: finishedGoodsLotId },
-          data: { status: shipped.newUnits <= 0 ? "SHIPPED" : "AVAILABLE" },
+        // Traceability (gap G09): which lots, how much from each. Sums equal the Delivery.
+        await tx.deliveryLine.createMany({
+          data: lines.map((l) => ({ deliveryId: delivery.id, finishedGoodsLotId: l.lotId, quantityUnits: l.units, quantityKg: l.kg })),
         });
 
-        await tx.inventoryMovement.create({
-          data: {
-            type: "OUT",
-            category: "FINISHED_GOODS",
-            referenceEntityId: finishedGoodsLotId,
-            quantityChanged: -shippedKg,
-            previousQuantity: kgForUnits(sku, shipped.previousUnits),
-            newQuantity: kgForUnits(sku, shipped.newUnits),
-            sourceDocType: "DELIVERY",
-            sourceDocId: newDelivery.id,
-            userId: user.id,
-            notes: `${units} x ${sku.skuCode}`,
-          },
-        });
-
-        // Hand back units this line no longer needs — it may hold reservations on lots
-        // this shipment never touched.
+        // Hand back units this line no longer needs — it may hold reservations on lots this
+        // shipment never touched.
         await trimUnitReservationToDemand(tx, {
           id: orderItemId,
           quantityUnits: updated.quantityUnits ?? 0,
@@ -275,22 +310,25 @@ export async function POST(request: Request) {
 
         await recalcOrderItemStatus(orderItemId, tx);
 
-        // Late lifecycle barrier for the unit path — same reasoning as the kilogram path
-        // below. Both branches return their own delivery, so both need the check.
+        // Late lifecycle barrier: locks the Order and re-reads its status; a hold or cancel
+        // that committed while this dispatch was in flight rolls all of it back.
         await assertOrderStillAcceptsDelivery(tx, orderItemId);
         await emitAutomationEvent(tx, {
           eventType: "delivery.recorded",
           subjectType: "Delivery",
-          subjectId: newDelivery.id,
-          payload: { orderItemId, units, deliveryType },
+          subjectId: delivery.id,
+          // Backward compatible: the fields a rule could read before stay as they were; `lots`
+          // is added for rules that want the traceability.
+          payload: { orderItemId, units, deliveryType: derivedType, lots: lines.map((l) => ({ lotId: l.lotId, batchNumber: l.batchNumber, units: l.units, kg: l.kg })) },
           actorId: user.id,
         });
-        return { delivery: newDelivery, replayed: false };
+        // Owner decision O2 (Phase B item 8): the last delivery closes the order, in this same
+        // transaction, when completionRefusal passes — never while a reservation is live.
+        const closed = await autoCloseAfterDelivery(tx, orderItem.orderId, { id: user.id, name: user.name });
+        return { delivery, replayed: false, orderId: orderItem.orderId, closed };
       }
 
-      // Same rule on the legacy axis, and the quantity is the one canonical value that was
-      // hashed — rounded once, in normalizeDeliveryIntent, then persisted, delivered,
-      // drawn from the lot and written to the ledger unchanged.
+      // ── Kilogram lines (legacy bulk) ──────────────────────────────────────
       if (intent.quantityKg === null) {
         throw {
           _appCode: 400,
@@ -302,12 +340,6 @@ export async function POST(request: Request) {
         throw { _appCode: 400, message: "quantityKg must be a positive number." };
       }
 
-      // Eligibility is a property of the SHELF, not of this order item's own roasting
-      // history. The previous rule measured packaged bags of batches belonging to this
-      // order item and then deducted from whichever lot the operator picked — so a new
-      // order could never draw on a full shelf, while a delivery that did pass could
-      // reduce a lot the check never looked at. Both halves now speak about the same
-      // kilograms: the lot must actually be able to cover the shipment.
       const outstanding = +(orderItem.quantityKg - orderItem.deliveredQty).toFixed(3);
       if (outstanding <= 0) {
         throw { _appCode: 400, message: "This order item has already been delivered in full." };
@@ -319,40 +351,40 @@ export async function POST(request: Request) {
         };
       }
 
-      // Validate FGL existence upfront (fail-fast, before any writes). Quantity is NOT read here;
-      // it is checked atomically in the conditional update below.
+      let kgPlan: { lotId: string; kg: number }[];
       if (finishedGoodsLotId) {
-        const lot = await tx.finishedGoodsLot.findUnique({
-          where: { id: finishedGoodsLotId },
-          select: { id: true },
-        });
+        const lot = await tx.finishedGoodsLot.findUnique({ where: { id: finishedGoodsLotId }, select: { id: true } });
         if (!lot) throw { _appCode: 404, message: "Finished goods lot not found." };
-
-        // Whether this lot may serve this order item is decided by lotMatchFilter — the
-        // same predicate the reservation path uses. Restating the rule here is how the two
-        // sides drifted apart once lotMatchFilter grew its green-bean tier: an order line
-        // naming a bean but no product could reserve a stock lot and then be refused
-        // delivery of it, stranding the coffee and deadlocking the order.
+        // lotMatchFilter is the one predicate for "may this lot serve this line" — the same one
+        // the reservation path uses.
         const matches = await tx.finishedGoodsLot.findFirst({
           where: { id: finishedGoodsLotId, ...lotMatchFilter(orderItem) },
           select: { id: true },
         });
-
         if (!matches) {
           throw { _appCode: 409, message: "Selected finished goods lot does not match this order item." };
         }
+        kgPlan = [{ lotId: finishedGoodsLotId, kg: qty }];
+      } else {
+        const picked = planDispatch(await kgPlanCandidates(tx, orderItem, lockSet), qty, true);
+        if (picked.covered + 0.0005 < qty) {
+          throw {
+            _appCode: 409,
+            message: `Only ${picked.ready}kg is ready to ship for this line (its reservations plus free stock). Nothing was delivered.`,
+          };
+        }
+        kgPlan = picked.lots.map((l) => ({ lotId: l.lotId, kg: l.quantity }));
       }
 
-      // 1. Create delivery record — needed first so its ID is available for the ledger
       // The claim, before any consumption — see the unit branch.
       const newDelivery = await tx.delivery.create({
-        data: { orderItemId, quantityKg: qty, deliveryType, notes, requestKey, intentHash },
+        data: {
+          orderItemId, quantityKg: qty, deliveryType: qty >= outstanding - 0.0005 ? "full" : "partial",
+          notes, requestKey, intentHash,
+        },
       });
 
-      // 2. Update delivery tracking on the order item.
-      //    Conditional increment: the `outstanding` check above was an unlocked read, so
-      //    two dispatchers submitting the same shipment at once would both pass it. The
-      //    WHERE clause re-checks the ceiling at write time and the count tells us who won.
+      // Over-delivery guard (write).
       const claimed = await tx.orderItem.updateMany({
         where: { id: orderItemId, deliveredQty: { lte: roundKg(orderItem.quantityKg - qty) } },
         data: { deliveredQty: { increment: qty } },
@@ -367,79 +399,87 @@ export async function POST(request: Request) {
         where: { id: orderItemId },
         select: { deliveredQty: true, quantityKg: true },
       });
-      const newDeliveryStatus = updatedItem.quantityKg - updatedItem.deliveredQty <= 0
-        ? "Delivered"
-        : "Partial Delivered";
+      const kgLineDone = updatedItem.quantityKg - updatedItem.deliveredQty <= 0;
       await tx.orderItem.update({
         where: { id: orderItemId },
-        data: { deliveryStatus: newDeliveryStatus },
+        data: { deliveryStatus: kgLineDone ? "Delivered" : "Partial Delivered" },
       });
+      const kgType = kgLineDone ? "full" : "partial";
+      const delivery = kgType === newDelivery.deliveryType
+        ? newDelivery
+        : await tx.delivery.update({ where: { id: newDelivery.id }, data: { deliveryType: kgType } });
 
-      // 3. Ship the kilograms off the shelf. consumeShelfStock draws down this item's own
-      //    reservation first and only touches free stock for the remainder, so a delivery
-      //    can never ship coffee that is promised to a different order.
-      const shipped = await consumeShelfStock(tx, orderItem, finishedGoodsLotId, qty, user.id);
-      if (!shipped) {
-        throw {
-          _appCode: 409,
-          message: "Insufficient free quantity on the selected finished goods lot — it may be reserved for another order.",
-        };
+      // Ship the kilograms lot by lot. consumeShelfStock draws down this item's own
+      // reservation on the lot first and only touches free stock for the remainder.
+      const kgShares = splitKg(qty, kgPlan.map((p) => p.kg));
+      const kgLines: { lotId: string; batchNumber: string; kg: number }[] = [];
+      for (const [i, p] of kgPlan.entries()) {
+        const shipped = await consumeShelfStock(tx, orderItem, p.lotId, kgShares[i], user.id);
+        if (!shipped) {
+          throw {
+            _appCode: 409,
+            message: finishedGoodsLotId
+              ? "Insufficient free quantity on the selected finished goods lot — it may be reserved for another order."
+              : "The ready stock changed while this delivery was being recorded. Please reload and retry.",
+          };
+        }
+        const lot = await tx.finishedGoodsLot.update({
+          where: { id: p.lotId },
+          data: { status: shipped.newQuantity <= 0 ? "SHIPPED" : "AVAILABLE" },
+          select: { batchNumber: true },
+        });
+        await tx.inventoryMovement.create({
+          data: {
+            type: "OUT",
+            category: "FINISHED_GOODS",
+            referenceEntityId: p.lotId,
+            quantityChanged: -kgShares[i],
+            previousQuantity: shipped.previousQuantity,
+            newQuantity: shipped.newQuantity,
+            sourceDocType: "DELIVERY",
+            sourceDocId: delivery.id,
+            userId: user.id,
+            notes: null,
+          },
+        });
+        kgLines.push({ lotId: p.lotId, batchNumber: lot.batchNumber, kg: kgShares[i] });
       }
-
-      const newLotStatus = shipped.newQuantity <= 0 ? "SHIPPED" : "AVAILABLE";
-      await tx.finishedGoodsLot.update({
-        where: { id: finishedGoodsLotId },
-        data: { status: newLotStatus },
+      await tx.deliveryLine.createMany({
+        data: kgLines.map((l) => ({ deliveryId: delivery.id, finishedGoodsLotId: l.lotId, quantityUnits: null, quantityKg: l.kg })),
       });
 
-      await tx.inventoryMovement.create({
-        data: {
-          type: "OUT",
-          category: "FINISHED_GOODS",
-          referenceEntityId: finishedGoodsLotId,
-          quantityChanged: -qty,
-          previousQuantity: shipped.previousQuantity,
-          newQuantity: shipped.newQuantity,
-          sourceDocType: "DELIVERY",
-          sourceDocId: newDelivery.id,
-          userId: user.id,
-          notes: null,
-        },
-      });
-
-      // 4. Hand back any promise this item no longer needs. An item may hold reservations
-      //    on several lots while a delivery draws on only one of them; without this the
-      //    leftovers stay promised to an order that is already satisfied, and the coffee
-      //    behind them is invisible to every other order forever.
+      // Hand back any promise this item no longer needs (it may hold kg on lots it never drew on).
       await trimReservationToDemand(tx, {
         ...orderItem,
         deliveredQty: updatedItem.deliveredQty,
       });
 
-      // 5. Recalculate productionStatus + remainingQty (reads the new deliveredQty committed above)
       await recalcOrderItemStatus(orderItemId, tx);
 
-      // 6. Late lifecycle barrier — the last acquisition, after ALLOC and OrderItem.
-      // The order-status check at the top of this transaction read through an unlocked
-      // nested select, so a cancellation committing while this delivery was in flight was
-      // invisible to it and the shipment went out against a dead order. This locks the
-      // Order row and re-reads the status as of now; a cancel that got there first is seen
-      // here and the rollback takes the delivery row, the delivered units, the allocation
-      // consumption and the lot decrement with it.
+      // Late lifecycle barrier — the last acquisition, after ALLOC, lots and OrderItem.
       await assertOrderStillAcceptsDelivery(tx, orderItemId);
 
       await emitAutomationEvent(tx, {
         eventType: "delivery.recorded",
         subjectType: "Delivery",
-        subjectId: newDelivery.id,
-        payload: { orderItemId, kg: qty, deliveryType },
+        subjectId: delivery.id,
+        payload: { orderItemId, kg: qty, deliveryType: kgType, lots: kgLines.map((l) => ({ lotId: l.lotId, batchNumber: l.batchNumber, units: null, kg: l.kg })) },
         actorId: user.id,
       });
+      const closed = await autoCloseAfterDelivery(tx, orderItem.orderId, { id: user.id, name: user.name });
 
-      return { delivery: newDelivery, replayed: false };
+      return { delivery, replayed: false, orderId: orderItem.orderId, closed };
     }, TX_OPTS);
 
-    return NextResponse.json(outcome.delivery, { status: outcome.replayed ? 200 : 201 });
+    // Phase B item 4: an order the delivery did not close is recomputed after the commit (its
+    // remaining lines' cover, and the production orders behind it); a closed one has its open
+    // production orders settled.
+    if (!outcome.replayed && outcome.orderId) {
+      const actor = { id: user.id, name: user.name };
+      if (outcome.closed) await settleProductionOrders({ orderId: outcome.orderId }, actor);
+      else await autoPrepareOrder(outcome.orderId, "delivery", actor);
+    }
+    return NextResponse.json(await withLines(outcome.delivery), { status: outcome.replayed ? 200 : 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
       const e = err as { _appCode: number; message: string };
@@ -461,7 +501,7 @@ export async function POST(request: Request) {
         if (winner.intentHash !== intentHash) {
           return NextResponse.json({ error: IDEMPOTENCY_MISMATCH }, { status: 422 });
         }
-        return NextResponse.json(winner, { status: 200 });
+        return NextResponse.json(await withLines(winner), { status: 200 });
       }
       // The row that caused the conflict is gone — a concurrent delete, or a rollback
       // between the conflict and this read. Retryable, and emphatically NOT a second

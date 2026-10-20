@@ -1,5 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
+import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -180,4 +181,21 @@ export async function createOrderFromQuote(
     isFirstOrder: link.isFirstOrder,
     replayed: false,
   };
+}
+
+/**
+ * Preparation for an order raised from a quotation (production simplification, Phase B item 4).
+ *
+ * createOrderFromQuote runs inside the caller's transaction, so preparation cannot run there —
+ * it reserves stock and must see the order committed. The route calls this right after its
+ * transaction: a new order gets the same automatic preparation as a manual one (shelf reserved,
+ * status derived, production orders for any shortfall); a replayed conversion gets nothing,
+ * because its order already had it. Best-effort, never throws (see autoPrepareOrder).
+ */
+export async function prepareConvertedOrder(
+  result: ConversionResult,
+  actor: { id: string; name: string },
+): Promise<void> {
+  if (result.replayed) return;
+  await autoPrepareOrder(result.orderId, "order_created", actor);
 }

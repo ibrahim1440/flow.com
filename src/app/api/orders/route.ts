@@ -7,6 +7,9 @@ import { handleDomainError } from "@/lib/api-error";
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
+import { deliveryLotsFor } from "@/lib/services/delivery-lots";
+import { autoPrepareOrder } from "@/lib/services/orders/preparation";
+import { orderPipelines } from "@/lib/services/orders/pipeline";
 
 export async function GET(request: Request) {
   // Production and Dispatch workers need to read orders to see what to roast / deliver
@@ -66,7 +69,16 @@ export async function GET(request: Request) {
       activities: { orderBy: { createdAt: "asc" } },
     },
   });
-  return NextResponse.json(orders);
+  // Phase D: each delivery also names the lots it drew from (DeliveryLine, or for a delivery
+  // recorded before it, the lot on its ledger row). Two queries for the whole list.
+  const lots = await deliveryLotsFor(prisma, orders.flatMap((o) => o.items.flatMap((i) => i.deliveries.map((d) => d.id))));
+  // Phase B: the orders board's roast → QC → pack → delivery bar, computed (additive field).
+  const pipelines = await orderPipelines(prisma, orders);
+  return NextResponse.json(orders.map((o) => ({
+    ...o,
+    pipeline: pipelines.get(o.id) ?? null,
+    items: o.items.map((i) => ({ ...i, deliveries: i.deliveries.map((d) => ({ ...d, lots: lots.get(d.id) ?? [] })) })),
+  })));
 }
 
 export async function POST(request: Request) {
@@ -123,6 +135,19 @@ export async function POST(request: Request) {
       },
       TX_OPTS,
     );
+
+    // Phase B item 4: preparation runs on creation — the shelf is reserved, the decision and the
+    // status derived, production orders raised for any shortfall — after the order committed.
+    // The response carries the result (status and line decisions), same shape as before.
+    const prepared = await autoPrepareOrder(order.id, "order_created", { id: user.id, name: user.name });
+    if (prepared?.order) {
+      const byId = new Map(prepared.order.items.map((i) => [i.id, i]));
+      return NextResponse.json({
+        ...order,
+        status: prepared.order.status,
+        items: order.items.map((i) => ({ ...i, ...(byId.get(i.id) ?? {}) })),
+      }, { status: 201 });
+    }
 
     return NextResponse.json(order, { status: 201 });
   } catch (err) {

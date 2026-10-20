@@ -423,6 +423,12 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         title: ar ? <>أُنشئ الطلب <bdi className="id">#{e.order.orderNumber}</bdi> · <span className="n">{money2(e.order.totalKg)}</span> كغ{e.order.value && <> · <span className="n">{money2(e.order.value)}</span> ر.س</>}</>
           : <>Order <bdi className="id">#{e.order.orderNumber}</bdi> created · <span className="n">{money2(e.order.totalKg)}</span> kg{e.order.value && <> · SAR <span className="n">{money2(e.order.value)}</span></>}</>,
       };
+      case "delivery": return {
+        title: ar
+          ? <>سُلّم للطلب <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> وحدة</> : <><span className="n">{money2(e.delivery.kg)}</span> كغ</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · اكتمل السطر" : ""}</>
+          : <>Delivered for order <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> units</> : <><span className="n">{money2(e.delivery.kg)}</span> kg</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · line complete" : ""}</>,
+        detail: e.delivery.lots.length ? `${L("اللوتات", "Lots")}: ${e.delivery.lots.join(ar ? "، " : ", ")}` : undefined,
+      };
       case "payment": return {
         title: ar ? <>دفعة <span className="n">{money2(e.payment.amount)}</span> ر.س{e.payment.orderNumber != null && <> للطلب <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>
           : <>Payment SAR <span className="n">{money2(e.payment.amount)}</span>{e.payment.orderNumber != null && <> for order <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>,

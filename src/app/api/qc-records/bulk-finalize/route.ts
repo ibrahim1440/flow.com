@@ -1,134 +1,104 @@
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { requireSub } from "@/lib/auth-server";
+import { privilegedGate, requireSub } from "@/lib/auth-server";
+import { hasSubPrivilege } from "@/lib/auth-shared";
 import { isValidTransition } from "@/lib/batch-transitions";
-import { handlePrismaError } from "@/lib/api-error";
-import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
-import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
-import { automationListens, emitAutomationEvent } from "@/lib/automation/emit";
+import { handleDomainError } from "@/lib/api-error";
+import { readQcSettings } from "@/lib/services/settings/sections";
+import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
+import { applyQcDecision, qcDecisionCheck, type QcDecisionInput } from "@/lib/services/qc-finalize";
 
+/**
+ * POST /api/qc-records/bulk-finalize — one decision for several batches.
+ *
+ * Body: { batchIds, outcome, finalDecisionReason?, override?, overrideReason?, confirmed? }
+ * Every batch is judged by the SAME rules as the single decision (src/lib/services/qc-finalize.ts:
+ * minimum evaluators, exceptional approval, disagreement reason in both directions, loss on
+ * reject). All or nothing at validation: one batch the rules refuse refuses the request, naming
+ * each refused batch and why, and nothing is decided. A batch somebody else decided between the
+ * check and the commit is not overwritten: it is reported in `skipped` (gap G26: the response no
+ * longer claims a decision it did not make).
+ */
 export async function POST(request: Request) {
   const { user, error } = await requireSub("qc", "manage");
   if (error) return error;
 
-  const { batchIds, outcome, finalDecisionReason } = await request.json() as {
-    batchIds: string[];
-    outcome: "Passed" | "Rejected";
-    finalDecisionReason?: string;
-  };
-
-  if (!Array.isArray(batchIds) || batchIds.length === 0)
+  let body: Record<string, unknown>;
+  try { body = (await request.json()) as Record<string, unknown>; } catch { body = {}; }
+  const batchIds = body.batchIds;
+  const outcome = body.outcome;
+  if (!Array.isArray(batchIds) || batchIds.length === 0 || !batchIds.every((x) => typeof x === "string"))
     return NextResponse.json({ error: "batchIds must be a non-empty array" }, { status: 400 });
+  if (batchIds.length > 100) return NextResponse.json({ error: "At most 100 batches per decision." }, { status: 400 });
   if (outcome !== "Passed" && outcome !== "Rejected")
     return NextResponse.json({ error: "outcome must be Passed or Rejected" }, { status: 400 });
+  const input: QcDecisionInput = {
+    outcome,
+    finalDecisionReason: typeof body.finalDecisionReason === "string" ? body.finalDecisionReason : null,
+    override: body.override === true,
+    overrideReason: typeof body.overrideReason === "string" ? body.overrideReason : null,
+    confirmed: body.confirmed === true,
+  };
+  const ids = [...new Set(batchIds as string[])];
 
   try {
-    // Load all batches upfront to validate transitions before opening the transaction
     const batches = await prisma.roastingBatch.findMany({
-      where: { id: { in: batchIds } },
-      select: {
-        id: true,
-        status: true,
-        orderItemId: true,
-        productionOrderId: true,
-        qcRecords: { select: { decision: true } },
-      },
+      where: { id: { in: ids } },
+      select: { id: true, status: true, batchNumber: true, orderItemId: true, productionOrderId: true, qcRecords: { select: { decision: true } } },
+      orderBy: { id: "asc" },
     });
 
-    if (batches.length !== batchIds.length) {
+    if (batches.length !== ids.length) {
       const found = new Set(batches.map((b) => b.id));
-      const missing = batchIds.filter((id) => !found.has(id));
-      return NextResponse.json({ error: "Some batches not found", missing }, { status: 404 });
+      return NextResponse.json({ error: "Some batches not found", missing: ids.filter((id) => !found.has(id)) }, { status: 404 });
     }
 
     const invalid = batches.filter((b) => !isValidTransition(b.status, outcome));
     if (invalid.length > 0) {
-      return NextResponse.json(
-        { error: "Some batches cannot transition to the chosen outcome", invalid: invalid.map((b) => b.id) },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "Some batches cannot transition to the chosen outcome", invalid: invalid.map((b) => b.id) }, { status: 409 });
     }
 
-    if (outcome === "Passed") {
-      const noAccept = batches.filter((b) => !b.qcRecords.some((r) => r.decision === "Accept"));
-      if (noAccept.length > 0) {
-        return NextResponse.json(
-          { error: "Cannot pass a batch without at least one accepted QC record.", batchIds: noAccept.map((b) => b.id) },
-          { status: 409 }
-        );
-      }
-
-      const hasAnyReject = batches.some((b) => b.qcRecords.some((r) => r.decision === "Reject"));
-      if (hasAnyReject) {
-        if (!finalDecisionReason?.trim()) {
-          return NextResponse.json(
-            { error: "Final decision reason is required when passing a batch with rejected QC records." },
-            { status: 400 }
-          );
-        }
-      }
+    const { effectiveMinEvaluators: min } = await readQcSettings(prisma);
+    const canOverride = hasSubPrivilege(user.permissions, "qc", "finalize_override");
+    const checks = batches.map((b) => ({ b, check: qcDecisionCheck({ input, records: b.qcRecords, min, canOverride }) }));
+    const refused = checks.filter((c) => !c.check.ok);
+    if (refused.length > 0) {
+      const first = refused[0].check as Exclude<(typeof refused)[number]["check"], { ok: true }>;
+      return NextResponse.json({
+        error: first.error, errorEn: first.errorEn, code: first.code, min,
+        // Every refused batch, so the screen can say which ones and why; nothing was decided.
+        refused: refused.map((c) => {
+          const r = c.check as typeof first;
+          return { batchId: c.b.id, batchNumber: c.b.batchNumber, code: r.code, error: r.error };
+        }),
+      }, { status: first.status });
     }
 
-    // Collect unique IDs to recalculate each affected entity only once.
-    // Stock batches contribute no order item — there is nothing to recalculate for them.
-    const orderItemIds = [...new Set(
-      batches.map((b) => b.orderItemId).filter((id): id is string => id !== null)
-    )];
-    const productionOrderIds = [
-      ...new Set(batches.map((b) => b.productionOrderId).filter((id): id is string => id !== null)),
-    ];
+    if (checks.some((c) => c.check.ok && c.check.overrideApplied)) {
+      const gate = await privilegedGate(user, "qc", "finalize_override");
+      if (gate) return gate;
+    }
 
-    // The status each batch was validated against, so the write can be made conditional
-    // on nothing having moved underneath it.
-    const expectedStatuses = [...new Set(batches.map((b) => b.status))];
-
-    const finalized = await prisma.$transaction(async (tx) => {
-      // Conditional on those statuses. The batches were read and their transitions
-      // checked before the transaction opened, so without this a batch finalised by
-      // somebody else in between would be silently overwritten — and the caller told
-      // every batch had been finalised when one had been decided the other way.
-      const updated = await tx.roastingBatch.updateMany({
-        where: { id: { in: batchIds }, status: { in: expectedStatuses } },
-        data: {
-          status: outcome,
-          qcClosedById: user.id,
-          qcToken: null,
-          qcFinalDecisionReason: finalDecisionReason?.trim() || null,
-        },
-      });
-
-      for (const orderItemId of orderItemIds) {
-        await recalcOrderItemStatus(orderItemId, tx);
+    const result = await prisma.$transaction(async (tx) => {
+      const decided: string[] = [];
+      const skipped: string[] = [];
+      let lossKg = 0;
+      for (const { b, check } of checks) {
+        if (!check.ok) continue;
+        const r = await applyQcDecision(tx, { batch: b, outcome, check, min, actor: user });
+        if (r.decided) { decided.push(b.id); lossKg += r.lossKg; } else skipped.push(b.id);
       }
-
-      for (const productionOrderId of productionOrderIds) {
-        await recalcProductionOrderStatus(productionOrderId, tx);
-      }
-
-      // Only the batches this request actually decided — not any that moved underneath it.
-      if (await automationListens("qc.batch_finalized")) {
-        const decided = await tx.roastingBatch.findMany({
-          where: { id: { in: batchIds }, status: outcome, qcClosedById: user.id },
-          select: { id: true },
-        });
-        for (const b of decided) {
-          await emitAutomationEvent(tx, {
-            eventType: "qc.batch_finalized",
-            subjectType: "RoastingBatch",
-            subjectId: b.id,
-            payload: { outcome, reason: finalDecisionReason?.trim() || null },
-            actorId: user.id,
-          });
-        }
-      }
-
-      return updated.count;
+      return { decided, skipped, lossKg: +lossKg.toFixed(3) };
     }, TX_OPTS);
+    await autoPrepareAfterBatches(result.decided, "qc_decision", { id: user.id, name: user.name });
 
-    // The real number, not the number asked for. Reporting the requested count would tell
-    // the operator that a batch somebody else had already decided was finalised by them.
-    return NextResponse.json({ finalized, requested: batchIds.length, outcome });
+    // The real number, not the number asked for.
+    return NextResponse.json({
+      finalized: result.decided.length, requested: ids.length, outcome,
+      decided: result.decided, skipped: result.skipped, lossKg: result.lossKg, min,
+      overrides: checks.filter((c) => c.check.ok && c.check.overrideApplied).length,
+    });
   } catch (err) {
-    return handlePrismaError(err);
+    return handleDomainError(err);
   }
 }

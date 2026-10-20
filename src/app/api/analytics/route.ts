@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readQcSettings } from "@/lib/services/settings/sections";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
@@ -144,11 +145,15 @@ export async function GET() {
 
   // ── QC alert shaping ──────────────────────────────────────────────────────
 
+  const { effectiveMinEvaluators: qcMin } = await readQcSettings(prisma);
   const qcBatchAlerts = openQcBatches.map((b) => ({
     id:           b.id,
     batchNumber:  b.batchNumber,
     origin:       b.greenBean?.beanType ?? b.orderItem?.beanTypeName ?? "",
     testerCount:  b.qcRecords.length,
+    // D1 (production simplification): the minimum in force, and whether the panel has reached it.
+    minEvaluators: qcMin,
+    belowMinimum: b.qcRecords.length < qcMin,
     deadline:     b.qcDeadline,
     isOverdue:    b.qcDeadline ? b.qcDeadline < now : false,
     isUrgent:     b.qcDeadline ? b.qcDeadline < new Date(now.getTime() + 6 * 60 * 60 * 1000) : false,
@@ -164,6 +169,10 @@ export async function GET() {
       qcPassRate,
       qcPassCount:      qcPass,
       qcTotalCount:     qcTotal,
+      // Production simplification (D2 / G05), last 30 days: decisions taken below the minimum, and
+      // roasted coffee written off by QC rejections (LOSS · ROASTED_COFFEE).
+      qcExceptionalApprovals: await prisma.roastingBatch.count({ where: { qcOverride: true, qcOverrideAt: { gte: thirtyDaysAgo } } }),
+      qcRejectedLossKg: +Math.abs((await prisma.inventoryMovement.aggregate({ where: { type: "LOSS", category: "ROASTED_COFFEE", sourceDocType: "ROASTING_BATCH", timestamp: { gte: thirtyDaysAgo } }, _sum: { quantityChanged: true } }))._sum.quantityChanged ?? 0).toFixed(2),
       rawMaterialKg:    +(greenBeanAgg._sum.quantityKg  ?? 0).toFixed(1),
       finishedGoodsKg:  +(fglAgg._sum.availableQty      ?? 0).toFixed(1),
     },

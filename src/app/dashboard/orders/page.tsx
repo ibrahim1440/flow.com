@@ -12,8 +12,9 @@ import { LocalizedName } from "@/components/LocalizedName";
 import { Combobox, Select } from "@/components/ui/Select";
 import {
   OrderStatusBadge, NeedsAttentionBadge, OwnerDisplay, ActivityTimeline, AddNoteForm,
-  StatusActionsBar, PreparationReviewTable, OrderProgressStepper, type LifecycleActivity,
+  StatusActionsBar, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
+import { LinePreparation, PipelineBar, type PipelineInfo } from "./_parts/board";
 import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, Tabs, kg, rowOpen, Kg, opsDate } from "@/components/ops/ui";
 
 type OrdersTab = "all" | "review" | "preparing" | "ready" | "hold" | "done";
@@ -59,7 +60,11 @@ type OrderItem = {
   product?: { productNameEn: string; productNameAr: string | null } | null;
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; status: string; isBlend: boolean }[];
-  deliveries: { date: string; quantityKg: number; deliveryType: string }[];
+  deliveries: {
+    id?: string; date: string; quantityKg: number; quantityUnits?: number | null; deliveryType: string;
+    // Phase D: the lots each delivery drew from (picked by the server).
+    lots?: { finishedGoodsLotId: string; batchNumber: string | null; quantityUnits: number | null; quantityKg: number }[];
+  }[];
   preparationDecision: string | null;
   availableQuantity: number | null;
   productionRequiredQuantity: number | null;
@@ -74,6 +79,8 @@ type Order = {
   ownerId: string | null;
   owner: { id: string; name: string; role: string } | null;
   activities: LifecycleActivity[];
+  /** Phase B: the roast → QC → pack → delivery bar, computed by GET /api/orders. */
+  pipeline?: PipelineInfo | null;
 };
 
 function lastActivityOf(order: Order): LifecycleActivity | null {
@@ -118,6 +125,8 @@ export default function OrdersPage() {
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
+  // Phase B: blocking a line is the one manual preparation decision left (supervisors).
+  const canPrepare = hasSubPrivilege(user?.permissions ?? {}, "orders", "prepare_review");
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
@@ -401,7 +410,7 @@ export default function OrdersPage() {
               </Btn>
             ) : null}
           >
-            <span><span className="hr-num">{orders.length}</span> {t("totalOrdersCount")}</span>
+            <span><span className="hr-num">{orders.length}</span> {t("totalOrdersCount")} · {t("ordBoardCaption")}</span>
           </PageHeader>
 
           <Tabs
@@ -628,7 +637,7 @@ export default function OrdersPage() {
                       <th className="num">{t("qtyKg")}</th>
                       <th className="hr-hide-preview">{t("opsCreatedCol")}</th>
                       <th>{t("opsPrepCol")}</th>
-                      <th className="hr-hide-preview">{t("production")}</th>
+                      <th className="hr-hide-preview">{t("ordPipeRoast")} · {t("ordPipeQc")} · {t("ordPipePack")} · {t("ordPipeDeliver")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -651,7 +660,7 @@ export default function OrdersPage() {
                         <td className="num">{kg(totalKg(order))}</td>
                         <td className="hr-hide-preview">{opsDate(order.createdAt, lang)}</td>
                         <td className="m-end"><OrderStatusBadge status={order.status} /></td>
-                        <td className="hr-hide-preview"><StatusBadge status={productionStatusOf(order)} /></td>
+                        <td className="hr-hide-preview">{order.pipeline ? <PipelineBar p={order.pipeline} compact testId={`order-pipe-${order.orderNumber}`} /> : <span className="hr-muted">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -682,6 +691,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
+                {order.pipeline ? <PipelineBar p={order.pipeline} testId={`order-pipe-detail-${order.orderNumber}`} /> : null}
                 <OrderProgressStepper status={order.status} approvalStatus={order.approvalStatus} items={order.items} />
 
                 <KV rows={[
@@ -725,6 +735,28 @@ export default function OrdersPage() {
                       );
                     })}
                   </ul>
+                  {order.items.some((i) => i.deliveries.length > 0) && (
+                    <div data-testid={`order-deliveries-${order.orderNumber}`} style={{ marginTop: 8 }}>
+                      <h3 className="hr-label" style={{ margin: "0 0 4px" }}>{lang === "ar" ? "التسليمات" : "Deliveries"}</h3>
+                      <ul className="ops-list">
+                        {order.items.flatMap((i) => i.deliveries.map((d, k) => (
+                          <li key={d.id ?? `${i.id}-${k}`}>
+                            <span style={{ minWidth: 0 }}>
+                              <bdi>{i.beanTypeName}</bdi>
+                              <span className="ops-sub">
+                                {opsDate(d.date, lang)} · {d.deliveryType === "full" ? t("fullBadge") : t("partialBadge")}
+                                {" · "}{lang === "ar" ? "اللوتات:" : "Lots:"}{" "}
+                                {(d.lots ?? []).length
+                                  ? (d.lots ?? []).map((x, j) => <span key={j}>{j ? (lang === "ar" ? "، " : ", ") : ""}<span className="ops-serial">{x.batchNumber ?? "—"}</span> (<span className="hr-num">{x.quantityUnits ?? x.quantityKg}</span>)</span>)
+                                  : "—"}
+                              </span>
+                            </span>
+                            <span style={{ whiteSpace: "nowrap" }}>{d.quantityUnits != null ? <><span className="hr-num">{d.quantityUnits}</span> {lang === "ar" ? "وحدة" : "units"}</> : <Kg v={d.quantityKg} />}</span>
+                          </li>
+                        )))}
+                      </ul>
+                    </div>
+                  )}
                   {order.items.some((i) => i.roastingBatches.length > 0) && (
                     <p className="hr-caption" style={{ margin: "8px 0 0" }}>
                       {t("linkedBatches")}{" "}
@@ -800,7 +832,10 @@ export default function OrdersPage() {
 
                 <div className="ops-panel">
                   <h3>{t("preparationReviewLabel")}</h3>
-                  <PreparationReviewTable orderId={order.id} items={order.items} onSuccess={loadData} />
+                  {/* Phase B: preparation is automatic; a supervisor may only block a line. */}
+                  <LinePreparation orderId={order.id} items={order.items} pipeline={order.pipeline ?? null}
+                    canBlock={canPrepare} open={["Waiting Approval", "Waiting Preparation Review", "Preparing", "Ready for Shipping"].includes(order.status)}
+                    onChanged={loadData} />
                 </div>
 
                 <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />

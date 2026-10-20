@@ -20,7 +20,9 @@
 //   · system administration: automation › manage_connection (which number sends, and whether).
 //   · operations (owner decision, 16 Oct, DECISIONS-2026-10-16.md): inventory › adjust,
 //     inventory › override, orders › approve — also step-up and verified-individual at action
-//     time (requirePrivilegedAction).
+//     time (requirePrivilegedAction);
+//   · quality (owner decision D2, production simplification): qc › finalize_override, the
+//     exceptional approval of a batch with fewer evaluators than the minimum — step-up too.
 // Everything else is an OPERATIONAL account, which may keep signing in with a PIN alone.
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { effectivePermissions } from "@/lib/hr/sod";
@@ -39,6 +41,7 @@ export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
   ["settings", "reset"], ["settings", "training_reset"],
   ["automation", "manage_connection"],
   ["inventory", "adjust"], ["inventory", "override"], ["orders", "approve"],
+  ["qc", "finalize_override"],
 ];
 
 /** Why an account is privileged (empty = operational). Stable keys, for the audit and the report. */

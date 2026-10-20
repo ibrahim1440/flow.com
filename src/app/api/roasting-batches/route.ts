@@ -19,6 +19,10 @@ import {
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { canSeeCustomerContact, CUSTOMER_OPERATIONS_SELECT } from "@/lib/auth/customer-detail";
+import { nextRoastBatchNumber } from "@/lib/services/batch-number";
+import { resolveGreenLot } from "@/lib/services/green-source";
+import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
+import { roastQueue } from "@/lib/services/roast-queue";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -107,37 +111,20 @@ function evaluateSurplusOverride(
   return { ok: true, reason };
 }
 
+/**
+ * A queue roast may come out a little over the coffee's demand: a drum load is not cut to the
+ * gram, and the roaster records what physically happened (production simplification principle).
+ * Up to the larger of 1 kg or 20 % of the coffee's demand, the excess simply goes to the shelf —
+ * recorded on the ledger row — for anyone who may roast. Beyond it, roasting for the shelf is the
+ * roast_to_stock privilege (or the admin's explicit surplus authorization), as before.
+ */
+const QUEUE_SURPLUS_TOLERANCE = { minKg: 1, share: 0.2 };
+const queueTolerance = (demandKg: number) => Math.max(QUEUE_SURPLUS_TOLERANCE.minKg, QUEUE_SURPLUS_TOLERANCE.share * demandKg);
+
 class AppError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
   }
-}
-
-/**
- * The day's next batch serial.
- *
- * The sequence is per DAY, not per green bean. It used to count only batches of the same
- * bean, so the first Colombia roast and the first Kenya roast on one morning were both
- * numbered ...01 — two physically different batches sharing the serial that operators,
- * QC cards, packaging cards and labels all identify a lot by. Nothing was corrupted,
- * because every write goes through the row id, but the number stopped identifying anything.
- *
- * Derived from the highest serial issued today rather than from a count, for the same
- * reason the production numbering is: a count silently reissues a number as soon as the
- * table has a gap. The advisory lock serialises the read-then-insert so two roasts
- * recorded at the same moment cannot claim the same serial; it is released at commit.
- */
-async function generateBatchNumber(tx: Prisma.TransactionClient): Promise<string> {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(7763, ${Number(dateStr) % 2147483647}::int)`;
-
-  const [{ max }] = await tx.$queryRaw<{ max: number | null }[]>`
-    SELECT MAX(CAST(SUBSTRING("batchNumber" FROM 9) AS INTEGER)) AS max
-      FROM "RoastingBatch"
-     WHERE "batchNumber" ~ ${`^${dateStr}[0-9]+$`}`;
-
-  return `${dateStr}${String((max ?? 0) + 1).padStart(2, "0")}`;
 }
 
 export async function GET(request: Request) {
@@ -182,6 +169,9 @@ export async function GET(request: Request) {
       },
       childBatches: { select: { id: true, batchNumber: true } },
       parentBatch: { select: { id: true, batchNumber: true } },
+      // Guests invited to the QC panel who have not evaluated yet (D4). Name and channel only:
+      // the guest's phone stays in the invite row.
+      qcInvites: { where: { status: "PENDING" }, select: { id: true, name: true, channel: true, createdAt: true }, orderBy: { createdAt: "asc" as const } },
       blendInputs: { select: { id: true, sourceBatchId: true, quantityUsed: true, sourceBatch: { select: { batchNumber: true } } } },
       blendOutputs: { select: { id: true, targetBlendBatchId: true, quantityUsed: true, targetBlendBatch: { select: { batchNumber: true } } } },
     },
@@ -194,18 +184,42 @@ export async function POST(request: Request) {
   if (error) return error;
 
   const data = await request.json();
-  const { orderItemId, greenBeanId, productId, greenBeanQuantity, roastedBeanQuantity, wasteQuantity, roastProfile, productionOrderId, surplusOverride, surplusReason } = data;
+  const { productId, greenBeanQuantity, roastedBeanQuantity, roastProfile, productionOrderId, surplusOverride, surplusReason } = data;
+  let orderItemId: string | undefined = typeof data.orderItemId === "string" && data.orderItemId ? data.orderItemId : undefined;
 
-  // A direct roast must always name the green bean it consumes. Without it the whole
-  // stock-deduction + ledger block below is skipped, so roasted kilograms appear on the
-  // shelf while raw stock never moves and InventoryMovement has no matching OUT row.
-  // Blends are the deliberate exception and are created by /api/roasting-batches/blend,
-  // which composes already-roasted source batches and touches no green stock.
-  if (typeof greenBeanId !== "string" || !greenBeanId) {
-    return NextResponse.json(
-      { error: "greenBeanId is required — a roasting batch must consume a specific green bean lot." },
-      { status: 400 }
-    );
+  // ── The roast queue (production simplification, Phase C item 2) ─────────────────────────
+  // `allocate: "oldest"` with a productId and no order line: the roaster tapped a coffee card.
+  // The server attributes the batch to the oldest order line of that coffee that still needs
+  // roasting (open units − shelf free − pipeline, src/lib/services/roast-queue.ts) and that
+  // production may start for. With no such line it is a roast to stock (its own privilege).
+  // The surplus gate is the COFFEE's demand, not one line's: a drum load larger than what is
+  // ordered goes to the shelf for whoever holds roast_to_stock, and otherwise needs the
+  // explicit admin authorization the per-line gate asks for. Re-resolved under the lock below.
+  const queueMode = data.allocate === "oldest" && !orderItemId;
+  let queueDemandKg = 0;
+  if (queueMode) {
+    if (typeof productId !== "string" || !productId) {
+      return NextResponse.json({ error: "productId is required to roast from the queue." }, { status: 400 });
+    }
+    if (productionOrderId) {
+      return NextResponse.json({ error: "A queue roast is linked to its production order automatically; do not name one." }, { status: 400 });
+    }
+    const [coffee] = await roastQueue(prisma, { productId });
+    queueDemandKg = coffee?.demandKg ?? 0;
+    orderItemId = coffee?.allocateTo?.orderItemId ?? undefined;
+  }
+
+  // ── The green lot: stated, or resolved here (production simplification item 1, O1) ──────
+  // A roast still always consumes a specific green lot — the stock decrement and the ledger OUT
+  // row below are unconditional — but the roaster no longer has to name it. Omitted, it is
+  // resolved inside the transaction from the product's default lot, falling back FIFO to the
+  // oldest active lot of the same beanType + country (src/lib/green-source.ts); a 409 tells the
+  // roaster to ask the supervisor when none holds enough. A stated greenBeanId is honoured as
+  // before (the supervisor's «تغيير», and every existing client).
+  const statedGreenBeanId: string | null =
+    typeof data.greenBeanId === "string" && data.greenBeanId ? data.greenBeanId : null;
+  if (data.greenBeanId !== undefined && data.greenBeanId !== null && data.greenBeanId !== "" && statedGreenBeanId === null) {
+    return NextResponse.json({ error: "greenBeanId must be a green lot id." }, { status: 400 });
   }
 
   const qty = Number(greenBeanQuantity);
@@ -214,16 +228,16 @@ export async function POST(request: Request) {
   }
 
   const roastedQty = Number(roastedBeanQuantity ?? 0);
-  const wasteQty   = Number(wasteQuantity ?? 0);
   if (!Number.isFinite(roastedQty) || roastedQty <= 0) {
     return NextResponse.json({ error: "Roasted quantity must be greater than 0." }, { status: 400 });
   }
-  if (!Number.isFinite(wasteQty) || wasteQty < 0) {
-    return NextResponse.json({ error: "wasteQuantity must be a non-negative number." }, { status: 400 });
+  if (roastedQty > qty) {
+    return NextResponse.json({ error: "roastedBeanQuantity cannot exceed greenBeanQuantity." }, { status: 400 });
   }
-  if (roastedQty + wasteQty > qty) {
-    return NextResponse.json({ error: "roastedBeanQuantity + wasteQuantity cannot exceed greenBeanQuantity." }, { status: 400 });
-  }
+  // Roast loss is what physically happened: green in − roasted out. It is derived, never typed
+  // (the manual «waste» input is gone from the roast sheet); a client that still sends
+  // wasteQuantity has it ignored rather than stored beside a contradicting pair of weights.
+  const wasteQty = +(qty - roastedQty).toFixed(3);
 
   // ── Roast to stock ───────────────────────────────────────────────────────
   // Omitting orderItemId means "roast for the shelf": a deliberate replenishment with
@@ -240,6 +254,12 @@ export async function POST(request: Request) {
   // what the surplus gate below exists to control. Since that gate cannot apply (there is
   // no order to exceed), the authority to do it is an explicit, separately revocable
   // privilege rather than a side effect of being allowed to roast at all.
+  if (queueMode && isStockBatch && !hasSubPrivilege(user.permissions, "production", "roast_to_stock")) {
+    return NextResponse.json(
+      { error: "Nothing is waiting to be roasted for this coffee: its orders are covered by the shelf or by batches already roasted. Roasting more would be a roast to stock, which your role does not include." },
+      { status: 409 }
+    );
+  }
   if (isStockBatch && !hasSubPrivilege(user.permissions, "production", "roast_to_stock")) {
     return NextResponse.json(
       { error: "You do not have permission to roast to stock." },
@@ -275,13 +295,13 @@ export async function POST(request: Request) {
   // the ceiling is what stops a plan covering the whole line from making the roast that
   // executes it look like surplus. Ambiguity is not resolved here — two live plans simply
   // credit nothing, and the transaction refuses the roast outright with an explanation.
-  const creditPoId = isStockBatch
+  const creditPoId = isStockBatch || queueMode
     ? null
     : ((productionOrderId as string | undefined) ?? (await soleLiveProductionOrderId(prisma, orderItemId as string)));
-  const ceiling = isStockBatch
+  const ceiling = isStockBatch || queueMode
     ? null
-    : await roastingCeilingForItem(prisma, orderItemId, creditPoId);
-  if (!isStockBatch && !ceiling) {
+    : await roastingCeilingForItem(prisma, orderItemId as string, creditPoId);
+  if (!isStockBatch && !queueMode && !ceiling) {
     return NextResponse.json({ error: "Order item not found." }, { status: 404 });
   }
 
@@ -293,13 +313,16 @@ export async function POST(request: Request) {
   // roastingCeilingForItem has already subtracted delivered, reserved, scheduled production
   // and any roasted output not held by a production order, so what remains is simply whether
   // THIS roast fits inside it.
-  const productionCeiling = ceiling ? ceiling.ceilingKg : Infinity;
+  const productionCeiling = queueMode && !isStockBatch ? queueDemandKg : ceiling ? ceiling.ceilingKg : Infinity;
   const excess = +(roastedQty - productionCeiling).toFixed(3);
+  // A queue roast larger than the coffee's demand: the remainder is a roast to stock.
+  const queueSurplusToStock = queueMode && excess > 0 &&
+    (hasSubPrivilege(user.permissions, "production", "roast_to_stock") || excess <= queueTolerance(productionCeiling));
 
   // The decision is taken once, here, and re-taken inside the transaction against live
   // numbers. Both use the same function, so "admin, explicitly, with a reason" means the
   // same thing in both places.
-  const surplus = excess > 0
+  const surplus = excess > 0 && !queueSurplusToStock
     ? evaluateSurplusOverride(user.role, surplusOverride, surplusReason)
     : null;
 
@@ -357,6 +380,31 @@ export async function POST(request: Request) {
     // roasting against the line consume the SAME demand, so they have to serialize against
     // each other and not merely each against themselves. Held until commit; unrelated order
     // lines are untouched.
+    // Queue roast: serialise roasts of the same coffee (7762 keyed on the product — taken before
+    // any line key, and no other path takes a product key, so no cycle), then re-resolve the
+    // line and the coffee's demand as this transaction sees them.
+    let queueEvidence: { demandKg: number; toStockKg: number } | null = null;
+    if (queueMode && !isStockBatch) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(7762, ${advisoryKey(`product:${productId as string}`)}::int)`;
+      const [liveCoffee] = await roastQueue(tx, { productId: productId as string });
+      const target = liveCoffee?.allocateTo?.orderItemId ?? null;
+      if (!target) {
+        throw { _appCode: 409, message: "This coffee's orders were covered while the roast was being recorded. Nothing was roasted; refresh the queue." };
+      }
+      orderItemId = target;
+      const liveDemand = liveCoffee!.demandKg;
+      const liveExcess = +(roastedQty - liveDemand).toFixed(3);
+      if (liveExcess > 0 && !hasSubPrivilege(user.permissions, "production", "roast_to_stock") && liveExcess > queueTolerance(liveDemand)) {
+        const liveDecision = evaluateSurplusOverride(user.role, surplusOverride, surplusReason);
+        if (!liveDecision.ok) {
+          throw { _appCode: liveDecision.status === 400 ? 400 : 409, message: `Only ${liveDemand}kg of this coffee is still needed; this roast exceeds it by ${liveExcess}kg. ` + liveDecision.message };
+        }
+        if (!surplus?.ok) await assertAdminRoleGate(user, "production.surplus_override", { stepUp: true });
+        overrideEvidence = { ceilingKg: liveDemand, requestedKg: roastedQty, excessKg: liveExcess, reason: liveDecision.reason };
+      }
+      queueEvidence = { demandKg: liveDemand, toStockKg: liveExcess > 0 && !overrideEvidence ? liveExcess : 0 };
+    }
+
     if (!isStockBatch) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(7762, ${advisoryKey(orderItemId as string)}::int)`;
 
@@ -365,13 +413,14 @@ export async function POST(request: Request) {
       // Re-resolved inside the lock: another transaction may have raised or completed a
       // plan since the pre-check, and the credit has to match the world this roast commits
       // into rather than the one it arrived in.
-      const liveCreditPoId =
-        (productionOrderId as string | undefined) ??
-        (await soleLiveProductionOrderId(tx, orderItemId as string));
-      const live = await roastingCeilingForItem(tx, orderItemId as string, liveCreditPoId);
-      if (!live) throw new AppError(404, "Order item not found.");
-      const liveExcess = +(roastedQty - live.ceilingKg).toFixed(3);
-      if (liveExcess > 0) {
+      const liveCreditPoId = queueMode
+        ? null
+        : (productionOrderId as string | undefined) ??
+          (await soleLiveProductionOrderId(tx, orderItemId as string));
+      const live = queueMode ? null : await roastingCeilingForItem(tx, orderItemId as string, liveCreditPoId);
+      if (!queueMode && !live) throw new AppError(404, "Order item not found.");
+      const liveExcess = live ? +(roastedQty - live.ceilingKg).toFixed(3) : 0;
+      if (live && liveExcess > 0) {
         // Re-asked under the lock. A request that was inside the ceiling when it arrived
         // and is outside it now needs the same explicit authorization as one that was
         // outside it from the start — being early is not an authorization.
@@ -417,12 +466,21 @@ export async function POST(request: Request) {
 
     // Generated inside the transaction so the advisory lock it takes is held until commit,
     // which is what stops two concurrent roasts being handed the same serial.
-    const batchNumber = await generateBatchNumber(tx);
+    const batchNumber = await nextRoastBatchNumber(tx);
 
     let previousQuantity: number | null = null;
     let newQuantity:      number | null = null;
 
-    if (greenBeanId) {
+    // The lot, resolved under this transaction when the request did not state one.
+    let greenBeanId: string = statedGreenBeanId ?? "";
+    let greenSource: { source: "stated" | "default" | "fifo_fallback"; fallbackFrom: string | null } = { source: "stated", fallbackFrom: null };
+    if (!statedGreenBeanId) {
+      const pick = await resolveGreenLot(tx, isStockBatch ? { productId: productId as string } : { orderItemId: orderItemId as string }, qty);
+      greenBeanId = pick.lot.id;
+      greenSource = { source: pick.source, fallbackFrom: pick.source === "fifo_fallback" ? pick.defaultLot?.serialNumber ?? null : null };
+    }
+
+    {
       // Step 1: confirm existence and active status
       const bean = await tx.greenBean.findUnique({
         where:  { id: greenBeanId },
@@ -501,9 +559,12 @@ export async function POST(request: Request) {
           status: { in: ["PENDING", "IN_PRODUCTION"] },
         },
         select: { id: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: 2,
       });
-      if (candidates.length === 1) {
+      // A queue roast is the system's attribution, not the operator's choice: with two live
+      // plans on the line it credits the oldest rather than refusing (Phase C item 3).
+      if (candidates.length === 1 || (queueMode && candidates.length > 1)) {
         effectiveProductionOrderId = candidates[0].id;
       } else if (candidates.length > 1) {
         // Storing the batch unlinked is not the neutral option it looks like. This roast
@@ -528,7 +589,7 @@ export async function POST(request: Request) {
         // Stock batches carry the product on the batch itself; order-backed ones keep
         // inheriting it from their order item at packaging time, as before.
         productId: isStockBatch ? (productId as string) : undefined,
-        greenBeanId:         greenBeanId ?? null,
+        greenBeanId,
         greenBeanQuantity:   qty,
         roastedBeanQuantity: roastedQty,
         // Roasted output starts fully available as intermediate stock. Packing a SKU
@@ -547,7 +608,7 @@ export async function POST(request: Request) {
       include: { orderItem: true, greenBean: true },
     });
 
-    if (greenBeanId && previousQuantity !== null && newQuantity !== null) {
+    if (previousQuantity !== null && newQuantity !== null) {
       await tx.inventoryMovement.create({
         data: {
           type:              "OUT",
@@ -561,16 +622,25 @@ export async function POST(request: Request) {
           userId:            user.id,
           // The ledger row is where somebody reconciling green stock will be standing when
           // they ask why this draw was larger than the order justified.
-          notes: overrideEvidence
-            ? `Surplus authorized: ${overrideEvidence.requestedKg}kg roasted against a ` +
-              `${overrideEvidence.ceilingKg}kg ceiling (+${overrideEvidence.excessKg}kg). ` +
-              `Reason: ${overrideEvidence.reason}`
-            : null,
+          notes: [
+            overrideEvidence
+              ? `Surplus authorized: ${overrideEvidence.requestedKg}kg roasted against a ` +
+                `${overrideEvidence.ceilingKg}kg ceiling (+${overrideEvidence.excessKg}kg). ` +
+                `Reason: ${overrideEvidence.reason}`
+              : null,
+            queueEvidence && queueEvidence.toStockKg > 0
+              ? `Roast queue: ${queueEvidence.toStockKg}kg beyond the coffee's ${queueEvidence.demandKg}kg demand goes to the shelf (roast to stock).`
+              : null,
+            // O1: the lot was chosen by the system because the product's default was short.
+            greenSource.source === "fifo_fallback"
+              ? `Green lot chosen automatically (FIFO, same bean and origin): the default lot ${greenSource.fallbackFrom ?? ""} held too little.`
+              : null,
+          ].filter(Boolean).join(" ") || null,
         },
       });
     }
 
-    if (!isStockBatch) await recalcOrderItemStatus(orderItemId, tx);
+    if (!isStockBatch) await recalcOrderItemStatus(orderItemId as string, tx);
 
     if (newBatch.productionOrderId) {
       await recalcProductionOrderStatus(newBatch.productionOrderId, tx);
@@ -590,7 +660,7 @@ export async function POST(request: Request) {
     //
     // Stock batches are excluded: they have no customer order whose lifecycle could
     // invalidate them, and are bounded by their own privilege and the atomic stock check.
-    if (!isStockBatch) await assertOrderStillAcceptsProduction(tx, orderItemId, "start");
+    if (!isStockBatch) await assertOrderStillAcceptsProduction(tx, orderItemId as string, "start");
 
     // Written last, and deliberately after the barrier above: the OrderActivity insert
     // takes FOR KEY SHARE on Order through its foreign key, and that barrier has just
@@ -627,8 +697,11 @@ export async function POST(request: Request) {
       actorId: user.id,
     });
 
-    return newBatch;
+    return { ...newBatch, greenSource, ...(queueMode ? { queue: { allocatedTo: newBatch.orderItemId, demandKg: queueEvidence?.demandKg ?? 0, toStockKg: queueEvidence?.toStockKg ?? 0 } } : {}) };
   }, TX_OPTS);
+
+  // Phase B item 4: the order the roast was made for is recomputed after the commit.
+  if (batch.orderItemId) await autoPrepareAfterBatches([batch.id], "roast", { id: user.id, name: user.name });
 
   return NextResponse.json(batch, { status: 201 });
   } catch (err: unknown) {

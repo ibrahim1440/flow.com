@@ -37,6 +37,7 @@
     "test:automation:http": "tsx --test --test-concurrency=1 tests/automation/http/*.test.ts",
     "test:print:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/print/unit/*.test.ts",
     "test:ops:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/ops/unit/*.test.ts",
+    "test:ops:http": "tsx --test --test-concurrency=1 tests/ops/http/*.test.ts",
     "test:ui:unit": "tsx --import ./tests/support/css-stub.mjs --test tests/ui/unit/*.test.ts",
     "test:sales:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/sales/unit/*.test.ts",
     "test:users:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/users/unit/*.test.ts",

@@ -4,7 +4,7 @@ import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
-import { createOrderFromQuote } from "@/lib/services/sales/quote-to-order";
+import { createOrderFromQuote, prepareConvertedOrder } from "@/lib/services/sales/quote-to-order";
 import { emitAutomationEvent } from "@/lib/automation/emit";
 
 type Params = { params: Promise<{ id: string }> };
@@ -69,6 +69,8 @@ export async function POST(request: Request, { params }: Params) {
       },
       TX_OPTS,
     );
+    // Quote → order triggers preparation (handoff §6.8), after the order committed.
+    await prepareConvertedOrder(result, { id: user.id, name: user.name });
 
     return NextResponse.json(
       {

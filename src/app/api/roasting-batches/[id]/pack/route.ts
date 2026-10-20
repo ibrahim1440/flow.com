@@ -1,3 +1,4 @@
+import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
@@ -23,6 +24,7 @@ import {
   outstandingUnitsForLine,
 } from "@/lib/services/batch-identity";
 import { reserveFinishedUnitsFromLot } from "@/lib/services/finished-products";
+import { packagingPlan } from "@/lib/services/packaging-plan";
 import {
   canReserveToOrderLine,
   casUpdateOrderItem,
@@ -331,6 +333,14 @@ export async function POST(request: Request, { params }: Params) {
       return responseBody;
     }, TX_OPTS);
 
+    // Phase B item 4 (G13): after the commit, the order this roast was for and every other open
+    // order short of the SKUs just made are recomputed, oldest first — the units are reserved and
+    // the order moves to «جاهز للشحن» without anybody re-running a review. Then the production
+    // orders behind the batch are settled (Phase C item 3: completed when packed).
+    await autoPrepareAfterBatches([id], "pack", { id: user.id, name: user.name }, {
+      producedSkuIds: result.lots.filter((l) => l.classification === "STANDARD" && l.units > 0).map((l) => l.productSkuId),
+    });
+
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     if (isReplaySignal(err)) {
@@ -435,9 +445,13 @@ export async function GET(_request: Request, { params }: Params) {
   try {
     const batch = await prisma.roastingBatch.findUnique({
       where: { id },
-      select: { id: true, batchNumber: true, status: true, productId: true, roastedAvailableKg: true },
+      select: { id: true, batchNumber: true, status: true, productId: true, roastedAvailableKg: true, orderItemId: true, productionOrderId: true },
     });
     if (!batch) return NextResponse.json({ error: "Batch not found." }, { status: 404 });
+
+    // The packaging plan (production simplification item 6): this coffee's sizes only, counts
+    // pre-filled from open demand. Additive to the response; the write path is unchanged.
+    const plan = await packagingPlan(prisma, batch, gramsFromKg(batch.roastedAvailableKg));
 
     const partials = await prisma.finishedGoodsLot.findMany({
       where: {
@@ -463,6 +477,7 @@ export async function GET(_request: Request, { params }: Params) {
       batchNumber: batch.batchNumber,
       status: batch.status,
       availableGrams: gramsFromKg(batch.roastedAvailableKg),
+      plan,
       openPartials: partials.map((p) => ({
         lotId: p.id,
         batchNumber: p.batchNumber,

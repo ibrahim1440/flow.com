@@ -1,31 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
+import { nextBlendBatchNumber, nextRoastBatchNumber } from "@/lib/services/batch-number";
 
 type Params = { params: Promise<{ id: string }> };
-
-async function generateBatchNumberForDate(
-  greenBeanId: string | null | undefined,
-  targetDate: Date,
-  excludeBatchId: string
-): Promise<string> {
-  const dateStr = targetDate.toISOString().slice(0, 10).replace(/-/g, "");
-  const dayStart = new Date(targetDate);
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const dayEnd = new Date(targetDate);
-  dayEnd.setUTCHours(23, 59, 59, 999);
-
-  const existing = await prisma.roastingBatch.findMany({
-    where: {
-      greenBeanId: greenBeanId ?? null,
-      date: { gte: dayStart, lte: dayEnd },
-      id: { not: excludeBatchId },
-    },
-    select: { id: true },
-  });
-
-  return `${dateStr}${String(existing.length + 1).padStart(2, "0")}`;
-}
 
 export async function PATCH(request: Request, { params }: Params) {
   const { error, user } = await requireSub("production", "edit_date");
@@ -59,6 +37,7 @@ export async function PATCH(request: Request, { params }: Params) {
       id: true,
       batchNumber: true,
       greenBeanId: true,
+      isBlend: true,
       date: true,
       parentBatchId: true,
       parentBatch: { select: { id: true, batchNumber: true, date: true } },
@@ -70,10 +49,17 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   const oldBatchNumber = batch.batchNumber;
-  const newBatchNumber = await generateBatchNumberForDate(batch.greenBeanId, targetDate, id);
-  const serialChanged = oldBatchNumber !== newBatchNumber;
+  let newBatchNumber = oldBatchNumber;
 
+  // Gap G22: the serial for the new day comes from the same generator a new roast (or blend)
+  // uses — the Riyadh day, the day's MAX, under its advisory lock, inside the transaction —
+  // instead of a count of the same bean's batches that day, which could repeat another bean's
+  // serial and raced without a lock.
   await prisma.$transaction(async (tx) => {
+    newBatchNumber = batch.isBlend
+      ? await nextBlendBatchNumber(tx, targetDate, id)
+      : await nextRoastBatchNumber(tx, targetDate, id);
+    const serialChanged = oldBatchNumber !== newBatchNumber;
     await tx.roastingBatch.update({
       where: { id },
       data: { batchNumber: newBatchNumber, date: targetDate },

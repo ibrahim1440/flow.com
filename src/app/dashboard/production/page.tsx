@@ -1,10 +1,9 @@
 "use client";
 
-import { Select } from "@/components/ui/Select";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
+import { ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
 import { Btn, Dot, Metrics, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, kg, type Tone, Kg, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
@@ -17,6 +16,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { type TranslationKey } from "@/lib/i18n/translations";
 
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
+import { RoastSheet, type RoastLine, type QueueCoffee } from "./_parts/roast-sheet";
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
   /** When the batch was recorded (the reference log lists batches by this time). */
@@ -98,32 +98,14 @@ export default function ProductionPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Roast form
-  const [showRoastForm, setShowRoastForm] = useState(false);
-  // Validation notices appear once the roaster has touched the quantities (or tried to submit),
-  // not the moment the form opens (D-3).
-  const [roastTouched, setRoastTouched] = useState(false);
+  // The roast sheet: an order line, a stock roast, or closed.
+  const [roastMode, setRoastMode] = useState<null | { kind: "order"; line: RoastLine } | { kind: "stock" } | { kind: "coffee"; coffee: QueueCoffee }>(null);
+  // Phase C item 2: the roast queue grouped by coffee (GET /api/roasting-batches/queue).
+  const [queue, setQueue] = useState<QueueCoffee[] | null>(null);
   // Disclosure rows of the two tables (prd-schedule / prd-overview keep one line per row).
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
   const toggleRow = (id: string) => setOpenRows((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
-  const [roastForm, setRoastForm] = useState({
-    greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "", productId: "",
-  });
   const [products, setProducts] = useState<{ id: string; productNameEn: string; productNameAr: string | null }[]>([]);
-  // Roast-to-stock: no order behind the batch, so its output lands on the shelf free for
-  // whichever order needs it first.
-  const [stockMode, setStockMode] = useState(false);
-  // FINISHED kilograms this line still needs, kept separate from anything the operator
-  // types into the green-weight field. Holding it in its own piece of state is the point:
-  // the two numbers used to share one, which is how a finished remainder ended up being
-  // submitted as a green weight.
-  const [remainingFinishedKg, setRemainingFinishedKg] = useState(0);
-  // Which production plan this roast is being made for. Preselected when the line has only
-  // one live plan; left empty when it has several, because that is a decision only the
-  // operator standing at the roaster can make. The server refuses an ambiguous roast, so an
-  // empty value here surfaces as a clear refusal rather than a silently unattributed batch.
-  const [poChoice, setPoChoice] = useState("");
 
   // Profile overrides (keyed by orderItemId) — local state for per-session profile hints
   const [profileOverrides, setProfileOverrides] = useState<Record<string, string>>({});
@@ -135,20 +117,14 @@ export default function ProductionPage() {
 
   // Tab
   // The module root is the overview (prd-overview); the roasting list is the schedule tab.
-  const [tab, setTab] = useState<"pending" | "batches" | "blend">("batches");
+  // Phase C: whoever roasts lands on the queue (the prototype's «التحميص» station); everyone
+  // else on the overview.
+  const [tab, setTab] = useState<"pending" | "batches" | "blend">(() => (canStartBatch ? "pending" : "batches"));
 
   // Pending tab filter state
   const [pendingSearch, setPendingSearch] = useState("");
   const [pendingBean, setPendingBean] = useState("");
   const [pendingOrder, setPendingOrder] = useState("");
-
-  // Overproduction confirmation
-  const [overproductionExcess, setOverproductionExcess] = useState<number | null>(null);
-  // The server will not authorize surplus production on the strength of a click: it wants
-  // surplusOverride together with a written reason, and refuses an admin without one. The
-  // dialog used to send neither, so Add as Surplus could not authorize anything at all.
-  const [surplusReason, setSurplusReason] = useState("");
-  const [surplusError, setSurplusError] = useState<string | null>(null);
 
   // Cancel batch modal
   const [cancelBatch, setCancelBatch] = useState<Batch | null>(null);
@@ -188,6 +164,11 @@ export default function ProductionPage() {
       // The «open production orders» tile and tab count (prd-overview), read only.
       fetch("/api/production-orders?status=PENDING,IN_PRODUCTION"),
     ]);
+    // The coffee-grouped queue loads beside the rest; a failure leaves the per-line list usable.
+    fetch("/api/roasting-batches/queue", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { coffees?: QueueCoffee[] } | null) => setQueue(j?.coffees ?? null))
+      .catch(() => setQueue(null));
     // Refused responses are read to the end so the page settles (an unread body keeps the
     // connection open); a failed queue or batch list is reported, not shown as empty.
     const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
@@ -202,53 +183,34 @@ export default function ProductionPage() {
   }
 
   function startProduction(item: OrderItem) {
-    setStockMode(false);
-    setSelectedItem(item);
-    // ── Finished demand, in finished kilograms ──────────────────────────────
-    // The figure below is what the ORDER still needs: finished coffee. It is deliberately
-    // NOT written into the green-weight field. The previous version summed greenBeanQuantity
-    // — the weight loaded into the roaster — subtracted it from quantityKg, which is finished
-    // weight, and then prefilled the green input with the result. Two different physical
-    // quantities were being treated as one, and because roasting always loses weight the
-    // suggestion was short every time.
-    //
-    // Converting finished demand to a green weight needs the coffee's roast loss, which this
-    // screen does not have. The operator weighs what goes into the roaster, so the green
-    // field is left for them to fill; the remaining demand is shown beside it as context.
-    // A rejected roast produced nothing usable, so it is not progress. Counting it made the
-    // line look partly covered and hid the work that still has to be done again.
+    // FINISHED kilograms the line still needs, shown as context on the sheet. A rejected roast
+    // produced nothing usable, so it is not progress.
     const producedFinishedKg = item.roastingBatches
       .filter((b) => !b.isBlend && b.status !== "Rejected")
       .reduce((s: number, b) => s + b.roastedBeanQuantity, 0);
     const coveredFromShelf = item.availableQuantity ?? 0;
-    const remainingFinishedKg = Number(
-      Math.max(0, item.quantityKg - coveredFromShelf - producedFinishedKg).toFixed(3),
-    );
-    setRemainingFinishedKg(remainingFinishedKg);
+    const remainingFinishedKg = Number(Math.max(0, item.quantityKg - coveredFromShelf - producedFinishedKg).toFixed(3));
     const pref = item.order.customer.roastPreferences?.find((p) => p.greenBeanId === item.greenBeanId);
-    const profileHint = profileOverrides[item.id] ?? pref?.profileName ?? "";
-    const livePos = livePosFor(item);
-    setPoChoice(livePos.length === 1 ? livePos[0].id : "");
-    setRoastForm({ greenBeanId: item.greenBeanId || "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: profileHint, productId: "" });
     setError(""); setSuccess("");
-    setRoastTouched(false);
-    setShowRoastForm(true);
-  }
-
-  function closeRoastForm() {
-    setShowRoastForm(false);
-    // Never leave stock mode armed: the next order-driven roast would post without its
-    // order item and silently become a stock batch.
-    setStockMode(false);
+    setShowBlendForm(false);
+    setRoastMode({
+      kind: "order",
+      line: {
+        id: item.id,
+        beanTypeName: item.beanTypeName,
+        orderNumber: item.order.orderNumber,
+        customerName: item.order.customer.name,
+        remainingFinishedKg,
+        profileHint: profileOverrides[item.id] ?? pref?.profileName ?? "",
+        livePos: livePosFor(item),
+      },
+    });
   }
 
   function startStockProduction() {
-    setStockMode(true);
-    setSelectedItem(null);
-    setRoastForm({ greenBeanId: "", greenBeanQuantity: 0, roastedBeanQuantity: 0, roastProfile: "", productId: "" });
     setError(""); setSuccess("");
-    setRoastTouched(false);
-    setShowRoastForm(true);
+    setShowBlendForm(false);
+    setRoastMode({ kind: "stock" });
   }
 
   /**
@@ -262,80 +224,6 @@ export default function ProductionPage() {
     return (item?.productionOrders ?? []).filter(
       (p) => p.status === "PENDING" || p.status === "IN_PRODUCTION",
     );
-  }
-
-  async function handleRoastSubmit(e: React.FormEvent, forceSubmit = false) {
-    e.preventDefault();
-    setError("");
-    setSurplusError(null);
-
-    if (roastForm.greenBeanId) {
-      const bean = beans.find((b) => b.id === roastForm.greenBeanId);
-      if (bean && bean.quantityKg < roastForm.greenBeanQuantity) {
-        setError(`${t("insufficientStock")} ${bean.quantityKg} ${t("opsKgUnit")}`);
-        return;
-      }
-    }
-
-    if (!forceSubmit && !stockMode && selectedItem) {
-      // A courtesy warning only — the server holds the real ceiling and computes it from
-      // the canonical planning figures, which include scheduled production this screen
-      // cannot see. remainingFinishedKg has already had produced output and shelf cover
-      // subtracted, so the comparison here is finished against finished.
-      const excess = +(roastForm.roastedBeanQuantity - remainingFinishedKg).toFixed(2);
-      if (excess > 0) {
-        setOverproductionExcess(excess);
-        setSurplusReason("");
-        return;
-      }
-    }
-
-    const wasteQuantity = Math.max(0, +(roastForm.greenBeanQuantity - roastForm.roastedBeanQuantity).toFixed(2));
-    const res = await fetch("/api/roasting-batches", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        // Omitting orderItemId is what makes this a stock batch.
-        orderItemId: stockMode ? undefined : selectedItem!.id,
-        productId: stockMode ? roastForm.productId : undefined,
-        greenBeanId: roastForm.greenBeanId || undefined,
-        greenBeanQuantity: roastForm.greenBeanQuantity,
-        roastedBeanQuantity: roastForm.roastedBeanQuantity,
-        wasteQuantity,
-        roastProfile: roastForm.roastProfile || undefined,
-        // The production order this roast is being made for, when the line has exactly one
-        // live one. Without it the batch was stored unlinked and the production order could
-        // never account for what had been roasted against it. The server validates the id
-        // and derives it anyway when it is unambiguous, so this is the screen stating what
-        // it is looking at rather than the only route to the link.
-        productionOrderId: stockMode ? undefined : (poChoice || undefined),
-        // Only on the deliberate second submit, and only ever what the operator typed.
-        ...(forceSubmit ? { surplusOverride: true, surplusReason: surplusReason.trim() } : {}),
-      }),
-    });
-
-    if (!res.ok) {
-      try {
-        const data = await res.json();
-        if (forceSubmit) {
-          setSurplusError(data.error || "Failed to create batch");
-        } else {
-          setError(data.error || "Failed to create batch");
-        }
-      } catch {
-        if (forceSubmit) {
-          setSurplusError("Failed to create batch");
-        } else {
-          setError("Failed to create batch");
-        }
-      }
-      return;
-    }
-
-    setOverproductionExcess(null);
-    setSuccess(t("batchCreated"));
-    closeRoastForm();
-    loadData();
   }
 
   function toggleBlendBatch(id: string) {
@@ -515,10 +403,8 @@ export default function ProductionPage() {
   const todayLog = [...todays].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   // Every live plan behind the queue, counted once (the «أوامر الإنتاج» tab count).
   const livePoIds = new Set<string>();
-  const pendingPos: { id: string; productionNumber: string; orderNumber: number }[] = [];
   for (const item of pendingItems) for (const p of item.productionOrders ?? []) {
     if (p.status === "PENDING" || p.status === "IN_PRODUCTION") livePoIds.add(p.id);
-    if (p.status === "PENDING" && !pendingPos.some((x) => x.id === p.id)) pendingPos.push({ id: p.id, productionNumber: p.productionNumber, orderNumber: item.order.orderNumber });
   }
   // prd-overview «يحتاج انتباهك»: rejected roasts awaiting a decision, QC waits past half the
   // 48-hour reminder, and plans that are not released yet. Oldest first, six at most.
@@ -571,7 +457,7 @@ export default function ProductionPage() {
 
   return (
     <OpsRoot>
-    <div className={`hr-split${showBlendForm ? " has-preview" : ""}`}>
+    <div className={`hr-split${showBlendForm || roastMode ? " has-preview" : ""}`}>
     <div className="hr-page">
       <PageHeader
         title={t("opsProductionTitle")}
@@ -632,6 +518,48 @@ export default function ProductionPage() {
 
       {loaded && tab === "pending" && (
         <>
+          {/* Phase C item 2 (prototype «التحميص»): one card per coffee with the roasted kilograms
+              still needed — open order units − shelf free − pipeline — and the orders it serves,
+              oldest first. Tapping a card opens the roast sheet for that coffee; the server
+              attributes the batch to the oldest order. */}
+          {(() => {
+            const needed = (queue ?? []).filter((c) => c.demandKg > 0);
+            const name = (c: QueueCoffee) => (lang === "ar" ? c.productNameAr || c.productNameEn : c.productNameEn);
+            return (
+              <section className="hr-stack" style={{ gap: 10 }} aria-label={t("opsRoastByCoffee")} data-testid="roast-queue">
+                <SecHead
+                  title={<>{t("opsRoastByCoffee")} <span className="hr-num">{needed.length}</span></>}
+                  caption={t("opsRoastByCoffeeCaption")}
+                  action={canStartBatch && canRoastToStock ? <Btn size="sm" onClick={startStockProduction} data-testid="roast-to-stock"><Boxes size={14} aria-hidden="true" /> {t("roastToStock")}</Btn> : undefined}
+                />
+                {queue === null ? <OpsError message={t("opsLoadFailed")} onRetry={loadData} /> : needed.length === 0 ? (
+                  <OpsEmpty title={t("opsNothingToRoast")} />
+                ) : (
+                  <div className="ops-dcards">
+                    {needed.map((c) => (
+                      <button key={c.productId} type="button" className="ops-dcard" data-testid={`roast-coffee-${c.productId}`}
+                        disabled={!canStartBatch || !c.allocateTo}
+                        aria-pressed={roastMode?.kind === "coffee" && roastMode.coffee.productId === c.productId}
+                        onClick={() => { setError(""); setSuccess(""); setShowBlendForm(false); setRoastMode({ kind: "coffee", coffee: c }); }}>
+                        <span className="ops-dcard-row">
+                          <span className="ops-dcard-t"><bdi>{name(c)}</bdi></span>
+                          {canStartBatch && c.allocateTo ? <span className="ops-dcard-go" aria-hidden="true">{t("opsRecordBatch")}</span> : null}
+                        </span>
+                        <span className="ops-dcard-s"><strong className="hr-num">{c.demandKg.toFixed(2)}</strong> {t("opsKgRoastedNeeded")}
+                          {c.pipelineKg > 0 ? <> · <span className="hr-num">{c.pipelineKg.toFixed(2)}</span> {t("opsKgInPipeline")}</> : null}</span>
+                        <span className="ops-dcard-tags">
+                          {c.orders.map((o) => <span key={o.orderId} className="ops-dtag tone-info">{t("opsOrderWord")} <span className="hr-id">#{o.orderNumber}</span></span>)}
+                          {c.green ? <span className="ops-dtag">{t("opsGreenWord")} <span className="hr-num">{c.green.quantityKg.toFixed(1)}</span> {t("opsKgAvailable")}</span> : null}
+                          {!c.allocateTo ? <span className="ops-dtag">{t("opsAwaitingPreparation")}</span> : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })()}
+
           <SecHead title={t("opsWorkList")} caption={t("opsWorkListCaption")} />
           {pendingItems.length > 0 && (
             <WorkflowFilterBar
@@ -976,7 +904,7 @@ export default function ProductionPage() {
           <div className="ops-cols" style={{ marginTop: 16 }}>
             <section className="hr-stack" style={{ gap: 8 }} aria-label={t("opsAttention")}>
               <SecHead title={t("opsAttention")} />
-              {rejectedBatches.length + lateQc.length + pendingPos.length === 0 ? <p className="hr-caption" style={{ margin: 0 }}>{t("opsNothingAttention")}</p> : (
+              {rejectedBatches.length + lateQc.length === 0 ? <p className="hr-caption" style={{ margin: 0 }}>{t("opsNothingAttention")}</p> : (
                 <ul className="ops-attn">
                   {rejectedBatches.slice(0, 3).map((b) => {
                     const lossPct = b.greenBeanQuantity > 0 ? (1 - b.roastedBeanQuantity / b.greenBeanQuantity) * 100 : 0;
@@ -999,15 +927,9 @@ export default function ProductionPage() {
                       <Link href="/dashboard/qc" className="hr-btn is-sm">{t("opsOpenQc")}</Link>
                     </li>
                   ))}
-                  {pendingPos.slice(0, 3).map((p) => (
-                    <li key={p.id}>
-                      <div>
-                        <Dot tone="warning"><span className="ops-serial">{p.productionNumber}</span> {t("opsAwaitingRelease")} <span className="hr-id">#{p.orderNumber}</span></Dot>
-                        <span className="ops-attn-sub">{t("opsNoRoastBeforeRelease")}</span>
-                      </div>
-                      <Link href={`/dashboard/production-orders/${p.id}`} className="hr-btn is-sm">{t("opsOpenOrder")}</Link>
-                    </li>
-                  ))}
+                  {/* G11 (Phase C item 3): production orders are internal and released by nobody —
+                      the «awaiting release» item and its «roasting does not start before release»
+                      line (which the server never enforced) are gone. */}
                 </ul>
               )}
             </section>
@@ -1106,240 +1028,22 @@ export default function ProductionPage() {
         </OpsPane>
       );
     })()}
+      {/* The roast sheet (production simplification item 1): replaces the roast dialog and its
+          separate overproduction dialog. The green lot is resolved by the server; the loss is
+          derived; a surplus is authorized inside the sheet. */}
+      {roastMode ? (
+        <RoastSheet
+          mode={roastMode}
+          products={products}
+          beans={beans}
+          canChangeGreen={canRoastToStock}
+          isAdmin={user?.role === "admin"}
+          onClose={() => setRoastMode(null)}
+          onSaved={(msg) => { setRoastMode(null); setError(""); setSuccess(msg); loadData(); }}
+        />
+      ) : null}
+
     </div>
-
-      {/* Overproduction Confirmation Modal */}
-      {overproductionExcess !== null && selectedItem && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="p-2 bg-amber-100 rounded-xl shrink-0">
-                <span className="text-2xl">⚠️</span>
-              </div>
-              <div>
-                <h3 className="font-extrabold text-charcoal text-base">{t("overprodWarnTitle")}</h3>
-                <p className="text-sm text-brown mt-1">
-                  {t("overprodWarnBody")}{" "}
-                  <span className="font-bold text-amber-700">+<Kg v={formatKg(overproductionExcess)} /></span>
-                  {". "}
-                  {t("overprodWarnConfirm")}
-                </p>
-                <p className="text-xs text-brown/60 mt-2">
-                  {t("requiredQtyLabel")}: <Kg v={selectedItem.quantityKg} /> — {t("totalProducedLabel")}: <Kg v={(+(
-                    selectedItem.roastingBatches.filter((b) => !b.isBlend && b.status !== "Rejected").reduce((s, b) => s + b.roastedBeanQuantity, 0) +
-                    roastForm.roastedBeanQuantity
-                  )).toFixed(2)} />
-                </p>
-              </div>
-            </div>
-            {surplusError ? (
-              <div className="space-y-3">
-                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-xl text-sm font-semibold">
-                  {surplusError}
-                </div>
-                <button
-                  onClick={() => { setOverproductionExcess(null); setSurplusError(null); }}
-                  className="w-full py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-            ) : (
-              <>
-              <label className="block mb-3">
-                <span className="block text-xs font-bold text-charcoal mb-1">
-                  {t("surplusReasonLabel")} <span className="text-red-500">*</span>
-                </span>
-                <textarea
-                  value={surplusReason}
-                  onChange={(e) => setSurplusReason(e.target.value)}
-                  rows={2}
-                  placeholder={t("surplusReasonPlaceholder")}
-                  className="w-full px-3 py-2 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors resize-none"
-                />
-              </label>
-              <div className="flex gap-3">
-                <button
-                  disabled={surplusReason.trim().length < 8}
-                  onClick={async () => {
-                    setSurplusError(null);
-                    const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
-                    await handleRoastSubmit(fakeEvent, true);
-                  }}
-                  className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 active:scale-[0.98] transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                  {t("addAsSurplus")}
-                </button>
-                <button
-                  onClick={() => { setOverproductionExcess(null); setSurplusError(null); }}
-                  className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                  {t("cancel")}
-                </button>
-              </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Roast Form Modal */}
-      {/* Desktop: the approved centred dialog (305:1457). Phone: the 344:3458 bottom sheet
-          (ops.css .ops-roast) — same form, same controls. */}
-      {showRoastForm && (selectedItem || stockMode) && (
-        <div className="ops-roast fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeRoastForm(); }}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg" role="dialog" aria-modal="true" aria-label={stockMode ? t("roastToStockTitle") : t("recordRoastTitle")}>
-            <h2 className="text-lg font-extrabold text-charcoal mb-1">
-              {stockMode ? t("roastToStockTitle") : t("recordRoastTitle")}
-            </h2>
-            {stockMode ? (
-              <p className="text-sm text-brown font-medium mb-4">{t("roastToStockHint")}</p>
-            ) : (
-              <p className="text-sm text-brown font-medium mb-4">#{selectedItem!.order.orderNumber} — {selectedItem!.beanTypeName}</p>
-            )}
-            <p className="text-xs text-brown/50 mb-4">{t("snAutoGenerated")}</p>
-            <form onSubmit={handleRoastSubmit} className="space-y-3">
-              {/* The page-level error banner sits behind this modal's backdrop, so a failed
-                  submit from here has to report itself inside the dialog. */}
-              {error && (
-                <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl">
-                  <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" /> <span>{error}</span>
-                </div>
-              )}
-              {stockMode && (
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">{t("productLabel")}</label>
-                  <Select value={roastForm.productId} onChange={(e) => setRoastForm({ ...roastForm, productId: e.target.value })}
-                    className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
-                    <option value="">{t("selectProduct")}</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>{lang === "ar" ? (p.productNameAr ?? p.productNameEn) : p.productNameEn}</option>
-                    ))}
-                  </Select>
-                  <p className="mt-1 text-xs text-brown/60">{t("roastToStockProductHint")}</p>
-                </div>
-              )}
-              <div>
-                <label className="block text-sm font-bold text-charcoal mb-1">{t("greenBeanSource")}</label>
-                <Select value={roastForm.greenBeanId} onChange={(e) => setRoastForm({ ...roastForm, greenBeanId: e.target.value })}
-                  className="w-full px-3 py-2.5 border-2 border-border rounded-xl text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required>
-                  <option value="">{t("selectBeanStock")}</option>
-                  {beans.map((b) => (
-                    <option key={b.id} value={b.id}>{b.beanType} ({b.serialNumber}) — {formatKg(b.quantityKg)} {t("opsKgUnit")}</option>
-                  ))}
-                </Select>
-              </div>
-              {!stockMode && livePosFor(selectedItem).length > 1 && (
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">
-                    Production order
-                  </label>
-                  <Select
-                    value={poChoice}
-                    onChange={(e) => setPoChoice(e.target.value)}
-                    required
-                    className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
-                  >
-                    <option value="">Select which production order this roast is for…</option>
-                    {livePosFor(selectedItem).map((p) => (
-                      <option key={p.id} value={p.id}>{p.productionNumber} — {p.status}</option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              {!stockMode && remainingFinishedKg > 0 && (
-                <p className="text-sm text-brown/70">
-                  {/* FINISHED kilograms still owed. Shown as context beside the green field,
-                      never written into it: converting this to a green weight needs the
-                      coffee's roast loss, which this screen does not hold. */}
-                  {t("opsStillToProduce").replace("{kg}", formatKg(remainingFinishedKg))}
-                </p>
-              )}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">{t("greenBeanQty")}</label>
-                  <input type="number" step="0.01" value={roastForm.greenBeanQuantity}
-                    onChange={(e) => setRoastForm({ ...roastForm, greenBeanQuantity: parseFloat(e.target.value) || 0 })} onBlur={() => setRoastTouched(true)}
-                    className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-charcoal mb-1">{t("roastedQty")}</label>
-                  <input type="number" step="0.01" value={roastForm.roastedBeanQuantity}
-                    onChange={(e) => setRoastForm({ ...roastForm, roastedBeanQuantity: parseFloat(e.target.value) || 0 })} onBlur={() => setRoastTouched(true)}
-                    className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" required />
-                </div>
-              </div>
-              {(() => {
-                const roastedExceeds = roastForm.roastedBeanQuantity > roastForm.greenBeanQuantity && roastForm.greenBeanQuantity > 0;
-                const roastedIsZero  = roastForm.roastedBeanQuantity <= 0;
-                const selectedBean = roastForm.greenBeanId
-                  ? beans.find((b) => b.id === roastForm.greenBeanId) ?? null
-                  : null;
-                const insufficientStock =
-                  selectedBean !== null &&
-                  roastForm.greenBeanQuantity > 0 &&
-                  roastForm.greenBeanQuantity > selectedBean.quantityKg;
-                const greenQtyInvalid = roastForm.greenBeanQuantity <= 0;
-                // greenBeanId is required by the API for every direct roast, and a stock
-                // roast has no order item to prefill it from — so the button must reflect
-                // that rather than letting the user submit into a 400.
-                const submitDisabled =
-                  roastedExceeds || roastedIsZero || insufficientStock || greenQtyInvalid ||
-                  !roastForm.greenBeanId || (stockMode && !roastForm.productId);
-                return (
-                  <>
-                    {roastTouched && greenQtyInvalid && (
-                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        {t("opsGreenQtyRequired")}
-                      </div>
-                    )}
-                    {roastTouched && roastedIsZero && (
-                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        {t("opsRoastedQtyRequired")}
-                      </div>
-                    )}
-                    {roastTouched && roastedExceeds && (
-                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        {t("roastedExceedsGreen")}
-                      </div>
-                    )}
-                    {roastTouched && insufficientStock && selectedBean && (
-                      <div className="text-sm font-bold px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700">
-                        {t("opsInsufficientAvail").replace("{kg}", formatKg(selectedBean.quantityKg))}
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-bold text-charcoal mb-1">{t("wasteKg")}</label>
-                        <input type="number" step="0.01"
-                          value={Math.max(0, +(roastForm.greenBeanQuantity - roastForm.roastedBeanQuantity).toFixed(2))}
-                          readOnly className="w-full px-3 py-2.5 border-2 border-border rounded-xl bg-cream/50 text-brown outline-none" />
-                        {roastForm.greenBeanQuantity > 0 && roastForm.roastedBeanQuantity > 0 && !roastedExceeds && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            Loss rate: {(((roastForm.greenBeanQuantity - roastForm.roastedBeanQuantity) / roastForm.greenBeanQuantity) * 100).toFixed(1)}%
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-bold text-charcoal mb-1">{t("roastProfileLabel")}</label>
-                        <input type="text" value={roastForm.roastProfile}
-                          onChange={(e) => setRoastForm({ ...roastForm, roastProfile: e.target.value })}
-                          className="w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" placeholder={t("roastProfilePlaceholder")} />
-                      </div>
-                    </div>
-                    <div className="flex gap-3 pt-2">
-                      <button type="submit" disabled={submitDisabled}
-                        className={`flex-1 py-3 rounded-xl font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${submitDisabled ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
-                        {t("recordBatch")}
-                      </button>
-                      <button type="button" onClick={() => closeRoastForm()} className="flex-1 py-3 border-2 border-border rounded-xl font-bold text-brown hover:bg-cream transition-colors">
-                        {t("cancel")}
-                      </button>
-                    </div>
-                  </>
-                );
-              })()}
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Cancel Batch Modal */}
       {cancelBatch && (() => {

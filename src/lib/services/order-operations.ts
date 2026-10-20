@@ -844,8 +844,15 @@ export async function lockOrderLifecycleResources(tx: PrismaTx, orderId: string)
 export async function lockDeliveryResources(
   tx: PrismaTx,
   orderItemId: string,
-  finishedGoodsLotId: string | null,
+  finishedGoodsLotIds: string | readonly string[] | null,
 ): Promise<void> {
+  // Phase D: a lot-less dispatch may draw from several lots, chosen by the server. It passes
+  // every lot it could touch (its reservations and the shelf lots of its SKU); all of them are
+  // locked here, in id order, before the OrderItem — the same canonical order as one lot.
+  const extra = [...new Set(
+    (finishedGoodsLotIds === null ? [] : typeof finishedGoodsLotIds === "string" ? [finishedGoodsLotIds] : [...finishedGoodsLotIds])
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
+  )];
   await tx.$queryRaw`
     SELECT sa."id" FROM "StockAllocation" sa
      WHERE sa."orderItemId" = ${orderItemId} AND sa."status" = 'RESERVED'
@@ -864,7 +871,7 @@ export async function lockDeliveryResources(
              SELECT sa."finishedGoodsLotId" FROM "StockAllocation" sa
               WHERE sa."orderItemId" = ${orderItemId} AND sa."status" = 'RESERVED'
              UNION
-             SELECT ${finishedGoodsLotId}::text WHERE ${finishedGoodsLotId}::text IS NOT NULL)
+             SELECT unnest(${extra}::text[]))
      ORDER BY f."id" ASC
        FOR UPDATE OF f`;
 }

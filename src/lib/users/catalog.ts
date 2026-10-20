@@ -53,7 +53,7 @@ export const GROUP_OF: Record<string, string> = Object.fromEntries(GROUPS.flatMa
 
 /** users.py SUBS where Figma draws the action; the rest are drafts (O-8). */
 export const SUB_AR: Record<string, Record<string, string>> = {
-  qc: { create_record: "تسجيل نتائج الجودة", edit_record: "تعديل سجلات الجودة", view_records: "عرض سجل الجودة", manage: "اعتماد لجنة الجودة وروابط الضيوف" },
+  qc: { create_record: "تسجيل نتائج الجودة", edit_record: "تعديل سجلات الجودة", view_records: "عرض سجل الجودة", manage: "اعتماد لجنة الجودة وروابط الضيوف", finalize_override: "اعتماد استثنائي بأقل من الحد الأدنى" },
   production: {
     start_batch: "بدء التحميص ومتابعته", roast_to_stock: "تحميص للمخزون دون طلب", blend: "خلط الدفعات", view_history: "عرض الدفعات المكتملة",
     cancel_batch: "إلغاء الدفعات وحذفها", edit_date: "تعديل تاريخ الدفعة بأثر رجعي",

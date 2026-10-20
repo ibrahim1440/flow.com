@@ -70,6 +70,8 @@ export type TimelineEntry = { key: string; at: string; kind: string } & (
   | { kind: "quote_issued" | "quote_accepted"; quote: { id: string; quoteNumber: string; revision: number; grandTotal: string; currency: string }; stageMove?: { from: string; to: string } | null }
   | { kind: "order"; order: { id: string; orderNumber: number; totalKg: number; status: string; value: string | null } }
   | { kind: "payment"; payment: { id: string; amount: string; currency: string; method: string; orderNumber: number | null } }
+  // Phase D: a delivery, with the lots the server drew it from (batch numbers only).
+  | { kind: "delivery"; delivery: { id: string; orderNumber: number; item: string; units: number | null; kg: number; type: string; lots: string[] } }
 );
 
 export type Account = {

@@ -8,6 +8,7 @@ import {
   Decimal, acceptedDocumentPerDeal, monthlyQuantities, orderRhythm, outstandingBalance,
   salesLast12Months, usualItems, type OrderRow,
 } from "@/lib/services/customers/aggregates";
+import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -249,6 +250,28 @@ export async function GET(_request: Request, { params }: Params) {
       // whole quotation's value again).
       const link = o.opportunityLinks.find((l) => l.quote && l.quote._count.orderLinks === 1);
       timeline.push({ key: `o-${o.id}`, at: o.createdAt, kind: "order", order: { id: o.id, orderNumber: o.orderNumber, totalKg, status: o.status, value: link?.quote ? link.quote.grandTotal.toFixed(2) : null } });
+    }
+    // Deliveries (orders module, Phase D): what left the shelf for this customer and from which
+    // lots — DeliveryLine rows, or the ledger lot of a delivery recorded before them.
+    if (orders) {
+      const dels = await prisma.delivery.findMany({
+        where: { orderItem: { order: { customerId: id } } },
+        orderBy: { date: "desc" },
+        take: 200,
+        select: {
+          id: true, date: true, quantityUnits: true, quantityKg: true, deliveryType: true,
+          orderItem: { select: { beanTypeName: true, productSku: { select: { name: true, skuCode: true } }, order: { select: { orderNumber: true } } } },
+        },
+      });
+      const lotsBy = await deliveryLotsFor(prisma, dels.map((d) => d.id));
+      for (const d of dels) {
+        timeline.push({ key: `d-${d.id}`, at: d.date, kind: "delivery", delivery: {
+          id: d.id, orderNumber: d.orderItem.order.orderNumber,
+          item: d.orderItem.productSku?.name ?? d.orderItem.productSku?.skuCode ?? d.orderItem.beanTypeName,
+          units: d.quantityUnits, kg: d.quantityKg, type: d.deliveryType,
+          lots: (lotsBy.get(d.id) ?? []).map((x) => x.batchNumber ?? "—"),
+        } });
+      }
     }
     for (const c of collections ?? []) {
       if (c.status !== "APPROVED") continue;

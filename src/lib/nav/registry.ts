@@ -210,7 +210,7 @@ const DECIDES_COLLECTIONS: Ability[] = [
  *   المالية:  النقد والبنوك · الفواتير والتحصيل · الأداء
  * and the owner's regrouping (19 Oct 2026) splits «التشغيل» into its areas of work:
  *   (top)                 لوحة التشغيل · خدماتي
- *   الطلبات:              الطلبات · تجهيز الطلبات · التسليم
+ *   الطلبات:              الطلبات · التسليم   («تجهيز الطلبات» retired, production simplification B)
  *   الإنتاج:              أوامر الإنتاج · الإنتاج والتحميص · التعبئة · الملصقات
  *   الجودة:               الجودة والتذوق · التذوق
  *   المخزون والمشتريات:   المخزون · المشتريات · المنتجات
@@ -477,17 +477,9 @@ export const NAV: NavNode[] = [
         unlessAny: [sales()],
         shell: { icon: "orders", group: "orders", trailRoot: "orders" },
       },
-      {
-        id: "operations.preparation",
-        ar: "تجهيز الطلبات", en: "Order preparation",
-        href: "/dashboard/workstation/preparation",
-        icon: PackageCheck,
-        anyOf: [{ module: "orders" }],
-        shell: { icon: "orders", group: "orders", trailRoot: "orders" },
-        // G-11: Operations' «الطلبات» is highlighted here. A seller meets orders under Sales
-        // instead, has no such entry, and keeps the page's own highlight.
-        highlightAs: ["operations.orders"],
-      },
+      // «تجهيز الطلبات» (operations.preparation) was retired by the production simplification
+      // (Phase B item 4): preparation is automatic and «الطلبات» is the status board. Its route
+      // redirects to Orders.
       {
         id: "operations.productionOrders",
         ar: "أوامر الإنتاج", en: "Production orders",

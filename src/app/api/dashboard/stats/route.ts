@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readQcSettings } from "@/lib/services/settings/sections";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { anonymousOrder, canSeeCustomerDetail } from "@/lib/auth/customer-detail";
@@ -123,11 +124,15 @@ export async function GET(request: Request) {
       : null;
 
   const now = new Date();
+  const { effectiveMinEvaluators: qcMin } = await readQcSettings(prisma);
   const qcBatchAlerts = openQcBatches.map((b) => ({
     id: b.id,
     batchNumber: b.batchNumber,
     origin: b.greenBean?.beanType ?? b.orderItem?.beanTypeName ?? "",
     testerCount: b.qcRecords.length,
+    // D1 (production simplification): the minimum in force, and whether the panel has reached it.
+    minEvaluators: qcMin,
+    belowMinimum: b.qcRecords.length < qcMin,
     deadline: b.qcDeadline,
     isOverdue: b.qcDeadline ? b.qcDeadline < now : false,
     isUrgent: b.qcDeadline

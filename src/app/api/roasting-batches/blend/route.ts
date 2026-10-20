@@ -13,6 +13,7 @@ import {
   recordBlendMovements,
 } from "@/lib/services/blend-transformation";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { nextBlendBatchNumber } from "@/lib/services/batch-number";
 
 /**
  * Blend several roasted batches into one.
@@ -117,8 +118,10 @@ export async function POST(request: Request) {
       }
 
       // ── 4. The output ──────────────────────────────────────────────────────
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const blendedBatchNumber = `${today}${locked.map((b) => b.batchNumber.slice(-2)).sort().join("")}`;
+      // Its own daily sequence in the Riyadh day (20261019B01): the previous shape — the UTC date
+      // plus the last two digits of every source — was read by the roast generator as a roast
+      // serial and pushed the next roast's number past it (gap G07), and could repeat itself.
+      const blendedBatchNumber = await nextBlendBatchNumber(tx);
 
       const blendedBatch = await tx.roastingBatch.create({
         data: {

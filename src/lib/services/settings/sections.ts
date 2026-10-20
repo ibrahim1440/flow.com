@@ -110,3 +110,47 @@ export function parseInvoicingPatch(b: Record<string, unknown>): { ok: true; dat
   }
   return { ok: true, data };
 }
+
+// ─── Settings › Production & roasting › QC (migration 20261023090000_production_qc_simplify) ───
+/** Owner decision D1: two evaluators per batch unless the owner sets another minimum. */
+export const QC_MIN_EVALUATORS_DEFAULT = 2;
+export const QC_MIN_EVALUATORS_MAX = 10;
+
+export type QcSettings = {
+  /** What the owner stored, or null. */
+  minEvaluators: number | null;
+  /** The minimum in force: the stored value, else 2. */
+  effectiveMinEvaluators: number;
+  isDefault: boolean;
+};
+
+export function qcFromRow(row: { qcMinEvaluators?: number | null } | null | undefined): QcSettings {
+  const stored = typeof row?.qcMinEvaluators === "number" ? row.qcMinEvaluators : null;
+  return { minEvaluators: stored, effectiveMinEvaluators: stored ?? QC_MIN_EVALUATORS_DEFAULT, isDefault: stored === null };
+}
+
+export async function readQcSettings(db: Db): Promise<QcSettings> {
+  return qcFromRow((await db.systemConfig.findUnique({ where: { id: "singleton" } })) as { qcMinEvaluators?: number | null } | null);
+}
+
+/** PUT /api/settings/production/qc body → the column to write. */
+export function parseQcPatch(b: Record<string, unknown>): { ok: true; data: { qcMinEvaluators?: number | null } } | Problem {
+  const data: { qcMinEvaluators?: number | null } = {};
+  if ("minEvaluators" in b) {
+    const v = b.minEvaluators;
+    if (v === null || v === "") data.qcMinEvaluators = null;
+    else {
+      const t = typeof v === "number" ? String(v) : typeof v === "string" ? normaliseNumberText(v) : "";
+      const n = /^\d+$/.test(t) ? Number(t) : NaN;
+      if (!Number.isInteger(n) || n < 1 || n > QC_MIN_EVALUATORS_MAX) {
+        return {
+          ok: false, field: "minEvaluators",
+          error: `The minimum number of evaluators is a whole number from 1 to ${QC_MIN_EVALUATORS_MAX}.`,
+          errorAr: `الحد الأدنى للمقيّمين عدد صحيح من 1 إلى ${QC_MIN_EVALUATORS_MAX}.`,
+        };
+      }
+      data.qcMinEvaluators = n;
+    }
+  }
+  return { ok: true, data };
+}

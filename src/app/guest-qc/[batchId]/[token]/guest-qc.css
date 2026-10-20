@@ -12,6 +12,9 @@
 .gc .gq-reasons legend { float: inline-start; width: 100%; padding: 0; margin-bottom: 4px; font: 500 13px/22px var(--f-ui); color: var(--text-primary); }
 .gc .gq-reasons label { display: flex; align-items: center; gap: 8px; font: 400 14px/22px var(--f-ui); color: var(--text-secondary); cursor: pointer; min-height: 32px; }
 .gc .gq-reasons input { width: 16px; height: 16px; accent-color: var(--action-primary); flex: none; }
+.gc .gq-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.gc .gq-chip { appearance: none; border: 0; cursor: pointer; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); font: 400 14px/22px var(--f-ui); }
+.gc .gq-chip[aria-pressed="true"] { background: var(--action-primary-tint); box-shadow: inset 0 0 0 2px var(--action-primary); font-weight: 600; }
 .gc .gq-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
 .gc .gq-ltr { text-align: start; }
 .gc .gq-error { margin: 0; }
@@ -25,7 +28,7 @@
 .gc .gc-state .gq-id { margin-top: 4px; }
 @media (max-width: 767px) {
   .gc .gq-seg { align-self: stretch; display: flex; }
-  .gc .gq-seg > button { flex: 1; height: 40px; min-width: 0; }
+  .gc .gq-seg > button { flex: 1; height: 44px; min-width: 0; }
   .gc .gq-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .gc .gq-submit { align-self: stretch; height: 44px; }
 }

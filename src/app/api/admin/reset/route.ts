@@ -83,6 +83,9 @@ export async function POST(request: Request) {
       prisma.cuppingSessionBatch.deleteMany(),
       prisma.cuppingSession.deleteMany(),
       prisma.inventoryMovement.deleteMany(),
+      // Phase D: DeliveryLine.finishedGoodsLotId is ON DELETE RESTRICT too, so the lines go
+      // before the lots (their deliveries would cascade them, but only after the lots).
+      prisma.deliveryLine.deleteMany(),
       // Must precede finishedGoodsLot: StockAllocation.finishedGoodsLotId is ON DELETE
       // RESTRICT, so leaving these behind makes the whole reset transaction fail.
       prisma.stockAllocation.deleteMany(),
@@ -90,6 +93,8 @@ export async function POST(request: Request) {
       prisma.productionOrder.deleteMany(),
       prisma.purchaseRecord.deleteMany(),
       prisma.qcRecord.deleteMany(),
+      // Guest invitations of the QC panel (20261023090000_production_qc_simplify); before the batches.
+      prisma.qcInvite.deleteMany(),
       prisma.delivery.deleteMany(),
       prisma.blendIngredient.deleteMany(),
       // Reachable ONLY behind the authorization above, which is what makes it acceptable:

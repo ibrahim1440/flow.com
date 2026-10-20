@@ -77,6 +77,35 @@ export async function POST(request: Request, { params }: Params) {
         };
       }
 
+      // Production simplification, Phase B item 4: a new order is prepared automatically on
+      // creation, so it is usually already «قيد التجهيز» / «جاهز للشحن» before anybody could
+      // approve it. Approval is not part of the normal path and gates nothing; an explicit
+      // "Yes" on a prepared order is therefore RECORDED — approvalStatus and its date — without
+      // touching the status the stock derived (nothing is rewound, nothing re-reviewed). "No"
+      // and "Pending" there stay refused below: a prepared order is cancelled, not rejected.
+      if (decision === "Yes" && (existing.status === "Preparing" || existing.status === "Ready for Shipping")) {
+        if (existing.approvalStatus !== "Yes") {
+          const recorded = await tx.order.updateMany({
+            where: { id, status: existing.status, approvalStatus: existing.approvalStatus },
+            data: { approvalStatus: "Yes", approvalDate: new Date() },
+          });
+          if (recorded.count === 0) {
+            throw { _appCode: 409, message: "Order changed before this decision could be applied. Please reload and retry." };
+          }
+          await appendOrderActivity(tx, {
+            orderId: id,
+            type: "ORDER_APPROVED",
+            message: `Order approved by ${user.name}. It was already prepared automatically; its status (${existing.status}) is unchanged.`,
+            authorId: user.id,
+            authorName: user.name,
+          });
+        }
+        return tx.order.findUnique({
+          where: { id },
+          select: { id: true, approvalStatus: true, approvalDate: true, notes: true, status: true, ownerId: true },
+        });
+      }
+
       // Terminal/downstream-status guard: approval decisions may only be made while the
       // order is still within the approval route's own domain. This blocks the approve
       // route from silently rewinding real operational progress (e.g. an order already

@@ -21,8 +21,20 @@ type BatchInfo = {
  * card. Arabic and English, phone first. The token handling, the request and its payload are
  * unchanged: GET and POST /api/guest-qc/:batchId/:token.
  */
-export default function GuestQCPage({ params }: { params: Promise<{ batchId: string; token: string }> }) {
+// The reasons a guest gives for a rejection — the same chips as an internal evaluation (gap G25:
+// a guest rejection carries its reason exactly like a staff one; the API refuses one without).
+const REASONS = [
+  { key: "burnt", ar: "محروقة", en: "Burnt" },
+  { key: "uneven", ar: "غير متجانسة", en: "Uneven" },
+  { key: "under", ar: "تحت التطوير", en: "Underdeveloped" },
+  { key: "odour", ar: "رائحة غريبة", en: "Off odour" },
+  { key: "other", ar: "أخرى", en: "Other" },
+] as const;
+
+export default function GuestQCPage({ params, searchParams }: { params: Promise<{ batchId: string; token: string }>; searchParams: Promise<{ name?: string | string[] }> }) {
   const { batchId, token } = use(params);
+  // A guest present on the inviting device arrives with their name already typed (?name=…).
+  const presetName = (() => { const n = use(searchParams).name; return (Array.isArray(n) ? n[0] : n ?? "").slice(0, 120); })();
 
   const [batch, setBatch] = useState<BatchInfo | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -33,11 +45,11 @@ export default function GuestQCPage({ params }: { params: Promise<{ batchId: str
   const [lang, setLang] = useState<GuestLang>("ar");
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
 
-  const [testerName, setTesterName] = useState("");
+  const [testerName, setTesterName] = useState(presetName);
   const [decision, setDecision] = useState<"Accept" | "Reject" | "">("");
-  const [underDeveloped, setUnderDeveloped] = useState(false);
-  const [overDeveloped, setOverDeveloped] = useState(false);
-  const [color, setColor] = useState("");
+  const [reason, setReason] = useState<(typeof REASONS)[number]["key"] | "">("");
+  const [colorWhole, setColorWhole] = useState("");
+  const [colorGround, setColorGround] = useState("");
   const [remarks, setRemarks] = useState("");
 
   useEffect(() => {
@@ -54,13 +66,25 @@ export default function GuestQCPage({ params }: { params: Promise<{ batchId: str
     e.preventDefault();
     if (!decision) { setError(L("اختر «قبول» أو «رفض».", "Please select Accept or Reject")); return; }
     if (!testerName.trim()) { setError(L("اكتب اسمك.", "Please enter your name")); return; }
+    if (decision === "Reject" && (!reason || (reason === "other" && !remarks.trim()))) { setError(L("اختر سبب الرفض.", "Please choose the rejection reason.")); return; }
     setError("");
     setSubmitting(true);
     try {
       const res = await fetch(`/api/guest-qc/${batchId}/${token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testerName, decision, color, remarks, underDeveloped, overDeveloped }),
+        body: JSON.stringify((() => {
+          const r = REASONS.find((x) => x.key === reason);
+          const label = decision === "Reject" && r && r.key !== "other" ? (lang === "ar" ? r.ar : r.en) : "";
+          return {
+            testerName, decision,
+            underDeveloped: decision === "Reject" && reason === "under",
+            overDeveloped: decision === "Reject" && reason === "burnt",
+            remarks: [label, remarks.trim()].filter(Boolean).join(" · "),
+            colorWhole: colorWhole.trim() || null,
+            colorGround: colorGround.trim() || null,
+          };
+        })()),
       });
       if (!res.ok) {
         const d = await res.json();
@@ -137,7 +161,7 @@ export default function GuestQCPage({ params }: { params: Promise<{ batchId: str
         <span className="gq-label" id="gq-verdict">{L("القرار", "Verdict")} <i aria-hidden>*</i></span>
         <span className="ops-seg gq-seg" role="group" aria-labelledby="gq-verdict">
           <button type="button" aria-pressed={decision === "Accept"} data-testid="guest-qc-accept"
-            onClick={() => { setDecision("Accept"); setUnderDeveloped(false); setOverDeveloped(false); }}>
+            onClick={() => { setDecision("Accept"); setReason(""); }}>
             {L("قبول", "Accept")}
           </button>
           <button type="button" className="is-negative" aria-pressed={decision === "Reject"} data-testid="guest-qc-reject"
@@ -148,22 +172,29 @@ export default function GuestQCPage({ params }: { params: Promise<{ batchId: str
       </div>
 
       {decision === "Reject" && (
-        <fieldset className="gq-reasons">
-          <legend>{L("سبب الرفض", "Rejection reason")}</legend>
-          <label><input type="radio" name="reason" checked={underDeveloped} onChange={() => { setUnderDeveloped(true); setOverDeveloped(false); }} />{L("تحميص ناقص", "Under developed")}</label>
-          <label><input type="radio" name="reason" checked={overDeveloped} onChange={() => { setUnderDeveloped(false); setOverDeveloped(true); }} />{L("تحميص زائد", "Over developed")}</label>
+        <fieldset className="gq-reasons" data-testid="guest-qc-reasons">
+          <legend>{L("سبب الرفض", "Rejection reason")} <i aria-hidden>*</i></legend>
+          <span className="gq-chips">
+            {REASONS.map((r) => (
+              <button key={r.key} type="button" className="gq-chip" aria-pressed={reason === r.key} onClick={() => setReason(r.key)}>{lang === "ar" ? r.ar : r.en}</button>
+            ))}
+          </span>
         </fieldset>
       )}
 
       <div className="gq-grid">
         <div className="gc-field">
-          <label htmlFor="gq-color">{L("اللون (Agtron)", "Color (Agtron)")}</label>
-          <input id="gq-color" type="number" dir="ltr" value={color} onChange={(e) => setColor(e.target.value)} placeholder={L("مثال: 65", "e.g. 65")} className="gc-input gq-ltr" inputMode="decimal" />
+          <label htmlFor="gq-whole">{L("Agtron حبة (اختياري)", "Agtron, whole bean (optional)")}</label>
+          <input id="gq-whole" type="number" dir="ltr" value={colorWhole} onChange={(e) => setColorWhole(e.target.value)} placeholder={L("مثال: 65", "e.g. 65")} className="gc-input gq-ltr" inputMode="decimal" />
         </div>
         <div className="gc-field">
-          <label htmlFor="gq-remarks">{L("ملاحظات", "Remarks")}</label>
-          <input id="gq-remarks" type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={L("اختياري", "Optional notes")} className="gc-input" />
+          <label htmlFor="gq-ground">{L("Agtron مطحون (اختياري)", "Agtron, ground (optional)")}</label>
+          <input id="gq-ground" type="number" dir="ltr" value={colorGround} onChange={(e) => setColorGround(e.target.value)} placeholder={L("مثال: 72", "e.g. 72")} className="gc-input gq-ltr" inputMode="decimal" />
         </div>
+      </div>
+      <div className="gc-field">
+        <label htmlFor="gq-remarks">{decision === "Reject" && reason === "other" ? <>{L("اكتب السبب", "Write the reason")} <i aria-hidden>*</i></> : L("ملاحظات", "Remarks")}</label>
+        <input id="gq-remarks" type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={L("اختياري", "Optional notes")} className="gc-input" />
       </div>
 
       {error && <p className="hr-notice tone-danger gq-error" role="alert">{error}</p>}

@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { extractIp, hashRateLimitKey, isIdentifierRateLimited, isIpRateLimited, recordFailedAttempt } from "@/lib/rate-limit";
 import { mfaConfigured, verifySecondFactor } from "@/lib/auth/mfa";
 import { authAudit, completeSignIn, readChallenge, MFA_UNAVAILABLE, TOO_MANY } from "@/lib/auth/sign-in";
+import { pinLoginEnabled, PIN_LOGIN_DISABLED, PIN_SESSION_METHODS } from "@/lib/auth/pin-login";
 
 /** Second factor of a sign-in: the 5-minute challenge from POST /api/auth/login plus a TOTP or recovery code. */
 export async function POST(request: Request) {
   const { challenge, code } = (await request.json().catch(() => ({}))) as { challenge?: string; code?: string };
   const c = typeof challenge === "string" ? await readChallenge(challenge, "login") : null;
   if (!c) return NextResponse.json({ error: "Sign in again.", errorAr: "سجّل الدخول من جديد.", code: "CHALLENGE_EXPIRED" }, { status: 401 });
+  // W0: a challenge a PIN sign-in started (before the flag was turned off) cannot finish one.
+  if (PIN_SESSION_METHODS.includes(c.method) && !pinLoginEnabled()) {
+    return NextResponse.json(PIN_LOGIN_DISABLED, { status: 400 });
+  }
   // Fail closed, audited like sign-in (re-test follow-up 1).
   if (!mfaConfigured()) {
     await authAudit(request, { userId: c.employeeId, action: "MFA_SIGN_IN", result: "REFUSED", reasonCode: "MFA_NOT_CONFIGURED" });

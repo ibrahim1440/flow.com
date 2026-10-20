@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { withDeliveryLots } from "@/lib/services/delivery-lots";
 
 export async function GET(request: Request) {
   const { user, error } = await requireModule("history");
@@ -39,11 +40,13 @@ export async function GET(request: Request) {
       });
       break;
     case "deliveries":
-      data = await prisma.delivery.findMany({
+      // Phase D: each delivery carries `lots` — its DeliveryLine rows, or for one recorded before
+      // them, the single lot its ledger row names.
+      data = await withDeliveryLots(prisma, await prisma.delivery.findMany({
         include: { orderItem: { include: { order: { include: { customer } } } } },
         orderBy: { date: "desc" },
         take: 500,
-      });
+      }));
       break;
     case "inventory":
       data = await prisma.greenBean.findMany({ orderBy: { beanType: "asc" }, take: 200 });

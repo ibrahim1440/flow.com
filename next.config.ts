@@ -108,6 +108,10 @@ const nextConfig: NextConfig = {
     return [
       { source: "/dashboard.html",        destination: "/dashboard",        permanent: false },
       { source: "/dashboard/:path*.html", destination: "/dashboard/:path*", permanent: false },
+      // «تجهيز الطلبات» is retired (production simplification, Phase B item 4): preparation is
+      // automatic and «الطلبات» is the status board. Old links and bookmarks land there; the
+      // Orders route guard (orders module) then applies as it always did.
+      { source: "/dashboard/workstation/preparation", destination: "/dashboard/orders", permanent: false },
     ];
   },
 };

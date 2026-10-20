@@ -3,25 +3,11 @@ import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import {
-  appendOrderActivity,
-  aggregatePreparationStatus,
   isPreparationDecision,
-  readLineReservationState,
-  casUpdateOrderItem,
-  PREPARATION_REVIEW_ENTRY_STATUSES,
   NOTE_MESSAGE_MAX_LENGTH,
   type PreparationDecision,
 } from "@/lib/services/order-operations";
-import {
-  ALLOCATABLE_ITEM_SELECT,
-  decisionFor,
-  kgEqual,
-  releaseShelfStock,
-  reserveShelfStock,
-  roundKg,
-} from "@/lib/services/shelf-allocation";
-import { kgForUnits, releaseFinishedUnits, reserveFinishedUnits } from "@/lib/services/finished-products";
-import { emitAutomationEvent } from "@/lib/automation/emit";
+import { reviewOrderPreparation, autoPrepareOrder } from "@/lib/services/orders/preparation";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -39,8 +25,6 @@ type ParsedItem = {
   availableQuantity: number | null;
   productionRequiredQuantity: number | null;
 };
-
-const ENTRY_STATUSES = PREPARATION_REVIEW_ENTRY_STATUSES as string[];
 
 export async function POST(request: Request, { params }: Params) {
   const { user, error } = await requireSub("orders", "prepare_review");
@@ -143,333 +127,25 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          status: true,
-          items: { select: { id: true, quantityKg: true } },
-        },
-      });
-      if (!order) throw { _appCode: 404, message: "Order not found." };
-
-      if (!ENTRY_STATUSES.includes(order.status)) {
-        throw {
-          _appCode: 409,
-          message: `Preparation review is not allowed while the order is in status "${order.status}".`,
-        };
-      }
-
-      const itemsById = new Map(order.items.map((i) => [i.id, i]));
-      for (const p of parsedItems) {
-        if (!itemsById.has(p.orderItemId)) {
-          throw { _appCode: 400, message: `Order item ${p.orderItemId} does not belong to this order.` };
-        }
-      }
-
-      // ── Shelf-first allocation ────────────────────────────────────────────
-      // The split between "already on the shelf" and "must be roasted" is no longer
-      // taken on trust from the request body. For every item the server reserves what
-      // the shelf can actually cover — atomically, so two reviews racing for the same
-      // kilograms cannot both win — and derives the decision from what it managed to
-      // hold. A decision supplied by the client is then only a claim, and a claim the
-      // stock cannot back is refused rather than silently stored.
-      const outcomes: {
-        orderItemId: string;
-        decision: PreparationDecision;
-        availableQuantity: number;
-        productionRequiredQuantity: number;
-        reservedFromLots: { lotId: string; batchNumber: string; quantityKg: number }[];
-      }[] = [];
-
-      // Every line's row in one query rather than one query per line. Against a database
-      // where a round trip costs about 167 ms, fetching them inside the loop made a
-      // three-line review pay three round trips before it had reserved anything. The rows
-      // are only read here — the atomic claims below are unchanged, so nothing about
-      // concurrency depends on when they were fetched.
-      const itemRows = await tx.orderItem.findMany({
-        where: { id: { in: parsedItems.map((p) => p.orderItemId) } },
-        select: {
-          ...ALLOCATABLE_ITEM_SELECT,
-          quantityUnits: true,
-          deliveredUnits: true,
-          productSku: { select: { weightGrams: true } },
-        },
-      });
-      const itemRowsById = new Map(itemRows.map((r) => [r.id, r]));
-      // The compare-and-swap token per line: the values each reservation decision was
-      // actually computed from, captured at the transaction-current re-read below.
-      const casTokens = new Map<string, { id: string; updatedAt: Date; deliveredUnits: number; deliveredQty: number }>();
-
-      for (const p of parsedItems) {
-        const stale = itemRowsById.get(p.orderItemId);
-        if (!stale) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
-
-        // ── Transaction-current demand ────────────────────────────────────
-        // The rows fetched above were read as the first statement of this transaction,
-        // before anything was locked. A delivery committing since then is invisible to
-        // them, and the ceiling computed from quantity - delivered would be a snapshot
-        // from one moment combined with allocation work done at another. Re-read here,
-        // immediately before the ceiling is derived, and record the token this decision
-        // is based on so the write at the end can prove nothing moved underneath it.
-        //
-        // A plain read: it takes no row lock, so the lock order frozen in dd14506 is
-        // untouched — ALLOC still precedes OrderItem, which still precedes Order.
-        const fresh = await readLineReservationState(tx, p.orderItemId);
-        if (!fresh) throw { _appCode: 404, message: `Order item ${p.orderItemId} not found.` };
-        const item = { ...stale, ...fresh, productSku: stale.productSku };
-        casTokens.set(item.id, {
-          id: fresh.id,
-          updatedAt: fresh.updatedAt,
-          deliveredUnits: fresh.deliveredUnits,
-          deliveredQty: fresh.deliveredQty,
-        });
-
-        // ── SKU lines reserve whole units ──────────────────────────────────
-        // A line created through the Finished Products flow is a quantity of one SKU,
-        // and finished goods are counted in units. It draws on unit-tracked lots through
-        // reserveFinishedUnits; the kilogram path below is for the legacy bean-based
-        // lines only, and the two pools are disjoint so neither can spend the other's
-        // stock. availableQuantity / productionRequiredQuantity stay in kilograms in both
-        // cases — they are Float columns that have always meant kg — derived here from
-        // the units actually reserved.
-        if (item.quantityUnits !== null && item.productSkuId && item.productSku) {
-          const sku = item.productSku;
-          await releaseFinishedUnits(tx, item.id);
-
-          const demandUnits = Math.max(0, item.quantityUnits - item.deliveredUnits);
-
-          if (p.decision === "Blocked") {
-            outcomes.push({
-              orderItemId: item.id,
-              decision: "Blocked",
-              availableQuantity: 0,
-              productionRequiredQuantity: kgForUnits(sku, demandUnits),
-              reservedFromLots: [],
-            });
-            continue;
-          }
-
-          const takenUnits = await reserveFinishedUnits(
-            tx,
-            { id: item.id, productSkuId: item.productSkuId, productSku: sku },
-            demandUnits,
-            user.id
-          );
-          const reservedUnits = takenUnits.reservedUnits;
-          const stillNeededUnits = Math.max(0, demandUnits - reservedUnits);
-          const derived = decisionFor(stillNeededUnits, reservedUnits) as PreparationDecision;
-
-          if (p.decision !== null && p.decision !== derived) {
-            throw {
-              _appCode: 409,
-              message:
-                `Item ${item.id}: "${p.decision}" is not supported by stock. ` +
-                `${reservedUnits} of ${demandUnits} unit(s) can be covered from finished goods, so the decision is "${derived}".`,
-              computed: {
-                orderItemId: item.id,
-                decision: derived,
-                availableUnits: reservedUnits,
-                productionRequiredUnits: stillNeededUnits,
-              },
-            };
-          }
-
-          outcomes.push({
-            orderItemId: item.id,
-            decision: derived,
-            availableQuantity: kgForUnits(sku, reservedUnits),
-            productionRequiredQuantity: kgForUnits(sku, stillNeededUnits),
-            reservedFromLots: takenUnits.lots.map((l) => ({
-              lotId: l.lotId,
-              batchNumber: l.batchNumber,
-              quantityKg: kgForUnits(sku, l.units),
-            })),
-          });
-          continue;
-        }
-
-        // Re-reviewing an item starts from a clean slate: hand back what it holds, then
-        // take a fresh reservation against the shelf as it stands now.
-        await releaseShelfStock(tx, item.id);
-
-        const demand = roundKg(Math.max(0, item.quantityKg - item.deliveredQty));
-
-        // Blocked means "do not proceed with this item" — it must not sit on stock.
-        if (p.decision === "Blocked") {
-          outcomes.push({
-            orderItemId: item.id,
-            decision: "Blocked",
-            availableQuantity: 0,
-            productionRequiredQuantity: demand,
-            reservedFromLots: [],
-          });
-          continue;
-        }
-
-        const taken = await reserveShelfStock(tx, item, demand, user.id);
-        const reserved = taken.reservedKg;
-        const stillNeeded = roundKg(Math.max(0, demand - reserved));
-        const derived = decisionFor(stillNeeded, reserved) as PreparationDecision;
-
-        // A client-supplied decision is honoured only when the shelf agrees with it.
-        if (p.decision !== null && p.decision !== derived) {
-          throw {
-            _appCode: 409,
-            message:
-              `Item ${item.id}: "${p.decision}" is not supported by stock. ` +
-              `${reserved}kg of ${demand}kg can be covered from the shelf, so the decision is "${derived}".`,
-            computed: { orderItemId: item.id, decision: derived, availableQuantity: reserved, productionRequiredQuantity: stillNeeded },
-          };
-        }
-
-        // Quantities sent by the client are cross-checked, never trusted.
-        if (p.availableQuantity !== null && !kgEqual(p.availableQuantity, reserved)) {
-          throw {
-            _appCode: 409,
-            message: `Item ${item.id}: availableQuantity ${p.availableQuantity}kg does not match the ${reserved}kg actually available on the shelf.`,
-          };
-        }
-        if (p.productionRequiredQuantity !== null && !kgEqual(p.productionRequiredQuantity, stillNeeded)) {
-          throw {
-            _appCode: 409,
-            message: `Item ${item.id}: productionRequiredQuantity ${p.productionRequiredQuantity}kg does not match the ${stillNeeded}kg that must be produced.`,
-          };
-        }
-
-        outcomes.push({
-          orderItemId: item.id,
-          decision: derived,
-          availableQuantity: reserved,
-          productionRequiredQuantity: stillNeeded,
-          reservedFromLots: taken.lots,
-        });
-      }
-
-      for (const o of outcomes) {
-        // Compare-and-swap, not a plain update. The predicate is the line's identity plus
-        // the exact delivery figures this decision was computed from, so a delivery or a
-        // second review that committed in between makes this write match zero rows and
-        // throw — rolling back the releases, the reservation inserts and the lot
-        // increments made above. Without it two concurrent reviews each reserved the full
-        // demand and the line ended holding twice what it had ordered.
-        const seen = casTokens.get(o.orderItemId);
-        if (!seen) throw { _appCode: 500, message: `Missing CAS token for item ${o.orderItemId}.` };
-        await casUpdateOrderItem(tx, seen, {
-          preparationDecision: o.decision,
-          // Server-derived, at the repo-wide 3-decimal kg precision.
-          availableQuantity: o.availableQuantity,
-          productionRequiredQuantity: o.productionRequiredQuantity,
-          // productionStatus, deliveryStatus, remainingQty intentionally omitted —
-          // these remain system-derived (recalcOrderItemStatus) and must never be
-          // written by preparation review.
-        });
-      }
-
-      const refreshedItems = await tx.orderItem.findMany({
-        where: { orderId: id },
-        select: { preparationDecision: true },
-      });
-      const newStatus = aggregatePreparationStatus(refreshedItems);
-
-      // Conditional guard: only applies if the order is still in an entry status we
-      // already verified above. Catches a concurrent Hold/Cancel that landed between
-      // our read and this write.
-      const updateResult = await tx.order.updateMany({
-        where: { id, status: { in: ENTRY_STATUSES } },
-        data: { status: newStatus },
-      });
-      if (updateResult.count === 0) {
-        throw { _appCode: 409, message: "Order status changed during review. Please reload and retry." };
-      }
-
-      // ── Operational ownership ────────────────────────────────────────────
-      // The first successful Commit Allocation claims the order for whoever ran it.
-      // Approving no longer assigns an owner, so this is the only place ownership is
-      // established on the normal path.
-      //
-      // Deliberately after the status guard above: a commit that could not be applied has
-      // already thrown, and this whole block is one transaction, so a failed commit never
-      // leaves an owner behind.
-      //
-      // `ownerId: null` in the predicate is what makes it claim-once under concurrency.
-      // Two operators committing at the same instant both try this; the row is already
-      // locked by the status write above, so the second waits, and PostgreSQL re-checks
-      // the predicate against the committed row before updating. It then matches nothing
-      // and the first owner stands. No last-writer reassignment, no oscillation — and a
-      // later commit by anyone else is the same no-op, which is what preserves both a
-      // historical owner and the one claimed here.
-      //
-      // Same row, already held, so it introduces no new lock and no inversion: Order stays
-      // the final acquisition of this transaction.
-      const ownerClaim = await tx.order.updateMany({
-        where: { id, ownerId: null },
-        data: { ownerId: user.id },
-      });
-      const claimedOwnership = ownerClaim.count === 1;
-
-      await appendOrderActivity(tx, {
+    // The arithmetic lives in services/orders/preparation (Phase B item 4), shared with the
+    // automatic recompute that now runs after every stock event. This route is the manual
+    // mode: unchanged behaviour, and the only place a line can be marked Blocked.
+    const outcome = await prisma.$transaction(
+      (tx) => reviewOrderPreparation(tx, {
         orderId: id,
-        type: "PREPARATION_REVIEWED",
-        message:
-          `Preparation review submitted by ${user.name} for ${parsedItems.length} item(s). ` +
-          `Order status set to ${newStatus}.` +
-          (claimedOwnership ? ` Order claimed by ${user.name}.` : ""),
-        department: "Preparation",
-        authorId: user.id,
-        authorName: user.name,
-        metadata: {
-          // The server-derived outcome, including which lots were actually reserved —
-          // the audit trail now records what the shelf gave, not what was typed.
-          items: outcomes.map((o) => ({
-            orderItemId: o.orderItemId,
-            decision: o.decision,
-            availableQuantity: o.availableQuantity,
-            productionRequiredQuantity: o.productionRequiredQuantity,
-            reservedFromLots: o.reservedFromLots,
-          })),
-        },
-      });
+        mode: "manual",
+        actor: { id: user.id, name: user.name },
+        items: parsedItems,
+        note: trimmedNote,
+      }),
+      TX_OPTS,
+    );
+    const result = outcome.order;
 
-      if (trimmedNote) {
-        await appendOrderActivity(tx, {
-          orderId: id,
-          type: "MANUAL_NOTE",
-          message: trimmedNote,
-          department: "Preparation",
-          authorId: user.id,
-          authorName: user.name,
-        });
-      }
-
-      // A re-review that lands on the same status is not news to anyone outside.
-      if (newStatus !== order.status) {
-        await emitAutomationEvent(tx, {
-          eventType: "order.status_changed",
-          subjectType: "Order",
-          subjectId: id,
-          payload: { from: order.status, to: newStatus },
-          actorId: user.id,
-        });
-      }
-
-      return tx.order.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          status: true,
-          items: {
-            select: {
-              id: true,
-              preparationDecision: true,
-              availableQuantity: true,
-              productionRequiredQuantity: true,
-            },
-          },
-        },
-      });
-    }, TX_OPTS);
+    // After commit, like every automatic step: production orders for any shortfall and the
+    // settling of plans that are no longer needed (Phase C item 3). The recompute itself is a
+    // no-op right after a review.
+    await autoPrepareOrder(id, "review", { id: user.id, name: user.name });
 
     return NextResponse.json(result);
   } catch (err: unknown) {

@@ -1,3 +1,5 @@
+import { autoPrepareOrder } from "@/lib/services/orders/preparation";
+import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { assertAdminRoleGate, requireSub } from "@/lib/auth-server";
@@ -237,6 +239,12 @@ export async function POST(request: Request, { params }: Params) {
         select: { id: true, status: true, ownerId: true },
       });
     }, TX_OPTS);
+
+    // After the commit (Phase B item 4 / Phase C item 3): a resumed order is recomputed from the
+    // stock as it is now; a cancelled or completed one has its internal production orders settled.
+    const actor = { id: user.id, name: user.name };
+    if (action === "resume") await autoPrepareOrder(id, "resume", actor);
+    else if (action === "cancel" || action === "complete") await settleProductionOrders({ orderId: id }, actor);
 
     return NextResponse.json(result);
   } catch (err: unknown) {

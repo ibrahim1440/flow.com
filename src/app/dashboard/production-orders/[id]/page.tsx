@@ -47,8 +47,14 @@ export default function ProductionOrderDetailPage({ params }: { params: Promise<
   const { id } = use(params);
   const { t, lang } = useI18n();
   const user = useUser();
-  const canRun = hasSubPrivilege(user?.permissions ?? {}, "production", "start_batch");
-  const canCancel = hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
+  // Owner decision O4 (production simplification, Phase C item 3): production orders are an
+  // internal record — created on a shortfall, linked on roast and closed when packed, all by the
+  // system — and this page is a read-only view for supervisors. Release, complete and link /
+  // unlink are no longer offered to anybody (the roaster role loses them); a supervisor
+  // (administrator) keeps one escape hatch, cancelling a plan, under the existing cancel_batch
+  // key. The API routes keep their own checks and remain the authorization boundary.
+  const canRun = false;
+  const canCancel = user?.role === "admin" && hasSubPrivilege(user?.permissions ?? {}, "production", "cancel_batch");
 
   const [order, setOrder] = useState<Detail | null>(null);
   const [candidates, setCandidates] = useState<CandidateBatch[]>([]);
@@ -222,7 +228,7 @@ export default function ProductionOrderDetailPage({ params }: { params: Promise<
           {order.sourceOrderItem && (
             <span>
               {t("poDemandSource")}:{" "}
-              <Link href="/dashboard/workstation/preparation" className="ops-link">#{order.sourceOrderItem.order.orderNumber}</Link>
+              <Link href="/dashboard/orders" className="ops-link">#{order.sourceOrderItem.order.orderNumber}</Link>
               {" "}— {order.sourceOrderItem.order.customer?.name} · <OrderStatusBadge status={order.sourceOrderItem.order.status} />
             </span>
           )}
@@ -236,7 +242,7 @@ export default function ProductionOrderDetailPage({ params }: { params: Promise<
           return <p className="ops-stage-now"><span className="hr-muted">{t("poStageWord")}</span><span>{now.title}{now.a ? <> · {now.a}</> : null}</span></p>;
         })()}
 
-        {order.allowedActions.length === 0 && <p className="hr-caption" style={{ margin: 0 }}>{t("poNoActions")}</p>}
+        <p className="hr-caption" style={{ margin: 0 }} data-testid="po-internal-note">{order.allowedActions.length === 0 ? t("poNoActions") : t("poInternalNote")}</p>
 
         {error && <OpsBanner tone="danger" onClose={() => setError(null)}>{error}</OpsBanner>}
 

@@ -1,0 +1,127 @@
+/*
+ * Station sheets — production simplification Phase A (docs/handoff/production-simplification,
+ * prototype production-simple.html). The roast sheet, the one-tap QC evaluation, the evaluator
+ * panel and decision, the guest invitation and the packaging plan. Direction 2.1 tokens only
+ * (src/components/shell/direction-2.1.css); Arabic RTL first; every control ≥ 44 px high.
+ * Scoped to the operations root so nothing leaks into other screens.
+ */
+[data-ops-root] .st-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+[data-ops-root] .st-body > * { min-width: 0; }
+
+/* the system decided this — an info line */
+[data-ops-root] .st-auto { display: flex; gap: 10px; align-items: flex-start; background: var(--surface-subtle); border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 0 0 1px var(--border-subtle); font-size: 13.5px; line-height: 20px; }
+[data-ops-root] .st-auto.is-warn { background: var(--status-warning-tint); box-shadow: none; }
+[data-ops-root] .st-auto .st-ico { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--action-primary-tint); color: var(--action-primary); display: grid; place-items: center; }
+[data-ops-root] .st-auto.is-warn .st-ico { background: var(--surface); color: var(--status-warning); }
+[data-ops-root] .st-auto > div { flex: 1; min-width: 0; }
+[data-ops-root] .st-auto b { font-weight: 600; }
+[data-ops-root] .st-auto small { display: block; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+[data-ops-root] .st-auto .st-link { margin-inline-start: auto; flex: none; }
+
+[data-ops-root] .st-field > label, [data-ops-root] .st-field > .st-label { display: block; font-size: 13.5px; font-weight: 500; margin-bottom: 6px; color: var(--text-primary); }
+[data-ops-root] .st-numin { display: flex; align-items: center; gap: 8px; height: 60px; border-radius: 14px; border: 1px solid var(--border-control); padding: 0 14px; background: var(--surface); }
+[data-ops-root] .st-numin:focus-within { border-color: var(--action-primary); box-shadow: 0 0 0 1px var(--action-primary); }
+/* The shared form styles draw a box around every input; inside the station field the field is the box. */
+[data-ops-root] .st-numin input { border: 0 !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; background: transparent !important; padding: 0 !important; margin: 0; width: auto; flex: 1; min-width: 0; font-family: var(--f-num); font-size: 26px !important; font-weight: 600; direction: ltr; text-align: right; color: var(--text-primary); height: 100% !important; }
+/* Above the shared phone rule that sets inputs to 16 px (iOS zoom): the station numbers stay large. */
+[data-ops-root] .st-numin input:not([type="checkbox"]):not([type="radio"]) { font-size: 26px !important; }
+[data-ops-root] .st-numin.is-sm input:not([type="checkbox"]):not([type="radio"]) { font-size: 18px !important; }
+[data-ops-root] .st-numin.is-text input:not([type="checkbox"]):not([type="radio"]) { font-size: 17px !important; }
+[data-ops-root] .st-numin.is-text input { font-family: var(--f-ui); font-size: 17px !important; font-weight: 500; direction: rtl; text-align: start; }
+[data-ops-root] .st-numin.is-sm { height: 48px; }
+[data-ops-root] .st-numin.is-sm input { font-size: 18px !important; }
+[data-ops-root] .st-numin > span { color: var(--text-muted); font-size: 14px; }
+[data-ops-root] .st-quick { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+[data-ops-root] .st-qb { appearance: none; border: 0; cursor: pointer; min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--surface-selected); color: var(--text-primary); font-family: var(--f-num); font-size: 13px; }
+[data-ops-root] .st-qb:hover { background: var(--action-primary-tint); box-shadow: inset 0 0 0 1px var(--action-primary); }
+
+[data-ops-root] .st-live { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13.5px; padding: 10px 12px; border-radius: 12px; background: var(--status-success-tint); color: var(--status-success); }
+[data-ops-root] .st-live.is-warn { background: var(--status-warning-tint); color: var(--status-warning); }
+[data-ops-root] .st-live.is-bad { background: var(--status-danger-tint); color: var(--status-danger); }
+[data-ops-root] .st-live .hr-num { font-weight: 600; }
+[data-ops-root] .st-note { font-size: 12.5px; color: var(--text-muted); margin: 0; line-height: 19px; }
+[data-ops-root] .st-note.is-bad { color: var(--status-danger); }
+
+[data-ops-root] .st-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-ops-root] .st-chip { appearance: none; border: 0; cursor: pointer; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); font-size: 14px; }
+[data-ops-root] .st-chip:hover { background: var(--surface-hover); }
+[data-ops-root] .st-chip[aria-pressed="true"] { background: var(--action-primary-tint); box-shadow: inset 0 0 0 2px var(--action-primary); font-weight: 600; }
+[data-ops-root] .st-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+[data-ops-root] .st-verdict { appearance: none; border: 0; cursor: pointer; height: 96px; border-radius: 16px; display: grid; place-items: center; align-content: center; gap: 4px; font-size: 17px; font-weight: 600; }
+[data-ops-root] .st-verdict.is-ok { background: var(--status-success-tint); color: var(--status-success); box-shadow: inset 0 0 0 1.5px var(--status-success); }
+[data-ops-root] .st-verdict.is-bad { background: var(--status-danger-tint); color: var(--status-danger); box-shadow: inset 0 0 0 1.5px var(--status-danger); }
+[data-ops-root] .st-verdict[aria-pressed="true"].is-ok { background: var(--status-success); color: var(--text-inverse); }
+[data-ops-root] .st-verdict[aria-pressed="true"].is-bad { background: var(--status-danger); color: var(--text-inverse); }
+
+[data-ops-root] details.st-more summary { cursor: pointer; color: var(--action-primary); font-weight: 500; font-size: 14px; min-height: 44px; display: flex; align-items: center; }
+[data-ops-root] details.st-more[open] summary { margin-bottom: 6px; }
+[data-ops-root] details.st-more > div { display: grid; gap: 8px; }
+
+[data-ops-root] .st-stepper { display: flex; align-items: center; gap: 8px; flex: none; }
+[data-ops-root] .st-stepper button { appearance: none; border: 0; cursor: pointer; width: 44px; height: 44px; border-radius: 12px; background: var(--surface-selected); color: var(--text-primary); font-size: 22px; font-family: var(--f-num); display: grid; place-items: center; }
+[data-ops-root] .st-stepper button:hover:not(:disabled) { background: var(--action-primary-tint); }
+[data-ops-root] .st-stepper button:disabled { color: var(--text-disabled); cursor: not-allowed; }
+[data-ops-root] .st-stepper output { min-width: 40px; text-align: center; font-family: var(--f-num); font-size: 24px; font-weight: 600; }
+[data-ops-root] .st-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--border-strong); }
+[data-ops-root] .st-line > div:first-child { min-width: 0; }
+[data-ops-root] .st-line .st-l1 { font-weight: 600; font-size: 15px; }
+[data-ops-root] .st-line .st-l2 { font-size: 12.5px; color: var(--text-muted); }
+[data-ops-root] .st-meter { height: 10px; border-radius: 5px; background: var(--surface-selected); overflow: hidden; display: flex; }
+[data-ops-root] .st-meter i { display: block; height: 100%; background: var(--status-success); transition: width 0.2s var(--ease); }
+[data-ops-root] .st-meter i.is-over { background: var(--status-danger); }
+[data-ops-root] .st-meter-l { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--text-secondary); margin-top: 6px; }
+
+/* evaluators */
+[data-ops-root] .st-dots { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+[data-ops-root] .st-dot { width: 22px; height: 22px; border-radius: 11px; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+[data-ops-root] .st-dot.is-ok { background: var(--status-success-tint); color: var(--status-success); box-shadow: inset 0 0 0 1px var(--status-success); }
+[data-ops-root] .st-dot.is-bad { background: var(--status-danger-tint); color: var(--status-danger); box-shadow: inset 0 0 0 1px var(--status-danger); }
+[data-ops-root] .st-dot.is-slot { box-shadow: inset 0 0 0 1.5px var(--border-control); background: var(--surface); }
+[data-ops-root] .st-dot.is-pend { background: var(--status-warning-tint); color: var(--status-warning); }
+[data-ops-root] .st-evs { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+[data-ops-root] .st-ev { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-subtle); min-height: 56px; }
+[data-ops-root] .st-ev > div { flex: 1; min-width: 0; }
+[data-ops-root] .st-ev b { display: block; font-weight: 600; font-size: 14.5px; }
+[data-ops-root] .st-ev small { display: block; font-size: 12px; color: var(--text-muted); line-height: 17px; }
+[data-ops-root] .st-av { width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; flex: none; font-weight: 600; background: var(--surface-selected); color: var(--text-muted); }
+[data-ops-root] .st-av.is-ok { background: var(--status-success-tint); color: var(--status-success); }
+[data-ops-root] .st-av.is-bad { background: var(--status-danger-tint); color: var(--status-danger); }
+[data-ops-root] .st-ev.is-pend .st-av { background: var(--status-warning-tint); color: var(--status-warning); }
+[data-ops-root] .st-ev.is-slot { box-shadow: inset 0 0 0 1.5px var(--border-strong); background: repeating-linear-gradient(-45deg, transparent 0 6px, var(--surface-subtle) 6px 12px); }
+[data-ops-root] .st-tag { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; background: var(--surface-selected); color: var(--text-secondary); white-space: nowrap; }
+[data-ops-root] .st-tag.is-ok { background: var(--status-success-tint); color: var(--status-success); }
+[data-ops-root] .st-tag.is-bad { background: var(--status-danger-tint); color: var(--status-danger); }
+[data-ops-root] .st-tag.is-warn { background: var(--status-warning-tint); color: var(--status-warning); }
+[data-ops-root] .st-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+[data-ops-root] .st-row2 > :only-child { grid-column: 1 / -1; }
+[data-ops-root] .st-sec { appearance: none; border: 0; cursor: pointer; min-height: 46px; border-radius: 12px; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-control); font-size: 14px; font-weight: 500; padding: 0 12px; }
+[data-ops-root] .st-sec:hover { background: var(--surface-hover); }
+[data-ops-root] .st-warnbox { background: var(--status-warning-tint); border-radius: 12px; padding: 12px; font-size: 13.5px; color: var(--text-primary); display: grid; gap: 6px; }
+[data-ops-root] .st-warnbox b { color: var(--status-warning); }
+[data-ops-root] .st-check { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; padding: 10px 12px; border-radius: 12px; background: var(--surface-subtle); cursor: pointer; min-height: 44px; }
+[data-ops-root] .st-check input { width: 20px; height: 20px; accent-color: var(--action-primary); margin: 1px 0 0; flex: none; }
+[data-ops-root] .st-textlink { appearance: none; border: 0; background: none; cursor: pointer; color: var(--action-primary); font-weight: 500; padding: 10px 2px; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; min-height: 44px; justify-self: start; }
+[data-ops-root] .st-textlink.is-sm { font-size: 13px; padding: 4px 2px; min-height: 32px; }
+[data-ops-root] .st-opt { appearance: none; border: 0; cursor: pointer; width: 100%; display: flex; gap: 12px; align-items: center; text-align: start; padding: 16px; border-radius: 14px; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); }
+[data-ops-root] .st-opt:hover { box-shadow: inset 0 0 0 1.5px var(--action-primary); background: var(--surface-subtle); }
+[data-ops-root] .st-opt .st-oi { width: 44px; height: 44px; border-radius: 12px; background: var(--action-primary-tint); color: var(--action-primary); display: grid; place-items: center; flex: none; }
+[data-ops-root] .st-opt b { display: block; font-size: 15.5px; font-weight: 600; }
+[data-ops-root] .st-opt small { display: block; font-size: 13px; color: var(--text-muted); line-height: 19px; }
+[data-ops-root] .st-linkbox { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-strong); }
+[data-ops-root] .st-linkbox code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-mono); font-size: 12.5px; direction: ltr; unicode-bidi: isolate; }
+
+/* the sheet footer: one full-width call to action (prototype .cta) */
+[data-ops-root] .st-cta { appearance: none; border: 0; cursor: pointer; min-height: 52px; border-radius: 14px; background: var(--action-primary); color: var(--text-inverse); font-size: 16px; font-weight: 600; width: 100%; padding: 0 16px; }
+[data-ops-root] .st-cta:hover:not(:disabled) { background: var(--action-primary-hover); }
+[data-ops-root] .st-cta:disabled { background: var(--surface-selected); color: var(--text-disabled); cursor: not-allowed; }
+[data-ops-root] .st-cta.is-bad:not(:disabled) { background: var(--action-danger); }
+[data-ops-root] .ops-pane-foot:has(.st-cta) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+
+@media (max-width: 420px) {
+  [data-ops-root] .st-verdict { height: 84px; }
+  [data-ops-root] .st-line { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ops-root] .st-meter i { transition: none; }
+}

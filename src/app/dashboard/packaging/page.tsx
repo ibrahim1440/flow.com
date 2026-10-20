@@ -2,7 +2,7 @@
 
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { AlertTriangle, Trash2, CalendarDays, X, Plus } from "lucide-react";
+import { AlertTriangle, Trash2, CalendarDays } from "lucide-react";
 import { Bar, Btn, Grams, Notice, OpsBanner, OpsEmpty, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Kg, gUnit, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
@@ -12,6 +12,9 @@ import { hasSubPrivilege } from "@/lib/auth-shared";
 import { createRequestKeyHolder } from "@/lib/request-key";
 
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
+import { AutoRow, Cta, NumIn, Stepper } from "@/components/ops/station";
+import { PrintDialog } from "@/components/print/PrintDialog";
+import { PRINT_GATE_NOTE_ID, PrintNotCertifiedNotice, usePrintCertified } from "@/components/print/Certification";
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
   productId: string | null;
@@ -30,18 +33,6 @@ type Batch = {
   orderItem: { beanTypeName: string; productId: string | null; productSkuId: string | null; order: { orderNumber: number; customer: { name: string } } } | null;
 };
 
-// The Finished Products catalog, for packing a roast into packages of a SKU.
-type CatalogSku = {
-  id: string;
-  skuCode: string;
-  name: string;
-  packSize: string;
-  weightGrams: number;
-  isActive: boolean;
-  hasBom: boolean;
-  availableUnits: number;
-};
-
 /** An open partial package this roast may legally be poured into. */
 type OpenPartial = {
   lotId: string;
@@ -53,11 +44,16 @@ type OpenPartial = {
   fromThisBatch: boolean;
 };
 
+/** One size of this roast's coffee, with the count suggested from open demand (GET …/pack). */
+type PlanRow = { id: string; skuCode: string; name: string; weightGrams: number; hasBom: boolean; suggested: number; outstandingUnits: number; forOrders: number[] };
+
 type BatchPackState = {
   batchNumber: string;
   status: string;
   availableGrams: number;
   openPartials: OpenPartial[];
+  /** The packaging plan (production simplification item 6): this coffee's sizes only. */
+  plan?: { ok: true; productId: string; productNameEn: string; productNameAr: string | null; rows: PlanRow[] } | { ok: false; error: string };
 };
 
 // ── The server's reconciliation, mirrored as types only ─────────────────────
@@ -116,16 +112,6 @@ type UiLine =
   | { uid: string; kind: "topUp"; lotId: string; gramsAdded: number }
   | { uid: string; kind: "loss"; grams: number; reason: string };
 
-let uidSeq = 0;
-const nextUid = () => `l${++uidSeq}`;
-
-function blankLine(kind: UiLine["kind"]): UiLine {
-  const uid = nextUid();
-  if (kind === "topUp") return { uid, kind, lotId: "", gramsAdded: 0 };
-  if (kind === "loss") return { uid, kind, grams: 0, reason: "" };
-  return { uid, kind: "pack", productSkuId: "", packages: 1, gramsEach: 0 };
-}
-
 /** Whether a row says enough to be sent to the server at all. */
 function isComplete(l: UiLine): boolean {
   if (l.kind === "pack") return !!l.productSkuId && l.packages >= 1 && l.gramsEach >= 1;
@@ -182,8 +168,18 @@ export default function PackagingPage() {
   // ── The one packaging operation ──────────────────────────────────────────
   const [packBatch, setPackBatch] = useState<Batch | null>(null);
   const [packState, setPackState] = useState<BatchPackState | null>(null);
-  const [catalog, setCatalog] = useState<CatalogSku[]>([]);
-  const [lines, setLines] = useState<UiLine[]>([]);
+  // The plan the operator adjusts: a count per size, and the exceptions (a partial package, a
+  // top-up of an open package, a packing loss) under «more». The packaging lines sent to the
+  // server are derived from these; the request and its idempotency are exactly as before.
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [partial, setPartial] = useState<{ skuId: string; grams: string } | null>(null);
+  const [topUps, setTopUps] = useState<Record<string, number>>({});
+  const [loss, setLoss] = useState<{ grams: string; reason: string }>({ grams: "", reason: "" });
+  // Labels are printed on request after packing (owner decision O3), never automatically.
+  const [lastPacked, setLastPacked] = useState<{ productId: string; label: string } | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
+  const printing = usePrintCertified();
+  const canPrintLabels = hasSubPrivilege(user?.permissions ?? {}, "labels", "print");
   const [preview, setPreview] = useState<PackagingPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [partialAck, setPartialAck] = useState(false);
@@ -195,7 +191,7 @@ export default function PackagingPage() {
   // the holder, which harness-selftest asserts directly — see src/lib/request-key.ts.
   const packKeyHolder = useRef(createRequestKeyHolder());
 
-  useEffect(() => { loadData(); loadCatalog(); }, []);
+  useEffect(() => { loadData(); }, []);
 
   useEffect(() => {
     const q = filterSearch.trim();
@@ -221,16 +217,12 @@ export default function PackagingPage() {
     setLoading(false);
   }
 
-  async function loadCatalog() {
-    // Active SKUs of inactive products too: switching a product off hides it from NEW orders
-    // only; what an existing order still needs can be packed.
-    const res = await fetch("/api/products?inactiveProducts=1");
-    if (res.ok) setCatalog(await res.json());
-  }
-
   const loadPackState = useCallback(async (batchId: string) => {
     const res = await fetch(`/api/roasting-batches/${batchId}/pack`);
-    setPackState(res.ok ? await res.json() : null);
+    const state: BatchPackState | null = res.ok ? await res.json() : null;
+    setPackState(state);
+    // The counts start from the suggestion; the operator changes what differs from reality.
+    setCounts(state?.plan?.ok ? Object.fromEntries(state.plan.rows.map((r) => [r.id, r.suggested])) : {});
   }, []);
 
   function openPacking(batch: Batch) {
@@ -239,8 +231,8 @@ export default function PackagingPage() {
     setPreview(null);
     setPartialAck(false);
     setPackError("");
-    setLines([blankLine("pack")]);
-    setError(""); setSuccess("");
+    setCounts({}); setPartial(null); setTopUps({}); setLoss({ grams: "", reason: "" });
+    setError(""); setSuccess(""); setLastPacked(null);
     packKeyHolder.current = createRequestKeyHolder();
     loadPackState(batch.id);
   }
@@ -249,7 +241,7 @@ export default function PackagingPage() {
     setPackBatch(null);
     setPackState(null);
     setPreview(null);
-    setLines([]);
+    setCounts({}); setPartial(null); setTopUps({}); setLoss({ grams: "", reason: "" });
   }
 
   async function handleCancelBatch(restock: boolean) {
@@ -272,6 +264,23 @@ export default function PackagingPage() {
 
   // Only complete rows are worth asking the server about. A half-typed row is not a
   // refusal, it is an unfinished sentence.
+  const planRows = useMemo(() => (packState?.plan?.ok ? packState.plan.rows : []), [packState]);
+  const lines = useMemo<UiLine[]>(() => {
+    const out: UiLine[] = [];
+    for (const r of planRows) {
+      const n = counts[r.id] ?? 0;
+      // Weight defaults to the size's nominal weight: a full package is the ordinary case.
+      if (n > 0) out.push({ uid: `pack:${r.id}`, kind: "pack", productSkuId: r.id, packages: n, gramsEach: r.weightGrams });
+    }
+    if (partial) {
+      const g = parseInt(partial.grams, 10) || 0;
+      out.push({ uid: "partial", kind: "pack", productSkuId: partial.skuId, packages: 1, gramsEach: g });
+    }
+    for (const [lotId, g] of Object.entries(topUps)) out.push({ uid: `top:${lotId}`, kind: "topUp", lotId, gramsAdded: g });
+    const lg = parseInt(loss.grams, 10) || 0;
+    if (lg > 0 || loss.reason) out.push({ uid: "loss", kind: "loss", grams: lg, reason: loss.reason });
+    return out;
+  }, [planRows, counts, partial, topUps, loss]);
   const completeLines = useMemo(() => lines.filter(isComplete), [lines]);
   const hasIncompleteLine = lines.length > completeLines.length;
   const payloadKey = useMemo(() => JSON.stringify(completeLines.map(toPayload)), [completeLines]);
@@ -348,22 +357,14 @@ export default function PackagingPage() {
       if (data.partialPackagesCreated > 0) parts.push(`${data.partialPackagesCreated} ${t("pkgPartialPackage")}`);
       if (data.partialPackagesCompleted > 0) parts.push(`${data.partialPackagesCompleted} ${t("pkgWillComplete")}`);
       if (data.lossGrams > 0) parts.push(`${data.lossGrams} ${gUnit(lang)} ${t("pkgReconLoss")}`);
+      if (data.reservedUnits > 0) parts.push(lang === "ar" ? `حُجز ${data.reservedUnits} للطلب` : `${data.reservedUnits} reserved to the order`);
       setSuccess(`${t("pkgDone")}: ${parts.join(" · ")}`);
+      if (packState?.plan?.ok) setLastPacked({ productId: packState.plan.productId, label: (lang === "ar" ? packState.plan.productNameAr : null) || packState.plan.productNameEn });
       closePacking();
       loadData();
-      // Finished stock changed, so the catalog's availableUnits is now stale.
-      loadCatalog();
     } finally {
       setPacking(false);
     }
-  }
-
-  function updateLine(uid: string, patch: Record<string, unknown>) {
-    setLines((prev) => prev.map((l) => (l.uid === uid ? ({ ...l, ...patch } as UiLine) : l)));
-  }
-
-  function changeLineKind(uid: string, kind: UiLine["kind"]) {
-    setLines((prev) => prev.map((l) => (l.uid === uid ? { ...blankLine(kind), uid } : l)));
   }
 
   const beanOptions = useMemo<FilterOption[]>(() => {
@@ -400,7 +401,6 @@ export default function PackagingPage() {
     });
   }, [batches, filterSearch, filterBean, filterOrder, t]);
 
-  const sellable = useMemo(() => catalog.filter((c) => c.isActive && c.hasBom), [catalog]);
 
   if (loading) {
     return <OpsRoot><div className="hr-page"><OpsLoading rows={5} /></div></OpsRoot>;
@@ -415,7 +415,22 @@ export default function PackagingPage() {
       </PageHeader>
 
       {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
-      {success && <OpsBanner tone="success" onClose={() => setSuccess("")}>{success}</OpsBanner>}
+      {success && <OpsBanner tone="success" onClose={() => { setSuccess(""); setLastPacked(null); }}>{success}</OpsBanner>}
+      {/* O3: labels are a separate action after packing, never printed automatically, and follow
+          the PRINT_CERTIFIED gate (disabled with the standing notice while printing is off). */}
+      {lastPacked && canPrintLabels ? (
+        <div className="hr-filterbar" style={{ justifyContent: "flex-start", gap: 12 }} data-testid="pack-print-labels">
+          <Btn variant="primary" disabled={printing !== true} aria-describedby={printing === true ? undefined : PRINT_GATE_NOTE_ID} onClick={() => { if (printing === true) setPrintOpen(true); }}>
+            {lang === "ar" ? "طباعة الملصقات" : "Print labels"}
+          </Btn>
+          <span className="hr-caption">{lastPacked.label}</span>
+        </div>
+      ) : null}
+      {lastPacked && canPrintLabels && printing === false ? <PrintNotCertifiedNotice /> : null}
+      {printOpen && lastPacked ? (
+        <PrintDialog open={printOpen} onClose={() => setPrintOpen(false)} initialTemplate="COFFEE_ORIGIN"
+          items={[{ kind: "product", productId: lastPacked.productId, label: lastPacked.label }]} subtitle={lastPacked.label} />
+      ) : null}
 
       {batches.length > 0 && (
         <WorkflowFilterBar
@@ -616,12 +631,14 @@ export default function PackagingPage() {
         sub={packBatch.greenBean?.beanType || (packBatch.orderItem?.beanTypeName ?? "")}
         busy={packing}
         onClose={closePacking}
-        footer={
-          <>
-            <Btn variant="primary" onClick={submitPackaging} disabled={blocked}>{packing ? "…" : t("pkgConfirmBtn")}</Btn>
-            <Btn onClick={closePacking} disabled={packing}>{t("cancel")}</Btn>
-          </>
-        }
+        footer={(() => {
+          const bags = lines.reduce((a, l) => a + (l.kind === "pack" ? l.packages : 0), 0);
+          return (
+            <Cta testId="pack-confirm" onClick={submitPackaging} disabled={blocked} busy={packing}>
+              {bags > 0 ? (lang === "ar" ? `أكّد ${bags} كيس` : `Confirm ${bags} package${bags === 1 ? "" : "s"}`) : completeLines.length ? t("pkgConfirmBtn") : (lang === "ar" ? "اختر عددًا" : "Choose a count")}
+            </Cta>
+          );
+        })()}
       >
         <div className="space-y-3 ops-pack-body">
               {/* What this roast still holds, before anything is entered. */}
@@ -640,206 +657,69 @@ export default function PackagingPage() {
                 </p>
               </div>
 
-              {sellable.length === 0 ? (
+              {packState && packState.plan && !packState.plan.ok ? (
+                <p className="hr-notice tone-danger" role="alert" style={{ margin: 0 }}>{packState.plan.error}</p>
+              ) : !packState ? null : planRows.length === 0 ? (
                 <p className="text-sm font-semibold text-red-700">{t("packSkuNoProducts")}</p>
               ) : (
                 <>
-                  {/* ── The packaging sheet ───────────────────────────────── */}
-                  <div className="space-y-2">
-                    {lines.map((line, idx) => {
-                      // Matched by the index the server reports, never by position in the
-                      // returned array: a line the server refused produces no outcome, and
-                      // position-matching would then show each later row its neighbour's verdict.
-                      const completeIdx = completeLines.findIndex((c) => c.uid === line.uid);
-                      const outcome = completeIdx >= 0
-                        ? preview?.lines.find((o) => o.lineIndex === completeIdx)
-                        : undefined;
-                      const sku = line.kind === "pack" ? catalog.find((c) => c.id === line.productSkuId) : undefined;
-                      const partial = line.kind === "topUp"
-                        ? packState?.openPartials.find((p) => p.lotId === line.lotId)
-                        : undefined;
+                  <AutoRow title={lang === "ar" ? "الخطة مقترحة من الطلبات المفتوحة" : "The plan comes from the open orders"}
+                    sub={lang === "ar" ? "تظهر أحجام قهوة هذه الدفعة فقط. عدّل العدد إن اختلف الواقع." : "Only this roast's coffee is offered. Change a count if reality differs."} />
+                  {/* ── The plan: one stepper per size of this coffee ───────── */}
+                  <div style={{ display: "grid", gap: 10 }} data-testid="pack-plan">
+                    {planRows.map((r) => {
+                      const n = counts[r.id] ?? 0;
+                      const size = r.weightGrams >= 1000 ? `${(r.weightGrams / 1000).toLocaleString("en-US")} ${lang === "ar" ? "كغ" : "kg"}` : `${r.weightGrams} ${gUnit(lang)}`;
                       return (
-                        <div key={line.uid} data-testid={`pack-line-${idx}`} className="rounded-xl border border-border p-3 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Select
-                              aria-label={t("pkgLineType")}
-                              value={line.kind}
-                              onChange={(e) => changeLineKind(line.uid, e.target.value as UiLine["kind"])}
-                              className="px-2 py-1.5 rounded-lg border-2 border-border text-xs font-bold"
-                            >
-                              <option value="pack">{t("pkgLineTypeNew")}</option>
-                              <option value="topUp">{t("pkgLineTypeTopUp")}</option>
-                              <option value="loss">{t("pkgLineTypeLoss")}</option>
-                            </Select>
-                            <div className="flex-1" />
-                            {lines.length > 1 && (
-                              <button
-                                type="button"
-                                aria-label={t("pkgRemoveLine")}
-                                title={t("pkgRemoveLine")}
-                                onClick={() => setLines((prev) => prev.filter((l) => l.uid !== line.uid))}
-                                className="p-1.5 rounded-lg text-brown/40 hover:text-red-600 hover:bg-red-50 transition-colors"
-                              >
-                                <X size={14} />
-                              </button>
-                            )}
+                        <div key={r.id} className="st-line" data-testid={`pack-plan-${r.skuCode}`}>
+                          <div>
+                            <div className="st-l1">{size} <span className="ops-serial" style={{ fontWeight: 400 }}>{r.skuCode}</span></div>
+                            <div className="st-l2">{!r.hasBom ? (lang === "ar" ? "لا مكوّنات (BOM) لهذا الحجم" : "No BOM for this size") : r.forOrders.length ? `${lang === "ar" ? "لطلبات" : "For orders"} ${r.forOrders.map((o) => `#${o}`).join("، ")}` : (lang === "ar" ? "للرف" : "For the shelf")}</div>
                           </div>
-
-                          {line.kind === "pack" && (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <label className="block sm:col-span-3">
-                                <span className="text-[11px] font-bold text-brown">{t("productNameLabel")}</span>
-                                <Select
-                                  value={line.productSkuId}
-                                  onChange={(e) => {
-                                    const chosen = catalog.find((c) => c.id === e.target.value);
-                                    // Default the fill to the SKU's nominal weight: a complete
-                                    // package is the ordinary case, so a partial one is always
-                                    // a deliberate departure the operator typed.
-                                    updateLine(line.uid, {
-                                      productSkuId: e.target.value,
-                                      gramsEach: chosen ? Math.round(chosen.weightGrams) : 0,
-                                    });
-                                  }}
-                                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
-                                >
-                                  <option value="">—</option>
-                                  {sellable.map((c) => (
-                                    <option key={c.id} value={c.id}>{c.name} ({c.skuCode})</option>
-                                  ))}
-                                </Select>
-                              </label>
-                              <label className="block">
-                                <span className="text-[11px] font-bold text-brown">{t("pkgPackagesCount")}</span>
-                                <input
-                                  type="number" min={1} step={1} value={line.packages || ""}
-                                  onChange={(e) => updateLine(line.uid, { packages: parseInt(e.target.value, 10) || 0 })}
-                                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm tabular-nums"
-                                />
-                              </label>
-                              <label className="block">
-                                <span className="text-[11px] font-bold text-brown">{t("pkgGramsEach")}</span>
-                                <input
-                                  type="number" min={1} step={1} value={line.gramsEach || ""}
-                                  onChange={(e) => updateLine(line.uid, { gramsEach: parseInt(e.target.value, 10) || 0 })}
-                                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm tabular-nums"
-                                />
-                              </label>
-                              <div className="flex flex-col justify-end pb-2">
-                                {sku && (
-                                  <span className="text-[11px] text-brown/60">
-                                    {t("pkgNominalWeight")}: <Grams strong v={Math.round(sku.weightGrams)} />
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {line.kind === "topUp" && (
-                            packState && packState.openPartials.length === 0 ? (
-                              <p className="text-xs font-semibold text-brown/60">{t("pkgNoOpenPartials")}</p>
-                            ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                <label className="block sm:col-span-2">
-                                  <span className="text-[11px] font-bold text-brown">{t("pkgChoosePackage")}</span>
-                                  <Select
-                                    value={line.lotId}
-                                    onChange={(e) => {
-                                      const p = packState?.openPartials.find((o) => o.lotId === e.target.value);
-                                      // Default to exactly what the package is short of. The
-                                      // common intent is to finish the bag; anything else the
-                                      // operator types over.
-                                      updateLine(line.uid, {
-                                        lotId: e.target.value,
-                                        gramsAdded: p ? Math.max(0, p.nominalGrams - p.actualGrams) : 0,
-                                      });
-                                    }}
-                                    className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
-                                  >
-                                    <option value="">—</option>
-                                    {(packState?.openPartials ?? []).map((p) => (
-                                      <option key={p.lotId} value={p.lotId}>
-                                        {p.skuCode} · {p.actualGrams}/{p.nominalGrams} {gUnit(lang)} · {t("pkgFromBatch")} {p.fromThisBatch ? t("pkgThisBatch") : p.batchNumber}
-                                      </option>
-                                    ))}
-                                  </Select>
-                                </label>
-                                <label className="block">
-                                  <span className="text-[11px] font-bold text-brown">{t("pkgGramsAdded")}</span>
-                                  <input
-                                    type="number" min={1} step={1} value={line.gramsAdded || ""}
-                                    onChange={(e) => updateLine(line.uid, { gramsAdded: parseInt(e.target.value, 10) || 0 })}
-                                    className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm tabular-nums"
-                                  />
-                                </label>
-                                {partial && (
-                                  <p className="sm:col-span-3 text-[11px] text-brown/60">
-                                    {t("pkgActualWeight")}: <Grams strong v={partial.actualGrams} /> ·{" "}
-                                    {t("pkgNominalWeight")}: <Grams strong v={partial.nominalGrams} />
-                                  </p>
-                                )}
-                              </div>
-                            )
-                          )}
-
-                          {line.kind === "loss" && (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <label className="block">
-                                <span className="text-[11px] font-bold text-brown">{t("pkgLossGramsLabel")}</span>
-                                <input
-                                  type="number" min={1} step={1} value={line.grams || ""}
-                                  onChange={(e) => updateLine(line.uid, { grams: parseInt(e.target.value, 10) || 0 })}
-                                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm tabular-nums"
-                                />
-                              </label>
-                              <label className="block sm:col-span-2">
-                                <span className="text-[11px] font-bold text-brown">{t("pkgLossReasonLabel")}</span>
-                                <input
-                                  type="text" value={line.reason}
-                                  onChange={(e) => updateLine(line.uid, { reason: e.target.value })}
-                                  className="w-full px-3 py-2 rounded-xl border-2 border-border text-sm"
-                                />
-                              </label>
-                            </div>
-                          )}
-
-                          {/* What this row will actually produce, decided by the server. */}
-                          {outcome && (
-                            <div data-testid="line-outcome" className="flex items-center gap-2 flex-wrap text-[11px] font-bold">
-                              {outcome.classification === "STANDARD" && (
-                                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-800">
-                                  {outcome.kind === "topUp" ? t("pkgWillComplete") : t("pkgCompletePackage")}
-                                </span>
-                              )}
-                              {outcome.classification === "PARTIAL" && (
-                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                                  {outcome.kind === "topUp" ? t("pkgStaysPartial") : t("pkgPartialPackage")}
-                                </span>
-                              )}
-                              {outcome.classification === "LOSS" && (
-                                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800">{t("pkgReconLoss")}</span>
-                              )}
-                              <span className="text-brown/60 tabular-nums">
-                                <Grams v={outcome.gramsConsumed} />
-                                {outcome.kind !== "loss" && outcome.nominalGrams > 0 && (
-                                  <> · {t("pkgActualWeight")} <bdi dir="ltr"><span className="hr-num">{outcome.actualGramsEach} / {outcome.nominalGrams}</span></bdi> {gUnit(lang)}</>
-                                )}
-                              </span>
-                            </div>
-                          )}
+                          <Stepper value={n} label={size} max={r.hasBom ? undefined : 0} testId={`pack-step-${r.skuCode}`} onChange={(v) => setCounts((c) => ({ ...c, [r.id]: v }))} />
                         </div>
                       );
                     })}
-
-                    <button
-                      type="button"
-                      onClick={() => setLines((prev) => [...prev, blankLine("pack")])}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 border-dashed border-border text-xs font-bold text-brown hover:border-orange/60 hover:text-orange transition-colors"
-                    >
-                      <Plus size={14} /> {t("pkgAddLine")}
-                    </button>
                   </div>
-
+                  {preview ? (() => {
+                    const used = preview.totalConsumedGrams, avail = preview.availableGrams, left = avail - used;
+                    return (
+                      <div>
+                        <div className="st-meter" aria-hidden="true"><i className={left < 0 ? "is-over" : ""} style={{ width: `${Math.min(100, avail > 0 ? (used / avail) * 100 : 0)}%` }} /></div>
+                        <div className="st-meter-l"><span>{lang === "ar" ? "يُعبّأ" : "Packing"} <Grams v={used} /></span><span>{lang === "ar" ? "يبقى في الدفعة" : "Left in the roast"} <Grams v={Math.max(0, left)} /></span></div>
+                      </div>
+                    );
+                  })() : null}
+                  <details className="st-more">
+                    <summary>{lang === "ar" ? "كيس ناقص، إكمال كيس مفتوح، أو فاقد تعبئة" : "A partial package, topping up an open one, or a packing loss"}</summary>
+                    <div>
+                      {/* A package below its nominal weight is the deliberate exception: only here is a weight asked for. */}
+                      {partial ? (
+                        <div className="st-two">
+                          <div className="st-field">
+                            <label htmlFor="pk-partial-sku">{lang === "ar" ? "حجم الكيس الناقص" : "Partial package size"}</label>
+                            <Select id="pk-partial-sku" value={partial.skuId} onChange={(e) => setPartial({ ...partial, skuId: e.target.value })} className="hr-input" style={{ height: 48, width: "100%" }}>
+                              {planRows.filter((r) => r.hasBom).map((r) => <option key={r.id} value={r.id}>{r.skuCode} · {r.weightGrams} {gUnit(lang)}</option>)}
+                            </Select>
+                          </div>
+                          <NumIn id="pk-partial-grams" small inputMode="numeric" label={lang === "ar" ? "وزنه الفعلي" : "Actual weight"} unit={gUnit(lang)} value={partial.grams} onChange={(v) => setPartial({ ...partial, grams: v })} />
+                        </div>
+                      ) : (
+                        <button type="button" className="st-sec" onClick={() => { const first = planRows.find((r) => r.hasBom); if (first) setPartial({ skuId: first.id, grams: "" }); }}>{lang === "ar" ? "+ كيس ناقص" : "+ A partial package"}</button>
+                      )}
+                      {partial ? <button type="button" className="st-textlink is-sm" onClick={() => setPartial(null)}>{lang === "ar" ? "إزالة الكيس الناقص" : "Remove the partial package"}</button> : null}
+                      {(packState.openPartials ?? []).filter((op) => planRows.some((r) => r.id === op.skuId)).map((op) => (
+                        <label key={op.lotId} className="st-check">
+                          <input type="checkbox" checked={op.lotId in topUps} onChange={(e) => setTopUps((tu) => { const n = { ...tu }; if (e.target.checked) n[op.lotId] = Math.max(1, op.nominalGrams - op.actualGrams); else delete n[op.lotId]; return n; })} />
+                          <span>{lang === "ar" ? "إكمال كيس مفتوح" : "Top up an open package"} <span className="ops-serial">{op.skuCode}</span> · <bdi dir="ltr">{op.actualGrams}/{op.nominalGrams}</bdi> {gUnit(lang)} · {t("pkgFromBatch")} {op.fromThisBatch ? t("pkgThisBatch") : op.batchNumber}</span>
+                        </label>
+                      ))}
+                      <div className="st-two">
+                        <NumIn id="pk-loss-grams" small inputMode="numeric" label={t("pkgLossGramsLabel")} unit={gUnit(lang)} value={loss.grams} onChange={(v) => setLoss((l) => ({ ...l, grams: v }))} />
+                        <NumIn id="pk-loss-reason" small text inputMode="text" label={t("pkgLossReasonLabel")} value={loss.reason} onChange={(v) => setLoss((l) => ({ ...l, reason: v }))} />
+                      </div>
+                    </div>
+                  </details>
                   {/* ── Reconciliation ────────────────────────────────────── */}
                   {preview && (() => {
                     const p = preview;

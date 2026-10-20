@@ -2,15 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub, requireAnyModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
-import {
-  createProductionOrderFromSales,
-  outstandingDemandForItem,
-  productionProgressMany,
-  advisoryKey,
-} from "@/lib/services/production-planning";
-import { appendOrderActivity, productionGateRefusal, assertOrderStillAcceptsProduction } from "@/lib/services/order-operations";
+import { outstandingDemandForItem, productionProgressMany } from "@/lib/services/production-planning";
+import { productionGateRefusal } from "@/lib/services/order-operations";
 import { explodeBom, kgForUnits } from "@/lib/services/finished-products";
-import { emitAutomationEvent } from "@/lib/automation/emit";
+import { scheduleShortfallInTx, withdrawProvisionalPlans } from "@/lib/services/production-schedule";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -155,7 +150,7 @@ export async function POST(_request: Request, { params }: Params) {
     if (!result.ok)
       return NextResponse.json({ error: result.error.message }, { status: result.error._appCode });
 
-    const { item, demand, shortfallUnits } = result;
+    const { item } = result;
 
     // Production entry gate. This replaces a check that refused only "Cancelled" and
     // "Rejected" — two of eight statuses — and never looked at approval or at whether
@@ -168,6 +163,15 @@ export async function POST(_request: Request, { params }: Params) {
     // would surface as a generic 500 instead of this 409.
     const refusal = productionGateRefusal(item, "schedule");
     if (refusal) return NextResponse.json({ error: refusal.message }, { status: refusal._appCode });
+
+    // Phase C item 3: a plan the system raised by itself, with nothing roasted against it, gives
+    // way to an explicit request — the shortfall is then computed again without it.
+    if (result.demand.scheduledUnits > 0 && (await withdrawProvisionalPlans({ id: item.id, orderId: item.order.id }, { id: user.id, name: user.name })) > 0) {
+      const again = await shortfallFor(id);
+      if (!again.ok) return NextResponse.json({ error: again.error.message }, { status: again.error._appCode });
+      Object.assign(result, again);
+    }
+    const { demand, shortfallUnits } = result;
 
     // Nothing outstanding is a legitimate, common answer — the shelf covers the line, or
     // production already scheduled covers it. The message distinguishes the two, because
@@ -196,92 +200,16 @@ export async function POST(_request: Request, { params }: Params) {
         { status: 409 }
       );
 
-    const created = await prisma.$transaction(async (tx) => {
-      // Everything above was computed outside the transaction and is only good enough to
-      // reject the obvious cases and build the error messages. The authoritative
-      // calculation happens here, behind an advisory lock keyed on this order line, so
-      // that two operators pressing the button at the same moment cannot both read the
-      // same shortfall and both schedule it. The lock is released at commit.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(7762, ${advisoryKey(item.id)}::int)`;
-
-      const fresh = await tx.orderItem.findUniqueOrThrow({
-        where: { id: item.id },
-        select: { id: true, quantityUnits: true, deliveredUnits: true },
-      });
-      const live = await outstandingDemandForItem(tx, {
-        id: fresh.id,
-        quantityUnits: fresh.quantityUnits ?? 0,
-        deliveredUnits: fresh.deliveredUnits,
-      });
-      if (live.outstandingUnits <= 0) {
-        throw {
-          _appCode: 409,
-          message:
-            "Nothing further to produce — this line was covered while the request was in flight.",
-        };
-      }
-
-      const liveKg = kgForUnits(item.productSku!, live.outstandingUnits);
-      const order = await createProductionOrderFromSales(item.id, tx, liveKg);
-
-      // ── Late lifecycle-serialization barrier ────────────────────────────────
-      // Locks the parent Order row and re-checks eligibility against
-      // transaction-current state. A Hold or Cancel that committed while this
-      // transaction was running is caught here and the whole transaction — including the
-      // production order just created — rolls back. Taken last, after the scheduling
-      // work, to keep production in the same OrderItem-then-Order direction preparation
-      // review uses; see assertOrderStillAcceptsProduction for the deadlock argument.
-      await assertOrderStillAcceptsProduction(tx, item.id, "schedule");
-
-      // The shortfall above was computed before that lock existed, so a preparation review
-      // committing in between could have reserved stock this order line now no longer
-      // needs. Re-derive it now that the Order lock makes review unable to commit under
-      // us: if reservations and open production orders together exceed what is still
-      // owed, this request would over-schedule and must not stand.
-      const settled = await outstandingDemandForItem(tx, {
-        id: fresh.id,
-        quantityUnits: fresh.quantityUnits ?? 0,
-        deliveredUnits: fresh.deliveredUnits,
-      });
-      const committedUnits =
-        settled.orderedUnits - settled.deliveredUnits - settled.reservedUnits - settled.scheduledUnits;
-      if (committedUnits < 0) {
-        throw {
-          _appCode: 409,
-          message:
-            `Coverage for this line changed while the request was in flight: ` +
-            `${settled.reservedUnits} unit(s) reserved and ${settled.scheduledUnits} scheduled ` +
-            `now exceed the ${settled.orderedUnits - settled.deliveredUnits} still owed. Nothing was scheduled.`,
-        };
-      }
-
-      await appendOrderActivity(tx, {
-        orderId: item.order.id,
-        type: "PRODUCTION_ORDER_CREATED",
-        message:
-          `Production order ${order.productionNumber} raised for ${order.targetUnits} × ${item.productSku!.skuCode} ` +
-          `(${order.targetWeightKg} kg finished, ${order.expectedGreenBeanKg} kg green) by ${user.name}.`,
-        authorId: user.id,
-        authorName: user.name,
-        metadata: {
-          productionOrderId: order.id,
-          productionNumber: order.productionNumber,
-          targetUnits: order.targetUnits,
-          outstandingBefore: live.outstandingUnits,
-          reservedUnits: live.reservedUnits,
-          scheduledUnits: live.scheduledUnits,
-        },
-      });
-
-      await emitAutomationEvent(tx, {
-        eventType: "production.order_created",
-        subjectType: "ProductionOrder",
-        subjectId: order.id,
-        actorId: user.id,
-      });
-
-      return { order, live, liveKg };
-    }, TX_OPTS);
+    // The transaction is services/production-schedule's scheduleShortfallInTx — the same one
+    // the automatic shortfall scheduling uses (Phase C item 3), moved there unchanged.
+    const created = await prisma.$transaction(
+      (tx) => scheduleShortfallInTx(
+        tx,
+        { id: item.id, orderId: item.order.id, skuCode: item.productSku!.skuCode, weightGrams: item.productSku!.weightGrams },
+        { id: user.id, name: user.name },
+      ),
+      TX_OPTS,
+    );
 
     return NextResponse.json(
       {

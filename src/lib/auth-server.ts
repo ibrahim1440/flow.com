@@ -156,6 +156,8 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   "finance.budget_approve", "finance.transfer_approve", "finance.spend_override_approve", "finance.period_close", "finance.payment",
   // Owner decision 19 Oct: a power user changing another account's access steps up like the administrator.
   "employees.manage_access",
+  // Owner decision D2 (production simplification): the exceptional QC approval steps up.
+  "qc.finalize_override",
 ]);
 
 /** Is `module.sub` (or the whole module) a privileged permission? */

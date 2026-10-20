@@ -188,6 +188,8 @@ export const EVENTS: EventDef[] = [
       v("delivery.quantity", "الكمية المسلمة", "Quantity delivered", "10 وحدات"),
       v("delivery.type", "نوع التسليم", "Delivery type", "partial", "enum", DELIVERY_TYPE_OPTIONS),
       v("delivery.notes", "ملاحظات التسليم", "Delivery notes", ""),
+      // Phase D (additive): the lots the server drew the delivery from, by batch number.
+      v("delivery.lots", "لوتات التسليم", "Lots delivered", "R-2610-03، R-2610-05"),
       v("order.fullyDelivered", "اكتمل تسليم الطلب كله", "Whole order delivered", "no", "enum", YES_NO),
       ...ORDER_VARS,
       ...COMMON_VARS,
@@ -218,6 +220,23 @@ export const EVENTS: EventDef[] = [
       ...COMMON_VARS,
     ],
     recipients: ["order_owner", "actor"],
+  },
+  {
+    key: "qc.guest_invited",
+    group: "operations",
+    ar: "دعوة مقيّم ضيف",
+    en: "Guest evaluator invited",
+    description: { ar: "عند دعوة مقيّم من خارج العمل لتقييم دفعة، حاضرًا أو برابط.", en: "When a guest evaluator is invited to a batch's QC panel, present or by link." },
+    variables: [
+      v("guest.name", "اسم الضيف", "Guest name", "أبو فهد"),
+      v("guest.channel", "طريقة الدعوة", "Invitation", "LINK", "enum", [
+        { value: "PRESENT", ar: "حاضر", en: "Present" },
+        { value: "LINK", ar: "برابط", en: "By link" },
+      ]),
+      ...BATCH_VARS,
+      ...COMMON_VARS,
+    ],
+    recipients: ["actor"],
   },
   {
     key: "packaging.completed",

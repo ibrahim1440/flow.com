@@ -216,6 +216,11 @@ const RESOLVERS: Record<string, Resolver> = {
   },
 
   "delivery.recorded": async (db, e, lang, actor) => {
+    const lotsText = (v: unknown): string | null => {
+      if (!Array.isArray(v) || v.length === 0) return null;
+      const names = v.map((x) => (x && typeof x === "object" && typeof (x as { batchNumber?: unknown }).batchNumber === "string" ? (x as { batchNumber: string }).batchNumber : null)).filter((x): x is string => !!x);
+      return names.length ? names.join(lang === "ar" ? "، " : ", ") : null;
+    };
     const p = payloadOf(e);
     const delivery = await db.delivery.findUnique({
       where: { id: e.subjectId },
@@ -225,6 +230,7 @@ const RESOLVERS: Record<string, Resolver> = {
         deliveryType: true,
         notes: true,
         orderItem: { select: { beanTypeName: true, orderId: true } },
+        lines: { orderBy: { createdAt: "asc" }, select: { finishedGoodsLot: { select: { batchNumber: true } } } },
       },
     });
     if (!delivery) return null;
@@ -241,6 +247,8 @@ const RESOLVERS: Record<string, Resolver> = {
         "delivery.quantity": units != null ? unitsText(units, lang) : `${trimKg(delivery.quantityKg)} kg`,
         "delivery.type": delivery.deliveryType,
         "delivery.notes": delivery.notes ?? "",
+        // Phase D: from the event payload (added there for this), else the delivery's lines.
+        "delivery.lots": lotsText(p.lots) ?? delivery.lines.map((l) => l.finishedGoodsLot.batchNumber).join(lang === "ar" ? "، " : ", "),
         "order.fullyDelivered": fully ? "yes" : "no",
         ...common(e, actor),
       },
@@ -268,6 +276,16 @@ const RESOLVERS: Record<string, Resolver> = {
     return {
       vars: { ...b.vars, "qc.outcome": s(p.outcome), "qc.reason": s(p.reason), ...common(e, actor) },
       people: { order_owner: employeePerson(b.owner), actor: employeePerson(actor) },
+    };
+  },
+
+  "qc.guest_invited": async (db, e, lang, actor) => {
+    const p = payloadOf(e);
+    const b = await batchContext(db, e.subjectId, lang);
+    if (!b) return null;
+    return {
+      vars: { ...b.vars, "guest.name": s(p.guestName), "guest.channel": s(p.channel), ...common(e, actor) },
+      people: { actor: employeePerson(actor) },
     };
   },
 

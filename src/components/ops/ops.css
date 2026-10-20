@@ -670,3 +670,59 @@
 .ops-results .ops-scorebars { max-width: none; }
 @media (max-width: 1279px) { .ops-results-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
 @media (max-width: 767px) { .ops-cups { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
+
+/* ── Dispatch without lots (production simplification Phase D; prototype «التسليم») ──────────────
+   Order cards (tap = open), a confirm sheet with one stepper per line and no lot picker, and the
+   read-only "lots used" detail. Direction 2.1 tokens only; every control is ≥ 44 px. */
+.ops-dcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 10px; }
+.ops-dcard { appearance: none; border: 0; cursor: pointer; text-align: start; font: inherit; color: var(--text-primary); display: grid; gap: 6px; min-height: 44px;
+  background: var(--surface); border-radius: 14px; padding: 14px; box-shadow: inset 0 0 0 1px var(--border-strong); transition: box-shadow 0.15s ease, background 0.15s ease; }
+.ops-dcard:hover:not(:disabled), .ops-dcard[aria-pressed="true"] { background: var(--surface-subtle); box-shadow: inset 0 0 0 1.5px var(--action-primary); }
+.ops-dcard:focus-visible { outline: 2px solid var(--action-primary); outline-offset: 2px; }
+.ops-dcard:disabled { cursor: default; }
+.ops-dcard-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ops-dcard-t { font-weight: 600; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-dcard-go { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 10px; background: var(--action-primary); color: var(--surface); font-weight: 500; font-size: 14px; flex: none; }
+.ops-dcard-s { font-size: 13px; color: var(--text-secondary); }
+.ops-dcard-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.ops-dtag { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; background: var(--surface-selected); color: var(--text-secondary); }
+.ops-dtag.tone-ok { background: var(--status-success-tint); color: var(--status-success); }
+.ops-dtag.tone-info { background: var(--status-info-tint); color: var(--status-info); }
+.ops-dlines { display: grid; gap: 10px; }
+.ops-dline { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.ops-dline-t { min-width: 0; }
+.ops-dline-name { font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ops-dline-sub { font-size: 12.5px; color: var(--text-muted); }
+.ops-stepper { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.ops-stepper button { width: 44px; height: 44px; border-radius: 10px; border: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--text-primary); font-size: 20px; line-height: 1; cursor: pointer; }
+.ops-stepper button:disabled { color: var(--text-disabled); cursor: default; }
+.ops-stepper button:focus-visible, .ops-stepper input:focus-visible { outline: 2px solid var(--action-primary); outline-offset: 2px; }
+.ops-stepper input { width: 64px; height: 44px; text-align: center; border-radius: 10px; border: 0; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); color: var(--text-primary); font-family: var(--f-num); font-size: 16px; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.ops-stepper input::-webkit-outer-spin-button, .ops-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ops-dauto { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-secondary); font-size: 13px; }
+.ops-dauto strong { font-weight: 600; color: var(--text-primary); }
+.ops-dmore > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--action-primary); font-weight: 500; }
+.ops-dlots { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.ops-dlots > li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 13px; }
+.ops-dlots-head { display: block; margin-top: 6px; font-size: 12.5px; color: var(--text-muted); }
+.ops-dlots-src { color: var(--text-secondary); font-size: 12.5px; }
+.ops-dcta { min-height: 48px; width: 100%; justify-content: center; }
+.ops-dispatch .ops-pane-close { min-width: 44px; min-height: 44px; }
+
+/* Phase B — the orders board's pipeline bar (prototype «الطلبات»): roast · QC · pack · delivery. */
+.ops-pipe { display: inline-grid; gap: 4px; min-width: 150px; max-width: 260px; }
+.ops-pipe-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.ops-pipe-label.tone-ok { color: var(--status-success); }
+.ops-pipe-label.tone-info { color: var(--status-info); }
+.ops-pipe-label.tone-warn { color: var(--status-warning); }
+.ops-pipe-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.ops-pipe-bar > i { height: 6px; border-radius: 3px; background: var(--border-subtle); }
+.ops-pipe-bar > i.is-done { background: var(--status-success); }
+.ops-pipe-bar > i.is-now { background: var(--action-primary); }
+.ops-pipe-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; font-size: 11px; color: var(--text-muted); }
+.ops-pipe.is-compact { min-width: 120px; }
+.ops-pipe.is-compact .ops-pipe-label { font-size: 12px; font-weight: 500; }
+.ops-dtag.tone-danger { background: var(--status-danger-tint, var(--surface-selected)); color: var(--status-danger); }
+/* A tag holding words and numbers side by side (the roast queue's «طلب #111», «أخضر 38.8 كغ متاح»):
+   a flex container drops the spaces between them, so they get a gap instead. */
+.ops-dtag { gap: 0.3em; }
