@@ -35,16 +35,33 @@
 .dh-lk:hover { text-decoration: underline; }
 
 /* Order pipeline (20:303): one row, hairlines top and bottom, 9 px inset; cells 16/20/18 inset,
-   value Number/Flow 30/33 −0.3, label UI/Body S secondary; the waiting cell warning-tinted. */
+   value Number/Flow 30/33 −0.3, label UI/Body S secondary.
+   Owner, 20 Oct 2026: the cells are tabs (components/ui/StageTabs). The highlight follows the
+   selection — the Clay signature as a 14 % tint with a signature border — and every other cell is
+   neutral; the fixed warning-tinted «بانتظار الجودة» cell is gone (an overdue QC keeps its
+   warning-coloured caption, and a dot + label on the phone). */
 .dh-pipehead { margin-top: 40px; }
-.dh-pipe { display: flex; margin-top: 13px; padding: 8px 0; /* 9 px inset in 20:303, whose strokes sit inside the frame */ border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); list-style: none; }
-.dh-stage { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 16px 20px 18px; }
-.dh-stage + .dh-stage { border-inline-start: 1px solid var(--border-subtle); }
+.dh-pipe { display: flex; margin-top: 13px; padding: 8px 0; /* 9 px inset in 20:303, whose strokes sit inside the frame */ border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); list-style: none; gap: 0; }
+.dh-stage { appearance: none; font: inherit; color: inherit; text-align: start; cursor: pointer; background: none; border: 1px solid transparent; border-radius: 10px;
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 16px 20px 18px; position: relative;
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease); }
+/* the hairline between cells, drawn so a selected cell's border replaces it */
+.dh-stage + .dh-stage::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: -1px; width: 1px; background: var(--border-subtle); }
+.dh-stage[aria-selected="true"]::before, .dh-stage[aria-selected="true"] + .dh-stage::before { display: none; }
+.dh-stage:hover { background: var(--surface-hover); }
+.dh-stage[aria-selected="true"] { background: color-mix(in srgb, var(--brand-signature) 14%, var(--surface)); border-color: var(--brand-signature); }
+.dh-stage:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 10px; }
 .dh-stage b { font: 400 30px/33px var(--f-num); letter-spacing: -0.3px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .dh-stage span { font: 400 13.5px/22px var(--f-ui); color: var(--text-secondary); }
+.dh-stage[aria-selected="true"] span { color: var(--text-primary); font-weight: 500; }
 .dh-stage small { display: block; margin-top: 2px; font: 400 12px/22px var(--f-ui); color: var(--status-warning); }
-.dh-stage.is-warning { background: var(--status-warning-tint); border-radius: 10px; }
-.dh-stage.is-warning b { color: var(--status-warning); }
+.dh-stage .sr-warn { display: none; }
+
+/* The selected card's orders (tab panel), in the «تحتاج إجراء» row style. */
+.dh-stagepanel { margin-top: 24px; display: flex; flex-direction: column; min-width: 0; }
+.dh-stagepanel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; border-radius: 6px; }
+.dh-stagepanel .dh-table { margin-top: 8px; }
+.dh-stagepanel .dh-empty { margin-top: 8px; }
 
 /* Divider 20:414 separates the roaster block from the columns; with no roaster source the
    pipeline's own bottom hairline is the separator, so the divider is not drawn twice. */
@@ -95,6 +112,8 @@
 
 /* ── Phone (34:1405 / 37:1376): the shell's phone header carries the title and date; metrics are
    rows, the pipeline scrolls sideways as 96×62 tiles, «تحتاج إجراء» is a list. ── */
+@media (prefers-reduced-motion: reduce) { .dh-stage { transition: none; } }
+
 @media (max-width: 767px) {
   .dh-page { padding: 12px 16px 24px; }
   .dh-head { display: none; }
@@ -105,12 +124,16 @@
   .dh-mcap { display: none; }
   .dh-pipehead { margin-top: 14px; }
   .dh-pipe { margin: 9px -16px 0; padding: 0 16px; border: 0; gap: 8px; overflow-x: auto; scrollbar-width: none; }
-  .dh-stage, .dh-stage + .dh-stage { flex: 0 0 96px; gap: 2px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 10px; }
+  .dh-pipe { scroll-padding-inline: 16px; }
+  .dh-stage, .dh-stage + .dh-stage { flex: 0 0 auto; min-width: 96px; gap: 2px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 10px; }
+  .dh-stage + .dh-stage::before { display: none; }
   .dh-stage b { font: 500 20px/22px var(--f-num); letter-spacing: 0; }
   .dh-stage span { font-size: 12px; line-height: 22px; color: var(--text-primary); white-space: nowrap; }
   .dh-stage small { display: none; }
-  .dh-stage.is-warning { border-color: transparent; }
-  .dh-stage.is-warning span { color: var(--status-warning); }
+  .dh-stage[aria-selected="true"] { border-color: var(--brand-signature); }
+  /* an overdue QC: a warning dot beside the label (its name is read out), not a coloured card */
+  .dh-stage .sr-warn { display: inline-block; width: 6px; height: 6px; margin-inline-start: 5px; vertical-align: middle; border-radius: 50%; background: var(--status-warning); }
+  .dh-stagepanel { margin-top: 16px; }
   .dh-divider { display: none; }
   .dh-cols { margin-top: 22px; gap: 22px; }
   .dh-table { display: none; }

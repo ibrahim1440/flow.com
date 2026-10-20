@@ -3,6 +3,8 @@ import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useCreateRequest } from "@/components/shell/page-context";
 
 import { useState, useEffect, useRef } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { isPipelineStage, riyadhDay, stageOf, TERMINAL_ORDER_STATUSES, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
 import { Plus, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
 import { useUser } from "../user-context";
 import { hasSubPrivilege, canEdit } from "@/lib/auth-shared";
@@ -22,6 +24,12 @@ import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeade
 const EDITABLE_ORDER_STATUSES = new Set(["Waiting Approval", "Waiting Preparation Review", "Preparing", "Ready for Shipping"]);
 
 type OrdersTab = "all" | "review" | "preparing" | "ready" | "hold" | "done";
+
+/** «اليوم» pipeline cards (lib/order-stage), the `?stage=` filter this page accepts. */
+const STAGE_LABEL: Record<PipelineStage, [string, string]> = {
+  approval: ["بانتظار الاعتماد", "Awaiting approval"], roasting: ["قيد التحميص", "Roasting"], qc: ["بانتظار الجودة", "Awaiting QC"],
+  packing: ["قيد التعبئة", "Packing"], ready: ["جاهز للشحن", "Ready to ship"], delivered: ["سُلّم اليوم", "Delivered today"],
+};
 
 const COMPLETION_STATUSES = new Set(["Passed", "Partially Packaged", "Packaged", "Blended"]);
 
@@ -138,6 +146,19 @@ export default function OrdersPage() {
   const [products, setProducts] = useState<ProductSummary[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  // `?stage=` (owner, 20 Oct 2026): the «اليوم» pipeline card links here filtered to its stage,
+  // counted by the same rule (lib/order-stage). It lives in the address, so links and Back work.
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const stageRaw = params.get("stage");
+  const stageFilter: PipelineStage | null = isPipelineStage(stageRaw) ? stageRaw : null;
+  const setStageFilter = (v: PipelineStage | null) => {
+    const q = new URLSearchParams(params.toString());
+    if (v) q.set("stage", v); else q.delete("stage");
+    const qs = q.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
   const [showForm, setShowForm] = useState(false);
   // «جديد» from the shell (A-3): `?new=1` opens the same form as «طلب جديد».
   useCreateRequest("order", () => setShowForm(true), canCreate);
@@ -392,8 +413,14 @@ export default function OrdersPage() {
     done: ["Completed"],
   };
   const inTab = (o: Order, k: OrdersTab) => !TAB_STATUSES[k] || TAB_STATUSES[k]!.includes(o.status);
+  const today = riyadhDay(new Date());
+  const inStage = (o: Order, k: PipelineStage) => k === "delivered"
+    ? o.items.some((i) => i.deliveries.some((d) => { const at = new Date(d.date).getTime(); return at >= today.start.getTime() && at < today.end.getTime(); }))
+    : !TERMINAL_ORDER_STATUSES.includes(o.status) && stageOf(o) === k;
+  // A stage filter replaces the status tab (the tab strip reads «الكل» while it is on).
+  const activeTab: OrdersTab = stageFilter ? "all" : tab;
   const filtered = orders.filter((o) => {
-    if (!inTab(o, tab)) return false;
+    if (stageFilter ? !inStage(o, stageFilter) : !inTab(o, tab)) return false;
     const matchSearch = `${o.orderNumber} ${o.customer.name} ${o.quotationNumber || ""}`.toLowerCase().includes(search.toLowerCase());
     if (statusFilter === "all") return matchSearch;
     return matchSearch && o.items.some((i) => i.productionStatus === statusFilter);
@@ -425,8 +452,8 @@ export default function OrdersPage() {
 
           <Tabs
             label={t("orders")}
-            value={tab}
-            onChange={(k) => setTab(k)}
+            value={activeTab}
+            onChange={(k) => { setTab(k); if (stageFilter) setStageFilter(null); }}
             items={([
               ["all", t("opsAll")],
               ["review", t("opsWaitingReview")],
@@ -439,6 +466,16 @@ export default function OrdersPage() {
 
           <div className="hr-filterbar">
             <input className="hr-input hr-search" type="search" placeholder={t("searchOrders")} aria-label={t("searchOrders")} value={search} onChange={(e) => setSearch(e.target.value)} />
+            <span data-testid="orders-stage-filter" data-stage={stageFilter ?? ""} style={{ display: "contents" }}>
+              <FilterChip
+                label={lang === "ar" ? "المرحلة" : "Stage"}
+                value={stageFilter ?? ""}
+                onChange={(v) => setStageFilter(isPipelineStage(v) ? v : null)}
+                allLabel={lang === "ar" ? "كل المراحل" : "All stages"}
+                clearLabel={lang === "ar" ? "مسح عامل التصفية: المرحلة" : "Clear filter: Stage"}
+                options={PIPELINE_STAGES.map((k) => ({ value: k, label: STAGE_LABEL[k][lang === "ar" ? 0 : 1] }))}
+              />
+            </span>
             <FilterChip
               label={t("opsProductionFilter")}
               value={statusFilter === "all" ? "" : statusFilter}
@@ -459,7 +496,7 @@ export default function OrdersPage() {
             <h2 className="text-lg font-bold text-charcoal mb-4">{t("newOrder")}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t("customer")}</label>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("customer")}</label>
                 <div className="flex gap-2">
                   <Select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}
                     aria-label={t("customer")} data-testid="order-customer"
@@ -469,7 +506,7 @@ export default function OrdersPage() {
                   </Select>
                   {/* POST /api/customers is requireEdit("customers"): offered only to those who hold it. */}
                   {canAddCustomer && <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}
-                    className={`p-2 rounded-lg border ${showNewCustomer ? "bg-red-50 border-red-200 text-red-600" : "bg-cream border-border text-brown"} hover:opacity-80`}
+                    className={`p-2 rounded-lg border ${showNewCustomer ? "bg-[var(--status-danger-tint)] border-[var(--status-danger-tint)] text-[var(--status-danger)]" : "bg-cream border-border text-brown"} hover:opacity-80`}
                     title={showNewCustomer ? t("cancel") : t("addNewCustomer")}>
                     {showNewCustomer ? <X size={18} /> : <UserPlus size={18} />}
                   </button>}
@@ -500,7 +537,7 @@ export default function OrdersPage() {
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t("quotationNumber")}</label>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("quotationNumber")}</label>
                 <input type="text" value={form.quotationNumber} onChange={(e) => setForm({ ...form, quotationNumber: e.target.value })}
                   className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
               </div>
@@ -512,7 +549,7 @@ export default function OrdersPage() {
                 return (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{t("orderItemsLabel")}</label>
+                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">{t("orderItemsLabel")}</label>
                       {form.items.map((item, idx) => {
                         const sku = catalog.find((c) => c.id === item.productSkuId);
                         const row = item.productSkuId ? previewBySku.get(item.productSkuId) : undefined;
@@ -556,7 +593,7 @@ export default function OrdersPage() {
                                 <button
                                   type="button"
                                   onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}
-                                  className="px-2 py-2 text-brown/60 hover:text-red-600"
+                                  className="px-2 py-2 text-brown/60 hover:text-[var(--status-danger)]"
                                   aria-label="Remove line"
                                 >
                                   <X size={16} />
@@ -568,7 +605,7 @@ export default function OrdersPage() {
                               <p className="mt-1.5 text-xs text-brown/70 font-medium">
                                 {sku.skuCode} · {sku.packSize} · {sku.price.toFixed(2)} · {t("availableLabel")}:{" "}
                                 <span className="font-bold text-charcoal">{sku.availableUnits}</span>
-                                {!sku.hasBom && <span className="text-red-600 font-bold"> · {t("noBomWarning")}</span>}
+                                {!sku.hasBom && <span className="text-[var(--status-danger)] font-bold"> · {t("noBomWarning")}</span>}
                               </p>
                             ) : (
                               <p className="mt-1.5 text-xs text-brown/50 font-medium">{t("noProductSelected")}</p>
@@ -577,16 +614,16 @@ export default function OrdersPage() {
                             {/* Section 5: what the shelf covers, and what has to be produced. */}
                             {row && row.orderedUnits > 0 && (
                               <div className="mt-1.5 flex items-center gap-3 text-xs font-semibold flex-wrap">
-                                <span className="text-green-700">
+                                <span className="text-[var(--status-success)]">
                                   {t("fromShelfLabel")}: {row.allocatedUnits}
                                 </span>
                                 {row.productionRequiredUnits > 0 && (
-                                  <span className="text-amber-700">
+                                  <span className="text-[var(--status-warning)]">
                                     {t("toProduceUnitsLabel")}: {row.productionRequiredUnits}
                                   </span>
                                 )}
                                 {row.productionRequirement && !row.productionRequirement.hasBom && (
-                                  <span className="text-red-600">{t("noBomWarning")}</span>
+                                  <span className="text-[var(--status-danger)]">{t("noBomWarning")}</span>
                                 )}
                               </div>
                             )}
@@ -601,10 +638,10 @@ export default function OrdersPage() {
                     {preview && preview.totals.orderedUnits > 0 && (
                       <div className="rounded-xl bg-cream border border-border px-3 py-2 text-xs font-semibold text-brown flex gap-4 flex-wrap">
                         <span>{t("fulfilmentCheckTitle")}</span>
-                        <span className="text-green-700">
+                        <span className="text-[var(--status-success)]">
                           {t("fromShelfLabel")}: {preview.totals.allocatedUnits}
                         </span>
-                        <span className="text-amber-700">
+                        <span className="text-[var(--status-warning)]">
                           {t("toProduceUnitsLabel")}: {preview.totals.productionRequiredUnits}
                         </span>
                       </div>
@@ -614,11 +651,11 @@ export default function OrdersPage() {
                       <button
                         type="submit"
                         disabled={blocked}
-                        className={`flex-1 py-2 rounded-lg font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${blocked ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20 hover:shadow-orange/35"}`}
+                        className={`flex-1 py-2 rounded-lg font-bold shadow-md active:scale-[0.98] transition-all duration-200 ${blocked ? "bg-[var(--border-strong)] text-[var(--text-muted)] cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20 hover:shadow-orange/35"}`}
                       >
                         {t("createOrder")}
                       </button>
-                      <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                      <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 border border-[var(--border-strong)] rounded-lg hover:bg-[var(--surface-subtle)]">
                         {t("cancel")}
                       </button>
                     </div>
@@ -800,7 +837,7 @@ export default function OrdersPage() {
                                 className="w-24 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
                               {editForm.items.length > 1 && (
                                 <button type="button" onClick={() => setEditForm({ ...editForm, items: editForm.items.filter((_, i) => i !== idx) })}
-                                  className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                                  className="p-1.5 text-[var(--status-danger)] hover:bg-[var(--status-danger-tint)] rounded-lg"><Trash2 size={14} /></button>
                               )}
                             </div>
                             <div className="flex gap-2 mt-1">
@@ -822,7 +859,7 @@ export default function OrdersPage() {
                               )}
                             </div>
                             {editWarnings[idx] && (
-                              <p className="text-xs font-bold text-red-600 mt-1 px-1">{editWarnings[idx]}</p>
+                              <p className="text-xs font-bold text-[var(--status-danger)] mt-1 px-1">{editWarnings[idx]}</p>
                             )}
                           </div>
                         ))}
@@ -831,9 +868,9 @@ export default function OrdersPage() {
                       </div>
                       <div className="flex gap-2 justify-end">
                         <button onClick={() => setEditingId(null)}
-                          className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">{t("cancel")}</button>
+                          className="px-4 py-1.5 text-sm border border-[var(--border-strong)] rounded-lg hover:bg-[var(--surface-subtle)]">{t("cancel")}</button>
                         <button onClick={handleEditSave} disabled={hasEditStockError}
-                          className={`flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg font-bold shadow-md ${hasEditStockError ? "bg-gray-300 text-gray-500 cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
+                          className={`flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg font-bold shadow-md ${hasEditStockError ? "bg-[var(--border-strong)] text-[var(--text-muted)] cursor-not-allowed shadow-none" : "bg-orange text-white hover:bg-orange-dark shadow-orange/20"}`}>
                           <Save size={14} /> {t("saveChanges")}
                         </button>
                       </div>

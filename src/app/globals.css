@@ -1,29 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  /* Primary Palette */
-  --slate: #6B7280;
-  --orange: #7C3AED;
-  --orange-dark: #6D28D9;
-  --cream: #F9FAFB;
+  /* The legacy semantic palette, re-pointed at Direction 2.1 (owner, 20 Oct 2026). Every
+     dashboard, sign-in and guest surface sits in a `.d21` root that remaps these names again
+     (app/dashboard/d21.css, components/ops/ops.css); these :root values are what is left for a
+     surface rendered OUTSIDE such a root (a dialog mounted beside the shell, a portal into
+     <body>). They used to be the retired purple/grey theme — the step-up dialog showed a purple
+     button and focus ring on production — and are now the Direction 2.1 values
+     (components/shell/direction-2.1.css), so no surface can fall back to the old theme. */
+  --slate: #6e6a61;          /* text-muted */
+  --orange: #5c5c38;         /* action-primary (olive) */
+  --orange-dark: #4c4b2f;    /* action-primary-hover */
+  --cream: #f8f5ee;          /* canvas */
 
-  /* Secondary Palette */
-  --charcoal: #1F2937;
-  --brown: #6B7280;
+  --charcoal: #28241a;       /* text-primary */
+  --brown: #6e6a61;          /* text-muted */
 
-  /* Semantic */
-  --background: #F9FAFB;
-  --foreground: #1F2937;
-  --border: #E5E7EB;
-  --muted: #F3F4F6;
-  --muted-foreground: #6B7280;
+  --background: #f8f5ee;     /* canvas */
+  --foreground: #28241a;     /* text-primary */
+  --border: #efeadf;         /* border-subtle */
+  --muted: #fbf9f4;          /* surface-subtle */
+  --muted-foreground: #6e6a61;
 
-  /* Status */
-  --success-bg: #dcfce7;
-  --warning-bg: #fef3c7;
-  --danger: #ef4444;
-  --danger-bg: #fecaca;
-  --info-bg: #F1F5F9;
+  --success-bg: #e9f2e7;     /* status-success-tint */
+  --warning-bg: #fbf2da;     /* status-warning-tint */
+  --danger: #b42318;         /* status-danger */
+  --danger-bg: #fcebe8;      /* status-danger-tint */
+  --info-bg: #eaf0f5;        /* status-info-tint */
 
 }
 
@@ -43,13 +46,13 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "Tajawal", system-ui, -apple-system, sans-serif;
+  font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", "Noto Sans Arabic", system-ui, -apple-system, sans-serif;
   font-weight: 400;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: "Tajawal", system-ui, sans-serif;
-  font-weight: 800;
+  font-family: inherit;
+  font-weight: 600;
 }
 
 .status-badge {
@@ -61,74 +64,68 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 600;
 }
 
-.status-completed { background: var(--success-bg); color: #166534; }
-.status-pending { background: var(--warning-bg); color: #92400e; }
-.status-in-production { background: var(--info-bg); color: #475569; }
-.status-partial { background: var(--warning-bg); color: #92400e; }
+/* Direction 2.1 status tones (status-success / warning / info / danger). */
+.status-completed { background: var(--success-bg); color: #3b7a45; }
+.status-pending { background: var(--warning-bg); color: #946200; }
+.status-in-production { background: var(--info-bg); color: #3b6385; }
+.status-partial { background: var(--warning-bg); color: #946200; }
 .status-not-yet { background: var(--muted); color: var(--muted-foreground); }
-.status-not-paid { background: var(--danger-bg); color: #991b1b; }
+.status-not-paid { background: var(--danger-bg); color: #b42318; }
 
 @media print {
   body { background: white; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Order Operations (S0) — scoped design tokens
-   ADDITIVE ONLY. Mirrors the approved Figma "ERP Design System & Order
-   Operations" file (zinc-gray neutrals + restrained indigo accent).
-   These --oo-* tokens are consumed ONLY by Order Operations components
-   (src/components/OrderLifecyclePanel.tsx). They do not replace or alias
-   the existing brand tokens (--orange, --slate, --status-*, etc.) used
-   elsewhere in the ERP — those are untouched.
+   Order Operations (S0) — scoped design tokens, consumed by the shared order lifecycle
+   components (src/components/OrderLifecyclePanel.tsx). Originally the zinc + indigo palette
+   of the S0 Figma file; every module now renders in Direction 2.1, whose roots remap these
+   names (app/dashboard/d21.css, components/ops/ops.css). The :root values below are the same
+   Direction 2.1 mapping, so a surface outside those roots cannot show indigo / teal either.
    ───────────────────────────────────────────────────────────────────────── */
 :root {
-  --oo-text-primary: #18181b;
-  --oo-text-secondary: #52525b;
-  --oo-text-muted: #a1a1aa;
+  --oo-text-primary: #28241a;        /* text-primary */
+  --oo-text-secondary: #4a473d;      /* text-secondary */
+  --oo-text-muted: #6e6a61;          /* text-muted */
 
-  --oo-bg-default: #ffffff;
-  --oo-bg-subtle: #fafafa;
+  --oo-bg-default: #ffffff;          /* surface */
+  --oo-bg-subtle: #fbf9f4;           /* surface-subtle */
 
-  --oo-border-default: #e4e4e7;
-  --oo-border-strong: #d4d4d8;
+  --oo-border-default: #efeadf;      /* border-subtle */
+  --oo-border-strong: #e3dccb;       /* border-strong */
 
-  --oo-action-primary: #4f46e5;
-  --oo-action-primary-hover: #4338ca;
+  --oo-action-primary: #5c5c38;      /* action-primary (olive) */
+  --oo-action-primary-hover: #4c4b2f;
 
-  /* Waiting Approval / Waiting Preparation Review */
-  --oo-status-waiting: #d97706;
-  --oo-status-waiting-bg: #fffbeb;
+  /* Waiting Approval / Waiting Preparation Review — warning */
+  --oo-status-waiting: #946200;
+  --oo-status-waiting-bg: #fbf2da;
 
-  /* Preparing */
-  --oo-status-preparing: #2563eb;
-  --oo-status-preparing-bg: #eff6ff;
+  /* Preparing — info */
+  --oo-status-preparing: #3b6385;
+  --oo-status-preparing-bg: #eaf0f5;
 
-  /* Ready for Shipping (teal — kept distinct from Completed's green) */
-  --oo-status-ready: #0d9488;
-  --oo-status-ready-bg: #f0fdfa;
+  /* Ready for Shipping — action (olive), kept distinct from Completed's success green */
+  --oo-status-ready: #5c5c38;
+  --oo-status-ready-bg: #f0f0e9;
 
-  /* Completed */
-  --oo-status-success: #16a34a;
-  --oo-status-success-bg: #f0fdf4;
+  /* Completed — success */
+  --oo-status-success: #3b7a45;
+  --oo-status-success-bg: #e9f2e7;
 
-  /* On Hold */
-  --oo-status-hold: #b45309;
-  --oo-status-hold-bg: #fef3c7;
+  /* On Hold — warning */
+  --oo-status-hold: #946200;
+  --oo-status-hold-bg: #fbf2da;
 
-  /* Blocked (preparation decision, not an order status) */
-  --oo-status-blocked: #dc2626;
-  --oo-status-blocked-bg: #fef2f2;
+  /* Blocked / Rejected — danger (separated by icon and label) */
+  --oo-status-blocked: #b42318;
+  --oo-status-blocked-bg: #fcebe8;
+  --oo-status-rejected: #b42318;
+  --oo-status-rejected-bg: #fcebe8;
 
-  /* Rejected — destructive red, one step darker than Blocked so an order-level
-     approval failure never reads as an item-level block. Shares the red-50 tint
-     with Blocked deliberately; the two are separated by foreground, icon and label. */
-  --oo-status-rejected: #b91c1c;
-  --oo-status-rejected-bg: #fef2f2;
-
-  /* Cancelled — neutral dark gray, deliberately NOT red so it never reads
-     the same as Rejected/Blocked. */
-  --oo-status-cancelled: #3f3f46;
-  --oo-status-cancelled-bg: #f4f4f5;
+  /* Cancelled — neutral, never red */
+  --oo-status-cancelled: #6e6a61;
+  --oo-status-cancelled-bg: #f3f0e9;
 }
 
 @theme inline {

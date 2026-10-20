@@ -175,7 +175,7 @@ export default function ImportDialog({
 
           {preview && (
             <div className="space-y-3" data-testid="import-preview">
-              <div className="bg-info-bg border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate">
+              <div className="bg-[var(--status-info-tint)] border border-[var(--border-subtle)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--text-secondary)]">
                 {ar
                   ? `${preview.wouldImport} صفاً سيُستورد من ${preview.rowsRead} صفاً مقروءاً.`
                   : `${preview.wouldImport} of ${preview.rowsRead} rows would be imported.`}

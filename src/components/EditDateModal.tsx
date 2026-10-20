@@ -152,14 +152,14 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
             <p className="text-xs text-brown/60 font-mono mb-4">
               {batch.batchNumber}
               {batch.parentBatch && (
-                <span className="ltr:ml-2 rtl:mr-2 text-purple-600">
+                <span className="ltr:ml-2 rtl:mr-2 text-[var(--action-primary)]">
                   ← {t("statusBlended")}: {batch.parentBatch.batchNumber}
                 </span>
               )}
             </p>
 
             {error && (
-              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl mb-3">
+              <div className="flex items-center gap-2 bg-[var(--status-danger-tint)] border border-[var(--status-danger-tint)] text-[var(--status-danger)] text-xs font-semibold px-3 py-2 rounded-xl mb-3">
                 <AlertTriangle size={13} />
                 {error}
               </div>
@@ -182,7 +182,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
               <div>
                 <label className="block text-xs font-bold text-brown uppercase tracking-wide mb-1.5">
                   {lang === "ar" ? "سبب التغيير" : "Reason for change"}{" "}
-                  <span className="text-red-500 normal-case font-bold">*</span>
+                  <span className="text-[var(--status-danger)] normal-case font-bold">*</span>
                 </label>
                 <textarea
                   value={reason}
@@ -221,11 +221,11 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
         {step === "blend_confirm" && firstResult && (
           <>
             <div className="flex items-center gap-2 mb-4">
-              <Merge size={18} className="text-purple-600" />
+              <Merge size={18} className="text-[var(--action-primary)]" />
               <h2 className="text-base font-extrabold text-charcoal">{t("updateBlendToo")}?</h2>
             </div>
 
-            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 mb-4 text-xs text-purple-800 leading-relaxed">
+            <div className="bg-[var(--action-primary-tint)] border border-[var(--border-subtle)] rounded-xl p-3 mb-4 text-xs text-[var(--text-secondary)] leading-relaxed">
               <p className="font-bold mb-1">
                 {t("blendCascadeQuestion")}: <span className="font-mono">{firstResult.parentBatch?.batchNumber}</span>
               </p>
@@ -238,7 +238,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
             </p>
 
             {error && (
-              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold px-3 py-2 rounded-xl mb-3">
+              <div className="flex items-center gap-2 bg-[var(--status-danger-tint)] border border-[var(--status-danger-tint)] text-[var(--status-danger)] text-xs font-semibold px-3 py-2 rounded-xl mb-3">
                 <AlertTriangle size={13} />
                 {error}
               </div>
@@ -255,7 +255,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
               <button
                 onClick={() => handleBlendCascade(true)}
                 disabled={blendLoading}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-purple-600 text-white rounded-xl text-xs font-bold hover:bg-purple-700 disabled:opacity-50 active:scale-[0.98] transition-all"
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-[var(--action-primary)] text-[var(--text-inverse)] rounded-xl text-xs font-bold hover:bg-[var(--action-primary-hover)] disabled:opacity-50 active:scale-[0.98] transition-all"
               >
                 {blendLoading ? <Loader2 size={13} className="animate-spin" /> : <Merge size={13} />}
                 {t("updateBlendToo")}

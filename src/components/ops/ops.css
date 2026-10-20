@@ -177,7 +177,9 @@
 .ops-steps li.is-done::before { background: var(--action-primary); }
 .ops-steps li.is-done::after { background: var(--action-primary); box-shadow: none; }
 .ops-steps li[aria-current="step"] { color: var(--text-primary); font-weight: 600; }
-.ops-steps li[aria-current="step"]::after { box-shadow: inset 0 0 0 2px var(--action-primary), 0 0 0 3px var(--action-primary-tint); }
+/* Stage mapping shared by every stage track (owner, 20 Oct 2026): done = olive action, current =
+   the Clay signature, pending = neutral. Same in .ops-stages and the order pipeline bar (.ops-pipe). */
+.ops-steps li[aria-current="step"]::after { box-shadow: inset 0 0 0 2px var(--brand-signature), 0 0 0 3px color-mix(in srgb, var(--brand-signature) 14%, var(--surface)); }
 .ops-steps li.is-paused::after { box-shadow: inset 0 0 0 2px var(--status-warning); }
 .ops-steps li.is-negative::after { box-shadow: inset 0 0 0 2px var(--status-danger); }
 .ops-steps li:last-child::before { inset-inline-end: auto; width: 12px; }
@@ -334,8 +336,10 @@
 .ops-stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; margin: 16px 0 8px; padding: 0; list-style: none; }
 .ops-stages li { position: relative; padding-top: 18px; border-top: 2px solid var(--border-strong); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ops-stages li::before { content: ""; position: absolute; top: -6px; inset-inline-start: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 2px var(--border-strong); }
-.ops-stages li.is-done, .ops-stages li.is-current { border-top-color: var(--action-primary); }
-.ops-stages li.is-done::before, .ops-stages li.is-current::before { background: var(--action-primary); box-shadow: none; }
+.ops-stages li.is-done { border-top-color: var(--action-primary); }
+.ops-stages li.is-done::before { background: var(--action-primary); box-shadow: none; }
+.ops-stages li.is-current { border-top-color: var(--brand-signature); }
+.ops-stages li.is-current::before { background: var(--brand-signature); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-signature) 14%, var(--surface)); }
 .ops-stage-title { font: 500 14px/20px var(--f-ui); color: var(--text-primary); }
 .ops-stages li.is-current .ops-stage-title { font-weight: 600; }
 .ops-stages li.is-pending .ops-stage-title { color: var(--text-muted); }
@@ -716,9 +720,12 @@
 .ops-pipe-label.tone-info { color: var(--status-info); }
 .ops-pipe-label.tone-warn { color: var(--status-warning); }
 .ops-pipe-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
-.ops-pipe-bar > i { height: 6px; border-radius: 3px; background: var(--border-subtle); }
-.ops-pipe-bar > i.is-done { background: var(--status-success); }
-.ops-pipe-bar > i.is-now { background: var(--action-primary); }
+/* The order pipeline bar (roast · QC · pack · deliver): done = olive action (as the order stepper and
+   the production-order tracker), the step the order is at = Clay signature, still ahead = neutral
+   surface-selected with a hairline so the empty track stays visible on white. */
+.ops-pipe-bar > i { height: 6px; border-radius: 3px; background: var(--surface-selected); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.ops-pipe-bar > i.is-done { background: var(--action-primary); box-shadow: none; }
+.ops-pipe-bar > i.is-now { background: var(--brand-signature); box-shadow: none; }
 .ops-pipe-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; font-size: 11px; color: var(--text-muted); }
 .ops-pipe.is-compact { min-width: 120px; }
 .ops-pipe.is-compact .ops-pipe-label { font-size: 12px; font-weight: 500; }

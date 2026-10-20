@@ -1159,8 +1159,8 @@ export default function QCPage() {
                       <div className="flex items-center gap-2 px-3 py-2 bg-cream rounded-xl text-sm font-semibold text-charcoal">
                         <span className="text-brown/60">{t("colorDeltaLabel")}:</span>
                         <span className="font-mono font-bold text-orange">{delta.toFixed(1)}</span>
-                        {deltaPass === true && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">{t("passLabel")}</span>}
-                        {deltaPass === false && <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">{t("failLabel")}</span>}
+                        {deltaPass === true && <span className="text-[10px] font-bold text-[var(--status-success)] bg-[var(--status-success-tint)] px-1.5 py-0.5 rounded-full">{t("passLabel")}</span>}
+                        {deltaPass === false && <span className="text-[10px] font-bold text-[var(--status-danger)] bg-[var(--status-danger-tint)] px-1.5 py-0.5 rounded-full">{t("failLabel")}</span>}
                         {pref && pref.targetDeltaMin != null && pref.targetDeltaMax != null && (
                           <span className="text-xs text-brown/50">{t("targetHint")}: {pref.targetDeltaMin}–{pref.targetDeltaMax}</span>
                         )}
@@ -1171,22 +1171,22 @@ export default function QCPage() {
                         <p className="text-[10px] font-extrabold text-orange/70 uppercase tracking-widest mb-2">{t("liveTargets")}: {pref.profileName}</p>
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           {wholePass != null && (
-                            <div className={`rounded-lg px-2.5 py-2 flex items-center justify-between ${wholePass ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                            <div className={`rounded-lg px-2.5 py-2 flex items-center justify-between ${wholePass ? "bg-[var(--status-success-tint)] border border-[var(--status-success-tint)]" : "bg-[var(--status-danger-tint)] border border-[var(--status-danger-tint)]"}`}>
                               <span className="font-medium text-charcoal">{t("colorWholeLabel")}</span>
                               <div className="text-end">
                                 <p className="font-bold font-mono">{whole.toFixed(1)}</p>
                                 <p className="text-[10px] text-brown/50">{t("targetHint")}: {pref.targetColorWhole} ±{pref.targetToleranceWhole}</p>
-                                <span className={`text-[10px] font-bold ${wholePass ? "text-green-600" : "text-red-600"}`}>{wholePass ? t("passLabel") : t("failLabel")}</span>
+                                <span className={`text-[10px] font-bold ${wholePass ? "text-[var(--status-success)]" : "text-[var(--status-danger)]"}`}>{wholePass ? t("passLabel") : t("failLabel")}</span>
                               </div>
                             </div>
                           )}
                           {groundPass != null && (
-                            <div className={`rounded-lg px-2.5 py-2 flex items-center justify-between ${groundPass ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                            <div className={`rounded-lg px-2.5 py-2 flex items-center justify-between ${groundPass ? "bg-[var(--status-success-tint)] border border-[var(--status-success-tint)]" : "bg-[var(--status-danger-tint)] border border-[var(--status-danger-tint)]"}`}>
                               <span className="font-medium text-charcoal">{t("colorGroundLabel")}</span>
                               <div className="text-end">
                                 <p className="font-bold font-mono">{ground.toFixed(1)}</p>
                                 <p className="text-[10px] text-brown/50">{t("targetHint")}: {pref.targetColorGround} ±{pref.targetToleranceGround}</p>
-                                <span className={`text-[10px] font-bold ${groundPass ? "text-green-600" : "text-red-600"}`}>{groundPass ? t("passLabel") : t("failLabel")}</span>
+                                <span className={`text-[10px] font-bold ${groundPass ? "text-[var(--status-success)]" : "text-[var(--status-danger)]"}`}>{groundPass ? t("passLabel") : t("failLabel")}</span>
                               </div>
                             </div>
                           )}
@@ -1200,11 +1200,11 @@ export default function QCPage() {
                 <label className="block text-sm font-medium text-charcoal mb-2">{t("verdict")} *</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button type="button" onClick={() => setForm({ ...form, decision: "Accept", underDeveloped: false, overDeveloped: false })}
-                    className={`flex items-center justify-center gap-2 py-3 rounded-lg border-2 font-semibold text-sm transition-all ${form.decision === "Accept" ? "border-green-500 bg-green-50 text-green-700" : "border-gray-200 bg-white text-gray-400 hover:border-green-300"}`}>
+                    className={`flex items-center justify-center gap-2 py-3 rounded-lg border-2 font-semibold text-sm transition-all ${form.decision === "Accept" ? "border-[var(--status-success)] bg-[var(--status-success-tint)] text-[var(--status-success)]" : "border-[var(--border-subtle)] bg-white text-[var(--text-disabled)] hover:border-[var(--status-success)]"}`}>
                     <CheckCircle2 size={20} /> {t("acceptedLabel")}
                   </button>
                   <button type="button" onClick={() => setForm({ ...form, decision: "Reject" })}
-                    className={`flex items-center justify-center gap-2 py-3 rounded-lg border-2 font-semibold text-sm transition-all ${form.decision === "Reject" ? "border-red-500 bg-red-50 text-red-700" : "border-gray-200 bg-white text-gray-400 hover:border-red-300"}`}>
+                    className={`flex items-center justify-center gap-2 py-3 rounded-lg border-2 font-semibold text-sm transition-all ${form.decision === "Reject" ? "border-[var(--status-danger)] bg-[var(--status-danger-tint)] text-[var(--status-danger)]" : "border-[var(--border-subtle)] bg-white text-[var(--text-disabled)] hover:border-[var(--status-danger)]"}`}>
                     <XCircle size={20} /> {t("rejectedLabel")}
                   </button>
                 </div>
@@ -1214,13 +1214,13 @@ export default function QCPage() {
                   <label className="block text-sm font-medium text-charcoal">{t("rejectionReason")}</label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="radio" name="roastAssessment" checked={form.underDeveloped}
-                      onChange={() => setForm({ ...form, underDeveloped: true, overDeveloped: false })} className="w-4 h-4 text-amber-500" />
-                    <span className="text-sm font-medium text-amber-700">{t("underDeveloped")}</span>
+                      onChange={() => setForm({ ...form, underDeveloped: true, overDeveloped: false })} className="w-4 h-4 text-[var(--status-warning)]" />
+                    <span className="text-sm font-medium text-[var(--status-warning)]">{t("underDeveloped")}</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="radio" name="roastAssessment" checked={form.overDeveloped}
-                      onChange={() => setForm({ ...form, underDeveloped: false, overDeveloped: true })} className="w-4 h-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-700">{t("overDeveloped")}</span>
+                      onChange={() => setForm({ ...form, underDeveloped: false, overDeveloped: true })} className="w-4 h-4 text-[var(--status-danger)]" />
+                    <span className="text-sm font-medium text-[var(--status-danger)]">{t("overDeveloped")}</span>
                   </label>
                 </div>
               )}
@@ -1233,7 +1233,7 @@ export default function QCPage() {
               {editingRecordId && (
                 <div>
                   <label className="block text-sm font-medium text-charcoal mb-1">
-                    {lang === "ar" ? "سبب التصحيح" : "Correction reason"} <span className="text-red-500">*</span>
+                    {lang === "ar" ? "سبب التصحيح" : "Correction reason"} <span className="text-[var(--status-danger)]">*</span>
                   </label>
                   <textarea
                     value={form.correctionReason}
@@ -1250,7 +1250,7 @@ export default function QCPage() {
                   className="flex-1 py-2 bg-orange text-white rounded-lg hover:bg-orange-dark shadow-md shadow-orange/20 hover:shadow-orange/35 active:scale-[0.98] transition-all duration-200 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                   {submitting ? <><Loader2 size={15} className="animate-spin" /> {t("saving")}</> : t("saveRecord")}
                 </button>
-                <button type="button" onClick={closeForm} className="flex-1 py-2 border rounded-lg hover:bg-gray-50">
+                <button type="button" onClick={closeForm} className="flex-1 py-2 border rounded-lg hover:bg-[var(--surface-subtle)]">
                   {t("cancel")}
                 </button>
               </div>
@@ -1267,7 +1267,7 @@ export default function QCPage() {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !cancelling && setCancelBatch(null)}>
             <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={20} className="text-red-600" /></div>
+                <div className="p-2 bg-[var(--status-danger-tint)] rounded-xl"><Trash2 size={20} className="text-[var(--status-danger)]" /></div>
                 <div>
                   <h2 className="font-extrabold text-charcoal">{t("cancelBatchTitle")}</h2>
                   <p className="text-sm text-brown font-mono">{cancelBatch.batchNumber}</p>
@@ -1279,7 +1279,7 @@ export default function QCPage() {
                   <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />
                   <div className="flex gap-3">
                     <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !restockReasonOk(restockReason)}
-                      className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 active:scale-[0.98] transition-all">
+                      className="flex-1 py-3 bg-[var(--action-danger)] text-white rounded-xl font-bold hover:bg-[var(--action-danger-hover)] disabled:opacity-50 active:scale-[0.98] transition-all">
                       {cancelling ? "…" : t("cancelConfirmRestock")}
                     </button>
                     <button onClick={() => setCancelBatch(null)} disabled={cancelling}
@@ -1300,7 +1300,7 @@ export default function QCPage() {
                     {hasBean && (
                       <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory || !restockReasonOk(restockReason)}
                         title={!canOverrideInventory ? t("noOverridePermission") : undefined}
-                        className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
+                        className="w-full py-3 bg-[var(--action-danger)] text-white rounded-xl font-bold hover:bg-[var(--action-danger-hover)] disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
                         {cancelling ? "…" : t("cancelRestock")}
                       </button>
                     )}
@@ -1321,8 +1321,8 @@ export default function QCPage() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <AlertTriangle size={20} className="text-amber-600" />
+              <div className="w-10 h-10 rounded-full bg-[var(--status-warning-tint)] flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={20} className="text-[var(--status-warning)]" />
               </div>
               <div>
                 <h2 className="font-extrabold text-charcoal">{t("bulkWarningTitle")}</h2>
@@ -1358,14 +1358,14 @@ export default function QCPage() {
             <div className="flex gap-3 mb-6">
               <button
                 onClick={() => setBulkOutcome("Passed")}
-                className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all ${bulkOutcome === "Passed" ? "bg-green-600 text-white border-green-600" : "bg-white text-green-700 border-green-300 hover:bg-green-50"}`}
+                className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all ${bulkOutcome === "Passed" ? "bg-[var(--status-success)] text-white border-[var(--status-success)]" : "bg-white text-[var(--status-success)] border-[var(--status-success)] hover:bg-[var(--status-success-tint)]"}`}
               >
                 <CheckCircle2 size={16} className="inline ltr:mr-1.5 rtl:ml-1.5" />
                 {t("bulkPassAll")}
               </button>
               <button
                 onClick={() => setBulkOutcome("Rejected")}
-                className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all ${bulkOutcome === "Rejected" ? "bg-red-600 text-white border-red-600" : "bg-white text-red-600 border-red-300 hover:bg-red-50"}`}
+                className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all ${bulkOutcome === "Rejected" ? "bg-[var(--action-danger)] text-white border-[var(--status-danger)]" : "bg-white text-[var(--status-danger)] border-[var(--status-danger)] hover:bg-[var(--status-danger-tint)]"}`}
               >
                 <XCircle size={16} className="inline ltr:mr-1.5 rtl:ml-1.5" />
                 {t("bulkFailAll")}

@@ -7,14 +7,19 @@ import { AmiriBold, AmiriRegular } from "./fonts/amiri-base64";
 
 const bidi = bidiFactory();
 
+// Direction 2.1 brand colours (components/shell/direction-2.1.css): olive action for the header
+// bands, clay signature for the accent rule / totals, the warm canvas for alternate rows and
+// Deep Black text. The retired grey + purple export theme is gone (owner, 20 Oct 2026).
 const BRAND = {
-  primary: "#6B7280",
-  accent: "#7C3AED",
-  primaryRGB: [107, 114, 128] as [number, number, number],
-  accentRGB: [124, 58, 237] as [number, number, number],
+  primary: "#5C5C38",
+  accent: "#BD7D47",
+  primaryRGB: [92, 92, 56] as [number, number, number],
+  accentRGB: [189, 125, 71] as [number, number, number],
+  /** Totals row: action-primary-hover, so white text keeps its contrast (clay is for marks only). */
+  totalRGB: [76, 75, 47] as [number, number, number],
   white: [255, 255, 255] as [number, number, number],
-  lightGray: [245, 245, 245] as [number, number, number],
-  darkText: [30, 30, 30] as [number, number, number],
+  lightGray: [248, 245, 238] as [number, number, number],
+  darkText: [40, 36, 26] as [number, number, number],
 };
 
 function shapeArabic(text: string): string {
@@ -249,7 +254,7 @@ export function exportBatchesPDF(
     },
     didParseCell(data) {
       if (data.row.index === body.length - 1 && data.section === "body") {
-        data.cell.styles.fillColor = BRAND.accentRGB;
+        data.cell.styles.fillColor = BRAND.totalRGB;
         data.cell.styles.textColor = BRAND.white;
         data.cell.styles.fontStyle = "bold";
       }
@@ -279,12 +284,12 @@ export async function exportBatchesExcel(
   const brandFill: ExcelJS.Fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FF738995" },
+    fgColor: { argb: "FF5C5C38" },
   };
   const accentFill: ExcelJS.Fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFE25D2F" },
+    fgColor: { argb: "FF4C4B2F" },
   };
   const whiteFill: ExcelJS.Fill = {
     type: "pattern",
@@ -294,7 +299,7 @@ export async function exportBatchesExcel(
   const altFill: ExcelJS.Fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFF5F5F5" },
+    fgColor: { argb: "FFF8F5EE" },
   };
   const whiteFont: Partial<ExcelJS.Font> = {
     name: "Cairo",
@@ -305,10 +310,10 @@ export async function exportBatchesExcel(
   const bodyFont: Partial<ExcelJS.Font> = {
     name: "Cairo",
     size: 10,
-    color: { argb: "FF1E1E1E" },
+    color: { argb: "FF28241A" },
   };
   const headerBorder: Partial<ExcelJS.Borders> = {
-    bottom: { style: "medium", color: { argb: "FFE25D2F" } },
+    bottom: { style: "medium", color: { argb: "FFBD7D47" } },
   };
 
   const XL_AR = [
@@ -334,7 +339,7 @@ export async function exportBatchesExcel(
     `حِقبة للقهوة المختصة | Hiqbah Specialty Coffee | ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}`,
   ]);
   ws.mergeCells(2, 1, 2, 15);
-  subRow.getCell(1).font = { name: "Cairo", size: 9, color: { argb: "FF738995" } };
+  subRow.getCell(1).font = { name: "Cairo", size: 9, color: { argb: "FF5C5C38" } };
   subRow.getCell(1).alignment = { horizontal: "center" };
   subRow.height = 20;
 
@@ -376,7 +381,7 @@ export async function exportBatchesExcel(
       cell.fill = i % 2 === 0 ? whiteFill : altFill;
       cell.alignment = { horizontal: "center", vertical: "middle" };
       cell.border = {
-        bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+        bottom: { style: "thin", color: { argb: "FFEFEADF" } },
       };
     });
   });

@@ -567,7 +567,7 @@ export default function PackagingPage() {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !cancelling && setCancelBatch(null)}>
             <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={20} className="text-red-600" /></div>
+                <div className="p-2 bg-[var(--status-danger-tint)] rounded-xl"><Trash2 size={20} className="text-[var(--status-danger)]" /></div>
                 <div>
                   <h2 className="font-extrabold text-charcoal">{t("cancelBatchTitle")}</h2>
                   <p className="text-sm text-brown font-mono">{cancelBatch.batchNumber}</p>
@@ -583,7 +583,7 @@ export default function PackagingPage() {
                 {hasBean && (
                   <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory || !restockReasonOk(restockReason)}
                     title={!canOverrideInventory ? t("noOverridePermission") : undefined}
-                    className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
+                    className="w-full py-3 bg-[var(--action-danger)] text-white rounded-xl font-bold hover:bg-[var(--action-danger-hover)] disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
                     {cancelling ? "…" : t("cancelRestock")}
                   </button>
                 )}
@@ -661,7 +661,7 @@ export default function PackagingPage() {
               {packState && packState.plan && !packState.plan.ok ? (
                 <p className="hr-notice tone-danger" role="alert" style={{ margin: 0 }}>{packState.plan.error}</p>
               ) : !packState ? null : planRows.length === 0 ? (
-                <p className="text-sm font-semibold text-red-700">{t("packSkuNoProducts")}</p>
+                <p className="text-sm font-semibold text-[var(--status-danger)]">{t("packSkuNoProducts")}</p>
               ) : (
                 <>
                   <AutoRow title={lang === "ar" ? "الخطة مقترحة من الطلبات المفتوحة" : "The plan comes from the open orders"}
@@ -741,12 +741,12 @@ export default function PackagingPage() {
                         <p className="text-[11px] font-bold text-brown/60 uppercase mb-1.5">{t("pkgReconTitle")}</p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                           {row(t("pkgReconAvailable"), p.availableGrams)}
-                          {row(t("pkgReconStandard"), p.standardGrams, `${p.standardUnits} ${t("pkgSellableUnits")}`, "text-green-800")}
-                          {row(t("pkgReconPartial"), p.partialGrams, `${p.partialPackages} ${t("pkgPackagesWord")}`, "text-amber-800")}
-                          {row(t("pkgReconLoss"), p.lossGrams, undefined, p.lossGrams > 0 ? "text-red-700" : "text-charcoal")}
+                          {row(t("pkgReconStandard"), p.standardGrams, `${p.standardUnits} ${t("pkgSellableUnits")}`, "text-[var(--status-success)]")}
+                          {row(t("pkgReconPartial"), p.partialGrams, `${p.partialPackages} ${t("pkgPackagesWord")}`, "text-[var(--status-warning)]")}
+                          {row(t("pkgReconLoss"), p.lossGrams, undefined, p.lossGrams > 0 ? "text-[var(--status-danger)]" : "text-charcoal")}
                           {row(t("pkgReconRemaining"), p.remainingGrams, `${gToKg(p.remainingGrams)} ${t("opsKgUnit")}`)}
                         </div>
-                        <p className={`mt-2 text-[11px] font-bold ${balanced ? "text-green-700" : "text-red-700"}`}>
+                        <p className={`mt-2 text-[11px] font-bold ${balanced ? "text-[var(--status-success)]" : "text-[var(--status-danger)]"}`}>
                           {balanced ? t("pkgReconBalanced") : t("pkgReconUnbalanced")}
                         </p>
                       </div>
@@ -758,11 +758,11 @@ export default function PackagingPage() {
                     const short = preview.materials.some((m) => m.missing > 0);
                     return (
                       <div
-                        className={`rounded-xl border p-2.5 ${short ? "border-red-300 bg-red-50" : "border-border"}`}
+                        className={`rounded-xl border p-2.5 ${short ? "border-[var(--status-danger)] bg-[var(--status-danger-tint)]" : "border-border"}`}
                         role={short ? "alert" : undefined}
                       >
                         <p className="text-[11px] font-bold text-brown/60 uppercase mb-1 flex items-center gap-1.5">
-                          {short && <AlertTriangle size={13} className="text-red-700" />}
+                          {short && <AlertTriangle size={13} className="text-[var(--status-danger)]" />}
                           {short ? t("pkgShortageTitle") : t("pkgMaterialsTitle")}
                         </p>
                         <ul className="space-y-0.5">
@@ -771,7 +771,7 @@ export default function PackagingPage() {
                               {m.label}: <b className="tabular-nums">{m.required}</b>{" "}
                               <span className="text-brown/60">({t("pkgShortageAvailable")} {m.available})</span>
                               {m.missing > 0 && (
-                                <span className="text-red-700 font-semibold"> — {t("pkgShortageMissing")}: {m.missing}</span>
+                                <span className="text-[var(--status-danger)] font-semibold"> — {t("pkgShortageMissing")}: {m.missing}</span>
                               )}
                             </li>
                           ))}
@@ -783,12 +783,12 @@ export default function PackagingPage() {
 
                   {/* Partial packages: allowed, recorded, and acknowledged. */}
                   {createsPartial && (
-                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-2.5" role="alert">
-                      <p className="text-[11px] font-bold text-amber-900 uppercase mb-1 flex items-center gap-1.5">
+                    <div className="rounded-xl border border-[var(--status-warning)] bg-[var(--status-warning-tint)] p-2.5" role="alert">
+                      <p className="text-[11px] font-bold text-[var(--status-warning)] uppercase mb-1 flex items-center gap-1.5">
                         <AlertTriangle size={13} /> {t("pkgPartialWarnTitle")}
                       </p>
-                      <p className="text-xs text-amber-900 leading-relaxed mb-1.5">{t("pkgPartialWarnBody")}</p>
-                      <label className="flex items-center gap-2 text-xs font-bold text-amber-900">
+                      <p className="text-xs text-[var(--status-warning)] leading-relaxed mb-1.5">{t("pkgPartialWarnBody")}</p>
+                      <label className="flex items-center gap-2 text-xs font-bold text-[var(--status-warning)]">
                         <input
                           type="checkbox"
                           checked={partialAck}
@@ -802,9 +802,9 @@ export default function PackagingPage() {
 
                   {/* Every reason the server would refuse, stated before it is asked. */}
                   {preview && preview.problems.length > 0 && (
-                    <ul className="rounded-xl border border-red-200 bg-red-50 p-2.5 space-y-0.5" role="alert">
+                    <ul className="rounded-xl border border-[var(--status-danger-tint)] bg-[var(--status-danger-tint)] p-2.5 space-y-0.5" role="alert">
                       {preview.problems.map((problem, i) => (
-                        <li key={i} className="text-xs font-semibold text-red-700 flex items-start gap-1.5">
+                        <li key={i} className="text-xs font-semibold text-[var(--status-danger)] flex items-start gap-1.5">
                           <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> {problem}
                         </li>
                       ))}
@@ -817,14 +817,14 @@ export default function PackagingPage() {
 
                   {/* Closing warning, next to the action that would close the batch. */}
                   {preview && preview.problems.length === 0 && preview.remainingGrams < 50 && (
-                    <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-start gap-1.5">
+                    <p className="text-xs font-bold text-[var(--status-warning)] bg-[var(--status-warning-tint)] border border-[var(--status-warning-tint)] rounded-xl px-3 py-2 flex items-start gap-1.5">
                       <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
                       {t("pkgClosingWarning")}
                     </p>
                   )}
 
                   {packError && (
-                    <p className="text-xs font-semibold text-red-700 flex items-start gap-1.5" role="alert">
+                    <p className="text-xs font-semibold text-[var(--status-danger)] flex items-start gap-1.5" role="alert">
                       <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> {packError}
                     </p>
                   )}

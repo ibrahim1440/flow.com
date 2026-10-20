@@ -65,15 +65,11 @@ const ORDER_STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
 // Icon and colour-token pairing per approved status — every status must be
 // distinguishable by icon + label, never by colour alone.
 //
-// Cancelled vs Rejected is the distinction to protect: Cancelled is NEUTRAL grey
-// (#3f3f46 on #f4f4f5, XCircle) because the order simply stopped; Rejected is
-// DESTRUCTIVE red (#b91c1c on #fef2f2, Ban) because it failed the approval gate.
-// They must never be merged.
-//
-// Rejected and Blocked intentionally share the red-50 background. That is not a
-// bug to "fix": Blocked is an item-level decision at #dc2626 with AlertTriangle,
-// Rejected is an order-level status one step darker at #b91c1c with Ban, so they
-// stay separable by foreground, icon, label and level.
+// Cancelled vs Rejected is the distinction to protect: Cancelled is NEUTRAL (the muted text
+// tone) because the order simply stopped; Rejected is DESTRUCTIVE (status-danger) because it
+// failed the approval gate. They must never be merged. Blocked (an item-level decision) shares
+// the danger tone and is separated from Rejected by its label and level. Every tone is a
+// Direction 2.1 token (components/shell/direction-2.1.css); no colour is written here.
 
 // Direction 2.1 status dot tone per lifecycle status (the label always carries the meaning;
 // the tone only reinforces it). Cancelled stays neutral and Rejected destructive, as above.

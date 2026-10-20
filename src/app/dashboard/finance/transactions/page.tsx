@@ -463,8 +463,8 @@ function ManualDialog({ open, onClose, accounts, onDone }: { open: boolean; onCl
     <Dialog open={open} onClose={onClose} title={L("قيد يدوي", "Manual entry")} sub={L("سطر بنكي أو نقدي فعلي. للمبالغ الصادرة استخدم إشارة سالبة.", "An actual bank or cash line. Use a negative amount for money out.")}>
       <Field label={L("الحساب", "Account")}><Select className={INPUT} value={f.cashAccountId} onChange={set("cashAccountId")}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {name(a)}</option>)}</Select></Field>
       <div className="fin-grid">
-        <Field label={L("المبلغ (سالب للمبالغ الصادرة)", "Amount (negative for money out)")} error={err.amount}><input className={`${INPUT} ${err.amount ? "!border-red-600" : ""}`} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
-        <Field label={L("التاريخ", "Date")} error={err.txnDate}><input type="date" className={`${INPUT} ${err.txnDate ? "!border-red-600" : ""}`} value={f.txnDate} onChange={set("txnDate")} /></Field>
+        <Field label={L("المبلغ (سالب للمبالغ الصادرة)", "Amount (negative for money out)")} error={err.amount}><input className={`${INPUT} ${err.amount ? "!border-[var(--status-danger)]" : ""}`} value={f.amount} onChange={set("amount")} inputMode="decimal" /></Field>
+        <Field label={L("التاريخ", "Date")} error={err.txnDate}><input type="date" className={`${INPUT} ${err.txnDate ? "!border-[var(--status-danger)]" : ""}`} value={f.txnDate} onChange={set("txnDate")} /></Field>
       </div>
       <div className="fin-grid">
         <Field label={L("الحالة", "Status")}><Select className={INPUT} value={f.status} onChange={set("status")}><option value="CONFIRMED">{L("مؤكد", "Confirmed")}</option><option value="PENDING">{L("معلّق", "Pending")}</option></Select></Field>

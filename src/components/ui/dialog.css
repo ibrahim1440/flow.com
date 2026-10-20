@@ -1,0 +1,93 @@
+/*
+ * Direction 2.1 dialog (components/ui/Dialog.tsx). Every value is a token of
+ * components/shell/direction-2.1.css, read from the dialog's own `.d21` root.
+ *   ≥ 768: centred modal — surface, radius 14, --shadow-pop, E1 scrim (Deep Black 16 % + 8 px blur).
+ *   < 768: the shell's bottom sheet — grip, 20 px top corners, safe-area padding (as .hq-sheet).
+ * Fields: TextField 36 (44 on a phone) with the control border and the olive focus ring;
+ * actions: Button 7:114 (primary olive, secondary hairline).
+ */
+.d21.d21-dlg-layer { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; background: none; }
+.d21-dlg-scrim { position: absolute; inset: 0; background: rgb(40 36 26 / 0.16); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); animation: d21-dlg-fade 0.18s var(--ease) both; }
+.d21-dlg {
+  position: relative; display: flex; flex-direction: column; width: min(var(--d21-dlg-w, 400px), 100%); max-height: calc(100dvh - 32px);
+  background: var(--surface); color: var(--text-primary); border-radius: 14px; box-shadow: var(--shadow-pop);
+  font-family: var(--f-ui); outline: none; overflow: hidden; animation: d21-dlg-pop 0.18s var(--ease) both;
+}
+.d21-dlg-grip { display: none; }
+.d21-dlg-head { display: flex; align-items: flex-start; gap: 10px; padding: 20px 24px 0; flex: none; }
+.d21-dlg-ico { flex: none; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--action-primary-tint); color: var(--action-primary); }
+.d21-dlg-ico svg { width: 18px; height: 18px; stroke-width: 1.5; }
+.d21-dlg-t { min-width: 0; flex: 1; }
+.d21-dlg-t h2 { margin: 0; font: 600 17px/1.4 var(--f-ui); color: var(--text-primary); }
+.d21-dlg-t p { margin: 2px 0 0; font: 400 13.5px/20px var(--f-ui); color: var(--text-muted); }
+.d21-dlg-body { display: flex; flex-direction: column; gap: 14px; padding: 18px 24px 4px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.d21-dlg-actions { display: flex; gap: 8px; padding: 16px 24px 20px; flex: none; }
+
+/* Fields */
+.d21-dlg-field { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.d21-dlg-label { font: 500 12.5px/18px var(--f-ui); color: var(--text-primary); }
+.d21-dlg-input {
+  width: 100%; height: 36px; padding: 0 11px; border: 1px solid var(--border-control); border-radius: 9px;
+  background: var(--surface); color: var(--text-primary); font: 400 14px/22px var(--f-ui); outline: none; box-shadow: none;
+  transition: border-color 0.15s var(--ease);
+}
+.d21-dlg-input:hover { border-color: var(--text-muted); }
+.d21 .d21-dlg-input:focus, .d21 .d21-dlg-input:focus-visible { border-color: var(--focus-ring); outline: 2px solid var(--focus-ring); outline-offset: 0; border-radius: 9px; }
+.d21-dlg-input.is-code { text-align: center; letter-spacing: 3px; font-family: var(--f-mono); }
+.d21-dlg-input[aria-invalid="true"] { border-color: var(--status-danger); }
+
+/* The «استخدم الرمز / كلمة المرور» switch: a quiet text link in the action colour. */
+.d21-dlg-link { appearance: none; align-self: flex-start; border: 0; background: none; padding: 2px 0; margin: -4px 0 0; font: 500 13px/22px var(--f-ui); color: var(--text-link); cursor: pointer; text-decoration: none; border-radius: 4px; }
+.d21-dlg-link:hover { text-decoration: underline; }
+
+/* PIN pad (PIN step-up): dots well and a 3 × 4 keypad, 48 px keys. */
+.d21-dlg-dots { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; border-radius: 9px; background: var(--surface-subtle); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.d21-dlg-dots > span { width: 10px; height: 10px; border-radius: 50%; background: var(--text-primary); }
+.d21-dlg-pad { display: grid; grid-template-columns: repeat(3, 48px); justify-content: center; gap: 10px 18px; margin-top: 4px; }
+.d21-dlg-key { appearance: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); font: 500 18px/1 var(--f-num); color: var(--text-primary); cursor: pointer; display: grid; place-items: center; }
+.d21-dlg-key:hover { background: var(--surface-hover); }
+.d21-dlg-key:active { background: var(--surface-selected); }
+.d21-dlg-key.is-plain { box-shadow: none; color: var(--text-secondary); }
+.d21-dlg-key svg { width: 18px; height: 18px; stroke-width: 1.5; }
+
+/* Notice (InlineAlert, danger) */
+.d21-dlg-alert { margin: 0; padding: 10px 12px; border-radius: 9px; background: var(--status-danger-tint); color: var(--status-danger); font: 500 13.5px/20px var(--f-ui); }
+
+/* Buttons: Button 7:114 — primary olive, secondary hairline; the primary takes the free width. */
+.d21-dlg-btn {
+  appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 16px;
+  border: 0; border-radius: 9px; font: 500 14px/1 var(--f-ui); cursor: pointer; white-space: nowrap;
+  background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong);
+  transition: background-color 0.15s var(--ease), transform 0.12s var(--ease);
+}
+.d21-dlg-btn:hover:not(:disabled) { background: var(--surface-hover); }
+.d21-dlg-btn:active:not(:disabled) { transform: scale(0.98); }
+.d21-dlg-btn.is-primary { flex: 1; background: var(--action-primary); color: var(--text-inverse); box-shadow: none; }
+.d21-dlg-btn.is-primary:hover:not(:disabled) { background: var(--action-primary-hover); }
+.d21-dlg-btn:disabled { cursor: not-allowed; background: var(--surface-disabled); color: var(--text-disabled); box-shadow: inset 0 0 0 1px var(--border-disabled); }
+.d21 :is(.d21-dlg-btn, .d21-dlg-key, .d21-dlg-link):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* keep each control's own corners under the shell's focus rule (which sets 4 px) */
+.d21 .d21-dlg-btn:focus-visible { border-radius: 9px; }
+.d21 .d21-dlg-key:focus-visible { border-radius: 50%; }
+
+/* ── Phone: the shell's bottom sheet ── */
+@media (max-width: 767px) {
+  .d21.d21-dlg-layer { align-items: flex-end; padding: 0; }
+  .d21-dlg-scrim { background: rgb(40 36 26 / 0.32); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .d21-dlg { width: 100%; max-height: 92dvh; border-radius: 20px 20px 0 0; box-shadow: var(--shadow-sheet); padding-bottom: max(12px, env(safe-area-inset-bottom)); animation: d21-dlg-sheet 0.22s var(--ease) both; }
+  .d21-dlg-grip { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: 8px auto 0; flex: none; }
+  .d21-dlg-head { padding: 12px 16px 0; }
+  .d21-dlg-body { padding: 16px 16px 4px; }
+  .d21-dlg-actions { padding: 14px 16px 8px; }
+  /* 44 px touch targets; 16 px text so iOS does not zoom the field. */
+  .d21-dlg-input { height: 44px; font-size: 16px; }
+  .d21-dlg-btn { height: 44px; font-size: 15px; }
+}
+
+@keyframes d21-dlg-fade { from { opacity: 0; } }
+@keyframes d21-dlg-pop { from { opacity: 0; transform: translateY(4px) scale(0.99); } }
+@keyframes d21-dlg-sheet { from { opacity: 0; transform: translateY(24px); } }
+@media (prefers-reduced-motion: reduce) {
+  .d21-dlg, .d21-dlg-scrim { animation: none; }
+  .d21-dlg-btn, .d21-dlg-input { transition: none; }
+}

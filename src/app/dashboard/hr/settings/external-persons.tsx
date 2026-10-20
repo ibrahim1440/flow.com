@@ -43,7 +43,7 @@ export function IdentityRequests({ reg, onDecided }: { reg: IdentityRegister; on
           <li key={r.id} style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "space-between", alignItems: "center", padding: 12, border: "1px solid var(--hr-border-subtle)", borderRadius: 10 }}>
             <span>
               <strong>{label(r)}</strong> · {r.subjectName ?? "—"}{r.idMasked ? <> · <bdi className="hr-num" dir="ltr">{r.idMasked}</bdi></> : null}
-              {r.warnings.length ? <span className="hr-caption" style={{ display: "block", color: "var(--hr-warning, #92400e)" }}>{t("تنبيه: اسم مطابق لسجل آخر — تأكد أنه شخص مختلف", "Warning: the name matches another record — make sure it is a different person")} ({r.warnings.map((w) => w.ref).join(", ")})</span> : null}
+              {r.warnings.length ? <span className="hr-caption" style={{ display: "block", color: "var(--hr-warning, #946200)" }}>{t("تنبيه: اسم مطابق لسجل آخر — تأكد أنه شخص مختلف", "Warning: the name matches another record — make sure it is a different person")} ({r.warnings.map((w) => w.ref).join(", ")})</span> : null}
               <span className="hr-caption" style={{ display: "block" }}>{t("طلبه", "Requested by")} {r.requestedByName ?? "—"} · {dateTimeIn(r.requestedAt)} · {r.reason}</span>
             </span>
             <span style={{ display: "flex", gap: 8 }}>

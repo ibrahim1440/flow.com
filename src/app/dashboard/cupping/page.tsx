@@ -129,7 +129,7 @@ function InviteModal({ session, onClose }: { session: Session; onClose: () => vo
       )}
       {origin && (
         <figure className="ops-qr" role="img" aria-label={L("رمز QR لرابط الضيف", "QR code for the guest link")}>
-          <QRCodeSVG value={guestUrl} size={160} bgColor="#FFFFFF" fgColor="#1F1A17" level="M" />
+          <QRCodeSVG value={guestUrl} size={160} bgColor="#FFFFFF" fgColor="#28241A" level="M" />
         </figure>
       )}
       <p className="hr-caption" style={{ margin: 0 }}>{L("صفحة الضيف غير معتمدة على الجوال في المرحلة الأولى؛ يُفضّل فتح الرابط على جهاز مكتبي.", "The guest page is not certified on phones in Phase 1; open the link on a desktop computer where possible.")}</p>
@@ -458,17 +458,17 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
                         <span className="text-orange/40 text-[10px] font-mono tabular-nums">{i + 1}.</span>
                         <span className="truncate max-w-[72px]">{label}</span>
                         {sub && <span className="text-orange/40 font-mono text-[10px]">#{sub}</span>}
-                        <button type="button" aria-label={L(`إزالة ${label}`, `Remove ${label}`)} onClick={() => toggleBatch(id)} className="ml-0.5 text-orange/40 hover:text-red-500 transition-colors leading-none">
+                        <button type="button" aria-label={L(`إزالة ${label}`, `Remove ${label}`)} onClick={() => toggleBatch(id)} className="ml-0.5 text-orange/40 hover:text-[var(--status-danger)] transition-colors leading-none">
                           <X size={11} />
                         </button>
                       </span>
                     );
                   })}
                   {externalSamples.map((s, i) => (
-                    <span key={`ext-${i}`} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-amber-100 border border-amber-300 text-xs font-bold text-amber-800">
-                      <span className="text-amber-500 text-[10px] font-mono tabular-nums">{selectedIds.size + i + 1}.</span>
+                    <span key={`ext-${i}`} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-[var(--status-warning-tint)] border border-[var(--status-warning)] text-xs font-bold text-[var(--status-warning)]">
+                      <span className="text-[var(--status-warning)] text-[10px] font-mono tabular-nums">{selectedIds.size + i + 1}.</span>
                       <span className="truncate max-w-[72px]">{s.externalSampleName}</span>
-                      <button type="button" aria-label={L(`إزالة ${s.externalSampleName}`, `Remove ${s.externalSampleName}`)} onClick={() => removeExternalSample(i)} className="ml-0.5 text-amber-400 hover:text-red-500 transition-colors leading-none">
+                      <button type="button" aria-label={L(`إزالة ${s.externalSampleName}`, `Remove ${s.externalSampleName}`)} onClick={() => removeExternalSample(i)} className="ml-0.5 text-[var(--status-warning)] hover:text-[var(--status-danger)] transition-colors leading-none">
                         <X size={11} />
                       </button>
                     </span>
@@ -575,14 +575,14 @@ function NewSessionModal({ onCreated, onClose }: { onCreated: () => void; onClos
             )}
           </div>
 
-          {error && <p className="text-xs text-red-500 font-medium shrink-0">{error}</p>}
+          {error && <p className="text-xs text-[var(--status-danger)] font-medium shrink-0">{error}</p>}
 
           {/* Fixed footer */}
           <div className="flex gap-2 shrink-0 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border-2 border-border text-sm font-bold text-brown hover:bg-gray-50 transition-colors"
+              className="flex-1 py-2.5 rounded-xl border-2 border-border text-sm font-bold text-brown hover:bg-[var(--surface-subtle)] transition-colors"
             >
               {L("إلغاء", "Cancel")}
             </button>

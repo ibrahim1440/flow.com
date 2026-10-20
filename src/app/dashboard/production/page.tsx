@@ -1054,7 +1054,7 @@ export default function ProductionPage() {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !cancelling && setCancelBatch(null)}>
             <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-red-100 rounded-xl"><Trash2 size={20} className="text-red-600" /></div>
+                <div className="p-2 bg-[var(--status-danger-tint)] rounded-xl"><Trash2 size={20} className="text-[var(--status-danger)]" /></div>
                 <div>
                   <h2 className="font-extrabold text-charcoal">{t("cancelBatchTitle")}</h2>
                   <p className="text-sm text-brown font-mono">{cancelBatch.batchNumber}</p>
@@ -1067,7 +1067,7 @@ export default function ProductionPage() {
                   <RestockReason value={restockReason} onChange={setRestockReason} label={t("restockReasonLabel")} hint={t("restockReasonHint")} disabled={cancelling} />
                   <div className="flex gap-3">
                     <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !restockReasonOk(restockReason)}
-                      className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 active:scale-[0.98] transition-all">
+                      className="flex-1 py-3 bg-[var(--action-danger)] text-white rounded-xl font-bold hover:bg-[var(--action-danger-hover)] disabled:opacity-50 active:scale-[0.98] transition-all">
                       {cancelling ? "…" : t("cancelConfirmRestock")}
                     </button>
                     <button onClick={() => setCancelBatch(null)} disabled={cancelling}
@@ -1088,7 +1088,7 @@ export default function ProductionPage() {
                     {hasBean && (
                       <button onClick={() => handleCancelBatch(true)} disabled={cancelling || !canOverrideInventory || !restockReasonOk(restockReason)}
                         title={!canOverrideInventory ? t("noOverridePermission") : undefined}
-                        className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
+                        className="w-full py-3 bg-[var(--action-danger)] text-white rounded-xl font-bold hover:bg-[var(--action-danger-hover)] disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all">
                         {cancelling ? "…" : t("cancelRestock")}
                       </button>
                     )}

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { riyadhDay, stageOf, TERMINAL_ORDER_STATUSES, type PipelineStage, type Stage } from "@/lib/order-stage";
 
 /**
  * «اليوم» — the operations dashboard (Figma Direction 2.1, `20:236` / `24:842` / `34:1405`).
@@ -13,18 +14,24 @@ import { prisma } from "@/lib/db";
  * shell's date line shows.
  */
 
-const RIYADH_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Days of roasting history the green-coffee consumption rate is averaged over. */
 export const COVER_WINDOW_DAYS = 28;
 /** The coverage bar's scale (Figma 20:455 «المقياس حتى 35 يومًا»). */
 export const COVER_SCALE_DAYS = 35;
+/** Orders listed under a selected pipeline card; the card links to the full filtered Orders page. */
+export const STAGE_LIST_LIMIT = 8;
 
-const TERMINAL = ["Completed", "Cancelled", "Rejected"];
-const APPROVAL = new Set(["Waiting Approval", "Waiting Preparation Review"]);
-const NEEDS_PRODUCTION = new Set(["Needs Production", "Partially Available"]);
+const TERMINAL = TERMINAL_ORDER_STATUSES;
 
-export type Stage = "approval" | "roasting" | "qc" | "packing" | "ready";
+// The stage rule and the Riyadh day are shared with the Orders page's `?stage=` filter.
+export { stageOf, riyadhDay };
+export type { Stage };
+
+/** One order under a pipeline card (customer-detail view) — the «تحتاج إجراء» row shape. */
+export type StageOrderRow = { id: string; orderNumber: number; customer: { name: string; nameAr: string | null }; kg: number; status: string; stage: Stage | "hold" | "delivered" };
+/** One status under a pipeline card (aggregate view, F4): no order number, no customer. */
+export type StageGroupRow = { status: string; stage: Stage | "hold" | "delivered"; orders: number; kg: number };
 
 export type TodayData = {
   generatedAt: string;
@@ -49,37 +56,18 @@ export type TodayData = {
   needsAction:
     | { detail: true; rows: { id: string; orderNumber: number; customer: { name: string; nameAr: string | null }; kg: number; status: string; stage: Stage | "hold" }[]; total: number }
     | { detail: false; rows: { status: string; stage: Stage | "hold"; orders: number; kg: number }[]; total: number };
+  /**
+   * What is in each pipeline card (owner, 20 Oct 2026: the cards are selectable and list their
+   * orders below). Same F4 rule as `needsAction`: per order with the customer-detail permission,
+   * otherwise one row per status. `total` is the card's count; at most STAGE_LIST_LIMIT rows,
+   * oldest first («سُلّم اليوم»: the kilograms delivered today).
+   */
+  stages:
+    | { detail: true; byStage: Record<PipelineStage, { total: number; rows: StageOrderRow[] }> }
+    | { detail: false; byStage: Record<PipelineStage, { total: number; rows: StageGroupRow[] }> };
   /** Green coffee by days of cover at the recent consumption rate, lowest first. */
   green: { rows: { id: string; name: string; nameAr: string | null; kg: number; days: number }[]; windowDays: number; scaleDays: number };
 };
-
-/** [start, end) of the Riyadh calendar day containing `now`, as UTC instants. */
-export function riyadhDay(now: Date): { start: Date; end: Date } {
-  const local = new Date(now.getTime() + RIYADH_OFFSET_MS);
-  const startLocal = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
-  const start = new Date(startLocal - RIYADH_OFFSET_MS);
-  return { start, end: new Date(start.getTime() + DAY_MS) };
-}
-
-type OpenOrder = {
-  status: string;
-  items: { productionStatus: string; preparationDecision: string | null; productionRequiredQuantity: number | null; roastingBatches: { createdAt: Date; qcDeadline: Date | null }[] }[];
-};
-
-/**
- * The one pipeline stage an open order is counted in. A «Preparing» order is split by what its
- * lines are waiting for: a roast waiting for quality control, then a roast still to be done,
- * otherwise the order is being packed / prepared from the shelf.
- */
-export function stageOf(o: OpenOrder): Stage | "hold" {
-  if (o.status === "On Hold") return "hold";
-  if (APPROVAL.has(o.status)) return "approval";
-  if (o.status === "Ready for Shipping") return "ready";
-  if (o.items.some((i) => i.roastingBatches.length > 0)) return "qc";
-  if (o.items.some((i) => (i.productionStatus === "Pending" || i.productionStatus === "In Production")
-    && (NEEDS_PRODUCTION.has(i.preparationDecision ?? "") || (i.productionRequiredQuantity ?? 0) > 0))) return "roasting";
-  return "packing";
-}
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -102,7 +90,10 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
       },
       orderBy: [{ createdAt: "asc" }, { orderNumber: "asc" }],
     }),
-    prisma.delivery.findMany({ where: { date: { gte: start, lt: end } }, select: { orderItem: { select: { orderId: true } } } }),
+    prisma.delivery.findMany({
+      where: { date: { gte: start, lt: end } },
+      select: { quantityKg: true, orderItem: { select: { orderId: true, order: { select: { id: true, orderNumber: true, status: true, createdAt: true, customer: { select: { name: true, nameAr: true } } } } } } },
+    }),
     prisma.roastingBatch.findMany({ where: { isBlend: false, date: { gte: start, lt: end } }, select: { greenBeanQuantity: true, roastedBeanQuantity: true } }),
     prisma.greenBean.findMany({ where: { isActive: true }, select: { id: true, beanType: true, beanTypeAr: true, quantityKg: true } }),
     prisma.roastingBatch.groupBy({
@@ -162,6 +153,41 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
     needsAction = { detail: false, rows: [...groups.values()].map((g) => ({ ...g, kg: round1(g.kg) })), total: actionable.length };
   }
 
+  // ── What each pipeline card holds (oldest first; delivered: today's kilograms per order) ──
+  type Item = { id: string; orderNumber: number; status: string; createdAt: Date; customer: { name: string; nameAr: string | null }; kg: number; stage: Stage | "hold" | "delivered" };
+  const lists: Record<PipelineStage, Item[]> = { approval: [], roasting: [], qc: [], packing: [], ready: [], delivered: [] };
+  for (const { o, stage } of staged) if (stage !== "hold") lists[stage].push({ ...o, kg: kgOf(o), stage });
+  const deliveredBy = new Map<string, Item>();
+  for (const d of deliveries) {
+    const o = d.orderItem.order;
+    const it = deliveredBy.get(o.id) ?? { id: o.id, orderNumber: o.orderNumber, status: o.status, createdAt: o.createdAt, customer: o.customer, kg: 0, stage: "delivered" as const };
+    it.kg += d.quantityKg;
+    deliveredBy.set(o.id, it);
+  }
+  lists.delivered = [...deliveredBy.values()].sort((x, y) => x.createdAt.getTime() - y.createdAt.getTime() || x.orderNumber - y.orderNumber);
+  const keys = Object.keys(lists) as PipelineStage[];
+  let stages: TodayData["stages"];
+  if (opts.customerDetail) {
+    const byStage = {} as Record<PipelineStage, { total: number; rows: StageOrderRow[] }>;
+    for (const k of keys) byStage[k] = {
+      total: lists[k].length,
+      rows: lists[k].slice(0, STAGE_LIST_LIMIT).map((x) => ({ id: x.id, orderNumber: x.orderNumber, customer: x.customer, status: x.status, stage: x.stage, kg: round1(x.kg) })),
+    };
+    stages = { detail: true, byStage };
+  } else {
+    const byStage = {} as Record<PipelineStage, { total: number; rows: StageGroupRow[] }>;
+    for (const k of keys) {
+      const groups = new Map<string, StageGroupRow>();
+      for (const x of lists[k]) {
+        const g = groups.get(x.status) ?? { status: x.status, stage: x.stage, orders: 0, kg: 0 };
+        g.orders += 1; g.kg += x.kg;
+        groups.set(x.status, g);
+      }
+      byStage[k] = { total: lists[k].length, rows: [...groups.values()].map((g) => ({ ...g, kg: round1(g.kg) })) };
+    }
+    stages = { detail: false, byStage };
+  }
+
   // ── Green coffee: days of cover at the last 28 days' consumption ──
   const used = new Map(usage.map((u) => [u.greenBeanId as string, u._sum.greenBeanQuantity ?? 0]));
   const green = {
@@ -182,6 +208,7 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
     roasted,
     pipeline: { ...counts, deliveredToday, open, onHold, qcLongestHours, qcOverdue },
     needsAction,
+    stages,
     green,
   };
 }

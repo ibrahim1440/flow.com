@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n/context";
 import { routeAllowed, type Viewer } from "@/lib/nav/registry";
 import { createActions } from "@/components/shell/creates";
@@ -10,6 +11,8 @@ import { useD21Phone } from "@/components/shell/page-context";
 import { OrderStatusBadge } from "@/components/OrderLifecyclePanel";
 import { OpsRoot, OpsError, OpsLoading, OpsEmpty, countNoun, ORDER_FORMS, BATCH_FORMS } from "@/components/ops/ui";
 import type { TodayData } from "@/lib/services/dashboard/today";
+import { isPipelineStage, type PipelineStage } from "@/lib/order-stage";
+import { StageTabs } from "@/components/ui/StageTabs";
 import { useUser } from "./user-context";
 import "./home.css";
 
@@ -44,6 +47,9 @@ const TX = {
     scale: (d: number, w: number) => `المقياس حتى ${d} يومًا · الاستهلاك بمتوسط آخر ${w} يومًا`,
     noGreen: "لا يوجد بن أخضر نشط استُهلك في آخر 28 يومًا.",
     loadFailed: "تعذّر تحميل لوحة اليوم.",
+    stagesLabel: "مراحل الطلبات", seeAll: "عرض الكل في الطلبات", overdue: "تجاوز موعد الجودة",
+    stageEmpty: "لا توجد طلبات في هذه المرحلة الآن.", stageEmptyDelivered: "لم يُسلَّم أي طلب اليوم.",
+    shownOf: (n: number, total: number) => `أقدم ${n} من ${total}`,
   },
   en: {
     title: "Today", updated: "Updated", newOrder: "New order",
@@ -59,6 +65,9 @@ const TX = {
     scale: (d: number, w: number) => `Scale up to ${d} days · usage averaged over the last ${w} days`,
     noGreen: "No active green coffee was used in the last 28 days.",
     loadFailed: "Could not load today's dashboard.",
+    stagesLabel: "Order stages", seeAll: "See all in Orders", overdue: "past its QC deadline",
+    stageEmpty: "No orders are in this stage right now.", stageEmptyDelivered: "No order was delivered today.",
+    shownOf: (n: number, total: number) => `Oldest ${n} of ${total}`,
   },
 } as const;
 
@@ -81,6 +90,10 @@ export default function DashboardPage() {
   const can = (href: string) => !!viewer && routeAllowed(viewer, href);
   const newOrder = viewer ? createActions(viewer, "operations").find((a) => a.id === "orders.order.new") ?? null : null;
 
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const urlStage = params.get("stage");
   const [data, setData] = useState<TodayData | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied" | "error">("loading");
 
@@ -137,7 +150,7 @@ export default function DashboardPage() {
   }
 
   const p = data.pipeline;
-  const stages: { key: string; n: number; label: string; warn?: boolean; sub?: string }[] = [
+  const stages: { key: PipelineStage; n: number; label: string; warn?: boolean; sub?: string }[] = [
     { key: "approval", n: p.approval, label: t.stApproval },
     { key: "roasting", n: p.roasting, label: t.stRoasting },
     { key: "qc", n: p.qc, label: t.stQc, warn: p.qcOverdue, sub: p.qcLongestHours !== null ? `${t.longest} ${countNoun(p.qcLongestHours, lang, HOUR_FORMS)}` : undefined },
@@ -145,11 +158,22 @@ export default function DashboardPage() {
     { key: "ready", n: p.ready, label: t.stReady },
     { key: "delivered", n: p.deliveredToday, label: t.stDelivered },
   ];
+  // The selected card (owner, 20 Oct 2026): `?stage=` when the address names one, otherwise the
+  // first stage that has orders. A card with nothing in it stays selectable (its empty state).
+  const stage: PipelineStage = isPipelineStage(urlStage) ? urlStage : (stages.find((s) => s.n > 0)?.key ?? "approval");
+  const selectStage = (k: PipelineStage) => {
+    const q = new URLSearchParams(params.toString());
+    q.set("stage", k);
+    router.replace(`${pathname}?${q.toString()}`, { scroll: false });
+  };
+  const sel = stages.find((s) => s.key === stage)!;
+  const box = data.stages.byStage[stage];
   const openText = lang === "ar" ? `${countNoun(p.open, "ar", ORDER_FORMS)} ${p.open === 1 ? "مفتوح" : p.open === 2 ? "مفتوحان" : t.open}` : `${p.open} ${t.open}`;
   const holdText = p.onHold > 0 ? ` · ${p.onHold} ${t.onHold}` : "";
 
   const actionFor = (stage: string): { label: string; href: string } => {
     if (stage === "ready") return { label: t.ship, href: "/dashboard/dispatch" };
+    if (stage === "delivered") return { label: t.open1, href: "/dashboard/dispatch" };
     if (stage === "approval") return { label: t.review, href: "/dashboard/orders" };
     return { label: t.open1, href: "/dashboard/orders" };
   };
@@ -178,14 +202,94 @@ export default function DashboardPage() {
           <h2>{t.pipeline}</h2>
           <p data-testid="pipe-open">{openText}{holdText}</p>
         </div>
-        <ol className="dh-pipe" data-testid="dash-pipeline">
-          {stages.map((s) => (
-            <li key={s.key} className={`dh-stage${s.warn ? " is-warning" : ""}`} data-testid={`stage-${s.key}`}>
-              <b>{s.n}</b>
-              <span>{s.label}{s.sub ? <small>{s.sub}</small> : null}</span>
-            </li>
-          ))}
-        </ol>
+        <StageTabs
+          items={stages.map((s) => ({ ...s, warnLabel: t.overdue }))}
+          value={stage}
+          onChange={selectStage}
+          label={t.stagesLabel}
+          idBase="dh-stage"
+          className="dh-pipe"
+          cardClassName="dh-stage"
+          testId="dash-pipeline"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+        />
+
+        {/* The selected card's orders, in the «تحتاج إجراء» row style; the full list is the
+            Orders page filtered to the same stage. Same F4 rule: aggregates without the
+            customer-detail permission. */}
+        <section className="dh-stagepanel" role="tabpanel" id="dh-stage-panel" aria-labelledby={`dh-stage-tab-${stage}`} data-testid="stage-panel" data-stage={stage} tabIndex={0}>
+          <div className="dh-block">
+            <h2>{sel.label}</h2>
+            <p data-testid="stage-panel-count">{box.total > box.rows.length && data.stages.detail ? t.shownOf(box.rows.length, box.total) : countNoun(box.total, lang, ORDER_FORMS)}</p>
+            {can("/dashboard/orders") ? <Link href={`/dashboard/orders?stage=${stage}`} className="dh-lk" data-testid="stage-see-all">{t.seeAll}<Ico name="chev" small /></Link> : null}
+          </div>
+          {box.rows.length === 0 ? <p className="dh-empty" data-testid="stage-empty">{stage === "delivered" ? t.stageEmptyDelivered : t.stageEmpty}</p> : data.stages.detail ? (
+            <>
+              <table className="dh-table" data-detail="customer">
+                <thead>
+                  <tr><th>{t.colOrder}</th><th>{t.colCustomer}</th><th className="num">{t.colKg}</th><th>{t.colStatus}</th><th aria-label={lang === "ar" ? "إجراء" : "Action"} /></tr>
+                </thead>
+                <tbody>
+                  {(data.stages.byStage[stage].rows as Extract<TodayData["stages"], { detail: true }>["byStage"][PipelineStage]["rows"]).map((o) => {
+                    const a = actionFor(o.stage);
+                    return (
+                      <tr key={o.id} data-testid={`stage-row-${o.orderNumber}`}>
+                        <td className="id">#{o.orderNumber}</td>
+                        <td className="who">{name(o.customer)}</td>
+                        <td className="num">{fmt(o.kg, o.kg % 1 ? 1 : 0)}</td>
+                        <td><OrderStatusBadge status={o.status} /></td>
+                        <td>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <ul className="dh-list" data-detail="customer">
+                {(data.stages.byStage[stage].rows as Extract<TodayData["stages"], { detail: true }>["byStage"][PipelineStage]["rows"]).map((o) => {
+                  const a = actionFor(o.stage);
+                  return (
+                    <li key={o.id}>
+                      <div className="l1"><span><span className="id">#{o.orderNumber}</span><span className="who">{name(o.customer)}</span></span><OrderStatusBadge status={o.status} /></div>
+                      <div className="l2"><span><span className="hr-num">{fmt(o.kg, o.kg % 1 ? 1 : 0)}</span> {t.kg}</span>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : (
+            <>
+              <table className="dh-table" data-detail="aggregate">
+                <thead>
+                  <tr><th>{t.colOrders}</th><th className="num">{t.colKg}</th><th>{t.colStatus}</th><th aria-label={lang === "ar" ? "إجراء" : "Action"} /></tr>
+                </thead>
+                <tbody>
+                  {(data.stages.byStage[stage].rows as Extract<TodayData["stages"], { detail: false }>["byStage"][PipelineStage]["rows"]).map((g) => {
+                    const a = actionFor(g.stage);
+                    return (
+                      <tr key={g.status} data-testid={`stage-group-${g.status}`}>
+                        <td className="cnt">{countNoun(g.orders, lang, ORDER_FORMS)}</td>
+                        <td className="num">{fmt(g.kg, g.kg % 1 ? 1 : 0)}</td>
+                        <td><OrderStatusBadge status={g.status} /></td>
+                        <td>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <ul className="dh-list" data-detail="aggregate">
+                {(data.stages.byStage[stage].rows as Extract<TodayData["stages"], { detail: false }>["byStage"][PipelineStage]["rows"]).map((g) => {
+                  const a = actionFor(g.stage);
+                  return (
+                    <li key={g.status}>
+                      <div className="l1"><span><span className="cnt">{countNoun(g.orders, lang, ORDER_FORMS)}</span></span><OrderStatusBadge status={g.status} /></div>
+                      <div className="l2"><span><span className="hr-num">{fmt(g.kg, g.kg % 1 ? 1 : 0)}</span> {t.kg}</span>{can(a.href) ? <Link href={a.href} className="dh-sbtn">{a.label}</Link> : null}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </section>
 
         <hr className="dh-divider" />
 

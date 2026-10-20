@@ -1393,7 +1393,7 @@ function SplitDialog({
         ))}
       </div>
       <div
-        className={`text-sm font-bold ${balanced ? "text-emerald-700" : "text-oo-status-rejected"}`}
+        className={`text-sm font-bold ${balanced ? "text-oo-status-success" : "text-oo-status-rejected"}`}
         data-testid="split-total"
         role="status"
       >

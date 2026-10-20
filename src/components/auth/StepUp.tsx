@@ -11,6 +11,7 @@ import { Delete, ShieldCheck } from "lucide-react";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { isEndedSession, SESSION_EXPIRED_LOGIN } from "@/lib/session-expired";
+import { D21Dialog } from "@/components/ui/Dialog";
 
 const T = {
   ar: { title: "تأكيد الهوية", hint: "هذا الإجراء حساس. أكّد هويتك للمتابعة.", username: "اسم المستخدم", pin: "الرمز", password: "كلمة المرور", usePassword: "استخدم كلمة المرور", usePin: "استخدم الرمز", code: "رمز التحقق (6 أرقام أو رمز استرداد)", confirm: "تأكيد", cancel: "إلغاء", failed: "بيانات التأكيد غير صحيحة.", busy: "جارٍ التأكيد…" },
@@ -90,12 +91,6 @@ function StepUpDialog({ lang, privileged, mfa, pinOnly, onDone }: { lang: "ar" |
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onDone(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onDone]);
-
   const ready = (!privileged || username.trim()) && (usePassword ? !!password : pin.length === PIN_LENGTH) && (!mfa || code.trim());
   async function submit() {
     if (!ready || busy) return;
@@ -111,56 +106,59 @@ function StepUpDialog({ lang, privileged, mfa, pinOnly, onDone }: { lang: "ar" |
     }
   }
 
-  const input = "w-full px-3 py-2.5 border-2 border-border rounded-xl focus:border-orange outline-none text-sm";
+  // Direction 2.1 (owner, 20 Oct): the dialog is mounted next to AppShell, outside the shell's
+  // `.d21` root, so it carries its own (components/ui/Dialog): olive primary, olive focus ring,
+  // TextField 36 / 44 on a phone, IBM Plex, a bottom sheet on the phone and a modal on desktop.
+  // Esc and the scrim cancel (as before); focus is held inside and returned on close.
   return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-charcoal/50 p-0 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="stepup-title" data-testid="step-up-dialog" dir={lang === "ar" ? "rtl" : "ltr"}>
-      <div className="w-full sm:max-w-sm bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center gap-2 mb-1">
-          <ShieldCheck size={20} className="text-orange" />
-          <h2 id="stepup-title" className="font-bold text-charcoal">{t.title}</h2>
-        </div>
-        <p className="text-sm text-brown/70 mb-4">{t.hint}</p>
-        {privileged && (
-          <label className="block mb-3">
-            <span className="block text-xs font-bold text-brown mb-1">{t.username}</span>
-            <input dir="ltr" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoComplete="username" className={input} data-testid="step-up-username" />
-          </label>
-        )}
-        {usePassword ? (
-          <label className="block mb-3">
-            <span className="block text-xs font-bold text-brown mb-1">{t.password}</span>
-            <input dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} autoComplete="current-password" className={input} />
-          </label>
-        ) : (
-          <div className="mb-3">
-            <span className="block text-xs font-bold text-brown mb-1">{t.pin}</span>
-            <div className="flex items-center justify-center gap-3 py-3 bg-cream rounded-xl border-2 border-border mb-2 min-h-[48px]" data-testid="step-up-dots">
-              {Array.from({ length: pin.length }).map((_, i) => <span key={i} className="w-3 h-3 rounded-full bg-charcoal" />)}
-            </div>
-            <div dir="ltr" className="grid grid-cols-3 gap-2 place-items-center">
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"].map((k, i) =>
-                k === "" ? <span key={i} /> : k === "del" ? (
-                  <button key={i} type="button" aria-label="Backspace" onClick={() => setPin((p) => p.slice(0, -1))} className="w-12 h-12 rounded-full flex items-center justify-center text-charcoal hover:bg-cream"><Delete size={18} /></button>
-                ) : (
-                  <button key={i} type="button" onClick={() => setPin((p) => (p.length < PIN_LENGTH ? p + k : p))} className="w-12 h-12 rounded-full border-2 border-border text-lg font-bold text-charcoal active:bg-cream">{k}</button>
-                ),
-              )}
-            </div>
+    <D21Dialog
+      lang={lang}
+      title={t.title}
+      sub={t.hint}
+      icon={<ShieldCheck aria-hidden />}
+      onClose={() => onDone(false)}
+      testId="step-up-dialog"
+      actions={<>
+        <button type="button" onClick={submit} disabled={!ready || busy} aria-busy={busy || undefined} className="d21-dlg-btn is-primary" data-testid="step-up-confirm">{busy ? t.busy : t.confirm}</button>
+        <button type="button" onClick={() => onDone(false)} className="d21-dlg-btn">{t.cancel}</button>
+      </>}
+    >
+      {privileged && (
+        <label className="d21-dlg-field">
+          <span className="d21-dlg-label">{t.username}</span>
+          <input dir="ltr" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoComplete="username" className="d21-dlg-input" data-testid="step-up-username" />
+        </label>
+      )}
+      {usePassword ? (
+        <label className="d21-dlg-field">
+          <span className="d21-dlg-label">{t.password}</span>
+          <input dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} autoComplete="current-password" className="d21-dlg-input" aria-invalid={error ? true : undefined} />
+        </label>
+      ) : (
+        <div className="d21-dlg-field">
+          <span className="d21-dlg-label">{t.pin}</span>
+          <div className="d21-dlg-dots" data-testid="step-up-dots" role="img" aria-label={`${pin.length} / ${PIN_LENGTH}`}>
+            {Array.from({ length: pin.length }).map((_, i) => <span key={i} />)}
           </div>
-        )}
-        {!pinOnly && <button type="button" onClick={() => { setUsePassword((v) => !v); setError(""); }} className="text-xs text-brown/60 hover:text-orange mb-3">{usePassword ? t.usePin : t.usePassword}</button>}
-        {mfa && (
-          <label className="block mb-3">
-            <span className="block text-xs font-bold text-brown mb-1">{t.code}</span>
-            <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} autoComplete="one-time-code" className={`${input} text-center tracking-[3px]`} data-testid="step-up-code" />
-          </label>
-        )}
-        {error && <div role="alert" className="bg-danger-bg text-danger px-3 py-2 rounded-xl text-sm font-semibold mb-3">{error}</div>}
-        <div className="flex gap-2">
-          <button type="button" onClick={submit} disabled={!ready || busy} className="flex-1 py-2.5 bg-orange text-white font-bold rounded-xl disabled:opacity-40" data-testid="step-up-confirm">{busy ? t.busy : t.confirm}</button>
-          <button type="button" onClick={() => onDone(false)} className="px-4 py-2.5 border-2 border-border rounded-xl text-sm font-semibold text-charcoal">{t.cancel}</button>
+          <div dir="ltr" className="d21-dlg-pad">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"].map((k, i) =>
+              k === "" ? <span key={i} /> : k === "del" ? (
+                <button key={i} type="button" aria-label="Backspace" onClick={() => setPin((p) => p.slice(0, -1))} className="d21-dlg-key is-plain"><Delete aria-hidden /></button>
+              ) : (
+                <button key={i} type="button" onClick={() => setPin((p) => (p.length < PIN_LENGTH ? p + k : p))} className="d21-dlg-key">{k}</button>
+              ),
+            )}
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+      {!pinOnly && <button type="button" onClick={() => { setUsePassword((v) => !v); setError(""); }} className="d21-dlg-link">{usePassword ? t.usePin : t.usePassword}</button>}
+      {mfa && (
+        <label className="d21-dlg-field">
+          <span className="d21-dlg-label">{t.code}</span>
+          <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} autoComplete="one-time-code" inputMode="text" className="d21-dlg-input is-code" data-testid="step-up-code" aria-invalid={error ? true : undefined} />
+        </label>
+      )}
+      {error && <p role="alert" className="d21-dlg-alert">{error}</p>}
+    </D21Dialog>
   );
 }

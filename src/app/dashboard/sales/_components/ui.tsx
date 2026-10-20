@@ -362,7 +362,7 @@ export function TextInput({
       aria-describedby={invalid ? `${id}-error` : undefined}
       onChange={(e) => onChange(e.target.value)}
       data-ui="input"
-      className={`${FIELD_BASE} ${invalid ? "border-red-400" : ""}`}
+      className={`${FIELD_BASE} ${invalid ? "border-[var(--status-danger)]" : ""}`}
     />
   );
 }
