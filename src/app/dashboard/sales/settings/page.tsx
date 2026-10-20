@@ -85,6 +85,13 @@ export default function SalesSettingsPage() {
   const [success, setSuccess] = useState("");
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Stage | null>(null);
+  /**
+   * What the server says this viewer may do (GET /api/sales/stages `can`). A rep without
+   * sales › stage_manage reads the stages but cannot change them (POST/PATCH refuse), and
+   * receives no team-wide deal counts: the screen is read-only for them and the open-deals
+   * column is hidden rather than showing zeros. Until the answer arrives, nothing is offered.
+   */
+  const [can, setCan] = useState<{ manage: boolean; counts: boolean }>({ manage: false, counts: false });
 
   useD21Phone({ title: ar ? "إعدادات المبيعات" : "Sales settings", sub: ar ? "الإعدادات" : "Settings" });
 
@@ -99,10 +106,11 @@ export default function SalesSettingsPage() {
     let cancelled = false;
     (async () => {
       // `all=true`: retired stages must stay visible here, or there is no way to bring one back.
-      const res = await api<{ stages: Stage[] }>("/api/sales/stages?all=true");
+      const res = await api<{ stages: Stage[]; can?: { manage: boolean; counts: boolean } }>("/api/sales/stages?all=true");
       if (cancelled) return;
       if (res.ok) {
         setStages(res.data.stages);
+        setCan({ manage: res.data.can?.manage === true, counts: res.data.can?.counts === true });
         setError("");
       } else {
         setError(res.data.error ?? (ar ? "تعذّر التحميل." : "Could not load."));
@@ -192,7 +200,7 @@ export default function SalesSettingsPage() {
         id={`purpose-${s.id}`}
         className="perf-sel"
         value={s.purpose ?? ""}
-        disabled={busy || !s.isActive}
+        disabled={busy || !s.isActive || !can.manage}
         aria-label={ar ? `أتمتة مرحلة ${s.nameAr}` : `Automation for ${s.nameEn}`}
         onChange={(e) => {
           const v = e.target.value;
@@ -216,7 +224,7 @@ export default function SalesSettingsPage() {
     </span>
   );
 
-  const moveBtns = (s: Stage, i: number) => (
+  const moveBtns = (s: Stage, i: number) => !can.manage ? null : (
     <span style={{ display: "inline-flex", gap: 2 }}>
       <button type="button" className="btn sm g" onClick={() => move(i, -1)} disabled={busy || i === 0}
         aria-label={ar ? `نقل ${s.nameAr} لأعلى` : `Move ${s.nameEn} up`}>↑</button>
@@ -239,6 +247,10 @@ export default function SalesSettingsPage() {
   };
 
   const rowBtns = (s: Stage) => {
+    // Read-only viewers: no edit / hide / restore control at all, only the hidden marker.
+    if (!can.manage) {
+      return !s.isActive ? <span className="perf-rowbtns"><span className="perf-code">{ar ? "مخفية" : "retired"}</span></span> : null;
+    }
     const reason = holdingReason(s);
     return (
     <span className="perf-rowbtns">
@@ -265,7 +277,7 @@ export default function SalesSettingsPage() {
     );
   };
 
-  const newStage = (
+  const newStage = !can.manage ? null : (
     <button type="button" className="btn p" onClick={() => setAdding(true)} data-testid="new-stage">
       <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
       {ar ? "مرحلة جديدة" : "New stage"}
@@ -289,11 +301,12 @@ export default function SalesSettingsPage() {
           {moveBtns(s, i)}
           <div className="r2">
             <span style={{ flex: 1 }}>
-              {ar ? "الاحتمال" : "Probability"} <span className="n">{s.probability}%</span> · {ar ? "صفقات مفتوحة" : "Open deals"} <span className="n">{num(s.openDeals ?? 0, lang)}</span>
+              {ar ? "الاحتمال" : "Probability"} <span className="n">{s.probability}%</span>
+              {can.counts && <> · {ar ? "صفقات مفتوحة" : "Open deals"} <span className="n">{num(s.openDeals ?? 0, lang)}</span></>}
             </span>
           </div>
           <div className="r2" style={{ marginTop: 6, flexWrap: "wrap" }}>{purposeSelect(s)}{rowBtns(s)}</div>
-          {s.isActive && holdingReason(s) && <div className="r2" aria-hidden>{holdingReason(s)}</div>}
+          {can.manage && s.isActive && holdingReason(s) && <div className="r2" aria-hidden>{holdingReason(s)}</div>}
         </div>
       ))}
     </div>
@@ -301,30 +314,34 @@ export default function SalesSettingsPage() {
     <div className="perf-scroll">
       <table className="t" data-testid="stages-table">
         <thead><tr>
-          <th scope="col">{ar ? "الترتيب" : "Order"}</th>
+          {can.manage && <th scope="col">{ar ? "الترتيب" : "Order"}</th>}
           <th scope="col">{ar ? "الرمز" : "Code"}</th>
           <th scope="col">{ar ? "الاسم" : "Name"}</th>
           <th scope="col" className="num">{ar ? "الاحتمال" : "Probability"}</th>
           <th scope="col">{ar ? "الأتمتة" : "Automation"}</th>
-          <th scope="col" className="num">{ar ? "الصفقات المفتوحة" : "Open deals"}</th>
-          <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>
+          {can.counts && <th scope="col" className="num">{ar ? "الصفقات المفتوحة" : "Open deals"}</th>}
+          {can.manage && <th scope="col"><span className="sr-only">{ar ? "الإجراءات" : "Actions"}</span></th>}
         </tr></thead>
         <tbody>
           {ordered.map((s, i) => (
             <tr key={s.id} style={s.isActive ? undefined : { opacity: 0.7 }} data-testid={`stage-row-${s.code}`}>
-              <td>{moveBtns(s, i)}</td>
+              {can.manage && <td>{moveBtns(s, i)}</td>}
               {/* The stable identity. Shown, and never editable. */}
               <td className="id">{s.code}</td>
               <td style={{ paddingBlock: 4 }}>
                 <div className="who">{ar ? s.nameAr : s.nameEn}</div>
                 <span className="perf-sub">{ar ? s.nameEn : s.nameAr}</span>
+                {/* Read-only viewers have no actions column; a retired stage is still marked. */}
+                {!can.manage && !s.isActive && <span className="perf-code" style={{ marginInlineStart: 6 }}>{ar ? "مخفية" : "retired"}</span>}
               </td>
               <td className="num"><span className="n">{s.probability}%</span></td>
               <td>{purposeSelect(s)}</td>
-              <td className="num" title={ar ? `كل الصفقات: ${num(s._count?.opportunities ?? 0, lang)}` : `All deals: ${s._count?.opportunities ?? 0}`}>
-                <span className="n">{num(s.openDeals ?? 0, lang)}</span>
-              </td>
-              <td style={{ textAlign: "end" }}>{rowBtns(s)}</td>
+              {can.counts && (
+                <td className="num" title={ar ? `كل الصفقات: ${num(s._count?.opportunities ?? 0, lang)}` : `All deals: ${s._count?.opportunities ?? 0}`}>
+                  <span className="n">{num(s.openDeals ?? 0, lang)}</span>
+                </td>
+              )}
+              {can.manage && <td style={{ textAlign: "end" }}>{rowBtns(s)}</td>}
             </tr>
           ))}
         </tbody>
@@ -360,6 +377,15 @@ export default function SalesSettingsPage() {
         <h2 className="bt">{ar ? "مراحل مسار الصفقات" : "Pipeline stages"}</h2>
         <span className="sub">{ar ? "تُخفى ولا تُحذف · لا تُخفى مرحلة فيها صفقات مفتوحة" : "retired, never deleted · a stage holding open deals cannot be retired"}</span>
       </div>
+      {!can.manage && (
+        <div style={{ marginBottom: 12 }}>
+          <PerfNote testId="stages-readonly">
+            {ar
+              ? "للعرض فقط: تعديل المراحل وترتيبها وإخفاؤها لمن لديه صلاحية «ضبط مراحل الصفقات»."
+              : "Read only: editing, reordering and retiring stages needs the «Configure pipeline stages» permission."}
+          </PerfNote>
+        </div>
+      )}
       {stagesBlock}
 
       {/* What the Automation column actually controls, and what happens when it is unset. */}

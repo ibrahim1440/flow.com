@@ -281,6 +281,12 @@ export default function AddProductPage() {
                       })}
                     </tbody>
                   </table>
+                  {/* The stock column is read only: packaging materials are created, received and counted in
+                      Inventory › packaging materials, on the inventory ledger (small-fixes batch). */}
+                  <p className="hr-caption" data-testid="np-materials-readonly">
+                    {L("هنا تُحدَّد مكونات الصنف فقط؛ مواد التعبئة نفسها وكمياتها تُدار في ", "Only the SKU's components are chosen here; the packaging materials and their stock are managed in ")}
+                    <Link href="/dashboard/inventory?tab=pack">{L("المخزون › مواد التعبئة", "Inventory › Packaging materials")}</Link>.
+                  </p>
                   <p className="cat-addrow">
                     <button type="button" className="cat-link" onClick={() => setBom(activeBomKey, [...bomOf(activeBomKey), { key: nextKey(), type: "MATERIAL", materialItemId: "", quantityPerUnit: "1" }])} data-testid="np-add-material">
                       <PlusIcon />{L("إضافة مادة تعبئة", "Add packaging material")}

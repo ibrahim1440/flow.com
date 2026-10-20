@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -253,9 +254,9 @@ export default function ProductionPage() {
         // the selection intact and the operator may correct and retry.
         try {
           const data = await res.json();
-          setError(data.error || "Failed to blend");
+          setError(localizeApiError(data, lang) || (lang === "ar" ? "تعذّر الخلط." : "Failed to blend"));
         } catch {
-          setError("Failed to blend");
+          setError(lang === "ar" ? "تعذّر الخلط." : "Failed to blend");
         }
         return;
       }
@@ -266,7 +267,7 @@ export default function ProductionPage() {
     } catch {
       // A network failure is NOT deterministic: the blend may or may not have committed.
       // Saying so is more honest than inviting a retry that could double it.
-      setError("The blend could not be confirmed. Reload the batch list before trying again.");
+      setError(lang === "ar" ? "تعذّر تأكيد الخلط. حدّث قائمة الدفعات قبل المحاولة مرة أخرى." : "The blend could not be confirmed. Reload the batch list before trying again.");
     } finally {
       setBlending(false);
     }
@@ -281,7 +282,7 @@ export default function ProductionPage() {
       : { method: "DELETE" });
     setCancelling(false);
     if (!res.ok) {
-      try { const d = await res.json(); setError(d.error || t("cancelFailed")); }
+      try { const d = await res.json(); setError(localizeApiError(d, lang) || t("cancelFailed")); }
       catch { setError(t("cancelFailed")); }
     } else {
       setSuccess(t("batchCancelled"));

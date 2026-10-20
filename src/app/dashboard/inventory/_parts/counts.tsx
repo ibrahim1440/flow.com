@@ -4,6 +4,7 @@
 // counted quantities, review the variances, then post — one approved step (inventory › adjust) that
 // books every variance through the same adjustment service as a single count. API:
 // /api/inventory/counts, /:id, /:id/post, /:id/cancel.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Btn, Field, Notice, OpsLoading, StatusDot, opsDate, useL } from "@/components/ops/ui";
@@ -31,7 +32,7 @@ const STATUS: Record<string, [string, "success" | "warning" | "neutral", string]
 
 async function errorOf(res: Response, fallback: string): Promise<string> {
   const j = await res.json().catch(() => ({}));
-  return (j as { error?: string }).error ?? fallback;
+  return localizeApiError(j) ?? fallback;
 }
 
 const fmtVar = (v: number | null, unit: string, lang: "ar" | "en") => {

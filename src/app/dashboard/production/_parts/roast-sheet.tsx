@@ -7,6 +7,7 @@
 // production privilege the roaster role does not hold by default). Loss = green − roasted, live,
 // with a warning outside the product's normal range. POST /api/roasting-batches resolves the lot
 // again under its transaction, so the line here and the server can never disagree silently.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useMemo, useState } from "react";
 import { OpsPane, useL } from "@/components/ops/ui";
 import { AutoRow, Chips, Cta, NumIn, parseNum } from "@/components/ops/station";
@@ -98,7 +99,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
       .then(async (r) => {
         const j = await r.json().catch(() => ({}));
         if (!live) return;
-        setLoaded(r.ok ? { key: subject, facts: j, error: "" } : { key: subject, facts: null, error: j.error ?? (lang === "ar" ? "تعذّر قراءة مصدر البن." : "Could not read the green source.") });
+        setLoaded(r.ok ? { key: subject, facts: j, error: "" } : { key: subject, facts: null, error: localizeApiError(j, lang) ?? (lang === "ar" ? "تعذّر قراءة مصدر البن." : "Could not read the green source.") });
       })
       .catch(() => { if (live) setLoaded({ key: subject, facts: null, error: lang === "ar" ? "تعذّر الاتصال." : "Network error." }); });
     return () => { live = false; };
@@ -148,8 +149,8 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (res.status === 422 && isAdmin) { setSurplus({ message: data.error ?? "", reason: surplus?.reason ?? "" }); return; }
-        setError((lang === "ar" ? data.error : data.errorEn ?? data.error) || L("تعذّر تسجيل الدفعة.", "Could not record the batch."));
+        if (res.status === 422 && isAdmin) { setSurplus({ message: localizeApiError(data, lang) ?? "", reason: surplus?.reason ?? "" }); return; }
+        setError(localizeApiError(data, lang) || L("تعذّر تسجيل الدفعة.", "Could not record the batch."));
         return;
       }
       try { window.localStorage.setItem(LAST_CHARGE_KEY, String(+g.toFixed(3))); } catch { /* storage unavailable */ }

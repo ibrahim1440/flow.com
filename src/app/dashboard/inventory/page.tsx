@@ -9,6 +9,7 @@
 // unpacked roasted coffee with «تتبع» to the lot trace page (/dashboard/inventory/lots/[id]), and
 // the ledger's filters, pages and CSV export. Every figure is derived from the ledger
 // (src/lib/inventory/metrics.ts); «—» where the history cannot support it. The tabs live in ./_parts.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { Languages } from "lucide-react";
@@ -243,7 +244,7 @@ function AdjustmentModal({
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      setError(j.error || t("adjustFailed"));
+      setError(localizeApiError(j) || t("adjustFailed"));
       return;
     }
     onSuccess(res.status === 200);
@@ -369,7 +370,7 @@ export default function InventoryPage() {
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      showToast(j.error || "Failed to add bean", "err");
+      showToast(localizeApiError(j) || L("تعذّرت إضافة البن.", "Failed to add bean"), "err");
       return;
     }
     setAddOpen(false);
@@ -383,7 +384,7 @@ export default function InventoryPage() {
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      showToast(j.error || "Failed to update bean", "err");
+      showToast(localizeApiError(j) || L("تعذّر تحديث البن.", "Failed to update bean"), "err");
       return;
     }
     setEditTarget(null);
@@ -402,7 +403,7 @@ export default function InventoryPage() {
     setDeleting(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      showToast(j.error || "Delete failed", "err");
+      showToast(localizeApiError(j) || L("تعذّر الحذف.", "Delete failed"), "err");
       setDeleteTarget(null);
       return;
     }

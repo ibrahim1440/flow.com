@@ -7,7 +7,9 @@ import type { Prisma } from "@/generated/prisma/client";
 export type SettingsSection = "production" | "inventory" | "invoicing";
 export type SettingsAction =
   | "SETTINGS_UPDATED" | "ROASTER_CREATED" | "ROASTER_UPDATED" | "ROASTER_STATUS_CHANGED"
-  | "MAINTENANCE_CREATED" | "MAINTENANCE_UPDATED" | "OPERATOR_ASSIGNED" | "OPERATOR_UNASSIGNED";
+  | "MAINTENANCE_CREATED" | "MAINTENANCE_UPDATED" | "OPERATOR_ASSIGNED" | "OPERATOR_UNASSIGNED"
+  // Small-fixes batch (migration 20261024090000_small_fixes): the one-time order status recompute.
+  | "ORDER_STATUS_RECOMPUTED";
 
 type Tx = { settingsAuditLog: { create(args: { data: Prisma.SettingsAuditLogUncheckedCreateInput }): Promise<unknown> } };
 type Plain = Record<string, unknown>;

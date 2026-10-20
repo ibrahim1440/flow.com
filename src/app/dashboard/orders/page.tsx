@@ -1,21 +1,25 @@
 "use client";
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useCreateRequest } from "@/components/shell/page-context";
 
 import { useState, useEffect, useRef } from "react";
 import { Plus, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
 import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import { hasSubPrivilege, canEdit } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
 import { LocalizedName } from "@/components/LocalizedName";
 import { Combobox, Select } from "@/components/ui/Select";
 import {
-  OrderStatusBadge, NeedsAttentionBadge, OwnerDisplay, ActivityTimeline, AddNoteForm,
+  OrderStatusBadge, NeedsAttentionBadge, OwnerDisplay, ActivityTimeline, AddNoteForm, canAddOrderNote,
   StatusActionsBar, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
 import { LinePreparation, PipelineBar, type PipelineInfo } from "./_parts/board";
 import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, Tabs, kg, rowOpen, Kg, opsDate } from "@/components/ops/ui";
+
+/** The statuses a structural edit is accepted from (mirrors services/order-edit.ts, server-only). */
+const EDITABLE_ORDER_STATUSES = new Set(["Waiting Approval", "Waiting Preparation Review", "Preparing", "Ready for Shipping"]);
 
 type OrdersTab = "all" | "review" | "preparing" | "ready" | "hold" | "done";
 
@@ -125,6 +129,7 @@ export default function OrdersPage() {
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
+  const canAddCustomer = canEdit(user?.permissions ?? {}, "customers");
   // Phase B: blocking a line is the one manual preparation decision left (supervisors).
   const canPrepare = hasSubPrivilege(user?.permissions ?? {}, "orders", "prepare_review");
   const [orders, setOrders] = useState<Order[]>([]);
@@ -252,7 +257,7 @@ export default function OrdersPage() {
       });
       if (!res.ok) {
         const body = await res.json();
-        alert(body.error + (body.details ? "\n" + body.details.join("\n") : ""));
+        alert((localizeApiError(body, lang) ?? "") + (body.details ? "\n" + body.details.join("\n") : ""));
         return;
       }
       setShowForm(false);
@@ -336,7 +341,7 @@ export default function OrdersPage() {
     });
     if (!res.ok) {
       const body = await res.json();
-      alert(body.error + (body.details ? "\n" + body.details.join("\n") : ""));
+      alert((localizeApiError(body, lang) ?? "") + (body.details ? "\n" + body.details.join("\n") : ""));
       return;
     }
     setEditingId(null);
@@ -394,6 +399,11 @@ export default function OrdersPage() {
     return matchSearch && o.items.some((i) => i.productionStatus === statusFilter);
   });
   const open = orders.find((o) => o.id === expanded) ?? null;
+  // DEF-04: a completed (or otherwise closed) order no longer offers edit or delete. The server
+  // refuses both — a structural edit only from these statuses (services/order-edit.ts
+  // STRUCTURAL_EDIT_ENTRY_STATUSES), a delete once anything was delivered — so the buttons follow.
+  const showEdit = (o: Order) => canEditOrder && EDITABLE_ORDER_STATUSES.has(o.status);
+  const showDelete = (o: Order) => canDelete && o.status !== "Completed" && o.items.every((i) => i.deliveries.length === 0);
   const productionStatusOf = (order: Order) =>
     order.items.every((i) => i.productionStatus === "Completed") ? "Completed" : order.items.some((i) => i.productionStatus === "In Production") ? "In Production" : "Pending";
   const totalKg = (order: Order) => order.items.reduce((s, i) => s + i.quantityKg, 0);
@@ -457,13 +467,14 @@ export default function OrdersPage() {
                     <option value="">{t("selectCustomer")}</option>
                     {customers.map((c) => <option key={c.id} value={c.id} data-hint={c.phone || undefined}>{c.name}</option>)}
                   </Select>
-                  <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}
+                  {/* POST /api/customers is requireEdit("customers"): offered only to those who hold it. */}
+                  {canAddCustomer && <button type="button" onClick={() => setShowNewCustomer(!showNewCustomer)}
                     className={`p-2 rounded-lg border ${showNewCustomer ? "bg-red-50 border-red-200 text-red-600" : "bg-cream border-border text-brown"} hover:opacity-80`}
                     title={showNewCustomer ? t("cancel") : t("addNewCustomer")}>
                     {showNewCustomer ? <X size={18} /> : <UserPlus size={18} />}
-                  </button>
+                  </button>}
                 </div>
-                {showNewCustomer && (
+                {canAddCustomer && showNewCustomer && (
                   <div className="mt-2 p-3 bg-cream border border-border rounded-lg space-y-2">
                     <p className="text-xs font-semibold text-brown">{t("newCustomerLabel")}</p>
                     <input type="text" placeholder={t("nameEnglish") + " *"} value={newCustomer.name}
@@ -785,7 +796,7 @@ export default function OrdersPage() {
                                 <option value="">{t("selectBean")}</option>
                                 {beans.map((b) => <option key={b.id} value={b.id}>{b.beanType} ({b.quantityKg} {t("opsKgUnit")})</option>)}
                               </Select>
-                              <input type="number" placeholder="kg" value={item.quantityKg || ""} onChange={(e) => updateEditItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
+                              <input type="number" placeholder={t("opsKgUnit")} value={item.quantityKg || ""} onChange={(e) => updateEditItem(idx, "quantityKg", parseFloat(e.target.value) || 0)}
                                 className="w-24 px-3 py-1.5 border-2 border-border rounded-lg text-sm focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors" />
                               {editForm.items.length > 1 && (
                                 <button type="button" onClick={() => setEditForm({ ...editForm, items: editForm.items.filter((_, i) => i !== idx) })}
@@ -840,10 +851,14 @@ export default function OrdersPage() {
 
                 <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />
 
-                <div className="ops-panel">
-                  <h3>{t("addNoteLabel")}</h3>
-                  <AddNoteForm orderId={order.id} onSuccess={loadData} />
-                </div>
+                {/* DEF-02: the note form is a write (requireEdit("orders")); a view-only account
+                    gets neither the form nor its empty panel. */}
+                {canAddOrderNote(user?.permissions ?? {}) ? (
+                  <div className="ops-panel">
+                    <h3>{t("addNoteLabel")}</h3>
+                    <AddNoteForm orderId={order.id} onSuccess={loadData} />
+                  </div>
+                ) : null}
 
                 <div className="ops-panel">
                   <h3>{t("activityTimelineLabel")}</h3>
@@ -852,12 +867,12 @@ export default function OrdersPage() {
               </>
               ); })()}
             </div>
-            {(canEditOrder && editingId !== open.id) || canDelete ? (
+            {(showEdit(open) && editingId !== open.id) || showDelete(open) ? (
               <div className="hr-preview-foot">
-                {canEditOrder && editingId !== open.id ? (
+                {showEdit(open) && editingId !== open.id ? (
                   <Btn onClick={() => startEdit(open)}><Pencil size={14} aria-hidden="true" /> {t("editOrder")}</Btn>
                 ) : null}
-                {canDelete ? (
+                {showDelete(open) ? (
                   <Btn variant="danger" onClick={() => deleteOrder(open.id)}><Trash2 size={14} aria-hidden="true" /> {t("deleteOrder")}</Btn>
                 ) : null}
               </div>

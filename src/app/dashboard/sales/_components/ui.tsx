@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select as HqSelect } from "@/components/ui/Select";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -962,5 +963,11 @@ export async function api<T = Record<string, unknown>>(
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  // DEF-08/09: a refusal reads in the page's language — the body's Arabic (`errorAr`) or the shared
+  // table for an English-only message. Every caller shows `data.error`, so it is localized here once.
+  if (!res.ok && data && typeof data === "object") {
+    const text = localizeApiError(data);
+    if (text) (data as { error?: string }).error = text;
+  }
   return { ok: res.ok, status: res.status, data };
 }

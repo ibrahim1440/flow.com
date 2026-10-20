@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState } from "react";
 
 /**
@@ -62,7 +63,7 @@ export default function ImportDialog({
         // A refused dry run still carries the row-level problems, and those are the useful
         // part: "the file is wrong" helps nobody, "row 14 has no contact name" does.
         setPreview(Array.isArray(data.problems) ? (data as Preview) : null);
-        setErr(data.error ?? (ar ? "تعذّرت قراءة الملف." : "Could not read that file."));
+        setErr(localizeApiError(data) ?? (ar ? "تعذّرت قراءة الملف." : "Could not read that file."));
       }
       return;
     }
@@ -74,7 +75,7 @@ export default function ImportDialog({
           : `Imported ${data.imported} of ${data.rowsRead} rows.`,
       );
     } else {
-      setErr(data.error ?? (ar ? "تعذّر الاستيراد." : "Could not import."));
+      setErr(localizeApiError(data) ?? (ar ? "تعذّر الاستيراد." : "Could not import."));
     }
   }
 

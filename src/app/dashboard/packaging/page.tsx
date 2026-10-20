@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { AlertTriangle, Trash2, CalendarDays } from "lucide-react";
@@ -253,7 +254,7 @@ export default function PackagingPage() {
       : { method: "DELETE" });
     setCancelling(false);
     if (!res.ok) {
-      try { const d = await res.json(); setError(d.error || t("cancelFailed")); }
+      try { const d = await res.json(); setError(localizeApiError(d, lang === "en" ? "en" : "ar") || t("cancelFailed")); }
       catch { setError(t("cancelFailed")); }
     } else {
       setSuccess(t("batchCancelled"));
@@ -306,7 +307,7 @@ export default function PackagingPage() {
         const data = await res.json().catch(() => null);
         if (controller.signal.aborted) return;
         setPreview(res.ok ? data : null);
-        setPackError(res.ok ? "" : (data?.error ?? ""));
+        setPackError(res.ok ? "" : (localizeApiError(data, lang === "en" ? "en" : "ar") ?? ""));
       } catch {
         // aborted or offline; the confirm button stays disabled without a preview
       } finally {
@@ -350,7 +351,7 @@ export default function PackagingPage() {
       packKeyHolder.current.recordResponse(res.status);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setPackError(data.error || "Failed to pack.");
+        setPackError(localizeApiError(data, lang === "en" ? "en" : "ar") || (lang === "en" ? "Failed to pack." : "تعذّرت التعبئة."));
         return;
       }
       const parts = [`${data.standardUnitsCreated} ${t("pkgSellableUnits")}`];

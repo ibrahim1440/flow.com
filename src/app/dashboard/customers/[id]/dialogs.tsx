@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,7 +17,7 @@ import type { Contact, Customer, Deal } from "./types";
  */
 
 const errorOf = (d: { error?: string; errorEn?: string }, ar: boolean, fallback: string) =>
-  (ar ? d.error : d.errorEn ?? d.error) || fallback;
+  localizeApiError(d, ar ? "ar" : "en") || fallback;
 
 export const SEGMENT_LABELS: Record<string, { ar: string; en: string }> = {
   WHOLESALE: { ar: "جملة", en: "Wholesale" },

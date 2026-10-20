@@ -12,6 +12,7 @@
 //     name filled) or a link — by WhatsApp under the automation sending mode, or copied.
 // The server holds every rule (src/lib/services/qc-finalize.ts, qc-invite.ts); this sheet only
 // makes them visible before the request is sent.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState } from "react";
 import { OpsPane, opsDate, useL } from "@/components/ops/ui";
 import { Chips, Cta, NumIn } from "@/components/ops/station";
@@ -100,7 +101,7 @@ export function PanelSheet({ batch, min, me, canCreate, canManage, canOverride, 
         }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) { setError((lang === "ar" ? j.error : j.errorEn ?? j.error) || L("تعذّر الاعتماد.", "Could not finalize.")); return; }
+      if (!r.ok) { setError(localizeApiError(j, lang) || L("تعذّر الاعتماد.", "Could not finalize.")); return; }
       onDecided(res === "Passed"
         ? L(`قُبلت ${batch.batchNumber}${j.override ? " · اعتماد استثنائي" : ""} · ظهرت في التعبئة`, `${batch.batchNumber} accepted${j.override ? " · exceptional approval" : ""} · now in packaging`)
         : L(`رُفضت ${batch.batchNumber} · سُجّل فاقد ${kgText(j.lossKg ?? 0)} كغ وعاد المطلوب لقائمة التحميص`, `${batch.batchNumber} rejected · ${kgText(j.lossKg ?? 0)} kg written off; the demand is back in the roast queue`));
@@ -121,7 +122,7 @@ export function PanelSheet({ batch, min, me, canCreate, canManage, canOverride, 
         body: JSON.stringify({ channel, name: gName.trim(), ...(channel === "link" && gPhone.trim() ? { phone: gPhone.trim() } : {}) }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) { setError((lang === "ar" ? j.error : j.errorEn ?? j.error) || L("تعذّرت الدعوة.", "Could not invite.")); return; }
+      if (!r.ok) { setError(localizeApiError(j, lang) || L("تعذّرت الدعوة.", "Could not invite.")); return; }
       if (channel === "present") {
         // The existing guest form, on this device, with the guest's name already typed.
         window.open(`${j.url}?name=${encodeURIComponent(gName.trim())}`, "_blank", "noopener");

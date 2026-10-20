@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withArabicError } from "@/lib/i18n/api-errors";
 import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_DISABLED_EN } from "@/lib/accounting/manual-journals-messages";
 
 /**
@@ -14,10 +15,11 @@ import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_
  */
 export function handleDomainError(err: unknown): NextResponse {
   if (err && typeof err === "object" && "_appCode" in err) {
-    const e = err as { _appCode: number; message?: string; errorEn?: string; code?: string };
+    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string };
     const status = Number.isInteger(e._appCode) && e._appCode >= 400 && e._appCode < 600 ? e._appCode : 400;
     // A coded refusal (e.g. REAUTH_REQUIRED, IDENTITY_NOT_VERIFIED) keeps its code, so the client can act on it.
-    return NextResponse.json({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status });
+    // DEF-08/09: an English refusal also carries its Arabic (`errorAr`) when it is known.
+    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}) }), { status });
   }
   return handlePrismaError(err);
 }
@@ -43,15 +45,15 @@ export function handlePrismaError(err: unknown): NextResponse {
   if (err && typeof err === "object" && "code" in err) {
     const code = (err as { code: string }).code;
     if (code === "P2002") {
-      return NextResponse.json({ error: "A record with these details already exists." }, { status: 409 });
+      return NextResponse.json(withArabicError({ error: "A record with these details already exists." }), { status: 409 });
     }
     if (code === "P2003" || code === "P2014") {
-      return NextResponse.json({ error: "Cannot complete: a related record is missing or still referenced." }, { status: 409 });
+      return NextResponse.json(withArabicError({ error: "Cannot complete: a related record is missing or still referenced." }), { status: 409 });
     }
     if (code === "P2025") {
-      return NextResponse.json({ error: "Record not found." }, { status: 404 });
+      return NextResponse.json(withArabicError({ error: "Record not found." }), { status: 404 });
     }
   }
   console.error("[API Error]", err);
-  return NextResponse.json({ error: "An unexpected error occurred. Please try again." }, { status: 500 });
+  return NextResponse.json(withArabicError({ error: "An unexpected error occurred. Please try again." }), { status: 500 });
 }

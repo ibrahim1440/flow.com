@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect, useCallback } from "react";
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { useUser } from "@/app/dashboard/user-context";
@@ -122,7 +123,7 @@ export function ProductionRequirementPanel({ itemIds }: { itemIds: string[] }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? "Failed to create production order.");
+        setError(localizeApiError(data, lang) ?? (lang === "ar" ? "تعذّر إنشاء أمر الإنتاج." : "Failed to create production order."));
         return;
       }
       setDone(`${t("productionReqCreated")}: ${data.productionOrder?.productionNumber ?? ""}`);

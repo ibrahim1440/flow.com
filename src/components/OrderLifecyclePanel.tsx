@@ -6,7 +6,7 @@ import { opsDate, countNoun, UNIT_FORMS, Kg } from "@/components/ops/ui";
 import { activityTextAr } from "@/components/ops/activity-text";
 import { createPortal } from "react-dom";
 import { useUser } from "@/app/dashboard/user-context";
-import { hasSubPrivilege, hasModuleAccess } from "@/lib/auth-shared";
+import { hasSubPrivilege, canEdit } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import { Dialog } from "@/components/hr/ui";
 import type { TranslationKey } from "@/lib/i18n/translations";
@@ -325,10 +325,18 @@ const DEPARTMENT_OPTIONS: { value: OrderNoteDepartment; labelKey: TranslationKey
   { value: "Shipping", labelKey: "deptShipping" },
 ];
 
+/** Who may add a note to an order: edit access to orders, the same rule as the server. */
+export function canAddOrderNote(permissions: Parameters<typeof canEdit>[0]): boolean {
+  return canEdit(permissions, "orders");
+}
+
 export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess: () => void }) {
   const { t } = useI18n();
   const user = useUser();
-  const canPost = hasModuleAccess(user?.permissions ?? {}, "orders");
+  // DEF-02: POST /api/orders/:id/activities is requireEdit("orders") — a note is a write to the
+  // order's permanent history. Module access alone ("view") used to show the form, and the
+  // server then refused it with 403. The form follows the server's rule.
+  const canPost = canAddOrderNote(user?.permissions ?? {});
 
   const [department, setDepartment] = useState<OrderNoteDepartment>("Operations");
   const [message, setMessage] = useState("");

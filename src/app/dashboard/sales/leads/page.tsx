@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -198,7 +199,7 @@ export default function LeadsPage() {
     const data = await res.json().catch(() => ({}));
     setDeleting(null);
     if (!res.ok) {
-      setError(data.error ?? (lang === "ar" ? "تعذّر الحذف." : "Could not delete."));
+      setError(localizeApiError(data) ?? (lang === "ar" ? "تعذّر الحذف." : "Could not delete."));
       return;
     }
     setSuccess(lang === "ar" ? "حُذف العميل المحتمل." : "Lead deleted.");
@@ -286,7 +287,7 @@ export default function LeadsPage() {
         return;
       }
       if (!res.ok) {
-        setFormError(data.error ?? (lang === "ar" ? "تعذّر الحفظ." : "Could not save."));
+        setFormError(localizeApiError(data) ?? (lang === "ar" ? "تعذّر الحفظ." : "Could not save."));
         return;
       }
       closeForm();
@@ -309,7 +310,7 @@ export default function LeadsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error ?? (lang === "ar" ? "تعذّر التحويل." : "Could not convert."));
+        setError(localizeApiError(data) ?? (lang === "ar" ? "تعذّر التحويل." : "Could not convert."));
         return;
       }
       setSuccess(

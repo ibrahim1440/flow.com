@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Coffee, CheckCircle2, XCircle, AlertTriangle, Loader2, Trash2, CalendarDays } from "lucide-react";
@@ -408,11 +409,11 @@ export default function QCPage() {
       form.overDeveloped ||
       Boolean(form.remarks?.trim());
     if (form.decision === "Reject" && !hasRejectReason) {
-      toast.error("Please select a rejection reason or write a remark.");
+      toast.error(lang === "ar" ? "اختر سبب الرفض أو اكتب ملاحظة." : "Please select a rejection reason or write a remark.");
       return;
     }
     if (editingRecordId && !form.correctionReason.trim()) {
-      toast.error("Correction reason is required.");
+      toast.error(lang === "ar" ? "سبب التصحيح مطلوب." : "Correction reason is required.");
       return;
     }
     setSubmitting(true);
@@ -443,7 +444,7 @@ export default function QCPage() {
           });
 
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error || t("error")); return; }
+      if (!res.ok) { toast.error(localizeApiError(data, lang) || t("error")); return; }
       toast.success(editingRecordId ? "QC record corrected." : t("saveRecord"));
       if (editingRecordId) {
         setCorrectionsCache((prev) => {
@@ -468,10 +469,10 @@ export default function QCPage() {
       : { method: "DELETE" });
     setCancelling(false);
     if (!res.ok) {
-      try { const d = await res.json(); toast.error(d.error || "Failed to cancel batch"); }
-      catch { toast.error("Failed to cancel batch"); }
+      try { const d = await res.json(); toast.error(localizeApiError(d, lang) || (lang === "ar" ? "تعذّر إلغاء الدفعة." : "Failed to cancel batch")); }
+      catch { toast.error(lang === "ar" ? "تعذّر إلغاء الدفعة." : "Failed to cancel batch"); }
     } else {
-      toast.success("Batch cancelled");
+      toast.success(lang === "ar" ? "أُلغيت الدفعة." : "Batch cancelled");
       setCancelBatch(null);
       loadBacklog();
     }
@@ -513,7 +514,7 @@ export default function QCPage() {
       if (!res.ok) {
         // The refusal names every batch it refused and why; nothing was decided.
         const which = Array.isArray(data.refused) ? data.refused.map((r: { batchNumber: string }) => r.batchNumber).join("، ") : "";
-        toast.error(`${(lang === "ar" ? data.error : data.errorEn ?? data.error) || t("error")}${which ? ` (${which})` : ""}`);
+        toast.error(`${localizeApiError(data, lang) || t("error")}${which ? ` (${which})` : ""}`);
         return;
       }
       if (Array.isArray(data.skipped) && data.skipped.length) toast(lang === "ar" ? `${data.skipped.length} دفعة اعتمدها غيرك في الأثناء ولم تتغير` : `${data.skipped.length} batch(es) were decided by someone else meanwhile and were left unchanged`);
@@ -1232,14 +1233,14 @@ export default function QCPage() {
               {editingRecordId && (
                 <div>
                   <label className="block text-sm font-medium text-charcoal mb-1">
-                    Correction reason <span className="text-red-500">*</span>
+                    {lang === "ar" ? "سبب التصحيح" : "Correction reason"} <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     value={form.correctionReason}
                     onChange={(e) => setForm({ ...form, correctionReason: e.target.value })}
                     className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors"
                     rows={2}
-                    placeholder="Why is this record being corrected?"
+                    placeholder={lang === "ar" ? "لماذا يُصحَّح هذا السجل؟" : "Why is this record being corrected?"}
                     required
                   />
                 </div>

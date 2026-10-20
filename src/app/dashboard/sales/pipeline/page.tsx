@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
@@ -126,7 +127,7 @@ export default function PipelinePage() {
         body: JSON.stringify({ toOutcome: "OPEN" }),
       });
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(payload.error ?? (ar ? "تعذّر التنفيذ." : "Could not do that.")); return; }
+      if (!res.ok) { setError(localizeApiError(payload) ?? (ar ? "تعذّر التنفيذ." : "Could not do that.")); return; }
       setSuccess(ar ? "أُعيد فتح الصفقة." : "Deal reopened.");
       reload();
     } finally {

@@ -1,11 +1,11 @@
 "use client";
 // Packaging materials (MaterialItem) — Direction 2.1 (Figma 253:2987 «مواد التعبئة», 270:6058).
 //
-// One component for the two places the materials list is offered: the «مواد التعبئة» tab of
-// Inventory (the approved IA) and the materials tab of Products (where it lived before; kept so
-// nothing reachable disappears). Requests, permission gates and validation are the ones the
-// products page had: receive = inventory › receive (POST /api/materials/:id/receive), count =
+// The ONE place packaging materials are entered (small-fixes batch): the «مواد التعبئة» tab of
+// Inventory, on the inventory ledger. The products screens (product page, add product) show a
+// material's stock read only and link here. Requests, permission gates and validation: receive = inventory › receive (POST /api/materials/:id/receive), count =
 // inventory › adjust (PATCH /api/materials/:id, reason required), create = POST /api/materials.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState } from "react";
 import { Btn, Field, useL } from "@/components/ops/ui";
@@ -71,7 +71,7 @@ export function MaterialsPanel({
   async function saveCount(m: Material) {
     const n = Number(value);
     if (!Number.isFinite(n) || n < 0) {
-      onError("Counted quantity must be zero or more.");
+      onError(L("الكمية المعدودة يجب ألا تكون سالبة.", "Counted quantity must be zero or more."));
       return;
     }
     const res = await fetch(`/api/materials/${m.id}`, {
@@ -80,7 +80,7 @@ export function MaterialsPanel({
       // The reason is required (it is the only document behind a count).
       body: JSON.stringify({ newActualQuantity: n, reason: reason.trim() }),
     });
-    if (!res.ok) onError((await res.json()).error ?? "Failed to adjust stock.");
+    if (!res.ok) onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّرت تسوية المخزون.", "Failed to adjust stock."));
     setAdjusting(null);
     setValue("");
     setReason("");
@@ -90,7 +90,7 @@ export function MaterialsPanel({
   async function saveReceipt(m: Material) {
     const n = Number(rqty);
     if (!Number.isFinite(n) || n <= 0) {
-      onError("Received quantity must be greater than zero.");
+      onError(L("الكمية المستلمة يجب أن تكون أكبر من صفر.", "Received quantity must be greater than zero."));
       return;
     }
     const res = await fetch(`/api/materials/${m.id}/receive`, {
@@ -98,7 +98,7 @@ export function MaterialsPanel({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ quantity: n, reference: rref.trim() }),
     });
-    if (!res.ok) onError((await res.json()).error ?? "Failed to receive stock.");
+    if (!res.ok) onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر استلام المخزون.", "Failed to receive stock."));
     setReceiving(null);
     setRqty("");
     setRref("");
@@ -241,7 +241,7 @@ export function MaterialsPanel({
 }
 
 export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => void; onSaved: () => void; onError: (m: string) => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const L = useL();
   const [form, setForm] = useState({ code: "", name: "", category: "PACKAGING", quantityOnHand: "0", reorderPoint: "0" });
   const [saving, setSaving] = useState(false);
@@ -261,7 +261,7 @@ export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => voi
         }),
       });
       if (!res.ok) {
-        onError((await res.json()).error ?? "Failed to create material.");
+        onError(localizeApiError(await res.json().catch(() => ({})), lang) ?? L("تعذّر إنشاء المادة.", "Failed to create material."));
         return;
       }
       onSaved();
@@ -295,7 +295,7 @@ export function MaterialForm({ onClose, onSaved, onError }: { onClose: () => voi
           </Select>
         </Field>
         <Field label={t("materialNameLabel")} wide>
-          <input className="hr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="1KG Coffee Bag" />
+          <input className="hr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={L("كيس قهوة 1 كغ", "1KG Coffee Bag")} />
         </Field>
         <Field label={t("onHandLabel")}>
           <input className="hr-input" type="number" min={0} value={form.quantityOnHand} onChange={(e) => setForm({ ...form, quantityOnHand: e.target.value })} />

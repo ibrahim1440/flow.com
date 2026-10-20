@@ -9,6 +9,7 @@
 // the same period / sort / search: GET /api/purchases/export), the 30-day metrics and the lot's
 // balance before / after in the pane. A «تسجيل مشتريات» link from the green coffee tab arrives with
 // ?bean=<lot id> and opens the pane on that lot.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
@@ -142,7 +143,7 @@ function AddPurchasePane({
         });
         if (!sRes.ok) {
           const j = await sRes.json().catch(() => ({}));
-          setFormError(j.error || t("error"));
+          setFormError(localizeApiError(j, lang) || t("error"));
           setSaving(false);
           return;
         }
@@ -165,7 +166,7 @@ function AddPurchasePane({
 
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        setFormError(j.error || t("purchaseFailed"));
+        setFormError(localizeApiError(j, lang) || t("purchaseFailed"));
         setSaving(false);
         return;
       }

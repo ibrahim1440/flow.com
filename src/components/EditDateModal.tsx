@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useRef, useState } from "react";
 import { CalendarDays, X, AlertTriangle, Merge, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/context";
@@ -72,7 +73,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
       });
       const data: DatePatchResponse = await res.json();
       if (!res.ok) {
-        setError((data as { error?: string }).error ?? t("error"));
+        setError(localizeApiError(data) ?? t("error"));
         return;
       }
 
@@ -106,7 +107,7 @@ export default function EditDateModal({ batch, onClose, onSuccess }: Props) {
       });
       const data: DatePatchResponse = await res.json();
       if (!res.ok) {
-        setError((data as { error?: string }).error ?? t("error"));
+        setError(localizeApiError(data) ?? t("error"));
         setStep("form");
         return;
       }

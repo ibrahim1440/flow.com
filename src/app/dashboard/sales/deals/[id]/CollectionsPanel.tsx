@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState } from "react";
 import Link from "next/link";
 import { Paperclip, Upload } from "lucide-react";
@@ -189,7 +190,7 @@ export function CollectionsPanel({
         onChanged();
         setError(
           (ar ? "سُجِّل التحصيل، لكن تعذّر رفع المرفق: " : "The collection was recorded, but the attachment failed: ") +
-            (data.error ?? ""),
+            (localizeApiError(data) ?? ""),
         );
         return;
       }

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { withArabicError } from "@/lib/i18n/api-errors";
 import { credentialVersion } from "./credential-version";
 import { NextResponse } from "next/server";
 import { verifyToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, canEdit, hasSubPrivilege, type UserPayload, type Permissions } from "./auth";
@@ -106,12 +107,13 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   return { ...user, role: employee.role, permissions, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange };
 }
 
+// DEF-08/09: the English `error` is unchanged; `errorAr` is added when the message is known.
 export function unauthorized(msg = "Not authenticated") {
-  return NextResponse.json({ error: msg }, { status: 401 });
+  return NextResponse.json(withArabicError({ error: msg }), { status: 401 });
 }
 
 export function forbidden(msg = "Insufficient permissions") {
-  return NextResponse.json({ error: msg }, { status: 403 });
+  return NextResponse.json(withArabicError({ error: msg }), { status: 403 });
 }
 
 export async function requireAuth(opts: { allowMfaEnrollment?: boolean; allowPasswordChange?: boolean } = {}) {

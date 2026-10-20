@@ -1,3 +1,5 @@
+import { localizeApiError } from "@/lib/i18n/api-errors";
+
 // Thin client-side fetch wrappers for the Order Operations S0 backend routes.
 // Pure functions only — no React state — shared by the Orders page and the
 // Preparation Workstation page so the two don't duplicate fetch/error handling.
@@ -27,7 +29,8 @@ async function postJson<T>(url: string, body: unknown): Promise<ApiResult<T>> {
   let message = "An unexpected error occurred. Please try again.";
   try {
     const errBody = await res.json();
-    if (errBody && typeof errBody.error === "string") message = errBody.error;
+    // DEF-08/09: in the page's language (errorAr, or the shared table for an English-only message).
+    if (errBody && typeof errBody.error === "string") message = localizeApiError(errBody) ?? errBody.error;
   } catch {
     // non-JSON error body — keep the generic fallback
   }
@@ -36,17 +39,21 @@ async function postJson<T>(url: string, body: unknown): Promise<ApiResult<T>> {
 
 /** Human-facing framing per status code. The backend message itself is already safe to show as-is. */
 export function describeApiError(error: ApiErrorInfo): string {
+  // Every text here is localized to the page's language (DEF-08/09): the message the server sent
+  // (already localized by the fetch wrapper; translated here again if it is a known English one),
+  // or the status fallback.
+  const local = (en: string) => localizeApiError({ error: en }) ?? en;
   switch (error.status) {
     case 403:
-      return error.message || "You do not have permission to perform this action.";
+      return local(error.message || "You do not have permission to perform this action.");
     case 404:
-      return error.message || "This record could not be found. It may have been removed.";
+      return local(error.message || "This record could not be found. It may have been removed.");
     case 409:
-      return error.message || "This action conflicts with the order's current state.";
+      return local(error.message || "This action conflicts with the order's current state.");
     case 500:
-      return error.message || "Something went wrong. Please try again.";
+      return local(error.message || "Something went wrong. Please try again.");
     default:
-      return error.message;
+      return local(error.message);
   }
 }
 
@@ -105,7 +112,8 @@ export async function fetchFulfillmentOptions(
   let message = "Could not load stock availability.";
   try {
     const errBody = await res.json();
-    if (errBody && typeof errBody.error === "string") message = errBody.error;
+    // DEF-08/09: in the page's language (errorAr, or the shared table for an English-only message).
+    if (errBody && typeof errBody.error === "string") message = localizeApiError(errBody) ?? errBody.error;
   } catch { /* non-JSON error body */ }
   return { ok: false, error: { status: res.status, message } };
 }

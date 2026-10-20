@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
@@ -158,7 +159,7 @@ export default function CustomersPage() {
       body: JSON.stringify(customerForm),
     });
     setSavingCustomer(false);
-    if (!res.ok) { const d = await res.json(); showToast(d.error || t("error"), "err"); return; }
+    if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
     showToast(t("customerSaved"));
     setShowCustomerForm(false);
     await loadData().then(() => {
@@ -176,7 +177,7 @@ export default function CustomersPage() {
   async function handleDeleteCustomer(c: Customer) {
     if (!confirm(t("deleteCustomerConfirm"))) return;
     const res = await fetch(`/api/customers/${c.id}`, { method: "DELETE" });
-    if (!res.ok) { const d = await res.json(); showToast(d.error || t("error"), "err"); return; }
+    if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
     showToast(t("customerDeleted"));
     setSelected(null);
     loadData();
@@ -244,7 +245,7 @@ export default function CustomersPage() {
     }
 
     setSavingProfile(false);
-    if (!res.ok) { const d = await res.json(); showToast(d.error || t("error"), "err"); return; }
+    if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
     showToast(t("roastPrefSaved"));
     setShowProfileForm(false);
     const updated = await fetch("/api/customers").then((r) => r.json()) as Customer[];
@@ -255,7 +256,7 @@ export default function CustomersPage() {
   async function handleDeleteProfile(pref: RoastPreference) {
     if (!selected) return;
     const res = await fetch(`/api/customers/${selected.id}/preferences/${pref.id}`, { method: "DELETE" });
-    if (!res.ok) { const d = await res.json(); showToast(d.error || t("error"), "err"); return; }
+    if (!res.ok) { const d = await res.json(); showToast(localizeApiError(d) || t("error"), "err"); return; }
     showToast(t("roastPrefDeleted"));
     const updated = await fetch("/api/customers").then((r) => r.json()) as Customer[];
     setCustomers(updated);

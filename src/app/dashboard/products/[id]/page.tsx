@@ -207,6 +207,15 @@ export default function ProductPage() {
                   </ul>
                 )}
                 {cover ? <p className="stk-foot">{L(`تكفي مواد التعبئة لـ ${n(cover.packs)} عبوة · تحدّها ${(cover.b.nameAr || cover.b.nameEn) ?? ""}.`, `Packaging covers ${n(cover.packs)} packs · limited by ${(cover.b.nameEn || cover.b.nameAr) ?? ""}.`)}</p> : null}
+                {/* One place to enter packaging materials (small-fixes batch): their stock is received,
+                    counted and created in Inventory › packaging materials, on the inventory ledger.
+                    Here it is read only, with the way there. */}
+                {activeSku.bomPerUnit.some((b) => b.type === "MATERIAL") ? (
+                  <p className="hr-caption" data-testid="bom-materials-readonly">
+                    {L("كميات مواد التعبئة للعرض هنا؛ تُستلم وتُجرد وتُضاف في ", "Packaging-material stock is shown here only; it is received, counted and added in ")}
+                    <Link href="/dashboard/inventory?tab=pack" data-testid="bom-materials-link">{L("المخزون › مواد التعبئة", "Inventory › Packaging materials")}</Link>.
+                  </p>
+                ) : null}
               </>
             ) : <p className="hr-caption">{L("أضف صنف بيع أولًا.", "Add a SKU first.")}</p>}
           </section>

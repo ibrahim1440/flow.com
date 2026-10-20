@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LEAD_STATUS_SPECS, LEAD_SOURCE_LABELS, pick } from "../_components/ui";
@@ -81,7 +82,7 @@ export function LeadPane({
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data.error ?? (ar ? "تعذّر التحويل." : "Could not convert.")); return; }
+      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر التحويل." : "Could not convert.")); return; }
       onChanged(data.replayed
         ? (ar ? "هذا العميل المحتمل محوَّل مسبقاً." : "This lead was already converted.")
         : (ar ? "تم التحويل إلى عميل وصفقة." : "Converted to a customer and a deal."));

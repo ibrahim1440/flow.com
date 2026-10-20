@@ -4,6 +4,7 @@
 // Requests go to the catalog API (src/app/api/categories, src/app/api/coffee-products); the
 // server checks every write on the `inventory` module, the screens only hide what a viewer
 // cannot do.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useEffect, useState } from "react";
 import { Btn, Field, Notice, OpsLoading, useL } from "@/components/ops/ui";
@@ -74,7 +75,7 @@ export async function api<T>(url: string, init?: { method?: string; json?: unkno
   try { body = text ? JSON.parse(text) : null; } catch { body = null; }
   if (!res.ok) {
     const b = (body ?? {}) as { error?: string; field?: string };
-    throw new ApiError(b.error ?? `Request failed (${res.status}).`, res.status, b.field);
+    throw new ApiError(localizeApiError(b) ?? `Request failed (${res.status}).`, res.status, b.field);
   }
   return body as T;
 }

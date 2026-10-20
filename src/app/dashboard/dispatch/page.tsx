@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Btn, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, StatusDot, Tabs, Kg, kg, opsDate, countNoun, UNIT_FORMS, useL } from "@/components/ops/ui";
 import { useUser } from "../user-context";
@@ -164,7 +165,7 @@ export default function DispatchPage() {
           // been recorded; the key stays so the retry is a replay.
           if (res.status < 500) keysRef.current[l.orderItemId] = newIdempotencyKey();
           setSubmitKind(res.status >= 500 ? "unconfirmed" : "refused");
-          setSubmitError(data.error || "");
+          setSubmitError(localizeApiError(data, lang) || "");
           return;
         }
         shippedRef.current[l.orderItemId] = { quantity: q, lots: data.lots ?? [] };

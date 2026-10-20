@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -187,7 +188,7 @@ export default function LeadDetailPage() {
         body: JSON.stringify(form),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data.error ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
+      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر الحفظ." : "Could not save.")); return; }
       setSuccess(ar ? "حُفظت التعديلات." : "Changes saved.");
       setEditing(false);
       await load();
@@ -219,7 +220,7 @@ export default function LeadDetailPage() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data.error ?? (ar ? "تعذّر تسجيل النشاط." : "Could not record the activity.")); return; }
+      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر تسجيل النشاط." : "Could not record the activity.")); return; }
       setLogSubject(""); setLogBody("");
       // The server says whether this put the lead into the pipeline, and names the deal it
       // created. Saying so here is the difference between automation and a surprise.
@@ -266,7 +267,7 @@ export default function LeadDetailPage() {
           });
           if (r.ok) return { ok: true };
           const d = await r.json().catch(() => ({}));
-          return { ok: false, error: d.error };
+          return { ok: false, error: localizeApiError(d) };
         },
         setFollowUpDate: async (iso) => {
           const r = await fetch(`/api/sales/leads/${params.id}`, {
@@ -276,7 +277,7 @@ export default function LeadDetailPage() {
           });
           if (r.ok) return { ok: true };
           const d = await r.json().catch(() => ({}));
-          return { ok: false, error: d.error };
+          return { ok: false, error: localizeApiError(d) };
         },
       },
       scheduleState,
@@ -308,7 +309,7 @@ export default function LeadDetailPage() {
         body: JSON.stringify({}),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data.error ?? (ar ? "تعذّر التحويل." : "Could not convert.")); return; }
+      if (!res.ok) { setError(localizeApiError(data) ?? (ar ? "تعذّر التحويل." : "Could not convert.")); return; }
       setSuccess(data.replayed
         ? (ar ? "هذا العميل المحتمل محوَّل مسبقاً." : "This lead was already converted.")
         : (ar ? "تم التحويل إلى عميل وصفقة." : "Converted to a customer and a deal."));

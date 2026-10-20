@@ -1,5 +1,6 @@
 "use client";
 
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
@@ -118,7 +119,7 @@ export default function ProductionOrderDetailPage({ params }: { params: Promise<
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action, reason }),
       });
-      if (!res.ok) { setError((await res.json())?.error ?? "Action failed."); return; }
+      if (!res.ok) { setError(localizeApiError(await res.json().catch(() => ({})), lang) ?? (lang === "ar" ? "تعذّر تنفيذ الإجراء." : "Action failed.")); return; }
       setShowCancel(false); setCancelReason("");
       await load();
     } finally { setBusy(null); }
@@ -132,7 +133,7 @@ export default function ProductionOrderDetailPage({ params }: { params: Promise<
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roastingBatchId: batchId }),
       });
-      if (!res.ok) { setError((await res.json())?.error ?? "Action failed."); return; }
+      if (!res.ok) { setError(localizeApiError(await res.json().catch(() => ({})), lang) ?? (lang === "ar" ? "تعذّر تنفيذ الإجراء." : "Action failed.")); return; }
       setPickBatch("");
       await load();
     } finally { setBusy(null); }

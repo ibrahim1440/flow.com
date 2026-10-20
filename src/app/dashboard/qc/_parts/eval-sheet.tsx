@@ -2,6 +2,7 @@
 // One evaluation, one tap (production simplification item 5; prototype «تقييمك»): مقبولة or
 // مرفوضة, a reason chip when rejected (required, as on the server), Agtron and a note optional.
 // POST /api/qc/[batchId]/records — unchanged; the chips map onto its existing fields.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState } from "react";
 import { OpsPane, useL } from "@/components/ops/ui";
 import { Chips, Cta, NumIn, parseNum } from "@/components/ops/station";
@@ -56,7 +57,7 @@ export function EvalSheet({ batch, min, onClose, onSaved }: {
         body: JSON.stringify({ decision: res, ...fields, remarks: fields.remarks || null, colorWhole: Number.isFinite(w) ? w : null, colorGround: Number.isFinite(gr) ? gr : null }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(j.error || L("تعذّر الإرسال.", "Could not send.")); return; }
+      if (!r.ok) { setError(localizeApiError(j) || L("تعذّر الإرسال.", "Could not send.")); return; }
       const n = batch.count + 1;
       onSaved(n >= min ? L("سُجّل تقييمك · اكتمل الحد الأدنى والدفعة جاهزة للقرار", "Your evaluation is recorded · the minimum is reached") : L(`سُجّل تقييمك · بقي ${min - n} تقييم`, `Your evaluation is recorded · ${min - n} more needed`));
     } catch {

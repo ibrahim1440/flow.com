@@ -11,6 +11,7 @@
 // server-side defect, not changed here).
 import { useState, useEffect } from "react";
 import { formatDate } from "@/lib/utils";
+import { inventoryExportRows, orderExportRows } from "@/lib/history-export";
 import { Btn, Empty, Notice, OpsBanner, OpsLoading, OpsRoot, PageHeader, countNoun, useL } from "@/components/ops/ui";
 import { dateTimeIn } from "@/components/hr/ui";
 import { useD21Phone } from "@/components/shell/page-context";
@@ -151,23 +152,8 @@ export default function HistoryPage() {
       const rows: Record<string, unknown>[] = [];
 
       if (exportType === "orders") {
-        for (const o of data) {
-          for (const item of o.items || []) {
-            rows.push({
-              "Order #": o.orderNumber,
-              Customer: o.customer?.name || "",
-              "Order Date": formatDate(o.createdAt),
-              "Payment Status": o.paymentStatus,
-              "VAT Status": o.vatStatus,
-              "Bean Type": item.beanTypeName,
-              "Quantity (kg)": item.quantityKg,
-              "Production Status": item.productionStatus,
-              "Delivery Status": item.deliveryStatus,
-              "Delivered (kg)": item.deliveredQty,
-              "Remaining (kg)": item.remainingQty,
-            });
-          }
-        }
+        // B1: "VAT Status" is the order's vatInvoiceStatus (lib/history-export).
+        rows.push(...orderExportRows(data));
       } else if (exportType === "production") {
         for (const b of data) {
           rows.push({
@@ -220,16 +206,8 @@ export default function HistoryPage() {
           });
         }
       } else if (exportType === "inventory") {
-        for (const g of data) {
-          rows.push({
-            "S/N": g.serialNumber,
-            "Bean Type": g.beanType,
-            Country: g.country,
-            Region: g.region || "",
-            "Quantity (kg)": g.quantityKg,
-            "Arrival Date": formatDate(g.arrivalDate),
-          });
-        }
+        // B2: "Arrival Date" is the green lot's receivedDate (lib/history-export).
+        rows.push(...inventoryExportRows(data));
       }
 
       if (rows.length === 0) return;

@@ -34,7 +34,8 @@ export async function GET(request: Request) {
   if (error) return error;
 
   const includeInactive = new URL(request.url).searchParams.get("all") === "true";
-  const counts = seesAllSales(user.permissions) || hasSubPrivilege(user.permissions, "sales", "stage_manage");
+  const canManage = hasSubPrivilege(user.permissions, "sales", "stage_manage");
+  const counts = seesAllSales(user.permissions) || canManage;
 
   try {
     const rows = await prisma.pipelineStage.findMany({
@@ -52,7 +53,10 @@ export async function GET(request: Request) {
     const openBy = new Map(open.map((o) => [o.stageId, o._count._all]));
     const stages = rows.map(({ _count, ...st }) =>
       counts ? { ...st, _count, openDeals: openBy.get(st.id) ?? 0 } : st);
-    return NextResponse.json({ stages, purposes: STAGE_PURPOSES });
+    // `can`: what this viewer may do here, so the settings screen renders read-only for a rep
+    // instead of offering controls the POST/PATCH gate (sales › stage_manage) would refuse, and
+    // hides the open-deals column when no counts were returned rather than showing zeros.
+    return NextResponse.json({ stages, purposes: STAGE_PURPOSES, can: { manage: canManage, counts } });
   } catch (err) {
     return handleDomainError(err);
   }

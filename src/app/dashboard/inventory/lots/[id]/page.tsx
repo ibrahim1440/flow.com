@@ -3,6 +3,7 @@
 // read from GET /api/inventory/lots/:id/trace (src/lib/services/lot-trace.ts — existing relations
 // only: PurchaseRecord → GreenBean → RoastingBatch → FinishedGoodsLot / PackagingSource →
 // StockAllocation → Order / Delivery). Reached from «تتبع» on the finished stock tab.
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -46,7 +47,7 @@ export default function LotTracePage() {
     fetch(`/api/inventory/lots/${encodeURIComponent(id)}/trace`).then(async (r) => {
       if (off) return;
       if (r.ok) setT(await r.json());
-      else setError(((await r.json().catch(() => ({}))) as { error?: string }).error ?? L("تعذّر تحميل اللوت.", "Could not load the lot."));
+      else setError(localizeApiError(await r.json().catch(() => ({}))) ?? L("تعذّر تحميل اللوت.", "Could not load the lot."));
     });
     return () => { off = true; };
   }, [id, L]);
