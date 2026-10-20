@@ -166,9 +166,10 @@ export async function hireApplicant(actor: HrActor, applicantId: string, b: Reco
       if (!acc) throw new HrError("Login account not found.", 400);
       const taken = (await tx.hrEmployee.findUnique({ where: { accountId } })) ?? (await tx.hrExternalPerson.findUnique({ where: { accountId } }));
       if (taken) throw new HrError("This login is already linked to another person.", 409, "ACCOUNT_TAKEN");
-      await assertLinkChangeAllowed(tx, null, accountId);
+      // SIMPLE MODE: a privileged login is allowed and its audit carries the bypass marker.
+      const bypass = await assertLinkChangeAllowed(tx, null, accountId);
       await tx.hrEmployee.update({ where: { id: person.id }, data: { accountId, version: { increment: 1 } } });
-      await audit(tx, { action: "ACCOUNT_LINK", entityType: "HrEmployee", entityId: person.id, employeeId: person.id, before: { accountId: null }, after: { accountId }, actorId: actor.id });
+      await audit(tx, { action: "ACCOUNT_LINK", entityType: "HrEmployee", entityId: person.id, employeeId: person.id, before: { accountId: null }, after: { accountId, ...bypass }, actorId: actor.id });
     }
     const r = await tx.hrApplicant.updateMany({ where: { id: applicantId, hiredEmployeeId: null }, data: { stage: "HIRED", hiredEmployeeId: person.id } });
     if (r.count !== 1) throw new HrError("The applicant was converted meanwhile.", 409);

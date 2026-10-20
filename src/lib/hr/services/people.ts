@@ -10,6 +10,7 @@ import {
 } from "../core";
 import { addDays, dayString, isDay, parseDay } from "../dates";
 import { balances } from "./leave";
+import { isSimpleMode } from "@/lib/simple-mode";
 
 const STATUSES = ["PROBATION", "ACTIVE", "NOTICE", "SUSPENDED", "SEPARATED"] as const;
 const TYPES = ["FULL_TIME", "PART_TIME", "TEMPORARY"] as const;
@@ -377,22 +378,42 @@ export async function setStatus(actor: HrActor, id: string, b: PersonInput) {
   }, TX);
 }
 
-/** Link (or unlink with accountId null) the login a person uses. Never creates a login. */
 /**
  * Owner decision 1: who holds a segregated duty is part of the control. A login holding one (or
  * the admin role) is neither linked, unlinked nor swapped — remove the duties first (a revocation
  * applies at once), change the link, then grant again (a second account editor approves the grant).
- * Shared by linkAccount and by hiring (QA2 P2-1), so no path links a duty-holding login quietly.
+ * Shared by linkAccount, by hiring (QA2 P2-1) and by the users screen, so no path links a
+ * duty-holding login quietly.
+ *
+ * SIMPLE MODE: the sole owner is the last admin (that protection stays), so he could never link his
+ * own login to his HR file. The change is ALLOWED, and the caller records the returned marker in
+ * the link's audit `after` ({ simpleModeBypass: true, privilegedLogins: [{ accountId, role, duties }] }),
+ * so the control exception — and the duties held at that moment — stays visible. Returns null when
+ * no privileged login is involved (nothing bypassed). With SIMPLE_MODE=off it refuses exactly as before.
  */
-export async function assertLinkChangeAllowed(tx: Prisma.TransactionClient, fromAccountId: string | null, toAccountId: string | null) {
-  const logins = [fromAccountId, toAccountId].filter((x): x is string => !!x);
-  if (!logins.length) return;
-  const rows = await tx.employee.findMany({ where: { id: { in: logins } }, select: { role: true, permissions: true } });
-  if (rows.some((r) => r.role === "admin" || payrollDuties(effectivePermissions(r.permissions as string | null, r.role)).length > 0)) {
-    throw new HrError("A login that holds payroll or account-administration duties cannot be linked or unlinked. Remove those duties first, then grant them again after the change.", 409, "IDENTITY_LOCKED");
-  }
+export type LinkChangeBypass = { simpleModeBypass: true; privilegedLogins: { accountId: string; role: string; duties: string[] }[] };
+
+/** A login's segregated duties, and whether it is privileged for the link rule (admin role, or any duty). */
+function linkPrivilege(r: { role: string; permissions: unknown }) {
+  const duties: string[] = payrollDuties(effectivePermissions(r.permissions as string | null, r.role));
+  return { duties, privileged: r.role === "admin" || duties.length > 0 };
 }
 
+export async function assertLinkChangeAllowed(tx: Prisma.TransactionClient, fromAccountId: string | null, toAccountId: string | null): Promise<LinkChangeBypass | null> {
+  const logins = [fromAccountId, toAccountId].filter((x): x is string => !!x);
+  if (!logins.length) return null;
+  const rows = await tx.employee.findMany({ where: { id: { in: logins } }, select: { id: true, role: true, permissions: true } });
+  const privileged = rows
+    .map((r) => ({ accountId: r.id, role: r.role, ...linkPrivilege(r) }))
+    .filter((r) => r.privileged)
+    .map(({ accountId, role, duties }) => ({ accountId, role, duties }));
+  if (!privileged.length) return null;
+  // SIMPLE MODE: allowed, and the caller audits it as a control exception (see above).
+  if (isSimpleMode()) return { simpleModeBypass: true, privilegedLogins: privileged };
+  throw new HrError("A login that holds payroll or account-administration duties cannot be linked or unlinked. Remove those duties first, then grant them again after the change.", 409, "IDENTITY_LOCKED");
+}
+
+/** Link (or unlink with accountId null) the login a person uses. Never creates a login. */
 export async function linkAccount(actor: HrActor, id: string, b: PersonInput) {
   assertCan(actor, "people_manage");
   const accountId = text(b.accountId, "accountId", { max: 40 });
@@ -408,9 +429,9 @@ export async function linkAccount(actor: HrActor, id: string, b: PersonInput) {
         // Option A: one login, one person — never an employee record and an external person.
         if (await tx.hrExternalPerson.findUnique({ where: { accountId }, select: { id: true } })) throw new HrError("This login is already linked to another person.", 409, "ACCOUNT_TAKEN");
       }
-      if ((before.accountId ?? null) !== (accountId ?? null)) await assertLinkChangeAllowed(tx, before.accountId, accountId);
+      const bypass = (before.accountId ?? null) !== (accountId ?? null) ? await assertLinkChangeAllowed(tx, before.accountId, accountId) : null;
       const after = await tx.hrEmployee.update({ where: { id }, data: { accountId, version: { increment: 1 } } });
-      await audit(tx, { action: accountId ? "ACCOUNT_LINK" : "ACCOUNT_UNLINK", entityType: "HrEmployee", entityId: id, employeeId: id, before: { accountId: before.accountId }, after: { accountId }, actorId: actor.id });
+      await audit(tx, { action: accountId ? "ACCOUNT_LINK" : "ACCOUNT_UNLINK", entityType: "HrEmployee", entityId: id, employeeId: id, before: { accountId: before.accountId }, after: { accountId, ...bypass }, actorId: actor.id });
       // Review NEW-1: the login that leaves this person loses every attestation naming it.
       if (before.accountId && before.accountId !== accountId) await revokeLoginAttestations(tx, before.accountId, actor.id, "Login unlinked from its person.");
       return after;
@@ -421,11 +442,19 @@ export async function linkAccount(actor: HrActor, id: string, b: PersonInput) {
   }
 }
 
-/** Login accounts that are not yet linked to any person — id and name only, never credentials. */
+/**
+ * Login accounts that are not yet linked to any person — id and name only, never credentials.
+ * `simpleModeException`: SIMPLE MODE is on and the login is privileged (admin role or a segregated
+ * duty), so linking it is recorded as a control exception (assertLinkChangeAllowed) — the dialog says so.
+ */
 export async function linkableAccounts(actor: HrActor) {
   assertCan(actor, "people_manage");
-  const rows = await prisma.employee.findMany({ where: { active: true, hrPerson: null, externalPerson: null }, select: { id: true, name: true, role: true }, orderBy: { name: "asc" } });
-  return rows;
+  const rows = await prisma.employee.findMany({ where: { active: true, hrPerson: null, externalPerson: null }, select: { id: true, name: true, role: true, permissions: true }, orderBy: { name: "asc" } });
+  const simple = isSimpleMode();
+  return rows.map((r) => ({
+    id: r.id, name: r.name, role: r.role,
+    simpleModeException: simple && linkPrivilege(r).privileged,
+  }));
 }
 
 // ── Private data ───────────────────────────────────────────────────────────────────

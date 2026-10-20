@@ -205,7 +205,7 @@ function StatusDialog({ id, status, onClose, onDone }: { id: string; status: str
 }
 
 function AccountDialog({ id, hasAccount, onClose, onDone }: { id: string; hasAccount: boolean; onClose: () => void; onDone: () => void }) {
-  const list = useHr<{ id: string; name: string; role: string }[]>("/api/hr/accounts/linkable");
+  const list = useHr<{ id: string; name: string; role: string; simpleModeException?: boolean }[]>("/api/hr/accounts/linkable");
   const [accountId, setAccountId] = useState("");
   const { L, t } = useHrI18n();
   const a = useAction();
@@ -229,6 +229,8 @@ function AccountDialog({ id, hasAccount, onClose, onDone }: { id: string; hasAcc
           </Field>
         )
       ) : null}
+      {/* SIMPLE MODE: a privileged login is linked as a recorded control exception (the server decides and audits it). */}
+      {list.data?.find((x) => x.id === accountId)?.simpleModeException ? <Notice tone="warning">{L("وضع التشغيل المبسّط: سيُسجَّل هذا الربط كاستثناء رقابي", "Simple operating mode: this link will be recorded as a control exception")}</Notice> : null}
       {hasAccount ? (
         <div className="hr-stack" style={{ gap: 6 }}>
           <hr className="hr-divider" />

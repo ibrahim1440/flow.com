@@ -471,9 +471,10 @@ export async function createUser(request: Request, user: SessionUser, raw: unkno
       const person = await tx.hrEmployee.findUnique({ where: { id: linkId }, select: { id: true, accountId: true } });
       if (!person) throw new UsersError(400, "HR_NOT_FOUND", "ملف الموظف غير موجود.", "HR record not found.");
       if (person.accountId) throw new UsersError(409, "HR_HAS_ACCOUNT", "لملف الموظف هذا حساب بالفعل.", "This HR record already has a login.");
-      await assertLinkChangeAllowed(tx, null, emp.id);
+      // SIMPLE MODE: a privileged new login is allowed and its audit carries the bypass marker.
+      const bypass = await assertLinkChangeAllowed(tx, null, emp.id);
       await tx.hrEmployee.update({ where: { id: linkId }, data: { accountId: emp.id, version: { increment: 1 } } });
-      await hrAudit(tx, { action: "ACCOUNT_LINK", entityType: "HrEmployee", entityId: linkId, employeeId: linkId, before: { accountId: null }, after: { accountId: emp.id }, actorId: user.id });
+      await hrAudit(tx, { action: "ACCOUNT_LINK", entityType: "HrEmployee", entityId: linkId, employeeId: linkId, before: { accountId: null }, after: { accountId: emp.id, ...bypass }, actorId: user.id });
     }
     if (set.length) {
       await recordOverrides(tx, { employeeId: emp.id, template, after: cells, requested: set.map((x) => x.ref), reason: reason!, expiresAt, reviewAt: null, actorId: user.id });

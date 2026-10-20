@@ -445,7 +445,7 @@ function OfferDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void
 function HireDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void; onDone: (r: { employeeId: string; replayed: boolean }) => void }) {
   const { meta } = useHrMeta();
   const f = useForm({ branchId: meta?.branches.length === 1 ? meta.branches[0].id : "", departmentId: "", managerId: "", accountId: "" });
-  const accounts = useHr<{ id: string; name: string; role: string }[]>("/api/hr/accounts/linkable");
+  const accounts = useHr<{ id: string; name: string; role: string; simpleModeException?: boolean }[]>("/api/hr/accounts/linkable");
   const act = useAction();
   const offer = a.offers.find((o) => o.status === "ACCEPTED");
   const { L, lang } = useHrI18n();
@@ -472,6 +472,8 @@ function HireDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void;
           <Select className="hr-select" {...f.bind("accountId")} disabled={!accounts.data}><option value="">{L("بلا حساب", "No account")}</option>{accounts.data?.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>
         </Field>
       </div>
+      {/* SIMPLE MODE: a privileged login is linked as a recorded control exception (the server decides and audits it). */}
+      {accounts.data?.find((x) => x.id === f.v.accountId)?.simpleModeException ? <Notice tone="warning">{L("وضع التشغيل المبسّط: سيُسجَّل هذا الربط كاستثناء رقابي", "Simple operating mode: this link will be recorded as a control exception")}</Notice> : null}
       <Notice tone="info">{L("التحويل ينشئ ملف موظف واحدًا من بيانات المتقدّم والعرض، ولا ينشئ حساب دخول. إعادة التحويل لا تُنشئ ملفًا ثانيًا. ربط حساب دخول قائم خطوة مستقلة.", "Conversion creates one employee file from the applicant and the offer, and no login account. Converting again does not create a second file. Linking an existing login is a separate step.")}</Notice>
     </Dialog>
   );
