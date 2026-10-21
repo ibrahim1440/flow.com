@@ -53,6 +53,14 @@ export function activityTextAr(a: ActivityLike, statusLabel: (status: string) =>
       if (s) out.detail = `الحالة: ${statusLabel(s)}`;
       return out;
     }
+    case "OWNER_CHANGED": {
+      // «Order owner changed by NAME: A → B.» / the recompute's assignment — the two names from
+      // the metadata, so Arabic never shows the English sentence.
+      const from = str(m.fromOwnerName) ?? "بلا مسؤول";
+      const to = str(m.toOwnerName) ?? "بلا مسؤول";
+      out.detail = m.trigger === "release_recompute" ? `عُيّن ${to} (منشئ الطلب)` : `من ${from} إلى ${to}`;
+      return out;
+    }
     case "ORDER_APPROVED": {
       const who = /Ownership transferred to (.+?)\.$/.exec(msg)?.[1];
       if (who) out.detail = `انتقلت الملكية إلى ${who}`;

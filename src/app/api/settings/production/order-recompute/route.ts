@@ -16,6 +16,8 @@ import { applyOrderStatusRecompute, planOrderStatusRecompute } from "@/lib/servi
  * other settings writes). Idempotent: a second run closes nothing and changes nothing. Every run is
  * appended to SettingsAuditLog (section "production", ORDER_STATUS_RECOMPUTED, migration
  * 20261024090000_small_fixes), and each order it closes carries its own ORDER_COMPLETED activity.
+ * Step 3 (fix/order-owner): open orders with no owner get their recorded creator (OWNER_CHANGED on
+ * each); the dry run counts those with and without a recorded creator.
  */
 export async function GET() {
   const { user, error } = await requireAuth();
@@ -42,18 +44,25 @@ export async function POST() {
       action: "ORDER_STATUS_RECOMPUTED",
       entityType: "Order",
       entityId: "status-recompute",
-      changed: result.closed.length > 0 || result.prepared.length > 0 ? ["status"] : [],
+      changed: [
+        ...(result.closed.length > 0 || result.prepared.length > 0 ? ["status"] : []),
+        ...(result.ownersAssigned.length > 0 ? ["ownerId"] : []),
+      ],
       before: {
         open: before.open,
         wouldClose: before.wouldClose.map((o) => o.orderNumber),
         wouldStayOpen: before.wouldStayOpen.map((o) => o.orderNumber),
         wouldPrepare: before.wouldPrepare.length,
+        unowned: before.unowned.open,
+        wouldAssignOwner: before.unowned.wouldAssign.map((o) => o.orderNumber),
       },
       after: {
         closed: result.closed.map((o) => o.orderNumber),
         leftOpen: result.leftOpen.map((o) => o.orderNumber),
         prepared: result.prepared.map((o) => ({ orderNumber: o.orderNumber, from: o.from, to: o.to })),
         preparedChecked: result.preparedChecked,
+        ownersAssigned: result.ownersAssigned.map((o) => ({ orderNumber: o.orderNumber, ownerId: o.creatorId })),
+        ownersUnresolved: result.ownersUnresolved,
       },
       actor: { id: user.id, name: user.name },
     });

@@ -14,7 +14,7 @@ import { orderNeedsAttention } from "@/lib/order-operations-client";
 import { LocalizedName } from "@/components/LocalizedName";
 import { Combobox, Select } from "@/components/ui/Select";
 import {
-  OrderStatusBadge, NeedsAttentionBadge, OwnerDisplay, ActivityTimeline, AddNoteForm, canAddOrderNote,
+  OrderStatusBadge, NeedsAttentionBadge, OwnerControl, ActivityTimeline, AddNoteForm, canAddOrderNote,
   StatusActionsBar, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
 import { LinePreparation, PipelineBar, type PipelineInfo } from "./_parts/board";
@@ -709,6 +709,10 @@ export default function OrdersPage() {
                           <span className="hr-msub">
                             <span className="hr-id">#{order.orderNumber}</span> · <span className="hr-num">{order.items.length}</span> {t("itemsTotal")} · <Kg v={totalKg(order)} />
                           </span>
+                          {/* fix/order-owner: «المسؤول» on the board, at every width. */}
+                          <span className="ops-line" data-testid={`order-owner-${order.orderNumber}`}>
+                            {t("orderOwnerLabel")}: {order.owner ? order.owner.name : <span className="hr-muted">{t("unassignedOwner")}</span>}
+                          </span>
                         </td>
                         <td className="num hr-hide-preview">{order.items.length}</td>
                         <td className="num">{kg(totalKg(order))}</td>
@@ -751,7 +755,7 @@ export default function OrdersPage() {
                 <KV rows={[
                   [t("quotationNumber"), order.quotationNumber || <span className="hr-muted">{t("noQuotation")}</span>],
                   [t("opsCreatedAt"), opsDate(order.createdAt, lang)],
-                  [t("orderOwnerLabel"), <OwnerDisplay key="o" owner={order.owner} />],
+                  [t("orderOwnerLabel"), <OwnerControl key="o" orderId={order.id} owner={order.owner} status={order.status} onSuccess={loadData} />],
                   [t("lastActivityLabel"), lastActivityOf(order) ? opsDate(lastActivityOf(order)!.createdAt, lang) : "—"],
                   [t("opsPaymentCol"), <StatusBadge key="p" status={order.paymentStatus} />],
                 ]} />

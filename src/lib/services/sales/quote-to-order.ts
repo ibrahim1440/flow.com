@@ -1,6 +1,7 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { resolveOrderLines, createOrderWithNumber } from "@/lib/services/orders/create-order";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
+import { ownerForConvertedOrder } from "@/lib/services/orders/owner-access";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -99,7 +100,9 @@ export async function createOrderFromQuote(
     where: { id: input.quoteId },
     select: {
       id: true, quoteNumber: true, customerId: true, opportunityId: true, issuedAt: true,
-      opportunity: { select: { id: true, customerId: true } },
+      // The deal's owner (the sales rep) becomes the order's owner; `owner.active` decides the
+      // fallback to the converting user (ownerForConvertedOrder).
+      opportunity: { select: { id: true, customerId: true, ownerId: true, owner: { select: { active: true } } } },
       lines: {
         orderBy: { position: "asc" },
         select: {
@@ -152,6 +155,9 @@ export async function createOrderFromQuote(
       quotationNumber: quote.quoteNumber,
       quotationSentDate: quote.issuedAt,
       notes: input.notes?.trim() || null,
+      // The quotation's owner — the rep who made the sale — owns the order, falling back to
+      // whoever converted it when that account is no longer active (fix/order-owner).
+      ownerId: ownerForConvertedOrder(quote.opportunity, input.actorId),
     },
     resolved,
   );

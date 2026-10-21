@@ -15,6 +15,7 @@ import {
   describeApiError,
   submitOrderNote,
   submitOrderStatusAction,
+  submitOrderOwnerChange,
   submitPreparationReview,
   canHold, canResume, canCancel, canComplete,
   fetchFulfillmentOptions,
@@ -255,6 +256,7 @@ const ACTIVITY_LABEL_KEYS: Record<string, TranslationKey> = {
   ORDER_RESUMED: "activityOrderResumed",
   ORDER_CANCELLED: "activityOrderCancelled",
   ORDER_COMPLETED: "activityOrderCompleted",
+  OWNER_CHANGED: "activityOwnerChanged",
   PRODUCTION_ORDER_CREATED: "activityProductionOrderCreated",
   PRODUCTION_ORDER_RELEASED: "activityProductionOrderReleased",
   PRODUCTION_ORDER_COMPLETED: "activityProductionOrderCompleted",
@@ -411,6 +413,97 @@ export function AddNoteForm({ orderId, onSuccess }: { orderId: string; onSuccess
 
 // ─── Status Actions ─────────────────────────────────────────────────────────
 
+type ViewerLike = { id: string; role: string; permissions: Parameters<typeof hasSubPrivilege>[0] } | null | undefined;
+
+/** The screen's copy of statusActionAccess (owner-access.ts): the owner, a manager, or the admin role. */
+export function canActOnOrderStatus(user: ViewerLike, ownerId: string | null): boolean {
+  if (!user) return false;
+  if (ownerId !== null && ownerId === user.id && canEdit(user.permissions, "orders")) return true;
+  return hasSubPrivilege(user.permissions, "orders", "manage_status") || user.role === "admin";
+}
+
+/** The screen's copy of ownerChangeAccess: a manager or the admin role (never the owner alone). */
+export function canChangeOrderOwner(user: ViewerLike): boolean {
+  return !!user && (hasSubPrivilege(user.permissions, "orders", "manage_status") || user.role === "admin");
+}
+
+/**
+ * «المسؤول» on the order pane: the owner's name (or «غير معيّن») and, for a manager / the admin
+ * role on an open order, «تغيير المسؤول» — a dialog listing the active employees (GET
+ * /api/employees, the roster anyone signed in may read). The server decides (PUT
+ * /api/orders/[id]/owner); a refusal stays in the dialog with its message.
+ */
+export function OwnerControl({ orderId, owner, status, onSuccess }: {
+  orderId: string;
+  owner: { id: string; name: string } | null;
+  status: string;
+  onSuccess: () => void;
+}) {
+  const { t } = useI18n();
+  const user = useUser();
+  const [open, setOpen] = useState(false);
+  const [people, setPeople] = useState<{ id: string; name: string }[] | null>(null);
+  const [choice, setChoice] = useState<string>(owner?.id ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const terminal = status === "Completed" || status === "Cancelled" || status === "Rejected";
+  const offer = canChangeOrderOwner(user) && !terminal;
+
+  async function openDialog() {
+    setChoice(owner?.id ?? ""); setError(null); setOpen(true);
+    if (people) return;
+    try {
+      const r = await fetch("/api/employees", { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      const rows = (await r.json()) as { id: string; name: string; active?: boolean }[];
+      setPeople(rows.filter((p) => p.active !== false).map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name)));
+    } catch {
+      setPeople([]);
+    }
+  }
+
+  async function save() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    const result = await submitOrderOwnerChange(orderId, choice || null);
+    setBusy(false);
+    if (!result.ok) { setError(describeApiError(result.error)); return; }
+    setOpen(false);
+    onSuccess();
+  }
+
+  const unchanged = (choice || "") === (owner?.id ?? "");
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }} data-testid="order-owner">
+      <OwnerDisplay owner={owner} />
+      {offer ? (
+        <button type="button" className="hr-btn is-sm" onClick={openDialog} data-testid="order-owner-change">{t("changeOwnerBtn")}</button>
+      ) : null}
+      <Dialog
+        open={open}
+        title={t("changeOwnerTitle")}
+        onClose={() => { if (!busy) setOpen(false); }}
+        testId="order-owner-dialog"
+        actions={<>
+          <button type="button" className="hr-btn is-primary" disabled={busy || unchanged} onClick={save} data-testid="order-owner-save">{t("changeOwnerSave")}</button>
+          <button type="button" className="hr-btn" disabled={busy} onClick={() => setOpen(false)}>{t("backBtn")}</button>
+        </>}
+      >
+        {error ? <div className="hr-notice tone-danger" role="alert">{error}</div> : null}
+        <p className="hr-caption" style={{ margin: 0 }}>{t("changeOwnerExplain")}</p>
+        <label className="hr-field" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span className="hr-label">{t("changeOwnerLabel")}</span>
+          <Select className="hr-select" value={choice} onChange={(e) => setChoice(e.target.value)} disabled={people === null} data-testid="order-owner-select">
+            <option value="">{t("changeOwnerNone")}</option>
+            {owner && people && !people.some((p) => p.id === owner.id) ? <option value={owner.id}>{owner.name}</option> : null}
+            {(people ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+        </label>
+      </Dialog>
+    </span>
+  );
+}
+
 export function StatusActionsBar({
   orderId,
   status,
@@ -430,8 +523,9 @@ export function StatusActionsBar({
 }) {
   const { t, lang } = useI18n();
   const user = useUser();
-  const canManageStatus = hasSubPrivilege(user?.permissions ?? {}, "orders", "manage_status");
-  const isOwnerOrAdmin = !!user && (user.role === "admin" || (ownerId !== null && ownerId === user.id));
+  // The server's matrix (services/orders/owner-access.ts), mirrored only to hide what it would
+  // refuse: the owner of this order (orders at edit), an orders manager, or the admin role.
+  const allowed = canActOnOrderStatus(user, ownerId);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -440,7 +534,7 @@ export function StatusActionsBar({
   const [reason, setReason] = useState("");
   const [reserved, setReserved] = useState<number | null>(null);
 
-  if (!canManageStatus || !isOwnerOrAdmin) return null;
+  if (!allowed) return null;
   if (!canHold(status) && !canResume(status) && !canCancel(status) && !canComplete(status)) return null;
 
   async function run(action: OrderStatusAction, reason?: string): Promise<boolean> {

@@ -8,10 +8,14 @@ export type ApiErrorInfo = { status: number; message: string };
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiErrorInfo };
 
 async function postJson<T>(url: string, body: unknown): Promise<ApiResult<T>> {
+  return sendJson<T>("POST", url, body);
+}
+
+async function sendJson<T>(method: "POST" | "PUT", url: string, body: unknown): Promise<ApiResult<T>> {
   let res: Response;
   try {
     res = await fetch(url, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -172,6 +176,18 @@ export function submitOrderStatusAction(
   reason?: string
 ): Promise<ApiResult<OrderStatusActionResponse>> {
   return postJson(`/api/orders/${orderId}/status`, reason !== undefined ? { action, reason } : { action });
+}
+
+export type OrderOwnerChangeResponse = {
+  id: string;
+  ownerId: string | null;
+  owner: { id: string; name: string; role: string } | null;
+  changed: boolean;
+};
+
+/** PUT /api/orders/[id]/owner — «تغيير المسؤول» (a manager or the admin role; fix/order-owner). */
+export function submitOrderOwnerChange(orderId: string, ownerId: string | null): Promise<ApiResult<OrderOwnerChangeResponse>> {
+  return sendJson<OrderOwnerChangeResponse>("PUT", `/api/orders/${orderId}/owner`, { ownerId });
 }
 
 export type OrderNoteDepartment = "Sales" | "Online" | "Preparation" | "Production" | "Operations" | "Shipping";

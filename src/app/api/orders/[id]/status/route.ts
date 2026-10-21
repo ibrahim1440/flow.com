@@ -2,7 +2,9 @@ import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
-import { assertAdminRoleGate, requireSub } from "@/lib/auth-server";
+import { assertAdminRoleGate, forbidden, requireAuth } from "@/lib/auth-server";
+import { hasModuleAccess } from "@/lib/auth-shared";
+import { statusActionAccess } from "@/lib/services/orders/owner-access";
 import { handleDomainError } from "@/lib/api-error";
 import { releaseShelfStock } from "@/lib/services/shelf-allocation";
 import { releaseFinishedUnits } from "@/lib/services/finished-products";
@@ -32,8 +34,12 @@ const ACTIVITY_TYPE_BY_ACTION = {
 } as const satisfies Record<StatusAction, string>;
 
 export async function POST(request: Request, { params }: Params) {
-  const { user, error } = await requireSub("orders", "manage_status");
+  // Who may act is decided per order (statusActionAccess: the owner, an orders › manage_status
+  // holder, or the admin role) once the order is read; here only that the caller is signed in and
+  // has the orders module at all, so somebody with no business on this screen gets a plain 403.
+  const { user, error } = await requireAuth();
   if (error) return error;
+  if (!hasModuleAccess(user.permissions, "orders")) return forbidden();
 
   const { id } = await params;
 
@@ -72,18 +78,19 @@ export async function POST(request: Request, { params }: Params) {
           id: true,
           status: true,
           ownerId: true,
+          customer: { select: { accountOwnerId: true } },
           items: { select: { preparationDecision: true } },
         },
       });
       if (!order) throw { _appCode: 404, message: "Order not found." };
 
-      const isOwner = order.ownerId !== null && order.ownerId === user.id;
-      const isAdmin = user.role === "admin";
-      if (!isOwner && !isAdmin) {
-        throw { _appCode: 403, message: "Only the order owner or an admin can change order status." };
-      }
-      // Changing someone else's order is the admin role exercised: a verified individual.
-      if (!isOwner) await assertAdminRoleGate(user, "orders.status_override");
+      // The permission matrix (services/orders/owner-access.ts): the owner on their own order, an
+      // orders manager (manage_status; a scoped sales rep only on their own customers' orders), or
+      // the admin role. Enforced here, whatever the screen offered.
+      const access = statusActionAccess(user, { ownerId: order.ownerId, customerAccountOwnerId: order.customer.accountOwnerId });
+      if (!access.ok) throw { _appCode: access.status, message: access.message };
+      // Changing an order one neither owns nor manages is the admin role exercised: a verified individual.
+      if (access.as === "admin") await assertAdminRoleGate(user, "orders.status_override");
 
       const currentStatus = order.status as OrderStatus;
       let expectedFromStatuses: OrderStatus[];

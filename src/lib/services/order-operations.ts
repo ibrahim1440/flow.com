@@ -84,6 +84,9 @@ export const ACTIVITY_TYPES = [
   "ORDER_RESUMED",
   "ORDER_CANCELLED",
   "ORDER_COMPLETED",
+  // The owner changed: by a manager / administrator from the order pane, or assigned by the
+  // one-time recompute to an order created before ownership-at-creation (fix/order-owner).
+  "OWNER_CHANGED",
   // Production-order events. They live on the customer order's timeline rather than in a
   // separate production audit log: every production order in this workflow is raised from
   // an order line, and the person asking "why was this order late?" wants the roasting

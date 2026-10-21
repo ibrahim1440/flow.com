@@ -13,8 +13,9 @@ import { localizeApiError } from "@/lib/i18n/api-errors";
 import "../../_parts/sections.css";
 
 type Brief = { id: string; orderNumber: number; status: string };
-type Plan = { open: number; wouldClose: Brief[]; wouldStayOpen: Brief[]; wouldPrepare: Brief[] };
-type Result = { closed: Brief[]; leftOpen: Brief[]; prepared: (Brief & { from: string | null; to: string | null })[]; preparedChecked: number };
+type Unowned = Brief & { creatorId: string | null; creatorName: string | null };
+type Plan = { open: number; wouldClose: Brief[]; wouldStayOpen: Brief[]; wouldPrepare: Brief[]; unowned: { open: number; wouldAssign: Unowned[]; noCreator: Unowned[] } };
+type Result = { closed: Brief[]; leftOpen: Brief[]; prepared: (Brief & { from: string | null; to: string | null })[]; preparedChecked: number; ownersAssigned: Unowned[]; ownersUnresolved: number };
 
 
 export function OrderRecomputeSection() {
@@ -58,7 +59,7 @@ export function OrderRecomputeSection() {
 
   if (!allowed) return null;
   const nums = (xs: Brief[]) => xs.map((o) => `#${o.orderNumber}`).join(L("، ", ", "));
-  const nothing = plan && plan.wouldClose.length === 0 && plan.wouldPrepare.length === 0;
+  const nothing = plan && plan.wouldClose.length === 0 && plan.wouldPrepare.length === 0 && plan.unowned.wouldAssign.length === 0;
 
   return (
     <section data-testid="order-recompute">
@@ -70,8 +71,8 @@ export function OrderRecomputeSection() {
         <div>
           <strong>{L("الطلبات التي أُنشئت قبل التجهيز التلقائي", "Orders created before the automatic preparation")}</strong>
           <p>{L(
-            "يُغلق كل طلب سُلِّم بالكامل وما زال «قيد التجهيز» أو «جاهز للشحن»، ثم يُعيد حساب تجهيز الطلبات المفتوحة. تظهر معاينة أولًا ولا يتغير شيء قبل التأكيد. التكرار آمن: التشغيل الثاني لا يغيّر شيئًا.",
-            "Closes every order delivered in full that is still «Preparing» or «Ready for shipping», then recomputes the preparation of the open orders. A preview comes first and nothing changes before you confirm. Safe to repeat: a second run changes nothing.",
+            "يُغلق كل طلب سُلِّم بالكامل وما زال «قيد التجهيز» أو «جاهز للشحن»، ثم يُعيد حساب تجهيز الطلبات المفتوحة، ويعيّن منشئ الطلب مسؤولًا عن كل طلب مفتوح بلا مسؤول. تظهر معاينة أولًا ولا يتغير شيء قبل التأكيد. التكرار آمن: التشغيل الثاني لا يغيّر شيئًا.",
+            "Closes every order delivered in full that is still «Preparing» or «Ready for shipping», recomputes the preparation of the open orders, and sets the creating user as the owner of every open order that has none. A preview comes first and nothing changes before you confirm. Safe to repeat: a second run changes nothing.",
           )}</p>
         </div>
         <Btn size="sm" onClick={dryRun} disabled={busy} data-testid="order-recompute-open">{L("معاينة", "Preview")}</Btn>
@@ -101,6 +102,9 @@ export function OrderRecomputeSection() {
               <div><dt>{L("ستُغلق (سُلِّمت بالكامل)", "Would close (delivered in full)")}</dt><dd><span className="hr-num" data-testid="order-recompute-would-close">{plan.wouldClose.length}</span>{plan.wouldClose.length ? <> · <bdi dir="ltr">{nums(plan.wouldClose)}</bdi></> : null}</dd></div>
               {plan.wouldStayOpen.length ? <div><dt>{L("سُلِّمت بالكامل وتبقى مفتوحة (حجز قائم — للمشرف)", "Delivered in full, stays open (a live reservation — for a supervisor)")}</dt><dd><span className="hr-num" data-testid="order-recompute-would-stay-open">{plan.wouldStayOpen.length}</span> · <bdi dir="ltr">{nums(plan.wouldStayOpen)}</bdi></dd></div> : null}
               <div><dt>{L("سيُعاد حساب تجهيزها", "Would be prepared again")}</dt><dd className="hr-num" data-testid="order-recompute-would-prepare">{plan.wouldPrepare.length}</dd></div>
+              <div><dt>{L("طلبات مفتوحة بلا مسؤول", "Open orders with no owner")}</dt><dd className="hr-num" data-testid="order-recompute-unowned">{plan.unowned.open}</dd></div>
+              <div><dt>{L("سيُعيَّن لها منشئ الطلب مسؤولًا", "Would get the creating user as owner")}</dt><dd><span className="hr-num" data-testid="order-recompute-would-assign">{plan.unowned.wouldAssign.length}</span>{plan.unowned.wouldAssign.length ? <> · <bdi dir="ltr">{nums(plan.unowned.wouldAssign)}</bdi></> : null}</dd></div>
+              {plan.unowned.noCreator.length ? <div><dt>{L("بلا منشئ مسجّل (تبقى بلا مسؤول)", "No creator recorded (stays unowned)")}</dt><dd><span className="hr-num" data-testid="order-recompute-no-creator">{plan.unowned.noCreator.length}</span> · <bdi dir="ltr">{nums(plan.unowned.noCreator)}</bdi></dd></div> : null}
             </dl>
             {nothing ? <p className="ss-muted">{L("لا يوجد ما يُعاد حسابه.", "There is nothing to recompute.")}</p> : null}
           </div>
@@ -112,6 +116,8 @@ export function OrderRecomputeSection() {
               <div><dt>{L("أُغلقت", "Closed")}</dt><dd><span className="hr-num" data-testid="order-recompute-closed">{result.closed.length}</span>{result.closed.length ? <> · <bdi dir="ltr">{nums(result.closed)}</bdi></> : null}</dd></div>
               {result.leftOpen.length ? <div><dt>{L("بقيت مفتوحة (حجز قائم أو سطر غير مطابق — للمشرف)", "Left open (a live reservation or an inexact line — for a supervisor)")}</dt><dd><bdi dir="ltr">{nums(result.leftOpen)}</bdi></dd></div> : null}
               <div><dt>{L("تغيّر تجهيزها", "Preparation changed")}</dt><dd><span className="hr-num" data-testid="order-recompute-prepared">{result.prepared.length}</span> {L(`من ${result.preparedChecked}`, `of ${result.preparedChecked}`)}</dd></div>
+              <div><dt>{L("عُيّن لها مسؤول", "Owner set")}</dt><dd><span className="hr-num" data-testid="order-recompute-owners-assigned">{result.ownersAssigned.length}</span>{result.ownersAssigned.length ? <> · <bdi dir="ltr">{nums(result.ownersAssigned)}</bdi></> : null}</dd></div>
+              {result.ownersUnresolved ? <div><dt>{L("بقيت بلا مسؤول (بلا منشئ مسجّل)", "Left unowned (no creator recorded)")}</dt><dd className="hr-num" data-testid="order-recompute-owners-unresolved">{result.ownersUnresolved}</dd></div> : null}
             </dl>
           </div>
         ) : null}

@@ -126,6 +126,8 @@ export async function POST(request: Request) {
             quotationNumber: typeof body.quotationNumber === "string" ? body.quotationNumber.trim() || null : null,
             quotationSentDate: body.quotationSentDate ? new Date(body.quotationSentDate) : null,
             notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
+            // The creating user owns the order (owner decision, fix/order-owner).
+            ownerId: user.id,
           },
           resolvedItems,
           canSeeCustomerContact(user.permissions),

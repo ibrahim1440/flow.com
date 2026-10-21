@@ -95,6 +95,12 @@ export type NewOrderHeader = {
   quotationNumber?: string | null;
   quotationSentDate?: Date | null;
   notes?: string | null;
+  /**
+   * The order's owner from the moment it exists (fix/order-owner): the creating user for a
+   * manual order, the quotation's owner for a converted one (services/orders/owner-access.ts).
+   * Every caller passes one; absent means an unowned order, which only legacy data has.
+   */
+  ownerId?: string | null;
 };
 
 /**
@@ -178,6 +184,10 @@ export async function createOrderWithNumber(
           // than left to the column default, because the default still describes the
           // legacy workflow and existing rows in it must keep their meaning.
           status: "Waiting Preparation Review",
+          // Ownership at creation. Preparation is automatic since Phase B, so nothing downstream
+          // would ever claim this order; the person who created it is who holds, resumes or
+          // cancels it (the manager and the administrator may as well).
+          ownerId: header.ownerId ?? null,
           items: { create: lines },
         },
         include: {

@@ -448,6 +448,14 @@ export const translations = {
   activityOrderResumed:        { en: "Order resumed",                ar: "تم استئناف الطلب" },
   activityOrderCancelled:      { en: "Order cancelled",              ar: "تم إلغاء الطلب" },
   activityOrderCompleted:      { en: "Order completed",              ar: "تم إكمال الطلب" },
+  activityOwnerChanged:        { en: "Owner changed",                ar: "تغيّر المسؤول" },
+  // fix/order-owner: «تغيير المسؤول» from the order pane (a manager / the admin role).
+  changeOwnerBtn:              { en: "Change owner",                 ar: "تغيير المسؤول" },
+  changeOwnerTitle:            { en: "Change order owner",           ar: "تغيير مسؤول الطلب" },
+  changeOwnerExplain:          { en: "The owner may hold, resume and cancel this order. The change is recorded in the activity timeline.", ar: "المسؤول يستطيع تعليق هذا الطلب واستئنافه وإلغاءه. يُسجَّل التغيير في الجدول الزمني." },
+  changeOwnerLabel:            { en: "New owner",                    ar: "المسؤول الجديد" },
+  changeOwnerNone:             { en: "No owner",                     ar: "بلا مسؤول" },
+  changeOwnerSave:             { en: "Change owner",                 ar: "تغيير المسؤول" },
 
   holdOrderBtn:                { en: "Hold",                         ar: "تعليق" },
   resumeOrderBtn:               { en: "Resume",                       ar: "استئناف" },
