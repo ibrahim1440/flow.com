@@ -7,12 +7,14 @@
  * added is the Arabic beside it:
  *
  *   - on the server, the shared refusal helpers (`forbidden`, `unauthorized`, `handleDomainError`,
- *     `handlePrismaError`) add `errorAr` to the body when the message is known here;
+ *     `handlePrismaError`) add `errorAr` to the body when the message is known here, and so does
+ *     every inline refusal: the routes import `NextResponse` from src/lib/api-response.ts, which
+ *     passes each error response through withArabicError (QA pass, 20 Oct);
  *   - in the browser, `localizeApiError` picks the text for the viewer's language: the body's own
  *     Arabic (`errorAr`, or an Arabic `error` from the HR-style routes) first, then this table.
  *
- * The table lives in api-errors-ar.ts. Every English refusal written in the production, QC,
- * packaging, dispatch, orders, inventory and sales routes and services has an entry — enforced by
+ * The table lives in api-errors-ar.ts. Every English refusal written in src/app/api and src/lib
+ * (every route family; HR keeps its own Arabic-first map) has an entry — enforced by
  * tests/ops/unit/api-errors-ar.test.ts, which reads those sources.
  *
  * Pure: no server or browser import, so the server helpers and the client screens share it.

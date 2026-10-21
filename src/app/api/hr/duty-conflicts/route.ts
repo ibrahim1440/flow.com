@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { effectivePermissions, payrollDutyConflicts, payrollDuties } from "@/lib/hr/sod";

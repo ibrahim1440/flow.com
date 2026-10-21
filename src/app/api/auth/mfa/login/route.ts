@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { extractIp, hashRateLimitKey, isIdentifierRateLimited, isIpRateLimited, recordFailedAttempt } from "@/lib/rate-limit";
 import { mfaConfigured, verifySecondFactor } from "@/lib/auth/mfa";
 import { authAudit, completeSignIn, readChallenge, MFA_UNAVAILABLE, TOO_MANY } from "@/lib/auth/sign-in";

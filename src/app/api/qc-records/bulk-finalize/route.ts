@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { privilegedGate, requireSub } from "@/lib/auth-server";
 import { hasSubPrivilege } from "@/lib/auth-shared";

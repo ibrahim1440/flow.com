@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-server";
 import { PRINT_NOT_CERTIFIED_CODE, PRINT_NOT_CERTIFIED_MESSAGE, isPrintCertified } from "@/lib/print/certification";
 

@@ -7,7 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { isPipelineStage, riyadhDay, stageOf, TERMINAL_ORDER_STATUSES, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
 import { Plus, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
 import { useUser } from "../user-context";
-import { hasSubPrivilege, canEdit } from "@/lib/auth-shared";
+import { hasSubPrivilege, hasModuleAccess, canEdit } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { orderNeedsAttention } from "@/lib/order-operations-client";
@@ -200,8 +200,14 @@ export default function OrdersPage() {
   }, []);
 
   async function loadData() {
+    // GET /api/green-beans is the inventory and production modules' (requireAnyModule): a login
+    // with neither is not asked for it — the refusal it used to get was a console error and a 403
+    // on every load of this screen for dispatch and sales logins (QA pass). The bean list only
+    // serves the legacy kilogram line editor.
+    const perms = user?.permissions ?? {};
+    const mayReadBeans = !user || hasModuleAccess(perms, "inventory") || hasModuleAccess(perms, "production");
     const [ordersRes, custRes, beansRes, productsRes, catalogRes] = await Promise.all([
-      fetch("/api/orders"), fetch("/api/customers"), fetch("/api/green-beans"),
+      fetch("/api/orders"), fetch("/api/customers"), mayReadBeans ? fetch("/api/green-beans") : Promise.resolve(null),
       fetch("/api/coffee-products/summary"),
       // The sellable catalog: one entry per finished SKU, with its free unit count.
       // The raw finished-goods-lots fetch is gone — free stock is per SKU and in units
@@ -214,7 +220,7 @@ export default function OrdersPage() {
     // refused response is still read to the end: an unread body keeps the connection open,
     // and the page never reaches "network idle" (green beans are refused to a dispatch-only
     // login, which is a normal state of this screen).
-    const take = async (r: Response) => (r.ok ? r.json() : (await r.text(), null));
+    const take = async (r: Response | null) => (!r ? null : r.ok ? r.json() : (await r.text(), null));
     const [ordersJ, custJ, beansJ, productsJ, catalogJ] = await Promise.all([ordersRes, custRes, beansRes, productsRes, catalogRes].map(take));
     if (ordersJ === null) { setLoadError(true); setLoaded(true); return; }
     setLoadError(false);

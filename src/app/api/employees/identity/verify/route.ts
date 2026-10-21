@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-server";
 import { requestVerification } from "@/lib/hr/services/identity-verification";
 import { errorResponse } from "../../permission-requests/_shared";

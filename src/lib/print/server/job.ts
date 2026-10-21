@@ -2,7 +2,7 @@
  * Shared request handling for /api/print/label-data (preview, no audit) and /api/print/jobs
  * (authorized job, audited).
  */
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { PRINT_LANGS, type PrintLang } from "../bidi";

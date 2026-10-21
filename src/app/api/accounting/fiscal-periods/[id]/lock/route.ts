@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAdminAction, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { lockFiscalPeriod } from "@/lib/accounting/fiscal-period-service";

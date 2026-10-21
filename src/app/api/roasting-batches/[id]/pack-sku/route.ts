@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { POST as packV2 } from "../pack/route";
 
 type Params = { params: Promise<{ id: string }> };

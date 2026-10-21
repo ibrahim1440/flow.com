@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth, requireFreshAuth } from "@/lib/auth-server";
 import { endMyOtherSessions } from "@/lib/auth/my-security";
 import { authAudit } from "@/lib/auth/sign-in";

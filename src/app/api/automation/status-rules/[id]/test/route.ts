@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { requireAdminAction, requireAuth } from "@/lib/auth-server";

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth, requireAdminAction } from "@/lib/auth-server";
 import { exportAudit, parseFilters } from "@/lib/users/audit";
 import { recordUsersAudit } from "@/lib/users/server";

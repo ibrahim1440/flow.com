@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
@@ -98,7 +98,7 @@ export async function GET(_request: Request, { params }: Params) {
     // Stage names for the history, resolved once rather than joined onto every event.
     const stages = await prisma.pipelineStage.findMany({
       select: { id: true, code: true, nameEn: true, nameAr: true, position: true, probability: true, isActive: true },
-      orderBy: { position: "asc" },
+      orderBy: [{ position: "asc" }, { code: "asc" }],
     });
 
     // The money against this deal. Computed rather than stored: a "collected so far"

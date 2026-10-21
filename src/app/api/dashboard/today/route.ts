@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireModule } from "@/lib/auth-server";
 import { loadToday } from "@/lib/services/dashboard/today";
 import { canSeeCustomerDetail } from "@/lib/auth/customer-detail";

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -21,7 +21,7 @@ export async function GET() {
     const [stages, deals] = await Promise.all([
       prisma.pipelineStage.findMany({
         where: { isActive: true },
-        orderBy: { position: "asc" },
+        orderBy: [{ position: "asc" }, { code: "asc" }],
         select: { id: true, code: true, nameEn: true, nameAr: true, position: true, probability: true },
       }),
       prisma.opportunity.findMany({

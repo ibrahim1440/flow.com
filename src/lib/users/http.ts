@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { DutyConflictError, conflictMessageEn } from "@/lib/hr/sod";
 import { HrError } from "@/lib/hr/core";
 import { toArabic } from "@/lib/hr/messages-ar";

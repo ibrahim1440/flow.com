@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth } from "@/lib/auth-server";
 import { checkAndRecordRateLimit } from "@/lib/api-rate-limit";
 

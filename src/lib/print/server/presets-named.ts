@@ -4,7 +4,7 @@
  * (`privacyConfirmed: true`). The confirmation is stored (who, when) and audited; turning names off
  * clears it. Returns the columns to write, or the refusal.
  */
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { isShown } from "../templates";
 import type { PresetInput } from "../presets";
 import { canNameScorers } from "./auth";

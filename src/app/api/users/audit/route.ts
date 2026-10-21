@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireModule } from "@/lib/auth-server";
 import { isUsersAdmin } from "@/lib/users/server";
 import { parseFilters, queryAudit } from "@/lib/users/audit";

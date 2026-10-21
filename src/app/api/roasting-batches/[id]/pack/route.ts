@@ -1,5 +1,5 @@
 import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";

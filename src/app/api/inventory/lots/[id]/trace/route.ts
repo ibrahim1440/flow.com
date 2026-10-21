@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { lotTrace } from "@/lib/services/lot-trace";

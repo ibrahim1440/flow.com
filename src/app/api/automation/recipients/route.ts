@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { formatPhone, normalizePhoneForWhatsApp } from "@/lib/automation/phone";

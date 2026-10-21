@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -68,7 +68,7 @@ export async function POST(request: Request, { params }: Params) {
     // longer draws, so a reopen without a chosen stage lands in the first active stage; the
     // move is recorded in the deal's stage history like any other.
     if (toOutcome === "OPEN" && !toStageId && opp.outcome !== "OPEN" && !opp.stage.isActive) {
-      const first = await prisma.pipelineStage.findFirst({ where: { isActive: true }, orderBy: { position: "asc" }, select: { id: true } });
+      const first = await prisma.pipelineStage.findFirst({ where: { isActive: true }, orderBy: [{ position: "asc" }, { code: "asc" }], select: { id: true } });
       if (!first) return NextResponse.json({ error: "No active stage to reopen the deal into." }, { status: 409 });
       toStageId = first.id;
     }

@@ -1,6 +1,6 @@
 // HTTP-only helpers for finance route handlers (kept apart so services stay importable
 // outside Next.js, e.g. by the integration tests).
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { hasModuleAccess } from "@/lib/auth-shared";
 import { requireAuth, requirePrivilegedAction, STEP_UP_KEYS } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";

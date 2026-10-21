@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import {
   extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, isIdentifierRateLimited,

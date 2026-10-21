@@ -1,6 +1,6 @@
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { settleProductionOrders } from "@/lib/services/production-schedule";
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { assertAdminRoleGate, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";

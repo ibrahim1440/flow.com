@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 
 /**
  * A refusal of the users, roles & permissions area: a stable code and the Arabic and English text

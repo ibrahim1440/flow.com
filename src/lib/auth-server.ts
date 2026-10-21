@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { withArabicError } from "@/lib/i18n/api-errors";
 import { credentialVersion } from "./credential-version";
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { verifyToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, canEdit, hasSubPrivilege, type UserPayload, type Permissions } from "./auth";
 import { prisma } from "./db";
 import { checkSession, revokeSession, freshEnough, REAUTH_AR, REAUTH_EN, type SessionMethod } from "./auth/session";

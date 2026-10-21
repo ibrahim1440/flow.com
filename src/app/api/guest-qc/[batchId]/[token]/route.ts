@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { handleDomainError } from "@/lib/api-error";
 import { cleanGuestName, sameGuestName } from "@/lib/services/qc-invite";

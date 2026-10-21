@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { cookies } from "next/headers";
 import { getUser, getUserWithPermissions } from "@/lib/auth-server";
 import { revokeSession } from "@/lib/auth/session";

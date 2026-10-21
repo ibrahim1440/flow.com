@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { adminRoleGate, assertAdminRoleGate, requireAnyModule, requireSub } from "@/lib/auth-server";

@@ -318,7 +318,9 @@ export default function CustomersPage() {
   ) : null;
 
   const searchBox = (
-    <label className="search" style={phone ? { flex: 1, height: 40 } : { width: 280 }}>
+    // minWidth 0 on the phone: a flex item does not shrink below its content by default, so at 320 px
+    // the search box kept the input's intrinsic width and pushed «+ عميل» off the screen (QA pass).
+    <label className="search" style={phone ? { flex: 1, minWidth: 0, height: 40 } : { width: 280 }}>
       <Ico name="search" small />
       <input value={search} onChange={(e) => setSearch(e.target.value)} data-testid="customer-search"
         placeholder={phone ? L("الاسم أو الهاتف", "Name or phone") : L("الاسم أو الهاتف أو البريد", "Name, phone or email")}

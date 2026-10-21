@@ -14,7 +14,7 @@
 //   · the last active administrator stays an active administrator (UR-S09);
 //   · the custom role an account follows (Employee.accessRoleId), and an optional hook that runs in
 //     the same transaction after the update (the screens record the exceptions behind the change).
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { hash } from "bcryptjs";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";

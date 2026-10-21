@@ -2,7 +2,7 @@
  * Server-side authorization for the print subsystem (B-9). Every print API calls one of these
  * before it reads any data; a hidden button is never the security.
  */
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth, forbidden, adminRoleGate } from "@/lib/auth-server";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth";
 import type { TemplateKey } from "../templates";

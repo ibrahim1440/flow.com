@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requirePrint } from "@/lib/print/server/auth";
 import { PrintRefusal, relatedRecords } from "@/lib/print/server/data";
 

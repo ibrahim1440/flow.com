@@ -10,7 +10,7 @@
 //   · counts the refusal toward the throttle and audits it (route and outcome only, never the PIN);
 //   · derives the bcrypt verifier BEFORE the uniqueness lookup, so a taken and a free PIN cost
 //     the same time (the lookup itself is one indexed equality on the keyed selector).
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { extractIp, hashRateLimitKey, isIdentifierRateLimited, isIpRateLimited, isPinSpaceConstrained, pruneExpired, recordPinFailure } from "@/lib/rate-limit";
 

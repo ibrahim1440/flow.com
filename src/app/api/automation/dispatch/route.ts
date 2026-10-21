@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { timingSafeEqual } from "node:crypto";
 import { requireSub } from "@/lib/auth-server";
 import { runAutomationDispatch } from "@/lib/automation/dispatcher";

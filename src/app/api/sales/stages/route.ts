@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
   try {
     const rows = await prisma.pipelineStage.findMany({
       where: includeInactive ? {} : { isActive: true },
-      orderBy: { position: "asc" },
+      orderBy: [{ position: "asc" }, { code: "asc" }],
       select: {
         id: true, code: true, nameEn: true, nameAr: true, position: true,
         probability: true, isActive: true, purpose: true,
@@ -234,7 +234,7 @@ export async function PATCH(request: Request) {
     ]);
 
     const stages = await prisma.pipelineStage.findMany({
-      orderBy: { position: "asc" },
+      orderBy: [{ position: "asc" }, { code: "asc" }],
       select: {
         id: true, code: true, nameEn: true, nameAr: true, position: true,
         probability: true, isActive: true, purpose: true,

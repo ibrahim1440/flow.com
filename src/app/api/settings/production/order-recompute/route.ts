@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { forbidden, requireAdminAction, requireAuth } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";

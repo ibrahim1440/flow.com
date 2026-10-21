@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";

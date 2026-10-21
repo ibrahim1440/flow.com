@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAuth } from "@/lib/auth-server";
 import { confirmEnrollment, MfaError } from "@/lib/auth/mfa";

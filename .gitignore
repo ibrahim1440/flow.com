@@ -60,6 +60,8 @@ next-env.d.ts
 # Domain-only compile output for the pure-arithmetic test suites (see tsconfig.test-domain.json)
 .test-build/
 tests/harness/app.css
+# The CSS the screens import (components/d21, quotes.css, …), emitted by esbuild beside bundle.js.
+tests/harness/bundle.css
 tests/harness/bundle.js
 tests/harness/_tw.css
 test-results/

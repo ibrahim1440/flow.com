@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
@@ -54,7 +54,7 @@ export async function POST(request: Request, { params }: Params) {
     const stageId = typeof b.stageId === "string" ? b.stageId : null;
     const stage = stageId
       ? await prisma.pipelineStage.findFirst({ where: { id: stageId, isActive: true }, select: { id: true } })
-      : await prisma.pipelineStage.findFirst({ where: { isActive: true }, orderBy: { position: "asc" }, select: { id: true } });
+      : await prisma.pipelineStage.findFirst({ where: { isActive: true }, orderBy: [{ position: "asc" }, { code: "asc" }], select: { id: true } });
     if (!stage) {
       return NextResponse.json(
         { error: "No active pipeline stage is configured. Configure the pipeline first." },

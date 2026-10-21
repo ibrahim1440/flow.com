@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireAuth, requireModule } from "@/lib/auth-server";
 import { canEdit } from "@/lib/auth";

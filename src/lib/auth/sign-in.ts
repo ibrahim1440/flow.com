@@ -1,6 +1,6 @@
 // Shared by the sign-in, second-factor and step-up routes: the audit row of an authentication
 // event, the short-lived second-factor challenge, and completing a sign-in into a session.
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "@/lib/db";
 import { parsePermissions, buildDefaultPermissions, hasModuleAccess, ALL_MODULES } from "@/lib/auth";

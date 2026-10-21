@@ -2,7 +2,7 @@
 // the integration tests). Every HR route goes through `hrHandler`: authenticate, require the
 // hr module (self-service routes require only a login), run, map errors. The duty check
 // itself lives in the service — hiding a button is never the control.
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { assertVerifiedActor } from "./identity";
 import { isPrivileged } from "@/lib/auth/privileged";
 import { hasModuleAccess } from "@/lib/auth-shared";

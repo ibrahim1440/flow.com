@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAnySub, requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { createCountSession, getCountSession, listCountSessions } from "@/lib/services/inventory-counts";

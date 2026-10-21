@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
 import { extractIp } from "@/lib/rate-limit";

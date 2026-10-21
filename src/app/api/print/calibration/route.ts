@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { printCertificationGate, requirePrintRead } from "@/lib/print/server/auth";
 
 export const dynamic = "force-dynamic";

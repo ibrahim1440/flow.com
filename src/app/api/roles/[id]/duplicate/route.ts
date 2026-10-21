@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth, requireAdminAction } from "@/lib/auth-server";
 import { createRole, freeCopyName, getRole } from "@/lib/users/roles";
 import { auditContext } from "@/lib/users/account-update";

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth, requireModule, requireAdminAction } from "@/lib/auth-server";
 import { getRole, updateRole } from "@/lib/users/roles";
 import { usersCaps } from "@/lib/users/server";

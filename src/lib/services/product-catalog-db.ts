@@ -1,7 +1,7 @@
 // Product catalog — the writes that touch several rows at once (one transaction each).
 // Validation lives in ./product-catalog (database-free, unit-tested); this file only checks the
 // references the database holds and writes.
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { handlePrismaError } from "@/lib/api-error";
 import type { Prisma } from "@/generated/prisma/client";

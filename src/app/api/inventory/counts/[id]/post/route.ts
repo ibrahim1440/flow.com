@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAuth, stockChangeGate } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { normalizeAdjustmentReason } from "@/lib/services/inventory-adjustment";

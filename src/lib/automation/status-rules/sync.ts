@@ -34,7 +34,9 @@ async function collect(tx: Tx, c: Collector): Promise<{ key: string; ar?: string
     );
     return rows.map((r) => ({ key: r.v }));
   }
-  const stages = await tx.pipelineStage.findMany({ orderBy: { position: "asc" }, select: { code: true, nameAr: true, nameEn: true, isActive: true } });
+  // Code breaks a tie of positions: without it two stages sharing a position came back in either
+  // order, and every sync then "renamed" them (their position follows this order).
+  const stages = await tx.pipelineStage.findMany({ orderBy: [{ position: "asc" }, { code: "asc" }], select: { code: true, nameAr: true, nameEn: true, isActive: true } });
   return stages.map((st) => ({ key: st.code, ar: st.nameAr || st.nameEn, en: st.nameEn || st.nameAr, visible: st.isActive }));
 }
 

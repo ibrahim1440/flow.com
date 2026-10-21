@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireAdminAction, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { reverseJournalEntry } from "@/lib/accounting/journal-service";

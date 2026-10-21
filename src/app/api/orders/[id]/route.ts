@@ -1,6 +1,6 @@
 import { withdrawProvisionalPlansInTx } from "@/lib/services/production-schedule";
 import { autoPrepareOrder } from "@/lib/services/orders/preparation";
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";

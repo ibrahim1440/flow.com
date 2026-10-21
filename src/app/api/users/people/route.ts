@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireModule } from "@/lib/auth-server";
 import { isUsersAdmin, linkablePeople } from "@/lib/users/server";
 import { ADMIN_READ_ONLY, noStore, usersErrorResponse } from "@/lib/users/http";

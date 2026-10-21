@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { hash } from "bcryptjs";
 import { verifySecret } from "@/lib/auth/sign-in";
 import { prisma } from "@/lib/db";

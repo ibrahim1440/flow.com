@@ -1,5 +1,5 @@
 // Request helpers shared by the settings-section routes (/api/settings/production, inventory, invoicing).
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { fieldErrorBody, type FieldError } from "./roasters";
 
 /** The JSON object of a request body, or the 400 to return. */

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/lib/api-response";
 import { requireEdit } from "@/lib/auth-server";
 import { parseSelection, selectionWhere, text } from "@/lib/services/product-catalog";
 import { bulkUpdate } from "@/lib/services/product-catalog-db";
