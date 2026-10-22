@@ -37,7 +37,7 @@ const ORDER_STATUS: Record<string, { ar: string; en: string; tone?: string }> = 
   Preparing: { ar: "قيد التجهيز", en: "Preparing", tone: "in" },
   "Ready for Shipping": { ar: "جاهز للشحن", en: "Ready to ship", tone: "in" },
   Completed: { ar: "مكتمل", en: "Completed", tone: "ok" },
-  "On Hold": { ar: "معلّق", en: "On hold", tone: "wa" },
+  "On Hold": { ar: "معلّق مؤقتاً", en: "On hold", tone: "wa" },
   Cancelled: { ar: "ملغى", en: "Cancelled", tone: "x" },
   Rejected: { ar: "مرفوض", en: "Rejected", tone: "er" },
 };

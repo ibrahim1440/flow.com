@@ -29,7 +29,7 @@ type OrdersTab = "all" | "review" | "preparing" | "ready" | "hold" | "done";
 const STAGE_LABEL: Record<PipelineStage, [string, string]> = {
   approval: ["بانتظار الاعتماد", "Awaiting approval"], roasting: ["قيد التحميص", "Roasting"], qc: ["بانتظار الجودة", "Awaiting QC"],
   packing: ["قيد التعبئة", "Packing"], ready: ["جاهز للشحن", "Ready to ship"], delivered: ["سُلّم اليوم", "Delivered today"],
-  hold: ["معلّق", "On hold"],
+  hold: ["معلّق مؤقتاً", "On hold"],
 };
 
 const COMPLETION_STATUSES = new Set(["Passed", "Partially Packaged", "Packaged", "Blended"]);
@@ -117,12 +117,12 @@ function StatusBadge({ status }: { status: string }) {
     "Completed":        "statusCompleted",
     "Delivered":        "statusDelivered",
     "Paid":             "statusPaid",
-    "Pending":          "pending",
+    "Pending":          "statusPendingProduction",
     "Partial Paid":     "statusPartialPaid",
     "In Production":    "statusInProd",
     "Partial Delivered":"statusPartDeliv",
     "Not Paid":         "statusNotPaid",
-    "Not Yet":          "statusNotYet",
+    "Not Yet":          "statusNotDelivered",
   };
   const label = labelMap[status] ? t(labelMap[status]) : status;
   return <span className={`status-badge ${cls}`}>{label}</span>;
@@ -420,7 +420,7 @@ export default function OrdersPage() {
   const inTab = (o: Order, k: OrdersTab) => !TAB_STATUSES[k] || TAB_STATUSES[k]!.includes(o.status);
   const today = riyadhDay(new Date());
   // The card rule of «اليوم» (lib/order-stage, fix/order-progress-ui): held orders only under
-  // «معلّق», completed / cancelled / rejected under no stage, «سُلّم اليوم» without cancelled or
+  // «معلّق مؤقتاً», completed / cancelled / rejected under no stage, «سُلّم اليوم» without cancelled or
   // rejected orders — so every card's count equals the rows this filter lists.
   const inStage = (o: Order, k: PipelineStage) => k === "delivered"
     ? countsAsDelivered(o.status) && o.items.some((i) => i.deliveries.some((d) => { const at = new Date(d.date).getTime(); return at >= today.start.getTime() && at < today.end.getTime(); }))
@@ -491,7 +491,7 @@ export default function OrdersPage() {
               allLabel={t("allStatuses")}
               clearLabel={`${t("clearFilters")}: ${t("opsProductionFilter")}`}
               options={[
-                { value: "Pending", label: t("pending") },
+                { value: "Pending", label: t("statusPendingProduction") },
                 { value: "In Production", label: t("statusInProd") },
                 { value: "Completed", label: t("statusCompleted") },
               ]}

@@ -206,6 +206,9 @@ export const translations = {
   statusPackaged:     { en: "Packed",               ar: "مُعبَّأ" },
   statusBlended:      { en: "Blended",                ar: "مدموج" },
   statusInProd:       { en: "In production",          ar: "قيد الإنتاج" },
+  // fix/status-labels (owner 2026-10-22): the order line PRODUCTION status «Pending». Its own key:
+  // the generic `pending` («معلق») is used elsewhere and read like the order hold status.
+  statusPendingProduction: { en: "Awaiting production", ar: "بانتظار الإنتاج" },
   statusCompleted:    { en: "Completed",              ar: "مكتمل" },
   statusDelivered:    { en: "Delivered",              ar: "تم التسليم" },
 
@@ -214,7 +217,7 @@ export const translations = {
   allBatches:         { en: "All batches",            ar: "جميع الدفعات" },
   awaitingQc:         { en: "awaiting QC",            ar: "في انتظار الجودة" },
   blendBatches:       { en: "Blend batches",          ar: "دمج الدفعات" },
-  noPendingItems:     { en: "No pending items",       ar: "لا توجد طلبات معلقة" },
+  noPendingItems:     { en: "No pending items",       ar: "لا توجد بنود بانتظار الإنتاج" },
   startProduction:    { en: "Start production",       ar: "بدء الإنتاج" },
   continueProd:       { en: "Continue",               ar: "متابعة" },
   producedKg:         { en: "kg produced",            ar: "كغ منتج" },
@@ -359,7 +362,7 @@ export const translations = {
   orderStatusWaitingPrepReview: { en: "Waiting preparation review",   ar: "بانتظار مراجعة التجهيز" },
   orderStatusPreparing:         { en: "Preparing",                    ar: "قيد التجهيز" },
   orderStatusReadyForShipping:  { en: "Ready for Shipping",           ar: "جاهز للشحن" },
-  orderStatusOnHold:            { en: "On hold",                      ar: "معلّق" },
+  orderStatusOnHold:            { en: "On hold",                      ar: "معلّق مؤقتاً" },
   orderStatusCancelled:         { en: "Cancelled",                    ar: "ملغى" },
   orderStatusRejected:          { en: "Rejected",                     ar: "مرفوض" },
 
@@ -509,7 +512,7 @@ export const translations = {
   summaryCreatedToday:         { en: "Created today",                ar: "أُنشئت اليوم" },
   summaryPreparing:            { en: "Preparing",                    ar: "قيد التجهيز" },
   summaryReadyForShipping:     { en: "Ready for Shipping",           ar: "جاهز للشحن" },
-  summaryOnHold:               { en: "On hold",                      ar: "معلّق" },
+  summaryOnHold:               { en: "On hold",                      ar: "معلّق مؤقتاً" },
   summaryCompletedToday:       { en: "Completed today",              ar: "أُكمل اليوم" },
 
   // ── Packaging page ────────────────────────────────────────────────────
@@ -602,8 +605,10 @@ export const translations = {
   statusPaid:         { en: "Paid",                  ar: "مدفوع" },
   statusNotPaid:      { en: "Not Paid",              ar: "غير مدفوع" },
   statusPartialPaid:  { en: "Partial Paid",          ar: "مدفوع جزئياً" },
-  statusPartDeliv:    { en: "Partial Delivered",     ar: "تسليم جزئي" },
-  statusNotYet:       { en: "Not Yet",               ar: "لم يبدأ" },
+  // fix/status-labels (owner 2026-10-22): the order line DELIVERY status. «Not Yet» has its own
+  // key so the Arabic says what has not happened yet (it read «لم يبدأ»).
+  statusPartDeliv:    { en: "Partial Delivered",     ar: "سُلِّم جزئياً" },
+  statusNotDelivered: { en: "Not delivered",         ar: "لم يُسلّم" },
 
   // ── Dashboard page ───────────────────────────────────────────────────────
   noDashboardAccess:  { en: "No dashboard access",  ar: "لا يوجد وصول للوحة التحكم" },

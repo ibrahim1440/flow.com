@@ -36,7 +36,7 @@ const TX = {
   ar: {
     title: "اليوم", updated: "آخر تحديث", newOrder: "طلب جديد",
     roasted: "مُحمّص اليوم", kg: "كغ", loss: "الفاقد",
-    pipeline: "مسار الطلبات", open: "مفتوحًا", onHold: "معلّق",
+    pipeline: "مسار الطلبات", open: "مفتوحًا", onHold: "معلّق مؤقتاً",
     stApproval: "بانتظار الاعتماد", stRoasting: "قيد التحميص", stQc: "بانتظار الجودة", stPacking: "قيد التعبئة", stReady: "جاهز للشحن", stDelivered: "سُلّم اليوم",
     longest: "أطول انتظار",
     action: "تحتاج إجراء", oldest: "الأقدم أولًا", allOrders: "كل الطلبات",
@@ -48,7 +48,7 @@ const TX = {
     noGreen: "لا يوجد بن أخضر نشط استُهلك في آخر 28 يومًا.",
     loadFailed: "تعذّر تحميل لوحة اليوم.",
     stagesLabel: "مراحل الطلبات", seeAll: "عرض الكل في الطلبات", overdue: "تجاوز موعد الجودة",
-    stageEmpty: "لا توجد طلبات في هذه المرحلة الآن.", stageEmptyDelivered: "لم يُسلَّم أي طلب اليوم.", stageEmptyHold: "لا توجد طلبات معلّقة.", stHold: "معلّق",
+    stageEmpty: "لا توجد طلبات في هذه المرحلة الآن.", stageEmptyDelivered: "لم يُسلَّم أي طلب اليوم.", stageEmptyHold: "لا توجد طلبات معلّقة مؤقتاً.", stHold: "معلّق مؤقتاً",
     shownOf: (n: number, total: number) => `أقدم ${n} من ${total}`,
   },
   en: {
@@ -151,7 +151,7 @@ export default function DashboardPage() {
 
   const p = data.pipeline;
   // Each card's number is the total of the list it opens (GET /api/dashboard/today `stages`, the
-  // shared card rule of lib/order-stage): held orders only in «معلّق», cancelled and rejected
+  // shared card rule of lib/order-stage): held orders only in «معلّق مؤقتاً», cancelled and rejected
   // orders in no card — so a card and the Orders page's `?stage=` list always agree.
   const n = (k: PipelineStage) => data.stages.byStage[k]?.total ?? 0;
   const stages: { key: PipelineStage; n: number; label: string; warn?: boolean; sub?: string }[] = [

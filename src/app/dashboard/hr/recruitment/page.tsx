@@ -29,7 +29,7 @@ type Opening = {
 };
 type View = "applicants" | "openings" | "interviews";
 
-const OPENING_STATUS: Record<string, StatusEntry> = { OPEN: ["مفتوحة", "success", "Open"], ON_HOLD: ["معلّقة", "warning", "On hold"], CLOSED: ["مغلقة", "cancelled", "Closed"] };
+const OPENING_STATUS: Record<string, StatusEntry> = { OPEN: ["مفتوحة", "success", "Open"], ON_HOLD: ["معلّقة مؤقتاً", "warning", "On hold"], CLOSED: ["مغلقة", "cancelled", "Closed"] };
 const OFFER_STATUS: Record<string, StatusEntry> = { DRAFT: ["مسودة", "neutral", "Draft"], SENT: ["عرض مُرسل", "warning", "Offer sent"], ACCEPTED: ["عرض مقبول", "success", "Offer accepted"], DECLINED: ["عرض مرفوض", "danger", "Offer declined"], WITHDRAWN: ["عرض مسحوب", "cancelled", "Offer withdrawn"] };
 const OUTCOME: Record<string, StatusEntry> = { PENDING: ["لم تُعقد", "neutral", "Not held"], PASS: ["مناسب", "success", "Suitable"], FAIL: ["غير مناسب", "danger", "Not suitable"], NO_SHOW: ["لم يحضر", "cancelled", "No-show"] };
 const NEXT_LABEL: Record<string, [string, string, string]> = { APPLIED: ["SCREENING", "نقل إلى الفرز", "Move to screening"], SCREENING: ["INTERVIEW", "نقل إلى المقابلة", "Move to interview"], INTERVIEW: ["OFFER", "نقل إلى العرض", "Move to offer"] };

@@ -5,7 +5,7 @@
  *
  * It also holds the ONE display rule for where an order stands (fix/order-progress-ui, owner
  * 2026-10-22): the order's STATUS takes precedence over its production stage — an order on hold
- * reads «معلّق», a cancelled / rejected one «ملغى» / «مرفوض», a completed one «مكتمل», and only
+ * reads «معلّق مؤقتاً», a cancelled / rejected one «ملغى» / «مرفوض», a completed one «مكتمل», and only
  * otherwise the production stage («بانتظار التحميص» …). Derived on every render, never stored, so
  * resuming an order brings its stage label back by itself.
  */
@@ -13,7 +13,7 @@ import type { TranslationKey } from "@/lib/i18n/translations";
 
 export type Stage = "approval" | "roasting" | "qc" | "packing" | "ready";
 /**
- * The cards of the row: the five open stages, «سُلّم اليوم», and «معلّق» (held orders are counted
+ * The cards of the row: the five open stages, «سُلّم اليوم», and «معلّق مؤقتاً» (held orders are counted
  * in no production stage; they have their own card).
  */
 export type PipelineStage = Stage | "delivered" | "hold";
@@ -53,7 +53,7 @@ export function stageOf(o: StageOrder): Stage | "hold" {
 }
 
 /**
- * The card an order is counted in, or null when it is in none: held orders in «معلّق», completed,
+ * The card an order is counted in, or null when it is in none: held orders in «معلّق مؤقتاً», completed,
  * cancelled and rejected orders nowhere, every other order in its production stage. «سُلّم اليوم»
  * is by delivery date, see `countsAsDelivered`.
  */

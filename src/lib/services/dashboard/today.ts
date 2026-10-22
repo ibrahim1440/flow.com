@@ -115,7 +115,7 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
   let onHold = 0;
   let qcOldest: Date | null = null;
   let qcOverdue = false;
-  // The shared card rule (lib/order-stage stageCardOf): held orders only in «معلّق»; the query
+  // The shared card rule (lib/order-stage stageCardOf): held orders only in «معلّق مؤقتاً»; the query
   // already leaves completed, cancelled and rejected orders out, and the rule would too.
   const staged = openOrders.flatMap((o) => { const stage = stageCardOf(o); return stage ? [{ o, stage }] : []; });
   for (const { o, stage } of staged) {
@@ -157,7 +157,7 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
 
   // ── What each pipeline card holds (oldest first; delivered: today's kilograms per order) ──
   type Item = { id: string; orderNumber: number; status: string; createdAt: Date; customer: { name: string; nameAr: string | null }; kg: number; stage: Stage | "hold" | "delivered" };
-  // fix/order-progress-ui: «معلّق» is a card of its own; «سُلّم اليوم» leaves out an order that
+  // fix/order-progress-ui: «معلّق مؤقتاً» is a card of its own; «سُلّم اليوم» leaves out an order that
   // was cancelled or rejected since (countsAsDelivered) — the same rule as the Orders `?stage=`.
   const lists: Record<PipelineStage, Item[]> = { approval: [], roasting: [], qc: [], packing: [], ready: [], delivered: [], hold: [] };
   for (const { o, stage } of staged) lists[stage].push({ ...o, kg: kgOf(o), stage });

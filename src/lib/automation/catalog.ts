@@ -62,7 +62,7 @@ export const ORDER_STATUS_OPTIONS: EnumOption[] = [
   { value: "Preparing", ar: "قيد التجهيز", en: "Preparing" },
   { value: "Ready for Shipping", ar: "جاهز للشحن", en: "Ready for Shipping" },
   { value: "Completed", ar: "مكتمل", en: "Completed" },
-  { value: "On Hold", ar: "معلّق", en: "On Hold" },
+  { value: "On Hold", ar: "معلّق مؤقتاً", en: "On Hold" },
   { value: "Cancelled", ar: "ملغى", en: "Cancelled" },
   { value: "Rejected", ar: "مرفوض", en: "Rejected" },
 ];
@@ -165,7 +165,7 @@ export const EVENTS: EventDef[] = [
     ar: "تغيرت حالة الطلب",
     en: "Order status changed",
     description: {
-      ar: "عند انتقال الطلب لحالة جديدة: قيد التجهيز، جاهز للشحن، معلق، ملغى، مكتمل... استعمل الشرط لتحديد الحالة.",
+      ar: "عند انتقال الطلب لحالة جديدة: قيد التجهيز، جاهز للشحن، معلّق مؤقتاً، ملغى، مكتمل... استعمل الشرط لتحديد الحالة.",
       en: "When an order moves to a new status. Use a condition to pick which status.",
     },
     variables: [

@@ -477,7 +477,7 @@ export default function ProductionPage() {
           </>
         ) : null}
       >
-        <span><span className="hr-num">{pendingItems.length}</span> {t("pending")} · <span className="hr-num">{pendingQcBatches.length}</span> {t("awaitingQc")}</span>
+        <span><span className="hr-num">{pendingItems.length}</span> {t("statusPendingProduction")} · <span className="hr-num">{pendingQcBatches.length}</span> {t("awaitingQc")}</span>
       </PageHeader>
 
       {error && <OpsBanner tone="danger" onClose={() => setError("")}>{error}</OpsBanner>}
