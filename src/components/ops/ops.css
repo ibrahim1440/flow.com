@@ -178,7 +178,7 @@
 .ops-steps li.is-done::after { background: var(--action-primary); box-shadow: none; }
 .ops-steps li[aria-current="step"] { color: var(--text-primary); font-weight: 600; }
 /* Stage mapping shared by every stage track (owner, 20 Oct 2026): done = olive action, current =
-   the Clay signature, pending = neutral. Same in .ops-stages and the order pipeline bar (.ops-pipe). */
+   the Clay signature, pending = neutral. Same in .ops-stages. */
 .ops-steps li[aria-current="step"]::after { box-shadow: inset 0 0 0 2px var(--brand-signature), 0 0 0 3px color-mix(in srgb, var(--brand-signature) 14%, var(--surface)); }
 .ops-steps li.is-paused::after { box-shadow: inset 0 0 0 2px var(--status-warning); }
 .ops-steps li.is-negative::after { box-shadow: inset 0 0 0 2px var(--status-danger); }
@@ -713,22 +713,21 @@
 .ops-dcta { min-height: 48px; width: 100%; justify-content: center; }
 .ops-dispatch .ops-pane-close { min-width: 44px; min-height: 44px; }
 
-/* Phase B — the orders board's pipeline bar (prototype «الطلبات»): roast · QC · pack · delivery. */
-.ops-pipe { display: inline-grid; gap: 4px; min-width: 150px; max-width: 260px; }
-.ops-pipe-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-.ops-pipe-label.tone-ok { color: var(--status-success); }
-.ops-pipe-label.tone-info { color: var(--status-info); }
-.ops-pipe-label.tone-warn { color: var(--status-warning); }
-.ops-pipe-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
-/* The order pipeline bar (roast · QC · pack · deliver): done = olive action (as the order stepper and
-   the production-order tracker), the step the order is at = Clay signature, still ahead = neutral
-   surface-selected with a hairline so the empty track stays visible on white. */
-.ops-pipe-bar > i { height: 6px; border-radius: 3px; background: var(--surface-selected); box-shadow: inset 0 0 0 1px var(--border-subtle); }
-.ops-pipe-bar > i.is-done { background: var(--action-primary); box-shadow: none; }
-.ops-pipe-bar > i.is-now { background: var(--brand-signature); box-shadow: none; }
-.ops-pipe-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; font-size: 11px; color: var(--text-muted); }
-.ops-pipe.is-compact { min-width: 120px; }
-.ops-pipe.is-compact .ops-pipe-label { font-size: 12px; font-weight: 500; }
+/* fix/order-progress-ui (owner, 2026-10-22): the four-segment pipeline bar is gone. Where an order
+   stands is one text status (lib/order-stage): a chip on the board and on each «بنود الطلب» line,
+   and one line under the stepper's current step in the pane. Hold = warning, cancelled / rejected
+   = danger muted. */
+.ops-dtag.tone-warn { background: var(--status-warning-tint); color: var(--status-warning); }
+.ops-dtag.is-muted { background: var(--surface-selected); }
+.ops-dline .ops-dtag { flex: none; }
+.ops-stepwrap { display: grid; grid-template-columns: repeat(4, 1fr); row-gap: 4px; }
+.ops-stepwrap > .ops-steps { grid-column: 1 / -1; }
+.ops-steps-where { margin: 0; font: 500 12.5px/18px var(--f-ui); color: var(--text-secondary); text-align: start; }
+.ops-steps-where.tone-info { color: var(--status-info); }
+.ops-steps-where.tone-ok { color: var(--status-success); }
+.ops-steps-where.tone-warn { color: var(--status-warning); }
+.ops-steps-where.tone-danger { color: var(--status-danger); }
+.ops-steps-where.is-muted { opacity: 0.8; }
 .ops-dtag.tone-danger { background: var(--status-danger-tint, var(--surface-selected)); color: var(--status-danger); }
 /* A tag holding words and numbers side by side (the roast queue's «طلب #111», «أخضر 38.8 كغ متاح»):
    a flex container drops the spaces between them, so they get a gap instead. */

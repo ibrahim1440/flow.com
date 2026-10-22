@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { riyadhDay, stageOf, TERMINAL_ORDER_STATUSES, type PipelineStage, type Stage } from "@/lib/order-stage";
+import { countsAsDelivered, riyadhDay, stageCardOf, stageOf, TERMINAL_ORDER_STATUSES, type PipelineStage, type Stage } from "@/lib/order-stage";
 
 /**
  * «اليوم» — the operations dashboard (Figma Direction 2.1, `20:236` / `24:842` / `34:1405`).
@@ -115,7 +115,9 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
   let onHold = 0;
   let qcOldest: Date | null = null;
   let qcOverdue = false;
-  const staged = openOrders.map((o) => ({ o, stage: stageOf(o) }));
+  // The shared card rule (lib/order-stage stageCardOf): held orders only in «معلّق»; the query
+  // already leaves completed, cancelled and rejected orders out, and the rule would too.
+  const staged = openOrders.flatMap((o) => { const stage = stageCardOf(o); return stage ? [{ o, stage }] : []; });
   for (const { o, stage } of staged) {
     if (stage === "hold") { onHold++; continue; }
     counts[stage]++;
@@ -155,11 +157,14 @@ export async function loadToday(now = new Date(), opts: { customerDetail: boolea
 
   // ── What each pipeline card holds (oldest first; delivered: today's kilograms per order) ──
   type Item = { id: string; orderNumber: number; status: string; createdAt: Date; customer: { name: string; nameAr: string | null }; kg: number; stage: Stage | "hold" | "delivered" };
-  const lists: Record<PipelineStage, Item[]> = { approval: [], roasting: [], qc: [], packing: [], ready: [], delivered: [] };
-  for (const { o, stage } of staged) if (stage !== "hold") lists[stage].push({ ...o, kg: kgOf(o), stage });
+  // fix/order-progress-ui: «معلّق» is a card of its own; «سُلّم اليوم» leaves out an order that
+  // was cancelled or rejected since (countsAsDelivered) — the same rule as the Orders `?stage=`.
+  const lists: Record<PipelineStage, Item[]> = { approval: [], roasting: [], qc: [], packing: [], ready: [], delivered: [], hold: [] };
+  for (const { o, stage } of staged) lists[stage].push({ ...o, kg: kgOf(o), stage });
   const deliveredBy = new Map<string, Item>();
   for (const d of deliveries) {
     const o = d.orderItem.order;
+    if (!countsAsDelivered(o.status)) continue;
     const it = deliveredBy.get(o.id) ?? { id: o.id, orderNumber: o.orderNumber, status: o.status, createdAt: o.createdAt, customer: o.customer, kg: 0, stage: "delivered" as const };
     it.kg += d.quantityKg;
     deliveredBy.set(o.id, it);

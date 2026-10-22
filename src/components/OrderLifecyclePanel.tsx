@@ -215,15 +215,23 @@ export function OrderProgressStepper({
   status,
   approvalStatus,
   items,
+  where,
 }: {
   status: string;
   approvalStatus?: string;
   items: { preparationDecision: string | null }[];
+  /**
+   * fix/order-progress-ui (owner, 2026-10-22): the stepper is the pane's ONE progress indicator.
+   * Under its current step, one small line says where the order is («التجهيز · بانتظار التعبئة»),
+   * from the shared status-precedence rule (lib/order-stage orderProgress) — the caller passes it.
+   */
+  where?: { text: string; tone: "warn" | "danger" | "ok" | "info"; muted?: boolean } | null;
 }) {
   const { t } = useI18n();
   const { states, negativeKind } = computeProgressStages({ status, approvalStatus, items });
+  const current = states.findIndex((st) => st === "active" || st === "paused" || st === "negative");
 
-  return (
+  const steps = (
     <ol className="ops-steps" aria-label={t("stepperLabel")}>
       {STEPPER_STAGES.map((stage, i) => {
         const state = states[i];
@@ -240,6 +248,15 @@ export function OrderProgressStepper({
         );
       })}
     </ol>
+  );
+  if (!where || current < 0) return steps;
+  return (
+    <div className="ops-stepwrap" data-testid="order-progress">
+      {steps}
+      <p className={`ops-steps-where tone-${where.tone}${where.muted ? " is-muted" : ""}`} style={{ gridColumn: `${current + 1} / -1` }} data-testid="order-progress-where">
+        {t(STAGE_LABEL_KEY[STEPPER_STAGES[current]])} · {where.text}
+      </p>
+    </div>
   );
 }
 

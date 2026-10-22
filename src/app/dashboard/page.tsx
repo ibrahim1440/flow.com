@@ -48,7 +48,7 @@ const TX = {
     noGreen: "لا يوجد بن أخضر نشط استُهلك في آخر 28 يومًا.",
     loadFailed: "تعذّر تحميل لوحة اليوم.",
     stagesLabel: "مراحل الطلبات", seeAll: "عرض الكل في الطلبات", overdue: "تجاوز موعد الجودة",
-    stageEmpty: "لا توجد طلبات في هذه المرحلة الآن.", stageEmptyDelivered: "لم يُسلَّم أي طلب اليوم.",
+    stageEmpty: "لا توجد طلبات في هذه المرحلة الآن.", stageEmptyDelivered: "لم يُسلَّم أي طلب اليوم.", stageEmptyHold: "لا توجد طلبات معلّقة.", stHold: "معلّق",
     shownOf: (n: number, total: number) => `أقدم ${n} من ${total}`,
   },
   en: {
@@ -66,7 +66,7 @@ const TX = {
     noGreen: "No active green coffee was used in the last 28 days.",
     loadFailed: "Could not load today's dashboard.",
     stagesLabel: "Order stages", seeAll: "See all in Orders", overdue: "past its QC deadline",
-    stageEmpty: "No orders are in this stage right now.", stageEmptyDelivered: "No order was delivered today.",
+    stageEmpty: "No orders are in this stage right now.", stageEmptyDelivered: "No order was delivered today.", stageEmptyHold: "No order is on hold.", stHold: "On hold",
     shownOf: (n: number, total: number) => `Oldest ${n} of ${total}`,
   },
 } as const;
@@ -150,13 +150,18 @@ export default function DashboardPage() {
   }
 
   const p = data.pipeline;
+  // Each card's number is the total of the list it opens (GET /api/dashboard/today `stages`, the
+  // shared card rule of lib/order-stage): held orders only in «معلّق», cancelled and rejected
+  // orders in no card — so a card and the Orders page's `?stage=` list always agree.
+  const n = (k: PipelineStage) => data.stages.byStage[k]?.total ?? 0;
   const stages: { key: PipelineStage; n: number; label: string; warn?: boolean; sub?: string }[] = [
-    { key: "approval", n: p.approval, label: t.stApproval },
-    { key: "roasting", n: p.roasting, label: t.stRoasting },
-    { key: "qc", n: p.qc, label: t.stQc, warn: p.qcOverdue, sub: p.qcLongestHours !== null ? `${t.longest} ${countNoun(p.qcLongestHours, lang, HOUR_FORMS)}` : undefined },
-    { key: "packing", n: p.packing, label: t.stPacking },
-    { key: "ready", n: p.ready, label: t.stReady },
-    { key: "delivered", n: p.deliveredToday, label: t.stDelivered },
+    { key: "approval", n: n("approval"), label: t.stApproval },
+    { key: "roasting", n: n("roasting"), label: t.stRoasting },
+    { key: "qc", n: n("qc"), label: t.stQc, warn: p.qcOverdue, sub: p.qcLongestHours !== null ? `${t.longest} ${countNoun(p.qcLongestHours, lang, HOUR_FORMS)}` : undefined },
+    { key: "packing", n: n("packing"), label: t.stPacking },
+    { key: "ready", n: n("ready"), label: t.stReady },
+    { key: "delivered", n: n("delivered"), label: t.stDelivered },
+    { key: "hold", n: n("hold"), label: t.stHold },
   ];
   // The selected card (owner, 20 Oct 2026): `?stage=` when the address names one, otherwise the
   // first stage that has orders. A card with nothing in it stays selectable (its empty state).
@@ -223,7 +228,7 @@ export default function DashboardPage() {
             <p data-testid="stage-panel-count">{box.total > box.rows.length && data.stages.detail ? t.shownOf(box.rows.length, box.total) : countNoun(box.total, lang, ORDER_FORMS)}</p>
             {can("/dashboard/orders") ? <Link href={`/dashboard/orders?stage=${stage}`} className="dh-lk" data-testid="stage-see-all">{t.seeAll}<Ico name="chev" small /></Link> : null}
           </div>
-          {box.rows.length === 0 ? <p className="dh-empty" data-testid="stage-empty">{stage === "delivered" ? t.stageEmptyDelivered : t.stageEmpty}</p> : data.stages.detail ? (
+          {box.rows.length === 0 ? <p className="dh-empty" data-testid="stage-empty">{stage === "delivered" ? t.stageEmptyDelivered : stage === "hold" ? t.stageEmptyHold : t.stageEmpty}</p> : data.stages.detail ? (
             <>
               <table className="dh-table" data-detail="customer">
                 <thead>

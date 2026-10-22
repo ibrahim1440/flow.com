@@ -4,7 +4,7 @@ import { useCreateRequest } from "@/components/shell/page-context";
 
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { isPipelineStage, riyadhDay, stageOf, TERMINAL_ORDER_STATUSES, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
+import { countsAsDelivered, isPipelineStage, orderProgress, progressText, riyadhDay, stageCardOf, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
 import { Plus, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
 import { useUser } from "../user-context";
 import { hasSubPrivilege, hasModuleAccess, canEdit } from "@/lib/auth-shared";
@@ -17,7 +17,7 @@ import {
   OrderStatusBadge, NeedsAttentionBadge, OwnerControl, ActivityTimeline, AddNoteForm, canAddOrderNote,
   StatusActionsBar, OrderProgressStepper, type LifecycleActivity,
 } from "@/components/OrderLifecyclePanel";
-import { LinePreparation, PipelineBar, type PipelineInfo } from "./_parts/board";
+import { OrderLines, ProgressChip, type PipelineInfo } from "./_parts/board";
 import { Btn, FilterChip, KV, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, Tabs, kg, rowOpen, Kg, opsDate } from "@/components/ops/ui";
 
 /** The statuses a structural edit is accepted from (mirrors services/order-edit.ts, server-only). */
@@ -29,6 +29,7 @@ type OrdersTab = "all" | "review" | "preparing" | "ready" | "hold" | "done";
 const STAGE_LABEL: Record<PipelineStage, [string, string]> = {
   approval: ["بانتظار الاعتماد", "Awaiting approval"], roasting: ["قيد التحميص", "Roasting"], qc: ["بانتظار الجودة", "Awaiting QC"],
   packing: ["قيد التعبئة", "Packing"], ready: ["جاهز للشحن", "Ready to ship"], delivered: ["سُلّم اليوم", "Delivered today"],
+  hold: ["معلّق", "On hold"],
 };
 
 const COMPLETION_STATUSES = new Set(["Passed", "Partially Packaged", "Packaged", "Blended"]);
@@ -138,8 +139,6 @@ export default function OrdersPage() {
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
   const canAddCustomer = canEdit(user?.permissions ?? {}, "customers");
-  // Phase B: blocking a line is the one manual preparation decision left (supervisors).
-  const canPrepare = hasSubPrivilege(user?.permissions ?? {}, "orders", "prepare_review");
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [beans, setBeans] = useState<GreenBean[]>([]);
@@ -420,9 +419,12 @@ export default function OrdersPage() {
   };
   const inTab = (o: Order, k: OrdersTab) => !TAB_STATUSES[k] || TAB_STATUSES[k]!.includes(o.status);
   const today = riyadhDay(new Date());
+  // The card rule of «اليوم» (lib/order-stage, fix/order-progress-ui): held orders only under
+  // «معلّق», completed / cancelled / rejected under no stage, «سُلّم اليوم» without cancelled or
+  // rejected orders — so every card's count equals the rows this filter lists.
   const inStage = (o: Order, k: PipelineStage) => k === "delivered"
-    ? o.items.some((i) => i.deliveries.some((d) => { const at = new Date(d.date).getTime(); return at >= today.start.getTime() && at < today.end.getTime(); }))
-    : !TERMINAL_ORDER_STATUSES.includes(o.status) && stageOf(o) === k;
+    ? countsAsDelivered(o.status) && o.items.some((i) => i.deliveries.some((d) => { const at = new Date(d.date).getTime(); return at >= today.start.getTime() && at < today.end.getTime(); }))
+    : stageCardOf(o) === k;
   // A stage filter replaces the status tab (the tab strip reads «الكل» while it is on).
   const activeTab: OrdersTab = stageFilter ? "all" : tab;
   const filtered = orders.filter((o) => {
@@ -691,7 +693,7 @@ export default function OrdersPage() {
                       <th className="num">{t("qtyKg")}</th>
                       <th className="hr-hide-preview">{t("opsCreatedCol")}</th>
                       <th>{t("opsPrepCol")}</th>
-                      <th className="hr-hide-preview">{t("ordPipeRoast")} · {t("ordPipeQc")} · {t("ordPipePack")} · {t("ordPipeDeliver")}</th>
+                      <th className="hr-hide-preview">{t("ordStageCol")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -718,7 +720,7 @@ export default function OrdersPage() {
                         <td className="num">{kg(totalKg(order))}</td>
                         <td className="hr-hide-preview">{opsDate(order.createdAt, lang)}</td>
                         <td className="m-end"><OrderStatusBadge status={order.status} /></td>
-                        <td className="hr-hide-preview">{order.pipeline ? <PipelineBar p={order.pipeline} compact testId={`order-pipe-${order.orderNumber}`} /> : <span className="hr-muted">—</span>}</td>
+                        <td className="hr-hide-preview">{(() => { const d = orderProgress(order); return d ? <ProgressChip d={d} testId={`order-stage-${order.orderNumber}`} /> : <span className="hr-muted">—</span>; })()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -749,8 +751,13 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                {order.pipeline ? <PipelineBar p={order.pipeline} testId={`order-pipe-detail-${order.orderNumber}`} /> : null}
-                <OrderProgressStepper status={order.status} approvalStatus={order.approvalStatus} items={order.items} />
+                {/* fix/order-progress-ui: the stepper is the pane's one progress indicator (the
+                    four-segment bar is gone); the line under its current step follows the shared
+                    status-precedence rule (lib/order-stage orderProgress). */}
+                {(() => { const d = orderProgress(order); return (
+                  <OrderProgressStepper status={order.status} approvalStatus={order.approvalStatus} items={order.items}
+                    where={d ? { text: progressText(d, t), tone: d.tone, muted: d.muted } : null} />
+                ); })()}
 
                 <KV rows={[
                   [t("quotationNumber"), order.quotationNumber || <span className="hr-muted">{t("noQuotation")}</span>],
@@ -888,12 +895,13 @@ export default function OrdersPage() {
                   );
                 })()}
 
-                <div className="ops-panel">
-                  <h3>{t("preparationReviewLabel")}</h3>
-                  {/* Phase B: preparation is automatic; a supervisor may only block a line. */}
-                  <LinePreparation orderId={order.id} items={order.items} pipeline={order.pipeline ?? null}
-                    canBlock={canPrepare} open={["Waiting Approval", "Waiting Preparation Review", "Preparing", "Ready for Shipping"].includes(order.status)}
-                    onChanged={loadData} />
+                <div className="ops-panel" data-testid={`order-lines-${order.orderNumber}`}>
+                  <h3>{t("orderLinesLabel")}</h3>
+                  {/* fix/order-progress-ui (owner, 2026-10-22): «مراجعة التجهيز» became «بنود الطلب» —
+                      name, quantity and one text status per line. Blocking a line is intentionally
+                      not offered (see OrderLines in ./_parts/board for the server path kept and how
+                      to re-enable it). */}
+                  <OrderLines orderStatus={order.status} items={order.items} pipeline={order.pipeline ?? null} />
                 </div>
 
                 <StatusActionsBar orderId={order.id} status={order.status} ownerId={order.ownerId} onSuccess={loadData} />
