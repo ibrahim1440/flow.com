@@ -66,6 +66,9 @@
 [data-ops-root] .ss-formacts .ss-cancel { margin-inline-start: auto; }
 [data-ops-root] .ss-fbody { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 12px; padding: 8px 0; }
 [data-ops-root] .ss-fbody.is-one { grid-template-columns: minmax(0, 1fr); }
+/* The phone's two-by-two weights: a label may take two lines (the owner's roaster names), so each
+   label keeps two lines' height and sits on its input — the four inputs stay level. */
+[data-ops-root] .ss-fbody:not(.is-one) > .hr-field > .hr-label { min-height: 36px; display: flex; align-items: flex-end; }
 [data-ops-root] .ss-fbody > .is-wide { grid-column: 1 / -1; }
 [data-ops-root] .ss-form .tl-seg { align-self: flex-start; justify-self: start; }
 @media (max-width: 767px) {
@@ -153,3 +156,5 @@
   [data-ops-root] .tl-note.ss-plain { background: none; padding: 0; font-size: 13px; }
   [data-ops-root] .ss-metrics { grid-template-columns: minmax(0, 1fr); }
 }
+/* RM1 table: the owner's roaster names are longer than the old headings, so these headings wrap. */
+[data-ops-root] .ss-rtable th.ss-thwrap { white-space: normal; height: auto; padding-block: 8px; min-width: 88px; vertical-align: bottom; }

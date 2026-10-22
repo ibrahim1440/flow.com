@@ -54,10 +54,10 @@ function weight(v: unknown): Decimal | null {
 }
 
 const LABEL: Record<string, [string, string]> = {
-  nominalCapacityKg: ["السعة الاسمية", "Nominal capacity"],
-  defaultTargetKg: ["الهدف الافتراضي", "Default target"],
-  minBatchKg: ["الحد الأدنى للدفعة", "Minimum batch"],
-  maxBatchKg: ["الحد الأقصى للدفعة", "Maximum batch"],
+  nominalCapacityKg: ["سعة المحمصة", "Roaster capacity"],
+  defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"],
+  minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"],
+  maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"],
 };
 
 /**
@@ -84,15 +84,15 @@ export function validateRoaster(input: Record<string, unknown>): { ok: true; val
     const d = weight(input[f]);
     const [la, le] = LABEL[f];
     if (!d || !d.greaterThan(0) || d.greaterThan(WEIGHT_MAX) || d.decimalPlaces() > 3) {
-      add({ field: f, ar: `أدخل وزنًا أكبر من صفر وحتى ${WEIGHT_MAX} كغ.`, en: `Enter a weight greater than 0 and up to ${WEIGHT_MAX} kg.`, summaryAr: `${la} غير صالح`, summaryEn: `${le} is not valid` });
+      add({ field: f, ar: `أدخل وزنًا أكبر من صفر وحتى ${WEIGHT_MAX} كغ.`, en: `Enter a weight greater than 0 and up to ${WEIGHT_MAX} kg.`, summaryAr: `${la} غير صالحة`, summaryEn: `${le} is not valid` });
       w[f] = null;
     } else w[f] = d;
   }
   const { nominalCapacityKg: nom, defaultTargetKg: tgt, minBatchKg: min, maxBatchKg: max } = w;
-  if (max && nom && max.greaterThan(nom)) add({ field: "maxBatchKg", ar: `الحد الأقصى أكبر من السعة الاسمية (${kg(nom)} كغ).`, en: `The maximum is above the nominal capacity (${kg(nom)} kg).`, summaryAr: "الحد الأقصى أكبر من السعة الاسمية", summaryEn: "Maximum is above the nominal capacity" });
-  if (tgt && min && tgt.lessThan(min)) add({ field: "defaultTargetKg", ar: `الهدف أقل من الحد الأدنى (${kg(min)} كغ).`, en: `The target is below the minimum (${kg(min)} kg).`, summaryAr: "الهدف الافتراضي أقل من الحد الأدنى", summaryEn: "Default target is below the minimum" });
-  if (tgt && max && tgt.greaterThan(max)) add({ field: "defaultTargetKg", ar: `الهدف أكبر من الحد الأقصى (${kg(max)} كغ).`, en: `The target is above the maximum (${kg(max)} kg).`, summaryAr: "الهدف الافتراضي أكبر من الحد الأقصى", summaryEn: "Default target is above the maximum" });
-  if (min && max && min.greaterThan(max)) add({ field: "minBatchKg", ar: `الحد الأدنى أكبر من الحد الأقصى (${kg(max)} كغ).`, en: `The minimum is above the maximum (${kg(max)} kg).`, summaryAr: "الحد الأدنى أكبر من الحد الأقصى", summaryEn: "Minimum is above the maximum" });
+  if (max && nom && max.greaterThan(nom)) add({ field: "maxBatchKg", ar: `أعلى كمية مسموحة للتحميص أكبر من سعة المحمصة (${kg(nom)} كغ).`, en: `The maximum roast quantity is above the roaster capacity (${kg(nom)} kg).`, summaryAr: "أعلى كمية مسموحة للتحميص أكبر من سعة المحمصة", summaryEn: "Maximum roast quantity is above the roaster capacity" });
+  if (tgt && min && tgt.lessThan(min)) add({ field: "defaultTargetKg", ar: `كمية التحميص الافتراضية أقل من أقل كمية مسموحة للتحميص (${kg(min)} كغ).`, en: `The default roast quantity is below the minimum roast quantity (${kg(min)} kg).`, summaryAr: "كمية التحميص الافتراضية أقل من أقل كمية مسموحة للتحميص", summaryEn: "Default roast quantity is below the minimum roast quantity" });
+  if (tgt && max && tgt.greaterThan(max)) add({ field: "defaultTargetKg", ar: `كمية التحميص الافتراضية أكبر من أعلى كمية مسموحة للتحميص (${kg(max)} كغ).`, en: `The default roast quantity is above the maximum roast quantity (${kg(max)} kg).`, summaryAr: "كمية التحميص الافتراضية أكبر من أعلى كمية مسموحة للتحميص", summaryEn: "Default roast quantity is above the maximum roast quantity" });
+  if (min && max && min.greaterThan(max)) add({ field: "minBatchKg", ar: `أقل كمية مسموحة للتحميص أكبر من أعلى كمية مسموحة للتحميص (${kg(max)} كغ).`, en: `The minimum roast quantity is above the maximum roast quantity (${kg(max)} kg).`, summaryAr: "أقل كمية مسموحة للتحميص أكبر من أعلى كمية مسموحة للتحميص", summaryEn: "Minimum roast quantity is above the maximum roast quantity" });
 
   const cycleRaw = typeof input.cycleMinutes === "string" ? normaliseNumberText(input.cycleMinutes) : input.cycleMinutes;
   const cycle = typeof cycleRaw === "number" ? cycleRaw : typeof cycleRaw === "string" && /^\d+$/.test(cycleRaw) ? Number(cycleRaw) : NaN;

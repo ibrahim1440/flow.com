@@ -21,7 +21,7 @@ export default function RoastersPage() {
   useD21Phone({
     title: L("المحامص", "Roasters"), sub: L("الإعدادات · الإنتاج والتحميص", "Settings · Production & roasting"),
     back: "/dashboard/settings",
-    ...(data?.can.edit ? { action: { href: `${BASE}/roasters/new`, label: L("إضافة محمصة", "Add roaster"), icon: "plus" as const } } : {}),
+    ...(data?.can.edit ? { action: { href: `${BASE}/roasters/new`, label: L("إضافة حمّاصة", "Add roaster"), icon: "plus" as const } } : {}),
   });
 
   const production = data?.roasters.filter((r) => r.type === "PRODUCTION") ?? [];
@@ -40,9 +40,9 @@ export default function RoastersPage() {
           <tr>
             <th>{L("المحمصة", "Roaster")}</th>
             <th>{L("النوع", "Type")}</th>
-            <th className="num">{L("السعة الاسمية", "Nominal")}</th>
-            <th className="num">{L("الهدف", "Target")}</th>
-            <th className="num hr-hide-compact">{L("الحد الأدنى – الأقصى", "Min – max")}</th>
+            <th className="num ss-thwrap">{L("سعة المحمصة", "Roaster capacity")}</th>
+            <th className="num ss-thwrap">{L("كمية التحميص الافتراضية", "Default roast quantity")}</th>
+            <th className="num hr-hide-compact ss-thwrap">{L("أقل – أعلى كمية مسموحة للتحميص", "Min – max roast quantity")}</th>
             <th className="num hr-hide-compact">{L("الدورة", "Cycle")}</th>
             <th className="hr-hide-compact">{L("المشغّل الافتراضي", "Default operator")}</th>
             <th>{L("الحالة", "Status")}</th>
@@ -75,7 +75,7 @@ export default function RoastersPage() {
     </div>
   );
 
-  // Phone (378:2): one row per roaster, «6.00 كغ · الهدف 5.00 · نورة السبيعي», status and «افتراضية».
+  // Phone (378:2): one row per roaster, «6.00 كغ · كمية التحميص الافتراضية 5.00 · نورة السبيعي», status and «افتراضية».
   const list = (rows: Roaster[]) => (
     <ul className="ss-mlist">
       {rows.map((r) => (
@@ -86,7 +86,7 @@ export default function RoastersPage() {
               <StatusText status={r.status} ar={ar} />
             </span>
             <span className="ss-mrow ss-muted">
-              <span><N>{r.nominalCapacityKg}</N> {L("كغ", "kg")} · {L("الهدف", "target")} <N>{r.defaultTargetKg}</N>{r.defaultOperatorName ? ` · ${r.defaultOperatorName}` : ""}</span>
+              <span><N>{r.nominalCapacityKg}</N> {L("كغ", "kg")} · {L("كمية التحميص الافتراضية", "default roast quantity")} <N>{r.defaultTargetKg}</N>{r.defaultOperatorName ? ` · ${r.defaultOperatorName}` : ""}</span>
               {r.isDefault ? <span>{L("افتراضية", "Default")}</span> : null}
             </span>
           </Link>
@@ -101,7 +101,7 @@ export default function RoastersPage() {
       <p>{phone
         ? L("أضف محمصة عينات لتظهر في الجدولة.", "Add a sample roaster to see it in scheduling.")
         : L("جلسات التذوق تعمل دون محمصة عينات. أضف محمصة عينات لتظهر في الجدولة ويُسنَد إليها مشغّل.", "Cupping sessions work without a sample roaster. Add a sample roaster to see it in scheduling and assign it an operator.")}</p>
-      {data?.can.edit ? <Link href={`${BASE}/roasters/new?type=SAMPLE`} className="hr-btn" data-testid="sample-add"><Plus />{L("إضافة محمصة", "Add roaster")}</Link> : null}
+      {data?.can.edit ? <Link href={`${BASE}/roasters/new?type=SAMPLE`} className="hr-btn" data-testid="sample-add"><Plus />{L("إضافة حمّاصة", "Add roaster")}</Link> : null}
     </div>
   );
 
@@ -117,8 +117,8 @@ export default function RoastersPage() {
                 items={[
                   [L("محامص الإنتاج", "Production roasters"), <N key="n">{production.length}</N>,
                     available.length ? `${L("متاحة الآن", "Available now")} · ${available.map((r) => r.name).join("، ")}` : L("لا محمصة متاحة الآن", "None available now")],
-                  [L("أكبر دفعة مسموحة", "Largest allowed batch"), biggest ? <><N>{biggest.maxBatchKg}</N>{unit(L("كغ أخضر", "kg green"))}</> : "—",
-                    def ? <>{L("الهدف الافتراضي", "Default target")} <N>{def.defaultTargetKg}</N> {L("كغ", "kg")}</> : null],
+                  [L("أعلى كمية مسموحة للتحميص", "Maximum roast quantity"), biggest ? <><N>{biggest.maxBatchKg}</N>{unit(L("كغ أخضر", "kg green"))}</> : "—",
+                    def ? <>{L("كمية التحميص الافتراضية", "Default roast quantity")} <N>{def.defaultTargetKg}</N> {L("كغ", "kg")}</> : null],
                   [L("الصيانة القادمة", "Next maintenance"), next ? <span className="ss-mtext">{dayLabel(next.startsAt, ar)}</span> : "—",
                     next ? <>{next.title}{nextRoaster && (data.roasters.length > 1) ? ` · ${nextRoaster.name}` : ""} · <N>{windowText(next, ar)}</N></> : L("لا صيانة مخططة", "No maintenance planned")],
                 ]}

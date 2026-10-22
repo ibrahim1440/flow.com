@@ -149,7 +149,7 @@ export function kindText(m: Maintenance, ar: boolean): string {
   return ar ? "لمرة واحدة" : "One-off";
 }
 
-/** The heading of the three tab pages (RM1 / RM4 / RM5): title, meta, «إضافة محمصة», the tabs. */
+/** The heading of the three tab pages (RM1 / RM4 / RM5): title, meta, «إضافة حمّاصة», the tabs. */
 export function RoastersHead({ tab, data, add }: { tab: "list" | "avail" | "ops"; data: Overview | null; add?: boolean }) {
   const { ar, L } = useLang();
   // The phone frames (378:2) draw the list alone under the phone header — its «+» adds — with no tabs.
@@ -161,7 +161,7 @@ export function RoastersHead({ tab, data, add }: { tab: "list" | "avail" | "ops"
       <PageHeader
         title={L("إدارة المحامص", "Roaster management")}
         actions={add && data?.can.edit && !phone ? (
-          <Link href={`${BASE}/roasters/new`} className="hr-btn is-primary" data-testid="roaster-add"><Ico name="plus" small />{L("إضافة محمصة", "Add roaster")}</Link>
+          <Link href={`${BASE}/roasters/new`} className="hr-btn is-primary" data-testid="roaster-add"><Ico name="plus" small />{L("إضافة حمّاصة", "Add roaster")}</Link>
         ) : null}
       />
       <p className="tl-sub">

@@ -3,12 +3,12 @@ import { STATUS, TYPE, dayLabel, type HistoryRow, type Roaster } from "./shared"
 
 const F: Record<string, [string, string]> = {
   name: ["الاسم", "Name"], manufacturerModel: ["الشركة المصنّعة والطراز", "Manufacturer and model"], type: ["النوع", "Type"],
-  nominalCapacityKg: ["السعة", "Capacity"], defaultTargetKg: ["الهدف", "Target"], minBatchKg: ["الحد الأدنى", "Minimum"], maxBatchKg: ["الأقصى", "Maximum"],
+  nominalCapacityKg: ["سعة المحمصة", "Roaster capacity"], defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"], minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"], maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"],
   cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي:", "Default operator:"], status: ["الحالة:", "Status:"],
   statusReason: ["السبب:", "Reason:"], statusUntil: ["حتى", "Until"], isDefault: ["الافتراضية:", "Default:"],
 };
 
-/** One history row as the frame writes it: «أُنشئت المحمصة · السعة 6.00 · الهدف 5.00 كغ», «الحد الأدنى 3.00 · الأقصى 6.00 · الدورة 30 دقيقة». */
+/** One history row: «أُنشئت المحمصة · سعة المحمصة 6.00 · كمية التحميص الافتراضية 5.00 كغ», «أقل كمية مسموحة للتحميص 3.00 · أعلى كمية مسموحة للتحميص 6.00 · الدورة 30 دقيقة». */
 export function historyText(h: HistoryRow, ar: boolean): string {
   const a = (h.after ?? {}) as Record<string, unknown>;
   const val = (k: string, v: unknown): string => {
@@ -27,7 +27,7 @@ export function historyText(h: HistoryRow, ar: boolean): string {
       return `${ar ? "أُنشئت المحمصة" : "Roaster created"} · ${part("nominalCapacityKg")} · ${part("defaultTargetKg")} ${ar ? "كغ" : "kg"}`;
     case "ROASTER_UPDATED":
     case "ROASTER_STATUS_CHANGED":
-      // In the form's order (the frame: «الحد الأدنى 3.00 · الأقصى 6.00 · الدورة 30 دقيقة»).
+      // In the form's order («أقل كمية مسموحة للتحميص 3.00 · أعلى كمية مسموحة للتحميص 6.00 · الدورة 30 دقيقة»).
       return Object.keys(F).filter((k) => h.changed.includes(k)).map(part).join(" · ");
     case "OPERATOR_ASSIGNED":
     case "OPERATOR_UNASSIGNED": {

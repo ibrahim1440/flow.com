@@ -72,8 +72,8 @@ export async function PATCH(request: Request, { params }: Params) {
       }
       if ("nominalCapacityKg" in body && !sameDecimal(body.nominalCapacityKg, cur.nominalCapacityKg.toString())) {
         throw new RouteError(NextResponse.json({
-          error: "السعة الاسمية مواصفة معتمدة. تغييرها طلب منفصل بمستند يُراجَع ويُسجَّل.",
-          errorEn: "The nominal capacity is a verified specification. Changing it is a separate request with a document that is reviewed and recorded.",
+          error: "سعة المحمصة (حسب الشركة المصنّعة) مواصفة معتمدة. تغييرها طلب منفصل بمستند يُراجَع ويُسجَّل.",
+          errorEn: "The roaster capacity (manufacturer rating) is a verified specification. Changing it is a separate request with a document that is reviewed and recorded.",
           code: "NOMINAL_LOCKED", field: "nominalCapacityKg",
         }, { status: 400 }));
       }

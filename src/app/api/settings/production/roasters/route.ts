@@ -8,7 +8,7 @@ import { writeSettingsAudit } from "@/lib/services/settings/audit";
 import { fieldErrors, isUniqueViolation, readObject, RouteError, routeErrorResponse } from "@/lib/services/settings/http";
 
 /**
- * POST /api/settings/production/roasters — «إضافة محمصة» (Figma RM2 389:640; ROASTERS.md §4, §7).
+ * POST /api/settings/production/roasters — «إضافة حمّاصة» (Figma RM2 389:640; ROASTERS.md §4, §7).
  *
  * The admin role, by a verified individual after a recent step-up (the organisation settings' gate).
  * Validated here, again by the database CHECKs: name required and unique (any case); type; the

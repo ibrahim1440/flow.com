@@ -73,9 +73,10 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
         <div className="ss-stack" data-testid="roaster-detail">
           <div className="ss-mrow is-start"><StatusText status={roaster.status} ar={ar} /><span className="ss-muted">{meta}</span></div>
           <dl className="ss-kv">
-            <dt>{L("السعة الاسمية", "Nominal capacity")}</dt><dd><N>{roaster.nominalCapacityKg}</N> {L("كغ أخضر", "kg green")}</dd>
-            <dt>{L("الهدف", "Target")}</dt><dd><N>{roaster.defaultTargetKg}</N> {L("كغ", "kg")}</dd>
-            <dt>{L("الحدود", "Limits")}</dt><dd><N>{roaster.minBatchKg}</N> – <N>{roaster.maxBatchKg}</N> {L("كغ", "kg")}</dd>
+            <dt>{L("سعة المحمصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)")}</dt><dd><N>{roaster.nominalCapacityKg}</N> {L("كغ أخضر", "kg green")}</dd>
+            <dt>{L("كمية التحميص الافتراضية", "Default roast quantity")}</dt><dd><N>{roaster.defaultTargetKg}</N> {L("كغ", "kg")}</dd>
+            <dt>{L("أقل كمية مسموحة للتحميص", "Minimum roast quantity")}</dt><dd><N>{roaster.minBatchKg}</N> {L("كغ", "kg")}</dd>
+            <dt>{L("أعلى كمية مسموحة للتحميص", "Maximum roast quantity")}</dt><dd><N>{roaster.maxBatchKg}</N> {L("كغ", "kg")}</dd>
             <dt>{L("الدورة", "Cycle")}</dt><dd><N>{roaster.cycleMinutes}</N> {L("دقيقة", "min")}</dd>
             <dt>{L("المشغّل", "Operator")}</dt><dd>{roaster.defaultOperatorName ?? "—"}</dd>
           </dl>

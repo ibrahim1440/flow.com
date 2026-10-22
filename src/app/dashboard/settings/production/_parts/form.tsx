@@ -1,5 +1,5 @@
 "use client";
-// The roaster form — RM2 «إضافة محمصة» (389:640, phone 379:49) and RM3 «تعديل» (391:1012). Five
+// The roaster form — RM2 «إضافة حمّاصة» (389:640, phone 379:49) and RM3 «تعديل» (391:1012). Five
 // label-column sections (الهوية · النوع · السعة والحدود · التشغيل · الحالة), the error summary,
 // inline errors, the unsaved bar (edit) and the save / cancel row. The rules are the API's; the
 // page shows the field errors it returns (ROASTERS.md §7) and keeps every input on a failure.
@@ -32,8 +32,8 @@ export const emptyDraft = (type: "PRODUCTION" | "SAMPLE" = "PRODUCTION"): Draft 
 
 const LABELS: Record<keyof Draft, [string, string]> = {
   name: ["اسم المحمصة", "Roaster name"], manufacturerModel: ["الشركة المصنّعة والطراز", "Manufacturer and model"], type: ["النوع", "Type"],
-  nominalCapacityKg: ["السعة الاسمية", "Nominal capacity"], defaultTargetKg: ["الهدف", "Target"], minBatchKg: ["الحد الأدنى", "Minimum"],
-  maxBatchKg: ["الحد الأقصى", "Maximum"], cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي", "Default operator"],
+  nominalCapacityKg: ["سعة المحمصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)"], defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"], minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"],
+  maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"], cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي", "Default operator"],
   status: ["الحالة", "Status"], statusReason: ["السبب", "Reason"], isDefault: ["الافتراضية", "Default"],
 };
 
@@ -78,9 +78,9 @@ export function RoasterForm({
     const e = err(f);
     if (!e) return null;
     if (phone) {
-      // The phone frame's short forms (379:49): «أقل من الحد الأدنى.», «أكبر من السعة الاسمية.».
-      if (e.summaryAr === "الهدف الافتراضي أقل من الحد الأدنى") return L("أقل من الحد الأدنى.", "Below the minimum.");
-      if (e.summaryAr === "الحد الأقصى أكبر من السعة الاسمية") return L("أكبر من السعة الاسمية.", "Above the nominal capacity.");
+      // The phone frame's short forms (379:49): «أقل من أقل كمية مسموحة للتحميص.», «أكبر من سعة المحمصة.».
+      if (e.summaryAr === "كمية التحميص الافتراضية أقل من أقل كمية مسموحة للتحميص") return L("أقل من أقل كمية مسموحة للتحميص.", "Below the minimum roast quantity.");
+      if (e.summaryAr === "أعلى كمية مسموحة للتحميص أكبر من سعة المحمصة") return L("أكبر من سعة المحمصة.", "Above the roaster capacity.");
     }
     return ar ? e.ar : e.en;
   };
@@ -120,20 +120,18 @@ export function RoasterForm({
   const typeOthers = othersOfType[d.type] - (mode === "edit" && current?.type === d.type ? 1 : 0);
   const autoDefault = typeOthers <= 0;
   const statusOpts: ["AVAILABLE" | "MAINTENANCE" | "STOPPED", string][] = (["AVAILABLE", "MAINTENANCE", "STOPPED"] as const).map((s) => [s, ar ? STATUS[s][0] : STATUS[s][1]]);
-  const kgLabel = (k: "nominalCapacityKg" | "defaultTargetKg" | "minBatchKg" | "maxBatchKg") => {
-    if (phone) return `${ar ? LABELS[k][0] : LABELS[k][1]} · ${L("كغ", "kg")}`;
-    const full: Record<typeof k, [string, string]> = {
-      nominalCapacityKg: ["السعة الاسمية · كغ أخضر", "Nominal capacity · kg green"], defaultTargetKg: ["الهدف الافتراضي · كغ أخضر", "Default target · kg green"],
-      minBatchKg: ["الحد الأدنى للدفعة · كغ", "Minimum batch · kg"], maxBatchKg: ["الحد الأقصى للدفعة · كغ", "Maximum batch · kg"],
-    };
-    return ar ? full[k][0] : full[k][1];
-  };
+  // The owner's names are the labels as given (no unit in them); the unit sits in the input as its
+  // suffix, «كغ» — kilograms of green coffee, as the section caption says.
+  const kgLabel = (k: "nominalCapacityKg" | "defaultTargetKg" | "minBatchKg" | "maxBatchKg") => (ar ? LABELS[k][0] : LABELS[k][1]);
   const req = (s: string) => `${s} *`;
   const opt = (s: string) => `${s} ${L("(اختياري)", "(optional)")}`;
   const num = (k: "nominalCapacityKg" | "defaultTargetKg" | "minBatchKg" | "maxBatchKg", help?: ReactNode, disabled?: boolean) => (
     <Field label={req(kgLabel(k))} error={errMsg(k)} help={help}>
-      <input className="hr-input ss-numin" dir="ltr" inputMode="decimal" value={d[k]} disabled={disabled} aria-invalid={err(k) ? true : undefined}
-        onChange={(e) => set(k, e.target.value)} data-testid={`f-${k}`} />
+      <span className="ss-unitin">
+        <input className="hr-input ss-numin" dir="ltr" inputMode="decimal" value={d[k]} disabled={disabled} aria-invalid={err(k) ? true : undefined}
+          onChange={(e) => set(k, e.target.value)} data-testid={`f-${k}`} />
+        <span aria-hidden>{L("كغ", "kg")}</span>
+      </span>
     </Field>
   );
   const eligible = people.filter((p) => p.authorized || p.id === d.defaultOperatorId);
@@ -204,7 +202,7 @@ export function RoasterForm({
           : num("nominalCapacityKg", L("مواصفة معتمدة. تغييرها طلب منفصل بمستند يُراجَع ويُسجَّل، ولا تتجاوزها أي دفعة.", "A verified specification. Changing it is a separate request with a document that is reviewed and recorded; no batch exceeds it."), true)}
         {num("defaultTargetKg", mode === "edit" ? L("يُقترح في «تسجيل دفعة» وفي تخطيط الدفعات.", "Suggested in «Record batch» and in batch planning.") : undefined)}
         {num("minBatchKg")}
-        {num("maxBatchKg", mode === "edit" ? L("لا يتجاوز السعة الاسمية.", "Not above the nominal capacity.") : undefined)}
+        {num("maxBatchKg", mode === "edit" ? L("لا يتجاوز سعة المحمصة.", "Not above the roaster capacity.") : undefined)}
       </>)}
       {sec(L("التشغيل", "Operation"), L("تقدير مدة الخانة والمشغّل المقترح.", "The estimated slot length and the suggested operator."), <>
         <Field label={req(L("مدة الدورة التقديرية", "Estimated cycle time"))} error={errMsg("cycleMinutes")}
