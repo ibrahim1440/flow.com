@@ -40,12 +40,12 @@ function StatusForm({ roaster, open, onClose, onSaved }: Props & { roaster: Roas
     setAlert(errText(r.data, ar));
   }
 
-  const action = status === "STOPPED" ? L("إيقاف المحمصة", "Stop the roaster") : status === "MAINTENANCE" ? L("تحويل إلى الصيانة", "Put into maintenance") : L("إتاحة المحمصة", "Make available");
+  const action = status === "STOPPED" ? L("إيقاف الحمّاصة", "Stop the roaster") : status === "MAINTENANCE" ? L("تحويل إلى الصيانة", "Put into maintenance") : L("إتاحة الحمّاصة", "Make available");
   return (
     <Dialog
       open={open}
       title={L(`تغيير حالة ${roaster.name}`, `Change the status of ${roaster.name}`)}
-      sub={L("المحمصة غير المتاحة لا تُجدول عليها دفعات جديدة.", "No new batches are scheduled on a roaster that is not available.")}
+      sub={L("الحمّاصة غير المتاحة لا تُجدول عليها دفعات جديدة.", "No new batches are scheduled on a roaster that is not available.")}
       onClose={() => { if (!busy) onClose(); }}
       testId="status-dialog"
       actions={<>

@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('settings.roasters'))`;
       const errs: FieldError[] = [];
       const dup = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Roaster" WHERE lower(btrim("name")) = lower(${values.name}) LIMIT 1`;
-      if (dup.length) errs.push({ field: "name", ar: "توجد محمصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم المحمصة مستخدم", summaryEn: "Roaster name is taken" });
+      if (dup.length) errs.push({ field: "name", ar: "توجد حمّاصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم الحمّاصة مستخدم", summaryEn: "Roaster name is taken" });
       if (values.defaultOperatorId && !(await isAuthorizedOperator(tx, values.defaultOperatorId))) {
         errs.push({ field: "defaultOperatorId", ar: "هذا المستخدم غير مخوّل بالتحميص، فلا يمكن إسناده.", en: "This user is not authorized to roast and cannot be assigned.", summaryAr: "المشغّل الافتراضي غير مخوّل", summaryEn: "Default operator is not authorized" });
       }
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     const r = routeErrorResponse(err);
     if (r) return r;
     if (isUniqueViolation(err, ["Roaster_name_norm_key", "name"])) {
-      return fieldErrors([{ field: "name", ar: "توجد محمصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم المحمصة مستخدم", summaryEn: "Roaster name is taken" }]);
+      return fieldErrors([{ field: "name", ar: "توجد حمّاصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم الحمّاصة مستخدم", summaryEn: "Roaster name is taken" }]);
     }
     return handleDomainError(err);
   }

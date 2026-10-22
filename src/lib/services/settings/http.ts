@@ -23,7 +23,7 @@ export function fieldErrors(errors: FieldError[], status = 400): NextResponse {
 
 export function notFound(what: "roaster" | "maintenance"): NextResponse {
   return what === "roaster"
-    ? NextResponse.json({ error: "المحمصة غير موجودة.", errorEn: "Roaster not found.", code: "NOT_FOUND" }, { status: 404 })
+    ? NextResponse.json({ error: "الحمّاصة غير موجودة.", errorEn: "Roaster not found.", code: "NOT_FOUND" }, { status: 404 })
     : NextResponse.json({ error: "موعد الصيانة غير موجود.", errorEn: "Maintenance window not found.", code: "NOT_FOUND" }, { status: 404 });
 }
 

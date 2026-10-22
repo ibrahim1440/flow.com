@@ -15,14 +15,14 @@ export default function AddRoasterPage() {
   const { data, error, reload } = useOverview();
   const type = params.get("type") === "SAMPLE" ? "SAMPLE" : "PRODUCTION";
   useD21Title(L("إضافة حمّاصة", "Add roaster"));
-  useD21Phone({ title: L("إضافة حمّاصة", "Add roaster"), sub: L("الإعدادات · المحامص", "Settings · Roasters"), back: BASE, ownBar: true });
+  useD21Phone({ title: L("إضافة حمّاصة", "Add roaster"), sub: L("الإعدادات · الحمّاصات", "Settings · Roasters"), back: BASE, ownBar: true });
 
   const others = { PRODUCTION: data?.roasters.filter((r) => r.type === "PRODUCTION").length ?? 0, SAMPLE: data?.roasters.filter((r) => r.type === "SAMPLE").length ?? 0 };
   return (
     <OpsRoot className="tl-root">
       <SettingsFrame>
         <PageHeader title={L("إضافة حمّاصة", "Add roaster")} />
-        <p className="tl-sub">{L("الإعدادات · الإنتاج والتحميص · المحامص", "Settings · Production & roasting · Roasters")}</p>
+        <p className="tl-sub">{L("الإعدادات · الإنتاج والتحميص · الحمّاصات", "Settings · Production & roasting · Roasters")}</p>
         {error ? <Retry error={error} onRetry={reload} /> : !data ? <OpsLoading rows={6} /> : !data.can.edit ? <ReadOnlyNote /> : (
           <RoasterForm
             mode="add"

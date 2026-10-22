@@ -98,14 +98,14 @@ export function N({ children }: { children: ReactNode }) {
   return <bdi dir="ltr" className="hr-num">{children}</bdi>;
 }
 
-/** Arabic count of production roasters: «محمصة إنتاج واحدة مسجّلة», «محمصتا إنتاج مسجّلتان», «3 محامص إنتاج مسجّلة». */
+/** Arabic count of production roasters: «حمّاصة إنتاج واحدة مسجّلة», «حمّاصتا إنتاج مسجّلتان», «3 حمّاصات إنتاج مسجّلة». */
 export function productionCount(n: number, ar: boolean): string {
   if (!ar) return n === 0 ? "No production roaster registered" : n === 1 ? "1 production roaster registered" : `${n} production roasters registered`;
-  if (n === 0) return "لا محمصة إنتاج مسجّلة";
-  if (n === 1) return "محمصة إنتاج واحدة مسجّلة";
-  if (n === 2) return "محمصتا إنتاج مسجّلتان";
-  if (n <= 10) return `${n} محامص إنتاج مسجّلة`;
-  return `${n} محمصة إنتاج مسجّلة`;
+  if (n === 0) return "لا حمّاصة إنتاج مسجّلة";
+  if (n === 1) return "حمّاصة إنتاج واحدة مسجّلة";
+  if (n === 2) return "حمّاصتا إنتاج مسجّلتان";
+  if (n <= 10) return `${n} حمّاصات إنتاج مسجّلة`;
+  return `${n} حمّاصة إنتاج مسجّلة`;
 }
 
 const AR_DAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
@@ -159,7 +159,7 @@ export function RoastersHead({ tab, data, add }: { tab: "list" | "avail" | "ops"
   return (
     <>
       <PageHeader
-        title={L("إدارة المحامص", "Roaster management")}
+        title={L("إدارة الحمّاصات", "Roaster management")}
         actions={add && data?.can.edit && !phone ? (
           <Link href={`${BASE}/roasters/new`} className="hr-btn is-primary" data-testid="roaster-add"><Ico name="plus" small />{L("إضافة حمّاصة", "Add roaster")}</Link>
         ) : null}
@@ -169,9 +169,9 @@ export function RoastersHead({ tab, data, add }: { tab: "list" | "avail" | "ops"
         {data ? <><span className="tl-sep">•</span>{productionCount(production, ar)}</> : null}
       </p>
       {phone && tab === "list" ? null : <LinkTabs
-        label={L("إدارة المحامص", "Roaster management")}
+        label={L("إدارة الحمّاصات", "Roaster management")}
         items={[
-          { href: BASE, label: L("المحامص", "Roasters"), count: all, current: tab === "list", testId: "rm-tab-list" },
+          { href: BASE, label: L("الحمّاصات", "Roasters"), count: all, current: tab === "list", testId: "rm-tab-list" },
           { href: `${BASE}/availability`, label: L("التوفر والصيانة", "Availability & maintenance"), current: tab === "avail", testId: "rm-tab-avail" },
           { href: `${BASE}/operators`, label: L("المشغّلون", "Operators"), current: tab === "ops", testId: "rm-tab-ops" },
         ]}
@@ -187,7 +187,7 @@ export function CapacityNote({ short }: { short?: boolean }) {
     <p className={`tl-note${short ? " ss-plain" : ""}`} data-testid="capacity-note">
       {short
         ? L("السعة للتخطيط والتحقق فقط. الفاقد من الأوزان المسجّلة.", "Capacity is for planning and validation only. Loss comes from recorded weights.")
-        : L("تُستخدم السعة والحدود للتخطيط والتحقق فقط. الفاقد والمحمص يُحسبان دائمًا من الأوزان المسجّلة لكل دفعة، ولا يُشتقّان من سعة المحمصة.",
+        : L("تُستخدم السعة والحدود للتخطيط والتحقق فقط. الفاقد والمحمص يُحسبان دائمًا من الأوزان المسجّلة لكل دفعة، ولا يُشتقّان من سعة الحمّاصة.",
           "Capacity and limits are used for planning and validation only. Loss and roasted weight always come from each batch's recorded weights, never from the roaster's capacity.")}
     </p>
   );

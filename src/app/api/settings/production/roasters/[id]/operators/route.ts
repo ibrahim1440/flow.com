@@ -67,7 +67,7 @@ export async function PUT(request: Request, { params }: Params) {
       } else {
         if (r.defaultOperatorId === employeeId) {
           throw new RouteError(NextResponse.json({
-            error: "هذا هو المشغّل الافتراضي للمحمصة. اختر مشغّلًا افتراضيًا آخر أولًا.",
+            error: "هذا هو المشغّل الافتراضي للحمّاصة. اختر مشغّلًا افتراضيًا آخر أولًا.",
             errorEn: "This is the roaster's default operator. Choose another default operator first.",
             code: "DEFAULT_OPERATOR",
           }, { status: 409 }));

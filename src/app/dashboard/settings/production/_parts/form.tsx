@@ -31,8 +31,8 @@ export const emptyDraft = (type: "PRODUCTION" | "SAMPLE" = "PRODUCTION"): Draft 
 });
 
 const LABELS: Record<keyof Draft, [string, string]> = {
-  name: ["اسم المحمصة", "Roaster name"], manufacturerModel: ["الشركة المصنّعة والطراز", "Manufacturer and model"], type: ["النوع", "Type"],
-  nominalCapacityKg: ["سعة المحمصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)"], defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"], minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"],
+  name: ["اسم الحمّاصة", "Roaster name"], manufacturerModel: ["الشركة المصنّعة والطراز", "Manufacturer and model"], type: ["النوع", "Type"],
+  nominalCapacityKg: ["سعة الحمّاصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)"], defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"], minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"],
   maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"], cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي", "Default operator"],
   status: ["الحالة", "Status"], statusReason: ["السبب", "Reason"], isDefault: ["الافتراضية", "Default"],
 };
@@ -78,9 +78,9 @@ export function RoasterForm({
     const e = err(f);
     if (!e) return null;
     if (phone) {
-      // The phone frame's short forms (379:49): «أقل من أقل كمية مسموحة للتحميص.», «أكبر من سعة المحمصة.».
+      // The phone frame's short forms (379:49): «أقل من أقل كمية مسموحة للتحميص.», «أكبر من سعة الحمّاصة.».
       if (e.summaryAr === "كمية التحميص الافتراضية أقل من أقل كمية مسموحة للتحميص") return L("أقل من أقل كمية مسموحة للتحميص.", "Below the minimum roast quantity.");
-      if (e.summaryAr === "أعلى كمية مسموحة للتحميص أكبر من سعة المحمصة") return L("أكبر من سعة المحمصة.", "Above the roaster capacity.");
+      if (e.summaryAr === "أعلى كمية مسموحة للتحميص أكبر من سعة الحمّاصة") return L("أكبر من سعة الحمّاصة.", "Above the roaster capacity.");
     }
     return ar ? e.ar : e.en;
   };
@@ -189,7 +189,7 @@ export function RoasterForm({
           </Field>
         )}
       </>)}
-      {sec(L("النوع", "Type"), L("محمصة الإنتاج تخدم أوامر الإنتاج، ومحمصة العينات تخدم العينات والتذوق.", "A production roaster serves production orders; a sample roaster serves samples and cupping."), (
+      {sec(L("النوع", "Type"), L("حمّاصة الإنتاج تخدم أوامر الإنتاج، وحمّاصة العينات تخدم العينات والتذوق.", "A production roaster serves production orders; a sample roaster serves samples and cupping."), (
         <div className="hr-field">
           <span className="hr-label">{req(L("النوع", "Type"))}</span>
           <Seg value={d.type} label={L("النوع", "Type")} options={[["PRODUCTION", L("إنتاج", "Production")], ["SAMPLE", L("عينات", "Sample")]]} onChange={(v) => set("type", v)} testId="f-type" />
@@ -202,7 +202,7 @@ export function RoasterForm({
           : num("nominalCapacityKg", L("مواصفة معتمدة. تغييرها طلب منفصل بمستند يُراجَع ويُسجَّل، ولا تتجاوزها أي دفعة.", "A verified specification. Changing it is a separate request with a document that is reviewed and recorded; no batch exceeds it."), true)}
         {num("defaultTargetKg", mode === "edit" ? L("يُقترح في «تسجيل دفعة» وفي تخطيط الدفعات.", "Suggested in «Record batch» and in batch planning.") : undefined)}
         {num("minBatchKg")}
-        {num("maxBatchKg", mode === "edit" ? L("لا يتجاوز سعة المحمصة.", "Not above the roaster capacity.") : undefined)}
+        {num("maxBatchKg", mode === "edit" ? L("لا يتجاوز سعة الحمّاصة.", "Not above the roaster capacity.") : undefined)}
       </>)}
       {sec(L("التشغيل", "Operation"), L("تقدير مدة الخانة والمشغّل المقترح.", "The estimated slot length and the suggested operator."), <>
         <Field label={req(L("مدة الدورة التقديرية", "Estimated cycle time"))} error={errMsg("cycleMinutes")}
@@ -221,7 +221,7 @@ export function RoasterForm({
           </Select>
         </Field>
       </>)}
-      {sec(L("الحالة", "Status"), L("المحمصة غير المتاحة لا تُجدول عليها دفعات.", "No batches are scheduled on a roaster that is not available."), <>
+      {sec(L("الحالة", "Status"), L("الحمّاصة غير المتاحة لا تُجدول عليها دفعات.", "No batches are scheduled on a roaster that is not available."), <>
         <div className="hr-field">
           <span className="hr-label">{req(L("الحالة", "Status"))}</span>
           <Seg value={d.status} label={L("الحالة", "Status")} options={statusOpts} onChange={(v) => set("status", v)} testId="f-status" />
@@ -230,9 +230,9 @@ export function RoasterForm({
           <span className="hr-label">{L("الافتراضية", "Default")}</span>
           <label className="tl-check">
             <input type="checkbox" checked={d.isDefault || autoDefault} disabled={autoDefault} onChange={(e) => set("isDefault", e.target.checked)} data-testid="f-isDefault" />
-            <span>{L("المحمصة الافتراضية لنوعها", "The default roaster of its type")}</span>
+            <span>{L("الحمّاصة الافتراضية لنوعها", "The default roaster of its type")}</span>
           </label>
-          {autoDefault && mode === "add" ? <span className="hr-help">{d.type === "SAMPLE" ? L("لا توجد محمصة عينات أخرى. ستصبح الافتراضية تلقائيًا.", "There is no other sample roaster. It becomes the default automatically.") : L("لا توجد محمصة إنتاج أخرى. ستصبح الافتراضية تلقائيًا.", "There is no other production roaster. It becomes the default automatically.")}</span> : null}
+          {autoDefault && mode === "add" ? <span className="hr-help">{d.type === "SAMPLE" ? L("لا توجد حمّاصة عينات أخرى. ستصبح الافتراضية تلقائيًا.", "There is no other sample roaster. It becomes the default automatically.") : L("لا توجد حمّاصة إنتاج أخرى. ستصبح الافتراضية تلقائيًا.", "There is no other production roaster. It becomes the default automatically.")}</span> : null}
         </div>
         {d.status !== "AVAILABLE" ? (
           <Field label={req(L("السبب", "Reason"))} error={errMsg("statusReason")} wide>
@@ -242,7 +242,7 @@ export function RoasterForm({
       </>)}
 
       <div className={`ss-formacts${phone ? " is-sticky" : ""}`}>
-        <Btn type="submit" variant="primary" busy={busy} data-testid="roaster-save">{mode === "add" ? L("حفظ المحمصة", "Save roaster") : L("حفظ التغييرات", "Save changes")}</Btn>
+        <Btn type="submit" variant="primary" busy={busy} data-testid="roaster-save">{mode === "add" ? L("حفظ الحمّاصة", "Save roaster") : L("حفظ التغييرات", "Save changes")}</Btn>
         {phone ? null : <Btn variant="ghost" className="ss-cancel" onClick={() => router.push(BASE)} data-testid="roaster-cancel">{L("إلغاء", "Cancel")}</Btn>}
       </div>
 
@@ -257,7 +257,7 @@ export function RoasterForm({
         </>}
       >
         <p style={{ margin: 0 }}>{ar
-          ? `«${moveDefault?.name}» هي الافتراضية لهذا النوع. تصبح «${d.name || "هذه المحمصة"}» الافتراضية بدلًا منها.`
+          ? `«${moveDefault?.name}» هي الافتراضية لهذا النوع. تصبح «${d.name || "هذه الحمّاصة"}» الافتراضية بدلًا منها.`
           : `«${moveDefault?.name}» is the default of this type. «${d.name || "This roaster"}» becomes the default instead.`}</p>
       </Dialog>
     </form>

@@ -702,7 +702,7 @@ export const NAV: NavNode[] = [
   // the same audience as «المنشأة» (the admin role, the settings module), reached from the gear and
   // the settings navigation, trail «الإعدادات / …».
   {
-    // Figma 377:2 RM1–RM5: «الإعدادات / الإنتاج والتحميص / المحامص» (ROASTERS.md §2, D2).
+    // Figma 377:2 RM1–RM5: «الإعدادات / الإنتاج والتحميص / الحمّاصات» (ROASTERS.md §2, D2).
     id: "settings.production",
     ar: "الإنتاج والتحميص", en: "Production & roasting",
     icon: Flame,
@@ -710,7 +710,7 @@ export const NAV: NavNode[] = [
     adminOnly: true,
     shell: { place: "menu", icon: "flame", trailRoot: "settings" },
     children: [
-      { id: "settings.production.roasters", ar: "المحامص", en: "Roasters", icon: Flame, href: "/dashboard/settings/production", anyOf: [{ module: "settings" }], adminOnly: true },
+      { id: "settings.production.roasters", ar: "الحمّاصات", en: "Roasters", icon: Flame, href: "/dashboard/settings/production", anyOf: [{ module: "settings" }], adminOnly: true },
     ],
   },
   { id: "settings.inventory", ar: "المخزون", en: "Inventory", icon: Boxes, href: "/dashboard/settings/inventory", anyOf: [{ module: "settings" }], adminOnly: true, shell: { place: "menu", icon: "box", trailRoot: "settings" } },

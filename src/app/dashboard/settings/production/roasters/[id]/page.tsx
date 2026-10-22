@@ -48,7 +48,7 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
 
   useD21Title(roaster?.name ?? null);
   useD21Phone({
-    title: roaster?.name ?? L("المحمصة", "Roaster"), sub: L("الإعدادات · المحامص", "Settings · Roasters"),
+    title: roaster?.name ?? L("الحمّاصة", "Roaster"), sub: L("الإعدادات · الحمّاصات", "Settings · Roasters"),
     back: editing && phone ? `${BASE}/roasters/${id}` : BASE, ownBar: true,
   });
 
@@ -59,11 +59,11 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
     PRODUCTION: overview?.roasters.filter((r) => r.type === "PRODUCTION").length ?? 0,
     SAMPLE: overview?.roasters.filter((r) => r.type === "SAMPLE").length ?? 0,
   };
-  const meta = roaster ? `${ar ? `محمصة ${TYPE[roaster.type][0]}` : `${TYPE[roaster.type][1]} roaster`}${roaster.isDefault ? L(" · افتراضية", " · default") : ""}` : "";
+  const meta = roaster ? `${ar ? `حمّاصة ${TYPE[roaster.type][0]}` : `${TYPE[roaster.type][1]} roaster`}${roaster.isDefault ? L(" · افتراضية", " · default") : ""}` : "";
   const canEdit = !!overview?.can.edit;
 
   const body = () => {
-    if (notFound) return <div className="hr-state" role="status"><h3>{L("المحمصة غير موجودة.", "Roaster not found.")}</h3><Link href={BASE} className="hr-btn">{L("رجوع إلى المحامص", "Back to roasters")}</Link></div>;
+    if (notFound) return <div className="hr-state" role="status"><h3>{L("الحمّاصة غير موجودة.", "Roaster not found.")}</h3><Link href={BASE} className="hr-btn">{L("رجوع إلى الحمّاصات", "Back to roasters")}</Link></div>;
     if (error || oErr) return <Retry error={(error ?? oErr)!} onRetry={() => { load(); reloadOverview(); }} />;
     if (!roaster || !overview) return <OpsLoading rows={8} />;
 
@@ -73,7 +73,7 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
         <div className="ss-stack" data-testid="roaster-detail">
           <div className="ss-mrow is-start"><StatusText status={roaster.status} ar={ar} /><span className="ss-muted">{meta}</span></div>
           <dl className="ss-kv">
-            <dt>{L("سعة المحمصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)")}</dt><dd><N>{roaster.nominalCapacityKg}</N> {L("كغ أخضر", "kg green")}</dd>
+            <dt>{L("سعة الحمّاصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)")}</dt><dd><N>{roaster.nominalCapacityKg}</N> {L("كغ أخضر", "kg green")}</dd>
             <dt>{L("كمية التحميص الافتراضية", "Default roast quantity")}</dt><dd><N>{roaster.defaultTargetKg}</N> {L("كغ", "kg")}</dd>
             <dt>{L("أقل كمية مسموحة للتحميص", "Minimum roast quantity")}</dt><dd><N>{roaster.minBatchKg}</N> {L("كغ", "kg")}</dd>
             <dt>{L("أعلى كمية مسموحة للتحميص", "Maximum roast quantity")}</dt><dd><N>{roaster.maxBatchKg}</N> {L("كغ", "kg")}</dd>
@@ -138,11 +138,11 @@ export default function RoasterPage({ params }: { params: Promise<{ id: string }
     <OpsRoot className="tl-root">
       <SettingsFrame>
         <PageHeader
-          title={roaster?.name ?? L("المحمصة", "Roaster")}
+          title={roaster?.name ?? L("الحمّاصة", "Roaster")}
           actions={roaster && canEdit && !phone ? <Btn onClick={() => setStatusOpen(true)} data-testid="roaster-status">{L("تغيير الحالة", "Change status")}</Btn> : null}
         />
         <p className="tl-sub">
-          {L("الإعدادات · الإنتاج والتحميص · المحامص", "Settings · Production & roasting · Roasters")}
+          {L("الإعدادات · الإنتاج والتحميص · الحمّاصات", "Settings · Production & roasting · Roasters")}
           {roaster ? <><span className="tl-sep">•</span>{meta}</> : null}
         </p>
         {body()}

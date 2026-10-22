@@ -65,14 +65,14 @@ export async function PATCH(request: Request, { params }: Params) {
       if (!cur || cur.status === "RETIRED") throw new RouteError(notFound("roaster"));
       if (typeof body.expectedUpdatedAt === "string" && new Date(body.expectedUpdatedAt).getTime() !== cur.updatedAt.getTime()) {
         throw new RouteError(NextResponse.json({
-          error: "حُفظت تغييرات أخرى على هذه المحمصة بعد فتحك النموذج. أعد التحميل للمقارنة؛ مدخلاتك باقية.",
+          error: "حُفظت تغييرات أخرى على هذه الحمّاصة بعد فتحك النموذج. أعد التحميل للمقارنة؛ مدخلاتك باقية.",
           errorEn: "Someone else saved changes to this roaster after you opened the form. Reload to compare; your inputs are kept.",
           code: "CONFLICT",
         }, { status: 409 }));
       }
       if ("nominalCapacityKg" in body && !sameDecimal(body.nominalCapacityKg, cur.nominalCapacityKg.toString())) {
         throw new RouteError(NextResponse.json({
-          error: "سعة المحمصة (حسب الشركة المصنّعة) مواصفة معتمدة. تغييرها طلب منفصل بمستند يُراجَع ويُسجَّل.",
+          error: "سعة الحمّاصة (حسب الشركة المصنّعة) مواصفة معتمدة. تغييرها طلب منفصل بمستند يُراجَع ويُسجَّل.",
           errorEn: "The roaster capacity (manufacturer rating) is a verified specification. Changing it is a separate request with a document that is reviewed and recorded.",
           code: "NOMINAL_LOCKED", field: "nominalCapacityKg",
         }, { status: 400 }));
@@ -91,7 +91,7 @@ export async function PATCH(request: Request, { params }: Params) {
       const errs: FieldError[] = [];
       if (values.name.toLowerCase() !== cur.name.trim().toLowerCase()) {
         const dup = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Roaster" WHERE lower(btrim("name")) = lower(${values.name}) AND "id" <> ${id} LIMIT 1`;
-        if (dup.length) errs.push({ field: "name", ar: "توجد محمصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم المحمصة مستخدم", summaryEn: "Roaster name is taken" });
+        if (dup.length) errs.push({ field: "name", ar: "توجد حمّاصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم الحمّاصة مستخدم", summaryEn: "Roaster name is taken" });
       }
       if (values.defaultOperatorId && values.defaultOperatorId !== cur.defaultOperatorId && !(await isAuthorizedOperator(tx, values.defaultOperatorId))) {
         errs.push({ field: "defaultOperatorId", ar: "هذا المستخدم غير مخوّل بالتحميص، فلا يمكن إسناده.", en: "This user is not authorized to roast and cannot be assigned.", summaryAr: "المشغّل الافتراضي غير مخوّل", summaryEn: "Default operator is not authorized" });
@@ -152,7 +152,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const r = routeErrorResponse(err);
     if (r) return r;
     if (isUniqueViolation(err, ["Roaster_name_norm_key", "name"])) {
-      return fieldErrors([{ field: "name", ar: "توجد محمصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم المحمصة مستخدم", summaryEn: "Roaster name is taken" }]);
+      return fieldErrors([{ field: "name", ar: "توجد حمّاصة بهذا الاسم.", en: "A roaster with this name exists.", summaryAr: "اسم الحمّاصة مستخدم", summaryEn: "Roaster name is taken" }]);
     }
     return handleDomainError(err);
   }

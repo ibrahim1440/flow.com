@@ -1,5 +1,5 @@
 "use client";
-// Settings › Production & roasting › Roasters — RM1 «المحامص» (Figma 387:182 at 1440, 388:435 at
+// Settings › Production & roasting › Roasters — RM1 «الحمّاصات» (Figma 387:182 at 1440, 388:435 at
 // 1024, phone 378:2). The production roasters and their limits, the sample roasters (or the empty
 // state), three metrics and the capacity footnote. GET /api/settings/production.
 import Link from "next/link";
@@ -17,9 +17,9 @@ export default function RoastersPage() {
   const { ar, L } = useLang();
   const phone = usePhone();
   const { data, error, reload } = useOverview();
-  useD21Title(L("المحامص", "Roasters"));
+  useD21Title(L("الحمّاصات", "Roasters"));
   useD21Phone({
-    title: L("المحامص", "Roasters"), sub: L("الإعدادات · الإنتاج والتحميص", "Settings · Production & roasting"),
+    title: L("الحمّاصات", "Roasters"), sub: L("الإعدادات · الإنتاج والتحميص", "Settings · Production & roasting"),
     back: "/dashboard/settings",
     ...(data?.can.edit ? { action: { href: `${BASE}/roasters/new`, label: L("إضافة حمّاصة", "Add roaster"), icon: "plus" as const } } : {}),
   });
@@ -38,9 +38,9 @@ export default function RoastersPage() {
       <table className="hr-table ss-rtable" aria-label={label}>
         <thead>
           <tr>
-            <th>{L("المحمصة", "Roaster")}</th>
+            <th>{L("الحمّاصة", "Roaster")}</th>
             <th>{L("النوع", "Type")}</th>
-            <th className="num ss-thwrap">{L("سعة المحمصة", "Roaster capacity")}</th>
+            <th className="num ss-thwrap">{L("سعة الحمّاصة", "Roaster capacity")}</th>
             <th className="num ss-thwrap">{L("كمية التحميص الافتراضية", "Default roast quantity")}</th>
             <th className="num hr-hide-compact ss-thwrap">{L("أقل – أعلى كمية مسموحة للتحميص", "Min – max roast quantity")}</th>
             <th className="num hr-hide-compact">{L("الدورة", "Cycle")}</th>
@@ -97,10 +97,10 @@ export default function RoastersPage() {
 
   const empty = (
     <div className="ss-empty" data-testid="sample-empty">
-      <strong>{L("لا توجد محمصة عينات مسجّلة", "No sample roaster registered")}</strong>
+      <strong>{L("لا توجد حمّاصة عينات مسجّلة", "No sample roaster registered")}</strong>
       <p>{phone
-        ? L("أضف محمصة عينات لتظهر في الجدولة.", "Add a sample roaster to see it in scheduling.")
-        : L("جلسات التذوق تعمل دون محمصة عينات. أضف محمصة عينات لتظهر في الجدولة ويُسنَد إليها مشغّل.", "Cupping sessions work without a sample roaster. Add a sample roaster to see it in scheduling and assign it an operator.")}</p>
+        ? L("أضف حمّاصة عينات لتظهر في الجدولة.", "Add a sample roaster to see it in scheduling.")
+        : L("جلسات التذوق تعمل دون حمّاصة عينات. أضف حمّاصة عينات لتظهر في الجدولة ويُسنَد إليها مشغّل.", "Cupping sessions work without a sample roaster. Add a sample roaster to see it in scheduling and assign it an operator.")}</p>
       {data?.can.edit ? <Link href={`${BASE}/roasters/new?type=SAMPLE`} className="hr-btn" data-testid="sample-add"><Plus />{L("إضافة حمّاصة", "Add roaster")}</Link> : null}
     </div>
   );
@@ -115,8 +115,8 @@ export default function RoastersPage() {
               <Metrics
                 className="ss-metrics"
                 items={[
-                  [L("محامص الإنتاج", "Production roasters"), <N key="n">{production.length}</N>,
-                    available.length ? `${L("متاحة الآن", "Available now")} · ${available.map((r) => r.name).join("، ")}` : L("لا محمصة متاحة الآن", "None available now")],
+                  [L("حمّاصات الإنتاج", "Production roasters"), <N key="n">{production.length}</N>,
+                    available.length ? `${L("متاحة الآن", "Available now")} · ${available.map((r) => r.name).join("، ")}` : L("لا حمّاصة متاحة الآن", "None available now")],
                   [L("أعلى كمية مسموحة للتحميص", "Maximum roast quantity"), biggest ? <><N>{biggest.maxBatchKg}</N>{unit(L("كغ أخضر", "kg green"))}</> : "—",
                     def ? <>{L("كمية التحميص الافتراضية", "Default roast quantity")} <N>{def.defaultTargetKg}</N> {L("كغ", "kg")}</> : null],
                   [L("الصيانة القادمة", "Next maintenance"), next ? <span className="ss-mtext">{dayLabel(next.startsAt, ar)}</span> : "—",
@@ -126,16 +126,16 @@ export default function RoastersPage() {
             )}
             <section>
               <div className="ss-bh">
-                <h2>{L("محامص الإنتاج", "Production roasters")}</h2>
+                <h2>{L("حمّاصات الإنتاج", "Production roasters")}</h2>
                 {phone ? null : <span>{L("السعة بالكيلوغرام الأخضر لكل دفعة", "Capacity in kg of green coffee per batch")}</span>}
               </div>
               {production.length === 0
-                ? <p className="ss-muted" data-testid="production-empty">{L("لا توجد محمصة إنتاج مسجّلة.", "No production roaster is registered.")}</p>
-                : phone ? list(production) : table(production, L("محامص الإنتاج", "Production roasters"))}
+                ? <p className="ss-muted" data-testid="production-empty">{L("لا توجد حمّاصة إنتاج مسجّلة.", "No production roaster is registered.")}</p>
+                : phone ? list(production) : table(production, L("حمّاصات الإنتاج", "Production roasters"))}
             </section>
             <section>
-              <div className="ss-bh"><h2>{L("محامص العينات", "Sample roasters")}</h2></div>
-              {samples.length === 0 ? empty : phone ? list(samples) : table(samples, L("محامص العينات", "Sample roasters"))}
+              <div className="ss-bh"><h2>{L("حمّاصات العينات", "Sample roasters")}</h2></div>
+              {samples.length === 0 ? empty : phone ? list(samples) : table(samples, L("حمّاصات العينات", "Sample roasters"))}
             </section>
             <QcMinSection />
             <OrderRecomputeSection />

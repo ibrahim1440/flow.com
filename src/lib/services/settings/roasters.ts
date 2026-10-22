@@ -54,7 +54,7 @@ function weight(v: unknown): Decimal | null {
 }
 
 const LABEL: Record<string, [string, string]> = {
-  nominalCapacityKg: ["سعة المحمصة", "Roaster capacity"],
+  nominalCapacityKg: ["سعة الحمّاصة", "Roaster capacity"],
   defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"],
   minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"],
   maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"],
@@ -71,8 +71,8 @@ export function validateRoaster(input: Record<string, unknown>): { ok: true; val
   const add = (e: FieldError) => { if (!errors.some((x) => x.field === e.field)) errors.push(e); };
 
   const name = str(input.name);
-  if (!name) add({ field: "name", ar: "اسم المحمصة مطلوب.", en: "The roaster name is required.", summaryAr: "اسم المحمصة مطلوب", summaryEn: "Roaster name is required" });
-  else if (name.length > NAME_MAX) add({ field: "name", ar: `الاسم أطول من ${NAME_MAX} حرفًا.`, en: `The name is longer than ${NAME_MAX} characters.`, summaryAr: "اسم المحمصة طويل", summaryEn: "Roaster name is too long" });
+  if (!name) add({ field: "name", ar: "اسم الحمّاصة مطلوب.", en: "The roaster name is required.", summaryAr: "اسم الحمّاصة مطلوب", summaryEn: "Roaster name is required" });
+  else if (name.length > NAME_MAX) add({ field: "name", ar: `الاسم أطول من ${NAME_MAX} حرفًا.`, en: `The name is longer than ${NAME_MAX} characters.`, summaryAr: "اسم الحمّاصة طويل", summaryEn: "Roaster name is too long" });
   const mm = str(input.manufacturerModel);
   if (mm.length > TEXT_MAX) add({ field: "manufacturerModel", ar: `النص أطول من ${TEXT_MAX} حرفًا.`, en: `Longer than ${TEXT_MAX} characters.`, summaryAr: "الشركة المصنّعة والطراز طويل", summaryEn: "Manufacturer and model is too long" });
 
@@ -89,7 +89,7 @@ export function validateRoaster(input: Record<string, unknown>): { ok: true; val
     } else w[f] = d;
   }
   const { nominalCapacityKg: nom, defaultTargetKg: tgt, minBatchKg: min, maxBatchKg: max } = w;
-  if (max && nom && max.greaterThan(nom)) add({ field: "maxBatchKg", ar: `أعلى كمية مسموحة للتحميص أكبر من سعة المحمصة (${kg(nom)} كغ).`, en: `The maximum roast quantity is above the roaster capacity (${kg(nom)} kg).`, summaryAr: "أعلى كمية مسموحة للتحميص أكبر من سعة المحمصة", summaryEn: "Maximum roast quantity is above the roaster capacity" });
+  if (max && nom && max.greaterThan(nom)) add({ field: "maxBatchKg", ar: `أعلى كمية مسموحة للتحميص أكبر من سعة الحمّاصة (${kg(nom)} كغ).`, en: `The maximum roast quantity is above the roaster capacity (${kg(nom)} kg).`, summaryAr: "أعلى كمية مسموحة للتحميص أكبر من سعة الحمّاصة", summaryEn: "Maximum roast quantity is above the roaster capacity" });
   if (tgt && min && tgt.lessThan(min)) add({ field: "defaultTargetKg", ar: `كمية التحميص الافتراضية أقل من أقل كمية مسموحة للتحميص (${kg(min)} كغ).`, en: `The default roast quantity is below the minimum roast quantity (${kg(min)} kg).`, summaryAr: "كمية التحميص الافتراضية أقل من أقل كمية مسموحة للتحميص", summaryEn: "Default roast quantity is below the minimum roast quantity" });
   if (tgt && max && tgt.greaterThan(max)) add({ field: "defaultTargetKg", ar: `كمية التحميص الافتراضية أكبر من أعلى كمية مسموحة للتحميص (${kg(max)} كغ).`, en: `The default roast quantity is above the maximum roast quantity (${kg(max)} kg).`, summaryAr: "كمية التحميص الافتراضية أكبر من أعلى كمية مسموحة للتحميص", summaryEn: "Default roast quantity is above the maximum roast quantity" });
   if (min && max && min.greaterThan(max)) add({ field: "minBatchKg", ar: `أقل كمية مسموحة للتحميص أكبر من أعلى كمية مسموحة للتحميص (${kg(max)} كغ).`, en: `The minimum roast quantity is above the maximum roast quantity (${kg(max)} kg).`, summaryAr: "أقل كمية مسموحة للتحميص أكبر من أعلى كمية مسموحة للتحميص", summaryEn: "Minimum roast quantity is above the maximum roast quantity" });

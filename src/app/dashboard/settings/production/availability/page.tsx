@@ -29,7 +29,7 @@ export default function AvailabilityPage() {
   const [statusFor, setStatusFor] = useState<Roaster | null>(null);
   const [mOpen, setMOpen] = useState<{ edit: Maintenance | null; roasterId?: string } | null>(null);
   useD21Title(L("التوفر والصيانة", "Availability & maintenance"));
-  useD21Phone({ title: L("التوفر والصيانة", "Availability & maintenance"), sub: L("الإعدادات · المحامص", "Settings · Roasters"), back: BASE });
+  useD21Phone({ title: L("التوفر والصيانة", "Availability & maintenance"), sub: L("الإعدادات · الحمّاصات", "Settings · Roasters"), back: BASE });
 
   // The seven days from today (Riyadh).
   const days = useMemo(() => {
@@ -70,7 +70,7 @@ export default function AvailabilityPage() {
         <RoastersHead tab="avail" data={data} />
         {error ? <Retry error={error} onRetry={reload} /> : !data ? <OpsLoading rows={6} /> : (
           <div className="ss-stack" data-testid="availability-page">
-            {roasters.length === 0 ? <p className="ss-muted">{L("لا توجد محمصة مسجّلة.", "No roaster is registered.")}</p> : null}
+            {roasters.length === 0 ? <p className="ss-muted">{L("لا توجد حمّاصة مسجّلة.", "No roaster is registered.")}</p> : null}
             {roasters.map((r) => (
               <div className="ss-statuscard" key={r.id} data-testid="status-card">
                 <div>
@@ -112,7 +112,7 @@ export default function AvailabilityPage() {
                 <div className="ss-legend">
                   <span><i className="ss-sw is-day" />{L("يوم عمل", "Working day")}</span>
                   <span><i className="ss-sw is-hatch" />{L("صيانة مخططة", "Planned maintenance")}</span>
-                  <span><i className="ss-sw is-off" />{L("المحمصة غير متاحة", "Roaster not available")}</span>
+                  <span><i className="ss-sw is-off" />{L("الحمّاصة غير متاحة", "Roaster not available")}</span>
                 </div>
               </section>
             ) : null}
@@ -216,7 +216,7 @@ function MaintenanceDialog({ edit, roasterId, roasters, people, onClose, onSaved
     >
       <form className="hr-form" noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
         {!edit && roasters.length > 1 ? (
-          <Field label={`${L("المحمصة", "Roaster")} *`} wide>
+          <Field label={`${L("الحمّاصة", "Roaster")} *`} wide>
             <Select className="hr-select" value={d.roasterId} onChange={(e) => set("roasterId", e.target.value)}>
               {roasters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </Select>

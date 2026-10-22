@@ -27,7 +27,7 @@ export default function OperatorsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   useD21Title(L("المشغّلون", "Operators"));
-  useD21Phone({ title: L("المشغّلون", "Operators"), sub: L("الإعدادات · المحامص", "Settings · Roasters"), back: BASE });
+  useD21Phone({ title: L("المشغّلون", "Operators"), sub: L("الإعدادات · الحمّاصات", "Settings · Roasters"), back: BASE });
 
   const [token, setToken] = useState(0);
   const load = () => setToken((t) => t + 1);
@@ -62,16 +62,16 @@ export default function OperatorsPage() {
           <div className="ss-stack" data-testid="operators-page">
             <p className="tl-note">
               <strong>{L("التخويل والإسناد أمران منفصلان.", "Authorization and assignment are separate.")}</strong>{" "}
-              {L("التخويل يأتي من صلاحية", "Authorization comes from the permission")} <code className="ss-code">production.start_batch</code> {L("في الأدوار ولا يُعدَّل هنا. الإسناد يحدد من يُقترح لكل محمصة في الجدولة.", "in the roles and is not changed here. Assignment decides who is proposed for each roaster in scheduling.")}
+              {L("التخويل يأتي من صلاحية", "Authorization comes from the permission")} <code className="ss-code">production.start_batch</code> {L("في الأدوار ولا يُعدَّل هنا. الإسناد يحدد من يُقترح لكل حمّاصة في الجدولة.", "in the roles and is not changed here. Assignment decides who is proposed for each roaster in scheduling.")}
             </p>
-            {roasters.length === 0 ? <p className="ss-muted">{L("لا توجد محمصة مسجّلة.", "No roaster is registered.")}</p> : (
+            {roasters.length === 0 ? <p className="ss-muted">{L("لا توجد حمّاصة مسجّلة.", "No roaster is registered.")}</p> : (
               <section>
                 <div className="ss-bh">
                   <h2>{L("المشغّلون", "Operators")} · {ops?.roaster.name ?? roasters.find((r) => r.id === chosen)?.name}</h2>
-                  <span>{L("من يمكن جدولته على هذه المحمصة", "Who can be scheduled on this roaster")}</span>
+                  <span>{L("من يمكن جدولته على هذه الحمّاصة", "Who can be scheduled on this roaster")}</span>
                   {roasters.length > 1 ? (
                     <span className="ss-bh-end">
-                      <Select className="hr-select ss-roaster-pick" aria-label={L("المحمصة", "Roaster")} value={chosen ?? ""} onChange={(e) => router.replace(`${BASE}/operators?roaster=${e.target.value}`)}>
+                      <Select className="hr-select ss-roaster-pick" aria-label={L("الحمّاصة", "Roaster")} value={chosen ?? ""} onChange={(e) => router.replace(`${BASE}/operators?roaster=${e.target.value}`)}>
                         {roasters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </Select>
                     </span>
@@ -114,7 +114,7 @@ export default function OperatorsPage() {
                     </table>
                   </div>
                 )}
-                <p className="tl-foot">{L("لا يُسند مستخدم غير مخوّل. لا يُجدول مشغّل واحد على محمصتين في الوقت نفسه.", "A user who is not authorized is not assigned. One operator is not scheduled on two roasters at the same time.")}</p>
+                <p className="tl-foot">{L("لا يُسند مستخدم غير مخوّل. لا يُجدول مشغّل واحد على حمّاصتين في الوقت نفسه.", "A user who is not authorized is not assigned. One operator is not scheduled on two roasters at the same time.")}</p>
               </section>
             )}
             {canEdit ? null : <ReadOnlyNote />}
