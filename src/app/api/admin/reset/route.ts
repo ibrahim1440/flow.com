@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     await clearAttempts(ipHash, identifierHash);
 
     // Atomic deletion in FK-safe order.
-    // Preserved: Employee, Supplier, CoffeeProduct, ProductSKU, SystemConfig.
+    // Preserved: Employee, Supplier, CoffeeProduct, ProductSKU, SystemConfig (and the roaster configuration).
     // BlendIngredient cascades from RoastingBatch but is deleted explicitly for clarity.
     await prisma.$transaction([
       prisma.cuppingScore.deleteMany(),
@@ -104,6 +104,12 @@ export async function POST(request: Request) {
       // the one transaction below, the pair either both happen or neither does.
       prisma.packagingOperation.deleteMany(),
       prisma.roastingBatch.deleteMany(),
+      // Roasting schedule (20261026090000_roast_schedule): the plans and slots are operational data
+      // like the batches (roasters, their configuration and operators are kept). After the batches,
+      // whose scheduledSlotId points at the slots.
+      prisma.scheduleEvent.deleteMany(),
+      prisma.scheduledSlot.deleteMany(),
+      prisma.roastPlan.deleteMany(),
       prisma.orderItem.deleteMany(),
       prisma.order.deleteMany(),
       prisma.customer.deleteMany(),

@@ -4,7 +4,7 @@ import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil } from "lucide-react";
+import { ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil, Flame } from "lucide-react";
 import { Btn, Dot, Metrics, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, kg, type Tone, Kg, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
@@ -18,6 +18,7 @@ import { type TranslationKey } from "@/lib/i18n/translations";
 
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
 import { RoastSheet, type RoastLine, type QueueCoffee } from "./_parts/roast-sheet";
+import { ScheduleViews } from "./schedule/_parts/shared";
 type Batch = {
   id: string; batchNumber: string; date: string; status: string;
   /** When the batch was recorded (the reference log lists batches by this time). */
@@ -121,6 +122,12 @@ export default function ProductionPage() {
   // Phase C: whoever roasts lands on the queue (the prototype's «التحميص» station); everyone
   // else on the overview.
   const [tab, setTab] = useState<"pending" | "batches" | "blend">(() => (canStartBatch ? "pending" : "batches"));
+  // ?tab=pending|batches|blend: the roasting schedule's views (/dashboard/production/schedule) link back here.
+  useEffect(() => {
+    const want = new URLSearchParams(window.location.search).get("tab");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL is read after mount (no Suspense boundary here)
+    if (want === "pending" || want === "batches" || want === "blend") setTab(want);
+  }, []);
 
   // Pending tab filter state
   const [pendingSearch, setPendingSearch] = useState("");
@@ -462,8 +469,14 @@ export default function ProductionPage() {
     <div className="hr-page">
       <PageHeader
         title={t("opsProductionTitle")}
-        actions={(canStartBatch && canRoastToStock) || (canBlend && blendableBatches.length >= 2) ? (
+        actions={canStartBatch || (canBlend && blendableBatches.length >= 2) ? (
           <>
+            {/* Workstations W1: the roasting station, for whoever may record a batch. */}
+            {canStartBatch && (
+              <Link href="/station/roasting" className="hr-btn" data-testid="open-roasting-station">
+                <Flame size={15} aria-hidden="true" /> {t("opsOpenRoastingStation")}
+              </Link>
+            )}
             {canBlend && blendableBatches.length >= 2 && (
               <Btn onClick={() => { setShowBlendForm(true); setBlendSelected(new Set()); setError(""); }}>
                 <Merge size={15} aria-hidden="true" /> {t("blendBatches")}
@@ -519,6 +532,9 @@ export default function ProductionPage() {
 
       {loaded && tab === "pending" && (
         <>
+          {/* «جدول التحميص»: the roast queue is its first view; the day, roasters and planning views are
+              /dashboard/production/schedule (Figma 377:2 RM6–RM8). */}
+          <ScheduleViews />
           {/* Phase C item 2 (prototype «التحميص»): one card per coffee with the roasted kilograms
               still needed — open order units − shelf free − pipeline — and the orders it serves,
               oldest first. Tapping a card opens the roast sheet for that coffee; the server

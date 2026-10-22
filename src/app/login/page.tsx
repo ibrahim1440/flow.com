@@ -72,6 +72,16 @@ const T = {
   },
 } as const;
 
+/**
+ * Workstations W1: a station page sends an unsigned visitor here with ?next=/station/…, and the
+ * sign-in returns there. Only a /station/ path is honoured (never another origin or ERP route), so
+ * the parameter cannot become an open redirect.
+ */
+function stationReturn(search: string): string | null {
+  const next = new URLSearchParams(search).get("next");
+  return next && /^\/station\/[a-z-]+$/.test(next) ? next : null;
+}
+
 export default function LoginPage() {
   const [lang, setLang] = useState<Lang>("ar");
   // SIMPLE MODE: username + password is the only method shown, and the default (SHOW_PIN_SIGN_IN).
@@ -94,7 +104,8 @@ export default function LoginPage() {
   // Reached because a session ended (idle 4 h, absolute 12 h, logout elsewhere, revocation).
   const [expired, setExpired] = useState(false);
   useEffect(() => {
-    if (cameForExpiredSession(window.location.search)) setExpired(true); // eslint-disable-line react-hooks/set-state-in-effect -- the query string exists only in the browser
+    // A station that signed itself out after 5 idle minutes (Workstations W1, D3) shows the same notice.
+    if (cameForExpiredSession(window.location.search) || new URLSearchParams(window.location.search).get("reason") === "station_idle") setExpired(true); // eslint-disable-line react-hooks/set-state-in-effect -- the query string exists only in the browser
   }, []);
 
   useEffect(() => {
@@ -131,7 +142,7 @@ export default function LoginPage() {
       const data = await safeJson(res);
       if (!res.ok) { setNote(noteFor(res.status, data, step)); return "refused"; }
       if (data?.mfaRequired && data.challenge) { setChallenge(data.challenge); setCode(""); return "ok"; }
-      router.push(data?.redirectTo ?? "/dashboard");
+      router.push(stationReturn(window.location.search) ?? data?.redirectTo ?? "/dashboard");
       return "ok";
     } catch {
       // AU-11: nothing reached the server.

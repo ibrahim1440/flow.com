@@ -11,12 +11,14 @@ import { isPrivilegedStored, normalizeUsername } from "@/lib/auth/privileged";
 import { isEnrolled, mfaConfigured } from "@/lib/auth/mfa";
 import { authAudit, completeSignIn, signChallenge, INVALID, MFA_UNAVAILABLE, TOO_MANY, verifySecret } from "@/lib/auth/sign-in";
 import type { SessionMethod } from "@/lib/auth/session";
-import { pinLoginEnabled, PIN_LOGIN_DISABLED } from "@/lib/auth/pin-login";
+import { pinLoginEnabled } from "@/lib/auth/pin-login";
 
-// W0 (security, Phase D batch): only "password" is open by default, and it is the default when
-// `method` is omitted. "pin" and "username_pin" answer 400 PIN_LOGIN_DISABLED (Arabic message)
-// unless the server sets AUTH_PIN_LOGIN_ENABLED (src/lib/auth/pin-login.ts). Their code below is
-// unchanged, so a deployment that turns the flag on gets exactly the behaviour described next.
+// W0 (security, Phase D batch; tightened by Workstations W0, owner decision D4): only "password" is
+// open by default, and it is the default when `method` is omitted. "pin" and "username_pin" answer
+// the SAME generic 401 a wrong credential gets — no code, nothing that says PIN sign-in exists or is
+// switched off — unless the server sets AUTH_PIN_LOGIN_ENABLED (src/lib/auth/pin-login.ts). Their
+// code below is unchanged, so a deployment that turns the flag on gets exactly the behaviour
+// described next (the local test servers do; production does not).
 //
 // Owner security decision (16 Oct, Option A). Three ways in:
 //   · "pin"           — a PIN alone, for OPERATIONAL accounts only. A PIN that resolves to a
@@ -61,7 +63,7 @@ export async function POST(request: Request) {
 
   // Before any lookup, verifier or rate-limit bucket: a refused method learns nothing and costs nothing.
   if ((method === "pin" || method === "username_pin") && !pinLoginEnabled()) {
-    return NextResponse.json(PIN_LOGIN_DISABLED, { status: 400 });
+    return INVALID();
   }
 
   if (method === "pin") {

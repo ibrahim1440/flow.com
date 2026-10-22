@@ -134,6 +134,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "view_history", label: "View completed batches" },
     { key: "cancel_batch", label: "Cancel / delete batches" },
     { key: "edit_date", label: "Edit batch date (retroactive)" },
+    // Roasting schedule (ROASTERS.md §6, D4): explicit privileges, granted per user and NEVER through a
+    // role default — the roasting role excludes both below. Administrators hold them by role.
+    { key: "manage_roasters", label: "Manage roasters, maintenance and operator assignments" },
+    { key: "manage_schedule", label: "Plan, approve, move and cancel roasting schedule slots" },
   ],
   qc: [
     { key: "create_record", label: "Submit QC records" },
@@ -299,7 +303,9 @@ export function buildDefaultPermissions(role: string): Permissions {
         // what any order asked for, which is exactly what the per-order surplus gate makes
         // admin-only. Granting it here by default would have made that gate circumventable
         // by simply omitting the order item. An admin can still turn it on per employee.
-        orders: allView("orders"), production: allEdit("production", ["roast_to_stock"]),
+        // manage_roasters / manage_schedule withheld (ROASTERS.md §6, D4): any new production key would
+        // otherwise reach every roasting account through allEdit. Delegated per user only.
+        orders: allView("orders"), production: allEdit("production", ["roast_to_stock", "manage_roasters", "manage_schedule"]),
         qc: none(), packaging: allEdit("packaging"),
         dispatch: none(), history: none(), analytics: none(),
         labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),

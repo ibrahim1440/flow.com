@@ -497,6 +497,19 @@ export const NAV: NavNode[] = [
         shell: { ar: "الإنتاج والتحميص", en: "Production & roasting", icon: "flame", group: "production", trailRoot: "production" },
       },
       {
+        // Figma 377:2 RM6–RM8 (ROASTERS.md §2, D2): «جدول التحميص» is a tab of «الإنتاج والتحميص», so it has
+        // no sidebar item of its own (the frames light «الإنتاج والتحميص»); reached from the tab, the
+        // quick jump and its own URL. The same audience as production: viewing is read-only, every write
+        // is checked by the API (production › manage_schedule, never a role default).
+        id: "operations.productionSchedule",
+        ar: "جدول التحميص", en: "Roasting schedule",
+        href: "/dashboard/production/schedule",
+        icon: CalendarDays,
+        anyOf: [{ module: "production" }],
+        highlightAs: ["operations.production"],
+        shell: { icon: "flame", group: "production", trailRoot: "production", place: "none" },
+      },
+      {
         id: "operations.packaging",
         ar: "التعبئة", en: "Packaging",
         href: "/dashboard/packaging",

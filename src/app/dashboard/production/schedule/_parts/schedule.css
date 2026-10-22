@@ -1,0 +1,108 @@
+/*
+ * Production › «جدول التحميص» (Figma 377:2 RM6 399:2339, RM7 403:2650, RM8 407:3005; 1024: 401:2503,
+ * 405:2837, 409:3167). Only the blocks the operations and settings kits lack: the view row, the roaster
+ * lanes on a time axis, the split cards, the rule list and the plan's two panes. Every value is a
+ * Direction 2.1 token (direction-2.1.css / ops.css).
+ */
+[data-ops-root] .rs-viewrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 20px; }
+[data-ops-root] .rs-when { font-size: 13.5px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 8px; }
+[data-ops-root] .rs-when .hr-btn { height: 28px; padding: 0 10px; }
+[data-ops-root] .rs-stack { display: flex; flex-direction: column; gap: 28px; padding-top: 20px; min-width: 0; }
+[data-ops-root] .rs-stack > section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* Lanes: the roaster's name at the start, its day on a time axis (earliest at the start edge). */
+[data-ops-root] .rs-board { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+[data-ops-root] .rs-lane { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: center; }
+[data-ops-root] .rs-lname strong { display: block; font-weight: 600; font-size: 14px; color: var(--text-primary); }
+[data-ops-root] .rs-lname span { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+[data-ops-root] .rs-track { position: relative; height: 56px; border-radius: 10px; background: var(--surface-subtle); }
+[data-ops-root] .rs-track.is-off { background: repeating-linear-gradient(135deg, var(--surface-subtle) 0 6px, var(--surface) 6px 12px); }
+[data-ops-root] .rs-hours { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--surface) 55%, transparent); border-radius: 8px; }
+[data-ops-root] .rs-maint { position: absolute; top: 4px; bottom: 4px; border-radius: 6px; background: repeating-linear-gradient(135deg, var(--status-warning-tint) 0 5px, transparent 5px 10px); border: 1px dashed var(--status-warning); }
+[data-ops-root] .rs-blk {
+  position: absolute; top: 6px; bottom: 6px; min-width: 34px; padding: 3px 6px; border-radius: 6px; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: center; gap: 1px; text-align: start;
+  font-size: 11.5px; line-height: 15px; background: var(--surface); border: 1px solid var(--border-subtle); color: var(--text-primary);
+  appearance: none; font-family: inherit; cursor: default;
+}
+[data-ops-root] .rs-blk > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-ops-root] .rs-blk > span + span { color: var(--text-secondary); }
+[data-ops-root] .rs-blk.is-recorded { background: var(--surface-selected); border-color: transparent; }
+[data-ops-root] .rs-blk.is-rejected { background: var(--status-danger-tint); border-color: transparent; color: var(--status-danger); }
+[data-ops-root] .rs-blk.is-rejected > span + span { color: var(--status-danger); }
+[data-ops-root] .rs-blk.is-running { background: var(--brand-surface); border-color: var(--brand-surface); color: var(--text-inverse); }
+[data-ops-root] .rs-blk.is-running > span + span { color: var(--text-inverse); }
+[data-ops-root] .rs-blk.is-missed { background: var(--status-warning-tint); border-style: dashed; border-color: var(--status-warning); }
+[data-ops-root] .rs-blk.is-conflict { border: 1.5px solid var(--status-danger); color: var(--status-danger); }
+[data-ops-root] .rs-now { position: absolute; top: -18px; bottom: -4px; width: 0; border-inline-start: 1.5px solid var(--status-warning); z-index: 2; pointer-events: none; }
+[data-ops-root] .rs-now span { position: absolute; top: -2px; transform: translateX(50%); font: 600 11px/14px var(--f-num); color: var(--status-warning); white-space: nowrap; }
+[dir="ltr"] [data-ops-root] .rs-now span, [data-ops-root][dir="ltr"] .rs-now span { transform: translateX(-50%); }
+[data-ops-root] .rs-axis { position: relative; height: 18px; margin-inline-start: 166px; font: 400 11.5px/18px var(--f-num); color: var(--text-muted); }
+[data-ops-root] .rs-axis span { position: absolute; transform: translateX(50%); }
+[dir="ltr"] [data-ops-root] .rs-axis span { transform: translateX(-50%); }
+[data-ops-root] .rs-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); }
+[data-ops-root] .rs-legend span { display: inline-flex; align-items: center; gap: 6px; }
+[data-ops-root] .rs-sw { width: 14px; height: 10px; border-radius: 3px; display: inline-block; border: 1px solid var(--border-subtle); background: var(--surface); }
+[data-ops-root] .rs-sw.is-recorded { background: var(--surface-selected); border-color: transparent; }
+[data-ops-root] .rs-sw.is-rejected { background: var(--status-danger-tint); border-color: transparent; }
+[data-ops-root] .rs-sw.is-running { background: var(--brand-surface); border-color: transparent; }
+[data-ops-root] .rs-sw.is-missed { background: var(--status-warning-tint); border: 1px dashed var(--status-warning); }
+[data-ops-root] .rs-sw.is-conflict { border: 1.5px solid var(--status-danger); }
+
+[data-ops-root] .rs-table tr.is-current td { background: var(--surface-hover); }
+[data-ops-root] .rs-acts { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+[data-ops-root] .rs-acts .hr-btn { height: 28px; padding: 0 10px; font-size: 12.5px; }
+[data-ops-root] .rs-num { font-family: var(--f-num); }
+[data-ops-root] .rs-strong { font-weight: 600; }
+
+/* RM7: inputs and split on the start pane, the proposed slots on the end pane. */
+[data-ops-root] .rs-plan { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+[data-ops-root] .rs-pane { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+[data-ops-root] .rs-pane > section { display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 1279px) { [data-ops-root] .rs-plan { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+[data-ops-root] .rs-kv { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px 16px; margin: 0; font-size: 13.5px; }
+[data-ops-root] .rs-kv dt { color: var(--text-secondary); }
+[data-ops-root] .rs-kv dd { margin: 0; color: var(--text-primary); }
+[data-ops-root] .rs-kv dd b { font-weight: 600; }
+[data-ops-root] .rs-pickers { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+[data-ops-root] .rs-splits { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+[data-ops-root] .rs-card {
+  appearance: none; font: inherit; text-align: start; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 10px;
+  border: 1px solid var(--border-subtle); background: var(--surface); color: var(--text-primary); min-width: 0;
+}
+[data-ops-root] button.rs-card { cursor: pointer; }
+[data-ops-root] .rs-card.is-on { border: 1.5px solid var(--brand-surface); background: var(--surface-selected); }
+[data-ops-root] .rs-card .rs-ct { font-size: 12.5px; color: var(--text-secondary); }
+[data-ops-root] .rs-card .rs-cn { font: 600 22px/28px var(--f-num); }
+[data-ops-root] .rs-card .rs-cn small { font: 400 12.5px/18px var(--f-ui); color: var(--text-secondary); margin-inline-start: 6px; }
+[data-ops-root] .rs-card .rs-cs { font-size: 13px; font-family: var(--f-num); color: var(--text-primary); }
+[data-ops-root] .rs-card .rs-cf { font-size: 12.5px; color: var(--text-secondary); }
+[data-ops-root] .rs-card .rs-cf.is-bad { color: var(--status-danger); }
+[data-ops-root] .rs-rules { list-style: none; margin: 0; padding: 0; }
+[data-ops-root] .rs-rules li { display: flex; gap: 10px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13.5px; }
+[data-ops-root] .rs-rules li i { width: 6px; height: 6px; border-radius: 50%; background: var(--status-success); flex: none; transform: translateY(-2px); }
+[data-ops-root] .rs-rules li.is-warn i { background: var(--status-warning); }
+[data-ops-root] .rs-rules li.is-fail i { background: var(--status-danger); }
+[data-ops-root] .rs-rules li strong { font-weight: 600; white-space: nowrap; }
+[data-ops-root] .rs-rules li.is-warn strong { color: var(--status-warning); }
+[data-ops-root] .rs-rules li.is-fail strong, [data-ops-root] .rs-rules li.is-fail span { color: var(--status-danger); }
+[data-ops-root] .rs-rules li span { color: var(--text-secondary); }
+[data-ops-root] .rs-dayrow td { background: var(--surface-subtle); font-size: 12.5px; color: var(--text-secondary); }
+[data-ops-root] .rs-foot { display: flex; justify-content: space-between; gap: 12px; padding-top: 8px; font-size: 13px; color: var(--text-secondary); }
+[data-ops-root] .rs-actbar { display: flex; align-items: center; gap: 10px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+[data-ops-root] .rs-actbar .rs-end { margin-inline-start: auto; }
+[data-ops-root] .rs-cell-in { height: 30px; font-size: 13px; padding: 0 8px; }
+[data-ops-root] .rs-alert { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+[data-ops-root] .rs-alert strong { color: var(--status-danger); }
+[data-ops-root] .rs-loadcell b { font: 600 14px/20px var(--f-num); }
+[data-ops-root] .rs-loadcell span { font-size: 12.5px; color: var(--text-muted); margin-inline-start: 4px; }
+[data-ops-root] .rs-daybtn { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+[data-ops-root] .rs-daybtn[aria-pressed="true"] { color: var(--text-primary); font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
+
+@media (max-width: 767.98px) {
+  [data-ops-root] .rs-lane { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  [data-ops-root] .rs-axis { margin-inline-start: 0; }
+  [data-ops-root] .rs-pickers, [data-ops-root] .rs-kv { grid-template-columns: minmax(0, 1fr); }
+  [data-ops-root] .rs-boardwrap { overflow-x: auto; }
+  [data-ops-root] .rs-boardwrap > .rs-board { min-width: 640px; }
+}

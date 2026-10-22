@@ -19,6 +19,8 @@ export type Roaster = {
   defaultOperatorId: string | null; defaultOperatorName: string | null;
   status: "AVAILABLE" | "MAINTENANCE" | "STOPPED" | "RETIRED"; statusReason: string | null; statusUntil: string | null; statusSince: string;
   isDefault: boolean; createdAt: string; updatedAt: string;
+  /** Scheduling hours (Asia/Riyadh, 0 = Sunday); null = the built-in Sunday–Thursday 07:00–15:00. */
+  workingHours?: { days: number[]; start: string; end: string } | null;
 };
 export type Maintenance = {
   id: string; roasterId: string; title: string; kind: "ROUTINE" | "ONE_OFF"; recurrenceWeeks: number | null;

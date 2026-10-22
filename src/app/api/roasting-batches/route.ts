@@ -23,6 +23,12 @@ import { nextRoastBatchNumber } from "@/lib/services/batch-number";
 import { resolveGreenLot } from "@/lib/services/green-source";
 import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
 import { roastQueue } from "@/lib/services/roast-queue";
+import { checkRoasterForRoast, logRoasterControls, type RoasterCheckResult } from "@/lib/services/roaster-controls";
+import { readRoastRequestKey, roastIntentHash, isRoastKeyConflict, ROAST_IDEMPOTENCY_MISMATCH, ROAST_IDEMPOTENCY_MISMATCH_AR } from "@/lib/services/roast-idempotency";
+import { completeStationClaim } from "@/lib/services/station/claims";
+import { linkBatchToSlot, ScheduleError } from "@/lib/services/schedule/schedule-db";
+import { scheduleError } from "@/lib/services/schedule/http";
+import { lossVerdict } from "@/lib/station/shared";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -127,6 +133,22 @@ class AppError extends Error {
   }
 }
 
+/** Thrown inside the transaction when the key's batch already exists (rolls the attempt back). */
+class ReplayFound extends Error {}
+
+/**
+ * The batch an Idempotency-Key already recorded, as a 200 replay — or a 422 when the key was used
+ * for a different roast. Null when the key has recorded nothing yet.
+ */
+async function replayOf(requestKey: string, intentHash: string) {
+  const done = await prisma.roastingBatch.findUnique({ where: { requestKey }, include: { orderItem: true, greenBean: true } });
+  if (!done) return null;
+  if (done.intentHash !== intentHash) {
+    return NextResponse.json({ error: ROAST_IDEMPOTENCY_MISMATCH_AR, errorEn: ROAST_IDEMPOTENCY_MISMATCH, code: "IDEMPOTENCY_MISMATCH" }, { status: 422 });
+  }
+  return NextResponse.json({ ...done, replayed: true }, { status: 200 });
+}
+
 export async function GET(request: Request) {
   // QC and Packaging workers need to read batches for their own workflow stages
   const { user, error } = await requireAnyModule("production", "qc", "packaging");
@@ -183,9 +205,52 @@ export async function POST(request: Request) {
   const { error, user } = await requireSub("production", "start_batch");
   if (error) return error;
 
-  const data = await request.json();
+  // ── Idempotency (Workstations W1, D8; the Delivery.requestKey pattern) ─────────────────
+  // Optional, so every caller that predates it records exactly as before. With a key, a retry of
+  // the same roast answers with the batch already recorded (200, replayed) instead of a second
+  // batch; the same key carrying a different roast is a 422.
+  const keyRead = readRoastRequestKey(request);
+  if (!keyRead.ok) return NextResponse.json({ error: keyRead.message, errorEn: keyRead.en }, { status: 400 });
+  const requestKey = keyRead.key;
+
+  const data = await request.json().catch(() => ({}));
   const { productId, greenBeanQuantity, roastedBeanQuantity, roastProfile, productionOrderId, surplusOverride, surplusReason } = data;
   let orderItemId: string | undefined = typeof data.orderItemId === "string" && data.orderItemId ? data.orderItemId : undefined;
+
+  // ── Roaster (D5) and station claim (W1): both optional ───────────────────────────────────
+  if (data.roasterId !== undefined && data.roasterId !== null && data.roasterId !== "" && typeof data.roasterId !== "string") {
+    return NextResponse.json({ error: "معرّف الحمّاصة غير صالح.", errorEn: "roasterId must be a roaster id." }, { status: 400 });
+  }
+  const roasterId: string | null = typeof data.roasterId === "string" && data.roasterId ? data.roasterId : null;
+  const claimId: string | null = typeof data.claimId === "string" && data.claimId ? data.claimId : null;
+  // ── The roasting schedule (RM6–RM8): the slot this roast is recorded from, optional ─────────
+  if (data.scheduledSlotId !== undefined && data.scheduledSlotId !== null && data.scheduledSlotId !== "" && typeof data.scheduledSlotId !== "string") {
+    return NextResponse.json({ error: "معرّف الخانة غير صالح.", errorEn: "scheduledSlotId must be a slot id." }, { status: 400 });
+  }
+  const scheduledSlotId: string | null = typeof data.scheduledSlotId === "string" && data.scheduledSlotId ? data.scheduledSlotId : null;
+  const lossReason: string | null = typeof data.lossReason === "string" && data.lossReason.trim() ? data.lossReason.trim().slice(0, 200) : null;
+  const intentHash = requestKey ? roastIntentHash(data) : null;
+
+  if (requestKey) {
+    // Fast replay probe; the advisory lock and the unique index below are the real control.
+    const done = await replayOf(requestKey, intentHash!);
+    if (done) return done;
+  }
+
+  // A slot belongs to one roaster: a roast recorded on another roaster is not that slot (409).
+  // The rest of the slot's rules (cancelled, already recorded, the coffee) are decided by
+  // linkBatchToSlot inside the transaction, under the schedule lock.
+  if (scheduledSlotId) {
+    const slot = await prisma.scheduledSlot.findUnique({ where: { id: scheduledSlotId }, select: { roasterId: true } });
+    if (!slot) return scheduleError(new ScheduleError(404, "الخانة غير موجودة.", "Slot not found.", "NOT_FOUND"));
+    if (roasterId && slot.roasterId !== roasterId) {
+      return NextResponse.json({
+        error: "هذه الخانة مخططة على محمصة أخرى. سجّل الدفعة على محمصة الخانة أو دون خانة.",
+        errorEn: "This slot is planned on another roaster. Record the roast on the slot's roaster, or without the slot.",
+        code: "SLOT_ROASTER_MISMATCH", slotRoasterId: slot.roasterId,
+      }, { status: 409 });
+    }
+  }
 
   // ── The roast queue (production simplification, Phase C item 2) ─────────────────────────
   // `allocate: "oldest"` with a productId and no order line: the roaster tapped a coffee card.
@@ -234,6 +299,34 @@ export async function POST(request: Request) {
   if (roastedQty > qty) {
     return NextResponse.json({ error: "roastedBeanQuantity cannot exceed greenBeanQuantity." }, { status: 400 });
   }
+  // W1: a station roast whose loss is above the boundary carries its reason (classification only,
+  // no stock). The boundary is the one the ERP roast sheet already uses (src/lib/station/shared.ts).
+  if (claimId) {
+    const product = typeof productId === "string" && productId ? await prisma.coffeeProduct.findUnique({ where: { id: productId }, select: { expectedRoastLoss: true } }) : null;
+    const loss = lossVerdict(qty, roastedQty, product?.expectedRoastLoss ?? null);
+    if (loss?.tone === "above" && !lossReason) {
+      return NextResponse.json({ error: "الفاقد فوق الحد: اختر سبب الفاقد.", errorEn: "The loss is above the boundary: choose the loss reason.", code: "LOSS_REASON_REQUIRED" }, { status: 422 });
+    }
+  }
+
+  // D5: a chosen roaster is checked before anything else is decided (operator, nominal, min–max).
+  // No roaster chosen → nothing here runs, exactly as before.
+  let roasterCheck: RoasterCheckResult | null = null;
+  if (roasterId) {
+    try {
+      roasterCheck = await checkRoasterForRoast(prisma, { roasterId, greenKg: qty, ack: data.ack === true, user });
+    } catch (err) {
+      return handleDomainError(err);
+    }
+    // An admin who is not an assigned operator is never blocked by the operator rule; the admin
+    // role is exercised as everywhere else (admin-role gate: a verified individual — SIMPLE MODE
+    // waives that — no step-up), and the bypass is logged with the batch.
+    if (roasterCheck.bypass) {
+      const refused = await adminRoleGate(user, "production.roaster_operator_bypass");
+      if (refused) return refused;
+    }
+  }
+
   // Roast loss is what physically happened: green in − roasted out. It is derived, never typed
   // (the manual «waste» input is gone from the roast sheet); a client that still sends
   // wasteQuantity has it ignored rather than stored beside a contradicting pair of weights.
@@ -353,6 +446,13 @@ export async function POST(request: Request) {
 
   try {
   const batch = await prisma.$transaction(async (tx) => {
+    // Idempotency: one transaction per key at a time, then the probe again under the lock. The
+    // loser of a race waits here and then finds the winner's batch (answered as a replay).
+    if (requestKey) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(7763, ${advisoryKey(`roast-key:${requestKey}`)}::int)`;
+      const already = await tx.roastingBatch.findUnique({ where: { requestKey }, select: { id: true } });
+      if (already) throw new ReplayFound();
+    }
     // Set only when this roast is committed as an authorized surplus, and used twice
     // below: once on the ledger note and once on the order timeline. It lives inside the
     // transaction so a rollback takes the evidence with the roast.
@@ -604,9 +704,19 @@ export async function POST(request: Request) {
         status:              "Pending QC",
         qcDeadline,
         productionOrderId:   effectiveProductionOrderId,
+        roasterId:           roasterCheck ? roasterCheck.roaster.id : null,
+        requestKey,
+        intentHash,
       },
       include: { orderItem: true, greenBean: true },
     });
+
+    // The roasting schedule: the slot this roast was recorded from becomes RECORDED, in this
+    // transaction (a refusal — cancelled, already recorded, another coffee — rolls the roast back).
+    // A replay never reaches this line: it answers with the batch, already linked, above.
+    if (scheduledSlotId) {
+      await linkBatchToSlot(tx, { slotId: scheduledSlotId, batchId: newBatch.id, actor: { id: user.id, name: user.name } });
+    }
 
     if (previousQuantity !== null && newQuantity !== null) {
       await tx.inventoryMovement.create({
@@ -690,6 +800,17 @@ export async function POST(request: Request) {
       });
     }
 
+    // D5: the acknowledgement of a charge outside min–max, and an admin's operator bypass.
+    if (roasterCheck) {
+      await logRoasterControls(tx, roasterCheck, {
+        batch: newBatch, requestKey, greenKg: qty, user, sourceInterface: claimId ? "STATION" : "WEB",
+      });
+    }
+    // W1: the station's claim on this work ends with the roast it was claimed for.
+    if (claimId) {
+      await completeStationClaim(tx, { claimId, user, batch: newBatch, requestKey, lossReason, body: { productId, productionOrderId } });
+    }
+
     await emitAutomationEvent(tx, {
       eventType: "production.batch_roasted",
       subjectType: "RoastingBatch",
@@ -697,7 +818,7 @@ export async function POST(request: Request) {
       actorId: user.id,
     });
 
-    return { ...newBatch, greenSource, ...(queueMode ? { queue: { allocatedTo: newBatch.orderItemId, demandKg: queueEvidence?.demandKg ?? 0, toStockKg: queueEvidence?.toStockKg ?? 0 } } : {}) };
+    return { ...newBatch, scheduledSlotId: scheduledSlotId ?? newBatch.scheduledSlotId, greenSource, roaster: roasterCheck ? { id: roasterCheck.roaster.id, name: roasterCheck.roaster.name, acknowledged: !!roasterCheck.ack, adminBypass: roasterCheck.bypass } : null, ...(queueMode ? { queue: { allocatedTo: newBatch.orderItemId, demandKg: queueEvidence?.demandKg ?? 0, toStockKg: queueEvidence?.toStockKg ?? 0 } } : {}) };
   }, TX_OPTS);
 
   // Phase B item 4: the order the roast was made for is recomputed after the commit.
@@ -705,9 +826,17 @@ export async function POST(request: Request) {
 
   return NextResponse.json(batch, { status: 201 });
   } catch (err: unknown) {
+    // Another request with this key committed first: answer with its batch.
+    if (requestKey && (err instanceof ReplayFound || isRoastKeyConflict(err))) {
+      const done = await replayOf(requestKey, intentHash!);
+      if (done) return done;
+      return NextResponse.json({ error: "تعذّر تأكيد هذه الدفعة. أعد المحاولة بالطلب نفسه.", errorEn: "This roast could not be confirmed. Please retry with the same request." }, { status: 503 });
+    }
     if (err instanceof AppError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
+    // The slot link (409 SLOT_RECORDED / COFFEE_MISMATCH / SLOT_CANCELLED, 404).
+    if (err instanceof ScheduleError) return scheduleError(err);
     // The production-planning guards throw the `{ _appCode, message }` shape the newer
     // routes use, rather than this file's older AppError class.
     // (handleDomainError keeps a refusal's code, e.g. REAUTH_REQUIRED, for the client.)

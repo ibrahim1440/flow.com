@@ -9,6 +9,8 @@ import { changedKeys, pick, writeSettingsAudit } from "@/lib/services/settings/a
 import { fieldErrors, isUniqueViolation, notFound, readObject, RouteError, routeErrorResponse } from "@/lib/services/settings/http";
 import { parseFiniteDecimal } from "@/lib/services/commissions/engine";
 import { normaliseNumberText } from "@/lib/services/settings/sections";
+import { cancelSlotsForRoasterStatus } from "@/lib/services/schedule/schedule-db";
+import { Prisma } from "@/generated/prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -18,7 +20,7 @@ function sameDecimal(v: unknown, stored: string): boolean {
   return !!d && d.equals(stored);
 }
 
-const EDITABLE = ["name", "manufacturerModel", "type", "defaultTargetKg", "minBatchKg", "maxBatchKg", "cycleMinutes", "defaultOperatorId", "status", "statusReason", "isDefault"] as const;
+const EDITABLE = ["name", "manufacturerModel", "type", "defaultTargetKg", "minBatchKg", "maxBatchKg", "cycleMinutes", "defaultOperatorId", "status", "statusReason", "isDefault", "workingHours"] as const;
 
 /**
  * GET /api/settings/production/roasters/[id] — one roaster (RM3) with its change history.
@@ -82,6 +84,7 @@ export async function PATCH(request: Request, { params }: Params) {
         nominalCapacityKg: cur.nominalCapacityKg.toString(), defaultTargetKg: cur.defaultTargetKg.toString(),
         minBatchKg: cur.minBatchKg.toString(), maxBatchKg: cur.maxBatchKg.toString(), cycleMinutes: cur.cycleMinutes,
         defaultOperatorId: cur.defaultOperatorId, status: cur.status, statusReason: cur.statusReason, isDefault: cur.isDefault,
+        workingHours: cur.workingHours,
       };
       for (const k of EDITABLE) if (k in body) merged[k] = body[k];
       const v = validateRoaster(merged);
@@ -125,8 +128,11 @@ export async function PATCH(request: Request, { params }: Params) {
           status: values.status, statusReason: values.statusReason,
           ...(statusChanged ? { statusSince: new Date(), statusUntil: null } : {}),
           isDefault, updatedById: user.id,
+          workingHours: values.workingHours ?? Prisma.DbNull,
         },
       });
+      // ROASTERS.md §5.10: to maintenance / stopped → the coming planned slots return to the work queue.
+      if (statusChanged) await cancelSlotsForRoasterStatus(tx, id, values.status, values.statusReason, { id: user.id, name: user.name });
       // A default operator is an assigned one (ROASTERS.md §4).
       if (values.defaultOperatorId) {
         await tx.roasterOperator.upsert({

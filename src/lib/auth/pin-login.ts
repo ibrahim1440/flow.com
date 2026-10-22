@@ -18,6 +18,11 @@ export function pinLoginEnabled(env: Record<string, string | undefined> = proces
   return v === "1" || v === "true" || v === "on" || v === "yes";
 }
 
+/**
+ * Kept for the code path's restoration and for the tests. Not sent any more: since Workstations W0
+ * (owner decision D4) a refused PIN sign-in answers the generic 401 «بيانات الدخول غير صحيحة»
+ * (sign-in.ts INVALID), so nothing tells a caller that PIN sign-in exists or is switched off.
+ */
 export const PIN_LOGIN_DISABLED = {
   error: "Sign-in with a PIN is turned off. Sign in with your username and password.",
   errorAr: "تسجيل الدخول بالرمز السري متوقف. سجّل الدخول باسم المستخدم وكلمة المرور.",

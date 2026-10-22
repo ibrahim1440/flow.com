@@ -11,6 +11,7 @@ import { Decimal, parseFiniteDecimal } from "../commissions/engine";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { effectivePermissions } from "@/lib/hr/sod";
 import { normaliseNumberText } from "./sections";
+import { parseWorkingHours, type WorkingHours } from "../schedule/planner";
 
 export const ROASTER_TYPES = ["PRODUCTION", "SAMPLE"] as const;
 export type RoasterType = (typeof ROASTER_TYPES)[number];
@@ -41,6 +42,8 @@ export type RoasterValues = {
   status: (typeof ROASTER_STATUSES)[number];
   statusReason: string | null;
   isDefault: boolean;
+  /** Scheduling hours (RM6–RM8): null = the built-in Sunday–Thursday 07:00–15:00. */
+  workingHours: WorkingHours | null;
 };
 
 const kg = (d: Decimal) => d.toFixed(2);
@@ -107,10 +110,17 @@ export function validateRoaster(input: Record<string, unknown>): { ok: true; val
   if ((status === "MAINTENANCE" || status === "STOPPED") && !reason) add({ field: "statusReason", ar: "السبب مطلوب.", en: "A reason is required.", summaryAr: "سبب الحالة مطلوب", summaryEn: "A status reason is required" });
   if (reason.length > REASON_MAX) add({ field: "statusReason", ar: `السبب أطول من ${REASON_MAX} حرف.`, en: `The reason is longer than ${REASON_MAX} characters.`, summaryAr: "سبب الحالة طويل", summaryEn: "Status reason is too long" });
 
+  let workingHours: WorkingHours | null = null;
+  if (input.workingHours !== undefined && input.workingHours !== null) {
+    workingHours = parseWorkingHours(input.workingHours);
+    if (!workingHours) add({ field: "workingHours", ar: "اختر يوم عمل واحدًا على الأقل، ووقت نهاية بعد وقت البداية.", en: "Choose at least one working day, and an end after the start.", summaryAr: "ساعات العمل غير صالحة", summaryEn: "Working hours are not valid" });
+  }
+
   if (errors.length) return { ok: false, errors };
   return {
     ok: true,
     values: {
+      workingHours,
       name, manufacturerModel: mm || null, type: type as RoasterType,
       nominalCapacityKg: nom!, defaultTargetKg: tgt!, minBatchKg: min!, maxBatchKg: max!, cycleMinutes: cycle,
       defaultOperatorId: typeof op === "string" && op ? op : null,
@@ -199,7 +209,7 @@ type RoasterRow = {
   id: string; name: string; manufacturerModel: string | null; type: string;
   nominalCapacityKg: { toString(): string }; defaultTargetKg: { toString(): string }; minBatchKg: { toString(): string }; maxBatchKg: { toString(): string };
   cycleMinutes: number; defaultOperatorId: string | null; status: string; statusReason: string | null; statusUntil: Date | null; statusSince: Date;
-  isDefault: boolean; createdAt: Date; updatedAt: Date;
+  isDefault: boolean; createdAt: Date; updatedAt: Date; workingHours?: unknown;
 };
 
 const fixed = (v: { toString(): string }) => new Decimal(v.toString()).toFixed(2);
@@ -213,6 +223,7 @@ export function roasterOut(r: RoasterRow, names: Map<string, string> = new Map()
     defaultOperatorId: r.defaultOperatorId, defaultOperatorName: r.defaultOperatorId ? names.get(r.defaultOperatorId) ?? null : null,
     status: r.status, statusReason: r.statusReason, statusUntil: r.statusUntil?.toISOString() ?? null, statusSince: r.statusSince.toISOString(),
     isDefault: r.isDefault, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
+    workingHours: parseWorkingHours(r.workingHours ?? null),
   };
 }
 
@@ -224,6 +235,7 @@ export function roasterAudit(r: RoasterRow | (RoasterValues & { statusUntil?: Da
     minBatchKg: fixed(r.minBatchKg), maxBatchKg: fixed(r.maxBatchKg), cycleMinutes: r.cycleMinutes,
     defaultOperatorId: r.defaultOperatorId, status: r.status, statusReason: r.statusReason ?? null,
     statusUntil: r.statusUntil ? new Date(r.statusUntil).toISOString() : null, isDefault: r.isDefault,
+    workingHours: parseWorkingHours(r.workingHours ?? null),
   };
 }
 

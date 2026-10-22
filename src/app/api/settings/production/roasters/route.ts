@@ -61,6 +61,7 @@ export async function POST(request: Request) {
           nominalCapacityKg: values.nominalCapacityKg, defaultTargetKg: values.defaultTargetKg,
           minBatchKg: values.minBatchKg, maxBatchKg: values.maxBatchKg, cycleMinutes: values.cycleMinutes,
           defaultOperatorId: values.defaultOperatorId, status: values.status, statusReason: values.statusReason,
+          ...(values.workingHours ? { workingHours: values.workingHours } : {}),
           isDefault, createdById: user.id, updatedById: user.id,
         },
       });

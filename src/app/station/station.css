@@ -1,0 +1,199 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Workstations · roasting station (Phase 9 W1) — the station shell and its blocks.
+
+   Source: docs/design/direction-2.1-rc/src/stations.py + stations2.py (the HTML the approved
+   Figma frames on page 630:2 were built from, pixel parity < 1 %). The values below are that
+   markup's own inline values; tokens and the page primitives (.btn .st .lbl .mid .unit .n .id .av)
+   come from components/shell/direction-2.1.css and components/d21/reference.css — nothing here
+   defines a token or a colour. Scoped under `.d21 .ws` so no other page can match a rule.
+
+   W5 touch scale (PHASE9 §4): primary 18 px, secondary 16 px, title 30 px, quantities 52 / 26 px,
+   keypad 96 × 64 keys with 12 px gaps, task targets ≥ 56 px, bar targets ≥ 44 px.
+   Laid out for 1280 × 800; checked at 1180 and 1024 (compact: < 1100 drops the bar's location
+   line, «جلسة» label and «آخر تحديث» word, and the queue side panel — as the 1024 frames do).
+   ───────────────────────────────────────────────────────────────────────── */
+
+.d21.ws { height: 100dvh; min-height: 560px; display: flex; flex-direction: column; background: var(--canvas); overflow: hidden; }
+
+/* ── Station bar (Phase 7 TD-13 bar + connection and last update) ── */
+.d21 .ws-bar { height: 64px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 32px; white-space: nowrap; }
+.d21 .ws-bar .ws-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sheet); flex: none; display: grid; place-items: center; overflow: hidden; }
+.d21 .ws-bar .ws-mark img { width: 22px; height: 22px; }
+.d21 .ws-bar .ws-id { line-height: 20px; min-width: 0; }
+.d21 .ws-bar .ws-id b { font-weight: 600; }
+.d21 .ws-bar .ws-loc { font-size: 12.5px; color: var(--text-muted); }
+.d21 .ws-bar .ws-sp { flex: 1; }
+.d21 .ws-bar .ws-upd { font-size: 12.5px; color: var(--text-muted); margin-inline-end: 8px; }
+.d21 .ws-bar .ws-emp { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 22px; background: var(--surface); }
+.d21[dir="ltr"] .ws-bar .ws-emp { padding: 6px 6px 6px 12px; }
+.d21 .ws-bar .ws-emp b { font-weight: 500; }
+.d21 .ws-bar .ws-tag { font-size: 12px; color: var(--text-muted); }
+.d21 .ws-bar .btn { height: 44px; }
+
+/* ── The one white sheet ── */
+.d21 .ws-sheet { flex: 1; margin: 0 16px 16px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-sheet); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.d21 .ws-head { padding: 24px 32px 0; flex: none; }
+.d21 .ws-body { flex: 1; min-height: 0; padding: 20px 32px 24px; display: flex; flex-direction: column; overflow-y: auto; }
+.d21 .ws-plain { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px 32px; overflow-y: auto; }
+.d21 .ws-foot { flex: none; display: flex; align-items: center; gap: 16px; padding: 16px 32px; border-top: 1px solid var(--border-subtle); }
+.d21 .ws-note { flex: 1; min-width: 0; font-size: 13.5px; line-height: 22px; color: var(--text-muted); }
+
+/* ── Head: title + task stepper, then the references and the status as text ── */
+.d21 .ws-h { display: flex; align-items: center; gap: 24px; }
+.d21 .ws-h h1 { font: 600 30px/40px var(--f-ui); margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d21 .ws-h2 { display: flex; align-items: baseline; gap: 16px; margin-top: 4px; }
+.d21 .ws-sub { flex: 1; min-width: 0; color: var(--text-secondary); font-size: 15px; line-height: 24px; }
+.d21 .ws-since { font-size: 13.5px; color: var(--text-muted); white-space: nowrap; }
+.d21.ws .st.ws-st { font-size: 15px; }
+.d21 .ws-bid { font: 500 15px/1 var(--f-mono); direction: ltr; unicode-bidi: isolate; }
+
+.d21 .ws-steps { display: flex; align-items: center; gap: 10px; }
+.d21 .ws-step { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 14px; color: var(--text-muted); }
+.d21 .ws-step i { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 500 12px/1 var(--f-num); font-style: normal; box-shadow: inset 0 0 0 1.5px var(--border-control); color: var(--text-muted); }
+.d21 .ws-step.done { color: var(--text-secondary); }
+.d21 .ws-step.done i { background: var(--action-primary); color: var(--text-inverse); box-shadow: none; }
+.d21 .ws-step.cur { color: var(--text-primary); font-weight: 600; }
+.d21 .ws-step.cur i { box-shadow: inset 0 0 0 2px var(--action-primary), 0 0 0 4px var(--action-primary-tint); font-weight: 600; color: var(--action-primary); }
+.d21 .ws-step-line { width: 28px; height: 2px; border-radius: 1px; background: var(--border-strong); }
+.d21 .ws-step-line.done { background: var(--action-primary); }
+
+/* ── Facts ── */
+.d21 .ws-facts { display: flex; gap: 24px; flex-wrap: wrap; }
+.d21 .ws-facts:not(.plain) > div + div { padding-inline-start: 24px; border-inline-start: 1px solid var(--border-subtle); }
+.d21 .ws-fact-v { margin-top: 4px; font-size: 16px; line-height: 24px; font-weight: 500; }
+
+/* ── Footer buttons: 64 px, the primary 420 px wide ── */
+.d21.ws .btn.ws-pri { height: 64px; min-width: 420px; justify-content: center; font-size: 18px; font-weight: 600; border-radius: 12px; gap: 12px; }
+.d21.ws .btn.ws-sec { height: 64px; padding: 0 24px; font-size: 16px; border-radius: 12px; }
+.d21.ws .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; opacity: .8; animation: ws-rot 0.9s linear infinite; }
+@keyframes ws-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .d21.ws .spin { animation: none; } }
+
+/* ── Keypad (96 × 64 keys, 12 px gaps; 1-2-3 order in both languages) ── */
+.d21 .ws-pad { display: grid; gap: 12px; align-content: start; justify-items: center; padding: 20px; border-radius: 14px; background: var(--surface-subtle); }
+.d21 .ws-pad-l { font-size: 13.5px; color: var(--text-secondary); }
+.d21 .ws-keys { display: grid; grid-template-columns: repeat(3, 96px); gap: 12px; direction: ltr; }
+.d21 .ws-key { width: 96px; height: 64px; border-radius: 12px; display: grid; place-items: center; font: 400 26px/1 var(--f-num); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-strong); border: 0; color: var(--text-primary); cursor: pointer; padding: 0; }
+.d21 .ws-key:hover { background: var(--surface-hover); }
+.d21 .ws-key:active { transform: scale(.97); }
+.d21 .ws-key.del { font: 500 16px/1 var(--f-ui); color: var(--text-secondary); background: none; box-shadow: none; }
+.d21 .ws-key:disabled { background: var(--surface-subtle); color: var(--text-disabled); box-shadow: none; cursor: not-allowed; transform: none; }
+.d21 .ws-key.ph { visibility: hidden; }
+
+/* ── Big quantity fields ── */
+.d21 .ws-fields { display: flex; gap: 20px; margin-top: 24px; }
+.d21 .ws-field { flex: 1; min-width: 0; }
+.d21 .ws-field-l { font-size: 15px; font-weight: 500; margin-bottom: 8px; }
+.d21 .ws-field-box { height: 96px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); display: flex; align-items: center; padding: 0 24px; gap: 6px; cursor: text; position: relative; width: 100%; border: 0; text-align: start; font: inherit; color: inherit; }
+.d21 .ws-field-box.focus { box-shadow: inset 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--action-primary-tint); }
+.d21 .ws-field-box.off { background: var(--surface-subtle); cursor: default; }
+.d21 .ws-field-box.bad { box-shadow: inset 0 0 0 1.5px var(--status-danger); }
+.d21 .ws-field-box .big { font: 400 52px/1 var(--f-num); letter-spacing: -.02em; font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.d21 .ws-field-box .big.empty { color: var(--text-disabled); }
+.d21 .ws-field-box.off .big { color: var(--text-secondary); }
+.d21 .ws-field-box .caret { width: 2px; height: 44px; background: var(--action-primary); margin-inline-start: 2px; animation: ws-blink 1.1s steps(1) infinite; }
+@keyframes ws-blink { 50% { opacity: 0; } }
+.d21 .ws-field-box .unit { font-size: 16px; margin-inline-start: auto; }
+.d21 .ws-field-h { font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+/* The real input stays focusable for the keyboard and assistive tech; the box draws it. */
+.d21 .ws-field-box input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; border: 0; padding: 0; cursor: text; }
+
+.d21 .ws-loss { display: flex; align-items: center; gap: 20px; margin-top: 20px; padding: 16px 20px; border-radius: 12px; background: var(--surface-subtle); }
+.d21 .ws-loss.warn { background: var(--status-warning-tint); }
+.d21 .ws-loss .ws-loss-r { text-align: end; }
+.d21 .ws-loss .ws-loss-r div { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.d21 .ws-loss.warn .ws-loss-r div { color: var(--text-secondary); }
+
+/* ── Notices: status is text plus tone, never colour alone ── */
+.d21 .ws-info { padding: 14px 16px; border-radius: 12px; background: var(--surface-subtle); }
+.d21 .ws-info.info { background: var(--status-info-tint); }
+.d21 .ws-info.err { background: var(--status-danger-tint); }
+.d21 .ws-info.warn { background: var(--status-warning-tint); }
+.d21 .ws-info > b { font-weight: 600; font-size: 15px; }
+.d21 .ws-info.err > b { color: var(--status-danger); }
+.d21 .ws-info > div { color: var(--text-secondary); font-size: 14px; line-height: 22px; margin-top: 2px; }
+
+/* ── Queue rows (72 px, the whole row is the target) ── */
+.d21 .ws-rows { display: grid; gap: 8px; align-content: start; flex: 1; min-width: 0; }
+.d21 .ws-row { display: flex; align-items: center; gap: 16px; min-height: 72px; padding: 12px 20px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-strong); background: var(--surface); border: 0; width: 100%; text-align: start; font: inherit; color: inherit; cursor: pointer; }
+.d21 .ws-row:hover { background: var(--surface-hover); }
+.d21 .ws-row.on { box-shadow: inset 0 0 0 2px var(--action-primary); background: var(--surface-selected); }
+.d21 .ws-row.dim { color: var(--text-muted); }
+.d21 .ws-row-t { display: flex; gap: 12px; align-items: baseline; font-size: 17px; line-height: 26px; font-weight: 600; }
+.d21 .ws-row.dim .ws-row-t { color: var(--text-secondary); }
+.d21 .ws-row-time { font-size: 20px; line-height: 28px; font-weight: 600; min-width: 56px; }
+.d21 .ws-row-s { font-size: 14px; line-height: 22px; color: var(--text-muted); margin-top: 2px; }
+.d21 .ws-row-m { flex: 1; min-width: 0; }
+
+.d21 .ws-side { width: 300px; flex: none; display: grid; gap: 12px; align-content: start; padding: 20px; border-radius: 14px; background: var(--surface-subtle); }
+.d21 .ws-side > b { font-weight: 600; }
+.d21 .ws-side-l { font-size: 14px; line-height: 24px; color: var(--text-secondary); }
+
+.d21 .ws-split { display: flex; gap: 32px; flex: 1; min-height: 0; }
+.d21 .ws-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* ── R2 confirmations ── */
+.d21 .ws-confirm { display: flex; gap: 16px; align-items: center; min-height: 80px; padding: 12px 20px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); }
+.d21 .ws-confirm.ok { box-shadow: inset 0 0 0 2px var(--action-primary); background: var(--surface-selected); }
+.d21 .ws-confirm .ws-box { width: 32px; height: 32px; border-radius: 8px; flex: none; display: grid; place-items: center; box-shadow: inset 0 0 0 1.5px var(--border-control); }
+.d21 .ws-confirm.ok .ws-box { background: var(--action-primary); color: var(--text-inverse); box-shadow: none; }
+.d21 .ws-confirm-t { font-size: 17px; line-height: 26px; font-weight: 600; }
+.d21 .ws-confirm-s { font-size: 14px; color: var(--text-muted); }
+
+/* ── R3 timer ── */
+.d21 .ws-timer { display: grid; gap: 6px; justify-items: center; padding: 28px 0; border-radius: 14px; background: var(--surface-subtle); }
+.d21 .ws-timer .ws-clock { font: 300 72px/1 var(--f-num); letter-spacing: -.02em; font-variant-numeric: tabular-nums; direction: ltr; }
+.d21 .ws-timer .ws-timer-s { font-size: 14px; color: var(--text-muted); }
+
+/* ── Choices (56 px) and option cards (R7) ── */
+.d21 .ws-chips { display: flex; gap: 12px; flex-wrap: wrap; }
+.d21 .ws-choice { height: 56px; flex: 1; min-width: 140px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: inherit; font-size: 16px; background: var(--surface); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-control); border: 0; cursor: pointer; padding: 0 12px; }
+.d21 .ws-choice[aria-pressed="true"] { background: var(--surface-selected); color: var(--action-primary); box-shadow: inset 0 0 0 2px var(--action-primary); font-weight: 600; }
+.d21 .ws-option { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); border: 0; width: 100%; text-align: start; font: inherit; color: inherit; cursor: pointer; }
+.d21 .ws-option[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--action-primary); background: var(--surface-selected); }
+.d21 .ws-option .ws-dot { width: 24px; height: 24px; border-radius: 50%; flex: none; display: grid; place-items: center; box-shadow: inset 0 0 0 1.5px var(--border-control); }
+.d21 .ws-option[aria-pressed="true"] .ws-dot { background: var(--action-primary); color: var(--text-inverse); box-shadow: none; }
+.d21 .ws-option-t { font-size: 17px; line-height: 26px; font-weight: 600; }
+.d21 .ws-option-s { font-size: 14px; line-height: 22px; color: var(--text-secondary); margin-top: 2px; }
+.d21 .ws-req { color: var(--status-danger); }
+.d21 .ws-lab { font-size: 15px; font-weight: 500; margin-bottom: 8px; }
+
+/* ── Results ── */
+.d21 .ws-done { display: grid; justify-items: center; gap: 16px; text-align: center; }
+.d21 .ws-mark-ok { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: var(--status-success-tint); color: var(--status-success); }
+.d21 .ws-mark-warn { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: var(--status-warning-tint); color: var(--status-warning); font: 600 30px/1 var(--f-num); }
+.d21 .ws-done-t { font: 600 26px/36px var(--f-ui); }
+.d21 .ws-done-n { font: 500 30px/1 var(--f-mono); letter-spacing: .02em; direction: ltr; }
+.d21 .ws-summary { margin-top: 12px; padding: 20px 24px; border-radius: 12px; background: var(--surface-subtle); text-align: start; }
+.d21 .ws-log-row { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px; line-height: 22px; }
+.d21 .ws-log-row > span:first-child { color: var(--status-success); }
+.d21 .ws-log-row > span:nth-child(2) { flex: 1; }
+.d21 .ws-log-row > span:last-child { color: var(--text-muted); }
+.d21 .ws-plain-w { display: grid; gap: 20px; max-width: 760px; width: 100%; }
+.d21 .ws-t2 { font: 600 30px/40px var(--f-ui); margin: 0; }
+.d21.ws .ico { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.d21.ws .ico.s { width: 16px; height: 16px; }
+.d21.ws .ico.l { width: 36px; height: 36px; stroke-width: 2; }
+.d21 .ws-sel { height: 44px; }
+
+/* ── Compact (the 1024 frames) ── */
+@media (max-width: 1099px) {
+  .d21 .ws-bar .ws-loc, .d21 .ws-bar .ws-tag, .d21 .ws-bar .ws-upd-w { display: none; }
+  .d21 .ws-side.ws-wide-only { display: none; }
+  .d21 .ws-h { gap: 16px; }
+}
+/* Below the station widths (390 is monitoring-only in the design; here it must simply not break). */
+@media (max-width: 900px) {
+  .d21.ws { height: auto; min-height: 100dvh; overflow: visible; }
+  .d21 .ws-bar { padding: 0 16px; gap: 8px; flex-wrap: wrap; height: auto; min-height: 64px; }
+  .d21 .ws-bar .ws-emp b { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  .d21 .ws-sheet { margin: 0 8px 8px; overflow: visible; }
+  .d21 .ws-head, .d21 .ws-body, .d21 .ws-foot, .d21 .ws-plain { padding-inline: 16px; }
+  .d21 .ws-h { flex-wrap: wrap; }
+  .d21 .ws-steps { display: none; }
+  .d21 .ws-split, .d21 .ws-fields, .d21 .ws-foot { flex-wrap: wrap; }
+  .d21.ws .btn.ws-pri { min-width: 0; width: 100%; }
+  .d21 .ws-h2 { flex-wrap: wrap; }
+  .d21 .ws-keys { grid-template-columns: repeat(3, 72px); }
+  .d21 .ws-key { width: 72px; }
+}

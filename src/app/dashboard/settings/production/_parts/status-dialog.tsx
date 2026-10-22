@@ -1,11 +1,12 @@
 "use client";
 // RM4b «تغيير حالة …» (Figma 395:1701, phone sheet 384:104). POST …/roasters/[id]/status. The frame's
-// panel of affected planned slots («7 خانات مخططة اليوم تتأثر») is not drawn here: no schedule
-// exists yet (RM6–RM8 are later work), so there is no planned slot to affect.
-import { useState } from "react";
+// panel of affected planned slots («7 خانات مخططة اليوم تتأثر · أول 3») reads GET
+// /api/production/schedule/impact: to maintenance / stopped, those slots return to the work queue
+// (ROASTERS.md §5.10).
+import { useEffect, useState } from "react";
 import { Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
-import { call, errText, Seg, STATUS, useLang, type FieldError, type Roaster } from "./shared";
+import { call, errText, Seg, STATUS, timeOf, dayLabel, useLang, type FieldError, type Roaster } from "./shared";
 
 type S = "AVAILABLE" | "MAINTENANCE" | "STOPPED";
 
@@ -25,6 +26,10 @@ function StatusForm({ roaster, open, onClose, onSaved }: Props & { roaster: Roas
   const [alert, setAlert] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [impact, setImpact] = useState<{ count: number; today: number; first: { id: string; startsAt: string; plannedGreenKg: string }[] } | null>(null);
+  useEffect(() => {
+    void call<{ count: number; today: number; first: { id: string; startsAt: string; plannedGreenKg: string }[] }>(`/api/production/schedule/impact?roasterId=${encodeURIComponent(roaster.id)}`).then((r) => { if (r.ok) setImpact(r.data); });
+  }, [roaster.id]);
   const err = (f: string) => { const e = errors.find((x) => x.field === f); return e ? (ar ? e.ar : e.en) : null; };
 
   async function submit() {
@@ -68,6 +73,13 @@ function StatusForm({ roaster, open, onClose, onSaved }: Props & { roaster: Roas
               <input className="hr-input" type="date" dir="ltr" value={until} onChange={(e) => setUntil(e.target.value)} data-testid="status-until" />
             </Field>
           </>
+        ) : null}
+        {status !== "AVAILABLE" && impact && impact.count > 0 ? (
+          <div className="hr-notice tone-warning" data-testid="status-impact">
+            <strong>{ar ? `${impact.count} ${impact.count === 1 ? "خانة مخططة تتأثر" : impact.count === 2 ? "خانتان مخططتان تتأثران" : "خانات مخططة تتأثر"}${impact.today ? ` · ${impact.today} اليوم` : ""} · أول ${Math.min(3, impact.count)}` : `${impact.count} planned slot(s) affected${impact.today ? ` · ${impact.today} today` : ""} · first ${Math.min(3, impact.count)}`}</strong>
+            <div>{impact.first.map((x) => `${dayLabel(x.startsAt, ar, false)} ${timeOf(x.startsAt)} · ${x.plannedGreenKg}`).join(" — ")}</div>
+            <div>{L("تُعاد إلى قائمة العمل غير مجدولة. لا تُلغى الطلبات ولا يُصرف بن.", "They return to the work queue unscheduled. No order is cancelled and no green is used.")}</div>
+          </div>
         ) : null}
         {alert ? <div className="hr-notice tone-danger" role="alert">{alert}</div> : null}
       </form>

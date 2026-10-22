@@ -57,6 +57,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
   production: {
     start_batch: "بدء التحميص ومتابعته", roast_to_stock: "تحميص للمخزون دون طلب", blend: "خلط الدفعات", view_history: "عرض الدفعات المكتملة",
     cancel_batch: "إلغاء الدفعات وحذفها", edit_date: "تعديل تاريخ الدفعة بأثر رجعي",
+    manage_roasters: "إدارة المحامص وصيانتها وإسناد المشغّلين", manage_schedule: "إدارة جدول التحميص واعتماد الخطط",
   },
   inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة" },
   sales: {

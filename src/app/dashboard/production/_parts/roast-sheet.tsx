@@ -8,7 +8,9 @@
 // with a warning outside the product's normal range. POST /api/roasting-batches resolves the lot
 // again under its transaction, so the line here and the server can never disagree silently.
 import { localizeApiError } from "@/lib/i18n/api-errors";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { newRequestKey, isConclusiveResponse } from "@/lib/request-key";
+import { LOSS_WARN_POINTS, DEFAULT_EXPECTED_LOSS } from "@/lib/station/shared";
 import { OpsPane, useL } from "@/components/ops/ui";
 import { AutoRow, Chips, Cta, NumIn, parseNum } from "@/components/ops/station";
 import { Select } from "@/components/ui/Select";
@@ -38,6 +40,8 @@ export type QueueCoffee = {
 };
 type Product = { id: string; productNameEn: string; productNameAr: string | null };
 type Bean = { id: string; beanType: string; serialNumber: string; quantityKg: number; isActive?: boolean };
+/** A production roaster in service (GET /api/station/roasters), for the capacity rule D5. */
+type SheetRoaster = { id: string; name: string; status: string; isDefault: boolean; nominalKg: number; defaultTargetKg: number; minKg: number; maxKg: number; assigned: boolean };
 type Facts = {
   productId: string | null; productNameEn: string | null; productNameAr: string | null;
   expectedRoastLoss: number; defaultLot: GreenLot | null; candidates: GreenLot[];
@@ -75,21 +79,31 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
   const [surplus, setSurplus] = useState<{ message: string; reason: string } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [quick, setQuick] = useState<number[]>([]);
+  // D5 (Workstations W1): the roaster the batch is roasted on. With none configured the sheet
+  // records exactly as before (no roaster, no capacity rule).
+  const [roasters, setRoasters] = useState<SheetRoaster[]>([]);
+  const [roasterId, setRoasterId] = useState("");
+  const [ack, setAck] = useState(false);
+  const [needAck, setNeedAck] = useState(false);
+  // One Idempotency-Key per roast: kept until the server's answer is conclusive (a lost response
+  // is retried with the same key and answers with the batch already recorded).
+  const keyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/production", { cache: "no-store" })
+    fetch("/api/station/roasters", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { roasters?: { type: string; status: string; isDefault: boolean; defaultTargetKg: string; minBatchKg: string; maxBatchKg: string }[] } | null) => {
-        const prod = (j?.roasters ?? []).filter((r) => r.type === "PRODUCTION" && r.status !== "RETIRED");
+      .then((j: { roasters?: SheetRoaster[] } | null) => {
+        const prod = j?.roasters ?? [];
+        setRoasters(prod);
         const def = prod.find((r) => r.isDefault) ?? prod[0];
         if (!def) return;
-        const t = Number(def.defaultTargetKg);
-        if (t > 0) setGreen((g) => g || String(t));
-        setQuick([...new Set([Number(def.minBatchKg), t, Number(def.maxBatchKg)].filter((x) => Number.isFinite(x) && x > 0))].sort((a, b) => a - b));
+        setRoasterId(def.id);
+        if (def.defaultTargetKg > 0) setGreen((g) => g || String(def.defaultTargetKg));
       })
       .catch(() => {});
   }, []);
+  const roaster = roasters.find((r) => r.id === roasterId) ?? null;
+  const quick = roaster ? [...new Set([roaster.minKg, roaster.defaultTargetKg, roaster.maxKg].filter((x) => Number.isFinite(x) && x > 0))].sort((a, b) => a - b) : [];
 
   const subject = mode.kind === "order" ? `orderItemId=${encodeURIComponent(mode.line.id)}` : productId ? `productId=${encodeURIComponent(productId)}` : null;
   useEffect(() => {
@@ -114,7 +128,7 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
     ? { id: stated.id, serialNumber: stated.serialNumber, beanType: stated.beanType, quantityKg: stated.quantityKg }
     : pick?.ok ? pick.lot : null;
   const lotName = (l: { beanType: string; beanTypeAr?: string | null }) => (lang === "ar" ? l.beanTypeAr || l.beanType : l.beanType);
-  const expected = facts?.expectedRoastLoss ?? 15;
+  const expected = facts?.expectedRoastLoss ?? DEFAULT_EXPECTED_LOSS;
 
   let live: { tone: "" | "is-warn" | "is-bad"; left: string; right?: string } | null = null;
   if (Number.isFinite(g) && g > 0 && Number.isFinite(r) && r > 0) {
@@ -122,20 +136,28 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
     else if (lot && g > lot.quantityKg) live = { tone: "is-bad", left: L(`المتاح من الأخضر ${kgText(lot.quantityKg)} كغ فقط`, `Only ${kgText(lot.quantityKg)} kg of green available`) };
     else {
       const pct = (1 - r / g) * 100;
-      const off = Math.abs(pct - expected) > 5;
+      const off = Math.abs(pct - expected) > LOSS_WARN_POINTS;
       live = { tone: off ? "is-warn" : "", left: L(`فاقد التحميص ${kgText(g - r)} كغ`, `Roast loss ${kgText(g - r)} kg`), right: `${pct.toFixed(1)}%${off ? L(" · خارج المعتاد", " · outside the normal range") : ""}` };
     }
   }
+  // D5: above the manufacturer capacity is refused (no override); outside min–max needs the
+  // acknowledgement; an employee not assigned to the roaster is refused (admins are not).
+  const g3 = Number.isFinite(g) ? +g.toFixed(3) : 0;
+  const overNominal = !!roaster && g3 > roaster.nominalKg;
+  const outsideRange = !!roaster && g3 > 0 && !overNominal && (g3 < roaster.minKg || g3 > roaster.maxKg);
+  const notOperator = !!roaster && !roaster.assigned && !isAdmin;
   const ready = (!stock || !!productId) && !!lot && Number.isFinite(g) && g > 0 && Number.isFinite(r) && r > 0 && r < g && g <= (lot?.quantityKg ?? 0)
-    && !(mode.kind === "order" && mode.line.livePos.length > 1 && !poChoice);
+    && !(mode.kind === "order" && mode.line.livePos.length > 1 && !poChoice)
+    && !overNominal && !notOperator && (!(outsideRange || needAck) || ack);
 
   async function save(withSurplus = false) {
     if (!ready || busy) return;
     setBusy(true); setError("");
     try {
+      keyRef.current ??= newRequestKey();
       const res = await fetch("/api/roasting-batches", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": keyRef.current },
         body: JSON.stringify({
           // A coffee card: the server attributes the batch to the oldest order (Phase C item 2).
           ...(mode.kind === "order" ? { orderItemId: mode.line.id, productionOrderId: poChoice || undefined } : mode.kind === "coffee" ? { productId, allocate: "oldest" } : { productId }),
@@ -144,11 +166,14 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
           greenBeanQuantity: +g.toFixed(3),
           roastedBeanQuantity: +r.toFixed(3),
           roastProfile: profile.trim() || undefined,
+          ...(roaster ? { roasterId: roaster.id, ack: ack || undefined } : {}),
           ...(withSurplus && surplus ? { surplusOverride: true, surplusReason: surplus.reason.trim() } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (isConclusiveResponse(res.status)) keyRef.current = null;
       if (!res.ok) {
+        if (res.status === 422 && data?.code === "ACK_REQUIRED") { setNeedAck(true); setAck(false); setError(localizeApiError(data, lang) ?? ""); return; }
         if (res.status === 422 && isAdmin) { setSurplus({ message: localizeApiError(data, lang) ?? "", reason: surplus?.reason ?? "" }); return; }
         setError(localizeApiError(data, lang) || L("تعذّر تسجيل الدفعة.", "Could not record the batch."));
         return;
@@ -228,6 +253,25 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
             </Select>
           </div>
         ) : null}
+        {roasters.length ? (
+          <div className="st-field">
+            {roasters.length > 1 ? (
+              <>
+                <label htmlFor="roast-roaster">{L("المحمصة", "Roaster")}</label>
+                <Select id="roast-roaster" value={roasterId} onChange={(e) => { setRoasterId(e.target.value); setAck(false); setNeedAck(false); }} className="hr-input" style={{ height: 48, width: "100%" }} data-testid="roast-roaster">
+                  {roasters.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </Select>
+              </>
+            ) : null}
+            {roaster ? <AutoRow testId="roast-roaster-line" title={<>{L("المحمصة: ", "Roaster: ")}{roaster.name}</>}
+              sub={L(`السعة ${kgText(roaster.nominalKg)} كغ · الدفعة ${kgText(roaster.minKg)}–${kgText(roaster.maxKg)} كغ`, `Capacity ${kgText(roaster.nominalKg)} kg · batch ${kgText(roaster.minKg)}–${kgText(roaster.maxKg)} kg`)} /> : null}
+          </div>
+        ) : null}
+        {notOperator ? (
+          <div className="st-warnbox" role="alert" data-testid="roast-operator">
+            <b>{L("أنت غير مربوط بهذه الحمّاصة. اطلب من المسؤول ربطك بها من إعدادات الحمّاصات.", "You are not assigned to this roaster. Ask the administrator to assign you in the roaster settings.")}</b>
+          </div>
+        ) : null}
         <div>
           <NumIn id="roast-green-kg" testId="roast-green-kg" label={L("البن الأخضر الداخل للمحمصة", "Green coffee into the roaster")} value={green} onChange={setGreen} unit={L("كغ", "kg")} placeholder="0.00" />
           {quick.length ? (
@@ -238,6 +282,21 @@ export function RoastSheet({ mode, products, beans, canChangeGreen, isAdmin, onC
         {live ? (
           <div className={`st-live ${live.tone}`} data-testid="roast-loss" role="status">
             <span>{live.left}</span>{live.right ? <span className="hr-num">{live.right}</span> : null}
+          </div>
+        ) : null}
+        {overNominal && roaster ? (
+          <div className="st-live is-bad" data-testid="roast-capacity" role="alert">
+            <span>{L(`فوق سعة ${roaster.name}: الحد ${kgText(roaster.nominalKg)} كغ أخضر حسب المصنّع`, `Above the capacity of ${roaster.name}: ${kgText(roaster.nominalKg)} kg green (manufacturer)`)}</span>
+          </div>
+        ) : null}
+        {(outsideRange || needAck) && roaster && !overNominal ? (
+          <div className="st-warnbox" role="alert" data-testid="roast-ack">
+            <b>{L(`الوزن خارج حدود الدفعة على ${roaster.name} (${kgText(roaster.minKg)}–${kgText(roaster.maxKg)} كغ)`, `The weight is outside the batch range of ${roaster.name} (${kgText(roaster.minKg)}–${kgText(roaster.maxKg)} kg)`)}</b>
+            <span>{L("يُسجَّل بتأكيدك، ويُحفظ التأكيد باسمك مع الوزن والمحمصة.", "It records with your confirmation; the confirmation is kept with your name, the weight and the roaster.")}</span>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} data-testid="roast-ack-check" />
+              <span>{L("أؤكد الوزن خارج حدود الدفعة", "I confirm the weight outside the batch range")}</span>
+            </label>
           </div>
         ) : null}
         {mode.kind === "order" && mode.line.livePos.length > 1 ? (

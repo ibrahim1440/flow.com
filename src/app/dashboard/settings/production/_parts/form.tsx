@@ -16,18 +16,25 @@ export type Draft = {
   name: string; manufacturerModel: string; type: "PRODUCTION" | "SAMPLE";
   nominalCapacityKg: string; defaultTargetKg: string; minBatchKg: string; maxBatchKg: string; cycleMinutes: string;
   defaultOperatorId: string; status: "AVAILABLE" | "MAINTENANCE" | "STOPPED"; statusReason: string; isDefault: boolean;
+  /** Scheduling hours (RM6–RM8): «0,1,2,3,4», «07:00», «15:00». */
+  workDays: string; workStart: string; workEnd: string;
 };
+
+/** ROASTERS.md §4 example (illustrative until the owner confirms, D6). */
+const DEFAULT_HOURS = { days: [0, 1, 2, 3, 4], start: "07:00", end: "15:00" };
 
 export const draftOf = (r: Roaster): Draft => ({
   name: r.name, manufacturerModel: r.manufacturerModel ?? "", type: r.type,
   nominalCapacityKg: r.nominalCapacityKg, defaultTargetKg: r.defaultTargetKg, minBatchKg: r.minBatchKg, maxBatchKg: r.maxBatchKg,
   cycleMinutes: String(r.cycleMinutes), defaultOperatorId: r.defaultOperatorId ?? "",
   status: r.status === "RETIRED" ? "STOPPED" : r.status, statusReason: r.statusReason ?? "", isDefault: r.isDefault,
+  workDays: (r.workingHours ?? DEFAULT_HOURS).days.join(","), workStart: (r.workingHours ?? DEFAULT_HOURS).start, workEnd: (r.workingHours ?? DEFAULT_HOURS).end,
 });
 
 export const emptyDraft = (type: "PRODUCTION" | "SAMPLE" = "PRODUCTION"): Draft => ({
   name: "", manufacturerModel: "", type, nominalCapacityKg: "", defaultTargetKg: "", minBatchKg: "", maxBatchKg: "",
   cycleMinutes: "", defaultOperatorId: "", status: "AVAILABLE", statusReason: "", isDefault: false,
+  workDays: DEFAULT_HOURS.days.join(","), workStart: DEFAULT_HOURS.start, workEnd: DEFAULT_HOURS.end,
 });
 
 const LABELS: Record<keyof Draft, [string, string]> = {
@@ -35,6 +42,7 @@ const LABELS: Record<keyof Draft, [string, string]> = {
   nominalCapacityKg: ["سعة الحمّاصة (حسب الشركة المصنّعة)", "Roaster capacity (manufacturer rating)"], defaultTargetKg: ["كمية التحميص الافتراضية", "Default roast quantity"], minBatchKg: ["أقل كمية مسموحة للتحميص", "Minimum roast quantity"],
   maxBatchKg: ["أعلى كمية مسموحة للتحميص", "Maximum roast quantity"], cycleMinutes: ["الدورة", "Cycle"], defaultOperatorId: ["المشغّل الافتراضي", "Default operator"],
   status: ["الحالة", "Status"], statusReason: ["السبب", "Reason"], isDefault: ["الافتراضية", "Default"],
+  workDays: ["أيام العمل", "Working days"], workStart: ["بداية العمل", "Work starts"], workEnd: ["نهاية العمل", "Work ends"],
 };
 
 /** «تغيير واحد غير محفوظ · مدة الدورة 30 ← 35 دقيقة» — the changed fields of the draft. */
@@ -95,6 +103,9 @@ export function RoasterForm({
       defaultOperatorId: d.defaultOperatorId || null, status: d.status, statusReason: d.statusReason, isDefault: d.isDefault,
       ...(mode === "add" ? { nominalCapacityKg: d.nominalCapacityKg } : { expectedUpdatedAt: current?.updatedAt }),
       ...(confirmMoveDefault ? { confirmMoveDefault: true } : {}),
+      // Scheduling hours: sent on add, and on edit only when changed (a roaster never given hours keeps the built-in ones).
+      ...(mode === "add" || ["workDays", "workStart", "workEnd"].some((k) => changed.includes(k as keyof Draft))
+        ? { workingHours: { days: d.workDays.split(",").filter(Boolean).map(Number), start: d.workStart, end: d.workEnd } } : {}),
     };
     const r = mode === "add"
       ? await call<{ roaster: Roaster }>("/api/settings/production/roasters", "POST", body)
@@ -214,6 +225,28 @@ export function RoasterForm({
             <span aria-hidden>{L("دقيقة", "min")}</span>
           </span>
         </Field>
+        <div className="hr-field is-wide">
+          <span className="hr-label">{L("أيام العمل وساعاته (للجدولة)", "Working days and hours (for scheduling)")}</span>
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }} data-testid="f-workingHours">
+            {(ar ? ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]).map((name, dow) => {
+              const on = d.workDays.split(",").filter(Boolean).map(Number).includes(dow);
+              return (
+                <label key={dow} className="tl-check">
+                  <input type="checkbox" checked={on} onChange={(e) => {
+                    const cur = new Set(d.workDays.split(",").filter(Boolean).map(Number));
+                    if (e.target.checked) cur.add(dow); else cur.delete(dow);
+                    set("workDays", [...cur].sort().join(","));
+                  }} data-testid={`f-workDay-${dow}`} />
+                  <span>{name}</span>
+                </label>
+              );
+            })}
+            <input className="hr-input" type="time" dir="ltr" step={300} style={{ width: 120 }} value={d.workStart} aria-label={L("بداية العمل", "Work starts")} onChange={(e) => set("workStart", e.target.value)} data-testid="f-workStart" />
+            <span>–</span>
+            <input className="hr-input" type="time" dir="ltr" step={300} style={{ width: 120 }} value={d.workEnd} aria-label={L("نهاية العمل", "Work ends")} onChange={(e) => set("workEnd", e.target.value)} data-testid="f-workEnd" />
+          </span>
+          {err("workingHours") ? <span className="hr-err">{errMsg("workingHours")}</span> : <span className="hr-help">{L("بتوقيت الرياض. تُوضع خانات الجدول داخلها فقط؛ تغييرها لا ينقل خانة معتمدة.", "Riyadh time. Schedule slots are placed inside these hours only; changing them never moves an approved slot.")}</span>}
+        </div>
         <Field label={mode === "add" ? opt(ar ? LABELS.defaultOperatorId[0] : LABELS.defaultOperatorId[1]) : ar ? LABELS.defaultOperatorId[0] : LABELS.defaultOperatorId[1]} error={errMsg("defaultOperatorId")}>
           <Select className="hr-select" value={d.defaultOperatorId} onChange={(e) => set("defaultOperatorId", e.target.value)} placeholder={L("اختر مشغّلًا", "Choose an operator")} data-testid="f-defaultOperatorId">
             <option value="">{L("اختر مشغّلًا", "Choose an operator")}</option>

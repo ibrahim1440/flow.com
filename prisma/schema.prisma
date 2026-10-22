@@ -447,6 +447,25 @@ model RoastingBatch {
   productionOrderId String?
   productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
 
+  // ─── Roasting station W1 (additive, migration 20261025090000_station_w1) ───
+  /// The roaster this batch was roasted on (Settings › Production & roasting › Roasters). NULL =
+  /// none chosen: every batch before this column, and every roast recorded without a roaster
+  /// (no roaster configured), exactly as before. No FK (audit convention, like RoasterOperator.employeeId).
+  roasterId  String?
+  /// Client-supplied Idempotency-Key of the POST that recorded this batch (same pattern as
+  /// Delivery.requestKey). Nullable: a caller that sends none records as before. Unique, so two
+  /// retries of one roast collapse to a single batch.
+  requestKey String?  @unique
+  /// SHA-256 over the normalized roast intent: the same key with a different intent is a 422.
+  intentHash String?
+
+  /// Roasting schedule (RM6–RM8, migration 20261026090000_roast_schedule): the planned slot this
+  /// batch was recorded from, or NULL (recorded without a slot — every batch before the schedule).
+  /// Planned and actual stay separate: the slot keeps its planned green, the batch its measured
+  /// weights. One batch per slot (unique).
+  scheduledSlotId   String?        @unique
+  scheduledSlot     ScheduledSlot? @relation(fields: [scheduledSlotId], references: [id], onDelete: SetNull)
+
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
   qcRecords             QcRecord[]
@@ -467,6 +486,7 @@ model RoastingBatch {
   @@index([greenBeanId, createdAt])
   @@index([status])
   @@index([status, createdAt])
+  @@index([roasterId, createdAt])
 }
 
 model BlendIngredient {
@@ -767,7 +787,14 @@ model Roaster {
   updatedById       String?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
+  /// Scheduling (RM6–RM8, migration 20261026090000_roast_schedule): the working days and hours slots
+  /// are placed in, Asia/Riyadh, 0 = Sunday — {"days":[0,1,2,3,4],"start":"07:00","end":"15:00"}.
+  /// NULL = not set by the owner: the built-in Sunday–Thursday 07:00–15:00 applies (ROASTERS.md §4,
+  /// illustrative until confirmed, D6). Changing it never moves an approved slot (§5.11).
+  workingHours      Json?
   maintenance       RoasterMaintenance[]
+  scheduledSlots    ScheduledSlot[]
+  roastPlans        RoastPlan[]
   operators         RoasterOperator[]
 
   @@index([type, status])
@@ -810,6 +837,40 @@ model RoasterOperator {
   createdAt   DateTime @default(now())
 
   @@unique([roasterId, employeeId])
+}
+
+/// Roaster controls at «تسجيل دفعة» (owner decision D5, ROASTERS.md §5.12; migration
+/// 20261025090000_station_w1). Append-only by the application; no FK (audit convention). One row per
+/// exception the server let through, written in the same transaction as the batch it belongs to:
+///   CAPACITY_ACK           green outside the roaster's min–max, recorded only with an explicit
+///                          acknowledgement (ack: true). Above nominal is never recorded at all.
+///   OPERATOR_ADMIN_BYPASS  an admin who is not an assigned RoasterOperator of the roaster recorded
+///                          on it (admins are never blocked; the bypass is kept visible).
+model RoasterControlLog {
+  id              String   @id @default(cuid())
+  kind            String
+  roasterId       String
+  roasterName     String
+  batchId         String?
+  batchNumber     String?
+  requestKey      String?
+  employeeId      String
+  employeeName    String
+  employeeRole    String
+  greenKg         Decimal  @db.Decimal(10, 3)
+  nominalKg       Decimal  @db.Decimal(10, 3)
+  minKg           Decimal  @db.Decimal(10, 3)
+  maxKg           Decimal  @db.Decimal(10, 3)
+  /// CAPACITY_ACK: BELOW_MIN | ABOVE_MAX. NULL otherwise.
+  direction       String?
+  /// WEB (ERP «تسجيل دفعة») | STATION (/station/roasting)
+  sourceInterface String   @default("WEB")
+  detail          Json?
+  createdAt       DateTime @default(now())
+
+  @@index([roasterId, createdAt])
+  @@index([batchId])
+  @@index([kind, createdAt])
 }
 
 /// Append-only (by the application; no FK, audit convention) trail of the settings sections of
@@ -885,6 +946,8 @@ model CoffeeProduct {
   roastingBatches    RoastingBatch[]
   finishedGoodsLots  FinishedGoodsLot[]
   productSkus        ProductSKU[]
+  scheduledSlots     ScheduledSlot[]
+  roastPlans         RoastPlan[]
 
   // BOM lines that consume this coffee as roasted/intermediate stock.
   bomComponents BomComponent[]
@@ -1600,6 +1663,10 @@ model RateLimit {
 // so this branch's schema.prisma matches the live demo DB and `prisma migrate dev` does
 // not propose dropping them. Not part of Accounting S0 — do not extend or modify here;
 // changes belong in the owning repo.
+//
+// Exception (owner decision D10, Workstations W1, 22 Oct 2026): WorkItemClaim and
+// WorkstationActionLog are ADOPTED by this repository as they are and are now written by the
+// roasting station (/api/station/*). Their shape is unchanged; the June seed rows are left alone.
 
 model AuthAuditLog {
   id               String   @id @default(cuid())
@@ -5615,5 +5682,104 @@ model PrintAuditLog {
 
   @@index([action, createdAt])
   @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+// ─── Roasting schedule (RM6–RM8; ROASTERS.md §4–§6; migration 20261026090000_roast_schedule) ───
+
+/// «اعتماد الخطة» (RM7): the slots approved together for one coffee on one roaster. A plan only
+/// reserves slots — it creates no batch, moves no stock and changes no order (§5.9). Append-only:
+/// the quantities the planner showed are kept as they were at approval.
+model RoastPlan {
+  id              String          @id @default(cuid())
+  productId       String
+  product         CoffeeProduct   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  roasterId       String
+  roaster         Roaster         @relation(fields: [roasterId], references: [id], onDelete: Restrict)
+  /// Employee id (no FK, audit convention): the operator the plan was made for.
+  operatorId      String
+  /// DEMAND (the roast queue's requirement) | STOCK (no open demand: production › roast_to_stock)
+  purpose         String          @default("DEMAND")
+  /// PROPOSED | ALTERNATIVE (§5.2: the redistributed split, or «البديل»)
+  split           String          @default("PROPOSED")
+  batchCount      Int
+  /// The sum of the slots' planned green (kg).
+  greenKg         Decimal         @db.Decimal(10, 3)
+  /// «الأخضر للتخطيط» as the planner computed it (§5.1). Differs from greenKg only by an authorized
+  /// planning decision (§5.3), which carries overrideReason.
+  computedGreenKg Decimal         @db.Decimal(10, 3)
+  overrideReason  String?
+  /// The planner's inputs at approval (remaining, required green, in progress, approved, loss).
+  inputs          Json
+  approvedById    String?
+  approvedByName  String?
+  createdAt       DateTime        @default(now())
+  slots           ScheduledSlot[]
+
+  @@index([productId, createdAt])
+  @@index([roasterId, createdAt])
+}
+
+/// A planned roast slot — never a batch (ROASTERS.md §4 ScheduledSlot). Planned green lives here;
+/// actual green, roasted and waste kg live only on the RoastingBatch recorded from it.
+/// Stored status: PLANNED | IN_PROGRESS | RECORDED | CANCELLED. MISSED is derived on read (a
+/// planned slot whose end has passed with no batch; a started one at the end of its Riyadh day),
+/// never stored, so no job is needed (src/lib/services/schedule/planner.ts effectiveStatus).
+/// A roaster, and an operator across all roasters, has at most one live slot at any moment —
+/// checked in one transaction under an advisory lock (§5.5, §5.6).
+model ScheduledSlot {
+  id             String         @id @default(cuid())
+  planId         String?
+  plan           RoastPlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  roasterId      String
+  roaster        Roaster        @relation(fields: [roasterId], references: [id], onDelete: Restrict)
+  /// Employee id (no FK, audit convention): assigned to this roaster (RoasterOperator) and holding
+  /// production › start_batch when the slot was planned or reassigned.
+  operatorId     String
+  productId      String
+  product        CoffeeProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// DEMAND | STOCK
+  purpose        String         @default("DEMAND")
+  startsAt       DateTime
+  /// startsAt + the roaster's cycle at planning time; a later cycle change never moves it (§5.11).
+  endsAt         DateTime
+  plannedGreenKg Decimal        @db.Decimal(10, 3)
+  status         String         @default("PLANNED")
+  startedAt      DateTime?
+  startedById    String?
+  recordedAt     DateTime?
+  cancelledAt    DateTime?
+  cancelledById  String?
+  cancelReason   String?
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  batch          RoastingBatch?
+
+  @@index([roasterId, startsAt])
+  @@index([operatorId, startsAt])
+  @@index([productId, status])
+  @@index([status, endsAt])
+  @@index([planId])
+}
+
+/// Append-only (by the application; no FK, audit convention) trail of the schedule: every plan
+/// approval and every slot move, reassignment, start, link and cancellation, with before / after.
+model ScheduleEvent {
+  id        String   @id @default(cuid())
+  /// PLAN_APPROVED | SLOT_MOVED | SLOT_REASSIGNED | SLOT_STARTED | SLOT_LINKED | SLOT_CANCELLED
+  action    String
+  planId    String?
+  slotId    String?
+  before    Json?
+  after     Json?
+  reason    String?
+  actorId   String?
+  actorName String?
+  createdAt DateTime @default(now())
+
+  @@index([slotId, createdAt])
+  @@index([planId])
   @@index([createdAt])
 }
