@@ -122,9 +122,9 @@ export type RosterEntry = { id: string; name: string; initials: string; supervis
  * supervisor label and whether their PIN is locked on THIS device. Nothing else (no role, no
  * username, no permissions, no task data). Never the admin role (D12).
  */
-export async function stationRoster(device: DeviceRow): Promise<RosterEntry[]> {
+export async function stationRoster(device: DeviceRow, stationId: string = device.stationId): Promise<RosterEntry[]> {
   const rows = await prisma.stationAssignment.findMany({
-    where: { stationId: device.stationId },
+    where: { stationId },
     select: { supervisor: true, employee: { select: { id: true, name: true, role: true, active: true, stationPin: { select: { employeeId: true, attempts: { where: { stationDeviceId: device.id }, select: { lockedAt: true } } } } } } },
   });
   return rows

@@ -1,3 +1,4 @@
+import { specBlocksPanelPass } from "@/lib/services/qc/inspection";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { privilegedGate, requireSub } from "@/lib/auth-server";
@@ -49,6 +50,15 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ error: `Cannot transition batch from "${batch.status}" to "${outcome}".` }, { status: 409 });
     }
 
+
+    // QC W3: a batch roasted to an APPROVED profile version passes only through a conforming
+    // inspection («فحص بالقياس»); the panel cannot pass around the approved spec.
+    if (outcome === "Passed") {
+      for (const id of [batch.id]) {
+        const n = await specBlocksPanelPass(prisma, id);
+        if (n) return NextResponse.json({ error: `للدفعة ${n} مواصفة معتمدة: القبول يمر عبر فحص بالقياس مطابق في محطة الجودة.`, errorEn: `Batch ${n} has an approved spec: it passes only through a conforming inspection.`, code: "SPEC_INSPECTION_REQUIRED" }, { status: 409 });
+      }
+    }
     const { effectiveMinEvaluators: min } = await readQcSettings(prisma);
     const canOverride = hasSubPrivilege(user.permissions, "qc", "finalize_override");
     const check = qcDecisionCheck({ input, records: batch.qcRecords, min, canOverride });

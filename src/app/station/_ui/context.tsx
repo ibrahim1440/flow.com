@@ -17,6 +17,8 @@ type Ctx = {
   lock: () => Promise<void>;
   /** «تبديل الموظف»: personal → sign out; device → S5 (the handover of an active task). */
   switchEmployee: () => void;
+  /** W3: every station this device serves (one for most devices). More than one → «تبديل المحطة». */
+  stations?: StationInfo[];
 };
 export const StationCtx = createContext<Ctx | null>(null);
 export const useStation = () => useContext(StationCtx)!;

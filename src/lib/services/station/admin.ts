@@ -32,7 +32,7 @@ export async function stationsOverview() {
     prisma.station.findMany({
       orderBy: [{ status: "asc" }, { createdAt: "asc" }],
       include: {
-        devices: { orderBy: [{ registeredAt: "desc" }], select: { id: true, displayName: true, deviceCode: true, status: true, activationExpiresAt: true, activationCodeHash: true, activatedAt: true, lastSeenAt: true, registeredAt: true, registeredByName: true, revokedAt: true, revokedByName: true, revokeReason: true } },
+        devices: { orderBy: [{ registeredAt: "desc" }], select: { extraStations: { select: { stationId: true } }, id: true, displayName: true, deviceCode: true, status: true, activationExpiresAt: true, activationCodeHash: true, activatedAt: true, lastSeenAt: true, registeredAt: true, registeredByName: true, revokedAt: true, revokedByName: true, revokeReason: true } },
         _count: { select: { assignments: true } },
       },
     }),
@@ -48,6 +48,7 @@ export async function stationsOverview() {
     })),
     devices: stations.flatMap((s) => s.devices.map((d) => ({
       id: d.id, name: d.displayName, deviceCode: d.deviceCode, status: d.status, stationId: s.id, stationName: s.name, stationType: s.type, place: s.place,
+      alsoStationIds: d.extraStations.map((x) => x.stationId),
       codeLive: d.status === "PENDING" && !!d.activationCodeHash && !!d.activationExpiresAt && d.activationExpiresAt.getTime() > now,
       codeExpiresAt: d.activationExpiresAt?.toISOString() ?? null, activatedAt: d.activatedAt?.toISOString() ?? null, lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
       registeredAt: d.registeredAt.toISOString(), registeredByName: d.registeredByName, revokedAt: d.revokedAt?.toISOString() ?? null, revokedByName: d.revokedByName, revokeReason: d.revokeReason,
@@ -180,6 +181,32 @@ export async function revokeDevice(request: Request, user: SessionUser, deviceId
     const ended = await tx.authSession.updateMany({ where: { stationDeviceId: d.id, revokedAt: null }, data: { revokedAt: now, revokedReason: "STATION_DEVICE_REVOKED" } });
     await tx.authAuditLog.create({ data: { userId: user.id, action: "STATION_REVOKED", result: "SUCCESS", sourceInterface: "WEB", ipHash: ctx.ipHash, userAgent: ctx.userAgent, metadata: { stationDeviceId: d.id, deviceName: d.displayName, stationId: d.stationId, stationName: d.station.name, reason, sessionsEnded: ended.count } } });
     return { revoked: true, sessionsEnded: ended.count };
+  }, TX_OPTS);
+}
+
+/**
+ * W3 «يخدم أيضًا» — the other stations this ACTIVE or PENDING device may serve (the same iPad at the
+ * roaster and in QC). The device chooses the station before the employee; its own station is always
+ * served. Removing a link ends every session on the device bound to that station. Audited.
+ */
+export async function setDeviceStations(request: Request, user: SessionUser, deviceId: string, raw: Record<string, unknown>) {
+  const d = await prisma.stationDevice.findUnique({ where: { id: deviceId }, include: { station: { select: { name: true } }, extraStations: { select: { stationId: true } } } });
+  if (!d) throw new UsersError(404, "NOT_FOUND", "الجهاز غير موجود.", "Device not found.");
+  if (d.status === "REVOKED") throw new UsersError(409, "ALREADY_REVOKED", "الجهاز ملغى.", "The device is revoked.");
+  const wanted = [...new Set((Array.isArray(raw.stationIds) ? raw.stationIds : []).filter((x): x is string => typeof x === "string" && !!x && x !== d.stationId))];
+  if (wanted.length > 10) throw new UsersError(400, "TOO_MANY", "عشر محطات على الأكثر.", "Ten stations at most.");
+  const valid = await prisma.station.findMany({ where: { id: { in: wanted }, status: "ACTIVE" }, select: { id: true, name: true } });
+  if (valid.length !== wanted.length) throw new UsersError(400, "STATION_INVALID", "محطة غير موجودة أو موقوفة.", "A station is missing or retired.");
+  const before = d.extraStations.map((x) => x.stationId);
+  const removed = before.filter((x) => !wanted.includes(x));
+  const added = wanted.filter((x) => !before.includes(x));
+  const ctx = auditContext(request, user.id);
+  return prisma.$transaction(async (tx) => {
+    if (removed.length) await tx.stationDeviceStation.deleteMany({ where: { stationDeviceId: d.id, stationId: { in: removed } } });
+    if (added.length) await tx.stationDeviceStation.createMany({ data: added.map((stationId) => ({ stationDeviceId: d.id, stationId, createdById: user.id, createdByName: user.name })) });
+    const ended = removed.length ? (await tx.authSession.updateMany({ where: { stationDeviceId: d.id, stationId: { in: removed }, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: "STATION_LINK_REMOVED" } })).count : 0;
+    await recordUsersAudit(tx, ctx, "STATION_DEVICE_STATIONS", { stationDeviceId: d.id, deviceName: d.displayName, stationId: d.stationId, stationName: d.station.name, added, removed, sessionsEnded: ended });
+    return { stationIds: wanted, sessionsEnded: ended };
   }, TX_OPTS);
 }
 

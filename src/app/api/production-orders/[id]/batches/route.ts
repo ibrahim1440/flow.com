@@ -1,3 +1,4 @@
+import { assertNotHeldRows } from "@/lib/services/qc/hold-guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
@@ -101,6 +102,8 @@ export async function POST(request: Request, { params }: Params) {
       if (batch.status === "Rejected") {
         throw { _appCode: 409, message: `Batch ${batch.batchNumber} failed QC and cannot count towards production.` };
       }
+      // QC W3: a held batch is not issued to normal production (one guard: hold-guard.ts).
+      assertNotHeldRows([batch], "production");
       // A blend's output is already represented by the batches that went into it, which is
       // why the progress aggregate excludes blends. Linking one would attach a batch that
       // contributes nothing and reads as a bug from the operator's side.
@@ -161,8 +164,8 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json(result, { status: 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; code?: string };
+      return NextResponse.json({ error: e.message, ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }
@@ -228,8 +231,8 @@ export async function DELETE(request: Request, { params }: Params) {
     return NextResponse.json(result);
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; code?: string };
+      return NextResponse.json({ error: e.message, ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }

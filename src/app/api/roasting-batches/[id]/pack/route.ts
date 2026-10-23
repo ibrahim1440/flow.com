@@ -34,6 +34,7 @@ import {
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { assertNotHeldRows, heldRefusal, isHeldStatus } from "@/lib/services/qc/hold-guard";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -107,6 +108,11 @@ export async function POST(request: Request, { params }: Params) {
     try {
       const prepared = await loadPreviewInputs(prisma, id, lines);
       if ("error" in prepared) return NextResponse.json({ error: prepared.error }, { status: prepared.status });
+      // QC W3: a held batch is not even previewed for packing (one guard: hold-guard.ts).
+      if (isHeldStatus(prepared.batch.status)) {
+        const r = heldRefusal((await prisma.roastingBatch.findUnique({ where: { id }, select: { batchNumber: true } }))?.batchNumber ?? id, "pack");
+        return NextResponse.json({ error: r.message, errorEn: r.errorEn, code: r.code }, { status: r._appCode });
+      }
       const identity = await resolveBatchCoffeeIdentity(prisma, prepared.identifiable);
       const preview = await previewPackaging(prisma, {
         batch: prepared.batch,
@@ -151,6 +157,8 @@ export async function POST(request: Request, { params }: Params) {
       // Behind the lock, with nothing cheaper in front of it: two retries of one submit
       // queue here and the second reads what the first committed rather than racing it.
       await guardIdempotency(tx, batch.id, key.key, requestHash);
+      // QC W3: a held batch («محجوزة») is never packed — the ERP page and the W4 station alike.
+      assertNotHeldRows([batch], "pack");
 
       if (batch.status !== "Passed" && batch.status !== "Partially Packaged") {
         throw {
@@ -353,8 +361,8 @@ export async function POST(request: Request, { params }: Params) {
     // Prisma mapper and surface as 500s, which tells the operator nothing and makes a
     // deliberate, correct refusal look like a server fault.
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string };
+      return NextResponse.json({ error: e.message, ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }
@@ -448,6 +456,10 @@ export async function GET(_request: Request, { params }: Params) {
       select: { id: true, batchNumber: true, status: true, productId: true, roastedAvailableKg: true, orderItemId: true, productionOrderId: true },
     });
     if (!batch) return NextResponse.json({ error: "Batch not found." }, { status: 404 });
+    if (isHeldStatus(batch.status)) {
+      const r = heldRefusal(batch.batchNumber, "pack");
+      return NextResponse.json({ error: r.message, errorEn: r.errorEn, code: r.code }, { status: r._appCode });
+    }
 
     // The packaging plan (production simplification item 6): this coffee's sizes only, counts
     // pre-filled from open demand. Additive to the response; the write path is unchanged.

@@ -14,6 +14,9 @@ import {
 } from "@/lib/services/blend-transformation";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { nextBlendBatchNumber } from "@/lib/services/batch-number";
+import { isHeldStatus } from "@/lib/services/qc/hold-guard";
+import { approvedBlendFor } from "@/lib/services/qc/dispositions";
+import { resolveApprovedVersionId } from "@/lib/services/qc/profiles";
 
 /**
  * Blend several roasted batches into one.
@@ -45,7 +48,17 @@ export async function POST(request: Request) {
       // Ordered by id inside the query, not by the order the operator ticked boxes in. Two
       // blends sharing sources therefore queue behind each other instead of each holding
       // what the other is waiting for.
-      const locked = await lockBlendSources(tx, requested.map((r) => r.batchId));
+      const lockedRows = await lockBlendSources(tx, requested.map((r) => r.batchId));
+
+      // ── QC W3: a held batch («محجوزة») is blended ONLY by an approved recipe ──
+      // (a BLEND disposition of that batch, approved by qc › dispose; the inputs must match the
+      // recipe exactly). Its partners are released batches, so the held source is validated as one
+      // of them; the OUTPUT always goes to QC («بانتظار الجودة»): blending never hides a defect.
+      const held = lockedRows.filter((b) => isHeldStatus(b.status));
+      const dispositionId = typeof body.dispositionId === "string" && body.dispositionId ? body.dispositionId : null;
+      const recipe = held.length || dispositionId ? await approvedBlendFor(tx, held.map((b) => b.id), dispositionId, requested) : null;
+      const partnerStatus = lockedRows.find((b) => !isHeldStatus(b.status))?.status ?? "Passed";
+      const locked = recipe ? lockedRows.map((b) => (isHeldStatus(b.status) ? { ...b, status: partnerStatus } : b)) : lockedRows;
 
       // ── 2. What may be taken, decided from the locked balances ─────────────
       const { plan, totalKg, commonStatus } = validateBlendSources(requested, locked);
@@ -57,6 +70,8 @@ export async function POST(request: Request) {
         };
       }
       const blendTiming = commonStatus === "Pending QC" ? "Before QC" : "After QC";
+      // A recipe blend of a held batch: the output is inspected before anything else (QC W3).
+      const outputStatus = recipe ? "Pending QC" : commonStatus;
 
       // ── 3. Whose coffee the blend is ───────────────────────────────────────
       // Derived from the sources, never supplied. The earlier version let a caller pass
@@ -145,7 +160,8 @@ export async function POST(request: Request) {
           // default of 0, which is why a finished blend could never be packed at all.
           roastedBeanQuantity: totalKg,
           roastedAvailableKg: totalKg,
-          status: commonStatus,
+          status: outputStatus,
+          ...(recipe ? { qcDeadline: new Date(Date.now() + 48 * 60 * 60 * 1000), profileVersionId: blendProductId ? await resolveApprovedVersionId(tx, blendProductId, null) : null } : {}),
           isBlend: true,
           blendTiming,
           roastProfile: null,
@@ -169,6 +185,10 @@ export async function POST(request: Request) {
           quantityUsed: p.quantityKg,
         })),
       });
+
+      if (recipe) {
+        await tx.qcDisposition.update({ where: { id: recipe.id }, data: { status: "EXECUTED", executedAt: new Date(), executedById: user.id, blendBatchId: blendedBatch.id } });
+      }
 
       await recordBlendMovements(tx, {
         blendBatchId: blendedBatch.id,
@@ -213,8 +233,8 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string };
+      return NextResponse.json({ error: e.message, ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }

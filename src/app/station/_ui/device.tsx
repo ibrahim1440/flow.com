@@ -10,7 +10,7 @@ import { st, type StationKey } from "@/lib/i18n/station";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import type { Lang } from "@/lib/i18n/translations";
 import { CODE_ALPHABET } from "@/lib/station/codes";
-import { StationBar, Sheet, Primary, Secondary, Note, Info, Keypad, Option, Bid } from "./blocks";
+import { StationBar, Sheet, Primary, Secondary, Note, Info, Keypad, Option, Bid, CheckIco } from "./blocks";
 import type { StationInfo } from "./context";
 
 const TZ = "Asia/Riyadh";
@@ -126,13 +126,26 @@ export type RosterEntry = { id: string; name: string; initials: string; supervis
 const TYPE_WORD: Record<string, { ar: string; en: string }> = { ROASTING: { ar: "التحميص", en: "Roasting" }, QUALITY: { ar: "الجودة", en: "Quality" }, PACKAGING: { ar: "التعبئة والتجهيز", en: "Packaging" } };
 export const typeWord = (type: string, lang: Lang) => (TYPE_WORD[type] ? TYPE_WORD[type][lang] : type);
 
-export function TilesScreen({ lang, station, roster, notice, onPick }: { lang: Lang; station: StationInfo; roster: RosterEntry[] | null; notice?: { tone: "info" | "err" | "warn"; text: string } | null; onPick: (e: RosterEntry) => void }) {
+export function TilesScreen({ lang, station, roster, notice, onPick, stations, onStation }: { lang: Lang; station: StationInfo; roster: RosterEntry[] | null; notice?: { tone: "info" | "err" | "warn"; text: string } | null; onPick: (e: RosterEntry) => void; stations?: StationInfo[]; onStation?: (s: StationInfo) => void }) {
   const t = useT(lang);
   return (
     <>
       <DeviceBar lang={lang} station={station} />
       <Sheet plain testId="station-s2">
         <div className="ws-center">
+          {stations && stations.length > 1 && onStation ? (
+            // W3: one device, several stations — the station is chosen BEFORE the employee.
+            <div className="ws-stchoice" role="group" aria-label={lang === "ar" ? "اختر المحطة" : "Choose the station"} data-testid="station-choice">
+              <div className="lbl">{lang === "ar" ? "المحطة على هذا الجهاز" : "Station on this device"}</div>
+              <div className="ws-chips">
+                {stations.map((s) => (
+                  <button key={s.id} type="button" className="ws-choice" aria-pressed={s.id === station.id} onClick={() => onStation(s)} data-testid={`station-choice-${s.type}`}>
+                    {s.id === station.id ? <CheckIco size="s" /> : null}{s.name} · {typeWord(s.type, lang)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div>
             <h1 className="ws-t2" data-testid="station-title">{t("s2Title")}</h1>
             <p className="ws-lead">{t("s2Sub")}</p>
@@ -176,14 +189,14 @@ export function PinScreen({ lang, station, emp, locked, onBack, onSignedIn, onRe
     if (sent.current) return;
     sent.current = true; setBusy(true); setErr("");
     try {
-      const r = await fetch("/api/station/sign-in", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: emp.id, pin: value }) });
+      const r = await fetch("/api/station/sign-in", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId: emp.id, pin: value, stationId: station.id }) });
       if (r.ok) { onSignedIn(); return; }
       const j = await r.json().catch(() => ({}));
       const text = localizeApiError(j, lang) ?? t("pinWrong");
       if (j.code === "STATION_PIN_WRONG" || r.status === 429) { setErr(r.status === 429 ? text : t("pinWrong")); setPin(""); return; }
       onRefused({ code: j.code ?? String(r.status), text, name: j.name });
     } catch { setErr(t("offline")); setPin(""); } finally { sent.current = false; setBusy(false); }
-  }, [emp.id, lang, onRefused, onSignedIn, t]);
+  }, [emp.id, station.id, lang, onRefused, onSignedIn, t]);
   const press = useCallback((k: string) => {
     if (busy) return;
     setErr("");

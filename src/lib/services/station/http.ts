@@ -44,3 +44,12 @@ export async function asStation<T>(ctx: { mode: "device" | "personal"; user: Ses
   if (ctx.mode === "device") return runAsStationActor(ctx.user as SessionUser & { scope: "STATION" }, fn);
   return fn();
 }
+
+/**
+ * Workstations W3 — every QC-station API («محطة الجودة»): the same guard (device → station session →
+ * assignment → qc › create_record → never a privileged key). Off a device: the personal ERP session
+ * with qc › create_record — the desktop QC user's equivalent of the station.
+ */
+export async function requireQualityStation() {
+  return requireStationContext("QUALITY");
+}

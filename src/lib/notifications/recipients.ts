@@ -37,7 +37,7 @@ export function namedPeople(def: NotificationEventDef, people: People): string[]
  */
 export function selectRecipients(
   def: NotificationEventDef,
-  input: { actorId?: string | null; people?: People; scopeOwners?: (string | null | undefined)[] },
+  input: { actorId?: string | null; people?: People; scopeOwners?: (string | null | undefined)[]; exclude?: (string | null | undefined)[] },
   candidates: Candidate[],
 ): string[] {
   const byId = new Map(candidates.map((c) => [c.id, c]));
@@ -57,6 +57,8 @@ export function selectRecipients(
     const c = byId.get(id);
     if (!c || !c.active) continue;
     if (input.actorId && id === input.actorId) continue;
+    // QC W3: people the event must never reach (the inspector of an exception request).
+    if (input.exclude?.includes(id)) continue;
     if (def.requires && !def.requires.some((a) => holdsAbility(c.permissions, a))) continue;
     if (def.scope === "customer" && via === "perm" && hasModuleAccess(c.permissions, "sales") && !seesAllSales(c.permissions) && !owners.has(id)) continue;
     out.push(id);

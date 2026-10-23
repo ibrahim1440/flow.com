@@ -20,6 +20,7 @@
 // answers with the first result. Order status wins over everything (src/lib/order-stage.ts): an
 // order «معلّق مؤقتاً» is listed as blocked and nothing can be prepared or handed off.
 // Customers appear by name and order number only (owner policy F4), never their contact record.
+import { assertLotsNotHeld } from "@/lib/services/qc/hold-guard";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -245,6 +246,8 @@ export async function matchForLine(orderItemId: string, entry: unknown, db: Db =
   if (m.kind === "ambiguous") return { kind: "ambiguous", candidates: m.candidates, fullLength: m.fullLength };
   if (m.kind === "unique") {
     const lot = candidates.find((l) => l.batchNumber === m.batchNumber)!;
+    // QC W3: nothing packed from a held batch is matched or picked (hold-guard.ts).
+    await assertLotsNotHeld(db, lot.lotIds, "pick");
     return { kind: "unique", batchNumber: m.batchNumber, by: m.by, orderItemId, nameEn: line.nameEn, nameAr: line.nameAr, skuCode: line.skuCode, weightGrams: line.weightGrams, pickable: Math.min(lot.pickable, line.remaining), lineRemaining: line.remaining };
   }
   // Wrong lot: name the lot the box belongs to when the entry points at exactly one number.
@@ -341,6 +344,7 @@ export async function recordPick(args: { user: Actor; orderItemId: string; entry
     if (m.kind === "ambiguous") throw AR("آخر 4 أرقام تطابق أكثر من لوت محجوز لهذا البند. أدخل رقم اللوت كاملًا.", "The last four digits match more than one lot reserved for this line. Enter the full lot number.", 409, "LOT_AMBIGUOUS", { candidates: m.candidates });
     if (m.kind !== "unique") throw AR("لوت غير مطابق: ليس محجوزًا لهذا البند. لم يُسجَّل شيء.", "Wrong lot: it is not reserved for this line. Nothing was recorded.", 409, "LOT_NOT_RESERVED");
     const lot = candidates.find((l) => l.batchNumber === m.batchNumber)!;
+    await assertLotsNotHeld(tx, lot.lotIds, "pick");
     if (units > line.remaining) throw AR(`المتبقي لهذا البند ${line.remaining} وحدة فقط.`, `Only ${line.remaining} unit(s) remain on this line.`, 409, "UNITS_OVER_LINE", { remaining: line.remaining });
     if (units > lot.pickable) throw AR(`المحجوز من اللوت ${lot.batchNumber} لهذا البند ${lot.pickable} وحدة فقط.`, `Only ${lot.pickable} unit(s) of lot ${lot.batchNumber} are reserved for this line.`, 409, "UNITS_OVER_LOT", { pickable: lot.pickable });
     await ensureClaim(tx, o, user, key);
@@ -430,6 +434,7 @@ export async function handOff(args: { user: Actor; orderId: string; orderItemIds
     if (only && only.some((id) => !o.lines.some((l) => l.id === id))) throw AR("بند ليس في هذا الطلب.", "A line is not in this order.", 400, "LINE_NOT_IN_ORDER");
     if (lines.length === 0) throw AR("لا وحدات مُتحقق منها للتسليم. جهّز البنود أولًا.", "No verified units to hand off. Prepare the lines first.", 409, "NOTHING_TO_HAND_OFF");
     const picks = await tx.preparationPick.findMany({ where: { orderItemId: { in: lines.map((l) => l.id) }, status: "PICKED" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    await assertLotsNotHeld(tx, picks.map((p) => p.finishedGoodsLotId), "pick");
     const units = picks.reduce((s, p) => s + p.units, 0);
     if (units <= 0) throw AR("لا وحدات مُتحقق منها للتسليم. جهّز البنود أولًا.", "No verified units to hand off. Prepare the lines first.", 409, "NOTHING_TO_HAND_OFF");
     // Partial: some of the order's open units are not in this handoff (or in an earlier one).

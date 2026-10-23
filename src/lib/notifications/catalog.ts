@@ -43,7 +43,7 @@ export function isCategory(x: unknown): x is Category {
 export const CATEGORY_LABEL: Record<Category, Bi & { hintAr: string; hintEn: string }> = {
   sales: { ar: "المبيعات", en: "Sales", hintAr: "عروض الأسعار وطلبات عملائك وإيقاف البيع والتحصيل.", hintEn: "Quotations, your customers' orders, sales holds and collections." },
   production: { ar: "الإنتاج", en: "Production", hintAr: "أوامر الإنتاج وجدول التحميص والمحامص ومشكلات المحطات.", hintEn: "Production orders, the roasting schedule, roasters and station problems." },
-  quality: { ar: "الجودة", en: "Quality", hintAr: "الدفعات التي تنتظر فحص الجودة.", hintEn: "Batches waiting for quality control." },
+  quality: { ar: "الجودة", en: "Quality", hintAr: "الدفعات التي تنتظر فحص الجودة أو حُجزت، وطلبات الاستثناء والتصرف.", hintEn: "Batches waiting for quality control or held, exception and disposition requests." },
   finance: { ar: "المالية", en: "Finance", hintAr: "تحصيلات بانتظار الاعتماد وحدود الائتمان وطلبات الاعتماد المالي.", hintEn: "Collections awaiting approval, credit limits and finance approvals." },
   hr: { ar: "الموارد البشرية", en: "Human resources", hintAr: "طلبات الإجازة التي تنتظر قرارك ووثائق الموظفين القريبة من الانتهاء.", hintEn: "Leave requests waiting for your decision and employee documents about to expire." },
   me: { ar: "شؤوني", en: "My work", hintAr: "قسيمة راتبك وإجازاتك ورمز المحطة ووصولك إلى المحطات وانتهاء وثائقك.", hintEn: "Your payslip, your leave, your station PIN, station access and your documents' expiry." },
@@ -364,6 +364,84 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({
       titleAr: `الدفعة ${s(f.batchNumber)} تنتظر فحص الجودة`, titleEn: `Batch ${s(f.batchNumber)} awaits quality control`,
       bodyAr: s(f.productName), bodyEn: s(f.productName), link: "/dashboard/qc",
+    }),
+  },
+  // QC station W3 (owner decisions 23 Oct 2026): hold, exception, disposition, profile approval.
+  {
+    key: "quality.batch_held", category: "quality", severity: "warning",
+    label: { ar: "دفعة محجوزة بعد فحص الجودة", en: "A batch was held after quality control" },
+    recipients: [{ perm: [{ module: "qc", sub: "manage" }, { module: "production", sub: "manage_schedule" }, { module: "production", sub: "manage_roasters" }] }],
+    requires: [MOD("qc"), MOD("production")],
+    trigger: "recordInspection (POST /api/station/quality/inspections) — an inspection outside the spec, with a defect or a failed sensory result",
+    render: (f) => ({
+      severity: f.foreign ? "danger" : "warning",
+      titleAr: `الدفعة ${s(f.batchNumber)} محجوزة${f.foreign ? " · أجسام غريبة" : ""}`,
+      titleEn: `Batch ${s(f.batchNumber)} is held${f.foreign ? " · foreign objects" : ""}`,
+      bodyAr: [s(f.productName), s(f.reasonsAr), f.inspectorName ? `فحصها ${s(f.inspectorName)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [s(f.productName), s(f.reasonsEn), f.inspectorName ? `Inspected by ${s(f.inspectorName)}` : ""].filter(Boolean).join(" · "),
+      link: "/dashboard/qc?tab=held",
+    }),
+  },
+  {
+    key: "quality.exception_requested", category: "quality", severity: "warning",
+    label: { ar: "طلب استثناء جودة ينتظر قرارك", en: "A QC exception request awaits your decision" },
+    // The inspector of the inspection (and the requester, the actor) never decide it: excluded by the hook.
+    recipients: [{ perm: [{ module: "qc", sub: "approve_exception" }] }], requires: [{ module: "qc", sub: "approve_exception" }],
+    trigger: "requestException (POST /api/station/quality/exceptions, POST /api/qc/exceptions)",
+    render: (f) => ({
+      titleAr: `طلب استثناء ${s(f.number)} · الدفعة ${s(f.batchNumber)}`, titleEn: `Exception request ${s(f.number)} · batch ${s(f.batchNumber)}`,
+      bodyAr: [s(f.productName), s(f.reasonAr), f.requesterName ? `طلبه ${s(f.requesterName)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [s(f.productName), s(f.reasonEn), f.requesterName ? `Requested by ${s(f.requesterName)}` : ""].filter(Boolean).join(" · "),
+      link: f.exceptionId ? `/dashboard/qc?tab=exceptions&id=${enc(s(f.exceptionId))}` : "/dashboard/qc?tab=exceptions",
+    }),
+  },
+  {
+    key: "quality.exception_decided", category: "quality", severity: "info",
+    label: { ar: "قُرّر طلب الاستثناء الذي قدّمته", en: "Your QC exception request was decided" },
+    recipients: [{ person: "requester" }], requires: [MOD("qc")],
+    trigger: "decideException (POST /api/qc/exceptions/[id]/decide)",
+    render: (f) => ({
+      severity: f.status === "APPROVED" ? "success" : "warning",
+      titleAr: `طلب الاستثناء ${s(f.number)} ${DECISION_AR[s(f.status)] ?? s(f.status)}`, titleEn: `Exception request ${s(f.number)} ${DECISION_EN[s(f.status)] ?? s(f.status)}`,
+      bodyAr: [`الدفعة ${s(f.batchNumber)}`, f.deciderName ? `قرّره ${s(f.deciderName)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [`Batch ${s(f.batchNumber)}`, f.deciderName ? `Decided by ${s(f.deciderName)}` : ""].filter(Boolean).join(" · "),
+      link: f.exceptionId ? `/dashboard/qc?tab=exceptions&id=${enc(s(f.exceptionId))}` : "/dashboard/qc?tab=exceptions",
+    }),
+  },
+  {
+    key: "quality.disposition_requested", category: "quality", severity: "warning",
+    label: { ar: "تصرف في دفعة محجوزة ينتظر قرارك", en: "A held-batch disposition awaits your decision" },
+    recipients: [{ perm: [{ module: "qc", sub: "dispose" }] }], requires: [{ module: "qc", sub: "dispose" }],
+    trigger: "requestDisposition (POST /api/qc/dispositions)",
+    render: (f) => ({
+      titleAr: `${s(f.kindAr)} · الدفعة ${s(f.batchNumber)} (${s(f.number)})`, titleEn: `${s(f.kindEn)} · batch ${s(f.batchNumber)} (${s(f.number)})`,
+      bodyAr: [`${s(f.quantityKg)} كغ`, s(f.reason)].filter(Boolean).join(" · "), bodyEn: [`${s(f.quantityKg)} kg`, s(f.reason)].filter(Boolean).join(" · "),
+      link: "/dashboard/qc?tab=held",
+    }),
+  },
+  {
+    key: "quality.disposition_decided", category: "quality", severity: "info",
+    label: { ar: "قُرّر التصرف الذي طلبته", en: "Your held-batch disposition was decided" },
+    recipients: [{ person: "requester" }], requires: [MOD("qc")],
+    trigger: "decideDisposition (POST /api/qc/dispositions/[id]/decide)",
+    render: (f) => ({
+      severity: f.status === "REJECTED" ? "warning" : "success",
+      titleAr: `${s(f.kindAr)} · الدفعة ${s(f.batchNumber)} ${DECISION_AR[s(f.status)] ?? "اعتُمد"}`, titleEn: `${s(f.kindEn)} · batch ${s(f.batchNumber)} ${DECISION_EN[s(f.status)] ?? "was approved"}`,
+      bodyAr: f.deciderName ? `قرّره ${s(f.deciderName)}` : "", bodyEn: f.deciderName ? `Decided by ${s(f.deciderName)}` : "",
+      link: "/dashboard/qc?tab=held",
+    }),
+  },
+  {
+    key: "production.profile_approved", category: "production", severity: "info",
+    label: { ar: "اعتُمد إصدار ملف تحميص", en: "A roast profile version was approved" },
+    recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }, { module: "production", sub: "manage_roasters" }, { module: "qc", sub: "manage" }] }],
+    requires: [MOD("production"), MOD("qc")],
+    trigger: "approveVersion (POST /api/qc/profile-versions/[id]/approve)",
+    render: (f) => ({
+      titleAr: `اعتُمد ${s(f.profileName)} · الإصدار ${s(f.version)}`, titleEn: `${s(f.profileName)} · version ${s(f.version)} approved`,
+      bodyAr: `${s(f.productName)} · حبوب ${s(f.whole)} · مطحون ${s(f.ground)} (${s(f.scale)})`,
+      bodyEn: `${s(f.productName)} · whole ${s(f.whole)} · ground ${s(f.ground)} (${s(f.scale)})`,
+      link: "/dashboard/qc?tab=profiles",
     }),
   },
   // ── HR (a decision is waiting for you) ──

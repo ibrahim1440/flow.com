@@ -48,8 +48,8 @@ export const STATION_TAB_PRIVILEGE: Record<StationTab, { module: string; sub: st
   preparation: { module: "dispatch", sub: null },
 };
 export const STATION_TYPE_TABS: Record<StationType, StationTab[]> = { ROASTING: [], QUALITY: [], PACKAGING: ["packaging", "preparation"] };
-/** Where a signed-in employee works, per station type (the QC station is not built yet). */
-export const STATION_HOME: Record<StationType, string | null> = { ROASTING: "/station/roasting", QUALITY: null, PACKAGING: "/station/packaging" };
+/** Where a signed-in employee works, per station type (W3: the QC station «محطة الجودة»). */
+export const STATION_HOME: Record<StationType, string | null> = { ROASTING: "/station/roasting", QUALITY: "/station/quality", PACKAGING: "/station/packaging" };
 
 // ── Policy (owner decision D7, 22 Oct 2026): configurable, these are the approved defaults ──
 export const POLICY_DEFAULTS = { idleMinutes: 5, pinMaxAttempts: 5, activationMinutes: 15 } as const;

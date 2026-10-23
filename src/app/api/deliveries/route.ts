@@ -1,5 +1,6 @@
 import { autoCloseAfterDelivery, autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { settleProductionOrders } from "@/lib/services/production-schedule";
+import { assertLotsNotHeld } from "@/lib/services/qc/hold-guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
@@ -219,6 +220,8 @@ export async function POST(request: Request) {
           }
           plan = picked.lots.map((l) => ({ lotId: l.lotId, units: l.quantity }));
         }
+        // QC W3: nothing packed from a held batch ships (hold-guard.ts).
+        await assertLotsNotHeld(tx, plan.map((p) => p.lotId), "deliver");
 
         const shippedKg = kgForUnits(sku, units);
 
@@ -382,6 +385,7 @@ export async function POST(request: Request) {
         }
         kgPlan = picked.lots.map((l) => ({ lotId: l.lotId, kg: l.quantity }));
       }
+      await assertLotsNotHeld(tx, kgPlan.map((p) => p.lotId), "deliver");
 
       // The claim, before any consumption — see the unit branch.
       const newDelivery = await tx.delivery.create({
@@ -490,8 +494,8 @@ export async function POST(request: Request) {
     return NextResponse.json(await withLines(outcome.delivery), { status: outcome.replayed ? 200 : 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string };
+      return NextResponse.json({ error: e.message, ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
     }
 
     // ── The unique index had the last word ────────────────────────────────

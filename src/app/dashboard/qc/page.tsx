@@ -17,6 +17,9 @@ import { Btn, KV, Notice, OpsEmpty, OpsError, OpsLoading, OpsRoot, PageHeader, S
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
 import { EvalSheet } from "./_parts/eval-sheet";
 import { PanelSheet } from "./_parts/panel-sheet";
+import { ExceptionsTab } from "./_parts/exceptions-tab";
+import { HeldTab } from "./_parts/held-tab";
+import { ProfilesTab } from "./_parts/profiles-tab";
 import "@/components/ops/station.css";
 type CustomerPref = {
   id: string;
@@ -242,7 +245,19 @@ export default function QCPage() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [records, setRecords] = useState<LegacyRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"backlog" | "history" | "records">("backlog");
+  // QC W3: «المحجوزة», «طلبات الاستثناء» (QX-01…06) and «ملفات التحميص»; ?tab= opens one (notifications link there).
+  type QcTab = "backlog" | "history" | "records" | "held" | "exceptions" | "profiles";
+  const [tab, setTab] = useState<QcTab>("backlog");
+  const [focusException, setFocusException] = useState<string | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const v = sp.get("tab");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL is read once on mount (no SSR mismatch)
+    if (v === "held" || v === "exceptions" || v === "profiles" || v === "history" || v === "records") setTab(v);
+    setFocusException(sp.get("id"));
+  }, []);
+  const [heldCount, setHeldCount] = useState<number | undefined>(undefined);
+  const [excCount, setExcCount] = useState<number | undefined>(undefined);
 
   // Backlog filter state
   const [backlogSearch, setBacklogSearch] = useState("");
@@ -608,10 +623,13 @@ export default function QCPage() {
         // N-10: the reference's one header action is «جلسة تذوق» (to the cupping sessions). The
         // «سجل جودة جديد» create action stays beside it as a secondary button: no decision
         // removed it, and it is the way to record against a batch chosen in the form.
-        actions={(canCuppingRead || (canCreate && tab === "backlog")) ? (
+        actions={(canCuppingRead || canCreate) ? (
           <>
             {canCuppingRead ? (
               <Link href="/dashboard/cupping" className="hr-btn"><Coffee size={16} aria-hidden="true" /> {t("opsQcCuppingSession")}</Link>
+            ) : null}
+            {canCreate ? (
+              <Link href="/station/quality" className="hr-btn" data-testid="qc-station-link">{lang === "ar" ? "فحص بالقياس · محطة الجودة" : "Measured inspection · QC station"}</Link>
             ) : null}
             {canCreate && tab === "backlog" ? (
               <Btn onClick={() => setShowForm(true)}>
@@ -634,11 +652,18 @@ export default function QCPage() {
           { key: "backlog", label: t("qcBacklog"), count: backlogBatches.length },
           { key: "history", label: t("qcHistory"), count: historyBatches.length },
           { key: "records", label: t("opsTesterRecordsTab"), count: records.length },
+          { key: "held", label: lang === "ar" ? "المحجوزة" : "Held", count: heldCount, danger: !!heldCount },
+          { key: "exceptions", label: lang === "ar" ? "طلبات الاستثناء" : "Exception requests", count: excCount },
+          { key: "profiles", label: lang === "ar" ? "ملفات التحميص" : "Roast profiles" },
         ]}
       />
 
       {loadError ? <OpsError message={t("opsLoadFailed")} onRetry={loadBacklog} /> : null}
       {!loaded && !loadError ? <OpsLoading /> : null}
+
+      {tab === "held" ? <HeldTab onCount={setHeldCount} /> : null}
+      {tab === "exceptions" ? <ExceptionsTab key={focusException ?? "list"} onCount={setExcCount} focusId={focusException} /> : null}
+      {tab === "profiles" ? <ProfilesTab /> : null}
 
       {/* Tab 1: QC Backlog */}
       {loaded && tab === "backlog" && (

@@ -185,6 +185,8 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   "employees.manage_access",
   // Owner decision D2 (production simplification): the exceptional QC approval steps up.
   "qc.finalize_override",
+  // QC station W3: the QC exception decision and the disposition of a held batch step up.
+  "qc.approve_exception", "qc.dispose",
 ]);
 
 /** Is `module.sub` (or the whole module) a privileged permission? */

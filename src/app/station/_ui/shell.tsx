@@ -25,7 +25,7 @@ type DeviceEmployee = { id: string; name: string; initials: string; supervisor: 
 type DeviceAnswer =
   | { device: null }
   | { device: { state: "unknown" | "revoked"; name?: string } }
-  | { device: { state: "active"; id: string; name: string }; station: StationInfo; policy: { idleMinutes: number }; session: { employee: DeviceEmployee } | null };
+  | { device: { state: "active"; id: string; name: string }; station: StationInfo; stations?: StationInfo[]; policy: { idleMinutes: number }; session: { employee: DeviceEmployee } | null };
 type Gate =
   | { v: "tiles"; notice?: { tone: "info" | "err" | "warn"; text: string } | null }
   | { v: "pin"; emp: { id: string; name: string; initials: string } }
@@ -33,8 +33,17 @@ type Gate =
   | { v: "unauth"; title: string; body: string };
 type Phase =
   | { p: "loading" } | { p: "failed" } | { p: "s1" } | { p: "revoked" } | { p: "personal"; user: StationUser }
-  | { p: "gate"; station: StationInfo; idleMinutes: number; gate: Gate }
-  | { p: "in"; station: StationInfo; idleMinutes: number; emp: DeviceEmployee; switching: boolean };
+  | { p: "gate"; station: StationInfo; stations: StationInfo[]; idleMinutes: number; gate: Gate }
+  | { p: "in"; station: StationInfo; stations: StationInfo[]; idleMinutes: number; emp: DeviceEmployee; switching: boolean };
+
+/** W3: the station chosen on a device that serves several (kept per browser tab; never a credential). */
+const CHOSEN_KEY = "hq.device.station";
+function chosenStation(all: StationInfo[], fallback: StationInfo): StationInfo {
+  try {
+    const id = sessionStorage.getItem(CHOSEN_KEY);
+    return all.find((x) => x.id === id) ?? fallback;
+  } catch { return fallback; }
+}
 
 export function StationShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/station";
@@ -68,15 +77,17 @@ export function StationShell({ children }: { children: ReactNode }) {
       if (j.device.state === "revoked") { clearStationDrafts(); setPhase({ p: "revoked" }); return; }
       if (j.device.state === "unknown") { setPhase({ p: "s1" }); return; }
       const a = j as Extract<DeviceAnswer, { station: StationInfo }>;
+      const stations = a.stations?.length ? a.stations : [a.station];
       if (a.session) {
-        setPhase({ p: "in", station: a.station, idleMinutes: a.policy.idleMinutes, emp: a.session.employee, switching: false });
-        if (pathname === "/station" && a.station.home) router.replace(a.station.home);
+        setPhase({ p: "in", station: a.station, stations, idleMinutes: a.policy.idleMinutes, emp: a.session.employee, switching: false });
+        if ((pathname === "/station" || !pathname.startsWith(a.station.home ?? "/station/__none")) && a.station.home) router.replace(a.station.home);
         return;
       }
       clearStationDrafts();
       setRoster(null);
-      setPhase({ p: "gate", station: a.station, idleMinutes: a.policy.idleMinutes, gate: gate ?? { v: "tiles" } });
-      const rr = await fetch("/api/station/roster", { cache: "no-store" });
+      const chosen = chosenStation(stations, a.station);
+      setPhase({ p: "gate", station: chosen, stations, idleMinutes: a.policy.idleMinutes, gate: gate ?? { v: "tiles" } });
+      const rr = await fetch(`/api/station/roster?stationId=${encodeURIComponent(chosen.id)}`, { cache: "no-store" });
       if (rr.ok) setRoster(((await rr.json()) as { employees: RosterEntry[] }).employees);
       else setRoster([]);
     } catch {
@@ -125,6 +136,7 @@ export function StationShell({ children }: { children: ReactNode }) {
     setPhase({ ...phase, switching: true });
     // The outgoing employee's active task (S5), read from the station queue (a read, not activity).
     // W4: on a packaging station it is the order being prepared (the preparation tab's claim).
+    if (phase.station.type === "QUALITY") { setTask(null); return; } // the QC station holds no claims
     if (phase.station.type === "PACKAGING") {
       void fetch("/api/station/prep/queue", { cache: "no-store", headers: { "x-station-poll": "1" } })
         .then(async (r) => {
@@ -202,7 +214,8 @@ export function StationShell({ children }: { children: ReactNode }) {
     };
     const signedIn = () => void refresh();
     body = g.v === "tiles" ? (
-      <TilesScreen lang={lang} station={phase.station} roster={roster} notice={g.notice}
+      <TilesScreen lang={lang} station={phase.station} roster={roster} notice={g.notice} stations={phase.stations}
+        onStation={(st) => { try { sessionStorage.setItem(CHOSEN_KEY, st.id); } catch { /* storage unavailable */ } void refresh({ v: "tiles" }); }}
         onPick={(e) => e.locked ? setPhase({ ...phase, gate: { v: "tiles", notice: { tone: "err", text: st("pinLocked", lang) } } }) : setPhase({ ...phase, gate: { v: "pin", emp: e } })} />
     ) : g.v === "pin" ? (
       <PinScreen key={`pin-${g.emp.id}`} lang={lang} station={phase.station} emp={g.emp} onBack={toTiles} onSignedIn={signedIn} onRefused={refused} />
@@ -225,7 +238,7 @@ export function StationShell({ children }: { children: ReactNode }) {
       body = phase.station.home ? <div className="ws-plain" role="status">{t("loading")}</div> : <NoScreen lang={lang} station={phase.station} bar={<DeviceBar lang={lang} station={phase.station} />} />;
     } else {
       body = (
-        <StationCtx value={{ user, mode: phase.p === "in" ? "device" : "personal", station, signOut, lock, switchEmployee }}>
+        <StationCtx value={{ user, mode: phase.p === "in" ? "device" : "personal", station, signOut, lock, switchEmployee, stations: phase.p === "in" ? phase.stations : undefined }}>
           <LanguageProvider lang={lang}>{children}</LanguageProvider>
         </StationCtx>
       );

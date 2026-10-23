@@ -53,7 +53,7 @@ export const GROUP_OF: Record<string, string> = Object.fromEntries(GROUPS.flatMa
 
 /** users.py SUBS where Figma draws the action; the rest are drafts (O-8). */
 export const SUB_AR: Record<string, Record<string, string>> = {
-  qc: { create_record: "تسجيل نتائج الجودة", edit_record: "تعديل سجلات الجودة", view_records: "عرض سجل الجودة", manage: "اعتماد لجنة الجودة وروابط الضيوف", finalize_override: "اعتماد استثنائي بأقل من الحد الأدنى" },
+  qc: { create_record: "تسجيل نتائج الجودة", edit_record: "تعديل سجلات الجودة", view_records: "عرض سجل الجودة", manage: "اعتماد لجنة الجودة وروابط الضيوف", finalize_override: "اعتماد استثنائي بأقل من الحد الأدنى", manage_profiles: "إدارة ملفات التحميص واعتماد مواصفة الجودة", approve_exception: "اعتماد استثناءات الجودة", dispose: "التصرف في الدفعات المحجوزة" },
   production: {
     start_batch: "بدء التحميص ومتابعته", roast_to_stock: "تحميص للمخزون دون طلب", blend: "خلط الدفعات", view_history: "عرض الدفعات المكتملة",
     cancel_batch: "إلغاء الدفعات وحذفها", edit_date: "تعديل تاريخ الدفعة بأثر رجعي",
@@ -132,7 +132,7 @@ export function moduleLabel(module: string, lang: "ar" | "en" = "ar"): string {
  * the model does not (users.py SUBS). Module level: access to a privileged module (finance,
  * accounting) is itself sensitive.
  */
-export const DESIGN_SENSITIVE: [string, string][] = [["qc", "manage"], ["production", "cancel_batch"], ["production", "edit_date"], ["sales", "lead_export"]];
+export const DESIGN_SENSITIVE: [string, string][] = [["qc", "manage"], ["qc", "manage_profiles"], ["production", "cancel_batch"], ["production", "edit_date"], ["sales", "lead_export"]];
 
 export function isSensitive(module: string, sub: string | null): boolean {
   if (sub === null) return (PRIVILEGED_MODULES as readonly string[]).includes(module);

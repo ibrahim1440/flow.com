@@ -3,8 +3,9 @@
 // src/stations.py: top_bar, station, steps, head, facts, primary, secondary, foot_note, keypad,
 // big_field, done_mark, info; stations2.py: row, side, option, chips, log, plain, title_only).
 // Classes in ../station.css; tokens and primitives from Direction 2.1.
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import { BrandMark } from "@/components/brand/BrandMark";
+import { StationCtx } from "./context";
 
 export const CheckIco = ({ size = "" }: { size?: "" | "s" | "l" }) => (
   <svg className={`ico${size ? " " + size : ""}`} viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
@@ -22,18 +23,25 @@ export function StationBar(props: {
   station: string; location?: string; conn: { tone: "ok" | "in" | "er"; label: string }; updated: string; updatedWord: string;
   emp?: { name: string; tag: string }; lockLabel?: string; switchLabel?: string; onLock?: () => void; onSwitch?: () => void; extra?: ReactNode;
 }) {
+  // W3 (owner decision 7): the bar always says WHICH station and WHO — «المحطة: … · المستخدم: …» —
+  // and a device that serves several stations offers «تبديل المحطة» (the S5 handover, then the
+  // station choice before the next employee).
+  const ctx = useContext(StationCtx);
+  const en = ctx?.user.preferredLanguage === "en";
+  const multi = ctx?.mode === "device" && (ctx.stations?.length ?? 0) > 1;
   return (
     <header className="ws-bar" data-testid="station-bar">
       <span className="ws-mark"><BrandMark /></span>
-      <div className="ws-id"><b>{props.station}</b>{props.location ? <div className="ws-loc">{props.location}</div> : null}</div>
+      <div className="ws-id"><span className="ws-k">{en ? "Station: " : "المحطة: "}</span><b data-testid="station-name">{props.station}</b>{props.location ? <div className="ws-loc">{props.location}</div> : null}</div>
       {props.extra}
       <span className="ws-sp" />
       <span className={`st ${props.conn.tone}`} data-testid="station-conn" role="status">{props.conn.label}</span>
       <span className="ws-upd"><span className="ws-upd-w">{props.updatedWord} </span><span className="n">{props.updated}</span></span>
       {props.emp ? (
         <>
-          <div className="ws-emp"><span className="av" aria-hidden="true">{initials(props.emp.name)}</span><b data-testid="station-employee">{props.emp.name}</b><span className="ws-tag">{props.emp.tag}</span></div>
+          <div className="ws-emp"><span className="av" aria-hidden="true">{initials(props.emp.name)}</span><span className="ws-k">{en ? "User: " : "المستخدم: "}</span><b data-testid="station-employee">{props.emp.name}</b><span className="ws-tag">{props.emp.tag}</span></div>
           <button type="button" className="btn" onClick={props.onLock} data-testid="station-lock">{props.lockLabel}</button>
+          {multi ? <button type="button" className="btn" onClick={props.onSwitch} data-testid="station-switch-station">{en ? "Switch station" : "تبديل المحطة"}</button> : null}
           <button type="button" className="btn" onClick={props.onSwitch} data-testid="station-switch">{props.switchLabel}</button>
         </>
       ) : null}

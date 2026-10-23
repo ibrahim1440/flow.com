@@ -149,6 +149,16 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     // reason, an explicit confirmation, recorded on the batch. Privileged with a step-up
     // (src/lib/auth/privileged.ts) and therefore NOT part of the qc role's defaults.
     { key: "finalize_override", label: "Exceptional approval with fewer evaluators than the minimum" },
+    // QC station W3 (owner decisions 23 Oct 2026). Roast profiles and their versioned QC spec
+    // (trials, approval with a sensory evaluation): a duty of its own, not a role default.
+    { key: "manage_profiles", label: "Manage roast profiles and approve their QC specification" },
+    // «اعتماد استثناءات الجودة»: approve / reject a QC exception for a held batch — another person than
+    // the inspector and the requester. Privileged with a step-up (src/lib/auth/privileged.ts); never a
+    // role default; delegated per person by the owner.
+    { key: "approve_exception", label: "Approve QC exceptions (never one's own inspection or request)" },
+    // UR-S19: deciding the disposition of a held batch (convert, blend by recipe, destroy) is a
+    // separate duty from deciding the QC result. Privileged with a step-up; never a role default.
+    { key: "dispose", label: "Decide the disposition of held batches (convert / blend / destroy)" },
   ],
   dispatch: [
     { key: "mark_delivered", label: "Mark as delivered" },
@@ -320,7 +330,8 @@ export function buildDefaultPermissions(role: string): Permissions {
         dashboard: allEdit("dashboard"), inventory: none(), orders: none(),
         // qc › finalize_override withheld (owner decision D2): it is privileged, so granting it by
         // default would make every QC account privileged (username + PIN). Granted individually.
-        production: none(), qc: allEdit("qc", ["finalize_override"]), packaging: none(),
+        // W3: manage_profiles, approve_exception and dispose are delegated per person, never by the role.
+        production: none(), qc: allEdit("qc", ["finalize_override", "manage_profiles", "approve_exception", "dispose"]), packaging: none(),
         dispatch: none(), history: none(), analytics: none(),
         labels: none(), employees: none(), cupping: allEdit("cupping"), settings: none(),
         customers: none(),

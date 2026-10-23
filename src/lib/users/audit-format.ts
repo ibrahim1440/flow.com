@@ -41,6 +41,7 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   STATION_CODE_CANCELLED: { ar: "ألغى رمز التفعيل", en: "Cancelled an activation code", cat: "accounts" },
   STATION_ACTIVATED: { ar: "فُعّل جهاز محطة", en: "Station device activated", cat: "accounts" },
   STATION_REVOKED: { ar: "ألغى جهاز محطة", en: "Revoked a station device", cat: "accounts" },
+  STATION_DEVICE_STATIONS: { ar: "غيّر المحطات التي يخدمها جهاز", en: "Changed the stations a device serves", cat: "accounts" },
   STATION_POLICY_CHANGED: { ar: "غيّر سياسة المحطات", en: "Changed the station policy", cat: "accounts" },
   STATION_ACCESS_CHANGED: { ar: "غيّر الوصول إلى المحطات", en: "Changed station access", cat: "permissions" },
   STATION_PIN_SET: { ar: "عيّن رمز المحطة", en: "Set the station PIN", cat: "signin" },
@@ -164,7 +165,7 @@ export function describe(r: Row, names: Map<string, string>): AuditEntry {
       details = [m.deviceName, r.reasonCode === "IDLE" ? "خمول" : r.reasonCode === "LOCK" ? "قفل" : null, typeof m.claimsReleased === "number" && m.claimsReleased ? `حُرّرت ${m.claimsReleased} مهمة` : null].filter(Boolean).join(" · ");
       break;
     case "STATION_CREATED": case "STATION_UPDATED": case "STATION_POLICY_CHANGED": target = m.stationName ? `محطة «${m.stationName}»` : "المحطات"; break;
-    case "STATION_REGISTERED": case "STATION_CODE_ISSUED": case "STATION_CODE_CANCELLED": case "STATION_ACTIVATED": case "STATION_REVOKED":
+    case "STATION_REGISTERED": case "STATION_CODE_ISSUED": case "STATION_CODE_CANCELLED": case "STATION_ACTIVATED": case "STATION_REVOKED": case "STATION_DEVICE_STATIONS":
       target = m.deviceName ? `جهاز «${m.deviceName}»` : "جهاز محطة"; details = m.stationName ? `المحطة: ${m.stationName}` : ""; break;
     case "STATION_ACCESS_CHANGED": {
       const ch = (Array.isArray(m.changes) ? m.changes : []) as { stationName: string; to: string }[];

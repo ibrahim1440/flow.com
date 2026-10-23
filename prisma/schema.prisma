@@ -439,6 +439,7 @@ model GreenBean {
   cuppingSessions  CuppingSession[]
   roastPreferences CustomerRoastPreference[]
   coffeeProducts   CoffeeProduct[]
+  roastProfiles    RoastProfile[]
   productionOrders ProductionOrder[]
 
   @@index([isActive])
@@ -633,6 +634,25 @@ model RoastingBatch {
   scheduledSlotId   String?        @unique
   scheduledSlot     ScheduledSlot? @relation(fields: [scheduledSlotId], references: [id], onDelete: SetNull)
 
+  // ─── QC station W3 (additive, migration 20261031090000_station_w3_qc) ───
+  /// The roast-profile version this batch was roasted to: the product's APPROVED version when the
+  /// batch was recorded (stored, never re-derived). NULL = none approved then — every batch before
+  /// this column, and every batch of a profile still in development: its QC shows «المواصفة قيد
+  /// المعايرة» (manual, documented acceptance; no numeric conformity). A batch is never its own reference.
+  profileVersionId       String?
+  profileVersion         RoastProfileVersion? @relation(fields: [profileVersionId], references: [id], onDelete: Restrict)
+  /// «محجوزة» (status "QC Hold"): when, by which inspection, and whether the hold is for foreign
+  /// objects / contamination — such a hold is NEVER released by a commercial exception.
+  qcHoldAt               DateTime?
+  qcHoldRecordId         String?
+  qcHoldForeignObject    Boolean?
+  /// The approved QcException that released this batch (QEX-…) and the use it permits.
+  qcExceptionId          String?
+  qcPermittedUse         String?
+  /// Converted from another product by an approved disposition (the product it was roasted as).
+  convertedFromProductId String?
+
+
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
   qcRecords             QcRecord[]
@@ -648,12 +668,16 @@ model RoastingBatch {
   serialHistory         BatchSerialHistory[]
   qcInvites             QcInvite[]
   packagingOperations   PackagingOperation[]
+  qcExceptions          QcException[]
+  qcDispositions        QcDisposition[]
+  profileTrials         RoastProfileTrial[]
 
   @@unique([greenBeanId, batchNumber])
   @@index([greenBeanId, createdAt])
   @@index([status])
   @@index([status, createdAt])
   @@index([roasterId, createdAt])
+  @@index([profileVersionId])
 }
 
 model BlendIngredient {
@@ -691,8 +715,58 @@ model QcRecord {
   updatedAt         DateTime              @updatedAt
   correctionHistory QcCorrectionHistory[]
 
+  // ─── QC station W3 inspection (additive, migration 20261031090000_station_w3_qc) ───
+  // NULL on every panel record (the legacy evaluator form, guests). An inspection («فحص بالقياس»)
+  // has kind INSPECTION and freezes what it was judged against: specSnapshot holds the profile
+  // version's spec as it stood (or state CALIBRATING), so a later version never changes a past
+  // result. Verdicts are computed by the server against that snapshot.
+  /// INSPECTION | NULL (panel record)
+  kind               String?
+  /// Idempotency-Key of the POST that recorded it (station and ERP send one); intent hash beside it.
+  requestKey         String?  @unique
+  intentHash         String?
+  profileVersionId   String?
+  specSnapshot       Json?
+  wholeDevice        String?
+  wholeScale         String?
+  groundDevice       String?
+  groundScale        String?
+  /// LIGHTER | ON_TARGET | DARKER — only against an APPROVED snapshot (never inferred development).
+  wholeVerdict       String?
+  groundVerdict      String?
+  defectUneven       Boolean?
+  defectScorched     Boolean?
+  defectPale         Boolean?
+  defectForeign      Boolean?
+  /// CONFORMING | NON_CONFORMING | NEEDS_REVIEW
+  sensoryResult      String?
+  sensoryNotes       String?
+  sensoryRequired    Boolean?
+  /// APPROVAL | FIRST_OF_DAY | DEVIATION (why the server required it)
+  sensoryRequiredWhy String?
+  cuppingScore       Float?
+  moisturePct        Float?
+  densityGL          Float?
+  /// Roast loss of the batch (green → roasted), copied for reference only: never re-entered, never a hold.
+  lossPct            Float?
+  /// Under calibration: ACCEPT | HOLD, with the documented note.
+  manualDecision     String?
+  manualNote         String?
+  /// RELEASED | HELD | AWAITING_EVALUATORS (conforming, below the QC minimum of evaluators)
+  outcome            String?
+  /// Why it was held: WHOLE_OUT, GROUND_OUT, DEFECT_UNEVEN, DEFECT_SCORCHED, DEFECT_PALE,
+  /// FOREIGN_OBJECT, SENSORY_NON_CONFORMING, SENSORY_REVIEW, MANUAL_HOLD.
+  holdReasons        Json?
+  /// A re-inspection names the inspection it follows; after a foreign-object hold, the cleaning done.
+  reinspectionOfId   String?
+  cleaningNote       String?
+  stationId          String?
+
+
   @@index([date])
   @@index([batchId, date])
+  @@index([kind, createdAt])
+  @@index([profileVersionId])
 }
 
 /// A guest evaluator invited to a batch's QC panel (owner decision D4, migration
@@ -1115,6 +1189,7 @@ model CoffeeProduct {
   productSkus        ProductSKU[]
   scheduledSlots     ScheduledSlot[]
   roastPlans         RoastPlan[]
+  roastProfiles      RoastProfile[]
 
   // BOM lines that consume this coffee as roasted/intermediate stock.
   bomComponents BomComponent[]
@@ -1879,6 +1954,7 @@ model Station {
   updatedAt     DateTime            @updatedAt
   devices       StationDevice[]
   assignments   StationAssignment[]
+  deviceLinks   StationDeviceStation[]
 
   @@index([status])
 }
@@ -1915,6 +1991,7 @@ model StationDevice {
   revokedByName       String?
   revokeReason        String?
   pinAttempts         StationPinAttempt[]
+  extraStations       StationDeviceStation[]
 
   @@index([stationId, status])
   @@index([status])
@@ -1973,6 +2050,23 @@ model StationPolicy {
   activationMinutes Int?
   updatedById       String?
   updatedAt         DateTime @updatedAt
+}
+
+/// Workstations W3: a device may serve more than its own station (the same iPad at the roaster and
+/// in QC). The station is chosen on the device before the employee (S2), the session is bound to it,
+/// and the bar always says which station and who. Registered by the administrator (step-up).
+model StationDeviceStation {
+  id              String        @id @default(cuid())
+  stationDeviceId String
+  device          StationDevice @relation(fields: [stationDeviceId], references: [id], onDelete: Cascade)
+  stationId       String
+  station         Station       @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  createdById     String?
+  createdByName   String?
+  createdAt       DateTime      @default(now())
+
+  @@unique([stationDeviceId, stationId])
+  @@index([stationId])
 }
 
 model WorkItemClaim {
@@ -6268,4 +6362,169 @@ model NotificationWatch {
   key       String   @id
   state     String
   updatedAt DateTime @updatedAt
+}
+
+// ─── QC station W3 · roast profiles, QC specifications, exceptions, dispositions (additive) ─────
+// Migration 20261031090000_station_w3_qc. Owner decisions of 23 Oct 2026 (OWNER-REQUIREMENTS).
+
+/// A roast profile: one coffee product (optionally one green coffee) roasted one way. Its colour
+/// reference lives on its versions; there is no general target for a crop.
+model RoastProfile {
+  id            String                @id @default(cuid())
+  productId     String
+  product       CoffeeProduct         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  /// NULL = every green lot of the product.
+  greenBeanId   String?
+  greenBean     GreenBean?            @relation(fields: [greenBeanId], references: [id], onDelete: Restrict)
+  name          String
+  notes         String?
+  /// ACTIVE | ARCHIVED
+  status        String                @default("ACTIVE")
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  versions      RoastProfileVersion[]
+
+  @@index([productId, status])
+}
+
+/// One version of a profile. DRAFT (development: trial readings set the target and tolerance) →
+/// APPROVED (spec frozen: whole and ground target ± tolerance, device, scale, sensory requirements;
+/// approval needs a sensory evaluation) → RETIRED (when a newer version is approved). One APPROVED
+/// version per profile (partial unique index); the spec of a non-DRAFT version cannot change (trigger).
+model RoastProfileVersion {
+  id                   String              @id @default(cuid())
+  profileId            String
+  profile              RoastProfile        @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  version              Int
+  /// DRAFT | APPROVED | RETIRED
+  status               String              @default("DRAFT")
+  wholeTarget          Float?
+  wholeTol             Float?
+  groundTarget         Float?
+  groundTol            Float?
+  device               String?
+  scale                String?
+  sensoryRequirements  String?
+  notes                String?
+  /// The sensory evaluation of the approval (required): CONFORMING, with its notes.
+  approvalSensory      String?
+  approvalSensoryNotes String?
+  approvedAt           DateTime?
+  approvedById         String?
+  approvedByName       String?
+  retiredAt            DateTime?
+  retiredById          String?
+  createdById          String?
+  createdByName        String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  trials               RoastProfileTrial[]
+  batches              RoastingBatch[]
+
+  @@unique([profileId, version])
+  @@index([status])
+}
+
+/// A TRIAL reading during development: whole and ground colour of a trial roast, with the device
+/// and scale, and the sensory note. Trials guide the target and tolerance; they judge nothing.
+model RoastProfileTrial {
+  id             String              @id @default(cuid())
+  versionId      String
+  version        RoastProfileVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  batchId        String?
+  batch          RoastingBatch?      @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  colorWhole     Float
+  colorGround    Float
+  device         String
+  scale          String
+  sensoryResult  String?
+  notes          String?
+  recordedById   String
+  recordedByName String
+  createdAt      DateTime            @default(now())
+
+  @@index([versionId, createdAt])
+}
+
+/// «طلب استثناء» (QX-01…06): a held batch, outside its APPROVED spec, released for a stated use by
+/// a person other than the inspector and the requester (qc › approve_exception, privileged, step-up).
+/// Never for foreign objects / contamination. Pending or rejected requests never change availability.
+model QcException {
+  id                   String        @id @default(cuid())
+  /// QEX-YYYY-NNNN
+  number               String        @unique
+  batchId              String
+  batch                RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  qcRecordId           String
+  inspectorId          String?
+  inspectorName        String?
+  /// TASTE_ACCEPTED | BLEND_SUITABLE | CUSTOMER_APPROVAL | OTHER
+  reason               String
+  reasonNote           String?
+  quantityKg           Float
+  /// GENERAL | CUSTOMER | INTERNAL
+  permittedUse         String
+  permittedUseNote     String?
+  measurementsSnapshot Json
+  /// PENDING | APPROVED | REJECTED | WITHDRAWN
+  status               String        @default("PENDING")
+  requestedById        String
+  requestedByName      String
+  stationId            String?
+  requestKey           String        @unique
+  decidedById          String?
+  decidedByName        String?
+  decisionReason       String?
+  decidedAt            DateTime?
+  decisionKey          String?       @unique
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([status, createdAt])
+  @@index([batchId])
+}
+
+/// The disposition of a held batch other than re-inspection and exception: CONVERT to another product
+/// (meets that product's APPROVED spec), BLEND by an approved recipe (sources traced, output to QC),
+/// DESTROY (reason, quantity; the roasted coffee leaves through a LOSS movement). Requested by QC
+/// (qc › manage), decided by another person (qc › dispose, privileged, step-up, never the requester
+/// or the inspector). Never CONVERT or BLEND for foreign objects.
+model QcDisposition {
+  id              String        @id @default(cuid())
+  /// QDP-YYYY-NNNN
+  number          String        @unique
+  batchId         String
+  batch           RoastingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  qcRecordId      String?
+  inspectorId     String?
+  /// CONVERT | BLEND | DESTROY
+  kind            String
+  /// PENDING | APPROVED | REJECTED | EXECUTED | WITHDRAWN
+  status          String        @default("PENDING")
+  quantityKg      Float
+  reason          String
+  targetProductId String?
+  targetVersionId String?
+  /// CONVERT: the server's check of the batch's readings against the target's approved spec.
+  conformity      Json?
+  /// BLEND: the recipe — [{ batchId, batchNumber, quantityKg }] partners and the held quantity.
+  recipe          Json?
+  blendBatchId    String?
+  movementId      String?
+  requestedById   String
+  requestedByName String
+  requestKey      String        @unique
+  decidedById     String?
+  decidedByName   String?
+  decisionReason  String?
+  decidedAt       DateTime?
+  executedAt      DateTime?
+  executedById    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([status, createdAt])
+  @@index([batchId])
 }

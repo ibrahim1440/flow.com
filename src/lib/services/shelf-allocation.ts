@@ -1,3 +1,4 @@
+import { LOT_NOT_HELD } from "@/lib/services/qc/hold-guard";
 import { Prisma } from "@/generated/prisma/client";
 import { lockLotsInIdOrder, lockAllocationsInIdOrder } from "./order-operations";
 
@@ -106,7 +107,7 @@ export type CandidateLot = {
  */
 export async function candidateLots(tx: PrismaTx, item: AllocatableItem): Promise<CandidateLot[]> {
   const lots = await tx.finishedGoodsLot.findMany({
-    where: { ...lotMatchFilter(item), availableQty: { gt: 0 } },
+    where: { ...lotMatchFilter(item), availableQty: { gt: 0 }, ...LOT_NOT_HELD },
     select: {
       id: true,
       batchNumber: true,
@@ -156,7 +157,7 @@ async function shelfPool(
   if (greenBeanIds.length) or.push({ roastingBatch: { greenBeanId: { in: greenBeanIds } } });
 
   const lots = await tx.finishedGoodsLot.findMany({
-    where: { status: "AVAILABLE", availableQty: { gt: 0 }, OR: or },
+    where: { status: "AVAILABLE", availableQty: { gt: 0 }, OR: or, ...LOT_NOT_HELD },
     select: {
       id: true,
       productId: true,

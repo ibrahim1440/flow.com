@@ -10,6 +10,7 @@
 //   · P5: what blocks packaging — a material short for the planned packages, a rejected batch.
 //   · PA2: the order line the packages will be reserved to (the same rule the commit applies) and
 //     how far the material shelf goes (`maxPackagesFor`, the «تعبئة 12 الآن» of the shortage frame).
+import { QC_HOLD_STATUS } from "@/lib/qc/spec";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -36,7 +37,7 @@ export type PackBatch = {
   shortage: { material: string; required: number; available: number } | null;
 };
 export type PackPending = { id: string; batchNumber: string; nameEn: string; nameAr: string | null; status: string; createdAt: string };
-export type PackBlocked = { kind: "MATERIAL_SHORT" | "REJECTED"; id: string; batchNumber: string; nameEn: string; nameAr: string | null; material?: string; required?: number; available?: number };
+export type PackBlocked = { kind: "MATERIAL_SHORT" | "REJECTED" | "QC_HOLD"; id: string; batchNumber: string; nameEn: string; nameAr: string | null; material?: string; required?: number; available?: number };
 
 const BATCH_SELECT = {
   id: true, batchNumber: true, status: true, roastedAvailableKg: true, updatedAt: true, createdAt: true, productId: true, orderItemId: true, productionOrderId: true,
@@ -68,10 +69,12 @@ const orderOf = (b: BatchRow) => b.orderItem?.order ?? b.productionOrder?.source
 
 /** PA1 + P5. */
 export async function packagingQueue() {
-  const [ready, pending, rejected] = await Promise.all([
+  const [ready, pending, rejected, held] = await Promise.all([
     prisma.roastingBatch.findMany({ where: { status: { in: PACKABLE }, roastedAvailableKg: { gte: MIN_GRAMS / 1000 } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }], take: 60, select: BATCH_SELECT }),
     prisma.roastingBatch.findMany({ where: { status: "Pending QC", roastedAvailableKg: { gte: MIN_GRAMS / 1000 } }, orderBy: [{ createdAt: "asc" }], take: 20, select: BATCH_SELECT }),
     prisma.roastingBatch.findMany({ where: { status: "Rejected", roastedAvailableKg: { gte: MIN_GRAMS / 1000 }, updatedAt: { gte: new Date(Date.now() - 14 * 24 * 3600_000) } }, orderBy: [{ updatedAt: "desc" }], take: 10, select: BATCH_SELECT }),
+    // QC W3: held batches («محجوزة») are never packed; P5 says so, and who releases them.
+    prisma.roastingBatch.findMany({ where: { status: QC_HOLD_STATUS }, orderBy: [{ updatedAt: "desc" }], take: 20, select: BATCH_SELECT }),
   ]);
   const plans = await Promise.all(ready.map((b) => packagingPlan(prisma, b, gramsFromKg(b.roastedAvailableKg))));
   // The plan's first size with packages suggested from open demand; a roast for the shelf: the
@@ -100,6 +103,7 @@ export async function packagingQueue() {
   const blocked: PackBlocked[] = [
     ...batches.filter((b) => b.shortage).map((b) => ({ kind: "MATERIAL_SHORT" as const, id: b.id, batchNumber: b.batchNumber, nameEn: b.nameEn, nameAr: b.nameAr, material: b.shortage!.material, required: b.shortage!.required, available: b.shortage!.available })),
     ...rejected.map((b) => ({ kind: "REJECTED" as const, id: b.id, batchNumber: b.batchNumber, ...nameOf(b) })),
+    ...held.map((b) => ({ kind: "QC_HOLD" as const, id: b.id, batchNumber: b.batchNumber, ...nameOf(b) })),
   ];
   const pendingOut: PackPending[] = pending.map((b) => ({ id: b.id, batchNumber: b.batchNumber, status: b.status, ...nameOf(b), createdAt: b.createdAt.toISOString() }));
   const version = createHash("sha256").update(JSON.stringify([batches, pendingOut, blocked])).digest("hex").slice(0, 16);

@@ -1,3 +1,4 @@
+import { LOT_NOT_HELD } from "@/lib/services/qc/hold-guard";
 import { Prisma } from "@/generated/prisma/client";
 import { lockLotsInIdOrder, lockAllocationsInIdOrder } from "./order-operations";
 
@@ -127,6 +128,8 @@ export async function availableUnitsBySku(
       productSkuId: { in: skuIds },
       isUnitTracked: true,
       status: "AVAILABLE",
+      // QC W3: nothing packed from a held batch is promised (hold-guard.ts).
+      ...LOT_NOT_HELD,
     },
     _sum: { unitsAvailable: true, unitsReserved: true },
   });
@@ -188,6 +191,7 @@ export async function reserveFinishedUnits(
       productSkuId: item.productSkuId,
       isUnitTracked: true,
       status: "AVAILABLE",
+      ...LOT_NOT_HELD,
     },
     select: { id: true, batchNumber: true, unitsAvailable: true, unitsReserved: true },
     // FIFO — roasted coffee degrades, so the oldest free lot leaves the shelf next.

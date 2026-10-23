@@ -110,7 +110,16 @@ export async function POST(request: Request) {
       // so it must precede the batches it refers to — and because both statements are in
       // the one transaction below, the pair either both happen or neither does.
       prisma.packagingOperation.deleteMany(),
+      // 20261031090000_station_w3_qc: the QC exceptions and dispositions describe the batches (they
+      // would cascade with them; named so the list says every table it clears).
+      prisma.qcException.deleteMany(),
+      prisma.qcDisposition.deleteMany(),
       prisma.roastingBatch.deleteMany(),
+      // The roast profiles and their versioned QC specs name the products and green coffee cleared
+      // below; after the batches, which point at a version (RESTRICT).
+      prisma.roastProfileTrial.deleteMany(),
+      prisma.roastProfileVersion.deleteMany(),
+      prisma.roastProfile.deleteMany(),
       // 20261030100000_station_w4: the packaging station's picks and dispatch handoffs describe the
       // orders cleared next (they would cascade with them; named so the list says every table it clears).
       prisma.dispatchHandoffLine.deleteMany(),

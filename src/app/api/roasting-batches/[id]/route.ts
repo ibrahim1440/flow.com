@@ -1,3 +1,4 @@
+import { assertBatchesNotHeld } from "@/lib/services/qc/hold-guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub, stockChangeGate } from "@/lib/auth-server";
@@ -111,6 +112,13 @@ export async function DELETE(request: Request, { params }: Params) {
       SELECT "id" FROM "RoastingBatch" WHERE "id" = ${id} FOR UPDATE
     `;
     if (locked.length === 0) throw { _appCode: 404, message: "Batch not found" };
+    // QC W3: a held batch is not cancelled away — its disposition (destroy, convert, blend, exception)
+    // is decided in QC, by another person, and logged (hold-guard.ts).
+    await assertBatchesNotHeld(tx, [id], "delete");
+    // Its QC history (inspections, exceptions, dispositions) is the audit trail: such a batch stays.
+    if ((await tx.qcException.count({ where: { batchId: id } })) + (await tx.qcDisposition.count({ where: { batchId: id } })) > 0) {
+      throw { _appCode: 409, message: "للدفعة سجل استثناء أو تصرف في الجودة، فلا تُحذف.", errorEn: "The batch has a QC exception or disposition record, so it cannot be deleted." };
+    }
 
     const packagedCount = await tx.packagingOperation.count({ where: { batchId: id } });
     if (packagedCount > 0) {
@@ -202,8 +210,8 @@ export async function DELETE(request: Request, { params }: Params) {
   return NextResponse.json({ success: true });
   } catch (err) {
     if (err && typeof err === "object" && "_appCode" in err) {
-      const e = err as { _appCode: number; message: string };
-      return NextResponse.json({ error: e.message }, { status: e._appCode });
+      const e = err as { _appCode: number; message: string; errorEn?: string; code?: string };
+      return NextResponse.json({ error: e.message, ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.code ? { code: e.code } : {}) }, { status: e._appCode });
     }
     return handlePrismaError(err);
   }

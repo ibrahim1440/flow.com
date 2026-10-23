@@ -95,7 +95,30 @@ export async function currentDevice(): Promise<DeviceState> {
   return deviceFromToken(jar.get(STATION_DEVICE_COOKIE)?.value ?? null);
 }
 
-type LiveStationSession = { id: string; employeeId: string; createdAt: Date; lastSeenAt: Date; expiresAt: Date };
+type LiveStationSession = { id: string; employeeId: string; createdAt: Date; lastSeenAt: Date; expiresAt: Date; stationId: string };
+
+const STATION_ROW_SELECT = { id: true, name: true, type: true, place: true, roasterId: true, status: true } as const;
+
+/**
+ * Workstations W3 — the stations a device serves: its own (registration) and every ACTIVE station
+ * the administrator linked to it (StationDeviceStation: the same iPad at the roaster and in QC). The
+ * station is chosen on the device BEFORE the employee; the session is bound to that choice.
+ */
+export async function deviceStations(device: { id: string; stationId: string }, home?: StationRow): Promise<StationRow[]> {
+  const own = home ?? ((await prisma.station.findUnique({ where: { id: device.stationId }, select: STATION_ROW_SELECT })) as StationRow | null);
+  const links = await prisma.stationDeviceStation.findMany({ where: { stationDeviceId: device.id, station: { status: "ACTIVE" } }, select: { station: { select: STATION_ROW_SELECT } }, orderBy: { createdAt: "asc" } });
+  const out: StationRow[] = own && own.status === "ACTIVE" ? [own] : [];
+  for (const l of links) if (!out.some((x) => x.id === l.station.id)) out.push({ ...l.station, type: l.station.type as StationType });
+  return out;
+}
+
+/** One station this device may serve (its own or a linked ACTIVE one), or null. */
+export async function deviceStation(device: { id: string; stationId: string }, stationId: string | null | undefined, home?: StationRow): Promise<StationRow | null> {
+  if (!stationId || stationId === device.stationId) return home ?? ((await prisma.station.findUnique({ where: { id: device.stationId }, select: STATION_ROW_SELECT })) as StationRow | null);
+  const link = await prisma.stationDeviceStation.findUnique({ where: { stationDeviceId_stationId: { stationDeviceId: device.id, stationId } }, select: { station: { select: STATION_ROW_SELECT } } });
+  if (!link || link.station.status !== "ACTIVE") return null;
+  return { ...link.station, type: link.station.type as StationType };
+}
 
 /**
  * The STATION session the cookie names, bound to this device (step 2 of H8), or null. Ends it here
@@ -108,7 +131,9 @@ export async function stationSessionFor(device: { id: string; stationId: string 
   if (!payload?.sid || payload.scope !== "STATION") return null;
   const s = await prisma.authSession.findUnique({ where: { id: payload.sid } });
   if (!s || s.scope !== "STATION" || s.employeeId !== payload.id || s.revokedAt) return null;
-  if (s.stationDeviceId !== device.id || s.stationId !== device.stationId) return null;
+  if (s.stationDeviceId !== device.id || !s.stationId) return null;
+  // W3: a session on a linked station stays valid only while the link and that station do.
+  if (s.stationId !== device.stationId && !(await deviceStation(device, s.stationId))) return null;
   const now = Date.now();
   if (now >= s.expiresAt.getTime()) return null;
   if (stationIdleExpired(s.lastSeenAt, now, opts.policy.idleMinutes)) {
@@ -124,11 +149,11 @@ export async function stationSessionFor(device: { id: string; stationId: string 
   if (opts.touch && now - s.lastSeenAt.getTime() > TOUCH_SESSION_MS) {
     await prisma.authSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { lastSeenAt: new Date(now) } });
   }
-  return { session: { id: s.id, employeeId: s.employeeId, createdAt: s.createdAt, lastSeenAt: s.lastSeenAt, expiresAt: s.expiresAt }, employee: e };
+  return { session: { id: s.id, employeeId: s.employeeId, createdAt: s.createdAt, lastSeenAt: s.lastSeenAt, expiresAt: s.expiresAt, stationId: s.stationId }, employee: e };
 }
 
 /** The station employee as the services see a caller: effective permissions, no privileged key. */
-export function stationActorOf(employee: { id: string; name: string; role: string; permissions: string; preferredLanguage: string }, session: LiveStationSession, device: DeviceRow, supervisor: boolean): StationActor {
+export function stationActorOf(employee: { id: string; name: string; role: string; permissions: string; preferredLanguage: string }, session: Omit<LiveStationSession, "stationId"> & { stationId?: string }, device: DeviceRow, supervisor: boolean): StationActor {
   let perms = parsePermissions(employee.permissions);
   if (!perms || Object.keys(perms).length === 0) perms = buildDefaultPermissions(employee.role);
   const permissions = stationPermissions(perms);
@@ -136,7 +161,7 @@ export function stationActorOf(employee: { id: string; name: string; role: strin
     id: employee.id, name: employee.name, role: employee.role, permissions, preferredLanguage: employee.preferredLanguage === "en" ? "en" : "ar",
     sid: session.id, authTime: session.createdAt, sessionId: session.id, sessionMethod: "PIN", sessionMfa: false, authFactor: null,
     privileged: false, mfaEnrollmentRequired: false, passwordChangeRequired: false,
-    scope: "STATION", stationId: device.stationId, stationDeviceId: device.id, supervisor,
+    scope: "STATION", stationId: session.stationId ?? device.stationId, stationDeviceId: device.id, supervisor,
   };
 }
 
@@ -181,10 +206,13 @@ export async function requireStationContext(type: StationType, tab?: StationTab)
   const policy = await stationPolicy();
   const live = await stationSessionFor(dev.device, jar.get(STATION_SESSION_COOKIE)?.value ?? null, { touch: h.get("x-station-poll") !== "1", policy });
   if (!live) return fail(SESSION_REQUIRED());
-  const assignment = await prisma.stationAssignment.findUnique({ where: { stationId_employeeId: { stationId: dev.station.id, employeeId: live.employee.id } }, select: { supervisor: true } });
-  if (!assignment) return fail(NOT_ASSIGNED(live.employee.name, dev.station.name));
-  if (dev.station.type !== type) return fail(WRONG_STATION());
+  // W3: the session's station — the device's own, or a linked one chosen before the employee.
+  const station = await deviceStation(dev.device, live.session.stationId, dev.station);
+  if (!station) return fail(SESSION_REQUIRED());
+  const assignment = await prisma.stationAssignment.findUnique({ where: { stationId_employeeId: { stationId: station.id, employeeId: live.employee.id } }, select: { supervisor: true } });
+  if (!assignment) return fail(NOT_ASSIGNED(live.employee.name, station.name));
+  if (station.type !== type) return fail(WRONG_STATION());
   const actor = stationActorOf(live.employee, live.session, dev.device, assignment.supervisor);
   if (!(tab ? holdsPrivilege(actor.permissions, need) : holdsStationPrivilege(actor.permissions, type))) return fail(NO_PRIVILEGE());
-  return { mode: "device", user: actor, station: dev.station, device: dev.device, error: null };
+  return { mode: "device", user: actor, station, device: dev.device, error: null };
 }

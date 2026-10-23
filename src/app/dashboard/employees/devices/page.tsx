@@ -14,7 +14,7 @@ import { Select } from "@/components/ui/Select";
 import { NoAccess, PasswordConfirmField, ReasonField, SectionHead, UsersFrame, api, errText, fmtDate, fmtWhen, useLangL, usePasswordConfirm, useUsersChrome, type Lang } from "../_ui/shared";
 
 type Station = { id: string; name: string; type: string; place: string | null; status: string; roasterId: string | null; roasterName: string | null; assigned: number; createdAt: string; createdByName: string | null };
-type Device = { id: string; name: string; deviceCode: string; status: "PENDING" | "ACTIVE" | "REVOKED"; stationId: string; stationName: string; stationType: string; place: string | null; codeLive: boolean; codeExpiresAt: string | null; activatedAt: string | null; lastSeenAt: string | null; registeredAt: string; registeredByName: string | null; revokedAt: string | null; revokedByName: string | null; revokeReason: string | null };
+type Device = { id: string; name: string; deviceCode: string; status: "PENDING" | "ACTIVE" | "REVOKED"; stationId: string; stationName: string; stationType: string; place: string | null; codeLive: boolean; codeExpiresAt: string | null; activatedAt: string | null; lastSeenAt: string | null; registeredAt: string; registeredByName: string | null; revokedAt: string | null; revokedByName: string | null; revokeReason: string | null; alsoStationIds?: string[] };
 type Policy = { idleMinutes: number; pinMaxAttempts: number; activationMinutes: number; stored: { idleMinutes: number | null; pinMaxAttempts: number | null; activationMinutes: number | null } };
 type Overview = { stations: Station[]; devices: Device[]; policy: Policy; roasters: { id: string; name: string; status: string }[] };
 type Code = { device: { id: string; name: string; stationName: string; deviceCode: string }; activationCode: string; expiresAt: string };
@@ -28,7 +28,7 @@ export default function StationDevicesPage() {
   const [error, setError] = useState<{ text: string; status: number } | null>(null);
   const [reload, setReload] = useState(0);
   const [counts, setCounts] = useState<{ users?: number; roles?: number }>({});
-  const [dlg, setDlg] = useState<null | "station" | "register" | "policy" | { newCode: Device } | { revoke: Device } | { retire: Station }>(null);
+  const [dlg, setDlg] = useState<null | "station" | "register" | "policy" | { newCode: Device } | { revoke: Device } | { retire: Station } | { serves: Device }>(null);
   const [code, setCode] = useState<Code | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const refresh = useCallback(() => setReload((x) => x + 1), []);
@@ -81,13 +81,15 @@ export default function StationDevicesPage() {
                 <tbody>
                   {data.devices.map((d) => (
                     <tr key={d.id} data-testid={`ur-device-${d.id}`} className={d.status === "REVOKED" ? "ur-dim" : undefined}>
-                      <td><b style={{ fontWeight: 600, color: d.status === "REVOKED" ? "var(--text-secondary)" : undefined }}>{d.name}</b>{d.name !== d.stationName ? <small className="ur-muted" style={{ display: "block" }}>{d.stationName}</small> : null}</td>
+                      <td><b style={{ fontWeight: 600, color: d.status === "REVOKED" ? "var(--text-secondary)" : undefined }}>{d.name}</b>{d.name !== d.stationName ? <small className="ur-muted" style={{ display: "block" }}>{d.stationName}</small> : null}
+                        {d.alsoStationIds?.length ? <small className="ur-muted" style={{ display: "block" }} data-testid={`ur-device-serves-${d.id}`}>{L("يخدم أيضًا: ", "Also serves: ")}{d.alsoStationIds.map((id) => data.stations.find((x) => x.id === id)?.name ?? "—").join("، ")}</small> : null}</td>
                       <td>{typeWord(d.stationType, lang)}</td>
                       <td className="ur-hide-rail">{d.place ?? "—"}</td>
                       <td>{status(d)}{d.status === "PENDING" && !d.codeLive ? <small className="ur-muted" style={{ display: "block" }}>{L("لا رمز صالح", "No live code")}</small> : null}</td>
                       <td style={{ fontFamily: "var(--f-num)" }}>{d.status === "PENDING" ? "—" : fmtWhen(d.status === "REVOKED" ? d.revokedAt : d.lastSeenAt, lang)}</td>
                       <td className="ur-hide-rail ur-muted">{fmtDate(d.registeredAt, lang)}{d.registeredByName ? ` · ${d.registeredByName}` : ""}</td>
                       <td style={{ textAlign: "end" }}>
+                        {d.status !== "REVOKED" ? <Btn size="sm" onClick={() => setDlg({ serves: d })} data-testid={`ur-device-serves-btn-${d.id}`}>{L("المحطات", "Stations")}</Btn> : null}
                         {d.status === "ACTIVE" ? <Btn size="sm" className="ur-danger" onClick={() => setDlg({ revoke: d })} data-testid={`ur-device-revoke-${d.id}`}>{L("إلغاء الجهاز", "Revoke device")}</Btn> : null}
                         {d.status === "PENDING" ? <Btn size="sm" onClick={() => setDlg({ newCode: d })} data-testid={`ur-device-code-${d.id}`}>{L("رمز جديد", "New code")}</Btn> : null}
                       </td>
@@ -142,6 +144,7 @@ export default function StationDevicesPage() {
       {data && dlg === "register" ? <RegisterDialog stations={active} onClose={() => setDlg(null)} onDone={(c) => { setDlg(null); setCode(c); refresh(); }} /> : null}
       {data && dlg === "policy" ? <PolicyDialog policy={data.policy} onClose={() => setDlg(null)} onDone={() => { setDlg(null); refresh(); }} /> : null}
       {dlg && typeof dlg === "object" && "newCode" in dlg ? <NewCodeDialog device={dlg.newCode} onClose={() => setDlg(null)} onDone={(c) => { setDlg(null); setCode(c); refresh(); }} /> : null}
+      {dlg && typeof dlg === "object" && "serves" in dlg ? <ServesDialog device={dlg.serves} stations={data?.stations.filter((x) => x.status === "ACTIVE" && x.id !== dlg.serves.stationId) ?? []} onClose={() => setDlg(null)} onDone={() => { setDlg(null); setNotice(L("حُفظت محطات الجهاز.", "The device's stations were saved.")); refresh(); }} /> : null}
       {dlg && typeof dlg === "object" && "revoke" in dlg ? <RevokeDialog device={dlg.revoke} onClose={() => setDlg(null)} onDone={(n) => { setDlg(null); setNotice(L(`أُلغي الجهاز وأُنهيت ${n} جلسة.`, `Device revoked; ${n} session(s) ended.`)); refresh(); }} /> : null}
       {dlg && typeof dlg === "object" && "retire" in dlg ? <RetireDialog station={dlg.retire} onClose={() => setDlg(null)} onDone={() => { setDlg(null); refresh(); }} /> : null}
       {code ? <CodeDialog code={code} onClose={() => { setCode(null); refresh(); }} /> : null}
@@ -176,7 +179,7 @@ function AddStationDialog({ roasters, onClose, onDone }: { roasters: Overview["r
         <Select value={type} onChange={(e) => setType(e.target.value)} data-testid="ur-station-type">
           {Object.keys(TYPE).map((k) => <option key={k} value={k}>{typeWord(k, lang)}</option>)}
         </Select>
-        {type === "QUALITY" ? <span className="hr-help">{L("شاشة هذا النوع لم تُبنَ بعد؛ محطتا التحميص والتعبئة والتجهيز تعملان الآن.", "This type's screen is not built yet; the roasting and the packaging & preparation stations work now.")}</span> : type === "PACKAGING" ? <span className="hr-help">{L("تبويبا «التعبئة» و«تجهيز الطلبات»: يعمل فيهما من يملك صلاحية التعبئة أو التسليم والشحن.", "«Packaging» and «Order preparation»: for whoever holds the packaging or the dispatch privilege.")}</span> : null}
+        {type === "QUALITY" ? <span className="hr-help">{L("محطة الجودة: الفحص بالقياس وطلب الاستثناء، لمن يملك «تسجيل نتائج الجودة». جهاز التحميص نفسه يمكن أن يخدمها (زر «المحطات» في الجهاز).", "The QC station: measured inspection and the exception request, for holders of “Submit QC records”. The roasting device itself can serve it (the device's «Stations» button).")}</span> : type === "PACKAGING" ? <span className="hr-help">{L("تبويبا «التعبئة» و«تجهيز الطلبات»: يعمل فيهما من يملك صلاحية التعبئة أو التسليم والشحن.", "«Packaging» and «Order preparation»: for whoever holds the packaging or the dispatch privilege.")}</span> : null}
       </label>
       <label className="hr-field"><span className="hr-label">{L("الموقع", "Place")}</span><input className="hr-input" value={place} onChange={(e) => setPlace(e.target.value)} maxLength={80} placeholder={L("صالة التحميص", "Roasting hall")} data-testid="ur-station-place" /></label>
       {type === "ROASTING" ? (
@@ -308,6 +311,41 @@ function RevokeDialog({ device, onClose, onDone }: { device: Device; onClose: ()
     <Dialog open onClose={onClose} title={L(`إلغاء «${device.name}»؟`, `Revoke “${device.name}”?`)} sub={L("تنتهي كل جلساته فورًا، ولا يدخل عليه أحد حتى يُسجَّل من جديد. لا يتحرك أي مخزون ولا تُحرَّر أي مهمة.", "All its sessions end at once; nobody signs in on it until it is registered again. No stock moves and no task is released.")} className="ur-dlg" testId="ur-revoke-device-dialog"
       actions={<><Btn onClick={onClose}>{L("رجوع", "Back")}</Btn><Btn variant="danger" busy={busy} disabled={reason.trim().length < 3} onClick={go} data-testid="ur-revoke-device-go">{L("إلغاء الجهاز", "Revoke device")}</Btn></>}>
       <ReasonField value={reason} onChange={setReason} required testId="ur-revoke-device-reason" options={[L("الجهاز مفقود", "The device is lost"), L("استُبدل الجهاز", "The device was replaced"), L("لم يعد مستخدمًا", "No longer used")]} />
+      <PasswordConfirmField pc={pc} />
+      {err ? <div className="hr-notice tone-danger" role="alert">{err}</div> : null}
+    </Dialog>
+  );
+}
+
+/**
+ * W3 «يخدم أيضًا»: the same iPad at the roaster and in QC. The device asks which station before the
+ * employee; the session is bound to the choice and the bar always names the station and the user.
+ */
+function ServesDialog({ device, stations, onClose, onDone }: { device: Device; stations: Station[]; onClose: () => void; onDone: () => void }) {
+  const { lang, L } = useLangL();
+  const [ids, setIds] = useState<string[]>(device.alsoStationIds ?? []);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const pc = usePasswordConfirm();
+  async function go() {
+    setBusy(true); setErr(null);
+    if (!(await pc.confirm())) { setBusy(false); return; }
+    const r = await api<{ stationIds: string[] }>(`/api/station-devices/${device.id}/stations`, { method: "PUT", body: { stationIds: ids } });
+    setBusy(false);
+    if (!r.ok) { setErr(errText(r.data, lang, L("تعذّر الحفظ.", "Could not save."))); return; }
+    onDone();
+  }
+  return (
+    <Dialog open onClose={onClose} title={L(`محطات «${device.name}»`, `Stations of “${device.name}”`)} sub={L(`محطته: ${device.stationName}. اختر المحطات الأخرى التي يخدمها الجهاز نفسه؛ يختار الموظف المحطة قبل اسمه، ويظهر في الشريط «المحطة · المستخدم».`, `Its station: ${device.stationName}. Choose the other stations the same device serves; the station is chosen before the employee.`)} className="ur-dlg" testId="ur-serves-dialog"
+      actions={<><Btn onClick={onClose}>{L("رجوع", "Back")}</Btn><Btn variant="primary" busy={busy} onClick={go} data-testid="ur-serves-go">{L("حفظ", "Save")}</Btn></>}>
+      <div style={{ display: "grid", gap: 8 }}>
+        {stations.length === 0 ? <p className="ur-muted">{L("لا محطات أخرى نشطة.", "No other active station.")}</p> : stations.map((s) => (
+          <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={ids.includes(s.id)} onChange={(e) => setIds(e.target.checked ? [...ids, s.id] : ids.filter((x) => x !== s.id))} data-testid={`ur-serves-${s.type}`} />
+            {s.name} · {typeWord(s.type, lang)}
+          </label>
+        ))}
+      </div>
       <PasswordConfirmField pc={pc} />
       {err ? <div className="hr-notice tone-danger" role="alert">{err}</div> : null}
     </Dialog>

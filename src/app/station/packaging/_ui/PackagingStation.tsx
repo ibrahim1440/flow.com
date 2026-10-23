@@ -145,8 +145,8 @@ export function PackagingStation() {
     for (const b of packQ?.blocked ?? []) {
       const nm = lang === "ar" ? b.nameAr || b.nameEn : b.nameEn;
       rows.push(<Row key={`p-${b.id}-${b.kind}`} testId={`blocked-pack-${b.batchNumber}`} title={<><bdi>{nm}</bdi> · <Bid>{b.batchNumber}</Bid></>}
-        sub={b.kind === "MATERIAL_SHORT" ? L(`نقص ${b.material}: يلزم ${b.required} والمتوفر ${b.available} · يحرره المخزون بعد الاستلام`, `${b.material} short: ${b.required} needed, ${b.available} on hand · released by inventory once received`) : L("مرفوضة ومحجورة · لا تُعبّأ · القرار في النظام", "Rejected and quarantined · not packed · decided in the ERP")}
-        right={<span className={`st ws-st ${b.kind === "MATERIAL_SHORT" ? "wa" : "er"}`}>{b.kind === "MATERIAL_SHORT" ? L("مواد ناقصة", "Materials short") : L("محجورة", "Quarantined")}</span>} />);
+        sub={b.kind === "MATERIAL_SHORT" ? L(`نقص ${b.material}: يلزم ${b.required} والمتوفر ${b.available} · يحرره المخزون بعد الاستلام`, `${b.material} short: ${b.required} needed, ${b.available} on hand · released by inventory once received`) : b.kind === "QC_HOLD" ? L("محجوزة بقرار الجودة · لا تُعبّأ · يقرر التصرف فيها شخص آخر في النظام", "Held by QC · not packed · its disposition is decided in the ERP by another person") : L("مرفوضة ومحجورة · لا تُعبّأ · القرار في النظام", "Rejected and quarantined · not packed · decided in the ERP")}
+        right={<span className={`st ws-st ${b.kind === "MATERIAL_SHORT" ? "wa" : "er"}`}>{b.kind === "MATERIAL_SHORT" ? L("مواد ناقصة", "Materials short") : b.kind === "QC_HOLD" ? L("محجوزة", "Held") : L("محجورة", "Quarantined")}</span>} />);
     }
     for (const o of prepQ?.blocked ?? []) {
       const cust = lang === "ar" ? o.customer.nameAr || o.customer.name : o.customer.name;

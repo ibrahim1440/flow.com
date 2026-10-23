@@ -30,6 +30,8 @@ export type NotifyInput = {
   /** For `scope: "customer"` events: the customer's account owner and / or the deal owner. */
   scopeOwners?: (string | null | undefined)[];
   entity?: { type: string; id: string } | null;
+  /** People never to notify (e.g. the inspector of the inspection an exception request is about). */
+  exclude?: (string | null | undefined)[];
 };
 
 function emailChannelOn(): boolean {
@@ -44,7 +46,7 @@ export async function notify(db: Db, input: NotifyInput): Promise<{ recipients: 
   if (!def) throw new Error(`notify: unknown event ${input.event}`);
   const people = input.people ?? {};
   const candidates = await loadCandidates(db, def, people);
-  const recipients = selectRecipients(def, { actorId: input.actorId, people, scopeOwners: input.scopeOwners }, candidates);
+  const recipients = selectRecipients(def, { actorId: input.actorId, people, scopeOwners: input.scopeOwners, exclude: input.exclude }, candidates);
   const dedupeKey = clip(`${def.key}:${input.dedupeKey}`, 300);
   if (recipients.length === 0) return { recipients, inserted: 0, dedupeKey };
   const r = def.render(input.facts ?? {});

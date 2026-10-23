@@ -1,3 +1,4 @@
+import { batchProductId, resolveApprovedVersionId } from "@/lib/services/qc/profiles";
 import { NextResponse } from "@/lib/api-response";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -683,6 +684,14 @@ export async function POST(request: Request) {
     }
 
     const qcDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    // QC station W3 (owner decision 1): the batch is judged against the roast-profile version
+    // APPROVED for its product (and green coffee) NOW, stored on the batch — never re-derived later
+    // and never the batch itself. None approved → its QC shows «المواصفة قيد المعايرة».
+    const profileVersionId = await resolveApprovedVersionId(
+      tx,
+      await batchProductId(tx, { productId: isStockBatch ? (productId as string) : null, orderItemId: isStockBatch ? null : (orderItemId as string) }),
+      greenBeanId,
+    );
     const newBatch = await tx.roastingBatch.create({
       data: {
         orderItemId: isStockBatch ? null : orderItemId,
@@ -707,6 +716,7 @@ export async function POST(request: Request) {
         roasterId:           roasterCheck ? roasterCheck.roaster.id : null,
         requestKey,
         intentHash,
+        profileVersionId,
       },
       include: { orderItem: true, greenBean: true },
     });
