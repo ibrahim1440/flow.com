@@ -1,0 +1,22 @@
+/* The system alerts bell (feat/credit-hold): Direction 2.1 tokens, no new colours. */
+.d21-bell { position: relative; display: flex; align-items: center; }
+.d21-bell-btn { position: relative; }
+.d21-bell-n { position: absolute; top: 2px; inset-inline-end: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--status-danger); color: var(--text-inverse, #fff); font-size: 10.5px; font-weight: 600; line-height: 16px; text-align: center; }
+.d21-bell-panel { position: absolute; top: calc(100% + 6px); inset-inline-end: 0; width: 380px; max-width: calc(100vw - 32px); max-height: 70vh; overflow: auto; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-pop); z-index: 80; color: var(--text-primary); }
+.d21-bell.ph .d21-bell-panel { position: fixed; top: 56px; inset-inline: 16px; width: auto; }
+.d21-bell-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
+.d21-bell-h b { font-weight: 600; flex: 1; }
+.d21-bell-h button { border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; text-decoration: underline; }
+.d21-bell-empty { margin: 0; padding: 18px 14px; font-size: 13.5px; color: var(--text-muted); }
+.d21-bell-list { list-style: none; margin: 0; padding: 4px 0; }
+.d21-bell-list li { padding: 10px 14px 10px 14px; border-bottom: 1px solid var(--border-subtle); border-inline-start: 3px solid transparent; }
+.d21-bell-list li:last-child { border-bottom: 0; }
+.d21-bell-list li.unread { background: var(--surface-subtle); }
+.d21-bell-list li.tone-danger { border-inline-start-color: var(--status-danger); }
+.d21-bell-list li.tone-warning { border-inline-start-color: var(--status-warning); }
+.d21-bell-list li.tone-success { border-inline-start-color: var(--status-success); }
+.d21-bell-list .t { font-size: 13.5px; font-weight: 600; line-height: 20px; }
+.d21-bell-list li.tone-danger .t { color: var(--status-danger); }
+.d21-bell-list li.tone-success .t { color: var(--status-success); }
+.d21-bell-list .b { margin-top: 4px; font-size: 12.5px; line-height: 19px; color: var(--text-secondary); white-space: pre-line; }
+.d21-bell-list .w { margin-top: 6px; font-size: 11.5px; color: var(--text-muted); }

@@ -92,6 +92,35 @@
 .dsh-bank { margin-top: 18px }
 .dsh-bank .dsh-props { margin-top: 2px; width: 420px; max-width: 100% }
 
+/* A sheet filled in by hand (the roast sheet): a ruled grid, taller rows, empty write-in boxes. */
+.dsh-lines.is-grid { font-size: 12.5px; line-height: 18px }
+.dsh-lines.is-grid th { font-size: 11.5px; line-height: 15px; height: 34px; white-space: normal; padding: 4px 6px; border: 1px solid var(--dsh-rule-strong); vertical-align: bottom }
+.dsh-lines.is-grid td { height: 46px; padding: 3px 6px; border: 1px solid var(--dsh-rule-strong); white-space: normal }
+.dsh-lines.is-grid tr > :first-child { padding-inline-start: 6px }
+.dsh-lines.is-grid tr > :last-child { padding-inline-end: 6px }
+.dsh-lines.is-grid td .s { font-size: 11px; line-height: 15px }
+.dsh-lines.is-grid td.wi { min-width: 54px }
+.dsh-lines.is-grid td.num { white-space: nowrap }
+.dsh-lines.is-grid td.signature { min-width: 72px }
+.dsh-lines.is-grid td.coffee { min-width: 150px }
+.dsh-lines.is-grid td.time { white-space: nowrap; font-family: var(--dsh-num) }
+.dsh-lines.is-grid td.time .s { font-family: var(--dsh-ui) }
+
+/* Summary / outstanding sections a document adds after its lines. */
+.dsh-extra { margin-top: 20px; break-inside: avoid }
+.dsh-extra h2 { margin: 0 0 4px; font: 500 12.5px/22px var(--dsh-ui); color: var(--dsh-muted) }
+.dsh-extra p { margin: 4px 0 0; color: var(--dsh-secondary) }
+.dsh-extra ul { margin: 4px 0 0; padding-inline-start: 18px; color: var(--dsh-secondary) }
+
+/* Signature boxes: a ruled line per field under each label. */
+.dsh-signs { margin-top: 28px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; break-inside: avoid }
+.dsh-sign { display: flex; flex-direction: column; gap: 4px }
+.dsh-sign h2 { margin: 0 0 6px; font: 600 13.5px/22px var(--dsh-ui); color: var(--dsh-primary) }
+.dsh-sign span { display: block; padding-top: 18px; border-bottom: 1px solid var(--dsh-rule-strong); color: var(--dsh-muted); font-size: 12px; line-height: 16px }
+
+/* Several sheets in one print (the roast sheet, one per roaster): each starts on a new page. */
+.dsh + .dsh { margin-top: 24px }
+
 /* Screen footer. */
 .dsh-foot { margin-top: 36px; padding-top: 10px; border-top: 1px solid var(--dsh-rule); color: var(--dsh-muted); font-size: 12.5px; line-height: 22px }
 .dsh-foot p { margin: 0 0 8px }
@@ -114,4 +143,22 @@
   .dsh-logo img { height: 46px }
   /* The running footer is drawn in the page margin on every sheet (DocumentSheet). */
   .dsh-foot { display: none }
+  .dsh + .dsh { margin-top: 0; break-before: page }
+}
+
+/* The screen chrome around a document page (DocumentPrintPage: roast sheet, delivery note), as the
+   quotation document's A-12 toolbar. Never printed. */
+.dsh-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; max-width: 795px; margin: 0 auto }
+.dsh-bar .num { font: 500 14px/22px var(--f-num, "IBM Plex Sans", sans-serif); color: var(--text-primary); text-decoration: none }
+.dsh-bar .num:hover { text-decoration: underline }
+.dsh-bar .ttl { font-size: 13.5px; color: var(--text-muted) }
+.dsh-bar .sp { flex: 1 }
+.dsh-bar select { height: 34px; border-radius: 9px; border: 0; box-shadow: inset 0 0 0 1px var(--border-strong); background: var(--surface); color: var(--text-primary); padding: 0 10px; font: inherit; font-size: 13.5px }
+.dsh-wrap { width: 100%; max-width: 795px; margin: 0 auto }
+
+.dsh-wait { color: var(--text-muted) }
+.dsh-err { width: 100%; max-width: 795px; margin: 0 auto }
+@media print {
+  .dsh-bar, .dsh-gate, .dsh-wait, .dsh-err { display: none !important }
+  .dsh-wrap { max-width: none }
 }

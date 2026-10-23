@@ -174,7 +174,7 @@ function EditDialog({ person: p, onClose, onDone }: { person: Person; onClose: (
         </Field>
         <Field label={L("نهاية فترة التجربة", "Probation ends")}><input className="hr-input" type="date" {...f.bind("probationEndDate")} /></Field>
         <Field label={L("هاتف العمل", "Work phone")}><input className="hr-input" dir="ltr" {...f.bind("workPhone")} /></Field>
-        <Field label={L("بريد العمل", "Work email")}><input className="hr-input" type="email" dir="ltr" {...f.bind("workEmail")} /></Field>
+        <Field label={L("بريد الشركة", "Company e-mail")} help={L("إليه تُرسل تنبيهات النظام. البريد الشخصي في «البيانات الخاصة».", "System notifications go here. The personal e-mail is under private data.")}><input className="hr-input" type="email" dir="ltr" {...f.bind("workEmail")} data-testid="hr-work-email" /></Field>
       </div>
       <p className="hr-caption" style={{ margin: 0 }}>{L("تاريخ المباشرة لا يُعدَّل هنا. إن عدّل شخص آخر الملف بعد فتحه فسيُرفض الحفظ وتحتاج إلى إعادة التحميل.", "The start date is not edited here. If someone else changes the file after you open it, saving is refused and you need to reload.")}</p>
     </Dialog>

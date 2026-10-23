@@ -10,7 +10,8 @@ import {
 } from "@/lib/services/customers/aggregates";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
-import { CUSTOMER_FILE_SELECT } from "@/lib/services/customers/files";
+import { CUSTOMER_FILE_SELECT, uploadLimit } from "@/lib/services/customers/files";
+import { creditLog, creditView } from "@/lib/services/customers/credit-db";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -54,7 +55,7 @@ export async function GET(_request: Request, { params }: Params) {
         id: true, name: true, nameAr: true, phone: true, email: true, address: true,
         whatsappOptOut: true, createdAt: true,
         commercialRegNo: true, vatNumber: true, segment: true, city: true, priceList: true,
-        paymentTermsDays: true, creditLimit: true,
+        paymentTermsDays: true, creditLimit: true, defaultHoldDays: true,
         accountOwner: { select: { id: true, name: true } },
         contacts: { orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, role: true, phone: true, email: true, position: true } },
         roastPreferences: {
@@ -274,6 +275,11 @@ export async function GET(_request: Request, { params }: Params) {
       .filter((a) => !a.completedAt)
       .sort((a, b) => (a.dueAt ? a.dueAt.getTime() : Infinity) - (b.dueAt ? b.dueAt.getTime() : Infinity))[0] ?? null;
 
+    // The credit warning, grace and hold (feat/credit-hold): the customer's whole account, flags for
+    // everyone, amounts only for a viewer who sees every deal. Settles an ended hold on read
+    // (before the timeline, so an automatic lift is already in the log it shows).
+    const creditState = await creditView(prisma, id, { all, canHold: hasSubPrivilege(p, "customers", "sales_hold"), now });
+
     // ── The timeline: what happened with this customer, newest first. Built here so every
     //    entry is already scoped; the page only words it. ──
     type Entry = { key: string; at: Date; kind: string; [k: string]: unknown };
@@ -328,6 +334,15 @@ export async function GET(_request: Request, { params }: Params) {
       if (c.status !== "APPROVED") continue;
       timeline.push({ key: `c-${c.id}`, at: c.collectedAt, kind: "payment", payment: { id: c.id, amount: c.amountGross.toFixed(2), currency: c.currency, method: c.paymentMethod, orderNumber: c.order?.orderNumber ?? null } });
     }
+    // The credit log (feat/credit-hold): every grace, hold, lift and automatic lift — the customer's,
+    // so shown to everyone who can open the customer (this route's own gate).
+    for (const l of await creditLog(prisma, id)) {
+      const d = (l.detail ?? {}) as Record<string, unknown>;
+      timeline.push({ key: `cr-${l.id}`, at: l.createdAt, kind: "credit", credit: {
+        id: l.id, kind: l.kind, days: l.days, untilAt: l.untilAt, reason: l.reason, by: l.actor,
+        liftKind: typeof d.liftKind === "string" ? d.liftKind : null, untilPaid: d.untilPaid === true,
+      } });
+    }
     timeline.sort((a, b) => b.at.getTime() - a.at.getTime());
 
     return NextResponse.json({
@@ -345,7 +360,10 @@ export async function GET(_request: Request, { params }: Params) {
         credit,
       },
       statement,
+      creditState,
       files,
+      // 20 MB with the private Blob store, 5 MB in the database (services/customers/file-store.ts).
+      fileLimits: { maxBytes: uploadLimit().maxBytes },
       openDeal: primary ? {
         ...primary, amount: primary.amount.toFixed(2), stageEvents: primary.stageEvents,
         nextStep: nextStep && nextStep.opportunity?.id === primary.id ? nextStep : null,

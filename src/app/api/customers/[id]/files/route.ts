@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireEdit, requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import {
-  CUSTOMER_FILE_SELECT, MAX_CUSTOMER_FILE_BYTES, MAX_FILES_PER_CUSTOMER, validateCustomerFile,
+  CUSTOMER_FILE_SELECT, MAX_FILES_PER_CUSTOMER, saveCustomerFile, tooLarge, uploadLimit, validateCustomerFile,
 } from "@/lib/services/customers/files";
 
 type Params = { params: Promise<{ id: string }> };
@@ -24,7 +24,8 @@ export async function GET(_req: Request, { params }: Params) {
     const customer = await prisma.customer.findUnique({ where: { id }, select: { id: true } });
     if (!customer) return NextResponse.json({ error: "العميل غير موجود.", errorEn: "Not found" }, { status: 404 });
     const files = await prisma.customerFile.findMany({ where: { customerId: id }, orderBy: { createdAt: "desc" }, select: CUSTOMER_FILE_SELECT });
-    return NextResponse.json({ files, limits: { maxBytes: MAX_CUSTOMER_FILE_BYTES, maxFiles: MAX_FILES_PER_CUSTOMER, types: ["PDF", "JPEG", "PNG"] } });
+    // 20 MB with the private Blob store, 5 MB in the database (services/customers/file-store.ts).
+    return NextResponse.json({ files, limits: { maxBytes: uploadLimit().maxBytes, maxFiles: MAX_FILES_PER_CUSTOMER, types: ["PDF", "JPEG", "PNG"] } });
   } catch (err) {
     return handleDomainError(err);
   }
@@ -47,24 +48,24 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ error: "أرفق ملفًا في الحقل file.", errorEn: "Attach a file in the `file` field." }, { status: 400 });
     }
     // Refused before buffering: a declared length is not proof, but an obvious oversize is cheap to refuse.
-    if (file.size > MAX_CUSTOMER_FILE_BYTES) {
-      return NextResponse.json({ error: "الحد الأقصى لحجم الملف 5 ميغابايت.", errorEn: "Files are limited to 5 MB.", code: "TOO_LARGE" }, { status: 413 });
+    const { maxBytes } = uploadLimit();
+    if (file.size > maxBytes) {
+      const p = tooLarge(maxBytes);
+      return NextResponse.json({ error: p.error, errorEn: p.errorEn, code: p.code }, { status: 413 });
     }
-    const checked = validateCustomerFile(new Uint8Array(await file.arrayBuffer()), file.name, form.get("category"), form.get("title"));
+    const checked = validateCustomerFile(new Uint8Array(await file.arrayBuffer()), file.name, form.get("category"), form.get("title"), maxBytes);
     if (!checked.ok) {
       const p = checked.problem;
       return NextResponse.json({ error: p.error, errorEn: p.errorEn, code: p.code }, { status: p.status });
     }
-    const v = checked.value;
-    const saved = await prisma.customerFile.create({
-      data: {
-        customerId: id, category: v.category, title: v.title, fileName: v.fileName, mimeType: v.mimeType,
-        sizeBytes: v.sizeBytes, sha256: v.sha256, content: new Uint8Array(v.content), uploadedById: user.id,
-      },
-      // Never the content.
-      select: CUSTOMER_FILE_SELECT,
-    });
-    return NextResponse.json(saved, { status: 201 });
+    // Blob when configured (falls back to the row for ≤ 5 MB if Blob fails — and alerts); never the
+    // bytes, the pathname or a Blob URL in the response.
+    const saved = await saveCustomerFile(prisma, { customerId: id, uploadedById: user.id, file: checked.value });
+    if (!saved.ok) {
+      const p = saved.problem;
+      return NextResponse.json({ error: p.error, errorEn: p.errorEn, code: p.code }, { status: p.status });
+    }
+    return NextResponse.json({ ...saved.row, storage: saved.storage, fallback: saved.fallback }, { status: 201 });
   } catch (err) {
     return handleDomainError(err);
   }

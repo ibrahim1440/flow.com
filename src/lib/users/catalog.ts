@@ -66,7 +66,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     quote_write: "إنشاء عروض الأسعار وتعديلها", quote_approve_discount: "اعتماد خصم فوق حد الاعتماد", stage_manage: "ضبط مراحل الصفقات",
     collection_submit: "تسجيل تحصيل على صفقة يملكها", collection_view_team: "عرض تحصيلات الفريق",
   },
-  customers: { manage: "إدارة تفضيلات تحميص العملاء" },
+  customers: { manage: "إدارة تفضيلات تحميص العملاء", sales_hold: "إيقاف البيع للعملاء" },
   commissions: {
     view_own: "عرض عمولتي", view_team: "عرض عمولات الفريق", manage_plans: "إنشاء خطط العمولة وتعديلها", approve: "اعتماد العمولة المستحقة",
     record_payout: "تسجيل صرف العمولة", collection_verify: "التحقق من تحصيل مسجّل", collection_reject: "رفض تحصيل مسجّل", collection_reverse: "عكس تحصيل معتمد",

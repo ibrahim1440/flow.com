@@ -1,3 +1,4 @@
+import type { CreditState } from "@/components/credit/credit-ui";
 // The shape of GET /api/customers/[id]/account (src/app/api/customers/[id]/account/route.ts),
 // as the account page reads it. Dates arrive as ISO strings, money as fixed-point strings.
 
@@ -16,6 +17,8 @@ export type Customer = {
   whatsappOptOut: boolean; createdAt: string;
   commercialRegNo: string | null; vatNumber: string | null; segment: string | null; city: string | null; priceList: string | null;
   paymentTermsDays: number | null; creditLimit: string | null;
+  /** «مدة الإيقاف الافتراضية» (feat/credit-hold), days; null = not set. */
+  defaultHoldDays?: number | null;
   accountOwner: { id: string; name: string } | null;
   contacts: Contact[];
   roastPreferences: RoastPreference[];
@@ -99,6 +102,8 @@ export type TimelineEntry = { key: string; at: string; kind: string } & (
   | { kind: "order"; order: { id: string; orderNumber: number; totalKg: number; status: string; value: string | null } }
   | { kind: "payment"; payment: { id: string; amount: string; currency: string; method: string; orderNumber: number | null } }
   // Phase D: a delivery, with the lots the server drew it from (batch numbers only).
+  // feat/credit-hold: the customer's credit log (grace, hold, lift, automatic lift).
+  | { kind: "credit"; credit: { id: string; kind: "GRACE" | "HOLD" | "LIFT" | "AUTO_LIFT"; days: number | null; untilAt: string | null; reason: string | null; by: { id: string; name: string } | null; liftKind: string | null; untilPaid: boolean } }
   | { kind: "delivery"; delivery: { id: string; orderNumber: number; item: string; units: number | null; kg: number; type: string; lots: string[] } }
 );
 
@@ -121,7 +126,10 @@ export type Account = {
     credit: Credit | null;
   };
   statement: Statement | null;
+  /** The credit warning, grace and hold (feat/credit-hold; GET /api/customers/[id]/credit's shape). */
+  creditState?: CreditState | null;
   files: CustomerFile[];
+  fileLimits?: { maxBytes: number };
   openDeal: OpenDeal | null;
   nextStep: Activity | null;
   openDeals: number;

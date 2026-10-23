@@ -135,3 +135,4 @@ button.acc-contact-name:hover { text-decoration: underline }
 .d21 .acc-phone .acc-tl .when { white-space: normal }
 .d21 .acc-phone .acc-note { margin: 8px 0 0 }
 .d21 .acc-today { font-family: var(--f-ui); font-size: 22px }
+.d21 .acc-credit-badges { display: inline-flex; margin-inline-start: 12px; vertical-align: middle; font-size: 12px; line-height: 22px; font-weight: 500; }

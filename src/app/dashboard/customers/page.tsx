@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n/context";
 import { Ico } from "@/components/shell/icons";
 import { SectionPages, usePhone, useD21Phone } from "@/components/shell/page-context";
 import { Dialog, Field, HrRoot } from "@/components/hr/ui";
+import { CreditBadges } from "@/components/credit/credit-ui";
 import "./customers.css";
 
 /**
@@ -70,6 +71,9 @@ export default function CustomersPage() {
   useD21Phone({ title: ar ? "العملاء" : "Customers" });
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  // feat/credit-hold: the red badges («متجاوز حد الائتمان», «متأخر السداد …», «البيع موقوف», «مهلة سماح حتى …»).
+  type Badge = { overLimit: boolean; overdueDays: number; graceUntil: string | null; hold: { endsAt: string | null; untilPaid: boolean } | null };
+  const [badges, setBadges] = useState<Record<string, Badge>>({});
   const [beans, setBeans] = useState<GreenBeanFull[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -128,6 +132,7 @@ export default function CustomersPage() {
     }
     if (beanRes.ok) setBeans(await beanRes.json());
     setLoading(false);
+    fetch("/api/customers/credit-badges").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.badges) setBadges(d.badges); }).catch(() => undefined);
   }
 
   function refreshSelected(id: string, updated: Customer[]) {
@@ -487,6 +492,7 @@ export default function CustomersPage() {
                         {c._count.roastPreferences > 0 && <span>{num(c._count.roastPreferences)} {t("customerProfilesLabel")}</span>}
                         {c.whatsappOptOut && <span className="flag wa">{L("بلا واتساب", "No WhatsApp")}</span>}
                       </div>
+                      {badges[c.id] && <div className="r2" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></div>}
                     </div>
                   ))}
                   {count}
@@ -537,6 +543,7 @@ export default function CustomersPage() {
                             {(otherName(c) || c.address) && (
                               <span className="sm cu-namesub">{[otherName(c), c.address?.split("\n")[0]].filter(Boolean).join(" · ")}</span>
                             )}
+                            {badges[c.id] && <span className="cu-badges-cell" data-testid={`customer-credit-${c.id}`}><CreditBadges ar={ar} s={badges[c.id]} compact /></span>}
                           </td>
                           <td>{c.phone ? <bdi dir="ltr" className="n">{c.phone}</bdi> : <span className="sm">—</span>}</td>
                           <td className="xl">{c.email ? <bdi dir="ltr" style={{ color: "var(--text-secondary)" }}>{c.email}</bdi> : <span className="sm">—</span>}</td>

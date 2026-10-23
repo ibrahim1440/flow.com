@@ -96,3 +96,26 @@ export function printStatus(env: Env = process.env): { certified: boolean; docum
  * keep «Save as PDF» available while printing is off (not approved).
  */
 export const QUOTATION_PDF_WHEN_PRINT_OFF: boolean = false;
+
+/**
+ * The A4 documents that read their data from a print endpoint (feat/print-docs, 23 Oct 2026): the
+ * roast sheet «ورقة التحميص» and the delivery note «إشعار التسليم». Their data endpoints
+ * (/api/print/documents/**) exist only to be printed, so they follow the document switch on the
+ * server too: while document printing is off they refuse with HTTP 409 and this body, after
+ * authentication (401) and the module permission (403), before reading anything.
+ */
+export const DOCUMENT_PRINTING_DISABLED_CODE = "DOCUMENT_PRINTING_DISABLED" as const;
+
+export const DOCUMENT_PRINTING_DISABLED_MESSAGE = {
+  ar: "طباعة المستندات غير مفعّلة على هذا النظام. تُفعَّل بقرار من المالك.",
+  en: "Document printing is not enabled on this deployment. It is enabled by the owner's decision.",
+} as const;
+
+export function documentPrintingDisabledBody() {
+  return {
+    error: DOCUMENT_PRINTING_DISABLED_MESSAGE.en,
+    errorAr: DOCUMENT_PRINTING_DISABLED_MESSAGE.ar,
+    message: { ...DOCUMENT_PRINTING_DISABLED_MESSAGE },
+    code: DOCUMENT_PRINTING_DISABLED_CODE,
+  };
+}

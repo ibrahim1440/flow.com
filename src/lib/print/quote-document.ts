@@ -62,6 +62,10 @@ export type DocColumn = {
   numeric: boolean;
   /** Read in the muted colour (the item number). */
   muted?: boolean;
+  /** A column filled in by hand on paper (the roast sheet): drawn as a ruled, empty box when empty. */
+  writeIn?: boolean;
+  /** Latin identifiers only (lot numbers): the cell reads left to right in either document language. */
+  ltr?: boolean;
 };
 
 /** One cell: the main text and, under it, a smaller muted line (the SKU, a rate). */
@@ -148,4 +152,25 @@ export function longDate(value: string | Date | null | undefined, lang: DocLang)
   return lang === "ar"
     ? `${get("weekday")} ${get("day")} ${get("month")} ${get("year")}`
     : `${get("weekday")}, ${get("day")} ${get("month")} ${get("year")}`;
+}
+
+/**
+ * Which notice the document carries above its meta (feat/print-docs review against Figma Gap P
+ * P-06a / P-06b and QP-03):
+ *   · a draft → «مسودة — غير صادر» (warning);
+ *   · SUPERSEDED → «مستبدَل بمراجعة أحدث» (danger);
+ *   · EXPIRED, or still ISSUED after its validity date (a Riyadh day) → «منتهي الصلاحية منذ …»
+ *     (danger, P-06b) — the document must not go to the customer as a live offer;
+ *   · otherwise none.
+ */
+export function quoteDocumentNotice(q: { isDraft: boolean; status: string; validUntil: string | null | undefined }, now: Date = new Date()): "draft" | "superseded" | "expired" | null {
+  if (q.isDraft) return "draft";
+  if (q.status === "SUPERSEDED") return "superseded";
+  if (q.status === "EXPIRED") return "expired";
+  if (q.status === "ISSUED" && q.validUntil) {
+    const day = (d: Date) => new Date(d.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
+    const until = new Date(q.validUntil);
+    if (!Number.isNaN(until.getTime()) && day(until) < day(now)) return "expired";
+  }
+  return null;
 }

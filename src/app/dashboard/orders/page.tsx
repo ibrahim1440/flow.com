@@ -1,11 +1,15 @@
 "use client";
+import { CustomerCreditNotice } from "@/components/credit/credit-ui";
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useCreateRequest } from "@/components/shell/page-context";
 
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { countsAsDelivered, isPipelineStage, orderProgress, progressText, riyadhDay, stageCardOf, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
-import { Plus, Trash2, UserPlus, X, Pencil, Save } from "lucide-react";
+import { Plus, Trash2, UserPlus, X, Pencil, Save, Printer } from "lucide-react";
+import Link from "next/link";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
+import { deliveryShipments } from "@/lib/print/delivery-note";
 import { useUser } from "../user-context";
 import { hasSubPrivilege, hasModuleAccess, canEdit } from "@/lib/auth-shared";
 import { useI18n } from "@/lib/i18n/context";
@@ -74,7 +78,7 @@ type OrderItem = {
   deliveryStatus: string; deliveredQty: number; remainingQty: number;
   roastingBatches: { batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; status: string; isBlend: boolean }[];
   deliveries: {
-    id?: string; date: string; quantityKg: number; quantityUnits?: number | null; deliveryType: string;
+    id?: string; date: string; createdAt?: string; notes?: string | null; quantityKg: number; quantityUnits?: number | null; deliveryType: string;
     // Phase D: the lots each delivery drew from (picked by the server).
     lots?: { finishedGoodsLotId: string; batchNumber: string | null; quantityUnits: number | null; quantityKg: number }[];
   }[];
@@ -134,6 +138,9 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function OrdersPage() {
   const user = useUser();
+  // «إشعار التسليم» (feat/print-docs): each shipment of an order prints as an A4 delivery note, behind
+  // the document gate (PRINT_DOCUMENTS_ENABLED; unknown = off, disabled with the Phase 1 note).
+  const printing = usePrintDocuments();
   const { t, lang } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
@@ -168,6 +175,8 @@ export default function OrdersPage() {
   // two clicks dispatched before React re-renders both saw creating === false and both
   // sent the order. A ref changes immediately, so the second call returns at the door.
   const [creating, setCreating] = useState(false);
+  // «إيقاف البيع» (feat/credit-hold): the chosen customer's hold disables «إنشاء الطلب».
+  const [customerHeld, setCustomerHeld] = useState(false);
   const creatingRef = useRef(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState<OrdersTab>("all");
@@ -544,6 +553,7 @@ export default function OrdersPage() {
                   </div>
                 )}
               </div>
+              <CustomerCreditNotice customerId={form.customerId || null} ar={lang === "ar"} onHold={setCustomerHeld} testId="order-credit" />
               <div>
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">{t("quotationNumber")}</label>
                 <input type="text" value={form.quotationNumber} onChange={(e) => setForm({ ...form, quotationNumber: e.target.value })}
@@ -553,7 +563,7 @@ export default function OrdersPage() {
                 // Section 8: one search box, then a quantity. No bean picker, no product
                 // picker, no SKU field — the SKU is the line.
                 const previewBySku = new Map((preview?.lines ?? []).map((l) => [l.productSkuId, l]));
-                const blocked = creating || form.items.some((i) => !i.productSkuId || i.quantityUnits <= 0);
+                const blocked = creating || customerHeld || form.items.some((i) => !i.productSkuId || i.quantityUnits <= 0);
                 return (
                   <>
                     <div>
@@ -800,9 +810,15 @@ export default function OrdersPage() {
                       );
                     })}
                   </ul>
-                  {order.items.some((i) => i.deliveries.length > 0) && (
+                  {order.items.some((i) => i.deliveries.length > 0) && (() => {
+                    // The rows recorded together (one dispatch confirm) print as one note.
+                    const groups = deliveryShipments(order.items.flatMap((i) => i.deliveries.filter((d) => d.id).map((d) => ({ id: d.id!, orderId: order.id, createdAt: d.createdAt ?? d.date, notes: d.notes ?? null }))));
+                    const shipmentOf = new Map(groups.flatMap((g) => g.map((x) => [x.id, g.map((y) => y.id)] as const)));
+                    const noteLabel = lang === "ar" ? "إشعار التسليم" : "Delivery note";
+                    return (
                     <div data-testid={`order-deliveries-${order.orderNumber}`} style={{ marginTop: 8 }}>
                       <h3 className="hr-label" style={{ margin: "0 0 4px" }}>{lang === "ar" ? "التسليمات" : "Deliveries"}</h3>
+                      {printing === false ? <PrintPhase1Notice /> : null}
                       <ul className="ops-list">
                         {order.items.flatMap((i) => i.deliveries.map((d, k) => (
                           <li key={d.id ?? `${i.id}-${k}`}>
@@ -816,12 +832,24 @@ export default function OrdersPage() {
                                   : "—"}
                               </span>
                             </span>
-                            <span style={{ whiteSpace: "nowrap" }}>{d.quantityUnits != null ? <><span className="hr-num">{d.quantityUnits}</span> {lang === "ar" ? "وحدة" : "units"}</> : <Kg v={d.quantityKg} />}</span>
+                            <span style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                              {d.quantityUnits != null ? <><span className="hr-num">{d.quantityUnits}</span> {lang === "ar" ? "وحدة" : "units"}</> : <Kg v={d.quantityKg} />}
+                              {d.id ? (printing === true ? (
+                                <Link href={`/dashboard/orders/print/delivery-note?ids=${(shipmentOf.get(d.id) ?? [d.id]).map(encodeURIComponent).join(",")}`} className="hr-btn is-ghost is-sm" title={noteLabel} aria-label={noteLabel} data-testid={`order-delivery-note-${d.id}`}>
+                                  <Printer size={14} aria-hidden="true" />
+                                </Link>
+                              ) : (
+                                <button type="button" className="hr-btn is-ghost is-sm" disabled aria-describedby={PRINT_PHASE1_NOTE_ID} aria-label={noteLabel} data-testid={`order-delivery-note-${d.id}`}>
+                                  <Printer size={14} aria-hidden="true" />
+                                </button>
+                              )) : null}
+                            </span>
                           </li>
                         )))}
                       </ul>
                     </div>
-                  )}
+                    );
+                  })()}
                   {order.items.some((i) => i.roastingBatches.length > 0) && (
                     <p className="hr-caption" style={{ margin: "8px 0 0" }}>
                       {t("linkedBatches")}{" "}

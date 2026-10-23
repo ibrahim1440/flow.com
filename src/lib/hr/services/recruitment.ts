@@ -150,8 +150,11 @@ export async function hireApplicant(actor: HrActor, applicantId: string, b: Reco
       fullNameAr: a.fullName, jobTitle: offer.jobTitle, hireDate: dayString(offer.startDate),
       probationEndDate: offer.probationDays ? dayString(addDays(offer.startDate, offer.probationDays - 1)) : null,
       branchId: b.branchId, departmentId: b.departmentId, managerId: b.managerId, status: offer.probationDays ? "PROBATION" : "ACTIVE",
-      workPhone: a.phone, workEmail: a.email,
+      // The company e-mail («بريد الشركة») is assigned at hiring (optional); the applicant's own
+      // address is their PERSONAL e-mail (feat/credit-hold, owner e-mail model) — not the company's.
+      workPhone: a.phone, workEmail: typeof b.workEmail === "string" ? b.workEmail : null,
     }, { tx });
+    if (a.email) await tx.hrEmployeePrivate.update({ where: { employeeId: person!.id }, data: { personalEmail: a.email, updatedBy: actor.id } });
     if (!person) throw new HrError("Could not create the person.", 500);
     const end = offer.contractType === "FIXED_TERM" && offer.contractMonths
       ? addDays(new Date(Date.UTC(offer.startDate.getUTCFullYear(), offer.startDate.getUTCMonth() + offer.contractMonths, offer.startDate.getUTCDate())), -1)

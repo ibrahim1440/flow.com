@@ -93,9 +93,10 @@ async function lastSignIns(ids?: string[]): Promise<Map<string, { at: Date; meth
 
 const ACCOUNT_SELECT = {
   id: true, name: true, username: true, role: true, permissions: true, active: true, createdAt: true, accessRoleId: true, phoneNumber: true,
+  workEmail: true,
   passwordMustChange: true, passwordTempExpiresAt: true, pinResetRequired: true, password: true, pinLookup: true,
   accessRole: { select: { id: true, name: true, permissions: true } },
-  hrPerson: { select: { id: true, fullNameAr: true, fullNameEn: true, jobTitle: true, department: { select: { nameAr: true, nameEn: true } } } },
+  hrPerson: { select: { id: true, fullNameAr: true, fullNameEn: true, jobTitle: true, workEmail: true, department: { select: { nameAr: true, nameEn: true } } } },
   externalPerson: { select: { id: true } },
   permissionOverrides: { orderBy: { createdAt: "desc" as const } },
 } satisfies Prisma.EmployeeSelect;
@@ -195,6 +196,8 @@ export async function profile(id: string, viewer: Viewer) {
     lock: locked ? { attempts: lock!.count, since: iso(lock!.last) } : null,
     hr: e.hrPerson ? { id: e.hrPerson.id, name: e.hrPerson.fullNameAr, nameEn: e.hrPerson.fullNameEn, jobTitle: e.hrPerson.jobTitle, department: e.hrPerson.department?.nameAr ?? null } : null,
     external: !!e.externalPerson,
+    // «البريد الإلكتروني للشركة» (feat/credit-hold): the linked HR person's, else the account's own.
+    companyEmail: { email: (e.hrPerson ? e.hrPerson.workEmail : e.workEmail) ?? null, source: e.hrPerson ? "hr" : "account" },
     createdAt: e.createdAt.toISOString(), createdByName: created?.userId ? actors.get(created.userId) ?? null : null,
     lastPermissionChange: lastPerm ? { at: lastPerm.occurredAt.toISOString(), byName: lastPerm.userId ? actors.get(lastPerm.userId) ?? null : null } : null,
     lastSignIn: signIn ? { at: signIn.at.toISOString(), method: signIn.method, device: describeUserAgent(signIn.userAgent) } : null,

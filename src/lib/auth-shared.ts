@@ -176,6 +176,10 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   ],
   customers: [
     { key: "manage", label: "Manage customer roast preferences" },
+    // feat/credit-hold (owner design): placing / lifting a customer's sales hold and giving grace
+    // days. A new capability nobody held — permission-backfill writes it adminOnly; the role
+    // templates other than admin have no customers access, so no default grants it.
+    { key: "sales_hold", label: "Hold sales for a customer, lift the hold, give grace days" },
   ],
   accounting: [
     { key: "settings_manage", label: "Manage accounting settings" },

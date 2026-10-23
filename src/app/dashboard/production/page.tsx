@@ -4,7 +4,7 @@ import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil, Flame } from "lucide-react";
+import { ChevronDown, Merge, Boxes, FileText, FileSpreadsheet, Trash2, CalendarDays, Pencil, Flame, Printer } from "lucide-react";
 import { Btn, Dot, Metrics, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Tabs, kg, type Tone, Kg, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
@@ -890,6 +890,17 @@ export default function ProductionPage() {
                           <td><StatusDot map={stageMap} value={batch.status} /></td>
                           <td><span className="hr-num">{opsDate(batch.createdAt, lang, true)}</span></td>
                           <td className="ops-actions">
+                            {/* «طباعة» (feat/print-docs): this batch's roast sheet with its actual figures — an A4
+                                document behind the document gate (disabled with the Phase 1 note while off). */}
+                            {!batch.isBlend ? (printing === true ? (
+                              <Link href={`/dashboard/production/schedule/print?batch=${encodeURIComponent(batch.id)}`} className="hr-btn is-ghost is-sm" title={lang === "ar" ? "طباعة ورقة التحميص" : "Print roast sheet"} aria-label={lang === "ar" ? `طباعة ورقة تحميص الدفعة ${batch.batchNumber}` : `Print the roast sheet of batch ${batch.batchNumber}`} data-testid={`batch-print-${batch.batchNumber}`}>
+                                <Printer size={15} aria-hidden="true" />
+                              </Link>
+                            ) : (
+                              <button type="button" className="hr-btn is-ghost is-sm" disabled aria-describedby={PRINT_PHASE1_NOTE_ID} aria-label={lang === "ar" ? "طباعة ورقة التحميص" : "Print roast sheet"} data-testid={`batch-print-${batch.batchNumber}`}>
+                                <Printer size={15} aria-hidden="true" />
+                              </button>
+                            )) : null}
                             {canCancelBatch && (
                               <button type="button" className="hr-btn is-ghost is-sm" onClick={() => setCancelBatch(batch)} title={t("cancelBatchTitle")} aria-label={t("cancelBatchTitle")}>
                                 <Trash2 size={15} aria-hidden="true" />

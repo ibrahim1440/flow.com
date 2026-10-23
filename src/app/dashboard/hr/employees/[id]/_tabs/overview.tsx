@@ -62,7 +62,7 @@ export default function OverviewTab({ id, profile, readOnly }: TabProps) {
               [L("حساب الدخول", "Login account"), p.hasAccount ? L("مرتبط", "Linked") : t("none"), p.hasAccount ? undefined : "muted"],
               [L("نوع التوظيف", "Employment type"), lbl(EMPLOYMENT_TYPE, p.employmentType, lang)],
               ...(p.workPhone ? [[L("هاتف العمل", "Work phone"), <span key="wp" className="hr-num">{p.workPhone}</span>] as [string, React.ReactNode]] : []),
-              ...(p.workEmail ? [[L("بريد العمل", "Work email"), <span key="we" className="hr-iso" dir="ltr">{p.workEmail}</span>] as [string, React.ReactNode]] : []),
+              ...(p.workEmail ? [[L("بريد الشركة", "Company e-mail"), <span key="we" className="hr-iso" dir="ltr">{p.workEmail}</span>] as [string, React.ReactNode]] : []),
             ]} />
           </div>
         </section>

@@ -228,11 +228,17 @@ function Preview({ id, onClose }: { id: string; onClose: () => void }) {
 function CreatePerson({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const { meta } = useHrMeta();
   const { L, t, lang } = useHrI18n();
-  const f = useForm({ fullNameAr: "", fullNameEn: "", jobTitle: "", hireDate: new Date().toISOString().slice(0, 10), probationEndDate: "", branchId: "", departmentId: "", managerId: "", employmentType: "FULL_TIME", status: "PROBATION" });
+  const f = useForm({ fullNameAr: "", fullNameEn: "", jobTitle: "", hireDate: new Date().toISOString().slice(0, 10), probationEndDate: "", branchId: "", departmentId: "", managerId: "", employmentType: "FULL_TIME", status: "PROBATION", workEmail: "", personalEmail: "" });
   const a = useAction();
+  const can = useCan();
+  // The personal e-mail is HR private data: offered only with the private-data permission, and
+  // written through the private route (its own permission check and audit) once the person exists.
+  const canPrivate = can("private_view") && can("people_manage");
   const submit = () => a.run("create", async () => {
-    const body = Object.fromEntries(Object.entries(f.v).filter(([, v]) => v !== ""));
+    const { personalEmail, ...rest } = f.v;
+    const body = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== ""));
     const p = await hrFetch<{ id: string }>("/api/hr/employees", { json: body });
+    if (canPrivate && personalEmail.trim()) await hrFetch(`/api/hr/employees/${p.id}/private`, { method: "PUT", json: { personalEmail: personalEmail.trim() } });
     onCreated(p.id);
   });
   return (
@@ -248,6 +254,8 @@ function CreatePerson({ onClose, onCreated }: { onClose: () => void; onCreated: 
         <Field label={L("المدير المباشر", "Line manager")}><Select className="hr-select" {...f.bind("managerId")}><option value="">—</option>{meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</Select></Field>
         <Field label={L("نهاية فترة التجربة", "Probation ends")}><input className="hr-input" type="date" {...f.bind("probationEndDate")} /></Field>
         <Field label={t("status")}><Select className="hr-select" {...f.bind("status")}><option value="PROBATION">{L("فترة تجربة", "Probation")}</option><option value="ACTIVE">{L("على رأس العمل", "Active")}</option></Select></Field>
+        <Field label={L("بريد الشركة", "Company e-mail")} help={L("إليه تُرسل تنبيهات النظام. فريد لكل شخص.", "System notifications go here. Unique per person.")}><input className="hr-input" type="email" dir="ltr" {...f.bind("workEmail")} data-testid="hr-new-work-email" /></Field>
+        {canPrivate ? <Field label={L("البريد الشخصي", "Personal e-mail")} help={L("للتواصل في التوظيف وإنهاء الخدمة. بيانات خاصة.", "For recruitment and separation. Private data.")}><input className="hr-input" type="email" dir="ltr" {...f.bind("personalEmail")} data-testid="hr-new-personal-email" /></Field> : null}
         <Field label={L("نوع التوظيف", "Employment type")}><Select className="hr-select" {...f.bind("employmentType")}><option value="FULL_TIME">{L("دوام كامل", "Full time")}</option><option value="PART_TIME">{L("دوام جزئي", "Part time")}</option><option value="TEMPORARY">{L("مؤقت", "Temporary")}</option></Select></Field>
       </div>
       <p className="hr-caption" style={{ margin: 0 }}>{L("لا يُنشأ حساب دخول. الراتب والعقد يُسجَّلان من ملف الموظف بصلاحية «العقود والرواتب».", "No login account is created. Pay and the contract are recorded from the employee file with the “Contracts & payroll” permission.")}</p>

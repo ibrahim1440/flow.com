@@ -68,6 +68,16 @@ model Employee {
   // Customer account (additive): the accounts this employee is responsible for.
   customerAccounts Customer[] @relation("CustomerAccountOwner")
   customerFiles    CustomerFile[] @relation("CustomerFileUploader")
+  // Credit hold (additive, 20261028100000_credit_hold).
+  customerHoldsPlaced CustomerSalesHold[] @relation("CustomerHoldCreator")
+  customerHoldsLifted CustomerSalesHold[] @relation("CustomerHoldLifter")
+  customerCreditLog   CustomerCreditLog[] @relation("CustomerCreditActor")
+  /// «البريد الإلكتروني للشركة» of an account with NO linked HR person (additive,
+  /// 20261028100000_credit_hold). A linked account's company e-mail is its person's
+  /// HrEmployee.workEmail — one source of truth (lib/notify/recipients.ts). Every system
+  /// notification is e-mailed to the company e-mail. Unique among active people and accounts
+  /// (case-insensitive), enforced by the application.
+  workEmail           String?
 
   // Users, roles & permissions (Figma Phase 8, 20261022090000_users_roles; additive).
   /// The custom role this account follows (role = "custom"); null = a system template or none.
@@ -248,7 +258,69 @@ model Customer {
   /// The customer file's documents (additive, migration 20261027120000_customer_file).
   files            CustomerFile[]
 
+  // ─── Credit warnings and the sales hold (additive, migration 20261028100000_credit_hold) ──
+  /// «مدة الإيقاف الافتراضية»: the duration (days, 1–365) the «إيقاف البيع» dialog proposes.
+  /// NULL = not set (the dialog proposes 14 days).
+  defaultHoldDays  Int?
+  /// Every hold placed on this customer (at most one unlifted — partial unique index).
+  salesHolds       CustomerSalesHold[]
+  /// Append-only: every grace, hold, lift and automatic lift.
+  creditLog        CustomerCreditLog[]
+
   @@index([accountOwnerId])
+}
+
+/// «إيقاف البيع» — a manual sales hold, placed by a person holding customers › sales_hold (never
+/// automatically). While it is in force, no new quotation or order is created for the customer
+/// (services/customers/credit-db.ts assertSalesAllowed, 409 CUSTOMER_SALES_HOLD); existing orders and
+/// deliveries continue. Lifted in place: by hand (MANUAL), or — checked on read and at creation,
+/// never by a job — at its end (EXPIRED, when autoLiftAtEnd) or when the customer is back within
+/// the limit with nothing overdue (PAID, when autoLiftOnPayment). Additive, 20261028100000_credit_hold.
+model CustomerSalesHold {
+  id                String    @id @default(cuid())
+  customerId        String
+  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  reason            String
+  /// What the warning said when the hold was placed: OVER_LIMIT | OVERDUE | BOTH | OTHER (CHECK).
+  basis             String
+  startsAt          DateTime  @default(now())
+  /// NULL = «حتى السداد» / open-ended.
+  endsAt            DateTime?
+  autoLiftAtEnd     Boolean   @default(false)
+  autoLiftOnPayment Boolean   @default(false)
+  createdById       String?
+  createdBy         Employee? @relation("CustomerHoldCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+  liftedAt          DateTime?
+  liftedById        String?
+  liftedBy          Employee? @relation("CustomerHoldLifter", fields: [liftedById], references: [id], onDelete: SetNull)
+  /// MANUAL | EXPIRED | PAID (CHECK).
+  liftKind          String?
+  liftReason        String?
+
+  @@index([customerId, createdAt])
+}
+
+/// The customer's credit log («سجل الائتمان»): GRACE (days, untilAt, reason), HOLD, LIFT and
+/// AUTO_LIFT (holdId). Append-only by convention — the application never updates or deletes a row.
+/// Shown in the customer file's activity. Additive, 20261028100000_credit_hold.
+model CustomerCreditLog {
+  id         String    @id @default(cuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  /// GRACE | HOLD | LIFT | AUTO_LIFT (CHECK).
+  kind       String
+  holdId     String?
+  days       Int?
+  untilAt    DateTime?
+  reason     String?
+  /// The standing at the time (overLimit, overdueDays) and the hold's options.
+  detail     Json?
+  actorId    String?
+  actor      Employee? @relation("CustomerCreditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
+
+  @@index([customerId, createdAt])
 }
 
 /// A person at a customer (Figma crm-account «جهات الاتصال»): a café has a buyer, an
@@ -274,12 +346,12 @@ model CustomerContact {
 /// A document on the customer's file — the account page's «الملفات» tab (Figma crm-account
 /// 179:1312): a signed contract, the commercial register, the VAT certificate, a price agreement.
 ///
-/// The bytes live in `content`, as CollectionEvidence, FinAttachment and HrDocument already do:
-/// the deployment's filesystem is ephemeral and the stack has no object store. A small,
-/// low-volume, private artefact (5 MB, PDF / JPEG / PNG — CHECKs in the migration);
-/// `lib/services/customers/files.ts` is the only reader and writer, so moving to object storage
-/// later changes that file and this column and nothing else. Additive, migration
-/// 20261027120000_customer_file.
+/// Where the bytes live (20261028100000_credit_hold): new uploads go to the PRIVATE Vercel Blob store
+/// when one is configured (`blobPathname`, up to 20 MB), and stay in `content` otherwise (5 MB) —
+/// local development and tests, and every file uploaded before. PDF / JPEG / PNG (CHECKs in the
+/// migrations). `lib/services/customers/files.ts` is the only reader and writer of the bytes; the
+/// download route streams them and never hands the browser a Blob URL. Additive, migrations
+/// 20261027120000_customer_file and 20261028100000_credit_hold.
 model CustomerFile {
   id           String    @id @default(cuid())
   customerId   String
@@ -295,7 +367,12 @@ model CustomerFile {
   sizeBytes    Int
   /// SHA-256 of the bytes.
   sha256       String
-  content      Bytes
+  /// The bytes, for a file stored in the row (every file before 20261028100000_credit_hold, and
+  /// every file while no Blob store is configured). NULL for a file in the private Blob store.
+  content      Bytes?
+  /// The private Vercel Blob pathname (customers/<customerId>/<fileId>-<safe name>) of a file kept
+  /// in the Blob store; never sent to the browser. Exactly one of content / blobPathname (CHECK).
+  blobPathname String?   @unique
   uploadedById String?
   uploadedBy   Employee? @relation("CustomerFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   createdAt    DateTime  @default(now())
@@ -5947,5 +6024,56 @@ model ScheduleEvent {
 
   @@index([slotId, createdAt])
   @@index([planId])
+  @@index([createdAt])
+}
+
+/// A small incident record that deduplicates system alerts (additive, 20261028100000_credit_hold):
+/// at most one OPEN incident per kind (partial unique index). BLOB_STORAGE: the private Blob store
+/// of the customer files failed (UPLOAD_FAILED / DOWNLOAD_FAILED / DELETE_FAILED) or is not
+/// configured in production (NOT_CONFIGURED). Counts what went to the DB fallback or was refused
+/// meanwhile; resolved by the next successful Blob operation (services/system/storage-alerts.ts).
+model SystemIncident {
+  id            String    @id @default(cuid())
+  /// BLOB_STORAGE (CHECK).
+  kind          String
+  /// OPEN | RESOLVED (CHECK).
+  status        String    @default("OPEN")
+  /// UPLOAD_FAILED | DOWNLOAD_FAILED | DELETE_FAILED | NOT_CONFIGURED (CHECK).
+  cause         String
+  /// The error's name / code — never a secret, a token or a URL.
+  detail        String?
+  openedAt      DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  occurrences   Int       @default(1)
+  fallbackCount Int       @default(0)
+  refusedCount  Int       @default(0)
+  /// When the incident alert went out (NULL: suppressed by the cooldown).
+  alertedAt     DateTime?
+  resolvedAt    DateTime?
+
+  @@index([kind, openedAt])
+}
+
+/// An in-app system alert («التنبيهات», the bell) for the accounts that hold Settings at edit —
+/// the system had no in-app notification mechanism. Also e-mailed when an e-mail provider is
+/// configured (lib/notify/email.ts). Read state is shared. Additive, 20261028100000_credit_hold.
+model SystemAlert {
+  id              String    @id @default(cuid())
+  /// STORAGE_INCIDENT | STORAGE_RECOVERED (CHECK).
+  kind            String
+  /// danger | warning | success | info (CHECK).
+  severity        String
+  incidentId      String?
+  titleAr         String
+  titleEn         String
+  bodyAr          String
+  bodyEn          String
+  /// SENT | FAILED | NOT_CONFIGURED | NO_RECIPIENTS (CHECK).
+  emailStatus     String    @default("NOT_CONFIGURED")
+  emailRecipients Int       @default(0)
+  createdAt       DateTime  @default(now())
+  readAt          DateTime?
+  readById        String?
+
   @@index([createdAt])
 }

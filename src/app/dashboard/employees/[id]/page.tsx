@@ -29,6 +29,8 @@ type Profile = {
   id: string; name: string; username: string | null; role: { key: string; id: string; name: string; nameEn: string; system: boolean }; customized: boolean;
   status: UserStatus; active: boolean; self: boolean; lock: { attempts: number; since: string | null } | null;
   hr: { id: string; name: string; jobTitle: string; department: string | null } | null; external: boolean;
+  /** «البريد الإلكتروني للشركة»: the linked HR person's «بريد الشركة», else the account's own (feat/credit-hold). */
+  companyEmail?: { email: string | null; source: "hr" | "account" };
   createdAt: string; createdByName: string | null; lastPermissionChange: { at: string; byName: string | null } | null;
   lastSignIn: { at: string; method: string; device: DeviceInfo } | null;
   password: { set: boolean; temporary: boolean; tempExpiresAt: string | null; changedAt: string | null };
@@ -61,7 +63,8 @@ function UserProfilePageInner() {
   const [p, setP] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [dlg, setDlg] = useState<null | "cred" | "revoke" | "reactivate" | "override" | { removeOverride: Override | EffRow } | { session: string } | { device: string } | "endAll">(null);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [dlg, setDlg] = useState<null | "email" | "cred" | "revoke" | "reactivate" | "override" | { removeOverride: Override | EffRow } | { session: string } | { device: string } | "endAll">(null);
   const [temp, setTemp] = useState<{ password: string; expiresAt: string; pending: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const refresh = useCallback(() => setReload((x) => x + 1), []);
@@ -145,7 +148,7 @@ function UserProfilePageInner() {
         ))}
       </nav>
 
-      {tab === "overview" ? <Overview p={p} goLog={() => setTab("log")} /> : null}
+      {tab === "overview" ? <Overview p={p} goLog={() => setTab("log")} editEmail={p.caps.manageThis || (p.self && p.role.key === "admin") ? () => { setEmailDraft(p.companyEmail?.email ?? ""); setDlg("email"); } : undefined} /> : null}
       {tab === "effective" ? <Effective p={p} /> : null}
       {tab === "exceptions" ? <Exceptions p={p} onAdd={() => setDlg("override")} onRemove={(o) => setDlg({ removeOverride: o })} /> : null}
       {tab === "stations" ? <Workstations p={p} onSaved={refresh} /> : null}
@@ -178,6 +181,17 @@ function UserProfilePageInner() {
           }} />
           {temp ? <TempPasswordDialog open onClose={() => setTemp(null)} name={p.name} username={p.username} password={temp.password} expiresAt={temp.expiresAt} pending={temp.pending} primaryLabel={L("تم", "Done")} onPrimary={() => setTemp(null)} /> : null}
           <RevokeDialog open={dlg === "revoke"} onClose={() => setDlg(null)} user={p} onDone={(deleted) => { setDlg(null); if (deleted) router.push("/dashboard/employees"); else { setNotice(L("أُوقف الوصول وأُنهيت الجلسات.", "Access revoked; sessions ended.")); refresh(); } }} />
+          <ConfirmDialog open={dlg === "email"} onClose={() => setDlg(null)} needReason={false} testId="ur-email-dialog"
+            title={L("البريد الإلكتروني للشركة", "Company e-mail")}
+            sub={p.companyEmail?.source === "hr" ? L(`يُحفظ في ملف الموظف «${p.hr?.name ?? ""}» (بريد الشركة) — مصدر واحد للبريد.`, `Saved on the HR record “${p.hr?.name ?? ""}” (company e-mail) — one source.`) : L("الحساب غير مرتبط بملف موظف، فيُحفظ البريد على الحساب نفسه.", "The account has no HR record, so the address is kept on the account.")}
+            confirmLabel={L("حفظ", "Save")}
+            run={async () => { const r = await api(`/api/users/${p.id}/company-email`, { method: "PUT", body: { email: emailDraft.trim() || null } }); if (r.ok) { setDlg(null); refresh(); } return r; }}>
+            <label className="hr-field" style={{ display: "grid", gap: 6 }}>
+              <span className="hr-label">{L("البريد الإلكتروني للشركة", "Company e-mail")}</span>
+              <input className="hr-input" type="email" dir="ltr" value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)} placeholder="name@company.sa" data-testid="ur-email-input" />
+              <span className="hr-caption">{L("تصل إليه تنبيهات النظام بالبريد. لكل شخص بريد شركة خاص به.", "System notifications are e-mailed here. Each person has their own company e-mail.")}</span>
+            </label>
+          </ConfirmDialog>
           <ConfirmDialog open={dlg === "reactivate"} onClose={() => setDlg(null)} title={L(`إعادة تفعيل ${p.name}؟`, `Reactivate ${p.name}?`)} sub={L("يعود الدخول بالدور والصلاحيات المحفوظة.", "Sign-in returns with the saved role and permissions.")} confirmLabel={L("إعادة التفعيل", "Reactivate")} testId="ur-reactivate-dialog"
             run={async (reason) => { const r = await api(`/api/users/${p.id}/reactivate`, { method: "POST", body: { reason } }); if (r.ok) { setDlg(null); refresh(); } return r; }} />
         </>
@@ -231,7 +245,7 @@ function capabilities(p: Profile, lang: "ar" | "en") {
   return { can, cannot: cannot.length ? [join(cannot)] : [] };
 }
 
-function Overview({ p, goLog }: { p: Profile; goLog: () => void }) {
+function Overview({ p, goLog, editEmail }: { p: Profile; goLog: () => void; editEmail?: () => void }) {
   const { lang, ar, L } = useLangL();
   const { can, cannot } = capabilities(p, lang);
   const recent = p.events.filter((e) => !["SIGN_IN", "MFA_SIGN_IN", "SIGN_OUT"].includes(e.action)).slice(0, 3);
@@ -243,6 +257,8 @@ function Overview({ p, goLog }: { p: Profile; goLog: () => void }) {
           <div><dt>{L("الاسم المعروض", "Display name")}</dt><dd>{p.name}</dd></div>
           <div><dt>{L("اسم المستخدم", "Username")}</dt><dd>{p.username ? <Latin>{p.username}</Latin> : "—"}</dd></div>
           <div><dt>{L("ملف الموظف", "HR record")}</dt><dd>{p.hr ? <Link href={`/dashboard/hr/employees/${p.hr.id}`}>{p.hr.name}{p.hr.department ? ` · ${p.hr.department}` : ""}</Link> : p.external ? L("شخص خارجي موثّق", "Verified external person") : L("غير مرتبط", "Not linked")}</dd></div>
+          <div data-testid="ur-company-email"><dt>{L("البريد الإلكتروني للشركة", "Company e-mail")}</dt><dd>{p.companyEmail?.email ? <Latin>{p.companyEmail.email}</Latin> : <span className="ur-muted">{L("لا يوجد بريد مسجّل", "No e-mail on record")}</span>}
+            {editEmail ? <> · <button type="button" className="ur-link" onClick={editEmail} data-testid="ur-email-edit">{L("تعديل", "Edit")}</button></> : null}</dd></div>
           <div><dt>{L("الدور", "Role")}</dt><dd><span className="ur-role">{ar ? p.role.name : p.role.nameEn}{p.customized ? <Tag>{L("مخصص", "Custom")}</Tag> : null}</span></dd></div>
           <div><dt>{L("أُنشئ", "Created")}</dt><dd>{fmtDate(p.createdAt, lang)}{p.createdByName ? ` · ${p.createdByName}` : ""}</dd></div>
           <div><dt>{L("آخر تغيير للصلاحيات", "Last permission change")}</dt><dd>{p.lastPermissionChange ? `${fmtDate(p.lastPermissionChange.at, lang)} ${fmtTime(p.lastPermissionChange.at)}${p.lastPermissionChange.byName ? ` · ${p.lastPermissionChange.byName}` : ""}` : "—"}</dd></div>

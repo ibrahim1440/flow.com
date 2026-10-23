@@ -50,9 +50,16 @@ export type DocumentSheetProps = {
   metaEnd: DocRow[];
   columns: DocColumn[];
   rows: DocCell[][];
-  totals: DocTotal[];
+  /** The lines table drawn as a ruled grid with taller rows (a sheet filled in by hand). */
+  grid?: boolean;
+  /** Absent or empty: no totals box (a document without amounts). */
+  totals?: DocTotal[];
+  /** Sections between the lines (and totals) and the notes: a summary, the outstanding lines. */
+  extra?: ReactNode;
   notes?: { label: string; text: string; testId?: string } | null;
   bank?: { label: string; rows: DocRow[]; testId?: string } | null;
+  /** Signature boxes at the end (name · signature · date lines under each label). */
+  signatures?: { label: string; lines: string[]; testId?: string }[] | null;
   footer: {
     legal: string;
     /** «الصفحة X من Y · <status>» — X and Y are filled in on paper by the page counters. */
@@ -141,7 +148,7 @@ export function DocumentSheet(p: DocumentSheetProps) {
         </div>
 
         {/* A real table: printed, its header row repeats on every sheet the lines run onto. */}
-        <table className="dsh-lines">
+        <table className={p.grid ? "dsh-lines is-grid" : "dsh-lines"} data-testid="doc-lines">
           <thead>
             <tr>
               {p.columns.map((c) => (
@@ -155,8 +162,8 @@ export function DocumentSheet(p: DocumentSheetProps) {
                 {cells.map((cell, i) => {
                   const col = p.columns[i];
                   return (
-                    <td key={col.key} className={[col.numeric ? "num" : "", col.muted ? "mu" : "", col.key].filter(Boolean).join(" ")}>
-                      <span className="m"><bdi>{cell.main}</bdi></span>
+                    <td key={col.key} className={[col.numeric ? "num" : "", col.muted ? "mu" : "", col.writeIn ? "wi" : "", col.key].filter(Boolean).join(" ")}>
+                      {cell.main === "" && col.writeIn ? <span className="m" aria-hidden="true" /> : <span className="m"><bdi dir={col.ltr ? "ltr" : undefined}>{cell.main}</bdi></span>}
                       {cell.sub && <span className={cell.subMono ? "s mono" : "s"}><bdi>{cell.sub}</bdi></span>}
                     </td>
                   );
@@ -166,14 +173,18 @@ export function DocumentSheet(p: DocumentSheetProps) {
           </tbody>
         </table>
 
-        <dl className="dsh-totals" data-testid="doc-totals">
-          {p.totals.map((t, i) => (
-            <div key={i} className={t.grand ? "g" : undefined} data-testid={t.testId}>
-              <dt>{t.label}</dt>
-              <dd><bdi>{t.value}</bdi></dd>
-            </div>
-          ))}
-        </dl>
+        {p.totals && p.totals.length > 0 ? (
+          <dl className="dsh-totals" data-testid="doc-totals">
+            {p.totals.map((t, i) => (
+              <div key={i} className={t.grand ? "g" : undefined} data-testid={t.testId}>
+                <dt>{t.label}</dt>
+                <dd><bdi>{t.value}</bdi></dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
+        {p.extra}
 
         {p.notes && (
           <section className="dsh-notes" data-testid={p.notes.testId}>
@@ -186,6 +197,17 @@ export function DocumentSheet(p: DocumentSheetProps) {
           <section className="dsh-bank" data-testid={p.bank.testId}>
             <h2>{p.bank.label}</h2>
             <Props rows={p.bank.rows} />
+          </section>
+        )}
+
+        {p.signatures && p.signatures.length > 0 && (
+          <section className="dsh-signs" data-testid="doc-signatures">
+            {p.signatures.map((sg, i) => (
+              <div key={i} className="dsh-sign" data-testid={sg.testId}>
+                <h2>{sg.label}</h2>
+                {sg.lines.map((l, j) => <span key={j}>{l}</span>)}
+              </div>
+            ))}
           </section>
         )}
       </div>

@@ -1,4 +1,5 @@
 import { NextResponse } from "@/lib/api-response";
+import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
@@ -256,6 +257,8 @@ export async function POST(request: Request) {
     const lines = parseLineInputs(rawLines);
 
     const result = await prisma.$transaction(async (tx) => {
+      // «إيقاف البيع» (feat/credit-hold): no new quotation while the customer's sales are on hold.
+      await assertSalesAllowed(tx, deal.customerId);
       const quoteNumber = await nextQuoteNumber(tx, new Date());
       const created = await tx.quote.create({
         data: {

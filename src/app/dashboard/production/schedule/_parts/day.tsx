@@ -4,7 +4,10 @@
 // now-line, and «الخانات القادمة» with the planned green beside the actual green and roasted («—» until
 // recorded). Planned and actual are never merged.
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Printer } from "lucide-react";
 import { Btn, Notice, OpsBanner, OpsLoading } from "@/components/ops/ui";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 import { useUser } from "../../../user-context";
 import {
   addDays, call, dayLabel, riyadhKeyOf, errText, keyIso, Lanes, Legend, N, NoRoaster, NowText, ScheduleFrame, SlotActions, STATUS_TEXT, timeOf, useLang, useSlotActions,
@@ -30,6 +33,9 @@ export function DayView({ initialDay, approved }: { initialDay: string | null; a
     return () => { off = true; };
   }, [day, token]);
   const actions = useSlotActions((m) => { setMsg({ tone: "success", text: m }); reload(); });
+  // «طباعة ورقة التحميص» (feat/print-docs): the day's sheet for the roasters, an A4 document behind the
+  // document-printing gate (PRINT_DOCUMENTS_ENABLED; unknown = off, disabled with the Phase 1 note).
+  const printing = usePrintDocuments();
   async function start(s: Slot) {
     const r = await call(`/api/production/schedule/slots/${s.id}/start`, "POST", {});
     setMsg(r.ok ? { tone: "success", text: L("بدأت الخانة.", "The slot was started.") } : { tone: "danger", text: errText(r.data, ar) });
@@ -42,6 +48,15 @@ export function DayView({ initialDay, approved }: { initialDay: string | null; a
       {data.day === data.today ? <NowText now={data.now} /> : <span>{dayLabel(keyIso(data.day), ar)}</span>}
       <Btn size="sm" variant="ghost" onClick={() => setDay(addDays(data.day, 1))} aria-label={L("اليوم التالي", "Next day")} data-testid="day-next">{ar ? "‹" : "›"}</Btn>
       {data.day !== data.today ? <Btn size="sm" onClick={() => setDay(data.today)}>{L("اليوم", "Today")}</Btn> : null}
+      {printing === true ? (
+        <Link href={`/dashboard/production/schedule/print?date=${data.day}`} className="hr-btn is-sm" data-testid="print-roast-sheet">
+          <Printer size={14} aria-hidden="true" /> {L("طباعة ورقة التحميص", "Print roast sheet")}
+        </Link>
+      ) : (
+        <Btn size="sm" disabled aria-describedby={PRINT_PHASE1_NOTE_ID} data-testid="print-roast-sheet">
+          <Printer size={14} aria-hidden="true" /> {L("طباعة ورقة التحميص", "Print roast sheet")}
+        </Btn>
+      )}
     </>
   ) : null;
   const productCell = (s: Slot) => <><strong className="rs-strong">{ar ? s.product.ar : s.product.en}</strong>{s.purpose === "STOCK" ? <> · {L("للمخزون", "for stock")}</> : null}</>;
@@ -53,6 +68,7 @@ export function DayView({ initialDay, approved }: { initialDay: string | null; a
   return (
     <ScheduleFrame view="day" when={when} testId="schedule-day">
       {msg ? <div style={{ paddingTop: 16 }}><OpsBanner tone={msg.tone} onClose={() => setMsg(null)}>{msg.text}</OpsBanner></div> : null}
+      {data && printing === false ? <div style={{ paddingTop: 16 }}><PrintPhase1Notice /></div> : null}
       {error ? <div className="rs-stack"><Retry error={error} onRetry={reload} /></div> : !data ? <div className="rs-stack"><OpsLoading rows={6} /></div> : data.roasters.length === 0 ? (
         <div className="rs-stack"><NoRoaster /></div>
       ) : (

@@ -2,9 +2,13 @@
 
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
+import { Printer } from "lucide-react";
 import { Btn, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, OpsPane, OpsRoot, PageHeader, StatusDot, Tabs, Kg, kg, opsDate, countNoun, UNIT_FORMS, useL } from "@/components/ops/ui";
 import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
+import { deliveryShipments } from "@/lib/print/delivery-note";
 import { useI18n } from "@/lib/i18n/context";
 
 // ─── Dispatch without lots (production simplification, Phase D item 7) ───────────────────────
@@ -26,11 +30,11 @@ type ReadyOrder = {
 };
 type LotRef = { finishedGoodsLotId: string; batchNumber: string | null; quantityUnits: number | null; quantityKg: number; source: "line" | "ledger" };
 type DeliveryRow = {
-  id: string; date: string; quantityKg: number; quantityUnits: number | null; deliveryType: string; notes: string | null;
-  orderItem: { beanTypeName: string; order: { orderNumber: number; customer: { name: string } } };
+  id: string; date: string; createdAt: string; quantityKg: number; quantityUnits: number | null; deliveryType: string; notes: string | null;
+  orderItem: { beanTypeName: string; order: { id: string; orderNumber: number; customer: { name: string } } };
   lots?: LotRef[];
 };
-type Done = { orderNumber: number; lines: { name: string; isUnitLine: boolean; quantity: number; lots: LotRef[] }[]; complete: boolean };
+type Done = { orderNumber: number; deliveryIds: string[]; lines: { name: string; isUnitLine: boolean; quantity: number; lots: LotRef[] }[]; complete: boolean };
 
 /**
  * One dispatch, one key — per line. The server refuses a delivery without an Idempotency-Key
@@ -66,6 +70,12 @@ export default function DispatchPage() {
   const L = useL();
   const user = useUser();
   const canDeliver = hasSubPrivilege(user?.permissions ?? {}, "dispatch", "mark_delivered");
+  // «طباعة إشعار التسليم» (feat/print-docs): the delivery note is an A4 document behind the document
+  // gate (PRINT_DOCUMENTS_ENABLED; unknown = off, disabled with the Phase 1 note). Its page lives
+  // under Orders (/dashboard/orders/print/delivery-note), so it is offered to whoever can open Orders.
+  const printing = usePrintDocuments();
+  const canOpenNote = hasModuleAccess(user?.permissions ?? {}, "orders");
+  const noteHref = (ids: string[]) => `/dashboard/orders/print/delivery-note?ids=${ids.map(encodeURIComponent).join(",")}&from=dispatch`;
 
   const [ready, setReady] = useState<ReadyOrder[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
@@ -85,7 +95,7 @@ export default function DispatchPage() {
   const [done, setDone] = useState<Done | null>(null);
   // Not state: a retry must read exactly the keys the previous attempt used.
   const keysRef = useRef<Record<string, string>>({});
-  const shippedRef = useRef<Record<string, { quantity: number; lots: LotRef[] }>>({});
+  const shippedRef = useRef<Record<string, { id: string; quantity: number; lots: LotRef[] }>>({});
 
   useEffect(() => { loadData(); }, []);
 
@@ -168,10 +178,11 @@ export default function DispatchPage() {
           setSubmitError(localizeApiError(data, lang) || "");
           return;
         }
-        shippedRef.current[l.orderItemId] = { quantity: q, lots: data.lots ?? [] };
+        shippedRef.current[l.orderItemId] = { id: data.id, quantity: q, lots: data.lots ?? [] };
       }
       setDone({
         orderNumber: open.orderNumber,
+        deliveryIds: Object.values(shippedRef.current).map((x) => x.id).filter(Boolean),
         complete: completes,
         lines: chosen.map((l) => ({ name: nameOf(l), isUnitLine: l.isUnitLine, quantity: shippedRef.current[l.orderItemId]?.quantity ?? 0, lots: shippedRef.current[l.orderItemId]?.lots ?? [] })),
       });
@@ -189,6 +200,21 @@ export default function DispatchPage() {
     if (!q) return ready;
     return ready.filter((o) => `${o.orderNumber} ${o.customer.name} ${o.customer.nameAr ?? ""} ${o.lines.map((l) => `${l.nameEn} ${l.nameAr ?? ""}`).join(" ")}`.toLowerCase().includes(q));
   }, [ready, readySearch]);
+
+  // The rows recorded together for one order (one confirm) print as one note.
+  const shipmentOf = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const g of deliveryShipments(deliveries.map((d) => ({ id: d.id, orderId: d.orderItem.order.id, createdAt: d.createdAt ?? d.date, notes: d.notes })))) {
+      const ids = g.map((x) => x.id);
+      for (const id of ids) m.set(id, ids);
+    }
+    return m;
+  }, [deliveries]);
+  const noteButton = (ids: string[], testId: string, label: string) => (printing === true ? (
+    <Link href={noteHref(ids)} className="hr-btn is-sm" data-testid={testId} aria-label={label}><Printer size={14} aria-hidden="true" /> {L("إشعار التسليم", "Delivery note")}</Link>
+  ) : (
+    <Btn size="sm" disabled aria-describedby={PRINT_PHASE1_NOTE_ID} data-testid={testId} aria-label={label}><Printer size={14} aria-hidden="true" /> {L("إشعار التسليم", "Delivery note")}</Btn>
+  ));
 
   const shownDeliveries = deliveries.filter((d) =>
     `${d.orderItem.order.orderNumber} ${d.orderItem.order.customer.name} ${d.orderItem.beanTypeName} ${(d.lots ?? []).map((x) => x.batchNumber).join(" ")}`
@@ -231,7 +257,21 @@ export default function DispatchPage() {
                 </li>
               ))}
             </ul>
+            {canOpenNote && done.deliveryIds.length ? (
+              <div style={{ marginTop: 8 }}>
+                {printing === true ? (
+                  <Link href={noteHref(done.deliveryIds)} className="hr-btn is-sm is-primary" data-testid="delivery-note-print">
+                    <Printer size={14} aria-hidden="true" /> {L("طباعة إشعار التسليم", "Print delivery note")}
+                  </Link>
+                ) : (
+                  <Btn size="sm" disabled aria-describedby={PRINT_PHASE1_NOTE_ID} data-testid="delivery-note-print">
+                    <Printer size={14} aria-hidden="true" /> {L("طباعة إشعار التسليم", "Print delivery note")}
+                  </Btn>
+                )}
+              </div>
+            ) : null}
           </OpsBanner>
+          {canOpenNote && printing === false ? <PrintPhase1Notice /> : null}
         </div>
       ) : null}
 
@@ -293,6 +333,7 @@ export default function DispatchPage() {
 
       {/* ── History: every delivery with the lots it drew from ── */}
       {loaded && tab === "history" ? <section className="hr-stack" style={{ gap: 12 }} aria-label={t("deliveryHistory")}>
+        {canOpenNote && printing === false && deliveries.length > 0 ? <PrintPhase1Notice /> : null}
         <div className="hr-filterbar">
           <input type="text" placeholder={t("searchDeliveries")} aria-label={t("searchDeliveries")} value={search} onChange={(e) => setSearch(e.target.value)} className="hr-input hr-search" />
         </div>
@@ -312,6 +353,7 @@ export default function DispatchPage() {
                   <th className="num">{L("الكمية", "Quantity")}</th>
                   <th>{L("اللوتات", "Lots")}</th>
                   <th>{t("type")}</th>
+                  {canOpenNote ? <th aria-label={L("إشعار التسليم", "Delivery note")} /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -334,6 +376,11 @@ export default function DispatchPage() {
                       <td className="m-end">
                         <StatusDot map={{ full: [t("fullBadge"), "success"], partial: [t("partialBadge"), "warning"] }} value={d.deliveryType === "full" ? "full" : "partial"} />
                       </td>
+                      {canOpenNote ? (
+                        <td className="ops-actions">
+                          {noteButton(shipmentOf.get(d.id) ?? [d.id], `delivery-note-${d.id}`, L(`إشعار تسليم الطلب #${d.orderItem.order.orderNumber}`, `Delivery note for order #${d.orderItem.order.orderNumber}`))}
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })}

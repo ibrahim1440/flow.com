@@ -11,6 +11,18 @@ import {
 import { addDays, dayString, isDay, parseDay } from "../dates";
 import { balances } from "./leave";
 import { isSimpleMode } from "@/lib/simple-mode";
+import { assertCompanyEmailFree, isValidEmail } from "@/lib/notify/recipients";
+
+/** The company e-mail is unique among active people and accounts — as an HR refusal (Arabic via messages-ar). */
+export async function companyEmailFree(tx: Prisma.TransactionClient, email: string | null, except: { hrEmployeeId?: string; accountId?: string }) {
+  try {
+    await assertCompanyEmailFree(tx, email, except);
+  } catch (e) {
+    const r = e as { _appCode?: number; errorEn?: string; code?: string };
+    if (r && r._appCode) throw new HrError(r.errorEn ?? "That e-mail address is not valid.", r._appCode, r.code);
+    throw e;
+  }
+}
 
 const STATUSES = ["PROBATION", "ACTIVE", "NOTICE", "SUSPENDED", "SEPARATED"] as const;
 const TYPES = ["FULL_TIME", "PART_TIME", "TEMPORARY"] as const;
@@ -281,7 +293,11 @@ export function parsePerson(b: PersonInput, partial = false) {
   if (!partial || has("hireDate")) out.hireDate = day(b.hireDate, "hireDate", !partial) as Date;
   if (!partial || has("probationEndDate")) out.probationEndDate = day(b.probationEndDate, "probationEndDate");
   if (!partial || has("workPhone")) out.workPhone = text(b.workPhone, "workPhone", { max: 40 });
-  if (!partial || has("workEmail")) out.workEmail = text(b.workEmail, "workEmail", { max: 120 });
+  // «بريد الشركة»: the company e-mail — the one address system notifications go to (lib/notify/recipients.ts).
+  if (!partial || has("workEmail")) {
+    out.workEmail = text(b.workEmail, "workEmail", { max: 120 });
+    if (out.workEmail && !isValidEmail(String(out.workEmail).toLowerCase())) throw new HrError("That e-mail address is not valid.", 400, "EMAIL_INVALID");
+  }
   if (out.hireDate && out.probationEndDate && (out.probationEndDate as Date) < (out.hireDate as Date)) throw new HrError("Probation cannot end before the hire date.", 400);
   return out;
 }
@@ -296,6 +312,7 @@ export async function createPerson(actor: HrActor, b: PersonInput, opts: { tx?: 
       throw new HrError("You can only add people to a branch you have access to.", 403);
     }
     await assertManagerValid(tx, null, (data.managerId as string) ?? null);
+    await companyEmailFree(tx, (data.workEmail as string) ?? null, {});
     const employeeNo = text(b.employeeNo, "employeeNo", { max: 20 }) ?? (await nextNumber(tx, "HR-", "employee"));
     const p = await tx.hrEmployee.create({
       data: {
@@ -343,6 +360,7 @@ export async function updatePerson(actor: HrActor, id: string, b: PersonInput) {
         throw new HrError("You can only move people to a branch you have access to.", 403);
       }
       if ("managerId" in data) await assertManagerValid(tx, id, (data.managerId as string) ?? null);
+      if ("workEmail" in data) await companyEmailFree(tx, (data.workEmail as string) ?? null, { hrEmployeeId: id });
       // Review P2-3: a name change of a VERIFIED person, or of one whose login holds duties, is a
       // request another person approves (the verification ends when it applies, not before). The
       // other fields apply now.

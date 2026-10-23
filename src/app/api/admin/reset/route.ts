@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
+import { deleteCustomerFileBlobs } from "@/lib/services/customers/files";
 import { evaluateResetAuthorization, resetRefusalBody } from "@/lib/reset-safety";
 import { validatePin } from "@/lib/pin-policy";
 import { pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
@@ -78,6 +79,9 @@ export async function POST(request: Request) {
     // Atomic deletion in FK-safe order.
     // Preserved: Employee, Supplier, CoffeeProduct, ProductSKU, SystemConfig (and the roaster configuration).
     // BlendIngredient cascades from RoastingBatch but is deleted explicitly for clarity.
+    // Customer files kept in the private Blob store go with their customers: listed before the
+    // reset, removed after it commits (best effort — a failure is a storage incident, not a 500).
+    const blobs = await prisma.customerFile.findMany({ where: { blobPathname: { not: null } }, select: { blobPathname: true } });
     await prisma.$transaction([
       prisma.cuppingScore.deleteMany(),
       prisma.cuppingSessionBatch.deleteMany(),
@@ -112,9 +116,14 @@ export async function POST(request: Request) {
       prisma.roastPlan.deleteMany(),
       prisma.orderItem.deleteMany(),
       prisma.order.deleteMany(),
+      // 20261028100000_credit_hold: the customers' holds and credit log (they would cascade with the
+      // customers; deleted explicitly so the reset's list names every table it clears).
+      prisma.customerCreditLog.deleteMany(),
+      prisma.customerSalesHold.deleteMany(),
       prisma.customer.deleteMany(),
       prisma.greenBean.deleteMany(),
     ]);
+    await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));
 
     return NextResponse.json({ success: true });
   } catch (err) {

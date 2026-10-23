@@ -9,7 +9,7 @@ import { PRINT_PHASE1_NOTE, QUOTATION_PDF_WHEN_PRINT_OFF } from "@/lib/print/cer
 import { BRAND_PRIMARY_SRC, BRAND_PRIMARY_VIEWBOX } from "@/components/brand/BrandMark";
 import { DocumentSheet, type DocRow, type DocTotal } from "@/components/print/document/DocumentSheet";
 import {
-  formatIban, formatPercent, longDate, quoteLineCells, quoteLineColumns, uniformTaxRate,
+  formatIban, formatPercent, longDate, quoteDocumentNotice, quoteLineCells, quoteLineColumns, uniformTaxRate,
   type DocLang, type QuoteDocLine,
 } from "@/lib/print/quote-document";
 
@@ -276,6 +276,9 @@ function QuoteDocument({
     },
     { label: L("صالح حتى", "Valid until"), value: longDate(validUntil, lang), testId: "doc-valid-until" },
   ];
+  // Gap P (P-01, P-06): an issued document states when it was issued — the snapshot's freeze time.
+  const issuedOn = snap?.frozenAt ?? quote.issuedAt;
+  if (!isDraft && issuedOn) metaStart.splice(1, 0, { label: L("تاريخ الإصدار", "Issued on"), value: longDate(issuedOn, lang), testId: "doc-issued-on" });
   const metaEnd: DocRow[] = [];
   if (cust) {
     metaEnd.push({ label: L("العميل", "Customer"), value: <bdi>{customerName}</bdi>, testId: "quote-customer" });
@@ -310,7 +313,8 @@ function QuoteDocument({
   ].filter(Boolean);
 
   let banner: { tone: "warning" | "danger"; title: string; text: string; testId: string } | null = null;
-  if (isDraft) {
+  const notice = quoteDocumentNotice({ isDraft, status: quote.status, validUntil });
+  if (notice === "draft") {
     banner = {
       tone: "warning",
       title: L("مسودة — غير صادر", "Draft — not issued"),
@@ -321,12 +325,20 @@ function QuoteDocument({
           "A draft for review, not an issued quotation. Prices may change until it is issued."),
       testId: "doc-draft-banner",
     };
-  } else if (quote.status === "SUPERSEDED") {
+  } else if (notice === "superseded") {
     banner = {
       tone: "danger",
       title: L("مستبدَل بمراجعة أحدث", "Superseded by a later revision"),
       text: L("استُبدل هذا العرض بمراجعة أحدث. لا تُرسله إلى العميل.", "This quotation has been superseded by a later revision. Do not send it to the customer."),
       testId: "doc-superseded-banner",
+    };
+  } else if (notice === "expired") {
+    // Gap P P-06b: an expired offer says so in red, with the date it lapsed.
+    banner = {
+      tone: "danger",
+      title: `${L("منتهي الصلاحية منذ ", "Expired since ")}${longDate(validUntil, lang)}`,
+      text: L("انتهت صلاحية هذا العرض. لا تُرسله إلى العميل عرضًا قائمًا؛ أصدر مراجعة جديدة عند الحاجة.", "This quotation has expired. Do not send it to the customer as a live offer; issue a new revision if needed."),
+      testId: "doc-expired-banner",
     };
   }
 

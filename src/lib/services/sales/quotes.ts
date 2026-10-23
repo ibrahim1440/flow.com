@@ -1,4 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
+import { assertSalesAllowed } from "../customers/credit-db";
 import { Decimal, ZERO, roundMoney, parseFiniteDecimal } from "../commissions/engine";
 import { DISCOUNT_APPROVAL_THRESHOLD, DISCOUNT_MAX } from "./discount-limits";
 import { settingsFromRow } from "./quote-settings";
@@ -784,6 +785,7 @@ export async function reviseQuote(
     where: { id: input.quoteId },
     select: {
       opportunityId: true, customerId: true, currency: true, revision: true, validUntil: true,
+      opportunity: { select: { customerId: true } },
       lines: {
         orderBy: { position: "asc" },
         select: {
@@ -793,6 +795,10 @@ export async function reviseQuote(
       },
     },
   });
+
+  // «إيقاف البيع» (feat/credit-hold): a revision is a new quotation — refused while the customer's
+  // sales are on hold (409 CUSTOMER_SALES_HOLD).
+  await assertSalesAllowed(tx, original.customerId ?? original.opportunity.customerId, at);
 
   const quoteNumber = await nextQuoteNumber(tx, at);
   const created = await tx.quote.create({

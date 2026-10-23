@@ -27,6 +27,8 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   DEVICE_SESSIONS_ENDED_ADMIN: { ar: "ألغى الثقة بجهاز", en: "Revoked a device", cat: "accounts" },
   SESSIONS_ENDED_ADMIN: { ar: "أنهى كل الجلسات", en: "Ended all sessions", cat: "accounts" },
   AUDIT_EXPORTED: { ar: "صدّر سجل الصلاحيات", en: "Exported the log", cat: "accounts" },
+  // feat/credit-hold: the company e-mail of an account (its HR person's, or its own).
+  EMPLOYEE_COMPANY_EMAIL_CHANGED: { ar: "غيّر بريد الشركة", en: "Changed the company e-mail", cat: "accounts" },
   PASSWORD_CHANGED_SELF: { ar: "غيّر كلمة مروره", en: "Changed own password", cat: "signin" },
   SIGN_IN: { ar: "سجّل دخولًا", en: "Signed in", cat: "signin" },
   MFA_SIGN_IN: { ar: "سجّل دخولًا", en: "Signed in", cat: "signin" },

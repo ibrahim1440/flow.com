@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { extractIp, hashRateLimitKey, pruneExpired, isIpRateLimited, isPairRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
 import { handlePrismaError } from "@/lib/api-error";
+import { deleteCustomerFileBlobs } from "@/lib/services/customers/files";
 import { evaluateResetAuthorization, resetRefusalBody } from "@/lib/reset-safety";
 import { validatePin } from "@/lib/pin-policy";
 import { pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
@@ -81,6 +82,9 @@ export async function POST(request: Request) {
     // Preserved: Employee, SystemConfig, LoginAttempt, RateLimit.
     // CustomerRoastPreference cascades from Customer (onDelete: Cascade) — no explicit delete needed.
     // CoffeeProduct.defaultGreenBeanId is nullable — SET NULL applied when GreenBean is deleted.
+    // Customer files kept in the private Blob store go with their customers: listed before the
+    // reset, removed after it commits (best effort — a failure is a storage incident, not a 500).
+    const blobs = await prisma.customerFile.findMany({ where: { blobPathname: { not: null } }, select: { blobPathname: true } });
     await prisma.$transaction([
       prisma.cuppingScore.deleteMany(),
       prisma.cuppingSessionBatch.deleteMany(),
@@ -109,12 +113,17 @@ export async function POST(request: Request) {
       prisma.roastingBatch.deleteMany(),
       prisma.orderItem.deleteMany(),
       prisma.order.deleteMany(),
+      // 20261028100000_credit_hold: the customers' holds and credit log (they would cascade with the
+      // customers; deleted explicitly so the reset's list names every table it clears).
+      prisma.customerCreditLog.deleteMany(),
+      prisma.customerSalesHold.deleteMany(),
       prisma.customer.deleteMany(),
       prisma.greenBean.deleteMany(),
       prisma.productSKU.deleteMany(),
       prisma.coffeeProduct.deleteMany(),
       prisma.supplier.deleteMany(),
     ]);
+    await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));
 
     return NextResponse.json({ success: true, message: "Training data reset completed successfully." });
   } catch (err) {

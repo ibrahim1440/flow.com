@@ -304,6 +304,9 @@ const RULES: Rule[] = [
   [/^Live payroll cannot be turned on: the readiness check has (\d+) finding\(s\) \((.+)\)\. Resolve them first\.$/, (m) => `لا يمكن تشغيل الرواتب الفعلية: فحص الجاهزية أظهر ${m[1]} ملاحظة مانعة (${m[2]}). عالجها أولًا.`],
   [/^Live payroll is already (on|off)\.$/, (m) => `الرواتب الفعلية ${m[1] === "on" ? "مفعّلة" : "مقفلة"} أصلًا.`],
   [/^payrollLive must be true or false\.$/, () => "حالة الرواتب الفعلية يجب أن تكون تشغيلًا أو إيقافًا."],
+  // ── Company e-mail (feat/credit-hold: one address per active person or account)
+  [/^The company e-mail (\S+) is already used by (.+)\. Each person has their own company e-mail\.$/, (m) => `بريد الشركة ${m[1]} مستخدم لدى ${m[2]}. لكل شخص بريد شركة خاص به.`],
+  [/^That e-mail address is not valid\.$/, () => "صيغة البريد الإلكتروني غير صحيحة."],
   // ── Generic validation
   [/^(\w+) is required\.$/, (m) => `حقل «${f(m[1])}» مطلوب.`],
   [/^(\w+) must be a date( \(YYYY-MM-DD\))?\.$/, (m) => `حقل «${f(m[1])}» يجب أن يكون تاريخًا.`],

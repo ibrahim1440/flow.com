@@ -12,6 +12,7 @@ import { currencyLabel, dayCount, dayUnit, daysFromToday, dueText, money2, relat
 import { api, pick, QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS } from "../../sales/_components/ui";
 import { ActivityDialog, ContactDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, QuoteDialog, SEGMENT_LABELS } from "./dialogs";
 import type { Account, Activity, AgingKey, Contact, CustomerFile, TimelineEntry } from "./types";
+import { CreditBadges, CreditCallout, HoldDialog, LiftDialog, badgesOf, fullDate } from "@/components/credit/credit-ui";
 import { orderProgress, progressText } from "@/lib/order-stage";
 import { ORDER_STATUS_LABEL_KEYS } from "@/components/OrderLifecyclePanel";
 import "../customers.css";
@@ -86,7 +87,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
-  const [dialog, setDialog] = useState<null | "activity" | "quote" | "details" | "file" | { contact: Contact | null }>(null);
+  const [dialog, setDialog] = useState<null | "activity" | "quote" | "details" | "file" | "hold" | "holdDirect" | "lift" | { contact: Contact | null }>(null);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -222,11 +223,20 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       <Ico name="plus" small />{L("عرض سعر", "Quotation")}
     </button>
   ) : null;
-  const moreItems = can.edit ? [
+  const cs = data.creditState ?? null;
+  const holdItem = cs?.can.hold && !cs.hold
+    ? [<button key="hold" type="button" role="menuitem" className="danger" data-testid="menu-hold" onClick={() => { setMore(false); setDialog("holdDirect"); }}>{L("إيقاف البيع", "Hold sales")}</button>]
+    : cs?.can.hold && cs.hold
+      ? [<button key="lift" type="button" role="menuitem" data-testid="menu-lift" onClick={() => { setMore(false); setDialog("lift"); }}>{L("رفع الإيقاف", "Lift hold")}</button>]
+      : [];
+  const moreItems = [...holdItem, ...(can.edit ? [
     <button key="edit" type="button" role="menuitem" data-testid="edit-customer" onClick={() => { setMore(false); setDialog("details"); }}>{L("تعديل بيانات العميل", "Edit customer details")}</button>,
     <Link key="profiles" role="menuitem" href={`/dashboard/customers?open=${id}&tab=profiles`}>{L("مسارات التحميص", "Roast profiles")}</Link>,
     <button key="del" type="button" role="menuitem" className="danger" data-testid="delete-customer" onClick={() => { setMore(false); deleteCustomer(); }}>{L("حذف العميل", "Delete customer")}</button>,
-  ] : [];
+  ] : [])];
+  // feat/credit-hold: the warning / hold / grace band, and the badges by the name.
+  const creditBand = cs ? <CreditCallout ar={ar} c={cs} phone={phone} onHold={() => setDialog("hold")} onLift={() => setDialog("lift")} /> : null;
+  const creditBadges = cs ? <CreditBadges ar={ar} s={badgesOf(cs)} /> : null;
 
   // ── Figures ──
   const sales = m.sales12m;
@@ -445,6 +455,14 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           : <>Delivered for order <bdi className="id">#{e.delivery.orderNumber}</bdi> · {e.delivery.units != null ? <><span className="n">{e.delivery.units}</span> units</> : <><span className="n">{money2(e.delivery.kg)}</span> kg</>} · <bdi>{e.delivery.item}</bdi>{e.delivery.type === "full" ? " · line complete" : ""}</>,
         detail: e.delivery.lots.length ? `${L("اللوتات", "Lots")}: ${e.delivery.lots.join(ar ? "، " : ", ")}` : undefined,
       };
+      case "credit": {
+        const k = e.credit;
+        const who = k.by?.name ?? L("النظام", "The system");
+        if (k.kind === "GRACE") return { title: ar ? <><b>{who}</b> منح مهلة سماح {dayCount(k.days ?? 0, lang)} حتى {k.untilAt ? fullDate(k.untilAt, true) : "—"}</> : <><b>{who}</b> gave {dayCount(k.days ?? 0, lang)} of grace until {k.untilAt ? fullDate(k.untilAt, false) : "—"}</>, detail: k.reason ?? undefined };
+        if (k.kind === "HOLD") return { title: ar ? <><b>{who}</b> أوقف البيع {k.untilPaid ? "حتى السداد" : k.untilAt ? `حتى ${fullDate(k.untilAt, true)}` : ""}</> : <><b>{who}</b> held sales {k.untilPaid ? "until paid" : k.untilAt ? `until ${fullDate(k.untilAt, false)}` : ""}</>, detail: k.reason ?? undefined };
+        if (k.kind === "LIFT") return { title: ar ? <><b>{who}</b> رفع الإيقاف</> : <><b>{who}</b> lifted the hold</>, detail: k.reason ?? undefined };
+        return { title: k.liftKind === "PAID" ? L("رُفع الإيقاف تلقائيًا: العميل ضمن الحد ولا متأخرات", "Hold lifted automatically: within the limit, nothing overdue") : L("رُفع الإيقاف تلقائيًا بانتهاء مدته", "Hold lifted automatically at its end") };
+      }
       case "payment": return {
         title: ar ? <>دفعة <span className="n">{money2(e.payment.amount)}</span> ر.س{e.payment.orderNumber != null && <> للطلب <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>
           : <>Payment SAR <span className="n">{money2(e.payment.amount)}</span>{e.payment.orderNumber != null && <> for order <bdi className="id">#{e.payment.orderNumber}</bdi></>} · {lx(METHOD[e.payment.method])}</>,
@@ -706,7 +724,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const filesTab = (
     <section data-testid="files-tab" className="acc-tabsec">
       <div className="bh"><h2 className="bt">{L("ملفات العميل", "Customer files")}</h2>
-        <span className="sub">{L("عقود، سجل تجاري، شهادة ضريبية، اتفاقيات أسعار · PDF أو JPEG أو PNG حتى 5 م.ب", "Contracts, commercial register, VAT certificate, price agreements · PDF, JPEG or PNG up to 5 MB")}</span>
+        <span className="sub">{ar ? `عقود، سجل تجاري، شهادة ضريبية، اتفاقيات أسعار · PDF أو JPEG أو PNG حتى ${Math.round((data.fileLimits?.maxBytes ?? 5242880) / 1048576)} م.ب` : `Contracts, commercial register, VAT certificate, price agreements · PDF, JPEG or PNG up to ${Math.round((data.fileLimits?.maxBytes ?? 5242880) / 1048576)} MB`}</span>
         {can.manageFiles && <button type="button" className="btn sm p acc-bh-act" onClick={() => setDialog("file")} data-testid="upload-file"><Ico name="plus" small />{L("رفع ملف", "Upload a file")}</button>}
       </div>
       {files.length === 0 ? empty(can.manageFiles ? L("لا ملفات على ملف العميل بعد. ارفع العقد أو السجل التجاري أو الشهادة الضريبية.", "No files yet. Upload the contract, the commercial register or the VAT certificate.") : L("لا ملفات على ملف العميل بعد.", "No files on the customer file yet.")) : (
@@ -741,8 +759,11 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     <>
       {dialog === "activity" && <ActivityDialog ar={ar} customerId={id} deals={openDeals} defaultDealId={null}
         onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("سُجّل النشاط.", "Activity logged."), ok: true }); reload(); }} />}
-      {dialog === "quote" && <QuoteDialog ar={ar} customer={c} openDeals={openDeals} canCreateDeal={can.createDeal} credit={m.credit} onClose={() => setDialog(null)} />}
-      {dialog === "file" && <FileDialog ar={ar} customerId={id} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
+      {dialog === "quote" && <QuoteDialog ar={ar} customer={c} openDeals={openDeals} canCreateDeal={can.createDeal} credit={m.credit} creditState={cs} onClose={() => setDialog(null)} />}
+      {(dialog === "hold" || dialog === "holdDirect") && cs && <HoldDialog ar={ar} customerId={id} customerName={name} c={cs} startAt={dialog === "holdDirect" && !cs.warning.any && !cs.grace ? "hold" : "ask"} onClose={() => setDialog(null)}
+        onDone={(what) => { setDialog(null); setNotice({ text: what === "grace" ? L("سُجّلت أيام السماح.", "Grace days recorded.") : L("أُوقف البيع لهذا العميل.", "Sales to this customer are on hold."), ok: true }); reload(); }} />}
+      {dialog === "lift" && cs && <LiftDialog ar={ar} customerId={id} customerName={name} c={cs} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الإيقاف.", "Hold lifted."), ok: true }); reload(); }} />}
+      {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
       {dialog === "details" && <DetailsDialog ar={ar} customer={c} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
       {dialog && typeof dialog === "object" && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
     </>
@@ -758,6 +779,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         <div className="pg acc acc-phone" data-testid="customer-account">
           {noticeEl}
           {subline && <p className="acc-subline">{subline}</p>}
+          {creditBand}
           <dl className="phrows" data-testid="account-metrics">
             <div><dt className="lbl">{L("الرصيد المستحق", "Balance due")}</dt><dd className={bal && Number(bal.outstanding) > 0 ? "acc-warn" : undefined}>{bal ? amountWithUnit(bal.outstanding, false, true) : "—"}</dd></div>
             <div><dt className="lbl">{L("مبيعات 12 شهرًا", "12-month sales")}</dt><dd>{sales ? amountWithUnit(sales.net) : "—"}</dd></div>
@@ -798,7 +820,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         {noticeEl}
         <div className="ph" style={{ alignItems: "flex-start" }}>
           <div style={{ minWidth: 0 }}>
-            <h1 data-testid="account-name">{name}</h1>
+            <h1 data-testid="account-name">{name}{creditBadges ? <span className="acc-credit-badges" data-testid="account-credit-badges">{creditBadges}</span> : null}</h1>
             <div className="meta">
               {metaParts.map((t, i) => <span key={i} className="acc-meta-item">{i > 0 && <i aria-hidden />}<span>{t}</span></span>)}
               {c.commercialRegNo && <span className="acc-meta-item">{metaParts.length > 0 && <i aria-hidden />}<span className="id" data-testid="account-cr">CR-{c.commercialRegNo}</span></span>}
@@ -816,6 +838,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           </div>
         </div>
 
+        {creditBand}
         <dl className="metrics acc-metrics" data-testid="account-metrics">
           {salesFig}{balFig}{lastFig}{qtyFig}{termsFig}
         </dl>

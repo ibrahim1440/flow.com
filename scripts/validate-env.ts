@@ -49,5 +49,5 @@ console.log(
   `Print certification gate (${printEnvironment(process.env)}): label printing (labels, calibration; A-8) ${isPrintCertified(process.env) ? "ENABLED (PRINT_CERTIFIED=true)" : "disabled (PRINT_CERTIFIED not \"true\")"}.`,
 );
 console.log(
-  `Document printing (${printEnvironment(process.env)}): quotation, payslips, credentials sheet, batches PDF ${isDocumentPrintingEnabled(process.env) ? `ENABLED (${isPrintCertified(process.env) ? "implied by PRINT_CERTIFIED=true" : "PRINT_DOCUMENTS_ENABLED=true"})` : "disabled (PRINT_DOCUMENTS_ENABLED not \"true\")"}.`,
+  `Document printing (${printEnvironment(process.env)}): quotation, payslips, credentials sheet, batches PDF, roast sheet, delivery note ${isDocumentPrintingEnabled(process.env) ? `ENABLED (${isPrintCertified(process.env) ? "implied by PRINT_CERTIFIED=true" : "PRINT_DOCUMENTS_ENABLED=true"})` : "disabled (PRINT_DOCUMENTS_ENABLED not \"true\")"}.`,
 );

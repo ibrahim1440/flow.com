@@ -4,6 +4,7 @@ import { requireAnyModule, requireEdit } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { canSeeCustomerContact, CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
 import { parseAccountFields } from "@/lib/services/customers/fields";
+import { deleteCustomerFileBlobs } from "@/lib/services/customers/files";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { user, error } = await requireAnyModule("customers", "orders");
@@ -74,7 +75,10 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
   try {
+    // The customer's documents cascade with it; their private blobs are removed after it commits.
+    const blobs = await prisma.customerFile.findMany({ where: { customerId: id, blobPathname: { not: null } }, select: { blobPathname: true } });
     await prisma.customer.delete({ where: { id } });
+    await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));
     return NextResponse.json({ deleted: true });
   } catch (err) {
     // P2003 = foreign key constraint: customer has orders

@@ -444,7 +444,7 @@ function OfferDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void
 
 function HireDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void; onDone: (r: { employeeId: string; replayed: boolean }) => void }) {
   const { meta } = useHrMeta();
-  const f = useForm({ branchId: meta?.branches.length === 1 ? meta.branches[0].id : "", departmentId: "", managerId: "", accountId: "" });
+  const f = useForm({ branchId: meta?.branches.length === 1 ? meta.branches[0].id : "", departmentId: "", managerId: "", accountId: "", workEmail: "" });
   const accounts = useHr<{ id: string; name: string; role: string; simpleModeException?: boolean }[]>("/api/hr/accounts/linkable");
   const act = useAction();
   const offer = a.offers.find((o) => o.status === "ACCEPTED");
@@ -466,6 +466,10 @@ function HireDialog({ a, onClose, onDone }: { a: Applicant; onClose: () => void;
       ) : null}
       <div className="hr-form">
         <Field label={L("الفرع", "Branch")}><Select className="hr-select" {...f.bind("branchId")}><option value="">—</option>{meta?.branches.map((b) => <option key={b.id} value={b.id}>{orgName(b, lang)}</option>)}</Select></Field>
+        {/* feat/credit-hold: the company e-mail is assigned at hiring; the applicant's own address becomes the personal e-mail. */}
+        <Field label={L("بريد الشركة", "Company e-mail")} help={a.email ? L(`بريد المتقدّم ${a.email} يُحفظ بريدًا شخصيًا.`, `The applicant's ${a.email} is kept as the personal e-mail.`) : L("اختياري؛ إليه تُرسل تنبيهات النظام.", "Optional; system notifications go here.")}>
+          <input className="hr-input" type="email" dir="ltr" {...f.bind("workEmail")} data-testid="hire-work-email" />
+        </Field>
         <Field label={L("الإدارة", "Department")}><Select className="hr-select" {...f.bind("departmentId")}><option value="">—</option>{meta?.departments.map((d) => <option key={d.id} value={d.id}>{orgName(d, lang)}</option>)}</Select></Field>
         <Field label={L("المدير المباشر", "Line manager")}><Select className="hr-select" {...f.bind("managerId")}><option value="">—</option>{meta?.people.map((p) => <option key={p.id} value={p.id}>{p.fullNameAr} · {p.employeeNo}</option>)}</Select></Field>
         <Field label={L("ربط حساب دخول قائم (اختياري)", "Link an existing login (optional)")} help={accounts.error ? accounts.error.message : L("يمكن ربطه لاحقًا من ملف الموظف.", "It can be linked later from the employee file.")}>

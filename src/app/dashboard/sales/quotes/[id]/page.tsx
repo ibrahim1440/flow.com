@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomerCreditNotice } from "@/components/credit/credit-ui";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
@@ -910,6 +911,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         <OrderDialog
           ar={ar}
           quoteId={id}
+          customerId={quote.customer?.id ?? null}
           onClose={() => setDialog(null)}
           onDone={(msg) => {
             setDialog(null);
@@ -1124,11 +1126,13 @@ function RejectDialog({
 }
 
 function OrderDialog({
-  ar, quoteId, onClose, onDone,
+  ar, quoteId, customerId, onClose, onDone,
 }: {
-  ar: boolean; quoteId: string; onClose: () => void; onDone: (message: string) => void;
+  ar: boolean; quoteId: string; customerId?: string | null; onClose: () => void; onDone: (message: string) => void;
 }) {
   const [notes, setNotes] = useState("");
+  // «إيقاف البيع» (feat/credit-hold): shown before submitting; the server refuses 409 CUSTOMER_SALES_HOLD regardless.
+  const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -1141,7 +1145,7 @@ function OrderDialog({
         <>
           <Button variant="secondary" onClick={onClose}>{ar ? "إلغاء" : "Cancel"}</Button>
           <Button
-            disabled={busy}
+            disabled={busy || held}
             testId="confirm-order"
             onClick={async () => {
               setBusy(true);
@@ -1161,6 +1165,7 @@ function OrderDialog({
       }
     >
       {err && <p className="notice er" role="alert">{err}</p>}
+      <CustomerCreditNotice customerId={customerId} ar={ar} onHold={setHeld} testId="order-credit" />
       <p className="lbl" style={{ fontWeight: 400, margin: 0 }}>
         {ar
           ? "يُنشأ الطلب في نظام الطلبات عبر خدمة الطلبات نفسها، ببنود العرض وكمياته. الضغط مرتين لا يُنشئ طلبين."

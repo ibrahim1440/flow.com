@@ -19,6 +19,8 @@ export type AccountFields = {
   paymentTermsDays?: number | null;
   creditLimit?: Decimal | null;
   accountOwnerId?: string | null;
+  /** «مدة الإيقاف الافتراضية» (feat/credit-hold): the hold dialog's proposed duration, 1–365 days. */
+  defaultHoldDays?: number | null;
 };
 
 type Problem = { error: string; errorAr: string };
@@ -98,6 +100,15 @@ export function parseAccountFields(b: Record<string, unknown>): Parsed<AccountFi
         return fail("The credit limit is an amount in SAR, zero or more, with at most two decimals.", "حد الائتمان مبلغ بالريال، صفر أو أكثر، بمنزلتين عشريتين على الأكثر.");
       }
       data.creditLimit = roundMoney(d);
+    }
+  }
+  if ("defaultHoldDays" in b) {
+    const v = b.defaultHoldDays;
+    if (v === null || v === "") data.defaultHoldDays = null;
+    else {
+      const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(digitsOnly(v)) ? Number(digitsOnly(v)) : NaN;
+      if (!Number.isInteger(n) || n < 1 || n > 365) return fail("The default hold duration is whole days, 1 to 365.", "مدة الإيقاف الافتراضية أيام صحيحة من 1 إلى 365.");
+      data.defaultHoldDays = n;
     }
   }
   if ("accountOwnerId" in b) {

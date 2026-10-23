@@ -6,7 +6,7 @@ import { NextResponse } from "@/lib/api-response";
 import { requireAuth, forbidden, adminRoleGate } from "@/lib/auth-server";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth";
 import type { TemplateKey } from "../templates";
-import { isPrintCertified, printNotCertifiedBody } from "../certification";
+import { documentPrintingDisabledBody, isDocumentPrintingEnabled, isPrintCertified, printNotCertifiedBody } from "../certification";
 
 type User = Awaited<ReturnType<typeof requireAuth>>["user"];
 
@@ -87,4 +87,15 @@ export async function readJson(req: Request): Promise<{ body: Record<string, unk
   } catch {
     return { body: null, error: badRequest("INVALID_BODY", "Invalid JSON body.") };
   }
+}
+
+/**
+ * The document gate (PRINT_DOCUMENTS_ENABLED, or implied by PRINT_CERTIFIED) for the A4 document
+ * data endpoints (/api/print/documents/**: roast sheet, delivery note). Called after
+ * authentication and the module permission, before the query string is read. Returns the 409
+ * refusal to send, or null.
+ */
+export function documentPrintGate(): NextResponse | null {
+  if (isDocumentPrintingEnabled()) return null;
+  return NextResponse.json(documentPrintingDisabledBody(), { status: 409 });
 }

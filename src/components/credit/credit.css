@@ -1,0 +1,19 @@
+/* Credit warnings and the sales hold (feat/credit-hold) — Direction 2.1 tokens only; the badge is
+   the reference `.flag`, the band the reference `.callout`. */
+.d21 .cr-badges { display: inline-flex; flex-wrap: wrap; gap: 6px; vertical-align: middle; }
+.d21 .cr-badges.is-compact { flex: none; }
+.d21 .cr-callout { margin: 0 0 16px; align-items: flex-start; line-height: 22px; flex-wrap: wrap; }
+.d21 .cr-callout > span:not(.flag):not(.cr-badges) { flex: 1 1 260px; min-width: 0; }
+.d21 .cr-callout.cr-grace { background: var(--status-warning-tint); }
+.d21 .cr-callout.cr-inline { margin: 0; grid-column: 1 / -1; font-size: 13.5px; }
+.d21 .cr-muted { color: var(--text-secondary); }
+[data-hr-root] .cr-q { margin: 0; grid-column: 1 / -1; font-size: 15px; font-weight: 600; }
+[data-hr-root] .cr-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-hr-root] .cr-chip { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--hr-border-control); background: var(--hr-surface, var(--surface)); font: inherit; font-size: 13.5px; color: var(--hr-text-2, var(--text-secondary)); cursor: pointer; }
+[data-hr-root] .cr-chip.on { border-color: var(--hr-primary, var(--action-primary)); color: var(--hr-text, var(--text-primary)); box-shadow: inset 0 0 0 1px var(--hr-primary, var(--action-primary)); font-weight: 600; }
+[data-hr-root] .cr-custom input { width: 44px; border: 0; background: transparent; font: inherit; text-align: center; color: inherit; outline: none; }
+[data-hr-root] .cr-lifts { display: grid; gap: 8px; }
+.d21 .cu-badges-cell { display: block; margin-top: 4px; }
+/* The badges keep their own width beside the sentence; on a phone they take a line of their own. */
+.d21 .callout.cr-callout > .cr-badges { flex: 0 0 auto; }
+.d21 .callout.ph.cr-callout > .cr-badges { flex: 1 1 100%; }

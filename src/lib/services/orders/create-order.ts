@@ -1,6 +1,7 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { kgForUnits } from "@/lib/services/finished-products";
 import { CUSTOMER_NAME_SELECT } from "@/lib/auth/customer-detail";
+import { assertSalesAllowed } from "@/lib/services/customers/credit-db";
 
 type Client = PrismaNS.TransactionClient;
 
@@ -163,6 +164,11 @@ export async function createOrderWithNumber(
     // Review" forever and can never reach Ready for Shipping.
     throw { _appCode: 400, message: "An order must have at least one line." };
   }
+
+  // «إيقاف البيع» (feat/credit-hold): no new order for a customer whose sales are on hold — 409
+  // CUSTOMER_SALES_HOLD. Here, in the one order writer, so POST /api/orders and an accepted
+  // quotation's conversion are both covered (a replayed conversion returns before reaching it).
+  await assertSalesAllowed(db, header.customerId);
 
   // Before reading the maximum, not after: the point is that nobody else is between the
   // read and the write.
