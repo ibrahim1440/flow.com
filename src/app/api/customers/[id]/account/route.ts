@@ -11,6 +11,8 @@ import {
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
 import { orderPipelines } from "@/lib/services/orders/pipeline";
 import { CUSTOMER_FILE_SELECT, uploadLimit } from "@/lib/services/customers/files";
+import { directUploadOffered } from "@/lib/services/customers/direct-upload";
+import { isScopedSalesRep } from "@/lib/services/orders/owner-access";
 import { creditLog, creditView } from "@/lib/services/customers/credit-db";
 
 type Params = { params: Promise<{ id: string }> };
@@ -363,7 +365,7 @@ export async function GET(_request: Request, { params }: Params) {
       creditState,
       files,
       // 20 MB with the private Blob store, 5 MB in the database (services/customers/file-store.ts).
-      fileLimits: { maxBytes: uploadLimit().maxBytes },
+      fileLimits: { maxBytes: uploadLimit().maxBytes, direct: directUploadOffered() },
       openDeal: primary ? {
         ...primary, amount: primary.amount.toFixed(2), stageEvents: primary.stageEvents,
         nextStep: nextStep && nextStep.opportunity?.id === primary.id ? nextStep : null,
@@ -389,7 +391,8 @@ export async function GET(_request: Request, { params }: Params) {
       can: {
         edit: canEdit(p, "customers"),
         manageProfiles: hasSubPrivilege(p, "customers", "manage"),
-        manageFiles: canEdit(p, "customers"),
+        // The file routes' own rule: a scoped sales rep changes files only on a customer they own.
+        manageFiles: canEdit(p, "customers") && (!isScopedSalesRep(p) || customer.accountOwner?.id === user.id),
         logActivity: hasSubPrivilege(p, "sales", "lead_write"),
         quote: hasSubPrivilege(p, "sales", "quote_write"),
         createDeal: hasSubPrivilege(p, "sales", "lead_convert"),

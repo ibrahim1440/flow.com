@@ -76,6 +76,8 @@ export async function runAutomationDispatch(opts: DispatchOptions): Promise<Disp
     await sweepDueTasks(report);
     await processPendingEvents(report, deadline);
     await sendDueMessages(report, deadline, opts.maxSends);
+    // feat/notifications: the scheduled dispatch also sends any notification e-mail still waiting.
+    if (Date.now() < deadline) await (await import("@/lib/notifications/deliver")).deliverPendingEmails({ limit: 50 });
   } catch (err) {
     // A dispatcher failure must never surface in the request that scheduled it. Whatever was
     // not done stays pending for the next run.

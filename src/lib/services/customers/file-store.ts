@@ -16,9 +16,20 @@
 //
 // The browser never sees a Blob URL or pathname: uploads arrive through the app's route, and
 // downloads are streamed by GET /api/customers/[id]/files/[fileId].
+//
+// ── Direct uploads (feat/blob-client-upload) ──
+// A file over 4 MB goes from the browser straight to the store (./direct-upload.ts). For that the
+// store also answers `head` (does the blob exist, how big, what type) and `issueUploadToken` (a
+// delegation for ONE pathname, put only — @vercel/blob 2.8.2 `issueSignedToken`, which authenticates
+// with OIDC + BLOB_STORE_ID like every other call; no BLOB_READ_WRITE_TOKEN is needed). The browser
+// then learns that pathname (its upload slot) — never a URL it could download from: the store is
+// private and downloads still stream through the app. The mock directory answers both too, and
+// receives the browser's presigned PUT at /api/system/blob-mock (NEXT_PUBLIC_VERCEL_BLOB_API_URL=
+// http://<host>/api/system/blob-mock?x= at build time, local builds only), checking the same signature, pathname, size, type and expiry Blob checks.
 
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 
 export const MAX_DB_FILE_BYTES = 5 * 1024 * 1024;
@@ -32,7 +43,22 @@ export type BlobStore = {
   /** null when the blob does not exist. */
   get(pathname: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number | null } | null>;
   del(pathnames: string[]): Promise<void>;
+  /** Direct uploads: the blob's metadata, null when it does not exist (stores without it offer no direct path). */
+  head?(pathname: string): Promise<{ size: number; contentType: string; uploadedAt: Date } | null>;
+  /** Direct uploads: a delegation scoped to one pathname (see direct-upload-rules.ts directTokenScope). */
+  issueUploadToken?(scope: UploadTokenScope): Promise<IssuedUploadToken>;
 };
+
+export type UploadTokenScope = {
+  pathname: string; operations: ("put")[]; validUntil: number; maximumSizeInBytes: number; allowedContentTypes: string[];
+};
+/** The shape of @vercel/blob's IssuedSignedToken. */
+export type IssuedUploadToken = { delegationToken: string; clientSigningToken: string; validUntil: number };
+
+/** Does this store support the browser's direct upload? */
+export function supportsDirectUpload(store: BlobStore): store is BlobStore & Required<Pick<BlobStore, "head" | "issueUploadToken">> {
+  return typeof store.head === "function" && typeof store.issueUploadToken === "function";
+}
 
 export type StorageChoice =
   | { kind: "blob"; store: BlobStore; maxBytes: number }
@@ -102,6 +128,21 @@ function vercelBlobStore(): BlobStore {
       const { del } = await sdk();
       await del(pathnames, { abortSignal: AbortSignal.timeout(BLOB_TIMEOUT_MS) });
     },
+    async head(pathname) {
+      const { head, BlobNotFoundError } = await sdk();
+      try {
+        const h = await head(pathname, { abortSignal: AbortSignal.timeout(BLOB_TIMEOUT_MS) });
+        return { size: h.size, contentType: h.contentType, uploadedAt: new Date(h.uploadedAt) };
+      } catch (e) {
+        if (e instanceof BlobNotFoundError) return null;
+        throw e;
+      }
+    },
+    async issueUploadToken(scope) {
+      // POST /signed-token on the Blob API, authenticated like put/get/del (OIDC first).
+      const { issueSignedToken } = await sdk();
+      return issueSignedToken({ ...scope, abortSignal: AbortSignal.timeout(BLOB_TIMEOUT_MS) });
+    },
   };
 }
 
@@ -119,11 +160,12 @@ function mockDirStore(dir: string): BlobStore {
   const boom = () => Object.assign(new Error("mock blob unavailable"), { name: "BlobServiceNotAvailable" });
   return {
     name: "mock-dir",
-    async put(pathname, bytes) {
+    async put(pathname, bytes, contentType) {
       if (failing()) throw boom();
       const f = file(pathname);
       await mkdir(path.dirname(f), { recursive: true });
       await writeFile(f, bytes, { flag: "wx" });
+      await writeMockMeta(dir, pathname, contentType);
     },
     async get(pathname) {
       if (failing()) throw boom();
@@ -134,7 +176,116 @@ function mockDirStore(dir: string): BlobStore {
     },
     async del(pathnames) {
       if (failing()) throw boom();
-      for (const p of pathnames) await rm(file(p), { force: true });
+      for (const p of pathnames) {
+        await rm(file(p), { force: true });
+        await rm(mockMetaFile(dir, p), { force: true });
+      }
+    },
+    async head(pathname) {
+      if (failing()) throw boom();
+      const f = file(pathname);
+      let st;
+      try { st = await stat(f); } catch { return null; }
+      const meta = await readFile(mockMetaFile(dir, pathname), "utf8").then((t) => JSON.parse(t) as { contentType?: string }).catch(() => ({ contentType: undefined }));
+      return { size: st.size, contentType: meta.contentType ?? "application/octet-stream", uploadedAt: st.mtime };
+    },
+    async issueUploadToken(scope) {
+      if (failing()) throw boom();
+      return mockIssueToken(dir, scope);
     },
   };
+}
+
+// ── The mock directory's stand-in for Blob's presigned uploads (never on Vercel) ──────────────────
+// Same token shapes as @vercel/blob 2.8.2 (src/signed-token.ts, presign-query-params.ts): a
+// delegation `<base64url JSON>.<HMAC>` and a client signing key HMAC(secret, delegation) that the
+// SDK's presign() uses to sign the canonical `operation=put / pathname=… / vercel-blob-…` lines. The
+// secret is random per directory (.mock-secret), so only this app's own tokens verify.
+
+const b64url = (b: Buffer) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64url = (s: string) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+const mockMetaFile = (dir: string, pathname: string) => {
+  const root = path.resolve(dir, ".meta");
+  const f = path.resolve(root, `${pathname}.json`);
+  if (!f.startsWith(root + path.sep)) throw new Error("bad pathname");
+  return f;
+};
+async function writeMockMeta(dir: string, pathname: string, contentType: string) {
+  const f = mockMetaFile(dir, pathname);
+  await mkdir(path.dirname(f), { recursive: true });
+  await writeFile(f, JSON.stringify({ contentType }));
+}
+function mockSecret(dir: string): string {
+  const f = path.join(dir, ".mock-secret");
+  if (!existsSync(f)) {
+    mkdirSync(dir, { recursive: true });
+    try { writeFileSync(f, randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 }); } catch { /* another request wrote it */ }
+  }
+  return readFileSync(f, "utf8").trim();
+}
+function mockIssueToken(dir: string, scope: UploadTokenScope): IssuedUploadToken {
+  const secret = mockSecret(dir);
+  const payload = b64url(Buffer.from(JSON.stringify({ storeId: "store_mockdir", ...scope })));
+  const delegationToken = `${payload}.${b64url(createHmac("sha256", secret).update(payload).digest())}`;
+  const clientSigningToken = b64url(createHmac("sha256", secret).update(delegationToken).digest());
+  return { delegationToken, clientSigningToken, validUntil: scope.validUntil };
+}
+const CANONICAL_KEYS = [
+  "vercel-blob-add-random-suffix", "vercel-blob-allow-overwrite", "vercel-blob-allowed-content-types",
+  "vercel-blob-cache-control-max-age", "vercel-blob-callback-token-payload", "vercel-blob-callback-url",
+  "vercel-blob-if-match", "vercel-blob-maximum-size-in-bytes", "vercel-blob-valid-until",
+];
+const blobApiError = (status: number, code: string, message: string) => ({ status, body: { error: { code, message } } });
+
+/**
+ * The browser's presigned PUT, as the Blob API would take it: the signature, the delegation's
+ * pathname, its expiry, the size and type limits, private access and no overwrite. Returns the
+ * response the SDK expects (or the error shape its getBlobError maps). Mock directory only.
+ */
+export async function mockReceivePresignedPut(
+  env: Record<string, string | undefined>,
+  url: URL,
+  headers: Headers,
+  body: Uint8Array,
+): Promise<{ status: number; body: unknown }> {
+  const dir = env.CUSTOMER_FILES_BLOB_MOCK_DIR?.trim();
+  if (!dir || env.VERCEL === "1") return blobApiError(404, "not_found", "Not found");
+  if (existsSync(path.join(dir, ".fail"))) return blobApiError(503, "service_unavailable", "mock blob unavailable");
+  const q = url.searchParams;
+  // The SDK appends "/?pathname=…" to the API URL; a path ending in "/" would be redirected by Next
+  // (and a redirected PUT loses its body), so the mock's API URL ends in "?x=" and the SDK's own
+  // query arrives inside `x`.
+  const pathname = q.get("pathname") ?? new URLSearchParams((q.get("x") ?? "").replace(/^\/\?/, "")).get("pathname") ?? "";
+  const delegation = q.get("vercel-blob-delegation") ?? "";
+  const signature = q.get("vercel-blob-signature") ?? "";
+  const secret = mockSecret(dir);
+  const dot = delegation.indexOf(".");
+  const eq = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  if (dot < 0 || !eq(delegation.slice(dot + 1), b64url(createHmac("sha256", secret).update(delegation.slice(0, dot)).digest()))) {
+    return blobApiError(403, "forbidden", "Invalid delegation");
+  }
+  const scope = JSON.parse(fromB64url(delegation.slice(0, dot)).toString("utf8")) as UploadTokenScope;
+  const lines = [`operation=put`, `pathname=${pathname}`];
+  for (const k of CANONICAL_KEYS) { const v = q.get(k); if (v) lines.push(`${k}=${v}`); }
+  lines.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  const clientKey = b64url(createHmac("sha256", secret).update(delegation).digest());
+  if (!eq(signature, b64url(createHmac("sha256", clientKey).update(lines.join("\n")).digest()))) return blobApiError(403, "forbidden", "Invalid signature");
+  if (!scope.operations?.includes("put")) return blobApiError(403, "forbidden", "Operation not allowed");
+  if (scope.pathname !== pathname) return blobApiError(400, "bad_request", `The "pathname" ${pathname} does not match the token payload`);
+  const until = Math.min(scope.validUntil, Number(q.get("vercel-blob-valid-until") ?? Infinity));
+  if (Date.now() > until) return blobApiError(403, "forbidden", "Token expired");
+  if (headers.get("x-vercel-blob-access") !== "private") return blobApiError(400, "bad_request", "access must be private");
+  const max = Math.min(scope.maximumSizeInBytes, Number(q.get("vercel-blob-maximum-size-in-bytes") ?? Infinity));
+  if (body.length > max) return blobApiError(400, "bad_request", `File is too large: the file length cannot be greater than ${max} bytes`);
+  const contentType = headers.get("x-content-type") ?? "application/octet-stream";
+  const allowed = (q.get("vercel-blob-allowed-content-types") ?? scope.allowedContentTypes.join(",")).split(",");
+  if (!allowed.includes(contentType) || !scope.allowedContentTypes.includes(contentType)) return blobApiError(400, "bad_request", `contentType ${contentType} is not allowed`);
+  const f = path.resolve(dir, pathname);
+  if (!f.startsWith(path.resolve(dir) + path.sep)) return blobApiError(400, "bad_request", "bad pathname");
+  if (existsSync(f)) return blobApiError(400, "bad_request", "This blob already exists, use `allowOverwrite: true` if you want to overwrite it.");
+  await mkdir(path.dirname(f), { recursive: true });
+  await writeFile(f, body, { flag: "wx" });
+  await writeMockMeta(dir, pathname, contentType);
+  const blobUrl = `https://mockdir.private.blob.vercel-storage.com/${pathname}`;
+  return { status: 200, body: { url: blobUrl, downloadUrl: `${blobUrl}?download=1`, pathname, contentType, contentDisposition: "attachment", etag: `"${b64url(createHmac("sha256", "etag").update(body).digest()).slice(0, 16)}"` } };
 }

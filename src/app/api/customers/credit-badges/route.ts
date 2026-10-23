@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireAnyModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { creditBadges } from "@/lib/services/customers/credit-db";
+import { checkCreditStandingLater } from "@/lib/notifications/credit-watch";
 
 /**
  * GET /api/customers/credit-badges[?ids=a,b] — the customers list's red badges («متجاوز حد
@@ -18,7 +19,10 @@ export async function GET(request: Request) {
     const ids = raw
       ? raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200)
       : (await prisma.customer.findMany({ orderBy: { name: "asc" }, take: 200, select: { id: true } })).map((c) => c.id);
-    return NextResponse.json({ badges: await creditBadges(prisma, ids, new Date()) });
+    const badges = await creditBadges(prisma, ids, new Date());
+    // feat/notifications: a standing that changed since it was last notified is notified (once), after the response.
+    checkCreditStandingLater(ids);
+    return NextResponse.json({ badges });
   } catch (err) {
     return handleDomainError(err);
   }

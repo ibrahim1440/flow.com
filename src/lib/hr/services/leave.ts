@@ -170,6 +170,27 @@ export async function quoteLeave(actor: HrActor, q: URLSearchParams, opts: { sel
  * Create a leave request. `self` = filed through self-service by the person themself;
  * otherwise an HR user with leave_manage files it for someone in scope.
  */
+/**
+ * feat/notifications: who may decide a request about `person` — active holders of hr › leave_approve
+ * whose HR scope covers the person (every branch, the person's branch, or the person's manager),
+ * never the person themself. The same rule as decideLeave's (resolveScope / inScope).
+ */
+async function leaveApproverAccounts(db: Db, person: { id: string; branchId: string | null; managerId: string | null; accountId: string | null }): Promise<string[]> {
+  const { effectivePermissions } = await import("@/lib/notifications/recipients");
+  const { hasSubPrivilege } = await import("@/lib/auth-shared");
+  const rows = await db.employee.findMany({ where: { active: true }, select: { id: true, role: true, permissions: true } });
+  const holders = rows.filter((r) => hasSubPrivilege(effectivePermissions(r), "hr", "leave_approve"));
+  if (holders.length === 0) return [];
+  const [branch, manager] = await Promise.all([
+    person.branchId ? db.finBranchAccess.findMany({ where: { branchId: person.branchId, employeeId: { in: holders.map((h) => h.id) }, branch: { active: true } }, select: { employeeId: true } }) : Promise.resolve([]),
+    person.managerId ? db.hrEmployee.findUnique({ where: { id: person.managerId }, select: { accountId: true } }) : Promise.resolve(null),
+  ]);
+  const inBranch = new Set(branch.map((b) => b.employeeId));
+  return holders
+    .filter((h) => h.id !== person.accountId && (hasSubPrivilege(effectivePermissions(h), "hr", "all_branches") || inBranch.has(h.id) || h.id === manager?.accountId))
+    .map((h) => h.id);
+}
+
 export async function requestLeave(actor: HrActor, b: Record<string, unknown>, opts: { selfEmployeeId?: string } = {}) {
   const employeeId = opts.selfEmployeeId ?? reqText(b.employeeId, "employeeId", 40);
   if (!opts.selfEmployeeId) assertCan(actor, "leave_manage");
@@ -195,6 +216,14 @@ export async function requestLeave(actor: HrActor, b: Record<string, unknown>, o
     const days = check.days as number;
     const row = await tx.hrLeaveRequest.create({ data: { employeeId, leaveTypeId, startDate, endDate, days: D(days), reason, requestedBy: actor.id, idempotencyKey } });
     await audit(tx, { action: "LEAVE_REQUEST", entityType: "HrLeaveRequest", entityId: row.id, employeeId, after: requestDto(row), actorId: actor.id });
+    // feat/notifications: the approvers who may decide it (hr.leave_pending).
+    const type = await tx.hrLeaveType.findUnique({ where: { id: leaveTypeId }, select: { nameAr: true } });
+    const { notify } = await import("@/lib/notifications/notify");
+    await notify(tx, {
+      event: "hr.leave_pending", dedupeKey: row.id, actorId: actor.id, entity: { type: "HrLeaveRequest", id: row.id },
+      facts: { personName: person.fullNameAr, leaveTypeAr: type?.nameAr ?? "", from: dayString(startDate), to: dayString(endDate), days },
+      people: { approvers: await leaveApproverAccounts(tx, person) },
+    });
     return requestDto(row);
   }, TX));
 }
@@ -232,6 +261,15 @@ export async function decideLeave(actor: HrActor, id: string, b: Record<string, 
     }
     const after = await tx.hrLeaveRequest.findUniqueOrThrow({ where: { id } });
     await audit(tx, { action: decision === "APPROVE" ? "LEAVE_APPROVE" : "LEAVE_REJECT", entityType: "HrLeaveRequest", entityId: id, employeeId: req.employeeId, after: requestDto(after), reason: note, actorId: actor.id });
+    // feat/notifications: the person learns the decision (me.leave_decided).
+    if (req.employee.accountId) {
+      const { notify } = await import("@/lib/notifications/notify");
+      await notify(tx, {
+        event: "me.leave_decided", dedupeKey: `${id}:${decision}`, actorId: actor.id, entity: { type: "HrLeaveRequest", id },
+        facts: { decision, from: dayString(req.startDate), to: dayString(req.endDate), note: note ?? null },
+        people: { subject: req.employee.accountId },
+      });
+    }
     return requestDto(after);
   }, TX));
 }

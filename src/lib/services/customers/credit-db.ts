@@ -15,9 +15,10 @@
 //   * placeGrace / placeHold / liftHold — the three acts of a holder of customers › sales_hold,
 //                           each serialised on the customer row and logged.
 //
-// In-app notification: the system has none (no notification model or inbox — checked against the
-// schema), so the assigned rep / deal owner is not notified; every act is in the customer's credit
-// log, which the customer file's activity shows to everyone who can open the customer.
+// In-app notification (feat/notifications): every act — a hold, a grace, a lift by hand or by
+// itself — notifies the customer's account owner (the rep) and the holders of customers › sales_hold
+// (sales.customer_hold, lib/notifications/catalog.ts), in the same transaction; every act also stays
+// in the customer's credit log.
 
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, acceptedDocumentPerDeal, statementOfAccount } from "./aggregates";
@@ -135,6 +136,19 @@ export async function loadCreditStates(db: Db, customerIds: string[], now: Date)
   return out;
 }
 
+/** feat/notifications: tell the customer's rep and the sales-hold holders about a credit act. */
+async function notifyCreditAct(db: Db, customerId: string, a: { kind: "HOLD" | "GRACE" | "LIFT" | "AUTO_LIFT"; key: string; actorId: string | null; days?: number | null; reason?: string | null }) {
+  const c = await db.customer.findUnique({ where: { id: customerId }, select: { name: true, nameAr: true, accountOwnerId: true } });
+  if (!c) return;
+  const { notify } = await import("@/lib/notifications/notify");
+  await notify(db, {
+    event: "sales.customer_hold", dedupeKey: `${customerId}:${a.kind}:${a.key}`, actorId: a.actorId,
+    entity: { type: "Customer", id: customerId },
+    facts: { kind: a.kind, customerName: c.nameAr || c.name, customerId, days: a.days ?? null, reason: a.reason ?? null },
+    people: { customerOwner: c.accountOwnerId }, scopeOwners: [c.accountOwnerId],
+  });
+}
+
 /**
  * Lift, once, an unlifted hold whose automatic ending has come — EXPIRED at its end date, PAID now —
  * and log it (AUTO_LIFT, no actor). Idempotent: the update is conditional on the hold still being
@@ -153,6 +167,7 @@ export async function settleHold(db: Db, customerId: string, flags: CreditFlags,
       detail: { liftKind: v.liftKind, overLimit: flags.overLimit, overdueDays: flags.overdueDays } as PrismaNS.InputJsonValue,
     },
   });
+  await notifyCreditAct(db, customerId, { kind: "AUTO_LIFT", key: open.id, actorId: null });
   return true;
 }
 
@@ -211,6 +226,7 @@ export async function placeGrace(db: Db, input: { customerId: string; actorId: s
     },
     select: { id: true, days: true, untilAt: true, reason: true, createdAt: true },
   });
+  await notifyCreditAct(db, input.customerId, { kind: "GRACE", key: row.id, actorId: input.actorId, days: input.days, reason: input.reason });
   return { grace: row, graces: { count: history.count + 1 } };
 }
 
@@ -244,6 +260,7 @@ export async function placeHold(db: Db, input: { customerId: string; actorId: st
       } as PrismaNS.InputJsonValue,
     },
   });
+  await notifyCreditAct(db, input.customerId, { kind: "HOLD", key: hold.id, actorId: input.actorId, days: h.days, reason: h.reason });
   return hold;
 }
 
@@ -261,6 +278,7 @@ export async function liftHold(db: Db, input: { customerId: string; actorId: str
   await db.customerCreditLog.create({
     data: { customerId: input.customerId, kind: "LIFT", holdId: state.hold.id, reason: input.reason, actorId: input.actorId, createdAt: input.now },
   });
+  await notifyCreditAct(db, input.customerId, { kind: "LIFT", key: state.hold.id, actorId: input.actorId, reason: input.reason });
   return { liftedAt: input.now, holdId: state.hold.id };
 }
 

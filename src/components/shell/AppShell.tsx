@@ -9,8 +9,9 @@ import {
   shellText, crumbText, groupText, shellGroupOf, shellTrail, dedupeTrail,
   type NavNode, type Viewer,
 } from "@/lib/nav/registry";
-import { ROLE_LABELS, ROLE_LABELS_AR, canEdit } from "@/lib/auth-shared";
-import { AlertsBell } from "./AlertsBell";
+import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
+import { NotificationsBell } from "@/components/notifications/NotificationsBell";
+import "./alerts-bell.css";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { Ico, type D21IconName } from "./icons";
 import { createActions } from "./creates";
@@ -193,8 +194,6 @@ export function AppShell({
 }) {
   const ar = lang === "ar";
   const pathname = usePathname();
-  // The system alerts bell: menu visibility only — GET /api/system/alerts enforces Settings at edit.
-  const alertsOn = canEdit(viewer.permissions, "settings");
   // The viewer's tree as the approved frames present it (`presentTree`: «الطلبات» in «التشغيل»
   // for every persona, N-02); resolution uses the same presentation of the full registry.
   const tree = useMemo(() => presentTree(visibleNav(viewer)), [viewer]);
@@ -463,7 +462,7 @@ export function AppShell({
             {phoneHeader?.sub ? <div className="sub">{phoneHeader.sub}</div> : null}
           </div>
           <span className="sp" />
-          {alertsOn && !phoneHeader?.back ? <AlertsBell lang={ar ? "ar" : "en"} phone /> : null}
+          {!phoneHeader?.back ? <NotificationsBell lang={ar ? "ar" : "en"} phone /> : null}
           {phoneHeader?.action ? (
             <Link href={phoneHeader.action.href} className="d21-ib" aria-label={phoneHeader.action.label} data-testid="ph-action"><Ico name={phoneHeader.action.icon} /></Link>
           ) : !phoneHeader?.back ? (
@@ -485,8 +484,9 @@ export function AppShell({
                 </nav>
               ) : null}
               <span className="sp" />
-              {/* feat/credit-hold: system alerts, for the accounts that hold Settings at edit. */}
-              {alertsOn ? <AlertsBell lang={ar ? "ar" : "en"} /> : null}
+              {/* feat/notifications: «التنبيهات», the bell of every signed-in account (the storage
+                  alerts of feat/credit-hold are its «system» notifications). */}
+              <NotificationsBell lang={ar ? "ar" : "en"} />
               {single ? (
                 <div className="d21-new" data-d21-new>
                   <Link href={single.href} className="d21-btn g sm" data-testid="d21-new" title={ar ? single.labelAr : single.labelEn}

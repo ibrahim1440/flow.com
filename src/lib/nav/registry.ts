@@ -5,7 +5,7 @@ import {
   ClipboardList, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3,
   ScrollText, Briefcase, Landmark, Boxes, Workflow, Zap, MessageSquareText, QrCode,
   Contact, UserRound, CalendarDays, Banknote, Laptop,
-  Flame, ListChecks, Coffee,
+  Flame, ListChecks, Coffee, Bell,
 } from "lucide-react";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import type { D21IconName } from "@/components/shell/icons";
@@ -689,6 +689,16 @@ export const NAV: NavNode[] = [
     icon: UserRound,
     href: "/dashboard/profile",
     shell: { place: "menu", crumb: { ar: "ملفي الشخصي", en: "My Profile" } },
+  },
+  {
+    // feat/notifications: «التنبيهات», the full list behind the bell. Every login (the person's own
+    // notifications; the API scopes by the session). Reached from the bell and the quick jump, not
+    // from the sidebar or the menu — the bell is its entry point in every top bar.
+    id: "notifications",
+    ar: "التنبيهات", en: "Notifications",
+    icon: Bell,
+    href: "/dashboard/notifications",
+    shell: { place: "none", icon: "bell" },
   },
   {
     id: "employees",

@@ -5,6 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import { creditView } from "@/lib/services/customers/credit-db";
+import { checkCreditStandingLater } from "@/lib/notifications/credit-watch";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -30,6 +31,8 @@ export async function GET(_req: Request, { params }: Params) {
       now: new Date(),
     }));
     if (!view) return NextResponse.json({ error: "العميل غير موجود.", errorEn: "Not found" }, { status: 404 });
+    // feat/notifications: a standing that changed since it was last notified is notified (once), after the response.
+    checkCreditStandingLater([id]);
     return NextResponse.json(view);
   } catch (err) {
     return handleDomainError(err);

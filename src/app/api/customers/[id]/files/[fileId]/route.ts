@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireEdit, requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { customerFileHeaders, deleteCustomerFileBlobs, openCustomerFile } from "@/lib/services/customers/files";
+import { editableCustomer } from "@/lib/services/customers/direct-upload";
 
 type Params = { params: Promise<{ id: string; fileId: string }> };
 
@@ -31,12 +32,15 @@ export async function GET(_req: Request, { params }: Params) {
   }
 }
 
-/** DELETE /api/customers/[id]/files/[fileId] — remove a document (customers at edit). */
+/** DELETE /api/customers/[id]/files/[fileId] — remove a document (customers at edit; a scoped rep only on their own customer). */
 export async function DELETE(_req: Request, { params }: Params) {
-  const { error } = await requireEdit("customers");
+  const { user, error } = await requireEdit("customers");
   if (error) return error;
   const { id, fileId } = await params;
   try {
+    // The same ownership scope as the uploads: a scoped sales rep only on a customer they own (404).
+    const may = await editableCustomer(prisma, user, id);
+    if (!may.ok) return NextResponse.json({ error: may.problem.error, errorEn: may.problem.errorEn, code: may.problem.code }, { status: may.problem.status });
     const row = await prisma.customerFile.findFirst({ where: { id: fileId, customerId: id }, select: { id: true, blobPathname: true } });
     const gone = row ? await prisma.customerFile.deleteMany({ where: { id: row.id, customerId: id } }) : { count: 0 };
     if (!row || gone.count === 0) return NextResponse.json({ error: "الملف غير موجود.", errorEn: "Not found" }, { status: 404 });

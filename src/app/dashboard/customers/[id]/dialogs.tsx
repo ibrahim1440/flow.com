@@ -10,6 +10,8 @@ import { ACTIVITY_LABELS, OUTCOME_LABELS } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
 import type { Contact, Credit, Customer, Deal } from "./types";
 import { CreditNoticeBody, type CreditState } from "@/components/credit/credit-ui";
+import { DIRECT_UPLOAD_MAX_BYTES, pickUploadPath } from "@/lib/services/customers/direct-upload-rules";
+import { directUpload } from "./direct-upload-client";
 
 /**
  * The account page's forms, in the HR kit dialog the customers list already uses. Each sends
@@ -39,41 +41,70 @@ export const FILE_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = 
 };
 
 /** «رفع ملف» — one multipart POST to /api/customers/[id]/files, which re-checks everything. */
-export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, onClose, onDone }: { ar: boolean; customerId: string; maxBytes?: number; onClose: () => void; onDone: () => void }) {
+export function FileDialog({ ar, customerId, maxBytes = 5 * 1024 * 1024, direct = false, onClose, onDone }: { ar: boolean; customerId: string; maxBytes?: number; direct?: boolean; onClose: () => void; onDone: () => void }) {
   const L = (a: string, e: string) => (ar ? a : e);
-  const mb = Math.round(maxBytes / 1024 / 1024);
+  // feat/blob-client-upload: ≤ 4 MB through the app's route (with its database fallback); above it,
+  // up to 20 MB, straight from the browser to the private Blob store (pickUploadPath).
+  const limit = direct ? DIRECT_UPLOAD_MAX_BYTES : maxBytes;
+  const mb = Math.round(limit / 1024 / 1024);
   const [file, setFile] = useState<File | null>(null);
   const [category, setCategory] = useState("CONTRACT");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
+  const [canRetry, setCanRetry] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  async function save(e?: React.FormEvent) {
+    e?.preventDefault();
     if (!file || busy) return;
-    if (file.size > maxBytes) { setErr(L(`الحد الأقصى لحجم الملف ${mb} ميغابايت.`, `Files are limited to ${mb} MB.`)); return; }
-    setBusy(true); setErr("");
+    const path = pickUploadPath(file.size, { maxBytes, direct });
+    if (path === "too-large") { setCanRetry(false); setErr(L(`الحد الأقصى لحجم الملف ${mb} ميغابايت.`, `Files are limited to ${mb} MB.`)); return; }
+    setBusy(true); setErr(""); setCanRetry(false);
+    if (path === "direct") {
+      setProgress(0);
+      const r = await directUpload({ customerId, file, category, title: title.trim(), onProgress: (p) => setProgress(Math.max(0, Math.min(100, Math.round(p)))) });
+      setBusy(false);
+      if (r.ok) { setProgress(100); onDone(); return; }
+      setProgress(null);
+      setCanRetry(r.retry);
+      setErr(errorOf(r.message, ar, L("تعذّر رفع الملف.", "Could not upload the file.")));
+      return;
+    }
     const fd = new FormData();
     fd.set("file", file); fd.set("category", category); if (title.trim()) fd.set("title", title.trim());
     const res = await fetch(`/api/customers/${customerId}/files`, { method: "POST", body: fd }).catch(() => null);
     setBusy(false);
-    if (!res) { setErr(L("تعذّر الاتصال.", "Could not connect.")); return; }
+    if (!res) { setCanRetry(true); setErr(L("تعذّر الاتصال.", "Could not connect.")); return; }
     if (res.ok) { onDone(); return; }
     const data = await res.json().catch(() => null);
     // A 413 with no JSON is the hosting platform's own request-size limit, before the app saw the file.
     if (!data && res.status === 413) { setErr(L("الملف أكبر مما يقبله الخادم في طلب واحد. جرّب ملفًا أصغر.", "The file is larger than the server accepts in one request. Try a smaller file.")); return; }
+    setCanRetry(res.status >= 500);
     setErr(errorOf(data ?? {}, ar, L("تعذّر رفع الملف.", "Could not upload the file.")));
   }
   return (
     <Dialog open title={L("رفع ملف", "Upload a file")} sub={L(`PDF أو JPEG أو PNG · حتى ${mb} ميغابايت`, `PDF, JPEG or PNG · up to ${mb} MB`)} onClose={onClose} testId="file-dialog"
       actions={<>
-        <button type="submit" form="acc-file" className="hr-btn is-primary" disabled={!file || busy} data-testid="file-save">{busy ? L("جارٍ الرفع…", "Uploading…") : L("رفع", "Upload")}</button>
+        <button type="submit" form="acc-file" className="hr-btn is-primary" disabled={!file || busy} data-testid="file-save">{busy ? L("جارٍ الرفع…", "Uploading…") : canRetry ? L("إعادة المحاولة", "Try again") : L("رفع", "Upload")}</button>
         <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
       </>}>
       <form id="acc-file" className="hr-form" onSubmit={save}>
         <Err text={err} />
         <Field label={L("الملف", "File")} wide>
-          <input type="file" className="hr-input" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="file-input" />
+          <input type="file" className="hr-input" accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={(e) => { setFile(e.target.files?.[0] ?? null); setErr(""); setCanRetry(false); setProgress(null); }} data-testid="file-input" />
         </Field>
+        {progress !== null && (
+          <div className="acc-upload-progress" style={{ gridColumn: "1 / -1" }} data-testid="file-progress">
+            <div className="lbl" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span>{progress >= 100 ? L("جارٍ التحقق من الملف…", "Checking the file…") : L("جارٍ الرفع إلى مخزن الملفات…", "Uploading to file storage…")}</span>
+              <bdi data-testid="file-progress-pct">{progress}%</bdi>
+            </div>
+            <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label={L("تقدّم الرفع", "Upload progress")}
+              style={{ height: 8, borderRadius: 999, background: "var(--hr-border-subtle)", overflow: "hidden", marginTop: 6 }}>
+              <div style={{ width: `${progress}%`, height: "100%", background: "var(--hr-primary)", transition: "width .2s" }} />
+            </div>
+          </div>
+        )}
         <Field label={L("التصنيف", "Category")}>
           <Select className="hr-select" value={category} onChange={(e) => setCategory(e.target.value)} data-testid="file-category">
             {Object.keys(FILE_CATEGORY_LABELS).map((k) => <option key={k} value={k}>{ar ? FILE_CATEGORY_LABELS[k].ar : FILE_CATEGORY_LABELS[k].en}</option>)}

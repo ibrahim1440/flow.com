@@ -275,7 +275,7 @@ export async function POST(request: Request) {
       });
 
       if (lines.length > 0) {
-        const saved = await saveQuoteLines(tx, { quoteId: created.id, lines, threshold: await discountThreshold(tx) });
+        const saved = await saveQuoteLines(tx, { quoteId: created.id, lines, threshold: await discountThreshold(tx), actorId: user.id });
         return { quote: created, priced: saved.priced, needsDiscountApproval: saved.needsDiscountApproval };
       }
       return { quote: created, priced: null, needsDiscountApproval: false };

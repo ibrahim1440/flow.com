@@ -42,6 +42,8 @@
     "test:sales:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/sales/unit/*.test.ts",
     "test:users:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/users/unit/*.test.ts",
     "test:users:http": "tsx --test --test-concurrency=1 tests/users/http/*.test.ts",
+    "test:notifications:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/notifications/unit/*.test.ts",
+    "test:notifications:http": "tsx --test --test-concurrency=1 tests/notifications/http/*.test.ts",
     "test:sales:http": "tsx --test --test-concurrency=1 tests/sales/http/*.test.ts",
     "test:finance:db": "tsx --env-file=.env.test --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/finance/integration/*.test.ts",
     "db:local": "node scripts/finance/local-postgres.mjs start",

@@ -527,6 +527,14 @@ export async function approveLines(actor: HrActor, id: string, b: Record<string,
       journal = await postHrJournal(tx, { sourceType: "PAYROLL_RUN", sourceId: id, purpose: "ACCRUAL", date: posting.date, actorId: actor.id, description: `Payroll ${run.periodMonth} · run #${run.runNo}${run.kind === "CORRECTION" ? " (correction)" : ""}${posting.note ? ` · ${posting.note}` : ""}`, lines: await accrualLines(tx, id) });
       await tx.hrPayrollRun.update({ where: { id }, data: { status: "APPROVED", approvedAt: new Date(), accountingSkipped: journal.skipped } });
       await audit(tx, { action: "PAYROLL_APPROVED", entityType: "HrPayrollRun", entityId: id, after: { journalEntryId: journal.journalEntryId, accountingSkipped: journal.skipped, postingDate: dayString(posting.date), routedFromClosedPeriod: posting.routed, postingNote: posting.note }, actorId: actor.id });
+      // feat/notifications: every person of the run with a login learns that their payslip is issued
+      // (the payslip is visible from APPROVED on). One notification per person per run.
+      const paid = await tx.hrPayrollLine.findMany({ where: { runId: id }, select: { id: true, employee: { select: { accountId: true } } } });
+      const { notify } = await import("@/lib/notifications/notify");
+      for (const l of paid) {
+        if (!l.employee.accountId) continue;
+        await notify(tx, { event: "me.payslip_issued", dedupeKey: `${id}:${l.id}`, actorId: actor.id, entity: { type: "HrPayrollLine", id: l.id }, facts: { month: run.periodMonth, lineId: l.id }, people: { subject: l.employee.accountId } });
+      }
       finalized = true;
     }
     return { ...(await runDto(tx, id, actor)), approvedNow: mine.length, skippedOwn: lines.length - mine.length, finalized, journalEntryId: journal?.journalEntryId ?? null };

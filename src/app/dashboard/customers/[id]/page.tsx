@@ -724,7 +724,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const filesTab = (
     <section data-testid="files-tab" className="acc-tabsec">
       <div className="bh"><h2 className="bt">{L("ملفات العميل", "Customer files")}</h2>
-        <span className="sub">{ar ? `عقود، سجل تجاري، شهادة ضريبية، اتفاقيات أسعار · PDF أو JPEG أو PNG حتى ${Math.round((data.fileLimits?.maxBytes ?? 5242880) / 1048576)} م.ب` : `Contracts, commercial register, VAT certificate, price agreements · PDF, JPEG or PNG up to ${Math.round((data.fileLimits?.maxBytes ?? 5242880) / 1048576)} MB`}</span>
+        <span className="sub">{ar ? `عقود، سجل تجاري، شهادة ضريبية، اتفاقيات أسعار · PDF أو JPEG أو PNG حتى ${Math.round((data.fileLimits?.direct ? 20971520 : data.fileLimits?.maxBytes ?? 5242880) / 1048576)} م.ب` : `Contracts, commercial register, VAT certificate, price agreements · PDF, JPEG or PNG up to ${Math.round((data.fileLimits?.direct ? 20971520 : data.fileLimits?.maxBytes ?? 5242880) / 1048576)} MB`}</span>
         {can.manageFiles && <button type="button" className="btn sm p acc-bh-act" onClick={() => setDialog("file")} data-testid="upload-file"><Ico name="plus" small />{L("رفع ملف", "Upload a file")}</button>}
       </div>
       {files.length === 0 ? empty(can.manageFiles ? L("لا ملفات على ملف العميل بعد. ارفع العقد أو السجل التجاري أو الشهادة الضريبية.", "No files yet. Upload the contract, the commercial register or the VAT certificate.") : L("لا ملفات على ملف العميل بعد.", "No files on the customer file yet.")) : (
@@ -763,7 +763,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       {(dialog === "hold" || dialog === "holdDirect") && cs && <HoldDialog ar={ar} customerId={id} customerName={name} c={cs} startAt={dialog === "holdDirect" && !cs.warning.any && !cs.grace ? "hold" : "ask"} onClose={() => setDialog(null)}
         onDone={(what) => { setDialog(null); setNotice({ text: what === "grace" ? L("سُجّلت أيام السماح.", "Grace days recorded.") : L("أُوقف البيع لهذا العميل.", "Sales to this customer are on hold."), ok: true }); reload(); }} />}
       {dialog === "lift" && cs && <LiftDialog ar={ar} customerId={id} customerName={name} c={cs} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الإيقاف.", "Hold lifted."), ok: true }); reload(); }} />}
-      {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
+      {dialog === "file" && <FileDialog ar={ar} customerId={id} maxBytes={data.fileLimits?.maxBytes} direct={data.fileLimits?.direct} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
       {dialog === "details" && <DetailsDialog ar={ar} customer={c} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
       {dialog && typeof dialog === "object" && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
     </>

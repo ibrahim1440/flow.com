@@ -172,7 +172,7 @@ function common(e: StoredEvent, actor: EmployeeRow | null): RenderContext {
 }
 
 /** Active employees who may decide this finance request — the same test the decision route applies. */
-async function eligibleApprovers(db: Db, req: { requiredSub: string; branchKey: string; requestedBy: string }) {
+export async function eligibleApprovers(db: Db, req: { requiredSub: string; branchKey: string; requestedBy: string }) {
   const [rows, access] = await Promise.all([
     db.employee.findMany({ where: { active: true }, select: { ...EMPLOYEE_SELECT, role: true, permissions: true } }),
     db.finBranchAccess.findMany({ where: { branchId: req.branchKey, branch: { active: true } }, select: { employeeId: true } }),

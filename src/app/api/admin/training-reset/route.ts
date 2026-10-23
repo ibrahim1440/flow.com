@@ -119,6 +119,13 @@ export async function POST(request: Request) {
       prisma.customerSalesHold.deleteMany(),
       prisma.customer.deleteMany(),
       prisma.greenBean.deleteMany(),
+      // 20261029090000_notifications: the notifications describe the records cleared above (orders,
+      // customers, batches …) and the credit standing watch follows the customers; the people's
+      // e-mail preferences are kept with the people.
+      prisma.notification.deleteMany(),
+      prisma.notificationWatch.deleteMany(),
+      // 20261029100000_blob_client_upload: the direct-upload slots (CustomerFileUpload) are NOT cleared —
+      // a slot outlives its customer by design so the orphan sweep still deletes its blob (an hour on).
       prisma.productSKU.deleteMany(),
       prisma.coffeeProduct.deleteMany(),
       prisma.supplier.deleteMany(),

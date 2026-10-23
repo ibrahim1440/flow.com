@@ -190,6 +190,14 @@ export async function stationSignIn(request: Request, device: DeviceRow, station
     await stationAudit({ userId: e.id, action: "STATION_PIN_FAILED", result: "FAILURE", device, ...info });
     if (next.locked) {
       await stationAudit({ userId: e.id, action: "STATION_PIN_LOCKED", result: "REFUSED", reasonCode: `ATTEMPTS_${policy.pinMaxAttempts}`, device, ...info });
+      // feat/notifications: the person is told in the ERP (me.station_pin_locked). No actor: the
+      // attempts may not have been theirs. Best effort — the refusal stands either way.
+      try {
+        const { notify } = await import("@/lib/notifications/notify");
+        await notify(prisma, { event: "me.station_pin_locked", dedupeKey: `${e.id}:${device.id}:${now.toISOString()}`, entity: { type: "StationDevice", id: device.id }, facts: { device: device.displayName }, people: { subject: e.id } });
+      } catch (err) {
+        console.error("[station] lock notification failed:", (err as Error)?.name ?? "error");
+      }
       throw PIN_LOCKED();
     }
     throw WRONG_PIN();

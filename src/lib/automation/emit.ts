@@ -22,6 +22,7 @@ import { after } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { eventTypesOfSources } from "./status-rules/sources";
+import { NOTIFIED_AUTOMATION_EVENTS, notifyFromAutomationEvent } from "@/lib/notifications/from-automation";
 
 type Tx = Prisma.TransactionClient;
 
@@ -60,6 +61,9 @@ async function listenedEventTypes(): Promise<Set<string>> {
  * something extra just to describe its event: ask first, and pay nothing when nobody listens.
  */
 export async function automationListens(eventType: string): Promise<boolean> {
+  // feat/notifications: an event the in-app notifications cover is always "heard" — the hook point
+  // must describe it even when no WhatsApp rule listens.
+  if (NOTIFIED_AUTOMATION_EVENTS.has(eventType)) return true;
   try {
     return (await listenedEventTypes()).has(eventType);
   } catch {
@@ -73,6 +77,9 @@ export function invalidateAutomationCache(): void {
 }
 
 export async function emitAutomationEvent(tx: Tx, input: AutomationEventInput): Promise<void> {
+  // feat/notifications: the in-app notifications of this event, in the same transaction, whether or
+  // not any automation rule listens (lib/notifications/from-automation.ts; no read for other events).
+  await notifyFromAutomationEvent(tx, input);
   let listened: Set<string>;
   try {
     listened = await listenedEventTypes();

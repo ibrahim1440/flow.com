@@ -443,7 +443,7 @@ export type SaveLinesResult = {
  */
 export async function saveQuoteLines(
   tx: Tx,
-  input: { quoteId: string; lines: LineInput[]; threshold?: Decimal },
+  input: { quoteId: string; lines: LineInput[]; threshold?: Decimal; actorId?: string | null },
 ): Promise<SaveLinesResult> {
   const quote = await tx.quote.findUnique({
     where: { id: input.quoteId },
@@ -525,7 +525,22 @@ export async function saveQuoteLines(
     },
   });
 
-  return { priced, needsDiscountApproval: discountNeedsApproval(priced, input.threshold) };
+  const needsDiscountApproval = discountNeedsApproval(priced, input.threshold);
+  // feat/notifications: a draft whose discount newly needs approval («اعتمادك مطلوب») is announced to
+  // the discount approvers — once per set of figures (saving the same figures again adds nothing).
+  if (needsDiscountApproval && figuresChanged) {
+    const q = await tx.quote.findUnique({ where: { id: input.quoteId }, select: { quoteNumber: true, opportunity: { select: { ownerId: true, customer: { select: { name: true, nameAr: true, accountOwnerId: true } } } } } });
+    if (q) {
+      const { notify } = await import("@/lib/notifications/notify");
+      await notify(tx, {
+        event: "sales.discount_pending", dedupeKey: `${input.quoteId}:${priced.grandTotal.toFixed(2)}:${priced.discountTotal.toFixed(2)}`,
+        actorId: input.actorId ?? null, entity: { type: "Quote", id: input.quoteId },
+        facts: { quoteNumber: q.quoteNumber, percent: priced.effectiveDiscountPercent.toDecimalPlaces(2).toString(), customerName: q.opportunity.customer ? q.opportunity.customer.nameAr || q.opportunity.customer.name : "", quoteId: input.quoteId },
+        scopeOwners: [q.opportunity.ownerId, q.opportunity.customer?.accountOwnerId],
+      });
+    }
+  }
+  return { priced, needsDiscountApproval };
 }
 
 /**
@@ -830,6 +845,7 @@ export async function reviseQuote(
       taxRatePercent: l.taxRatePercent,
       position: l.position,
     })),
+    actorId: input.actorId,
   });
 
   await tx.quote.update({ where: { id: input.quoteId }, data: { status: "SUPERSEDED" } });
@@ -876,6 +892,7 @@ export async function decideDiscount(
     select: {
       quoteNumber: true, createdById: true, subtotal: true, discountTotal: true, taxTotal: true, grandTotal: true,
       lines: { select: { quantity: true, unitPrice: true, discountPercent: true, taxRatePercent: true } },
+      opportunity: { select: { ownerId: true } },
     },
   });
   if (quote.lines.length === 0) throw { _appCode: 409, message: "The quotation has no lines.", code: "NO_LINES" };
@@ -928,6 +945,14 @@ export async function decideDiscount(
         ...(note ? { note } : {}),
       },
     },
+  });
+  // feat/notifications: the rep who raised the quotation (and the deal owner) learns the decision.
+  const { notify } = await import("@/lib/notifications/notify");
+  await notify(tx, {
+    event: "sales.discount_decided", dedupeKey: `${input.quoteId}:${input.decision}:${at.toISOString()}`,
+    actorId: input.actor.id, entity: { type: "Quote", id: input.quoteId },
+    facts: { quoteNumber: quote.quoteNumber, decision: input.decision, note: note || null, quoteId: input.quoteId },
+    people: { quoteCreator: quote.createdById, dealOwner: quote.opportunity?.ownerId },
   });
   return {
     state: input.decision === "APPROVE" ? "APPROVED" : "REJECTED",

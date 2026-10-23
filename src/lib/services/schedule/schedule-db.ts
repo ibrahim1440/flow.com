@@ -458,16 +458,39 @@ export async function approvePlan(tx: Prisma.TransactionClient, req: PlanRequest
       approvedById: actor.id, approvedByName: actor.name ?? null,
     },
   });
+  const createdSlots: { id: string; operatorId: string; startsAt: Date }[] = [];
   for (const s of p.slots) {
-    await tx.scheduledSlot.create({
+    createdSlots.push(await tx.scheduledSlot.create({
       data: {
         planId: plan.id, roasterId: p.roaster.id, operatorId: s.operatorId!, productId: p.product.id, purpose: p.purpose,
         startsAt: new Date(s.startsAt), endsAt: new Date(s.endsAt), plannedGreenKg: s.kg, createdById: actor.id, updatedById: actor.id,
       },
-    });
+      select: { id: true, operatorId: true, startsAt: true },
+    }));
   }
+  await notifyOperators(tx, "production.slot_assigned", `plan:${plan.id}`, createdSlots, { actorId: actor.id, roasterName: p.roaster.name, productName: p.product.name.ar });
   await event(tx, { action: "PLAN_APPROVED", planId: plan.id, after: { productId: p.product.id, roasterId: p.roaster.id, operatorId: p.operatorId, greenKg: p.greenKg, computedGreenKg: computed, slots: p.slots.map((s) => ({ startsAt: s.startsAt, kg: s.kg, operatorId: s.operatorId })) }, reason: reason || null, actor });
   return { planId: plan.id, slots: p.slots.length, greenKg: p.greenKg };
+}
+
+// ── feat/notifications: the operators of the slots, and the managers of a roaster's status ─────────
+const hhmm = (d: Date) => new Date(+d + 3 * 3_600_000).toISOString().slice(11, 16);
+const whenText = (d: Date) => `${riyadhKey(d)} ${hhmm(d)}`;
+
+/** One notification per operator: the slots assigned / cancelled for them (aggregated). */
+async function notifyOperators(tx: Prisma.TransactionClient, event: "production.slot_assigned" | "production.slot_cancelled", key: string,
+  slots: { id: string; operatorId: string; startsAt: Date }[], o: { actorId: string; roasterName: string; productName?: string | null; reason?: string | null }) {
+  const by = new Map<string, Date[]>();
+  for (const sl of slots) by.set(sl.operatorId, [...(by.get(sl.operatorId) ?? []), sl.startsAt]);
+  const { notify } = await import("@/lib/notifications/notify");
+  for (const [operatorId, starts] of by) {
+    const first = starts.sort((a, b) => +a - +b)[0];
+    await notify(tx, {
+      event, dedupeKey: `${key}:${operatorId}`, actorId: o.actorId, entity: { type: "ScheduledSlot", id: slots[0].id },
+      facts: { count: starts.length, roasterName: o.roasterName, productName: o.productName ?? null, when: whenText(first), day: riyadhKey(first), reason: o.reason ?? null },
+      people: { operator: operatorId },
+    });
+  }
 }
 
 // ── Slot actions ────────────────────────────────────────────────────────────────────────────
@@ -512,6 +535,18 @@ export async function moveSlot(tx: Prisma.TransactionClient, id: string, body: {
   const before = audit(s);
   const row = await tx.scheduledSlot.update({ where: { id }, data: { startsAt: new Date(start), endsAt: new Date(start + len), operatorId, updatedById: actor.id } });
   await event(tx, { action: operatorId !== s.operatorId && start === +s.startsAt ? "SLOT_REASSIGNED" : "SLOT_MOVED", planId: s.planId, slotId: id, before, after: audit(row), actor });
+  // feat/notifications: the operator who had it (moved, or given to someone else) and the one who has it now.
+  const { notify } = await import("@/lib/notifications/notify");
+  const stamp = `${id}:${row.updatedAt.toISOString()}`;
+  if (operatorId !== s.operatorId) {
+    const other = (await tx.employee.findUnique({ where: { id: operatorId }, select: { name: true } }))?.name ?? null;
+    await notify(tx, { event: "production.slot_changed", dedupeKey: `${stamp}:removed`, actorId: actor.id, entity: { type: "ScheduledSlot", id },
+      facts: { change: "REMOVED", roasterName: s.roaster.name, otherName: other, when: whenText(s.startsAt), day: riyadhKey(s.startsAt) }, people: { operator: s.operatorId } });
+    await notifyOperators(tx, "production.slot_assigned", `move:${stamp}`, [{ id, operatorId, startsAt: row.startsAt }], { actorId: actor.id, roasterName: s.roaster.name });
+  } else if (start !== +s.startsAt) {
+    await notify(tx, { event: "production.slot_changed", dedupeKey: `${stamp}:moved`, actorId: actor.id, entity: { type: "ScheduledSlot", id },
+      facts: { change: "MOVED", roasterName: s.roaster.name, when: `${whenText(s.startsAt)} → ${whenText(row.startsAt)}`, whenAr: `من ${whenText(s.startsAt)} إلى ${whenText(row.startsAt)}`, day: riyadhKey(row.startsAt) }, people: { operator: operatorId } });
+  }
   return row;
 }
 
@@ -522,6 +557,7 @@ export async function cancelSlot(tx: Prisma.TransactionClient, id: string, reaso
   if (s.status === "CANCELLED") throw new ScheduleError(409, "الخانة ملغاة.", "The slot is already cancelled.", "SLOT_CANCELLED");
   const row = await tx.scheduledSlot.update({ where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason, updatedById: actor.id } });
   await event(tx, { action: "SLOT_CANCELLED", planId: s.planId, slotId: id, before: audit(s), after: audit(row), reason, actor });
+  await notifyOperators(tx, "production.slot_cancelled", `cancel:${id}`, [{ id, operatorId: s.operatorId, startsAt: s.startsAt }], { actorId: actor.id, roasterName: s.roaster.name, reason });
   return row;
 }
 
@@ -600,6 +636,23 @@ export async function affectedSlots(db: Db, roasterId: string, now = new Date())
  */
 export async function cancelSlotsForRoasterStatus(tx: Prisma.TransactionClient, roasterId: string, status: string, reason: string | null, actor: { id: string; name?: string | null }, now = new Date()): Promise<number> {
   if (status !== "MAINTENANCE" && status !== "STOPPED") return 0;
+  const n = await cancelSlotsForRoasterStatusInner(tx, roasterId, status, reason, actor, now);
+  // feat/notifications: the schedule / roaster managers and the roaster's operators; each operator
+  // whose slots were returned to the queue also gets those slots.
+  const roaster = await tx.roaster.findUnique({ where: { id: roasterId }, select: { name: true, operators: { select: { employeeId: true } } } });
+  if (roaster) {
+    const { notify } = await import("@/lib/notifications/notify");
+    await notify(tx, {
+      event: "production.roaster_status", dedupeKey: `${roasterId}:${status}:${now.toISOString()}`, actorId: actor.id, entity: { type: "Roaster", id: roasterId },
+      facts: { roasterName: roaster.name, status, reason, cancelled: n.length },
+      people: { operators: roaster.operators.map((o) => o.employeeId) },
+    });
+    await notifyOperators(tx, "production.slot_cancelled", `roaster:${roasterId}:${now.toISOString()}`, n, { actorId: actor.id, roasterName: roaster.name, reason: `${status === "MAINTENANCE" ? "المحمصة في الصيانة" : "المحمصة متوقفة"}${reason ? `: ${reason}` : ""}` });
+  }
+  return n.length;
+}
+
+async function cancelSlotsForRoasterStatusInner(tx: Prisma.TransactionClient, roasterId: string, status: string, reason: string | null, actor: { id: string; name?: string | null }, now: Date): Promise<{ id: string; operatorId: string; startsAt: Date }[]> {
   await lockSchedule(tx);
   const rows = (await liveSlots(tx, { from: now, to: new Date(+now + 400 * 86_400_000), roasterId, now })).filter((s) => s.status === "PLANNED" && +s.startsAt >= +now);
   const why = `${status === "MAINTENANCE" ? "المحمصة في الصيانة" : "المحمصة متوقفة"}${reason ? `: ${reason}` : ""}`;
@@ -607,7 +660,7 @@ export async function cancelSlotsForRoasterStatus(tx: Prisma.TransactionClient, 
     const row = await tx.scheduledSlot.update({ where: { id: s.id }, data: { status: "CANCELLED", cancelledAt: now, cancelledById: actor.id, cancelReason: why, updatedById: actor.id } });
     await event(tx, { action: "SLOT_CANCELLED", planId: s.planId, slotId: s.id, before: audit(s), after: audit(row), reason: why, actor });
   }
-  return rows.length;
+  return rows.map((r) => ({ id: r.id, operatorId: r.operatorId, startsAt: r.startsAt }));
 }
 
 /** Live slots of a roaster inside a window — a planned maintenance window may not be saved over them (§4). */

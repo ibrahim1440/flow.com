@@ -68,6 +68,12 @@ model Employee {
   // Customer account (additive): the accounts this employee is responsible for.
   customerAccounts Customer[] @relation("CustomerAccountOwner")
   customerFiles    CustomerFile[] @relation("CustomerFileUploader")
+  // In-app notifications (additive, 20261029090000_notifications): this account's inbox (the bell)
+  // and its per-category e-mail choices.
+  notifications           Notification[]           @relation("NotificationRecipient")
+  notificationPreferences NotificationPreference[] @relation("NotificationPreferenceOwner")
+  /// Direct browser-to-Blob uploads this account started (additive, 20261029100000_blob_client_upload).
+  customerFileUploads CustomerFileUpload[] @relation("CustomerFileUploadRequester")
   // Credit hold (additive, 20261028100000_credit_hold).
   customerHoldsPlaced CustomerSalesHold[] @relation("CustomerHoldCreator")
   customerHoldsLifted CustomerSalesHold[] @relation("CustomerHoldLifter")
@@ -378,6 +384,35 @@ model CustomerFile {
   createdAt    DateTime  @default(now())
 
   @@index([customerId, createdAt])
+}
+
+/// A direct browser-to-Blob upload in flight (additive, migration 20261029100000_blob_client_upload).
+/// Created when the server hands out an upload slot for ONE exact pathname; deleted when the upload is
+/// finalized into a CustomerFile (same id), refused at finalize (the blob is deleted), or swept as an
+/// orphan an hour later (the blob is deleted). Only this database's own slots are ever swept, so an
+/// environment never deletes a blob it did not authorize. No FK to Customer on purpose: a slot outlives
+/// its customer's deletion so that its blob is still swept.
+model CustomerFileUpload {
+  /// The id the CustomerFile row will take (cf + 24 hex), also inside the pathname.
+  id            String    @id
+  customerId    String
+  /// customers/<customerId>/<id>-<safe name> — the ONLY pathname the upload token is scoped to.
+  pathname      String    @unique
+  category      String
+  title         String?
+  /// The uploader's file name (the stored name takes its extension from the bytes at finalize).
+  fileName      String
+  /// What the browser declared; the finalize step checks the blob itself.
+  declaredBytes Int
+  declaredType  String
+  requestedById String?
+  requestedBy   Employee? @relation("CustomerFileUploadRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+  /// The upload token's own expiry (short); the slot itself may be finalized for up to 50 minutes.
+  tokenExpiresAt DateTime
+
+  @@index([createdAt])
+  @@index([customerId])
 }
 
 model GreenBean {
@@ -6076,4 +6111,68 @@ model SystemAlert {
   readById        String?
 
   @@index([createdAt])
+}
+
+/// «التنبيهات» — one in-app notification for ONE account (additive, 20261029090000_notifications).
+/// Written by lib/notifications/notify.ts from the one event catalogue (lib/notifications/catalog.ts),
+/// in the transaction of the change it describes wherever that change has one. Never deleted on
+/// read; rows older than 90 days are removed (lib/notifications/retention.ts). The recipient's own
+/// rows only: every route filters by the session's account, never by a client-sent id.
+model Notification {
+  id          String    @id @default(cuid())
+  recipientId String
+  recipient   Employee  @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  /// The catalogue key (sales.quote_decided, hr.payslip_issued, …; CHECK on shape).
+  kind        String
+  /// sales | production | quality | finance | hr | me | system (CHECK).
+  category    String
+  /// info | success | warning | danger (CHECK).
+  severity    String    @default("info")
+  titleAr     String
+  titleEn     String
+  bodyAr      String    @default("")
+  bodyEn      String    @default("")
+  /// An app path (starts with /dashboard; CHECK), or NULL.
+  link        String?
+  entityType  String?
+  entityId    String?
+  /// Who did it (never a recipient of their own act). No FK: the actor may be deleted.
+  actorId     String?
+  /// The event instance: unique per recipient, so one event never produces two rows for one person.
+  /// Also groups the e-mail of one event (at most one immediate e-mail per event).
+  dedupeKey   String
+  /// NONE (no e-mail for this row) | PENDING | SENDING | SENT | FAILED | OFF (the person's choice) |
+  /// NO_ADDRESS | NOT_CONFIGURED | EXPIRED (CHECK).
+  emailState  String    @default("NONE")
+  emailClaimedAt DateTime?
+  emailedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  @@unique([recipientId, dedupeKey])
+  @@index([recipientId, createdAt])
+  @@index([recipientId, category, createdAt])
+  @@index([createdAt])
+}
+
+/// A person's e-mail choice for one notification category (additive, 20261029090000_notifications).
+/// In-app is always on. No row = the category's default (lib/notifications/catalog.ts EMAIL_DEFAULT).
+model NotificationPreference {
+  employeeId String
+  employee   Employee @relation("NotificationPreferenceOwner", fields: [employeeId], references: [id], onDelete: Cascade)
+  /// sales | production | quality | finance | hr | me | system (CHECK).
+  category   String
+  email      Boolean
+  updatedAt  DateTime @updatedAt
+
+  @@id([employeeId, category])
+}
+
+/// The last notified state of something whose state is DERIVED, not stored (additive,
+/// 20261029090000_notifications): a customer's credit standing («credit:<customerId>» → "OVER_LIMIT,OVERDUE").
+/// A notification goes out only when the state CHANGES — never a daily repeat.
+model NotificationWatch {
+  key       String   @id
+  state     String
+  updatedAt DateTime @updatedAt
 }

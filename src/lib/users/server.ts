@@ -562,6 +562,11 @@ export async function credentialsAction(request: Request, user: SessionUser, id:
       const { reenableStationPin } = await import("@/lib/services/station/admin");
       const r = await reenableStationPin(tx, id);
       await recordUsersAudit(tx, ctx, "STATION_PIN_REENABLED", { targetEmployeeId: id, targetName: e.name, reason, devices: r.devices });
+      // feat/notifications: the person learns their station PIN works again (me.station_pin_reenabled).
+      if (r.devices > 0) {
+        const { notify } = await import("@/lib/notifications/notify");
+        await notify(tx, { event: "me.station_pin_reenabled", dedupeKey: `${id}:${Date.now()}`, actorId: ctx.actorId ?? null, entity: { type: "Employee", id }, people: { subject: id } });
+      }
       return r.devices;
     }, TX_OPTS);
     return { action, devices: n };

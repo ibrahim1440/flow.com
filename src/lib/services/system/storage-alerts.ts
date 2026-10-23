@@ -24,7 +24,7 @@
 import type { Prisma as PrismaNS, PrismaClient } from "@/generated/prisma/client";
 import { canEdit, parsePermissions } from "@/lib/auth-shared";
 import { simpleModePermissions } from "@/lib/simple-mode";
-import { alertEmailHtml, sendEmail, type EmailResult } from "@/lib/notify/email";
+import type { EmailResult } from "@/lib/notify/email";
 import { looksLikeAuth } from "../customers/file-store";
 import { recipientFor } from "@/lib/notify/recipients";
 
@@ -114,16 +114,24 @@ export async function alertRecipients(db: Db): Promise<{ id: string; email: stri
 }
 
 async function raiseAlert(db: Db, a: { kind: "STORAGE_INCIDENT" | "STORAGE_RECOVERED"; severity: string; incidentId: string; titleAr: string; titleEn: string; bodyAr: string; bodyEn: string }) {
-  const recipients = await alertRecipients(db);
-  const to = recipients.map((r) => r.email).filter((x): x is string => !!x);
-  const appUrl = process.env.APP_BASE_URL?.trim() || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null);
-  const status: EmailResult = await sendEmail({
-    to,
-    subject: `حِقبة · ${a.titleAr}`,
-    html: alertEmailHtml({ ...a, appUrl }),
-    text: `${a.titleAr}\n\n${a.bodyAr}\n\n— ${a.titleEn}\n${a.bodyEn}`,
+  // feat/notifications: the alert is a «system» notification of every account that holds Settings at
+  // edit (their bell), and its e-mail goes through the notification channel — one message to every
+  // recipient whose «النظام» e-mail is on (the default, as before this feature) at the company
+  // address. The SystemAlert row stays (GET /api/system/alerts keeps working) with the e-mail result.
+  const { notify } = await import("@/lib/notifications/notify");
+  const { deliverEvent } = await import("@/lib/notifications/deliver");
+  const n = await notify(db, {
+    event: a.kind === "STORAGE_INCIDENT" ? "system.storage_incident" : "system.storage_recovered",
+    dedupeKey: a.incidentId, entity: { type: "SystemIncident", id: a.incidentId },
+    facts: { severity: a.severity, titleAr: a.titleAr, titleEn: a.titleEn, bodyAr: a.bodyAr, bodyEn: a.bodyEn },
   });
-  return db.systemAlert.create({ data: { ...a, emailStatus: status, emailRecipients: status === "SENT" ? to.length : 0 } });
+  let status: EmailResult = n.recipients.length === 0 ? "NO_RECIPIENTS" : "NOT_CONFIGURED";
+  let emailed = 0;
+  if (n.inserted > 0) {
+    const r = await deliverEvent(db, n.dedupeKey);
+    if (r) { status = r.status; emailed = r.emailed; }
+  }
+  return db.systemAlert.create({ data: { ...a, emailStatus: status, emailRecipients: status === "SENT" ? emailed : 0 } });
 }
 
 /**

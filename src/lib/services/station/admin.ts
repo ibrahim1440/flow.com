@@ -274,6 +274,12 @@ export async function setUserStations(request: Request, user: SessionUser, id: s
       changes.push({ stationId, stationName: name, from, to });
     }
     if (changes.length) await recordUsersAudit(tx, ctx, "STATION_ACCESS_CHANGED", { targetEmployeeId: id, targetName: e.name, changes, sessionsEnded: ended, reason: reasonOf(raw.reason) || undefined });
+    // feat/notifications: access newly granted to a station (NONE → allowed) is told to the person.
+    const granted = changes.filter((c) => c.from === "NONE" && c.to !== "NONE");
+    if (granted.length) {
+      const { notify } = await import("@/lib/notifications/notify");
+      await notify(tx, { event: "me.station_access_granted", dedupeKey: `${id}:${granted.map((g) => g.stationId).sort().join(",")}:${Date.now()}`, actorId: user.id, entity: { type: "Employee", id }, facts: { stations: granted.map((g) => `«${g.stationName}»`).join("، ") }, people: { subject: id } });
+    }
     return { changed: changes.length, sessionsEnded: ended };
   }, TX_OPTS);
 }

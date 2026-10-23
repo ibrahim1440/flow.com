@@ -1,4 +1,4 @@
-/* The system alerts bell (feat/credit-hold): Direction 2.1 tokens, no new colours. */
+/* The bell frame (feat/credit-hold; since feat/notifications the «التنبيهات» bell of every account): Direction 2.1 tokens, no new colours. */
 .d21-bell { position: relative; display: flex; align-items: center; }
 .d21-bell-btn { position: relative; }
 .d21-bell-n { position: absolute; top: 2px; inset-inline-end: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--status-danger); color: var(--text-inverse, #fff); font-size: 10.5px; font-weight: 600; line-height: 16px; text-align: center; }

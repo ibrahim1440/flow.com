@@ -5,6 +5,7 @@ import { handleDomainError } from "@/lib/api-error";
 import {
   CUSTOMER_FILE_SELECT, MAX_FILES_PER_CUSTOMER, saveCustomerFile, tooLarge, uploadLimit, validateCustomerFile,
 } from "@/lib/services/customers/files";
+import { directUploadOffered, editableCustomer } from "@/lib/services/customers/direct-upload";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,21 +26,27 @@ export async function GET(_req: Request, { params }: Params) {
     if (!customer) return NextResponse.json({ error: "العميل غير موجود.", errorEn: "Not found" }, { status: 404 });
     const files = await prisma.customerFile.findMany({ where: { customerId: id }, orderBy: { createdAt: "desc" }, select: CUSTOMER_FILE_SELECT });
     // 20 MB with the private Blob store, 5 MB in the database (services/customers/file-store.ts).
-    return NextResponse.json({ files, limits: { maxBytes: uploadLimit().maxBytes, maxFiles: MAX_FILES_PER_CUSTOMER, types: ["PDF", "JPEG", "PNG"] } });
+    // `direct`: files over 4 MB go from the browser straight to Blob (services/customers/direct-upload.ts).
+    return NextResponse.json({ files, limits: { maxBytes: uploadLimit().maxBytes, maxFiles: MAX_FILES_PER_CUSTOMER, types: ["PDF", "JPEG", "PNG"], direct: directUploadOffered() } });
   } catch (err) {
     return handleDomainError(err);
   }
 }
 
-/** POST /api/customers/[id]/files — multipart: `file`, optional `category` and `title`. */
+/**
+ * POST /api/customers/[id]/files — multipart: `file`, optional `category` and `title`. Customers at
+ * edit; a scoped sales rep only on a customer they own (404 otherwise). Reads stay unscoped.
+ */
 export async function POST(request: Request, { params }: Params) {
   const { user, error } = await requireEdit("customers");
   if (error) return error;
   const { id } = await params;
   try {
-    const customer = await prisma.customer.findUnique({ where: { id }, select: { id: true, _count: { select: { files: true } } } });
-    if (!customer) return NextResponse.json({ error: "العميل غير موجود.", errorEn: "Not found" }, { status: 404 });
-    if (customer._count.files >= MAX_FILES_PER_CUSTOMER) {
+    // Exists, and a scoped sales rep (sales without lead_assign) is its account owner — the same
+    // ownership scope as the direct upload (services/customers/direct-upload.ts); otherwise 404.
+    const may = await editableCustomer(prisma, user, id);
+    if (!may.ok) return NextResponse.json({ error: may.problem.error, errorEn: may.problem.errorEn, code: may.problem.code }, { status: may.problem.status });
+    if (may.customer.fileCount >= MAX_FILES_PER_CUSTOMER) {
       return NextResponse.json({ error: `بلغ ملف العميل الحد الأقصى (${MAX_FILES_PER_CUSTOMER} ملفًا). احذف ملفًا قديمًا أولًا.`, errorEn: `The customer file holds at most ${MAX_FILES_PER_CUSTOMER} documents.`, code: "TOO_MANY_FILES" }, { status: 409 });
     }
     const form = await request.formData().catch(() => null);

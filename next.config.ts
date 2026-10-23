@@ -54,7 +54,9 @@ const CSP_REPORT_ONLY = [
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
   "img-src 'self' data: blob:",
-  "connect-src 'self' blob:",
+  // https://vercel.com/api/blob: customer files over 4 MB are uploaded by the browser straight to
+  // the private Vercel Blob store (feat/blob-client-upload, @vercel/blob/client uploadPresigned).
+  "connect-src 'self' blob: https://vercel.com",
 ].join("; ");
 
 /** Enforced now, because none of it can break a page that is already working. */

@@ -129,7 +129,8 @@ export type Account = {
   /** The credit warning, grace and hold (feat/credit-hold; GET /api/customers/[id]/credit's shape). */
   creditState?: CreditState | null;
   files: CustomerFile[];
-  fileLimits?: { maxBytes: number };
+  /** `direct`: files over 4 MB upload from the browser straight to the private Blob store (up to 20 MB). */
+  fileLimits?: { maxBytes: number; direct?: boolean };
   openDeal: OpenDeal | null;
   nextStep: Activity | null;
   openDeals: number;

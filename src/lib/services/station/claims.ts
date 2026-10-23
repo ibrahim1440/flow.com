@@ -213,6 +213,15 @@ export async function reportProblem(args: { user: Actor; claimId: string; kind: 
     if (c.claimedById !== user.id) throw AR("هذه المهمة محجوزة لموظف آخر.", "This task is claimed by somebody else.", 403, "NOT_YOUR_CLAIM");
     const prev = (await claimStates(tx, [c.id])).get(c.id)?.state ?? "ROASTING";
     const log = await logAction(tx, { claimId: c.id, action: "FLAG", fromState: prev, toState: PROBLEM_STATE[kind], user, key, reason: [kind, args.reason as string, note || null].filter(Boolean).join(" · ") });
+    // feat/notifications: the schedule / roaster managers are told (production.station_problem).
+    const KIND_AR: Record<ProblemKind, string> = { PAUSE: "إيقاف مؤقت", MALFUNCTION: "عطل في المحمصة", RELEASE_REQUEST: "طلب تحرير المهمة" };
+    const KIND_EN: Record<ProblemKind, string> = { PAUSE: "paused", MALFUNCTION: "roaster malfunction", RELEASE_REQUEST: "release requested" };
+    const REASON_AR: Record<string, string> = { BURNER_STOPPED: "توقف الموقد", IRREGULAR_HEAT: "حرارة غير منتظمة", COOLING_PROBLEM: "مشكلة في التبريد", OTHER: "أخرى" };
+    const { notify } = await import("@/lib/notifications/notify");
+    await notify(tx, {
+      event: "production.station_problem", dedupeKey: key, actorId: user.id, entity: { type: "WorkItemClaim", id: c.id },
+      facts: { kindAr: KIND_AR[kind], kindEn: KIND_EN[kind], byName: user.name, reason: [REASON_AR[args.reason as string] ?? String(args.reason), note || null].filter(Boolean).join(" · ") },
+    });
     return { log, replayed: false };
   }, TX_OPTS);
 }

@@ -10,6 +10,7 @@ import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 import { MfaEnrollment } from "@/components/auth/MfaEnrollment";
 import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
 import { Btn, Dot, Field, Notice, OpsRoot, Tabs, OpsError, OpsLoading, useL, type Tone } from "@/components/ops/ui";
+import { NotificationPrefs } from "@/components/notifications/NotificationPrefs";
 import { Dialog } from "@/components/hr/ui";
 import { useD21Title } from "@/components/shell/page-context";
 import type { DeviceInfo } from "@/lib/auth/device";
@@ -39,8 +40,8 @@ type Security = {
   currentSignIn: SignIn; previousSignIn: SignIn;
   sessions: Session[]; devices: Device[]; activity: Activity[]; activityMore: boolean;
 };
-type TabKey = "overview" | "security" | "devices" | "activity";
-const TABS: TabKey[] = ["overview", "security", "devices", "activity"];
+type TabKey = "overview" | "security" | "devices" | "activity" | "notifications";
+const TABS: TabKey[] = ["overview", "security", "devices", "activity", "notifications"];
 type Msg = { ok: boolean; text: string } | null;
 
 /** «اليوم 10:42», «أمس 08:02», «5 أكتوبر 18:55», «20/09/2026» — the frames' date forms, Latin digits. */
@@ -353,6 +354,8 @@ export default function ProfilePage() {
             { key: "security", label: L("الأمان", "Security") },
             { key: "devices", label: L("الأجهزة والجلسات", "Devices & sessions"), count: data ? data.sessions.length : undefined },
             { key: "activity", label: L("سجل الدخول", "Sign-in log") },
+            // feat/notifications: «التنبيهات» — the e-mail choice per category.
+            { key: "notifications", label: L("التنبيهات", "Notifications") },
           ]}
         />
 
@@ -523,6 +526,8 @@ export default function ProfilePage() {
             <p className="pf-foot">{L("كل إنهاء يتطلب تأكيد هويتك بكلمة المرور ويُسجَّل باسمك. تنتهي الجلسة بعد 4 ساعات دون نشاط، أو بعد 12 ساعة من الدخول.", "Every end needs you to confirm your identity with your password and is recorded under your name. A session ends after 4 hours without activity, or 12 hours after sign-in.")}</p>
           </div>
         ) : null}
+
+        {tab === "notifications" ? <NotificationPrefs /> : null}
 
         {data && tab === "activity" ? (
           <div className="pf-tabbody" data-testid="pf-log">
