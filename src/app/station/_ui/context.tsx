@@ -4,7 +4,20 @@ import type { Lang } from "@/lib/i18n/translations";
 import type { Permissions } from "@/lib/auth-shared";
 
 export type StationUser = { id: string; name: string; role: string; permissions: Permissions; preferredLanguage: Lang };
-type Ctx = { user: StationUser; signOut: (reason?: string) => Promise<void> };
+/** A paired station device (Workstations W2): its station, as GET /api/station/device returns it. */
+export type StationInfo = { id: string; name: string; type: string; place: string | null; roaster: { id: string; name: string; status: string } | null; home: string | null };
+type Ctx = {
+  user: StationUser;
+  /** W1: the personal ERP session at a browser; W2: a station session on a paired device. */
+  mode: "personal" | "device";
+  station: StationInfo | null;
+  /** Personal: sign out of the ERP. Device: the station session ended (back to the tiles). */
+  signOut: (reason?: string) => Promise<void>;
+  /** «قفل»: personal → sign out; device → S4 for this employee. */
+  lock: () => Promise<void>;
+  /** «تبديل الموظف»: personal → sign out; device → S5 (the handover of an active task). */
+  switchEmployee: () => void;
+};
 export const StationCtx = createContext<Ctx | null>(null);
 export const useStation = () => useContext(StationCtx)!;
 
@@ -18,8 +31,7 @@ export function clearStationDrafts() {
   } catch { /* storage unavailable */ }
 }
 
-export function loginUrl(reason?: string) {
-  const next = typeof window !== "undefined" ? window.location.pathname : "/station/roasting";
-  return `/login?next=${encodeURIComponent(next)}${reason ? `&reason=${reason}` : ""}`;
+export function loginUrl(reason?: string, next?: string) {
+  const path = next ?? (typeof window !== "undefined" ? window.location.pathname : "/station/roasting");
+  return `/login?next=${encodeURIComponent(path === "/station" ? "/station/roasting" : path)}${reason ? `&reason=${reason}` : ""}`;
 }
-

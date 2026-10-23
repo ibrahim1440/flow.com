@@ -200,6 +200,9 @@ export async function profile(id: string, viewer: Viewer) {
     lastSignIn: signIn ? { at: signIn.at.toISOString(), method: signIn.method, device: describeUserAgent(signIn.userAgent) } : null,
     password: { set: !!e.password, temporary: e.passwordMustChange, tempExpiresAt: iso(e.passwordTempExpiresAt), changedAt: pwChanged ? pwChanged.occurredAt.toISOString() : null },
     pin: { set: !!e.pinLookup && !e.pinResetRequired, resetPending: e.pinResetRequired, changedAt: iso(pinChange?.createdAt) },
+    // Workstations W2: the station PIN the person set themselves (StationPin; never its value).
+    stationPin: await prisma.stationPin.findUnique({ where: { employeeId: id }, select: { setAt: true, attempts: { where: { lockedAt: { not: null } }, select: { lockedAt: true } } } })
+      .then((sp) => ({ set: !!sp, setAt: iso(sp?.setAt), locked: (sp?.attempts.length ?? 0) > 0 })),
     template, effective, groups, overrides,
     sensitive: sensitiveActive(effective).map((ref) => ({ key: cellKey(ref), module: ref.module, sub: ref.sub, source: effectOf(ref, getCell(effective, ref), getCell(template, ref)) ? "override" : "role" })),
     events: events.filter((x) => AUDIT_ACTIONS[x.action]).map((x) => ({ ...describe(x, actors), device: describeUserAgent(x.userAgent) })),
@@ -539,10 +542,26 @@ export async function credentialsAction(request: Request, user: SessionUser, id:
     await prisma.$transaction(async (tx) => {
       if (!(await lockEmployeeForAdmin(tx, id))) throw new UsersError(404, "NOT_FOUND", "المستخدم غير موجود.", "User not found.");
       await tx.employee.update({ where: { id }, data: { pin, pinLookup: null, pinResetRequired: true } });
+      // Workstations W2: «إعادة تعيين رمز المحطة» clears the station PIN too (and its lockouts); the
+      // person sets a new one from «ملفي» after confirming their identity (J-6).
+      const { clearStationPin } = await import("@/lib/services/station/admin");
+      const station = await clearStationPin(tx, id);
       const ended = await revokeSessions(tx, id, "PIN_RESET_ADMIN");
-      await recordEmployeeAudit(tx, ctx, [{ action: "EMPLOYEE_CREDENTIAL_CHANGED", targetEmployeeId: id, targetName: e.name, metadata: { credentials: ["pin"], kind: "PIN_CLEARED", reason, sessionsEnded: ended, via: "USERS_SCREEN" } }]);
+      await recordEmployeeAudit(tx, ctx, [{ action: "EMPLOYEE_CREDENTIAL_CHANGED", targetEmployeeId: id, targetName: e.name, metadata: { credentials: ["pin"], kind: "PIN_CLEARED", reason, sessionsEnded: ended + station.sessionsEnded, stationPinCleared: station.cleared, via: "USERS_SCREEN" } }]);
     }, TX_OPTS);
     return { action };
+  }
+
+  // Workstations W2 (D7): a station PIN locked after too many wrong attempts on a device is
+  // re-enabled here; the PIN itself is unchanged (UR-04).
+  if (action === "reenable_station_pin") {
+    const n = await prisma.$transaction(async (tx) => {
+      const { reenableStationPin } = await import("@/lib/services/station/admin");
+      const r = await reenableStationPin(tx, id);
+      await recordUsersAudit(tx, ctx, "STATION_PIN_REENABLED", { targetEmployeeId: id, targetName: e.name, reason, devices: r.devices });
+      return r.devices;
+    }, TX_OPTS);
+    return { action, devices: n };
   }
   throw new UsersError(400, "UNKNOWN_ACTION", "إجراء غير معروف.", "Unknown action.");
 }

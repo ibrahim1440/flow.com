@@ -10,7 +10,7 @@ import { scheduleError } from "@/lib/services/schedule/http";
  * 201 on a new claim, 200 on a replay or when the caller already holds it.
  */
 export async function POST(request: Request) {
-  const { user, error } = await requireStation();
+  const { user, error, station } = await requireStation();
   if (error) return error;
   const k = requiredKey(request);
   if (k.error) return k.error;
@@ -18,7 +18,8 @@ export async function POST(request: Request) {
   const itemType = body.itemType === "RoastCoffee" || body.itemType === "ProductionOrder" ? body.itemType : null;
   const itemId = typeof body.itemId === "string" && body.itemId ? body.itemId : null;
   if (!itemType || !itemId) return NextResponse.json({ error: "اختر الدفعة من الطابور.", errorEn: "Choose the batch from the queue." }, { status: 400 });
-  const roasterId = typeof body.roasterId === "string" && body.roasterId ? body.roasterId : null;
+  // A paired device works on its station's roaster only (W2); a personal session names one.
+  const roasterId = station ? station.roasterId : typeof body.roasterId === "string" && body.roasterId ? body.roasterId : null;
   const slotId = typeof body.slotId === "string" && body.slotId ? body.slotId : null;
   try {
     const out = await startRoast({ user, item: { type: itemType, id: itemId }, roasterId, key: k.key, slotId });

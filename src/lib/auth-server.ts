@@ -10,6 +10,7 @@ import { mfaMode } from "./auth/mfa";
 import { stockChangeRefusal, stockAuthSnapshot } from "./auth/stock-change";
 import { isBcryptHash } from "./auth/secret";
 import { isSimpleMode, simpleModePermissions } from "./simple-mode";
+import { stationDelegate } from "./auth/station-delegate";
 
 export async function getUser(): Promise<UserPayload | null> {
   const cookieStore = await cookies();
@@ -55,8 +56,16 @@ export type SessionUser = UserPayload & {
 };
 
 export async function getUserWithPermissions(): Promise<SessionUser | null> {
+  // Workstations W2: a station route that has already run the whole station guard (device →
+  // station session bound to it → station access → module privilege → no privileged key) may hand
+  // the SAME request to an existing ERP handler (the roast POST) as that station employee. This is
+  // an in-process call, never a token: an HTTP request carrying a station session is refused below.
+  const delegated = stationDelegate();
+  if (delegated) return delegated;
   const user = await getUser();
   if (!user) return null;
+  // A station session is never an ERP session (checkSession refuses scope STATION as well).
+  if ((user as { scope?: unknown }).scope === "STATION") return null;
 
   let employee = await prisma.employee.findUnique({
     where: { id: user.id },
@@ -83,7 +92,8 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   // earlier session ends (QA P1-B — a reset applied by a second person revokes the old ones).
   if (user.cv !== credentialVersion({ id: user.id, ...employee })) return null;
   // Owner security decision: the token is a pointer to a server-side session. Logout, expiry
-  // (idle 4 h, absolute 12 h) and revocation end it on the next request.
+  // (idle 4 h, absolute 12 h) and revocation end it on the next request. Only an ERP-scope
+  // session passes: a STATION session (Workstations W2) is refused by every ERP API here.
   const session = await checkSession(user.sid, user.id);
   if (!session) return null;
 

@@ -8,10 +8,10 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import type { SendMode } from "./send-mode";
+export { effectiveMode, liveAllowed, type EffectiveMode, type SendMode } from "./send-mode";
 
 type Db = Prisma.TransactionClient | typeof prisma;
-
-export type SendMode = "OFF" | "TEST" | "LIVE";
 
 export const SETTINGS_ID = "singleton";
 
@@ -30,26 +30,4 @@ export async function readSettings(db: Db = prisma): Promise<AutomationSettingsV
     lastSweepAt: row?.lastSweepAt ?? null,
     updatedAt: row?.updatedAt ?? null,
   };
-}
-
-export function liveAllowed(env: Record<string, string | undefined> = process.env): boolean {
-  return env.WHATSAPP_LIVE_ENABLED === "true";
-}
-
-export type EffectiveMode =
-  | { mode: "OFF"; note: string }
-  | { mode: "TEST"; testPhone: string }
-  | { mode: "LIVE" };
-
-/** What the dispatcher actually does, given the stored mode and this deployment. */
-export function effectiveMode(s: Pick<AutomationSettingsView, "sendMode" | "testPhone">, env = process.env): EffectiveMode {
-  if (s.sendMode === "LIVE") {
-    return liveAllowed(env)
-      ? { mode: "LIVE" }
-      : { mode: "OFF", note: "Live sending is not enabled on this deployment (WHATSAPP_LIVE_ENABLED)." };
-  }
-  if (s.sendMode === "TEST") {
-    return s.testPhone ? { mode: "TEST", testPhone: s.testPhone } : { mode: "OFF", note: "Test mode has no test number." };
-  }
-  return { mode: "OFF", note: "Sending is turned off. The message was recorded, not sent." };
 }

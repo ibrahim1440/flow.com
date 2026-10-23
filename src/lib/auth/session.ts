@@ -76,11 +76,18 @@ export async function revokeSessions(db: Db, employeeId: string, reason: string,
 export type AuthFactor = "PIN" | "PASSWORD";
 export type LiveSession = { id: string; method: SessionMethod; mfa: boolean; authTime: Date; authFactor: AuthFactor | null; createdAt: Date; expiresAt: Date };
 
-/** The live session a token names, or null (missing, another account's, revoked, idle or past its deadline). */
+/**
+ * The live session a token names, or null (missing, another account's, revoked, idle or past its
+ * deadline — or of another scope). Workstations W2: only an ERP-scope session is an ERP session. A
+ * STATION session (opened by a station PIN on a registered station device) is refused here, before
+ * anything is touched, so a station token never authenticates an ERP API and an ERP request never
+ * refreshes a station session's idle clock (getUserWithPermissions is the one caller).
+ */
 export async function checkSession(sid: string | undefined, employeeId: string): Promise<LiveSession | null> {
   if (!sid) return null;
   const s = await prisma.authSession.findUnique({ where: { id: sid } });
   if (!s || s.employeeId !== employeeId || s.revokedAt) return null;
+  if (s.scope !== "ERP") return null;
   const now = Date.now();
   if (now >= s.expiresAt.getTime()) return null;
   if (now - s.lastSeenAt.getTime() > SESSION_IDLE_MS) {

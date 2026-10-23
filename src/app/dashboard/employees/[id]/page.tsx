@@ -18,6 +18,7 @@ import {
   type DeviceInfo, type Source, type UserStatus,
 } from "../_ui/shared";
 import { AddOverrideDialog, ConfirmDialog, CredentialsDialog, RevokeDialog, TempPasswordDialog, valueWord } from "../_ui/dialogs";
+import { Workstations } from "../_ui/workstations";
 
 type Cells = Record<string, { access: string; sub: Record<string, boolean> }>;
 type EffRow = { module: string; sub: string | null; value: string; roleValue: string; source: Source; sensitive: boolean; override?: { id?: string; reason: string; expiresAt: string | null; reviewAt: string | null; createdAt?: string; createdByName?: string | null; recorded: boolean } | null };
@@ -32,6 +33,7 @@ type Profile = {
   lastSignIn: { at: string; method: string; device: DeviceInfo } | null;
   password: { set: boolean; temporary: boolean; tempExpiresAt: string | null; changedAt: string | null };
   pin: { set: boolean; resetPending: boolean; changedAt: string | null };
+  stationPin?: { set: boolean; setAt: string | null; locked: boolean };
   template: Cells; effective: Cells; groups: Group[]; overrides: Override[]; sensitive: { key: string; module: string; sub: string | null; source: string }[];
   powerUser: boolean;
   events: Event[]; caps: { view: boolean; manage: boolean; manageThis: boolean; accessThis: boolean; powerUser: boolean; limit: Cells | null; simpleMode: boolean }; computedAt: string;
@@ -86,7 +88,7 @@ function UserProfilePageInner() {
     { key: "overview", label: L("نظرة عامة", "Overview") },
     { key: "effective", label: L("الصلاحيات الفعلية", "Effective permissions") },
     { key: "exceptions", label: L("الاستثناءات", "Exceptions"), count: activeOverrides.length },
-    { key: "stations", label: L("محطات العمل", "Workstations"), soon: true },
+    { key: "stations", label: L("محطات العمل", "Workstations") },
     { key: "sessions", label: L("الأجهزة والجلسات", "Devices & sessions"), hidden: !p?.caps.manage },
     { key: "log", label: L("السجل", "History") },
   ];
@@ -146,6 +148,7 @@ function UserProfilePageInner() {
       {tab === "overview" ? <Overview p={p} goLog={() => setTab("log")} /> : null}
       {tab === "effective" ? <Effective p={p} /> : null}
       {tab === "exceptions" ? <Exceptions p={p} onAdd={() => setDlg("override")} onRemove={(o) => setDlg({ removeOverride: o })} /> : null}
+      {tab === "stations" ? <Workstations p={p} onSaved={refresh} /> : null}
       {tab === "sessions" && p.caps.manage ? <Sessions p={p} reload={reload} onEnd={(ref) => setDlg({ session: ref })} onDevice={(ref) => setDlg({ device: ref })} onAll={() => setDlg("endAll")} /> : null}
       {tab === "log" ? <History p={p} saved={saved} /> : null}
 
@@ -167,10 +170,10 @@ function UserProfilePageInner() {
 
       {p.caps.manageThis ? (
         <>
-          <CredentialsDialog open={dlg === "cred"} onClose={() => setDlg(null)} user={p} lock={p.lock} onDone={(r) => {
+          <CredentialsDialog open={dlg === "cred"} onClose={() => setDlg(null)} user={p} lock={p.lock} stationPinLocked={!!p.stationPin?.locked} onDone={(r) => {
             setDlg(null);
             if (r.action === "reset_password" && r.temporaryPassword) setTemp({ password: r.temporaryPassword, expiresAt: r.expiresAt!, pending: !r.applied });
-            else setNotice(r.action === "unlock" ? L("فُتح القفل. يستطيع الدخول بكلمة المرور الحالية.", "Unlocked.") : L(`أُلغي رمز المحطة. يعيّن ${first} رمزًا جديدًا بنفسه.`, "The PIN was cleared."));
+            else setNotice(r.action === "unlock" ? L("فُتح القفل. يستطيع الدخول بكلمة المرور الحالية.", "Unlocked.") : r.action === "reenable_station_pin" ? L(`أُعيد تفعيل رمز المحطة. يستطيع ${first} الدخول به من جديد.`, "The station PIN was re-enabled.") : L(`أُلغي رمز المحطة. يعيّن ${first} رمزًا جديدًا بنفسه.`, "The PIN was cleared."));
             refresh();
           }} />
           {temp ? <TempPasswordDialog open onClose={() => setTemp(null)} name={p.name} username={p.username} password={temp.password} expiresAt={temp.expiresAt} pending={temp.pending} primaryLabel={L("تم", "Done")} onPrimary={() => setTemp(null)} /> : null}
@@ -245,7 +248,9 @@ function Overview({ p, goLog }: { p: Profile; goLog: () => void }) {
           <div><dt>{L("آخر تغيير للصلاحيات", "Last permission change")}</dt><dd>{p.lastPermissionChange ? `${fmtDate(p.lastPermissionChange.at, lang)} ${fmtTime(p.lastPermissionChange.at)}${p.lastPermissionChange.byName ? ` · ${p.lastPermissionChange.byName}` : ""}` : "—"}</dd></div>
           <div><dt>{L("آخر دخول", "Last sign-in")}</dt><dd>{p.lastSignIn ? `${fmtWhen(p.lastSignIn.at, lang)} · ${ar ? METHOD_WORD[p.lastSignIn.method]?.ar ?? "" : METHOD_WORD[p.lastSignIn.method]?.en ?? ""} · ${L("ويب", "Web")}` : "—"}</dd></div>
           <div><dt>{L("كلمة المرور", "Password")}</dt><dd>{p.password.temporary ? L(`مؤقتة · تنتهي ${fmtWhen(p.password.tempExpiresAt, lang)} إن لم تُستخدم`, `Temporary · expires ${fmtWhen(p.password.tempExpiresAt, lang)} if unused`) : p.password.changedAt ? L(`غُيّرت في ${fmtDate(p.password.changedAt, lang)}`, `Changed on ${fmtDate(p.password.changedAt, lang)}`) : p.password.set ? L("معيّنة", "Set") : L("غير معيّنة", "Not set")}</dd></div>
-          <div><dt>{L("رمز المحطة", "Station PIN")}</dt><dd>{p.pin.resetPending ? L("غير معيّن · يعيّنه الموظف بنفسه بعد التحقق من هويته", "Not set · the person sets it after confirming their identity") : p.pin.changedAt ? L(`عيّنه الموظف في ${fmtDate(p.pin.changedAt, lang)}`, `Set by the employee on ${fmtDate(p.pin.changedAt, lang)}`) : p.pin.set ? L("معيّن", "Set") : L("غير معيّن", "Not set")}</dd></div>
+          <div><dt>{L("رمز المحطة", "Station PIN")}</dt><dd data-testid="ur-station-pin-state">{p.stationPin
+            ? (p.stationPin.locked ? L("مقفل بعد محاولات خاطئة · يعيد المسؤول تفعيله من «إعادة تعيين بيانات الدخول»", "Locked after wrong attempts · re-enabled from “Reset credentials”") : p.stationPin.set ? L(`عيّنه الموظف في ${fmtDate(p.stationPin.setAt, lang)}`, `Set by the employee on ${fmtDate(p.stationPin.setAt, lang)}`) : L("غير معيّن · يعيّنه الموظف بنفسه من «ملفي» بعد التحقق من هويته", "Not set · the person sets it in their profile after confirming their identity"))
+            : p.pin.resetPending ? L("غير معيّن · يعيّنه الموظف بنفسه بعد التحقق من هويته", "Not set · the person sets it after confirming their identity") : p.pin.set ? L("معيّن", "Set") : L("غير معيّن", "Not set")}</dd></div>
         </dl>
         <div>
           <p className="ur-lbl">{L("يستطيع", "Can")}</p>

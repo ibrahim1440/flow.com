@@ -59,8 +59,35 @@ export const PRINT_PHASE1_NOTE = {
   en: "Printing is not available in Phase 1",
 } as const;
 
-/** Alias that reads as what it decides: printing of any kind is on only for the exact "true". */
+/** Alias kept for the label flows: label printing is on only for the exact "true". */
 export const isPrintingEnabled = isPrintCertified;
+
+/**
+ * Print enablement (owner request «تفعيل الطباعة», 22 Oct 2026). Two kinds of printing, two
+ * switches, both fail-closed (only the exact string "true"):
+ *
+ *  - LABELS — `PRINT_CERTIFIED`: label sheets / thermal rolls (Coffee Origin, Cupping Results,
+ *    the packaging «Print labels» action, the roasting station's recorded screen) and the
+ *    calibration page. A-8 still applies: it is set in production only after a passing physical
+ *    run is recorded (docs/print/CERTIFICATION.md §3, RUNBOOK §10.9 line 12d).
+ *  - DOCUMENTS — `PRINT_DOCUMENTS_ENABLED`: plain A4 documents printed by the browser
+ *    (window.print / «Save as PDF») — the quotation document, the payslips (HR and self-service),
+ *    the one-time credentials sheet of a new user, and the Production → Batches «PDF». These are
+ *    not A-8 (CERTIFICATION.md §1 rows 10–12: no label printer, stock or profile is involved); they
+ *    were off only by the Phase 1 scope decision D1. Turning labels on (`PRINT_CERTIFIED=true`)
+ *    turns documents on too, so the single-switch behaviour of D1 is unchanged.
+ *
+ * Neither is an admin setting: the design (Figma page 1632:2) has no enablement control and
+ * CERTIFICATION.md §3 makes the label switch a release step, not a setting.
+ */
+export function isDocumentPrintingEnabled(env: Env = process.env): boolean {
+  return env.PRINT_DOCUMENTS_ENABLED === "true" || isPrintCertified(env);
+}
+
+/** The state GET /api/print/status reports (labels = the A-8 gate; documents = plain A4 printing). */
+export function printStatus(env: Env = process.env): { certified: boolean; documents: boolean } {
+  return { certified: isPrintCertified(env), documents: isDocumentPrintingEnabled(env) };
+}
 
 /**
  * D1-Q (decided 18 Oct 2026: follow D1 strictly). The quotation's only PDF is the browser's

@@ -9,7 +9,7 @@ import {
 import { dayRows, fullUnpaid, itemLabel, itemNote, type DayDetail, type PayItem } from "../../shared";
 import { DayValue } from "../../day-value";
 import { NOT_AUTHORIZED_AR, NOT_AUTHORIZED_EN, NOT_AUTHORIZED_NET_AR, NOT_AUTHORIZED_NET_EN } from "@/lib/hr/payroll-doc";
-import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintCertified } from "@/components/print/Certification";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 
 type Payslip = {
   id: string; runNo: number; kind: "REGULAR" | "CORRECTION"; periodMonth: string; status: string;
@@ -46,8 +46,8 @@ export default function PayslipPage() {
   const { data: p, error, loading, reload } = useHr<Payslip>(`/api/hr/payroll/payslips/${lineId}`);
   const { L, month, en, lang } = useHrI18n();
   // Owner decision D1: printing is out of Phase 1. The Print action works only once the server's
-  // PRINT_CERTIFIED gate says so (unknown counts as off); the payslip itself stays viewable.
-  const printing = usePrintCertified();
+  // document-printing gate (PRINT_DOCUMENTS_ENABLED) says so (unknown counts as off); the payslip itself stays viewable.
+  const printing = usePrintDocuments();
 
   return (
     <div className="hr-page hr-payslip" style={{ maxWidth: 880 }}>

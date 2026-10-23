@@ -57,7 +57,35 @@ export type Sample = {
 export type Order = {
   id: string; orderNumber: number; createdAt: string; status: string; approvalStatus: string; paymentStatus: string;
   vatInvoiceStatus: string; quotationNumber: string | null; itemCount: number; totalKg: number;
+  /** The orders board's computed stage (services/orders/pipeline.ts); null for cancelled / rejected. */
+  pipeline: { key: string; stage: number; partDelivered: boolean } | null;
 };
+
+/** A document on the customer's file («الملفات»). Metadata only. */
+export type CustomerFile = {
+  id: string; category: string; title: string; fileName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string;
+  uploadedBy: { id: string; name: string } | null;
+};
+
+/** «كشف الحساب»: derived from accepted quotations and approved collections — not an accounting ledger. */
+export type StatementLine = {
+  kind: "document" | "payment"; key: string; at: string; opportunityId: string; dealTitle: string;
+  debit: string; credit: string; balance: string;
+  quoteId?: string; quoteNumber?: string; revision?: number;
+  paymentId?: string; method?: string; orderNumber?: number | null; reference?: string | null;
+};
+export type AgingKey = "notDue" | "d1_30" | "d31_60" | "d61_90" | "d90plus";
+export type Statement = {
+  termsDays: number | null;
+  lines: StatementLine[];
+  totals: { debit: string; credit: string; net: string; outstanding: string; unapplied: string };
+  open: { opportunityId: string; dealTitle: string; quoteId: string; quoteNumber: string; total: string; paid: string; unpaid: string; dueAt: string; basis: "delivery" | "acceptance"; daysOverdue: number; bucket: AgingKey }[];
+  aging: Record<AgingKey | "total", string>;
+  currency: string;
+};
+export type Credit =
+  | { scope: "all"; limit: string; used: string; available: string; percent: number | null; over: boolean }
+  | { scope: "own"; limit: string; used: null; available: null; percent: null; over: null };
 
 export type Collection = {
   id: string; status: string; amountGross: string; currency: string; paymentMethod: string; collectedAt: string;
@@ -89,7 +117,11 @@ export type Account = {
     monthly: { month: string; kg: number; partial?: true }[] | null;
     usualItems: { name: string; kgPerMonth: number }[] | null;
     unpricedOrders: number | null;
+    /** The credit limit against the balance; null without a limit or without the sales section. */
+    credit: Credit | null;
   };
+  statement: Statement | null;
+  files: CustomerFile[];
   openDeal: OpenDeal | null;
   nextStep: Activity | null;
   openDeals: number;
@@ -100,6 +132,6 @@ export type Account = {
   orders: Order[] | null;
   collections: Collection[] | null;
   timeline: TimelineEntry[];
-  can: { edit: boolean; manageProfiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean };
+  can: { edit: boolean; manageProfiles: boolean; manageFiles: boolean; logActivity: boolean; quote: boolean; createDeal: boolean };
   now: string;
 };

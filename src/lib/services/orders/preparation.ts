@@ -26,6 +26,7 @@ import {
   reserveFinishedUnits,
 } from "@/lib/services/finished-products";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { orderNeedsProduction } from "@/lib/automation/order-progress";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -82,7 +83,9 @@ export type PreparationTrigger =
   | "delivery"
   | "resume"
   | "order_edited"
-  | "review";
+  | "review"
+  /** «إعادة حساب حالات الطلبات»: corrects the past, so its automation events are silent. */
+  | "recompute";
 
 type Outcome = {
   orderItemId: string;
@@ -468,12 +471,27 @@ export async function reviewOrderPreparation(
 
   // A re-review that lands on the same status is not news to anyone outside. The payload keeps
   // its two fields; `automatic` and `trigger` are additive.
+  // feat/wa-status-rules: the recompute's events are kept but produce no WhatsApp message.
+  const silent = input.trigger === "recompute";
   if (newStatus !== order.status) {
     await emitAutomationEvent(tx, {
       eventType: "order.status_changed",
       subjectType: "Order",
       subjectId: id,
-      payload: auto ? { from: order.status, to: newStatus, automatic: true, trigger: input.trigger ?? null } : { from: order.status, to: newStatus },
+      payload: auto
+        ? { from: order.status, to: newStatus, automatic: true, trigger: input.trigger ?? null, ...(silent ? { silent: true } : {}) }
+        : { from: order.status, to: newStatus },
+      actorId: actor.id,
+    });
+  }
+  // «بانتظار الإنتاج» for the order as a whole: announced when the order STARTS needing production
+  // (no line did before this review, one does now) — not again while it keeps needing it.
+  if (!orderNeedsProduction(order.items) && orderNeedsProduction(refreshedItems)) {
+    await emitAutomationEvent(tx, {
+      eventType: "order.progress_changed",
+      subjectType: "Order",
+      subjectId: id,
+      payload: { from: null, to: "pending_production", automatic: auto, trigger: input.trigger ?? null, ...(silent ? { silent: true } : {}) },
       actorId: actor.id,
     });
   }
@@ -635,7 +653,7 @@ export async function autoCloseAfterDelivery(
     eventType: "order.status_changed",
     subjectType: "Order",
     subjectId: orderId,
-    payload: { from: order.status, to: "Completed", reason: null, automatic: true, trigger },
+    payload: { from: order.status, to: "Completed", reason: null, automatic: true, trigger, ...(trigger === "release_recompute" ? { silent: true } : {}) },
     actorId: actor.id,
   });
   return true;

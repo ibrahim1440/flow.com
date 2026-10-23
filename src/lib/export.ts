@@ -28,15 +28,36 @@ function shapeArabic(text: string): string {
   return bidi.getReorderedString(shaped, embeddingLevels);
 }
 
+/**
+ * The strings above are already shaped AND in visual order (shapeArabic). jsPDF's own bidi step
+ * (postProcessText) treats every string as visual-LTR input and re-orders it to logical order,
+ * which reversed every Arabic word in the batches PDF («جاتنلإا ريرقت» for «تقرير الإنتاج»).
+ * Visual in, visual out: jsPDF leaves the text as given. Applied to every doc.text of the
+ * document, including the ones jspdf-autotable makes.
+ */
+function keepVisualOrder(doc: jsPDF) {
+  const text = doc.text.bind(doc) as (...a: unknown[]) => jsPDF;
+  (doc as unknown as { text: (...a: unknown[]) => jsPDF }).text = (t: unknown, x: unknown, y: unknown, options?: unknown, ...rest: unknown[]) =>
+    text(t, x, y, { ...((options as object | undefined) ?? {}), isInputVisual: true, isOutputVisual: true }, ...rest);
+}
+
 function hasArabic(text: string): boolean {
   return /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(text);
 }
 
+/**
+ * A table cell in LOGICAL order. autoTable wraps it into lines first (so a long Arabic cell breaks
+ * between the right words, first line first), and each drawn line is shaped into visual order
+ * in willDrawCell (visualCellLines) — shaping before the wrap printed wrapped Arabic lines in the
+ * wrong order, and a cell left unshaped (the date «1 أكتوبر 2026») printed reversed.
+ */
 function processCell(value: string | number | null | undefined): string {
   if (value == null) return "";
-  const s = String(value);
-  if (hasArabic(s)) return shapeArabic(s);
-  return s;
+  return String(value);
+}
+
+function visualCellLines(lines: string[]): string[] {
+  return lines.map((l) => (hasArabic(l) ? shapeArabic(l) : l));
 }
 
 export type BatchExportRow = {
@@ -107,10 +128,10 @@ function rowToRtlArray(r: BatchExportRow): string[] {
     String(r.roastedBeanQuantity),
     String(r.greenBeanQuantity),
     processCell(r.beanType),
-    String(r.orderNumber),
+    processCell(r.orderNumber),
     processCell(r.customer),
-    r.date,
-    r.batchNumber,
+    processCell(r.date),
+    processCell(r.batchNumber),
   ];
 }
 
@@ -134,14 +155,14 @@ function addPdfHeader(doc: jsPDF, title: string, titleAr: string) {
 
   doc.setFontSize(7);
   doc.setFont("Amiri", "normal");
-  doc.text("Hiqbah Specialty Coffee", pageW - 14, 16);
+  doc.text("Hiqbah Specialty Coffee", pageW - 14, 16, { align: "right" });
 
   doc.setFont("Amiri", "bold");
   doc.setFontSize(12);
   doc.text(shapeArabic(titleAr), pageW / 2, 10, { align: "center" });
   doc.setFontSize(9);
   doc.setFont("Amiri", "normal");
-  doc.text(title, pageW / 2, 17);
+  doc.text(title, pageW / 2, 17, { align: "center" });
 
   doc.setFontSize(7);
   const now = new Date();
@@ -185,10 +206,11 @@ export function exportBatchesPDF(
   titleAr = "تقرير الإنتاج"
 ) {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  keepVisualOrder(doc);
   registerFonts(doc);
   addPdfHeader(doc, title, titleAr);
 
-  const headers = AR_HEADERS.map((h) => shapeArabic(h));
+  const headers = [...AR_HEADERS];
 
   const body = rows.map((r) => rowToRtlArray(r));
 
@@ -216,7 +238,7 @@ export function exportBatchesPDF(
     "",
     "",
     "",
-    shapeArabic("الإجمالي"),
+    "الإجمالي",
   ]);
 
   autoTable(doc, {
@@ -251,6 +273,12 @@ export function exportBatchesPDF(
       8: { halign: "center" },
       9: { halign: "center" },
       11: { halign: "center" },
+      // The date («1 أكتوبر 2026») and its header stay on whole words: the customer column takes
+      // the slack instead of splitting them mid-word.
+      13: { cellWidth: 24 },
+    },
+    willDrawCell(data) {
+      data.cell.text = visualCellLines(data.cell.text);
     },
     didParseCell(data) {
       if (data.row.index === body.length - 1 && data.section === "body") {

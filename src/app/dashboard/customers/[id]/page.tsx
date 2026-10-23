@@ -10,8 +10,10 @@ import { HrRoot } from "@/components/hr/ui";
 import { ACTIVITY_LABELS, OUTCOME_LABELS, initials, splitTitle } from "@/components/d21/labels";
 import { currencyLabel, dayCount, dayUnit, daysFromToday, dueText, money2, relativeDays, shortDate, whole } from "@/components/d21/format";
 import { api, pick, QUOTE_STATUS_SPECS, LEAD_SOURCE_LABELS } from "../../sales/_components/ui";
-import { ActivityDialog, ContactDialog, DetailsDialog, QuoteDialog, SEGMENT_LABELS } from "./dialogs";
-import type { Account, Activity, Contact, TimelineEntry } from "./types";
+import { ActivityDialog, ContactDialog, DetailsDialog, FileDialog, FILE_CATEGORY_LABELS, QuoteDialog, SEGMENT_LABELS } from "./dialogs";
+import type { Account, Activity, AgingKey, Contact, CustomerFile, TimelineEntry } from "./types";
+import { orderProgress, progressText } from "@/lib/order-stage";
+import { ORDER_STATUS_LABEL_KEYS } from "@/components/OrderLifecyclePanel";
 import "../customers.css";
 import "./account.css";
 
@@ -25,22 +27,26 @@ import "./account.css";
  * Every figure comes from GET /api/customers/[id]/account and is defined there and in
  * services/customers/aggregates.ts; nothing is computed or invented here. A section the viewer
  * may not read arrives as null and says so («لا تملك صلاحية …») rather than showing zero.
- * The files tab is drawn disabled: the system has no file storage for customers (CRM.md
- * backend dependencies; only collection evidence and finance attachments store bytes).
+ * The files tab (feat/customer-file) lists, uploads, downloads and removes the customer's documents
+ * (/api/customers/[id]/files; bytes in Postgres like collection evidence — no object store exists).
+ * The invoices tab adds «كشف الحساب» and «أعمار الديون», derived from the same accepted quotations
+ * and approved collections as «الرصيد المستحق» (aggregates.ts statementOfAccount) — not accounting.
+ * The orders tab reads each order by the owner's one display rule (lib/order-stage orderProgress).
  */
 
 type Tab = "overview" | "orders" | "invoices" | "deals" | "quotes" | "samples" | "files";
 
-const ORDER_STATUS: Record<string, { ar: string; en: string; tone?: string }> = {
-  "Waiting Approval": { ar: "بانتظار الاعتماد", en: "Waiting approval" },
-  "Waiting Preparation Review": { ar: "بانتظار مراجعة التجهيز", en: "Preparation review", tone: "in" },
-  Preparing: { ar: "قيد التجهيز", en: "Preparing", tone: "in" },
-  "Ready for Shipping": { ar: "جاهز للشحن", en: "Ready to ship", tone: "in" },
-  Completed: { ar: "مكتمل", en: "Completed", tone: "ok" },
-  "On Hold": { ar: "معلّق مؤقتاً", en: "On hold", tone: "wa" },
-  Cancelled: { ar: "ملغى", en: "Cancelled", tone: "x" },
-  Rejected: { ar: "مرفوض", en: "Rejected", tone: "er" },
+/** lib/order-stage ProgressTone → the Direction 2.1 status pill (`.st`) tones. */
+const PROGRESS_TONE: Record<string, string> = { warn: "wa", danger: "er", ok: "ok", info: "in" };
+const AGING_LABELS: Record<AgingKey, { ar: string; en: string }> = {
+  notDue: { ar: "غير مستحق بعد", en: "Not due yet" },
+  d1_30: { ar: "1–30 يومًا", en: "1–30 days" },
+  d31_60: { ar: "31–60 يومًا", en: "31–60 days" },
+  d61_90: { ar: "61–90 يومًا", en: "61–90 days" },
+  d90plus: { ar: "أكثر من 90 يومًا", en: "Over 90 days" },
 };
+const AGING_KEYS: AgingKey[] = ["notDue", "d1_30", "d31_60", "d61_90", "d90plus"];
+const fileSize = (n: number, ar: boolean) => n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} ${ar ? "م.ب" : "MB"}` : `${Math.max(1, Math.round(n / 1024))} ${ar ? "ك.ب" : "KB"}`;
 const PAYMENT_STATUS: Record<string, { ar: string; en: string; tone?: string }> = {
   Paid: { ar: "مدفوع", en: "Paid", tone: "ok" }, "Not Paid": { ar: "غير مدفوع", en: "Not paid", tone: "wa" }, "Partial Paid": { ar: "مدفوع جزئيًا", en: "Partly paid", tone: "in" },
 };
@@ -68,7 +74,7 @@ const EN_MONTHS = ["January", "February", "March", "April", "May", "June", "July
 
 export default function CustomerAccountPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { lang } = useI18n();
+  const { lang, t } = useI18n();
   const ar = lang === "ar";
   const L = useCallback((a: string, e: string) => (ar ? a : e), [ar]);
   const lx = (x: { ar: string; en: string } | undefined, fallback = "—") => (x ? (ar ? x.ar : x.en) : fallback);
@@ -80,7 +86,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
-  const [dialog, setDialog] = useState<null | "activity" | "quote" | "details" | { contact: Contact | null }>(null);
+  const [dialog, setDialog] = useState<null | "activity" | "quote" | "details" | "file" | { contact: Contact | null }>(null);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -190,6 +196,14 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     if (res.ok) { setNote(""); setNotice({ text: L("سُجّلت الملاحظة.", "Note logged."), ok: true }); reload(); }
     else setNotice({ text: res.data.error ?? L("تعذّر الحفظ.", "Could not save."), ok: false });
   }
+  async function deleteFile(f: CustomerFile) {
+    if (busy || !confirm(ar ? `حذف «${f.title}» من ملف العميل؟` : `Remove “${f.title}” from the customer file?`)) return;
+    setBusy(true);
+    const res = await api(`/api/customers/${id}/files/${f.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (res.ok) { setNotice({ text: L("حُذف الملف.", "File removed."), ok: true }); reload(); }
+    else setNotice({ text: res.data.error ?? L("تعذّر الحذف.", "Could not remove it."), ok: false });
+  }
   async function deleteCustomer() {
     if (!c || !confirm(L("حذف هذا العميل؟ لا يمكن التراجع.", "Delete this customer? This cannot be undone."))) return;
     const res = await api(`/api/customers/${id}`, { method: "DELETE" });
@@ -288,13 +302,15 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       </>}
     </div>
   );
+  const credit = m.credit;
   const termsFig = (
     <div data-testid="metric-terms">
       <dt className="lbl">{L("شروط الدفع", "Payment terms")}</dt>
       <dd className="mid acc-terms">{c.paymentTermsDays != null ? <><span className="n">{c.paymentTermsDays}</span> {dayUnit(c.paymentTermsDays, lang) === "يوم" && c.paymentTermsDays !== 1 ? "يومًا" : dayUnit(c.paymentTermsDays, lang)}</> : notSet}</dd>
-      <dd className="d">{c.creditLimit != null
+      <dd className="d" data-testid="metric-credit" title={credit && credit.scope === "all" ? (ar ? `المستخدم ${whole(credit.used)} · المتاح ${whole(credit.available)} ر.س` : `Used ${whole(credit.used)} · available SAR ${whole(credit.available)}`) : undefined}>{c.creditLimit != null
         ? (ar ? <>حد ائتمان <span className="n">{whole(c.creditLimit)}</span> ر.س</> : <>Credit limit SAR <span className="n">{whole(c.creditLimit)}</span></>)
-        : L("حد الائتمان غير محدد", "No credit limit set")}</dd>
+        : L("حد الائتمان غير محدد", "No credit limit set")}
+        {credit?.over && <> · <span className="acc-warn" data-testid="credit-over">{L("متجاوز", "exceeded")}</span></>}</dd>
     </div>
   );
 
@@ -308,15 +324,15 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     { id: "deals", text: L("الصفقات", "Deals"), n: data.deals?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
     { id: "quotes", text: L("عروض الأسعار", "Quotations"), n: data.quotes?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
     { id: "samples", text: L("العينات", "Samples"), n: data.samples?.length, disabled: sections.sales ? undefined : L("يتطلب صلاحية المبيعات", "Needs the sales permission") },
-    { id: "files", text: L("الملفات", "Files") },
+    { id: "files", text: L("الملفات", "Files"), n: data.files.length || null },
   ];
   const tabBar = (
     <div className="tabs acc-tabs" role="tablist" aria-label={L("أقسام الحساب", "Account sections")}>
-      {tabs.map((t) => (
-        <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={`${tab === t.id ? "on" : ""}${t.disabled || t.id === "files" ? " acc-off" : ""}`.trim() || undefined}
-          aria-disabled={t.disabled ? true : undefined} title={t.disabled ?? (t.id === "files" ? L("غير متاح: لا يوجد مخزن ملفات بعد", "Unavailable: no file storage yet") : undefined)}
-          data-testid={`tab-${t.id}`} onClick={() => { if (!t.disabled) setTab(t.id); }}>
-          {t.text}{count(t.n)}
+      {tabs.map((tb) => (
+        <button key={tb.id} type="button" role="tab" aria-selected={tab === tb.id} className={`${tab === tb.id ? "on" : ""}${tb.disabled ? " acc-off" : ""}`.trim() || undefined}
+          aria-disabled={tb.disabled ? true : undefined} title={tb.disabled}
+          data-testid={`tab-${tb.id}`} onClick={() => { if (!tb.disabled) setTab(tb.id); }}>
+          {tb.text}{count(tb.n)}
         </button>
       ))}
     </div>
@@ -555,14 +571,83 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
   // ── Other tabs ──
   const st = (spec: { ar: string; en: string; tone?: string } | undefined, raw: string) => <span className={`st ${spec?.tone ?? ""}`}>{spec ? lx(spec) : raw}</span>;
   const empty = (t: string) => <p className="acc-muted acc-empty" data-testid="tab-empty">{t}</p>;
+  // One text status per order, by the owner's rule (lib/order-stage, as the orders board): the
+  // status when it decides (hold, cancelled, rejected, completed), else the production stage;
+  // an order without a computed stage falls back to its status label (the same translation keys).
+  const orderStatus = (o: NonNullable<Account["orders"]>[number]) => {
+    const d = orderProgress(o);
+    if (d) return <span className={`st ${d.muted ? "x" : PROGRESS_TONE[d.tone] ?? ""}`} data-testid={`order-status-${o.orderNumber}`} data-key={d.key}>{progressText(d, t)}</span>;
+    const k = ORDER_STATUS_LABEL_KEYS[o.status];
+    return <span className="st" data-testid={`order-status-${o.orderNumber}`}>{k ? t(k) : o.status}</span>;
+  };
   const ordersTab = !data.orders ? empty(L("لا تملك صلاحية الطلبات.", "No access to orders.")) : data.orders.length === 0 ? empty(L("لا طلبات لهذا العميل.", "No orders for this customer.")) : (
     <div className="acc-scroll"><table className="t" data-testid="orders-table">
       <thead><tr><th>{L("الطلب", "Order")}</th><th>{L("التاريخ", "Date")}</th><th>{L("الحالة", "Status")}</th><th className="num">{L("الكمية (كغ)", "Quantity (kg)")}</th><th className="num">{L("البنود", "Lines")}</th><th>{L("الدفع", "Payment")}</th><th>{L("الفاتورة الضريبية", "VAT invoice")}</th></tr></thead>
       <tbody>{data.orders.map((o) => (
-        <tr key={o.id}><td><Link href={`/dashboard/orders?order=${o.orderNumber}`}><bdi className="id">#{o.orderNumber}</bdi></Link></td><td>{shortDate(o.createdAt, lang)}</td><td>{st(ORDER_STATUS[o.status], o.status)}</td>
+        <tr key={o.id}><td><Link href={`/dashboard/orders?order=${o.orderNumber}`}><bdi className="id">#{o.orderNumber}</bdi></Link></td><td>{shortDate(o.createdAt, lang)}</td><td>{orderStatus(o)}</td>
           <td className="num">{money2(o.totalKg)}</td><td className="num">{o.itemCount}</td><td>{st(PAYMENT_STATUS[o.paymentStatus], o.paymentStatus)}</td><td>{st(VAT_STATUS[o.vatInvoiceStatus], o.vatInvoiceStatus)}</td></tr>
       ))}</tbody>
     </table></div>
+  );
+  // ── «كشف الحساب» and «أعمار الديون» (sales section) ──
+  const stm = data.statement;
+  const money = (v: string) => <span className="n">{money2(v)}</span>;
+  const statementBlock = !stm ? null : (
+    <section data-testid="statement" className="acc-tabsec" style={{ marginTop: 22 }}>
+      <div className="bh"><h2 className="bt">{L("كشف الحساب", "Statement of account")}</h2>
+        <span className="sub">{L("من عروض الأسعار المقبولة والدفعات المعتمدة · ليس قيدًا محاسبيًا", "From accepted quotations and approved payments · not an accounting ledger")}</span></div>
+      <dl className="metrics acc-metrics acc-stm-sum" data-testid="statement-totals">
+        <div><dt className="lbl">{L("المستحق بالعروض", "Agreed (quotations)")}</dt><dd className="mid n">{money2(stm.totals.debit)}</dd><dd className="d">{cur} · {L("شامل الضريبة", "VAT included")}</dd></div>
+        <div><dt className="lbl">{L("المدفوع المعتمد", "Approved payments")}</dt><dd className="mid n">{money2(stm.totals.credit)}</dd><dd className="d">{cur}</dd></div>
+        <div><dt className="lbl">{L("الرصيد المستحق", "Balance due")}</dt><dd className={`mid n${Number(stm.totals.outstanding) > 0 ? " acc-warn" : ""}`} data-testid="statement-outstanding">{money2(stm.totals.outstanding)}</dd>
+          <dd className="d">{Number(stm.totals.unapplied) > 0 ? (ar ? <>ورصيد دائن <span className="n">{money2(stm.totals.unapplied)}</span> لم يُطبَّق</> : <>and SAR <span className="n">{money2(stm.totals.unapplied)}</span> unapplied credit</>) : cur}</dd></div>
+        <div data-testid="statement-credit"><dt className="lbl">{L("حد الائتمان", "Credit limit")}</dt>
+          {credit ? <><dd className="mid n">{money2(credit.limit)}</dd>
+            <dd className="d">{credit.scope === "all"
+              ? (credit.over ? <span className="acc-warn">{ar ? <>متجاوز · مستخدم <span className="n">{credit.percent}%</span></> : <>Exceeded · <span className="n">{credit.percent}%</span> used</>}</span>
+                : (ar ? <>المتاح <span className="n">{money2(credit.available)}</span> · مستخدم <span className="n">{credit.percent ?? 0}%</span></> : <>Available <span className="n">{money2(credit.available)}</span> · <span className="n">{credit.percent ?? 0}%</span> used</>))
+              : L("الاستخدام يظهر لمن يرى صفقات الفريق", "Usage is shown to viewers of the whole team's deals")}</dd></>
+            : <><dd className="mid">—</dd><dd className="d">{L("غير محدد", "Not set")}</dd></>}</div>
+      </dl>
+
+      <div className="lbl" style={{ margin: "22px 0 6px" }}>{L("أعمار الديون", "Aging")}
+        <span className="acc-muted" style={{ fontWeight: 400 }}> · {stm.termsDays != null
+          ? (ar ? `الاستحقاق بعد ${dayCount(stm.termsDays, lang)} من التسليم، أو من قبول العرض قبل التسليم` : `Due ${dayCount(stm.termsDays, lang)} after delivery, or after acceptance before any delivery`)
+          : L("شروط الدفع غير محددة: يُستحق عند التسليم أو قبول العرض", "No payment terms set: due at delivery or acceptance")}</span></div>
+      <dl className="acc-aging" data-testid="aging">
+        {AGING_KEYS.map((k) => (
+          <div key={k} data-testid={`aging-${k}`} className={k !== "notDue" && Number(stm.aging[k]) > 0 ? "late" : undefined}>
+            <dt>{lx(AGING_LABELS[k])}</dt><dd className="n">{money2(stm.aging[k])}</dd>
+          </div>
+        ))}
+      </dl>
+      {stm.open.length > 0 && (
+        <div className="acc-scroll" style={{ marginTop: 10 }}><table className="t dense" data-testid="open-documents">
+          <thead><tr><th>{L("العرض", "Quotation")}</th><th>{L("الصفقة", "Deal")}</th><th className="num">{L("الإجمالي", "Total")}</th><th className="num">{L("المدفوع", "Paid")}</th><th className="num">{L("المتبقي", "Unpaid")}</th><th>{L("الاستحقاق", "Due")}</th><th>{L("العمر", "Age")}</th></tr></thead>
+          <tbody>{stm.open.map((o) => (
+            <tr key={o.quoteId}><td><Link href={`/dashboard/sales/quotes/${o.quoteId}`}><bdi className="id">{o.quoteNumber}</bdi></Link></td><td><bdi>{o.dealTitle}</bdi></td>
+              <td className="num">{money(o.total)}</td><td className="num">{money(o.paid)}</td><td className="num"><b>{money(o.unpaid)}</b></td>
+              <td>{shortDate(o.dueAt, lang)} <span className="acc-muted">· {o.basis === "delivery" ? L("من التسليم", "from delivery") : L("من القبول", "from acceptance")}</span></td>
+              <td>{o.daysOverdue > 0 ? <span className="st er">{ar ? `متأخر ${dayCount(o.daysOverdue, lang)}` : `${dayCount(o.daysOverdue, lang)} overdue`}</span> : <span className="st">{lx(AGING_LABELS.notDue)}</span>}</td></tr>
+          ))}</tbody></table></div>
+      )}
+
+      <div className="lbl" style={{ margin: "22px 0 6px" }}>{L("الحركات", "Entries")}</div>
+      {stm.lines.length === 0 ? empty(L("لا عروض مقبولة ولا دفعات معتمدة بعد.", "No accepted quotations or approved payments yet.")) : (
+        <div className="acc-scroll"><table className="t dense" data-testid="statement-lines">
+          <thead><tr><th>{L("التاريخ", "Date")}</th><th>{L("البيان", "Description")}</th><th>{L("الصفقة", "Deal")}</th><th className="num">{L("مدين", "Debit")}</th><th className="num">{L("دائن", "Credit")}</th><th className="num">{L("الرصيد", "Balance")}</th></tr></thead>
+          <tbody>{stm.lines.map((l) => (
+            <tr key={l.key} data-kind={l.kind}><td>{shortDate(l.at, lang)}</td>
+              <td>{l.kind === "document"
+                ? <>{L("عرض مقبول", "Accepted quotation")} <Link href={`/dashboard/sales/quotes/${l.quoteId}`}><bdi className="id">{l.quoteNumber}</bdi></Link></>
+                : <>{L("دفعة", "Payment")} · {lx(METHOD[l.method ?? ""], l.method ?? "")}{l.orderNumber != null && <> · <bdi className="id">#{l.orderNumber}</bdi></>}{l.reference && <span className="acc-muted"> · <bdi>{l.reference}</bdi></span>}</>}</td>
+              <td><bdi>{l.dealTitle}</bdi></td>
+              <td className="num">{Number(l.debit) ? money(l.debit) : ""}</td><td className="num">{Number(l.credit) ? money(l.credit) : ""}</td><td className="num">{money(l.balance)}</td></tr>
+          ))}</tbody>
+          <tfoot><tr><td colSpan={3}><b>{L("الإجمالي", "Total")}</b></td><td className="num"><b>{money(stm.totals.debit)}</b></td><td className="num"><b>{money(stm.totals.credit)}</b></td><td className="num"><b>{money(stm.totals.net)}</b></td></tr></tfoot>
+        </table></div>
+      )}
+    </section>
   );
   const invoicesTab = (
     <div data-testid="invoices-tab">
@@ -571,6 +656,7 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
           "The system has no invoicing yet: VAT invoices are issued outside it. Shown here is what is recorded of them per order, and the payments recorded against the customer's deals.")}
       </p>
       {unpricedNote && <p className="acc-note" style={{ margin: "10px 0 0" }} data-testid="unpriced-note">{unpricedNote}</p>}
+      {statementBlock}
       {data.orders && (<>
         <div className="lbl" style={{ margin: "18px 0 6px" }}>{L("الفاتورة الضريبية لكل طلب", "VAT invoice per order")}</div>
         {data.orders.length === 0 ? empty(L("لا طلبات.", "No orders.")) : (
@@ -616,11 +702,32 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
       ))}</tbody>
     </table></div>
   );
+  const files = data.files;
   const filesTab = (
-    <div className="callout acc-info" data-testid="files-unavailable" role="note">
-      <span>{L("الملفات غير متاحة بعد: لا يوجد في النظام مخزن ملفات للعملاء. يُفعَّل هذا القسم حين يُعتمد مخزن للملفات.",
-        "Files are not available yet: the system has no file storage for customers. This tab is enabled once a file store is approved.")}</span>
-    </div>
+    <section data-testid="files-tab" className="acc-tabsec">
+      <div className="bh"><h2 className="bt">{L("ملفات العميل", "Customer files")}</h2>
+        <span className="sub">{L("عقود، سجل تجاري، شهادة ضريبية، اتفاقيات أسعار · PDF أو JPEG أو PNG حتى 5 م.ب", "Contracts, commercial register, VAT certificate, price agreements · PDF, JPEG or PNG up to 5 MB")}</span>
+        {can.manageFiles && <button type="button" className="btn sm p acc-bh-act" onClick={() => setDialog("file")} data-testid="upload-file"><Ico name="plus" small />{L("رفع ملف", "Upload a file")}</button>}
+      </div>
+      {files.length === 0 ? empty(can.manageFiles ? L("لا ملفات على ملف العميل بعد. ارفع العقد أو السجل التجاري أو الشهادة الضريبية.", "No files yet. Upload the contract, the commercial register or the VAT certificate.") : L("لا ملفات على ملف العميل بعد.", "No files on the customer file yet.")) : (
+        <div className="acc-scroll"><table className="t" data-testid="files-table">
+          <thead><tr><th>{L("الملف", "File")}</th><th>{L("التصنيف", "Category")}</th><th className="num">{L("الحجم", "Size")}</th><th>{L("رفعه", "Uploaded by")}</th><th>{L("التاريخ", "Date")}</th><th aria-label={L("إجراءات", "Actions")} /></tr></thead>
+          <tbody>{files.map((f) => (
+            <tr key={f.id} data-testid={`file-${f.id}`}>
+              <td className="who"><a href={`/api/customers/${id}/files/${f.id}`} download={f.fileName} data-testid={`file-download-${f.id}`}><bdi>{f.title}</bdi></a><div className="acc-muted sm" dir="auto">{f.fileName}</div></td>
+              <td>{lx(FILE_CATEGORY_LABELS[f.category], f.category)}</td>
+              <td className="num">{fileSize(f.sizeBytes, ar)}</td>
+              <td>{f.uploadedBy?.name ?? "—"}</td>
+              <td>{shortDate(f.createdAt, lang)}</td>
+              <td className="acc-file-act">
+                <a className="btn sm" href={`/api/customers/${id}/files/${f.id}`} download={f.fileName}>{L("تنزيل", "Download")}</a>
+                {can.manageFiles && <button type="button" className="btn sm" disabled={busy} onClick={() => deleteFile(f)} data-testid={`file-delete-${f.id}`}>{L("حذف", "Remove")}</button>}
+              </td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </section>
   );
   const tabBody = tab === "orders" ? ordersTab : tab === "invoices" ? invoicesTab : tab === "deals" ? dealsTab : tab === "quotes" ? quotesTab : tab === "samples" ? samplesTab : tab === "files" ? filesTab : null;
 
@@ -634,7 +741,8 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
     <>
       {dialog === "activity" && <ActivityDialog ar={ar} customerId={id} deals={openDeals} defaultDealId={null}
         onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("سُجّل النشاط.", "Activity logged."), ok: true }); reload(); }} />}
-      {dialog === "quote" && <QuoteDialog ar={ar} customer={c} openDeals={openDeals} canCreateDeal={can.createDeal} onClose={() => setDialog(null)} />}
+      {dialog === "quote" && <QuoteDialog ar={ar} customer={c} openDeals={openDeals} canCreateDeal={can.createDeal} credit={m.credit} onClose={() => setDialog(null)} />}
+      {dialog === "file" && <FileDialog ar={ar} customerId={id} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("رُفع الملف.", "File uploaded."), ok: true }); setTab("files"); reload(); }} />}
       {dialog === "details" && <DetailsDialog ar={ar} customer={c} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setNotice({ text: L("حُفظت البيانات.", "Saved."), ok: true }); reload(); }} />}
       {dialog && typeof dialog === "object" && <ContactDialog ar={ar} customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
     </>

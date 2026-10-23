@@ -9,10 +9,12 @@ import { stationRoasters } from "@/lib/services/station/queue";
  * warn before sending; POST /api/roasting-batches decides (D5, owner change 22 Oct 2026).
  */
 export async function GET() {
-  const { user, error } = await requireStation();
+  const { user, error, station } = await requireStation();
   if (error) return error;
   try {
-    return NextResponse.json({ roasters: await stationRoasters(user) }, { headers: { "Cache-Control": "no-store" } });
+    // A paired device lists its station's roaster only (W2).
+    const roasters = (await stationRoasters(user)).filter((r) => !station || r.id === station.roasterId);
+    return NextResponse.json({ roasters }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return handleDomainError(err);
   }

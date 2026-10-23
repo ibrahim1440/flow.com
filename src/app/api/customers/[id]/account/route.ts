@@ -5,10 +5,12 @@ import { handleDomainError } from "@/lib/api-error";
 import { canEdit, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import {
-  Decimal, acceptedDocumentPerDeal, monthlyQuantities, orderRhythm, outstandingBalance,
-  salesLast12Months, usualItems, type OrderRow,
+  Decimal, acceptedDocumentPerDeal, creditPosition, monthlyQuantities, orderRhythm, outstandingBalance,
+  salesLast12Months, statementOfAccount, usualItems, type OrderRow,
 } from "@/lib/services/customers/aggregates";
 import { deliveryLotsFor } from "@/lib/services/delivery-lots";
+import { orderPipelines } from "@/lib/services/orders/pipeline";
+import { CUSTOMER_FILE_SELECT } from "@/lib/services/customers/files";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -75,8 +77,10 @@ export async function GET(_request: Request, { params }: Params) {
             paymentStatus: true, vatInvoiceStatus: true, quotationNumber: true,
             items: {
               select: {
-                quantityKg: true, quantityUnits: true, beanTypeName: true,
-                productSku: { select: { name: true, skuCode: true } },
+                id: true, quantityKg: true, quantityUnits: true, beanTypeName: true,
+                // For the orders board's stage (services/orders/pipeline.ts), shown in the orders tab.
+                deliveredUnits: true, deliveredQty: true, productId: true,
+                productSku: { select: { name: true, skuCode: true, productId: true, weightGrams: true } },
                 product: { select: { productNameEn: true, productNameAr: true } },
               },
             },
@@ -186,14 +190,14 @@ export async function GET(_request: Request, { params }: Params) {
     // ── Money (sales module): accepted documents of the deals in scope, and the APPROVED
     //    collections against those deals — all of them, whoever recorded them, exactly as the
     //    deal page's collectionSummary counts them. ──
-    let salesFigure = null, balance = null;
+    let salesFigure = null, balance = null, statement = null, credit = null;
     if (sales && deals && quotes) {
       const dealIds = deals.map((d) => d.id);
       const accepted = acceptedDocumentPerDeal(quotes.filter((q) => q.status === "ACCEPTED"));
       const approved = dealIds.length
         ? await prisma.salesCollection.findMany({
             where: { opportunityId: { in: dealIds }, status: "APPROVED" },
-            select: { opportunityId: true, amountGross: true, collectedAt: true, paymentMethod: true, order: { select: { orderNumber: true } } },
+            select: { id: true, opportunityId: true, amountGross: true, collectedAt: true, paymentMethod: true, referenceNumber: true, order: { select: { orderNumber: true } } },
             orderBy: { collectedAt: "desc" },
           })
         : [];
@@ -211,9 +215,56 @@ export async function GET(_request: Request, { params }: Params) {
         outstanding: b.outstanding.toFixed(2), documents: b.documents, openDocuments: b.openDocuments, currency: "SAR",
         lastPayment: last ? { amount: last.amountGross.toFixed(2), collectedAt: last.collectedAt, method: last.paymentMethod, orderNumber: last.order?.orderNumber ?? null } : null,
       };
+
+      // «كشف الحساب» / «أعمار الديون» (invoices tab): the same documents and approved payments,
+      // line by line — derived, nothing posted (aggregates.ts statementOfAccount). Terms run from
+      // the first delivery of an order made from the document, else from acceptance.
+      const acceptedIds = accepted.map((q) => q.id);
+      const links = acceptedIds.length
+        ? await prisma.opportunityOrder.findMany({
+            where: { quoteId: { in: acceptedIds } },
+            select: { quoteId: true, order: { select: { items: { select: { deliveries: { orderBy: { date: "asc" }, take: 1, select: { date: true } } } } } } },
+          })
+        : [];
+      const firstDelivery = new Map<string, Date>();
+      for (const l of links) {
+        for (const i of l.order.items) for (const d of i.deliveries) {
+          const cur = firstDelivery.get(l.quoteId!);
+          if (!cur || d.date < cur) firstDelivery.set(l.quoteId!, d.date);
+        }
+      }
+      const st = statementOfAccount(
+        accepted.map((q) => ({
+          opportunityId: q.opportunityId, dealTitle: q.opportunity.title, quoteId: q.id, quoteNumber: q.quoteNumber, revision: q.revision,
+          at: q.acceptedAt ?? q.issuedAt ?? q.createdAt, grandTotal: new Decimal(q.grandTotal.toString()), firstDeliveryAt: firstDelivery.get(q.id) ?? null,
+        })),
+        approved.map((c) => ({ id: c.id, opportunityId: c.opportunityId, at: c.collectedAt, amountGross: new Decimal(c.amountGross.toString()), method: c.paymentMethod, orderNumber: c.order?.orderNumber ?? null, reference: c.referenceNumber })),
+        { termsDays: customer.paymentTermsDays, now },
+      );
+      const m2 = (d: Decimal) => d.toFixed(2);
+      statement = {
+        termsDays: customer.paymentTermsDays,
+        lines: st.lines.map((l) => ({ ...l, debit: m2(l.debit), credit: m2(l.credit), balance: m2(l.balance) })),
+        totals: { debit: m2(st.totals.debit), credit: m2(st.totals.credit), net: m2(st.totals.net), outstanding: m2(st.totals.outstanding), unapplied: m2(st.totals.unapplied) },
+        open: st.open.map((o) => ({ ...o, total: m2(o.total), paid: m2(o.paid), unpaid: m2(o.unpaid) })),
+        aging: Object.fromEntries(Object.entries(st.aging).map(([k, v]) => [k, m2(v)])),
+        currency: "SAR",
+      };
+      // The credit limit against the balance — only for a viewer whose balance is the customer's
+      // whole balance (sees every rep's deals). A rep's balance covers their own deals only, so
+      // "used / available" would be wrong for them; they get the limit alone.
+      const cp = all && customer.creditLimit != null ? creditPosition(new Decimal(customer.creditLimit.toString()), b.outstanding) : null;
+      credit = customer.creditLimit == null ? null : cp
+        ? { scope: "all", limit: m2(cp.limit), used: m2(cp.used), available: m2(cp.available), percent: cp.percent, over: cp.over }
+        : { scope: "own", limit: customer.creditLimit.toFixed(2), used: null, available: null, percent: null, over: null };
     }
 
     const rhythm = orders ? orderRhythm(asRows, now) : null;
+    // The orders tab reads each order as the orders board does (lib/order-stage orderProgress):
+    // its status when that decides, otherwise its production stage — computed, never stored.
+    const pipelines = orderRows ? await orderPipelines(prisma, orderRows) : new Map();
+    // The customer's documents (customers module — this route's own gate): metadata only.
+    const files = await prisma.customerFile.findMany({ where: { customerId: id }, orderBy: { createdAt: "desc" }, select: CUSTOMER_FILE_SELECT });
 
     // ── The open deal of the overview: the open deal in scope moved most recently. ──
     const openDeals = (deals ?? []).filter((d) => d.outcome === "OPEN");
@@ -282,7 +333,7 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({
       customer: { ...customer, creditLimit: customer.creditLimit?.toFixed(2) ?? null },
       source: source ? { leadId: source.leadId, convertedAt: source.convertedAt, source: source.lead.source, sourceNote: source.lead.sourceNote } : null,
-      sections: { sales, orders, scope: sales ? (all ? "all" : "own") : null, files: false },
+      sections: { sales, orders, scope: sales ? (all ? "all" : "own") : null, files: true },
       metrics: {
         sales12m: salesFigure,
         balance,
@@ -291,7 +342,10 @@ export async function GET(_request: Request, { params }: Params) {
         monthly: orders ? monthlyQuantities(asRows, now) : null,
         usualItems: orders ? usualItems(asRows, now) : null,
         unpricedOrders: orders && orderRows ? orderRows.filter((o) => o.opportunityLinks.length === 0).length : null,
+        credit,
       },
+      statement,
+      files,
       openDeal: primary ? {
         ...primary, amount: primary.amount.toFixed(2), stageEvents: primary.stageEvents,
         nextStep: nextStep && nextStep.opportunity?.id === primary.id ? nextStep : null,
@@ -310,12 +364,14 @@ export async function GET(_request: Request, { params }: Params) {
         id: o.id, orderNumber: o.orderNumber, createdAt: o.createdAt, status: o.status, approvalStatus: o.approvalStatus,
         paymentStatus: o.paymentStatus, vatInvoiceStatus: o.vatInvoiceStatus, quotationNumber: o.quotationNumber,
         itemCount: o.items.length, totalKg: Math.round(o.items.reduce((s, i) => s + i.quantityKg, 0) * 100) / 100,
+        pipeline: (() => { const p = pipelines.get(o.id); return p ? { key: p.key, stage: p.stage, partDelivered: p.partDelivered } : null; })(),
       })) ?? null,
       collections: collections?.map((c) => ({ ...c, amountGross: c.amountGross.toFixed(2) })) ?? null,
       timeline: timeline.slice(0, 200),
       can: {
         edit: canEdit(p, "customers"),
         manageProfiles: hasSubPrivilege(p, "customers", "manage"),
+        manageFiles: canEdit(p, "customers"),
         logActivity: hasSubPrivilege(p, "sales", "lead_write"),
         quote: hasSubPrivilege(p, "sales", "quote_write"),
         createDeal: hasSubPrivilege(p, "sales", "lead_convert"),

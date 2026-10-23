@@ -215,6 +215,22 @@ const RESOLVERS: Record<string, Resolver> = {
     };
   },
 
+  // feat/wa-status-rules: the order as a whole entered a production / delivery state. Subject is
+  // the Order (never a line), so its status rule announces it once per order.
+  "order.progress_changed": async (db, e, lang, actor) => {
+    const p = payloadOf(e);
+    const o = await orderContext(db, e.subjectId, lang);
+    if (!o.order) return null;
+    return {
+      vars: { ...o.vars, "progress.from": s(p.from), "progress.to": s(p.to), ...common(e, actor) },
+      people: {
+        customer: customerPerson(o.customer, lang),
+        order_owner: employeePerson(o.owner),
+        actor: employeePerson(actor),
+      },
+    };
+  },
+
   "delivery.recorded": async (db, e, lang, actor) => {
     const lotsText = (v: unknown): string | null => {
       if (!Array.isArray(v) || v.length === 0) return null;

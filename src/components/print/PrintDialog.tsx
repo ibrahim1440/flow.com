@@ -26,7 +26,9 @@ import { PrintRoot, SheetPage } from "./SheetView";
 import "./print.css";
 
 export type DialogItem =
-  | { kind: "product"; productId: string; label: string }
+  // `batch`: a roasting batch the caller already knows (the roasting station's recorded screen):
+  // traceability starts on with that batch selected; the server still checks it belongs to the coffee.
+  | { kind: "product"; productId: string; label: string; batch?: { id: string; batchNumber: string } | null }
   | { kind: "cup"; sessionId: string; cupId: string | null; label: string };
 
 type Profile = PrintProfileData & { canEdit?: boolean };
@@ -135,8 +137,8 @@ export function PrintDialog({ open, onClose, items, initialTemplate, subtitle, o
   const [notesDefault, setNotesDefault] = useState<NotesMode>(() => notesModeOf(defaultFields(template)));
   const [notesLines, setNotesLines] = useState<number | null>(null);
   // Traceability follows the template's batch / roast-date fields (Cupping Results prints them by default).
-  const [traceOn, setTraceOn] = useState(() => defaultFields(template).some((f) => f.key === "roastDate" && f.show));
-  const [trace, setTrace] = useState<Record<string, Trace>>({});
+  const [traceOn, setTraceOn] = useState(() => defaultFields(template).some((f) => f.key === "roastDate" && f.show) || items.some((it) => it.kind === "product" && !!it.batch));
+  const [trace, setTrace] = useState<Record<string, Trace>>(() => Object.fromEntries(items.flatMap((it) => (it.kind === "product" && it.batch ? [[it.productId, { batchId: it.batch.id, lotId: null, text: it.batch.batchNumber }]] : []))));
   const [preview, setPreview] = useState<{ labels: LabelData[]; warnings: PrintWarning[] } | null>(null);
   const [previewErr, setPreviewErr] = useState<{ code?: string; message: string; totals?: { labels: number; pages: number } } | null>(null);
   const [page, setPage] = useState(0);

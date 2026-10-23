@@ -24,6 +24,7 @@ import {
   type OrderStatus,
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { emitDeliveryProgress } from "@/lib/services/orders/progress-events";
 import { canSeeCustomerContact, CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";
 
 export async function GET() {
@@ -322,6 +323,8 @@ export async function POST(request: Request) {
           payload: { orderItemId, units, deliveryType: derivedType, lots: lines.map((l) => ({ lotId: l.lotId, batchNumber: l.batchNumber, units: l.units, kg: l.kg })) },
           actorId: user.id,
         });
+        // feat/wa-status-rules: the ORDER (not this line) became «سُلِّم جزئياً».
+        await emitDeliveryProgress(tx, { orderId: orderItem.orderId, orderItemId, deliveryId: delivery.id, units, kg: shippedKg, actorId: user.id });
         // Owner decision O2 (Phase B item 8): the last delivery closes the order, in this same
         // transaction, when completionRefusal passes — never while a reservation is live.
         const closed = await autoCloseAfterDelivery(tx, orderItem.orderId, { id: user.id, name: user.name });
@@ -466,6 +469,7 @@ export async function POST(request: Request) {
         payload: { orderItemId, kg: qty, deliveryType: kgType, lots: kgLines.map((l) => ({ lotId: l.lotId, batchNumber: l.batchNumber, units: null, kg: l.kg })) },
         actorId: user.id,
       });
+      await emitDeliveryProgress(tx, { orderId: orderItem.orderId, orderItemId, deliveryId: delivery.id, units: null, kg: qty, actorId: user.id });
       const closed = await autoCloseAfterDelivery(tx, orderItem.orderId, { id: user.id, name: user.name });
 
       return { delivery, replayed: false, orderId: orderItem.orderId, closed };

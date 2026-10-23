@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "@/components/hr/ui";
 import { Select } from "@/components/ui/Select";
-import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintCertified } from "@/components/print/Certification";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 import { Btn } from "@/components/ops/ui";
 import { GROUPS, isSensitive, moduleLabel, subLabel, subsOf } from "@/lib/users/catalog";
 import { PasswordConfirmField, ReasonField, SensFlag, api, endOfDayRiyadh, errText, fmtDate, fmtTime, useLangL, usePasswordConfirm, type Lang } from "./shared";
@@ -26,12 +26,14 @@ export function CredentialsDialog(props: Parameters<typeof CredentialsDialogInne
   return props.open ? <CredentialsDialogInner {...props} /> : null;
 }
 
-function CredentialsDialogInner({ open, onClose, user, lock, onDone }: {
+function CredentialsDialogInner({ open, onClose, user, lock, stationPinLocked, onDone }: {
   open: boolean; onClose: () => void; user: { id: string; name: string; username: string | null }; lock: { attempts: number; since: string | null } | null;
+  /** Workstations W2 (D7): the station PIN is locked on a device after too many wrong attempts. */
+  stationPinLocked?: boolean;
   onDone: (r: { action: string; temporaryPassword?: string; expiresAt?: string; applied?: boolean; pendingApproval?: unknown }) => void;
 }) {
   const { lang, L } = useLangL();
-  const [action, setAction] = useState<"unlock" | "reset_password" | "reset_pin">(lock ? "unlock" : "reset_password");
+  const [action, setAction] = useState<"unlock" | "reset_password" | "reset_pin" | "reenable_station_pin">(lock ? "unlock" : stationPinLocked ? "reenable_station_pin" : "reset_password");
   const [reason, setReason] = useState(L("طلب الموظف بعد التحقق من هويته", "The employee asked, after verifying their identity"));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -46,7 +48,7 @@ function CredentialsDialogInner({ open, onClose, user, lock, onDone }: {
     if (!r.ok) { setErr(errText(r.data, lang, L("تعذّر التنفيذ.", "Could not do it."))); return; }
     onDone(r.data);
   }
-  const primary = action === "unlock" ? L("فتح القفل", "Unlock") : action === "reset_password" ? L("إعادة تعيين كلمة المرور", "Reset password") : L("إعادة تعيين رمز المحطة", "Reset station PIN");
+  const primary = action === "unlock" ? L("فتح القفل", "Unlock") : action === "reset_password" ? L("إعادة تعيين كلمة المرور", "Reset password") : action === "reenable_station_pin" ? L("إعادة تفعيل رمز المحطة", "Re-enable station PIN") : L("إعادة تعيين رمز المحطة", "Reset station PIN");
   return (
     <Dialog open={open} onClose={onClose} title={L(`بيانات دخول ${user.name}`, `${user.name}'s credentials`)} sub={L("لا تُعرض كلمة المرور ولا الرمز الحاليان ولا يمكن قراءتهما.", "The current password and PIN are never shown and cannot be read.")} className="ur-dlg" testId="ur-credentials-dialog"
       actions={<><Btn onClick={onClose}>{L("تراجع", "Back")}</Btn><Btn variant="primary" busy={busy} onClick={go} disabled={reason.trim().length < 3} data-testid="ur-cred-go">{primary}</Btn></>}>
@@ -54,6 +56,8 @@ function CredentialsDialogInner({ open, onClose, user, lock, onDone }: {
         <Radio on={action === "unlock"} onClick={() => setAction("unlock")} disabled={!lock || !user.username} title={L("فتح القفل", "Unlock")} sub={lockText} testId="ur-cred-unlock" />
         <Radio on={action === "reset_password"} onClick={() => setAction("reset_password")} title={L("إعادة تعيين كلمة المرور", "Reset password")} sub={L("تُولَّد كلمة مؤقتة تُعرض مرة واحدة، ويُطلب تغييرها عند أول دخول. تُنهى جلساته كلها.", "A temporary password is generated and shown once; it must be changed at first sign-in. All sessions end.")} testId="ur-cred-password" />
         <Radio on={action === "reset_pin"} onClick={() => setAction("reset_pin")} title={L("إعادة تعيين رمز المحطة", "Reset station PIN")} sub={L(`يُلغى الرمز الحالي، ويعيّن ${first} رمزًا جديدًا بعد التحقق من هويته.`, `The current PIN is cleared; ${first} sets a new one after confirming their identity.`)} testId="ur-cred-pin" />
+        {/* Workstations W2 (D7): lift a station-PIN lockout; the PIN itself is unchanged. */}
+        <Radio on={action === "reenable_station_pin"} onClick={() => setAction("reenable_station_pin")} disabled={!stationPinLocked} title={L("إعادة تفعيل رمز المحطة", "Re-enable station PIN")} sub={stationPinLocked ? L(`قُفل رمز المحطة بعد محاولات خاطئة. يعود ${first} للدخول برمزه الحالي.`, `The station PIN locked after wrong attempts. ${first} signs in with the current PIN again.`) : L("رمز المحطة غير مقفل الآن.", "The station PIN is not locked now.")} testId="ur-cred-station-reenable" />
       </div>
       <ReasonField value={reason} onChange={setReason} required testId="ur-cred-reason" options={[L("طلب الموظف بعد التحقق من هويته", "The employee asked, after verifying their identity"), L("نسي كلمة المرور", "Forgot the password"), L("اشتباه في تسرّب بيانات الدخول", "Suspected credential leak")]} />
       <PasswordConfirmField pc={pc} hint={L("لا يُقبل الرمز السريع ولا البيانات الحيوية.", "Quick PIN and biometrics are not accepted.")} />
@@ -68,10 +72,10 @@ export function TempPasswordDialog({ open, onClose, name, username, password, ex
   const [handed, setHanded] = useState(false);
   const [copied, setCopied] = useState(false);
   // UR-03e «طباعة»: a plain-document print, gated like every other (Phase 1: printing is off).
-  const printing = usePrintCertified();
+  const printing = usePrintDocuments();
   const [hours] = useState(() => Math.max(1, Math.round((new Date(expiresAt).getTime() - Date.now()) / 3_600_000)));
   return (
-    <Dialog open={open} onClose={() => { if (handed) onClose(); }} title={L(`أُنشئ حساب ${name}`, `${name}'s account`)} className="ur-dlg" testId="ur-temp-dialog"
+    <Dialog open={open} onClose={() => { if (handed) onClose(); }} title={L(`أُنشئ حساب ${name}`, `${name}'s account`)} className="ur-dlg ur-print" testId="ur-temp-dialog"
       sub={L("تُعرض كلمة المرور المؤقتة الآن فقط ولا يمكن استرجاعها. سلّمها للموظف بطريقة آمنة؛ سيغيّرها عند أول دخول.", "The temporary password is shown now only and cannot be recovered. Hand it over safely; it is changed at first sign-in.")}
       actions={<><Btn disabled={printing !== true} aria-describedby={printing === true ? undefined : PRINT_PHASE1_NOTE_ID} onClick={() => { if (printing === true) window.print(); }}>{L("طباعة", "Print")}</Btn><Btn variant="primary" disabled={!handed} onClick={onPrimary} data-testid="ur-temp-done">{primaryLabel}</Btn></>}>
       <dl className="ur-cred">

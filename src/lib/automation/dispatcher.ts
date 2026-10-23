@@ -28,6 +28,7 @@ import { parseStoredConditions, parseStoredSteps, stepOffsetsMinutes, type Recip
 import { effectiveMode, readSettings, SETTINGS_ID, type EffectiveMode } from "./settings";
 import { renderTemplate } from "./template";
 import { processStatusRules } from "./status-rules/evaluate";
+import { isSilentEventPayload } from "./order-progress";
 
 type Tx = Prisma.TransactionClient;
 
@@ -205,6 +206,14 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
 
   if (Date.now() - ev.occurredAt.getTime() > STALE_MS) {
     await finish("FAILED", "Expired: not processed within 24 hours of happening.");
+    return true;
+  }
+
+  // «إعادة حساب حالات الطلبات» (feat/wa-status-rules): its events correct statuses that were
+  // already true in the past. They stay as the record of what changed, and produce no message —
+  // neither from a rule nor from a status notification.
+  if (isSilentEventPayload(ev.payload)) {
+    await finish("PROCESSED");
     return true;
   }
 

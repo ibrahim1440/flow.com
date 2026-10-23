@@ -77,6 +77,26 @@ button.acc-contact-name:hover { text-decoration: underline }
 .d21 .acc-profiles b { font-weight: 500 }
 .d21 .acc-props { margin-top: 0 }
 
+/* Invoices tab: «كشف الحساب» totals (four figures), «أعمار الديون» (five buckets) — feat/customer-file. */
+.d21 .acc-stm-sum { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 4px 0 8px }
+.d21 .acc-aging { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border-subtle) }
+.d21 .acc-aging > div { padding: 10px 14px; border-inline-start: 1px solid var(--border-subtle); min-width: 0 }
+.d21 .acc-aging > div:first-child { border-inline-start: 0 }
+.d21 .acc-aging dt { font-size: 12.5px; color: var(--text-muted) }
+.d21 .acc-aging dd { margin: 4px 0 0; font: 500 16px/1.3 var(--f-num) }
+.d21 .acc-aging > .late dd { color: var(--status-warning) }
+.d21 .acc .t tfoot td { border-top: 1px solid var(--border-strong) }
+
+/* Section heads of the tabs: the title never breaks; on a phone the subtitle goes under it. */
+.d21 .acc .bh .bt { white-space: nowrap }
+.d21 .acc-phone .acc-tabsec > .bh { flex-wrap: wrap; row-gap: 4px }
+.d21 .acc-phone .acc-tabsec > .bh .sub { flex-basis: 100%; order: 3 }
+
+/* Files tab. */
+.d21 .acc .bh .acc-bh-act { margin-inline-start: auto }
+.d21 .acc-file-act { white-space: nowrap; text-align: end }
+.d21 .acc-file-act > * + * { margin-inline-start: 6px }
+
 /* Forms (HR kit dialog) — a form-level error line. */
 [data-hr-root] .hr-form > .hr-err { font-size: 13px; color: var(--hr-danger); margin: 0 }
 [data-hr-root] .hr-form > .hr-help { font-size: 12.5px; color: var(--hr-muted) }
@@ -88,6 +108,17 @@ button.acc-contact-name:hover { text-decoration: underline }
   .d21 .acc-cols { grid-template-columns: minmax(0, 1fr) !important }
   .d21 .acc-deal { flex-wrap: wrap; gap: 20px }
   .d21 .acc-track { max-width: none; flex-basis: 100% }
+  .d21 .acc-stm-sum { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .d21 .acc-stm-sum > div:nth-child(3) { padding-inline-start: 0; border-inline-start: 0 }
+}
+@media (max-width: 767.98px) {
+  .d21 .acc-stm-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 16px; margin-bottom: 16px }
+  .d21 .acc-stm-sum > div:nth-child(3) { padding-inline-start: 0; border-inline-start: 0 }
+  .d21 .acc-aging { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .d21 .acc-aging > div { border-inline-start: 0; border-top: 1px solid var(--border-subtle) }
+  .d21 .acc-aging > div:nth-child(-n+2) { border-top: 0 }
+  .d21 .acc-aging > div:nth-child(even) { border-inline-start: 1px solid var(--border-subtle) }
+  .d21 .acc-aging > div:last-child { grid-column: 1 / -1; border-inline-start: 0 }
 }
 
 /* Phone (178:1353). */

@@ -189,7 +189,8 @@ export async function applyOrderStatusRecompute(actor: PreparationActor, opts: {
     });
     for (const o of toPrepare) {
       preparedChecked++;
-      const r = await autoPrepareOrder(o.id, "review", actor);
+      // "recompute": the statuses it corrects were already true, so no WhatsApp message follows.
+      const r = await autoPrepareOrder(o.id, "recompute", actor);
       if (r?.changed) prepared.push({ ...brief(o), from: r.from, to: r.to });
     }
   }

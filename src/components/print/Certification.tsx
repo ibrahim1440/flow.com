@@ -13,18 +13,36 @@ import { PRINT_NOT_CERTIFIED_CODE, PRINT_NOT_CERTIFIED_MESSAGE, PRINT_PHASE1_NOT
 
 export const PRINT_GATE_NOTE_ID = "print-not-certified-note";
 
+type PrintStatus = { certified: boolean; documents: boolean };
+const OFF: PrintStatus = { certified: false, documents: false };
+
 /** null while loading (treated as not enabled: fail-closed), then the server's answer. */
-export function usePrintCertified(): boolean | null {
-  const [certified, setCertified] = useState<boolean | null>(null);
+function usePrintStatus(): PrintStatus | null {
+  const [status, setStatus] = useState<PrintStatus | null>(null);
   useEffect(() => {
     let alive = true;
     fetch("/api/print/status", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { certified: false }))
-      .then((b: { certified?: unknown }) => { if (alive) setCertified(b.certified === true); })
-      .catch(() => { if (alive) setCertified(false); });
+      .then((r) => (r.ok ? r.json() : OFF))
+      .then((b: { certified?: unknown; documents?: unknown }) => { if (alive) setStatus({ certified: b.certified === true, documents: b.documents === true || b.certified === true }); })
+      .catch(() => { if (alive) setStatus(OFF); });
     return () => { alive = false; };
   }, []);
-  return certified;
+  return status;
+}
+
+/** Label printing (PRINT_CERTIFIED, A-8): null while loading, then the server's answer. */
+export function usePrintCertified(): boolean | null {
+  const s = usePrintStatus();
+  return s === null ? null : s.certified;
+}
+
+/**
+ * Plain A4 document printing (quotation, payslips, credentials sheet, batches PDF):
+ * PRINT_DOCUMENTS_ENABLED, or implied by PRINT_CERTIFIED. null while loading (= off).
+ */
+export function usePrintDocuments(): boolean | null {
+  const s = usePrintStatus();
+  return s === null ? null : s.documents;
 }
 
 /** The localized refusal text when an API answer is the certification refusal, else null. */
@@ -48,8 +66,9 @@ export function PrintNotCertifiedNotice({ id = PRINT_GATE_NOTE_ID }: { id?: stri
 export const PRINT_PHASE1_NOTE_ID = "print-phase1-note";
 
 /**
- * Owner decision D1: every plain-document «Print» action (payslips, …) is unavailable while the
- * same PRINT_CERTIFIED gate is off. The action is rendered disabled and points at this note.
+ * Owner decision D1: every plain-document «Print» action (payslips, …) is unavailable while
+ * document printing is off (PRINT_DOCUMENTS_ENABLED, or PRINT_CERTIFIED, not "true"). The action
+ * is rendered disabled and points at this note.
  */
 export function PrintPhase1Notice({ id = PRINT_PHASE1_NOTE_ID, className }: { id?: string; className?: string }) {
   const L = useL();

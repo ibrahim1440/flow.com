@@ -77,6 +77,19 @@ export const DELIVERY_TYPE_OPTIONS: EnumOption[] = [
   { value: "partial", ar: "جزئي", en: "Partial" },
 ];
 
+/**
+ * Where an order stands as a whole, beyond its stored status (feat/wa-status-rules): the order-level
+ * production and delivery states the owner named (fix/status-labels, 2026-10-22) and the return
+ * from a hold. Announced on the ORDER, never per line, by `order.progress_changed` (and, for
+ * «استُؤنف», by `order.status_changed` leaving «معلّق مؤقتاً»).
+ */
+export const ORDER_PROGRESS_OPTIONS: EnumOption[] = [
+  { value: "pending_production", ar: "بانتظار الإنتاج", en: "Awaiting production" },
+  { value: "not_delivered", ar: "لم يُسلّم", en: "Not delivered" },
+  { value: "part_delivered", ar: "سُلِّم جزئياً", en: "Partially delivered" },
+  { value: "resumed", ar: "استُؤنف الطلب", en: "Resumed" },
+];
+
 export const QC_OUTCOME_OPTIONS: EnumOption[] = [
   { value: "Passed", ar: "ناجح", en: "Passed" },
   { value: "Rejected", ar: "مرفوض", en: "Rejected" },
@@ -172,6 +185,23 @@ export const EVENTS: EventDef[] = [
       v("status.from", "الحالة السابقة", "Previous status", "Preparing", "enum", ORDER_STATUS_OPTIONS),
       v("status.to", "الحالة الجديدة", "New status", "Ready for Shipping", "enum", ORDER_STATUS_OPTIONS),
       v("status.reason", "السبب", "Reason", "طلب العميل التأجيل"),
+      ...ORDER_VARS,
+      ...COMMON_VARS,
+    ],
+    recipients: ["customer", "order_owner", "actor"],
+  },
+  {
+    key: "order.progress_changed",
+    group: "orders",
+    ar: "تقدّم الطلب",
+    en: "Order progress",
+    description: {
+      ar: "عند انتقال الطلب كله إلى «بانتظار الإنتاج» أو «سُلِّم جزئياً»، مرة لكل انتقال وليس لكل صنف.",
+      en: "When the whole order becomes «awaiting production» or «partially delivered»: once per transition, not per line.",
+    },
+    variables: [
+      v("progress.from", "الحالة السابقة", "Previous state", "not_delivered", "enum", ORDER_PROGRESS_OPTIONS),
+      v("progress.to", "الحالة الجديدة", "New state", "part_delivered", "enum", ORDER_PROGRESS_OPTIONS),
       ...ORDER_VARS,
       ...COMMON_VARS,
     ],

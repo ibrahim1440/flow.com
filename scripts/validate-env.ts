@@ -27,7 +27,7 @@
  */
 import "dotenv/config";
 import { evaluateServerEnv } from "../src/lib/server-env";
-import { isPrintCertified, printEnvironment } from "../src/lib/print/certification";
+import { isDocumentPrintingEnabled, isPrintCertified, printEnvironment } from "../src/lib/print/certification";
 
 const problems = evaluateServerEnv(process.env);
 
@@ -46,5 +46,8 @@ console.log("Environment gate: required server configuration is present.");
 // The print certification gate (RUNBOOK §10): reported, never decided here. Label printing is on
 // only when PRINT_CERTIFIED is exactly "true"; in production that needs the A-8 evidence first.
 console.log(
-  `Print certification gate (${printEnvironment(process.env)}): all printing (labels, calibration, payslips; D1) ${isPrintCertified(process.env) ? "ENABLED (PRINT_CERTIFIED=true)" : "disabled (PRINT_CERTIFIED not \"true\")"}.`,
+  `Print certification gate (${printEnvironment(process.env)}): label printing (labels, calibration; A-8) ${isPrintCertified(process.env) ? "ENABLED (PRINT_CERTIFIED=true)" : "disabled (PRINT_CERTIFIED not \"true\")"}.`,
+);
+console.log(
+  `Document printing (${printEnvironment(process.env)}): quotation, payslips, credentials sheet, batches PDF ${isDocumentPrintingEnabled(process.env) ? `ENABLED (${isPrintCertified(process.env) ? "implied by PRINT_CERTIFIED=true" : "PRINT_DOCUMENTS_ENABLED=true"})` : "disabled (PRINT_DOCUMENTS_ENABLED not \"true\")"}.`,
 );

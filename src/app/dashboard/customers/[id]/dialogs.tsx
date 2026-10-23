@@ -8,7 +8,7 @@ import { Dialog, Field } from "@/components/hr/ui";
 import { api } from "../../sales/_components/ui";
 import { ACTIVITY_LABELS, OUTCOME_LABELS } from "@/components/d21/labels";
 import { ACTIVITY_OUTCOMES } from "@/lib/services/sales/qualification";
-import type { Contact, Customer, Deal } from "./types";
+import type { Contact, Credit, Customer, Deal } from "./types";
 
 /**
  * The account page's forms, in the HR kit dialog the customers list already uses. Each sends
@@ -26,6 +26,62 @@ export const SEGMENT_LABELS: Record<string, { ar: string; en: string }> = {
   DISTRIBUTOR: { ar: "موزّع", en: "Distributor" },
   OTHER: { ar: "أخرى", en: "Other" },
 };
+
+const fmtMoney = (v: string) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+export const FILE_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
+  CONTRACT: { ar: "عقد", en: "Contract" },
+  REGISTRATION: { ar: "السجل التجاري", en: "Commercial register" },
+  TAX: { ar: "شهادة ضريبية", en: "VAT certificate" },
+  PRICE_AGREEMENT: { ar: "اتفاقية أسعار", en: "Price agreement" },
+  OTHER: { ar: "أخرى", en: "Other" },
+};
+
+/** «رفع ملف» — one multipart POST to /api/customers/[id]/files, which re-checks everything. */
+export function FileDialog({ ar, customerId, onClose, onDone }: { ar: boolean; customerId: string; onClose: () => void; onDone: () => void }) {
+  const L = (a: string, e: string) => (ar ? a : e);
+  const [file, setFile] = useState<File | null>(null);
+  const [category, setCategory] = useState("CONTRACT");
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file || busy) return;
+    if (file.size > 5 * 1024 * 1024) { setErr(L("الحد الأقصى لحجم الملف 5 ميغابايت.", "Files are limited to 5 MB.")); return; }
+    setBusy(true); setErr("");
+    const fd = new FormData();
+    fd.set("file", file); fd.set("category", category); if (title.trim()) fd.set("title", title.trim());
+    const res = await fetch(`/api/customers/${customerId}/files`, { method: "POST", body: fd }).catch(() => null);
+    setBusy(false);
+    if (!res) { setErr(L("تعذّر الاتصال.", "Could not connect.")); return; }
+    if (res.ok) { onDone(); return; }
+    const data = await res.json().catch(() => ({}));
+    setErr(errorOf(data, ar, L("تعذّر رفع الملف.", "Could not upload the file.")));
+  }
+  return (
+    <Dialog open title={L("رفع ملف", "Upload a file")} sub={L("PDF أو JPEG أو PNG · حتى 5 ميغابايت", "PDF, JPEG or PNG · up to 5 MB")} onClose={onClose} testId="file-dialog"
+      actions={<>
+        <button type="submit" form="acc-file" className="hr-btn is-primary" disabled={!file || busy} data-testid="file-save">{busy ? L("جارٍ الرفع…", "Uploading…") : L("رفع", "Upload")}</button>
+        <button type="button" className="hr-btn" onClick={onClose}>{L("إلغاء", "Cancel")}</button>
+      </>}>
+      <form id="acc-file" className="hr-form" onSubmit={save}>
+        <Err text={err} />
+        <Field label={L("الملف", "File")} wide>
+          <input type="file" className="hr-input" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="file-input" />
+        </Field>
+        <Field label={L("التصنيف", "Category")}>
+          <Select className="hr-select" value={category} onChange={(e) => setCategory(e.target.value)} data-testid="file-category">
+            {Object.keys(FILE_CATEGORY_LABELS).map((k) => <option key={k} value={k}>{ar ? FILE_CATEGORY_LABELS[k].ar : FILE_CATEGORY_LABELS[k].en}</option>)}
+          </Select>
+        </Field>
+        <Field label={L("العنوان", "Title")} help={L("اختياري؛ يُستخدم اسم الملف إن تُرك فارغًا.", "Optional; the file name is used when empty.")}>
+          <input className="hr-input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} data-testid="file-title" />
+        </Field>
+      </form>
+    </Dialog>
+  );
+}
 
 function Err({ text }: { text: string }) {
   return text ? <p className="hr-err is-wide" role="alert" data-testid="dialog-error" style={{ gridColumn: "1 / -1" }}>{text}</p> : null;
@@ -116,9 +172,9 @@ export function ActivityDialog({ ar, customerId, deals, defaultDealId, onClose, 
 }
 
 // ── «عرض سعر»: a quotation belongs to a deal — pick an open one or open a new one ─────────
-export function QuoteDialog({ ar, customer, openDeals, canCreateDeal, onClose }: {
+export function QuoteDialog({ ar, customer, openDeals, canCreateDeal, credit, onClose }: {
   ar: boolean; customer: Pick<Customer, "id" | "name" | "nameAr">; openDeals: Pick<Deal, "id" | "title" | "stage" | "amount">[];
-  canCreateDeal: boolean; onClose: () => void;
+  canCreateDeal: boolean; credit?: Credit | null; onClose: () => void;
 }) {
   const L = (a: string, e: string) => (ar ? a : e);
   const router = useRouter();
@@ -155,6 +211,14 @@ export function QuoteDialog({ ar, customer, openDeals, canCreateDeal, onClose }:
         <p className="hr-help is-wide" style={{ gridColumn: "1 / -1", margin: 0 }}>
           {L("عرض السعر يُنشأ من صفقة. اختر صفقة مفتوحة لهذا العميل أو افتح صفقة جديدة.", "A quotation is raised from a deal. Choose an open deal of this customer or open a new one.")}
         </p>
+        {/* The credit limit is a warning, never a block (no owner rule refuses a quotation over it). */}
+        {credit?.over && (
+          <p className="hr-err is-wide" role="note" style={{ gridColumn: "1 / -1", margin: 0 }} data-testid="quote-credit-warning">
+            {ar
+              ? `تنبيه: الرصيد المستحق ${fmtMoney(credit.used)} ر.س يتجاوز حد الائتمان ${fmtMoney(credit.limit)} ر.س. يمكنك المتابعة؛ القرار لك.`
+              : `Note: the balance due SAR ${fmtMoney(credit.used)} is above the credit limit SAR ${fmtMoney(credit.limit)}. You may continue; it is your call.`}
+          </p>
+        )}
         {nothing && (
           <p className="hr-err is-wide" style={{ gridColumn: "1 / -1" }} data-testid="quote-no-deal">
             {L("لا توجد صفقة مفتوحة يمكنك تسعيرها، ولا تملك صلاحية فتح صفقة (تحويل العملاء المحتملين).", "There is no open deal you can quote, and you may not open one (the lead-conversion permission).")}

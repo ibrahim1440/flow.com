@@ -9,11 +9,12 @@ import { stationQueue } from "@/lib/services/station/queue";
  * content version, so an unchanged queue answers 304.
  */
 export async function GET(request: Request) {
-  const { user, error } = await requireStation();
+  const { user, error, station } = await requireStation();
   if (error) return error;
   try {
-    const roasterId = new URL(request.url).searchParams.get("roasterId");
-    const q = await stationQueue(user, { roasterId });
+    // A paired device works on its station's roaster only (W2); a personal session picks one.
+    const roasterId = station ? station.roasterId : new URL(request.url).searchParams.get("roasterId");
+    const q = await stationQueue(user, { roasterId, fixedRoaster: !!station });
     const etag = `"${q.version}"`;
     if (request.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { ETag: etag } });
     return NextResponse.json(q, { headers: { ETag: etag, "Cache-Control": "no-store" } });

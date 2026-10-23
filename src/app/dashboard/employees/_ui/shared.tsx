@@ -129,15 +129,15 @@ export function UsersFrame({ children, testId }: { children: ReactNode; testId?:
 export type SectionTab = "users" | "roles" | "devices" | "audit";
 /**
  * The section header (users.py sec_head): «المستخدمون والصلاحيات», its meta line and actions, then
- * the section tabs. «أجهزة المحطات» has no page: the station device model (I-10) is not built, so
- * the tab is drawn disabled with «قريباً», as the settings navigation does for a section with no page.
+ * the section tabs. «أجهزة المحطات» is UR-14 (Workstations W2, /dashboard/employees/devices).
  */
-export function SectionHead({ tab, meta, actions, counts, isAdmin }: { tab: SectionTab; meta: ReactNode; actions?: ReactNode; counts?: { users?: number; roles?: number }; isAdmin: boolean }) {
+export function SectionHead({ tab, meta, actions, counts, isAdmin }: { tab: SectionTab; meta: ReactNode; actions?: ReactNode; counts?: { users?: number; roles?: number; devices?: number }; isAdmin: boolean }) {
   const { L } = useLangL();
   const items: { key: SectionTab; href: string | null; label: string; count?: number }[] = [
     { key: "users", href: "/dashboard/employees", label: L("المستخدمون", "Users"), count: counts?.users },
     { key: "roles", href: "/dashboard/employees/roles", label: L("الأدوار", "Roles"), count: counts?.roles },
-    { key: "devices", href: null, label: L("أجهزة المحطات", "Station devices") },
+    // Workstations W2: «أجهزة المحطات» (UR-14) — the administrator's page; others see who to ask.
+    { key: "devices", href: "/dashboard/employees/devices", label: L("أجهزة المحطات", "Station devices"), count: counts?.devices },
     ...(isAdmin ? [{ key: "audit" as const, href: "/dashboard/employees/audit", label: L("سجل الصلاحيات", "Permission log") }] : []),
   ];
   return (

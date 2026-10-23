@@ -15,8 +15,9 @@ import {
   StationBar, Sheet, Head, Facts, Primary, Secondary, Note, Info, Keypad, BigField, Row, Side, SideLine,
   Confirm, Option, Chips, LogRows, DoneMark, Bid, Num,
 } from "../../_ui/blocks";
+import { BatchLabelPrint } from "@/components/print/BatchLabelPrint";
 
-type Batch = { id: string; batchNumber: string; greenBeanQuantity: number; roastedBeanQuantity: number; wasteQuantity: number; createdAt: string; greenBean?: { serialNumber: string } | null };
+type Batch = { id: string; batchNumber: string; productId?: string | null; greenBeanQuantity: number; roastedBeanQuantity: number; wasteQuantity: number; createdAt: string; greenBean?: { serialNumber: string } | null };
 type View =
   | { v: "queue" } | { v: "blocked" } | { v: "start"; key: string } | { v: "active" } | { v: "weights" }
   | { v: "done"; batch: Batch; item: QueueItem | null; lossTone: string; at: string }
@@ -40,7 +41,8 @@ function cleanWeight(v: string): string {
 }
 
 export function RoastingStation() {
-  const { user, signOut } = useStation();
+  const { user, signOut, mode, station, lock, switchEmployee } = useStation();
+  const onDevice = mode === "device";
   const lang = user.preferredLanguage === "en" ? "en" : "ar";
   const t = useCallback((k: StationKey, vars?: Record<string, string | number>) => st(k, lang, vars), [lang]);
   const L = useCallback((ar: string, en: string) => (lang === "ar" ? ar : en), [lang]);
@@ -49,7 +51,7 @@ export function RoastingStation() {
 
   const [q, setQ] = useState<StationQueue | null>(null);
   const [loadErr, setLoadErr] = useState(false);
-  const [unauth, setUnauth] = useState(false);
+  const [unauth, setUnauth] = useState<{ code: string; text: string } | false>(false);
   const [online, setOnline] = useState(true);
   const [updated, setUpdated] = useState<string>("");
   const [view, setView] = useState<View>({ v: "queue" });
@@ -60,12 +62,14 @@ export function RoastingStation() {
   const [now, setNow] = useState(() => Date.now());
 
   // ── Server reads ──────────────────────────────────────────────────────────────────────────
-  const load = useCallback(async (force = false): Promise<StationQueue | null> => {
+  // `poll`: a background read (H5). On a station device it is not activity, so it never keeps a
+  // station session alive past the idle lock (x-station-poll, read by the station guard).
+  const load = useCallback(async (force = false, poll = false): Promise<StationQueue | null> => {
     try {
-      const r = await fetch(`/api/station/roasting/queue${roasterId ? `?roasterId=${encodeURIComponent(roasterId)}` : ""}`, { cache: "no-store", headers: !force && etag.current ? { "If-None-Match": etag.current } : {} });
+      const r = await fetch(`/api/station/roasting/queue${roasterId && !onDevice ? `?roasterId=${encodeURIComponent(roasterId)}` : ""}`, { cache: "no-store", headers: { ...(!force && etag.current ? { "If-None-Match": etag.current } : {}), ...(poll ? { "x-station-poll": "1" } : {}) } });
       setOnline(true);
-      if (r.status === 401) { await signOut(); return null; }
-      if (r.status === 403) { setUnauth(true); return null; }
+      if (r.status === 401) { await signOut(onDevice ? "ended" : undefined); return null; }
+      if (r.status === 403) { const j = await r.json().catch(() => ({})); setUnauth({ code: String(j.code ?? ""), text: localizeApiError(j, lang) ?? "" }); return null; }
       if (r.status === 304) { setUpdated(time(Date.now())); return q; }
       if (!r.ok) { setLoadErr(true); return null; }
       const j = (await r.json()) as StationQueue;
@@ -76,14 +80,14 @@ export function RoastingStation() {
       setOnline(false);
       return null;
     }
-  }, [roasterId, signOut, time, q]);
+  }, [roasterId, signOut, time, q, onDevice, lang]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- the queue is an external system read on mount and when the roaster changes
   useEffect(() => { void load(true); }, [roasterId]);
   // Polling with a version (H5): every 15 s on the reading views; nothing is written by a poll.
   useEffect(() => {
     if (!["queue", "blocked", "active", "start"].includes(view.v)) return;
-    const id = setInterval(() => { void load(); }, 15000);
+    const id = setInterval(() => { void load(false, true); }, 15000);
     return () => clearInterval(id);
   }, [view.v, load]);
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
@@ -91,7 +95,7 @@ export function RoastingStation() {
   // answer flips the station back online and starts the S6 recovery below.
   useEffect(() => {
     if (online) return;
-    const id = setInterval(() => { void load(); }, 5000);
+    const id = setInterval(() => { void load(false, true); }, 5000);
     return () => clearInterval(id);
   }, [online, load]);
   useEffect(() => {
@@ -228,7 +232,9 @@ export function RoastingStation() {
         // Started from a slot of today's schedule: the batch links to it (the slot becomes recorded).
         ...(mine.slot ? { scheduledSlotId: mine.slot.id } : {}),
       };
-      const r = await post("roast", "/api/roasting-batches", body, key);
+      // The station's own record route (W2): on a paired device the station guard runs, then the
+      // ERP's one roast POST records it; with a personal session it is that POST unchanged.
+      const r = await post("roast", "/api/station/roasting/record", body, key);
       if (r.status === 200 || r.status === 201) {
         const b = r.body as Batch;
         clearDraft(); setStage("entry"); setNeedAck(false);
@@ -260,12 +266,12 @@ export function RoastingStation() {
   const conn = !online ? { tone: "er" as const, label: t("offline") } : stage === "wait" ? { tone: "in" as const, label: t("connectedWaiting") } : { tone: "ok" as const, label: t("connected") };
   const bar = (
     <StationBar
-      station={t("stationName")}
-      location={roaster ? [roaster.name, roaster.statusReason].filter(Boolean).join(" · ") : undefined}
+      station={station?.name ?? t("stationName")}
+      location={station ? [roaster?.name ?? station.roaster?.name, station.place].filter(Boolean).join(" · ") || undefined : roaster ? [roaster.name, roaster.statusReason].filter(Boolean).join(" · ") : undefined}
       conn={conn} updated={updated || "—"} updatedWord={t("lastUpdate")}
-      emp={{ name: user.name, tag: t("personalSession") }}
+      emp={{ name: user.name, tag: onDevice ? t("stationSession") : t("personalSession") }}
       lockLabel={t("lock")} switchLabel={t("switchEmployee")}
-      onLock={() => void signOut()} onSwitch={() => void signOut()}
+      onLock={() => void lock()} onSwitch={() => switchEmployee()}
     />
   );
   const steps = [t("stepConfirm"), t("stepRoast"), t("stepWeights"), t("stepQc")];
@@ -285,13 +291,15 @@ export function RoastingStation() {
   const offlineBox = !online ? <Info tone="err" title={t("offlineTitle")} testId="station-offline">{t("offlineBody", { time: updated || "—" })}</Info> : null;
 
   // ── S7 not authorised ───────────────────────────────────────────────────────────────────
-  if (unauth) {
+  if (unauth !== false) {
+    // S7. On a station device the session ends and the tiles come back; the server's words say why
+    // (not assigned, or — UR-S17 — assigned without the module privilege).
     return (<>{bar}
-      <Sheet plain testId="station-unauth" foot={<><Primary onClick={() => void signOut()} testId="station-signout">{t("signOut")}</Primary><Note>{t("unauthNote")}</Note></>}>
+      <Sheet plain testId="station-unauth" foot={<><Primary onClick={() => void signOut()} testId="station-signout">{onDevice ? t("s7Back") : t("signOut")}</Primary><Note>{onDevice ? t("s7Note") : t("unauthNote")}</Note></>}>
         <div className="ws-done" style={{ maxWidth: 640 }}>
           <span className="ws-mark-warn" aria-hidden="true">!</span>
-          <h1 className="ws-t2" style={{ fontSize: 28, lineHeight: "38px" }}>{t("unauthTitle", { name: user.name })}</h1>
-          <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 15, lineHeight: "24px" }}>{t("unauthBody")}</p>
+          <h1 className="ws-t2" style={{ fontSize: 28, lineHeight: "38px" }}>{onDevice && unauth.code !== "STATION_NOT_ASSIGNED" && unauth.text ? unauth.text : t("unauthTitle", { name: user.name })}</h1>
+          <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 15, lineHeight: "24px" }}>{onDevice ? (unauth.code === "STATION_NOT_ASSIGNED" ? t("s7Body", { station: station?.name ?? "" }) : "") : t("unauthBody")}</p>
         </div>
       </Sheet></>);
   }
@@ -363,7 +371,7 @@ export function RoastingStation() {
             <SideLine>{t("todayDone", { n: q.today.batches, r: q.today.rejected })}</SideLine>
             <SideLine>{roaster ? (roaster.status === "AVAILABLE" ? t("todayCapacity", { kg: k2(roaster.defaultTargetKg) }) : t("todayCapacityOff", { state: rs.label, kg: k2(roaster.defaultTargetKg) })) : t("todayNoRoaster")}</SideLine>
             <SideLine>{t("todayBlocked", { n: nBlocked })}</SideLine>
-            {q.roasters.length > 1 ? (
+            {q.roasters.length > 1 && !onDevice ? (
               <Chips label={t("chooseRoaster")} value={roaster?.id ?? null} options={q.roasters.map((r) => ({ value: r.id, label: r.name }))}
                 onChange={(v) => { setRoasterId(v); try { sessionStorage.setItem("hq.station.roaster", v); } catch { /* */ } }} testId="roaster-choice" />
             ) : null}
@@ -611,7 +619,8 @@ export function RoastingStation() {
                 [t("sumBy"), <>{user.name} · <Num>{view.at}</Num></>],
               ]} />
             </div>
-            <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{t("recordedNote")} · {t("labelsUnavailable")}</div>
+            <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{t("recordedNote")}<BatchLabelPrint permissions={user.permissions} productId={b.productId ?? doneItem?.productId} productLabel={name(doneItem)} batch={{ id: b.id, batchNumber: b.batchNumber }}
+              buttonLabel={t("printLabel")} unavailable={<> · {t("labelsUnavailable")}</>} className="btn" testId="done-print-label" /></div>
           </div>
         </div>
       </Sheet></>);

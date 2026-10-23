@@ -4,7 +4,7 @@ import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import { Printer, FileText } from "lucide-react";
-import { usePrintCertified } from "@/components/print/Certification";
+import { usePrintDocuments } from "@/components/print/Certification";
 // The stored unit, as the frames write it («800 عبوة»); the printed document uses the same labels.
 import { UNIT_LABELS } from "@/lib/print/quote-document";
 import {
@@ -1180,11 +1180,11 @@ function OrderDialog({
 
 /**
  * The link to the quotation document. Owner decision D1: printing is out of Phase 1, so while
- * the PRINT_CERTIFIED gate is off (or unknown) it is not offered as «Print»: it opens the
+ * the document-printing gate (PRINT_DOCUMENTS_ENABLED) is off (or unknown) it is not offered as «Print»: it opens the
  * document, which stays viewable (and, per decision point D1-Q, savable as the customer's PDF).
  */
 function QuoteDocumentLink({ id, ar }: { id: string; ar: boolean }) {
-  const printing = usePrintCertified();
+  const printing = usePrintDocuments();
   return (
     <Link href={`/dashboard/sales/quotes/${id}/print`} data-testid="open-print" className="btn">
       {printing === true

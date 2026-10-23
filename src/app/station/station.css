@@ -197,3 +197,60 @@
   .d21 .ws-keys { grid-template-columns: repeat(3, 72px); }
   .d21 .ws-key { width: 72px; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Workstations W2 · the shared device: S1 activation, S2 tiles, S3 PIN, S4 lock, S5 handover,
+   S7 not assigned, DS-15 revoked (Figma 630:2 WS-S1…S7; stations.py device / select / pin / lock /
+   handover / unauth). The values are the approved markup's own inline values.
+   ───────────────────────────────────────────────────────────────────────── */
+.d21 .ws-clock { font: 500 15px/1 var(--f-num); color: var(--text-secondary); }
+.d21 .ws-center { display: grid; gap: 28px; justify-items: center; text-align: center; }
+.d21 .ws-center p.ws-lead { margin: 6px 0 0; color: var(--text-secondary); font-size: 15px; line-height: 24px; }
+.d21 .ws-tiles { display: grid; grid-template-columns: repeat(2, 300px); gap: 16px; }
+.d21 .ws-tile { width: 300px; height: 96px; box-sizing: border-box; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-strong); display: flex; align-items: center; gap: 14px; padding: 0 18px; background: var(--surface); border: 0; font: inherit; color: inherit; text-align: start; cursor: pointer; }
+.d21 .ws-tile:hover { background: var(--surface-hover); }
+.d21 .ws-tile:focus-visible, .d21 .ws-actfield:focus-within { outline: none; box-shadow: inset 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--action-primary-tint); }
+.d21 .ws-tile[aria-disabled="true"] { cursor: not-allowed; }
+.d21 .ws-tile[aria-disabled="true"] .ws-tile-n { color: var(--text-secondary); }
+.d21 .ws-av { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-selected); color: var(--action-primary); font: 600 18px/1 var(--f-ui); flex: none; }
+.d21 .ws-av.lg { width: 88px; height: 88px; font: 600 26px/1 var(--f-ui); }
+.d21 .ws-tile-n { font-size: 17px; font-weight: 600; line-height: 24px; }
+.d21 .ws-tile-s { font-size: 13.5px; color: var(--text-muted); line-height: 24px; }
+.d21 .ws-tile-s .st { font-size: 13.5px; }
+.d21 .ws-foot-note { font-size: 13.5px; line-height: 22px; color: var(--text-muted); text-align: center; max-width: 560px; }
+.d21 .ws-pinrow { display: flex; gap: 96px; align-items: center; }
+.d21 .ws-who { display: grid; justify-items: center; gap: 12px; text-align: center; width: 300px; }
+.d21 .ws-who-n { font: 600 22px/32px var(--f-ui); }
+.d21 .ws-who-s { font-size: 14px; color: var(--text-muted); line-height: 26px; }
+.d21.ws .btn.ws-notyou { height: 56px; padding: 0 20px; font-size: 16px; border-radius: 12px; }
+.d21 .ws-pinbox { display: grid; gap: 16px; justify-items: center; }
+.d21 .ws-pinbox > .ws-pad { padding: 16px; }
+.d21 .ws-prompt { font-size: 15px; color: var(--text-secondary); }
+.d21 .ws-dots { display: flex; gap: 14px; justify-content: center; direction: ltr; }
+.d21 .ws-dots span { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border-control); }
+.d21 .ws-dots span.on { background: var(--action-primary); box-shadow: none; }
+.d21 .ws-dots.bad span { box-shadow: inset 0 0 0 1.5px var(--status-danger); }
+.d21 .ws-pinerr { min-height: 22px; font-size: 14px; color: var(--status-danger); text-align: center; max-width: 340px; }
+.d21 .ws-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+/* S1: the device code and the activation-code field (72 px, mono 32 px, tracked). */
+.d21 .ws-devcode { font: 500 30px/1 var(--f-mono); letter-spacing: .12em; direction: ltr; }
+.d21 .ws-actfield { width: 420px; height: 72px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-control); display: flex; align-items: center; justify-content: center; position: relative; background: var(--surface); }
+.d21 .ws-actfield input { width: 100%; height: 100%; border: 0; background: transparent; text-align: center; font: 500 32px/1 var(--f-mono); letter-spacing: .3em; direction: ltr; text-transform: uppercase; color: var(--text-primary); outline: none; padding: 0 0 0 .3em; }
+.d21 .ws-actfield input::placeholder { color: var(--text-disabled); }
+.d21 .ws-actfield.bad { box-shadow: inset 0 0 0 1.5px var(--status-danger); }
+.d21 .ws-small { font-size: 13px; color: var(--text-muted); }
+.d21 .ws-field-t { font-size: 15px; font-weight: 500; }
+.d21 .ws-link { background: none; border: 0; padding: 0; font: inherit; font-size: 14px; color: var(--action-primary); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 44px; }
+/* S5: the active task card. */
+.d21 .ws-task { display: flex; align-items: center; gap: 16px; min-height: 72px; box-sizing: border-box; padding: 12px 20px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-strong); }
+.d21 .ws-warnmark { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: var(--status-warning-tint); color: var(--status-warning); font: 600 30px/1 var(--f-num); }
+.d21 .ws-errmark { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: var(--status-danger-tint); color: var(--status-danger); font: 600 30px/1 var(--f-num); }
+@media (max-width: 1099px) {
+  .d21 .ws-pinrow { gap: 56px; }
+}
+@media (max-width: 900px) {
+  .d21 .ws-tiles { grid-template-columns: 1fr; width: 100%; }
+  .d21 .ws-tile { width: 100%; }
+  .d21 .ws-pinrow { flex-direction: column; gap: 24px; }
+  .d21 .ws-actfield { width: 100%; }
+}

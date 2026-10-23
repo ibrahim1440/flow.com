@@ -23,9 +23,10 @@
  */
 import {
   APPROVAL_DECISION_OPTIONS, COLLECTION_STATUS_OPTIONS, DEAL_OUTCOME_OPTIONS, DELIVERY_TYPE_OPTIONS, EVENTS,
-  ORDER_STATUS_OPTIONS, QC_OUTCOME_OPTIONS, QUOTE_STATUS_OPTIONS, getEvent,
+  ORDER_PROGRESS_OPTIONS, ORDER_STATUS_OPTIONS, QC_OUTCOME_OPTIONS, QUOTE_STATUS_OPTIONS, getEvent,
   type DynamicRecipient, type EnumOption, type EventDef, type Label, type VarDef,
 } from "../catalog";
+import { isResume, isSilentEventPayload } from "../order-progress";
 
 /** Who a status notification may go to: the event's own people, or every admin («المالك»). */
 export type StatusRecipient = DynamicRecipient | "admins";
@@ -43,6 +44,7 @@ export const STATUS_RECIPIENT_LABELS: Record<StatusRecipient, Label> = {
 
 export type StatusSourceKey =
   | "order"
+  | "order_progress"
   | "order_delivery"
   | "roast_batch"
   | "production_order"
@@ -75,6 +77,8 @@ export type StatusSource = Label & {
   recipients: StatusRecipient[];
   /** The message offered when a status is switched on without one. */
   defaultTemplate: string;
+  /** A status's own suggested message, when it has one; otherwise `defaultTemplate`. */
+  defaultTemplates?: Record<string, string>;
 };
 
 const s = (value: string, ar: string, en: string): EnumOption => ({ value, ar, en });
@@ -91,6 +95,30 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["order.status_changed"],
     recipients: ["customer", "order_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، طلبكم رقم {{order.number}} أصبح «{{status.name}}».",
+  },
+  {
+    // feat/wa-status-rules: the order-level states that are not a stored Order.status — the owner's
+    // labels of 2026-10-22 — announced on the ORDER (never per line), plus the return from a hold.
+    // «لم يُسلّم» is where every order starts: nothing enters it, so it is listed and cannot fire.
+    key: "order_progress",
+    ar: "تقدّم الطلب",
+    en: "Order progress",
+    description: {
+      ar: "حالة الطلب كله في الإنتاج والتسليم، والاستئناف بعد التعليق. رسالة واحدة للطلب، لا لكل صنف.",
+      en: "The whole order's production and delivery state, and resuming after a hold. One message per order, not per line.",
+    },
+    known: ORDER_PROGRESS_OPTIONS,
+    collector: { kind: "static" },
+    userDefined: false,
+    events: ["order.progress_changed", "order.status_changed"],
+    fires: ["pending_production", "part_delivered", "resumed"],
+    recipients: ["customer", "order_owner", "actor", "admins"],
+    defaultTemplate: "مرحبًا {{customer.name}}، طلبكم رقم {{order.number}}: {{status.name}}.",
+    defaultTemplates: {
+      pending_production: "مرحبًا {{customer.name}}، طلبكم رقم {{order.number}} بانتظار الإنتاج: نحمّص قهوتكم طازجة، وسنخبركم حين يجهز.",
+      part_delivered: "مرحبًا {{customer.name}}، سُلِّم جزء من طلبكم رقم {{order.number}}، وسنخبركم عند تسليم الباقي.",
+      resumed: "مرحبًا {{customer.name}}، استُؤنف العمل على طلبكم رقم {{order.number}} بعد تعليقه مؤقتاً، وسنخبركم بكل جديد.",
+    },
   },
   {
     key: "order_delivery",
@@ -208,6 +236,11 @@ export function getStatusSource(key: string): StatusSource | undefined {
   return BY_KEY.get(key as StatusSourceKey);
 }
 
+/** The message the editor suggests for a status switched on without one. */
+export function defaultTemplateOf(source: StatusSource, statusKey: string): string {
+  return source.defaultTemplates?.[statusKey] ?? source.defaultTemplate;
+}
+
 /** Whether an event can ever announce this status. */
 export function statusCanFire(source: StatusSource, statusKey: string): boolean {
   return !source.fires || source.fires.includes(statusKey);
@@ -259,11 +292,16 @@ const str = (x: unknown) => (typeof x === "string" ? x : x === null || x === und
  * type and payload only (the payload is written at the hook point, in the same transaction).
  */
 export function statusesOfEvent(eventType: string, payload: unknown): StatusHit[] {
+  // The one-time recompute corrects statuses that were already true: never a message.
+  if (isSilentEventPayload(payload)) return [];
   const p = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
   const hit = (source: StatusSourceKey, key: unknown): StatusHit[] => (str(key) ? [{ source, statusKey: str(key) }] : []);
   switch (eventType) {
     case "order.status_changed":
-      return str(p.from) === str(p.to) ? [] : hit("order", p.to);
+      if (str(p.from) === str(p.to)) return [];
+      return [...hit("order", p.to), ...(isResume(p.from, p.to) ? hit("order_progress", "resumed") : [])];
+    case "order.progress_changed":
+      return str(p.from) === str(p.to) ? [] : hit("order_progress", p.to);
     case "delivery.recorded":
       return hit("order_delivery", p.deliveryType);
     case "production.batch_roasted":

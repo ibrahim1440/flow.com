@@ -131,24 +131,31 @@ export default function ProfilePage() {
     }
   }
 
-  // ── PIN change (unchanged requests and messages) ─────────────────────────────────────────
+  // ── «رمز المحطة» (Workstations W2): the existing self-set PIN flow, re-pointed to the station
+  // PIN (PUT /api/profile/station-pin). Changing it needs the current station PIN; the first one
+  // (or after the administrator's reset, UR-04) needs a recent password step-up — the server answers
+  // 401 REAUTH_REQUIRED and the dashboard's step-up dialog asks for the password, then retries.
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [pinSaving, setPinSaving] = useState(false);
   const [pinMsg, setPinMsg] = useState<Msg>(null);
+  const [stationPin, setStationPin] = useState<{ set: boolean; setAt: string | null; locked: boolean; stations: string[]; admin: boolean } | null>(null);
+  const loadStationPin = useCallback(() => fetch("/api/profile/station-pin", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d) => setStationPin(d)).catch(() => setStationPin(null)), []);
+  useEffect(() => { void loadStationPin(); }, [loadStationPin]);
   async function savePin(e: React.FormEvent) {
     e.preventDefault();
     setPinMsg(null);
     if (newPin !== confirmPin) { setPinMsg({ ok: false, text: t("pinMismatch") }); return; }
     setPinSaving(true);
     try {
-      const res = await fetch("/api/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPin, newPin }) });
+      const res = await fetch("/api/profile/station-pin", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...(stationPin?.set ? { currentPin } : {}), newPin }) });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(res.status === 401 ? t("wrongCurrentPin") : res.status === 409 ? t("pinTaken") : body.error ?? t("error"));
-      setPinMsg({ ok: true, text: t("pinUpdated") });
+      if (!res.ok) throw new Error((ar ? body.error : body.errorEn ?? body.error) ?? t("error"));
+      setPinMsg({ ok: true, text: L("حُفظ رمز المحطة. استخدمه على جهاز المحطة بعد اختيار اسمك.", "The station PIN is saved. Use it at the station device after choosing your name.") });
       setCurrentPin(""); setNewPin(""); setConfirmPin("");
+      void loadStationPin();
       load();
     } catch (err: unknown) {
       setPinMsg({ ok: false, text: err instanceof Error ? err.message : t("error") });
@@ -298,7 +305,7 @@ export default function ProfilePage() {
 
   const a = data?.account;
   const pwState = !a ? "" : !a.hasPassword ? L("غير معيّنة", "Not set") : a.passwordChangedAt ? `${L("غُيّرت في", "Changed on")} ${when(a.passwordChangedAt, { time: false })}` : L("معيّنة", "Set");
-  const pinState = !a ? "" : a.pinChangedAt ? `${L("غُيّر في", "Changed on")} ${when(a.pinChangedAt, { time: false })}` : L("معيّن", "Set");
+  const pinState = !stationPin ? "" : stationPin.locked ? L("مقفل على جهاز محطة", "Locked on a station device") : stationPin.set ? `${L("عُيّن في", "Set on")} ${when(stationPin.setAt!, { time: false })}` : L("غير معيّن", "Not set");
   const facts: [string, ReactNode][] = a ? [
     [L("الاسم المعروض", "Display name"), <bdi key="n">{a.name}</bdi>],
     [L("اسم المستخدم", "Username"), a.username ? <bdi key="u" dir="ltr" className="pf-latin">{a.username}</bdi> : "—"],
@@ -307,7 +314,7 @@ export default function ProfilePage() {
     [L("آخر دخول", "Last sign-in"), data?.previousSignIn ? `${when(data.previousSignIn.at)} · ${methodLabel(data.previousSignIn.method)} · ${L("ويب", "Web")}` : L("هذا أول دخول مسجّل", "This is the first recorded sign-in")],
     [L("كلمة المرور", "Password"), pwState],
     [L("التحقق بخطوتين", "Two-step verification"), a.mfaEnrolledAt ? <Dot key="m" tone="success">{L("مفعّل", "On")}</Dot> : <Dot key="m" tone="neutral">{L("غير مفعّل", "Off")}</Dot>],
-    [L("الرمز الشخصي", "PIN"), pinState],
+    [L("رمز المحطة", "Station PIN"), pinState || "—"],
   ] : [];
 
   return (
@@ -404,19 +411,22 @@ export default function ProfilePage() {
                   </form>
                 ) : <Notice tone="info">{L("لا توجد كلمة مرور لهذا الحساب: يعيّنها مسؤول المستخدمين.", "This account has no password: an account editor sets it.")}</Notice>)}
 
-              {block("pf-pin-h", t("changePin"), pinState, null,
+              {block("pf-pin-h", L("رمز المحطة", "Station PIN"), pinState || null, null,
+                stationPin?.admin ? <Notice tone="info">{L("حساب مدير المنشأة لا يدخل من أجهزة المحطات المشتركة، فلا يحتاج رمز محطة. يستخدم المحطة من متصفحه بحسابه.", "The administrator account does not sign in at shared station devices, so it needs no station PIN.")}</Notice> : (
                 <form onSubmit={savePin} className="pf-form" data-testid="pf-pin-form">
-                  {/* UR-04: after an administrator cleared the PIN there is no current one — a password step-up confirms the person instead. */}
-                  {data?.account.pinResetRequired
-                    ? <p className="hr-caption pf-note" data-testid="pf-pin-reset">{L("أعاد مسؤول النظام تعيين رمزك. عيّن رمزًا جديدًا؛ نطلب كلمة مرورك للتحقق من هويتك.", "An administrator reset your PIN. Set a new one; we ask for your password to confirm it is you.")}</p>
-                    : secret("pf-current", t("currentPin"), currentPin, setCurrentPin, { pin: true })}
-                  {secret("pf-new", t("newPin"), newPin, setNewPin, { pin: true, minLength: PIN_LENGTH })}
+                  <p className="hr-caption pf-note" data-testid="pf-station-pin-note">{L("رمز من 6 أرقام تدخله على جهاز المحطة بعد اختيار اسمك. لا يفتح النظام الرئيسي، ولا يراه المسؤول.", "Six digits you enter at the station device after choosing your name. It does not open the main system, and the administrator never sees it.")}{stationPin?.stations.length ? ` ${L("محطاتك:", "Your stations:")} ${stationPin.stations.join(L("، ", ", "))}.` : ""}</p>
+                  {stationPin?.locked ? <Notice tone="warning">{L("رمزك مقفل على جهاز محطة بعد محاولات خاطئة. يعيد مسؤول النظام تفعيله.", "Your PIN is locked on a station device after wrong attempts. The administrator re-enables it.")}</Notice> : null}
+                  {/* The first station PIN (or after an administrator's reset, UR-04): no current one — a password step-up confirms the person instead. */}
+                  {stationPin && !stationPin.set
+                    ? <p className="hr-caption pf-note" data-testid="pf-pin-reset">{L("لم تعيّن رمز المحطة بعد. عيّنه الآن؛ نطلب كلمة مرورك للتحقق من هويتك.", "You have not set a station PIN yet. Set it now; we ask for your password to confirm it is you.")}</p>
+                    : secret("pf-current", L("رمز المحطة الحالي", "Current station PIN"), currentPin, setCurrentPin, { pin: true })}
+                  {secret("pf-new", L("رمز المحطة الجديد", "New station PIN"), newPin, setNewPin, { pin: true, minLength: PIN_LENGTH })}
                   {secret("pf-confirm", t("confirmNewPin"), confirmPin, setConfirmPin, { pin: true, error: confirmPin && confirmPin !== newPin ? t("pinMismatch") : null })}
                   {msg(pinMsg)}
                   <div className="pf-formacts">
-                    <Btn type="submit" variant="primary" disabled={pinSaving || (!!confirmPin && confirmPin !== newPin)}>{pinSaving ? t("saving") : t("changePin")}</Btn>
+                    <Btn type="submit" variant="primary" disabled={pinSaving || !stationPin || newPin.length !== PIN_LENGTH || confirmPin !== newPin || (stationPin.set && currentPin.length !== PIN_LENGTH)} data-testid="pf-pin-save">{pinSaving ? t("saving") : stationPin?.set ? L("تغيير رمز المحطة", "Change station PIN") : L("تعيين رمز المحطة", "Set station PIN")}</Btn>
                   </div>
-                </form>)}
+                </form>))}
             </div>
             <div id="mfa" className="pf-mfa"><MfaEnrollment lang={ar ? "ar" : "en"} onEnrolled={load} /></div>
           </div>

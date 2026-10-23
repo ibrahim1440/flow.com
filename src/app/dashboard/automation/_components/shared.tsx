@@ -56,7 +56,7 @@ export const SEND_MODE_LABELS: Record<string, { ar: string; en: string; tone: To
 const NOTE_AR: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Sending is turned off\./, () => "الإرسال متوقف: سجلت الرسالة ولم ترسل."],
   [/^Live sending is not enabled/, () => "الإرسال الفعلي غير مفعل على هذا الخادم (WHATSAPP_LIVE_ENABLED)."],
-  [/^Test mode has no test number\./, () => "وضع التجربة بلا رقم تجربة."],
+  [/^Test mode has no test number\./, () => "وضع التجربة بلا رقم تجربة: سُجّلت الرسالة كما كانت ستُرسل، ولم تُرسل."],
   [/^No recipient for this event/, () => "لا يوجد مستلم لهذا الحدث (مثلا: الطلب بلا مسؤول بعد)."],
   [/^This customer asked not to receive/, () => "العميل طلب عدم استقبال رسائل واتساب."],
   [/^No phone number\.$/, () => "لا يوجد رقم جوال."],

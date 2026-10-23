@@ -9,10 +9,10 @@ import { useUser } from "../../user-context";
 import { sampleContext } from "@/lib/automation/catalog";
 import { renderTemplate } from "@/lib/automation/template";
 import {
-  getStatusSource, sourceEventDef, sourceVariables, STATUS_RECIPIENT_LABELS, STATUS_SOURCES,
+  defaultTemplateOf, getStatusSource, sourceEventDef, sourceVariables, STATUS_RECIPIENT_LABELS, STATUS_SOURCES,
   type StatusRecipient, type StatusSource,
 } from "@/lib/automation/status-rules/sources";
-import { AutomationHeader, Bubble, LoadError, whenParts } from "../_components/shared";
+import { AutomationHeader, Bubble, LoadError, Phone, whenParts, type Connection } from "../_components/shared";
 import { SettingsFrame } from "../../_components/tools-ui";
 
 /**
@@ -77,6 +77,8 @@ export default function StatusNotificationsPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<Rule | null>(null);
   const [reload, setReload] = useState(0);
+  // The sending mode, read once for the header strip and the dialog's «where it goes» line.
+  const [conn, setConn] = useState<Connection | null>(null);
 
   useD21Phone({ title: ar ? "إشعارات الحالات" : "Status notifications", sub: ar ? "الأتمتة والواتساب" : "Automation & WhatsApp" });
 
@@ -97,6 +99,15 @@ export default function StatusNotificationsPage() {
       cancelled = true;
     };
   }, [isAdmin, ar, reload]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    api<Connection>("/api/automation/whatsapp").then((r) => {
+      if (!cancelled && r.ok) setConn(r.data);
+    });
+    return () => { cancelled = true; };
+  }, [isAdmin]);
 
   async function syncNow() {
     setSyncing(true);
@@ -145,6 +156,7 @@ export default function StatusNotificationsPage() {
       <SettingsFrame>
         <AutomationHeader
           lang={lang}
+          conn={conn}
           actions={
             <Btn onClick={syncNow} busy={syncing} disabled={!data} data-testid="status-sync">
               <RefreshIco /> {L("تحديث الحالات", "Refresh statuses")}
@@ -235,6 +247,7 @@ export default function StatusNotificationsPage() {
           key={editing.id}
           rule={editing}
           lang={lang}
+          conn={conn}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
             setEditing(null);
@@ -305,7 +318,26 @@ function StatusRow({ rule: r, source, lang, onEdit, onToggle }: { rule: Rule; so
   );
 }
 
-function RuleDialog({ rule, lang, onClose, onSaved }: { rule: Rule; lang: "ar" | "en"; onClose: () => void; onSaved: (r: Partial<Rule> & { id: string }) => void }) {
+/**
+ * Where a message of this status goes right now, under the preview (feat/wa-status-rules): the
+ * sending mode decides, not the rule — the owner keeps WhatsApp in test mode until he switches it.
+ */
+function ModeLine({ conn, lang }: { conn: Connection | null; lang: "ar" | "en" }) {
+  const ar = lang === "ar";
+  if (!conn) return null;
+  const m = conn.effectiveMode;
+  const noTestPhone = conn.sendMode === "TEST" && m === "OFF";
+  const text = m === "TEST"
+    ? <>{ar ? "وضع التجربة: تذهب الرسالة إلى رقم التجربة " : "Test mode: the message goes to the test number "}<Phone value={conn.testPhone} />{ar ? " فقط، لا إلى المستلم." : " only, not to the recipient."}</>
+    : m === "LIVE"
+      ? ar ? "إرسال فعلي: تذهب الرسالة إلى المستلمين المختارين." : "Live: the message goes to the chosen recipients."
+      : noTestPhone
+        ? ar ? "وضع التجربة بلا رقم تجربة: تُسجَّل الرسالة في السجل كما كانت ستُرسل، ولا تصل لأحد." : "Test mode without a test number: the message is logged as it would be sent, and reaches no one."
+        : ar ? "الإرسال متوقف: تُسجَّل الرسالة في السجل كما كانت ستُرسل، ولا تصل لأحد." : "Sending is off: the message is logged as it would be sent, and reaches no one.";
+  return <span className="hr-caption" data-testid="status-mode-line" data-mode={m}>{text}</span>;
+}
+
+function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: "ar" | "en"; conn: Connection | null; onClose: () => void; onSaved: (r: Partial<Rule> & { id: string }) => void }) {
   const ar = lang === "ar";
   const L = (a: string, e: string) => (ar ? a : e);
   const source = getStatusSource(rule.source);
@@ -314,7 +346,7 @@ function RuleDialog({ rule, lang, onClose, onSaved }: { rule: Rule; lang: "ar" |
   const [recipients, setRecipients] = useState<StatusRecipient[]>(
     rule.recipients.length ? rule.recipients : source ? [source.recipients[0]] : [],
   );
-  const [template, setTemplate] = useState(rule.template || source?.defaultTemplate || "");
+  const [template, setTemplate] = useState(rule.template || (source ? defaultTemplateOf(source, rule.statusKey) : ""));
   const [renotify, setRenotify] = useState(rule.renotify);
   const [busy, setBusy] = useState<"" | "save" | "test">("");
   const [error, setError] = useState("");
@@ -431,6 +463,7 @@ function RuleDialog({ rule, lang, onClose, onSaved }: { rule: Rule; lang: "ar" |
         <div className="hr-stack" style={{ gap: 6 }}>
           <span className="hr-label">{L("معاينة بالبيانات التجريبية", "Preview with sample data")}</span>
           <Bubble text={preview} lang={lang} testId="status-preview" />
+          <ModeLine conn={conn} lang={lang} />
         </div>
       </div>
     </Dialog>

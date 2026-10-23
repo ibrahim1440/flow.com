@@ -104,9 +104,12 @@ export async function stationRoasters(user: { id: string }): Promise<StationRoas
   }));
 }
 
-export async function stationQueue(user: Actor, opts: { roasterId?: string | null } = {}): Promise<StationQueue> {
-  const roasters = await stationRoasters(user);
-  const roaster = roasters.find((r) => r.id === opts.roasterId) ?? roasters[0] ?? null;
+export async function stationQueue(user: Actor, opts: { roasterId?: string | null; fixedRoaster?: boolean } = {}): Promise<StationQueue> {
+  // fixedRoaster (a paired station device, W2): the station's own roaster and no other — never a
+  // fallback to another roaster when it is missing or retired.
+  const all = await stationRoasters(user);
+  const roasters = opts.fixedRoaster ? all.filter((r) => r.id === opts.roasterId) : all;
+  const roaster = roasters.find((r) => r.id === opts.roasterId) ?? (opts.fixedRoaster ? null : roasters[0] ?? null);
   const plannedGreenKg = roaster ? roaster.defaultTargetKg : null;
 
   const canStock = hasSubPrivilege(user.permissions, "production", "roast_to_stock");

@@ -8,7 +8,7 @@ import { Btn, ErrorState, KV, LoadingTable, Metrics, PageHeader, RUN_STATUS, Sta
 import { hrText } from "@/lib/hr/messages-en";
 import { dayRows, type DayDetail } from "../../../hr/payroll/shared";
 import { DayValue } from "../../../hr/payroll/day-value";
-import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintCertified } from "@/components/print/Certification";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 import "../../me.css";
 import { NOT_AUTHORIZED_AR, NOT_AUTHORIZED_EN } from "@/lib/hr/payroll-doc";
 
@@ -47,8 +47,8 @@ export default function MyPayslipPage() {
   const { data, error, loading, reload } = useHr<Slip>(lineId ? `/api/hr/me/payslips/${encodeURIComponent(lineId)}` : null);
   const { L, month, en, lang } = useHrI18n();
   // Owner decision D1: printing is out of Phase 1. The Print action works only once the server's
-  // PRINT_CERTIFIED gate says so (unknown counts as off); the payslip itself stays viewable.
-  const printing = usePrintCertified();
+  // document-printing gate (PRINT_DOCUMENTS_ENABLED) says so (unknown counts as off); the payslip itself stays viewable.
+  const printing = usePrintDocuments();
   const back = <Link className="hr-btn is-ghost me-noprint" href="/dashboard/me">{en ? "← My HR" : "→ خدماتي"}</Link>;
 
   if (error) return <div className="hr-page"><PageHeader title={L("قسيمة الراتب", "Payslip")} actions={back} /><ErrorState error={error} onRetry={reload} /></div>;

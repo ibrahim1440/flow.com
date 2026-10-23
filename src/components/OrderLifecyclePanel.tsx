@@ -52,7 +52,7 @@ export type PreparationOrderItem = {
 
 // ─── Small display helpers ───────────────────────────────────────────────────
 
-const ORDER_STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
+export const ORDER_STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   "Waiting Approval": "orderStatusWaitingApproval",
   "Waiting Preparation Review": "orderStatusWaitingPrepReview",
   "Preparing": "orderStatusPreparing",

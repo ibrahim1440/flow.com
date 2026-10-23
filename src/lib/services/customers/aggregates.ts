@@ -208,3 +208,159 @@ export function outstandingBalance(
   }
   return { outstanding: roundMoney(total), documents: docs.length, openDocuments: open };
 }
+
+// ─── Statement of account and aging (customer file, feat/customer-file) ────────────────────
+//
+// A STATEMENT DERIVED FROM SALES RECORDS — NOT AN ACCOUNTING LEDGER. Accounting and ZATCA are
+// deferred by the owner, so nothing here posts, stores or invents an entry: a line is either a
+// deal's accepted quotation (what the customer agreed to pay, VAT included — the same document
+// «الرصيد المستحق» counts) or a collection Finance APPROVED against one of those deals. The
+// closing figure therefore agrees with `outstandingBalance` by construction (see `unapplied`).
+
+export type StatementDocument = {
+  opportunityId: string;
+  dealTitle: string;
+  quoteId: string;
+  quoteNumber: string;
+  revision: number;
+  /** When the customer accepted it (falls back to the caller's choice of date when absent). */
+  at: Date;
+  grandTotal: Decimal;
+  /**
+   * The first delivery of an order made from this quotation, if any: payment terms run from
+   * when the goods left, and from acceptance when nothing has been delivered yet.
+   */
+  firstDeliveryAt: Date | null;
+};
+export type StatementPayment = {
+  id: string;
+  opportunityId: string;
+  at: Date;
+  amountGross: Decimal;
+  method: string;
+  orderNumber: number | null;
+  reference: string | null;
+};
+export type StatementLine =
+  | { kind: "document"; key: string; at: Date; quoteId: string; quoteNumber: string; revision: number; opportunityId: string; dealTitle: string; debit: Decimal; credit: Decimal; balance: Decimal }
+  | { kind: "payment"; key: string; at: Date; paymentId: string; method: string; orderNumber: number | null; reference: string | null; opportunityId: string; dealTitle: string; debit: Decimal; credit: Decimal; balance: Decimal };
+
+export const AGING_BUCKETS = ["notDue", "d1_30", "d31_60", "d61_90", "d90plus"] as const;
+export type AgingBucket = (typeof AGING_BUCKETS)[number];
+
+/** Whole Riyadh calendar days from `from` to `to` (negative when `to` is earlier). */
+export function riyadhDayDiff(from: Date, to: Date): number {
+  const day = (d: Date) => Math.floor((d.getTime() + RIYADH_OFFSET) / DAY);
+  return day(to) - day(from);
+}
+
+/** The bucket of an unpaid amount `daysOverdue` days past its due date (≤ 0 → not due yet). */
+export function agingBucket(daysOverdue: number): AgingBucket {
+  if (daysOverdue <= 0) return "notDue";
+  if (daysOverdue <= 30) return "d1_30";
+  if (daysOverdue <= 60) return "d31_60";
+  if (daysOverdue <= 90) return "d61_90";
+  return "d90plus";
+}
+
+/**
+ * «كشف الحساب» and «أعمار الديون».
+ *
+ * Lines: every document and approved payment of the deals in scope, oldest first (a document
+ * before a payment at the same instant), with a running balance = Σ debit − Σ credit.
+ *
+ * Open documents and aging: per deal, unpaid = its document − its approved payments, as
+ * `outstandingBalance` (never below zero for a deal: an overpayment on one deal does not pay
+ * another's). The unpaid amount is due `termsDays` (the customer's payment terms; none → 0) after
+ * the first delivery of an order made from the document, or after acceptance when nothing has
+ * been delivered, and is aged in Riyadh calendar days past that date.
+ *
+ * Totals: debit, credit, net (= the last running balance), outstanding (= Σ unpaid, the figure
+ * «الرصيد المستحق» shows) and unapplied (= outstanding − net ≥ 0: approved money beyond a deal's
+ * document, shown as a credit rather than silently netted against another deal).
+ */
+export function statementOfAccount(
+  docs: StatementDocument[],
+  payments: StatementPayment[],
+  opts: { termsDays: number | null; now: Date },
+): {
+  lines: StatementLine[];
+  totals: { debit: Decimal; credit: Decimal; net: Decimal; outstanding: Decimal; unapplied: Decimal };
+  open: { opportunityId: string; dealTitle: string; quoteId: string; quoteNumber: string; total: Decimal; paid: Decimal; unpaid: Decimal; dueAt: Date; basis: "delivery" | "acceptance"; daysOverdue: number; bucket: AgingBucket }[];
+  aging: Record<AgingBucket, Decimal> & { total: Decimal };
+} {
+  const title = new Map(docs.map((d) => [d.opportunityId, d.dealTitle]));
+  const docDeals = new Set(docs.map((d) => d.opportunityId));
+  // A payment counts only against a deal that has a document in scope (as outstandingBalance).
+  const pays = payments.filter((p) => docDeals.has(p.opportunityId));
+  type Raw = { at: Date; order: number; key: string; debit: Decimal; credit: Decimal; make: (bal: Decimal) => StatementLine };
+  const raw: Raw[] = [
+    ...docs.map((d): Raw => ({
+      at: d.at, order: 0, key: `q-${d.quoteId}`, debit: roundMoney(d.grandTotal), credit: ZERO,
+      make: (balance) => ({ kind: "document", key: `q-${d.quoteId}`, at: d.at, quoteId: d.quoteId, quoteNumber: d.quoteNumber, revision: d.revision, opportunityId: d.opportunityId, dealTitle: d.dealTitle, debit: roundMoney(d.grandTotal), credit: ZERO, balance }),
+    })),
+    ...pays.map((p): Raw => ({
+      at: p.at, order: 1, key: `c-${p.id}`, debit: ZERO, credit: roundMoney(p.amountGross),
+      make: (balance) => ({ kind: "payment", key: `c-${p.id}`, at: p.at, paymentId: p.id, method: p.method, orderNumber: p.orderNumber, reference: p.reference, opportunityId: p.opportunityId, dealTitle: title.get(p.opportunityId) ?? "", debit: ZERO, credit: roundMoney(p.amountGross), balance }),
+    })),
+  ].sort((a, b) => a.at.getTime() - b.at.getTime() || a.order - b.order || a.key.localeCompare(b.key));
+  let bal = ZERO, debit = ZERO, credit = ZERO;
+  const lines = raw.map((r) => {
+    debit = debit.plus(r.debit);
+    credit = credit.plus(r.credit);
+    bal = roundMoney(bal.plus(r.debit).minus(r.credit));
+    return r.make(bal);
+  });
+
+  const paid = new Map<string, Decimal>();
+  for (const p of pays) paid.set(p.opportunityId, (paid.get(p.opportunityId) ?? ZERO).plus(p.amountGross));
+  const terms = Math.max(0, opts.termsDays ?? 0);
+  const aging = Object.fromEntries(AGING_BUCKETS.map((b) => [b, ZERO])) as Record<AgingBucket, Decimal>;
+  const open = [];
+  let outstanding = ZERO;
+  for (const d of docs) {
+    const p = roundMoney(paid.get(d.opportunityId) ?? ZERO);
+    const unpaid = roundMoney(d.grandTotal.minus(p));
+    if (!unpaid.greaterThan(0)) continue;
+    const basisAt = d.firstDeliveryAt ?? d.at;
+    const dueAt = new Date(basisAt.getTime() + terms * DAY);
+    const daysOverdue = riyadhDayDiff(dueAt, opts.now);
+    const bucket = agingBucket(daysOverdue);
+    aging[bucket] = aging[bucket].plus(unpaid);
+    outstanding = outstanding.plus(unpaid);
+    open.push({ opportunityId: d.opportunityId, dealTitle: d.dealTitle, quoteId: d.quoteId, quoteNumber: d.quoteNumber, total: roundMoney(d.grandTotal), paid: p, unpaid, dueAt, basis: d.firstDeliveryAt ? "delivery" as const : "acceptance" as const, daysOverdue, bucket });
+  }
+  open.sort((a, b) => b.daysOverdue - a.daysOverdue || a.quoteNumber.localeCompare(b.quoteNumber));
+  outstanding = roundMoney(outstanding);
+  const net = roundMoney(debit.minus(credit));
+  for (const b of AGING_BUCKETS) aging[b] = roundMoney(aging[b]);
+  return {
+    lines,
+    totals: { debit: roundMoney(debit), credit: roundMoney(credit), net, outstanding, unapplied: roundMoney(outstanding.minus(net)) },
+    open,
+    aging: { ...aging, total: outstanding },
+  };
+}
+
+/**
+ * The credit limit against what is owed. Displayed and warned about — never enforced: there is
+ * no owner rule that refuses a quotation or an order over the limit (CRM.md backend
+ * dependencies: "a field and enforcement rules"; only the field was decided).
+ *   used       — the outstanding balance (`outstandingBalance`, VAT included);
+ *   available  — limit − used, never below zero;
+ *   percent    — used / limit, whole percent (null without a positive limit);
+ *   over       — used is above the limit.
+ */
+export function creditPosition(limit: Decimal | null, used: Decimal): {
+  limit: Decimal; used: Decimal; available: Decimal; percent: number | null; over: boolean;
+} | null {
+  if (limit == null) return null;
+  const available = limit.minus(used);
+  return {
+    limit: roundMoney(limit),
+    used: roundMoney(used),
+    available: available.greaterThan(0) ? roundMoney(available) : ZERO,
+    percent: limit.greaterThan(0) ? Math.round(used.dividedBy(limit).times(100).toNumber()) : null,
+    over: used.greaterThan(limit),
+  };
+}

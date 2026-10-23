@@ -31,6 +31,23 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
   SIGN_IN: { ar: "سجّل دخولًا", en: "Signed in", cat: "signin" },
   MFA_SIGN_IN: { ar: "سجّل دخولًا", en: "Signed in", cat: "signin" },
   SIGN_OUT: { ar: "سجّل خروجًا", en: "Signed out", cat: "signin" },
+  // Workstations W2 (20261027090000_station_w2): station devices, access and the station PIN.
+  STATION_CREATED: { ar: "أضاف محطة", en: "Added a station", cat: "accounts" },
+  STATION_UPDATED: { ar: "عدّل محطة", en: "Changed a station", cat: "accounts" },
+  STATION_REGISTERED: { ar: "سجّل جهاز محطة", en: "Registered a station device", cat: "accounts" },
+  STATION_CODE_ISSUED: { ar: "أصدر رمز تفعيل", en: "Issued an activation code", cat: "accounts" },
+  STATION_CODE_CANCELLED: { ar: "ألغى رمز التفعيل", en: "Cancelled an activation code", cat: "accounts" },
+  STATION_ACTIVATED: { ar: "فُعّل جهاز محطة", en: "Station device activated", cat: "accounts" },
+  STATION_REVOKED: { ar: "ألغى جهاز محطة", en: "Revoked a station device", cat: "accounts" },
+  STATION_POLICY_CHANGED: { ar: "غيّر سياسة المحطات", en: "Changed the station policy", cat: "accounts" },
+  STATION_ACCESS_CHANGED: { ar: "غيّر الوصول إلى المحطات", en: "Changed station access", cat: "permissions" },
+  STATION_PIN_SET: { ar: "عيّن رمز المحطة", en: "Set the station PIN", cat: "signin" },
+  STATION_PIN_REENABLED: { ar: "أعاد تفعيل رمز المحطة", en: "Re-enabled the station PIN", cat: "accounts" },
+  STATION_SIGN_IN: { ar: "دخل من محطة", en: "Signed in at a station", cat: "signin" },
+  STATION_SIGN_OUT: { ar: "خرج من محطة", en: "Signed out at a station", cat: "signin" },
+  STATION_SWITCH: { ar: "بدّل الموظف في محطة", en: "Switched employee at a station", cat: "signin" },
+  STATION_PIN_FAILED: { ar: "رمز محطة غير صحيح", en: "Wrong station PIN", cat: "signin" },
+  STATION_PIN_LOCKED: { ar: "قُفل رمز المحطة", en: "Station PIN locked", cat: "signin" },
 };
 
 const SOURCE: Record<string, { ar: string; en: string }> = { WEB: { ar: "ويب", en: "Web" }, STATION: { ar: "محطة", en: "Station" }, SYSTEM: { ar: "النظام", en: "System" } };
@@ -138,6 +155,20 @@ export function describe(r: Row, names: Map<string, string>): AuditEntry {
     case "ACCOUNT_UNLOCKED": details = `${m.attemptsCleared ?? 0} محاولات فاشلة مُسحت`; break;
     case "SESSION_ENDED_ADMIN": case "DEVICE_SESSIONS_ENDED_ADMIN": case "SESSIONS_ENDED_ADMIN": details = `${m.sessions ?? 0} جلسات`; break;
     case "AUDIT_EXPORTED": target = "سجل الصلاحيات"; details = `${m.rows ?? 0} سطرًا`; break;
+    // Workstations W2: the device or station named, never a PIN, code or token.
+    case "STATION_SIGN_IN": case "STATION_SIGN_OUT": case "STATION_SWITCH": case "STATION_PIN_FAILED": case "STATION_PIN_LOCKED": case "STATION_PIN_SET":
+      target = actor;
+      if (r.action === "STATION_SIGN_IN" && r.result !== "SUCCESS") label = r.reasonCode === "NOT_ASSIGNED" ? "محاولة دخول لمحطة غير مكلّف بها" : r.reasonCode === "ADMIN_ROLE" ? "رُفض دخول المسؤول من محطة" : "رُفض الدخول من محطة";
+      details = [m.deviceName, r.reasonCode === "IDLE" ? "خمول" : r.reasonCode === "LOCK" ? "قفل" : null, typeof m.claimsReleased === "number" && m.claimsReleased ? `حُرّرت ${m.claimsReleased} مهمة` : null].filter(Boolean).join(" · ");
+      break;
+    case "STATION_CREATED": case "STATION_UPDATED": case "STATION_POLICY_CHANGED": target = m.stationName ? `محطة «${m.stationName}»` : "المحطات"; break;
+    case "STATION_REGISTERED": case "STATION_CODE_ISSUED": case "STATION_CODE_CANCELLED": case "STATION_ACTIVATED": case "STATION_REVOKED":
+      target = m.deviceName ? `جهاز «${m.deviceName}»` : "جهاز محطة"; details = m.stationName ? `المحطة: ${m.stationName}` : ""; break;
+    case "STATION_ACCESS_CHANGED": {
+      const ch = (Array.isArray(m.changes) ? m.changes : []) as { stationName: string; to: string }[];
+      details = ch.map((c) => `${c.stationName}: ${c.to === "NONE" ? "غير مسموح" : c.to === "SUPERVISOR" ? "مسموح · مشرف" : "مسموح"}`).join(" · ");
+      break;
+    }
   }
   if (reason && !details.includes(reason) && r.action !== "EMPLOYEE_PERMISSIONS_CHANGED" && r.action !== "ROLE_UPDATED") details = details ? `${details} · السبب: ${reason}` : `السبب: ${reason}`;
   return {

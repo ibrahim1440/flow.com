@@ -9,7 +9,7 @@ import { Btn, Dot, Metrics, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, O
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { exportBatchesPDF, exportBatchesExcel, type BatchExportRow } from "@/lib/export";
-import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintCertified } from "@/components/print/Certification";
+import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 import { useUser } from "../user-context";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { canStartProduction } from "@/lib/order-operations-client";
@@ -85,8 +85,8 @@ export default function ProductionPage() {
   const router = useRouter();
   const { t, lang } = useI18n();
   // Owner decision D1: the batches PDF (jsPDF) is a printable document, so it follows the same
-  // PRINT_CERTIFIED gate as every other print action (unknown = off). Excel stays available.
-  const printing = usePrintCertified();
+  // document-printing gate (PRINT_DOCUMENTS_ENABLED) as every other print action (unknown = off). Excel stays available.
+  const printing = usePrintDocuments();
   const canStartBatch = hasSubPrivilege(user?.permissions ?? {}, "production", "start_batch");
   const canBlend = hasSubPrivilege(user?.permissions ?? {}, "production", "blend");
   const canRoastToStock = hasSubPrivilege(user?.permissions ?? {}, "production", "roast_to_stock");

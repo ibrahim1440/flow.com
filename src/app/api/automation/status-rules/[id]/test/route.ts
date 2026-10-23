@@ -8,7 +8,7 @@ import { audit } from "@/lib/hr/core";
 import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { readSettings } from "@/lib/automation/settings";
 import { renderTemplate, unknownPlaceholders } from "@/lib/automation/template";
-import { getStatusSource, sourceEventDef } from "@/lib/automation/status-rules/sources";
+import { defaultTemplateOf, getStatusSource, sourceEventDef } from "@/lib/automation/status-rules/sources";
 import { sampleContext } from "@/lib/automation/catalog";
 import { getConnectionState, sendText, whatsappConfig } from "@/lib/whatsapp/evolution";
 
@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: Ctx) {
     const source = getStatusSource(rule.source);
     if (!source) return NextResponse.json({ error: "مصدر الحالة غير معروف.", errorEn: "Unknown status source." }, { status: 409 });
     const def = sourceEventDef(source);
-    const template = (typeof body.template === "string" ? body.template : rule.template).trim() || source.defaultTemplate;
+    const template = (typeof body.template === "string" ? body.template : rule.template).trim() || defaultTemplateOf(source, rule.statusKey);
     const unknown = unknownPlaceholders(def, template);
     if (unknown.length) {
       return NextResponse.json({ error: `متغير غير معروف: ${unknown.join(", ")}`, errorEn: `Unknown variable: ${unknown.join(", ")}` }, { status: 400 });

@@ -4,7 +4,7 @@ import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useLang, Spinner, api, formatMoney, QUOTE_STATUS_SPECS } from "../../../_components/ui";
 import { useD21Title, useD21Phone } from "@/components/shell/page-context";
-import { usePrintCertified } from "@/components/print/Certification";
+import { usePrintDocuments } from "@/components/print/Certification";
 import { PRINT_PHASE1_NOTE, QUOTATION_PDF_WHEN_PRINT_OFF } from "@/lib/print/certification";
 import { BRAND_PRIMARY_SRC, BRAND_PRIMARY_VIEWBOX } from "@/components/brand/BrandMark";
 import { DocumentSheet, type DocRow, type DocTotal } from "@/components/print/document/DocumentSheet";
@@ -125,10 +125,10 @@ export default function QuotePrintPage({
   const [liveSeller, setLiveSeller] = useState<Seller | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // Owner decision D1: printing is out of Phase 1 (PRINT_CERTIFIED gate, unknown counts as off).
+  // Owner decision D1: printing is out of Phase 1 (document-printing gate (PRINT_DOCUMENTS_ENABLED), unknown counts as off).
   // D1-Q (decided: strict): «Save as PDF» opens the print dialog, so with QUOTATION_PDF_WHEN_PRINT_OFF
   // false it is disabled like every other print action while printing is off; the document stays.
-  const printing = usePrintCertified();
+  const printing = usePrintDocuments();
   const pdfOnly = printing !== true && QUOTATION_PDF_WHEN_PRINT_OFF;
   const actionOn = printing === true || pdfOnly;
 

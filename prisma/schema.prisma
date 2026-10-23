@@ -58,11 +58,16 @@ model Employee {
 
   // Owner security decision (username + PIN): server-side sessions and MFA (additive).
   authSessions      AuthSession[]
+  // Workstations W2 (20261027090000_station_w2; additive, relation fields only): the stations this
+  // login may sign in at (UR-13) and its own station PIN (never unique, no lookup index).
+  stationAssignments StationAssignment[]
+  stationPin         StationPin?
   authMfa           AuthMfa?
   authRecoveryCodes AuthRecoveryCode[]
 
   // Customer account (additive): the accounts this employee is responsible for.
   customerAccounts Customer[] @relation("CustomerAccountOwner")
+  customerFiles    CustomerFile[] @relation("CustomerFileUploader")
 
   // Users, roles & permissions (Figma Phase 8, 20261022090000_users_roles; additive).
   /// The custom role this account follows (role = "custom"); null = a system template or none.
@@ -159,9 +164,16 @@ model AuthSession {
   /// The browser the session was opened from: an opaque random id from the httpOnly hq_device
   /// cookie (not a credential). Groups the own profile's device list; null = before 20261019120000.
   deviceId      String?
+  /// Workstations W2 (20261027090000_station_w2): ERP | STATION. A STATION session is opened by a
+  /// station PIN on a registered station device, is bound to that station and device, and is refused
+  /// by every ERP API (getUserWithPermissions); method = STATION_PIN.
+  scope           String    @default("ERP")
+  stationId       String?
+  stationDeviceId String?
 
   @@index([employeeId])
   @@index([expiresAt])
+  @@index([stationDeviceId])
 }
 
 /// TOTP (RFC 6238); the secret is AES-256-GCM encrypted with a key from the environment.
@@ -233,6 +245,8 @@ model Customer {
   accountOwnerId   String?
   accountOwner     Employee?         @relation("CustomerAccountOwner", fields: [accountOwnerId], references: [id], onDelete: SetNull)
   contacts         CustomerContact[]
+  /// The customer file's documents (additive, migration 20261027120000_customer_file).
+  files            CustomerFile[]
 
   @@index([accountOwnerId])
 }
@@ -255,6 +269,38 @@ model CustomerContact {
   updatedAt  DateTime @updatedAt
 
   @@index([customerId, position])
+}
+
+/// A document on the customer's file — the account page's «الملفات» tab (Figma crm-account
+/// 179:1312): a signed contract, the commercial register, the VAT certificate, a price agreement.
+///
+/// The bytes live in `content`, as CollectionEvidence, FinAttachment and HrDocument already do:
+/// the deployment's filesystem is ephemeral and the stack has no object store. A small,
+/// low-volume, private artefact (5 MB, PDF / JPEG / PNG — CHECKs in the migration);
+/// `lib/services/customers/files.ts` is the only reader and writer, so moving to object storage
+/// later changes that file and this column and nothing else. Additive, migration
+/// 20261027120000_customer_file.
+model CustomerFile {
+  id           String    @id @default(cuid())
+  customerId   String
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  /// CONTRACT | REGISTRATION | TAX | PRICE_AGREEMENT | OTHER (CHECK).
+  category     String
+  /// What the file is, in the uploader's words («عقد التوريد 2026»).
+  title        String
+  /// Safe filename (no separators, quotes or control characters; extension from the bytes).
+  fileName     String
+  /// The type proven by the file's own signature, never the browser's claim.
+  mimeType     String
+  sizeBytes    Int
+  /// SHA-256 of the bytes.
+  sha256       String
+  content      Bytes
+  uploadedById String?
+  uploadedBy   Employee? @relation("CustomerFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+
+  @@index([customerId, createdAt])
 }
 
 model GreenBean {
@@ -1686,6 +1732,126 @@ model AuthAuditLog {
   @@index([identifierHash, occurredAt])
   @@index([action, occurredAt])
   @@index([result, occurredAt])
+}
+
+// ─── Workstations W2: station devices, station PIN, station-scoped sessions ─────────────────────
+// Migration 20261027090000_station_w2 (additive: new tables, nullable or defaulted columns).
+// Figma UR-13 / UR-14 / UR-14b (page 596:2), WS-S1…S7 (page 630:2); PHASE7-DEVICES-BACKEND §3;
+// CORE-INTERFACES-INVENTORY §H. Owner decisions D7, D11, D12 (22 Oct 2026).
+
+/// A station: one place where a shared device works («محطة التحميص 1» · «صالة التحميص»). A device
+/// grants nothing by itself; the employees assigned to its station sign in there with their own
+/// station PIN. A roasting station names its roaster (Roaster id, no FK: the audit convention of
+/// Roaster.defaultOperatorId; roasters are retired, never deleted). Retired, never deleted.
+model Station {
+  id            String              @id @default(cuid())
+  name          String
+  /// ROASTING | QUALITY | PACKAGING
+  type          String
+  place         String?
+  roasterId     String?
+  /// ACTIVE | RETIRED
+  status        String              @default("ACTIVE")
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  devices       StationDevice[]
+  assignments   StationAssignment[]
+
+  @@index([status])
+}
+
+/// A shared device registered to one station (UR-14). Registered by the administrator with the code
+/// the device shows on S1 (deviceCode, «رمز هذا الجهاز»); activated on the device with a one-time
+/// activation code (UR-14b: random, stored as a keyed hash, single use, ≤ 15 min, attempts counted).
+/// Activation sets the httpOnly hq_station cookie, an opaque 32-byte random token stored only as
+/// tokenHash. Revocation (REVOKED) ends every session on the device at its next request.
+model StationDevice {
+  id                  String              @id @default(cuid())
+  stationId           String
+  station             Station             @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  displayName         String
+  /// WS-XXXX, shown by the device on S1 before it is activated.
+  deviceCode          String
+  /// SHA-256 of the hq_station cookie token (never the token). NULL until activated.
+  tokenHash           String?             @unique
+  /// PENDING | ACTIVE | REVOKED
+  status              String              @default("PENDING")
+  /// Keyed hash of the one-time activation code; cleared when used, cancelled or exhausted.
+  activationCodeHash  String?
+  activationExpiresAt DateTime?
+  /// Wrong activation codes against this device's current code (the code is dropped at the limit).
+  activationAttempts  Int                 @default(0)
+  activatedAt         DateTime?
+  lastSeenAt          DateTime?
+  userAgent           String?
+  registeredById      String?
+  registeredByName    String?
+  registeredAt        DateTime            @default(now())
+  revokedAt           DateTime?
+  revokedById         String?
+  revokedByName       String?
+  revokeReason        String?
+  pinAttempts         StationPinAttempt[]
+
+  @@index([stationId, status])
+  @@index([status])
+}
+
+/// UR-13: an employee may sign in at a station (the name appears on its S2 tiles). It decides WHERE
+/// only; what the employee may do there comes from the module privileges (UR-S17). The supervisor
+/// flag is a label only (owner decision O-5).
+model StationAssignment {
+  id          String   @id @default(cuid())
+  stationId   String
+  station     Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  supervisor  Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([stationId, employeeId])
+  @@index([employeeId])
+}
+
+/// The employee's own station PIN (J-6: set by the person, never seen or issued by the
+/// administrator; UR-04 clears it). verifier = bcrypt(stationPinVerifierInput(pin)), a keyed HMAC in
+/// its own domain. It is checked against the SELECTED employee only (J-2): not unique, no lookup.
+model StationPin {
+  employeeId String              @id
+  employee   Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  verifier   String
+  setAt      DateTime            @default(now())
+  attempts   StationPinAttempt[]
+}
+
+/// Failed station-PIN attempts per employee per device (D7). At the policy limit the PIN is locked
+/// on that device (lockedAt) until the administrator re-enables it (UR-04); a success resets it.
+model StationPinAttempt {
+  employeeId      String
+  stationPin      StationPin    @relation(fields: [employeeId], references: [employeeId], onDelete: Cascade)
+  stationDeviceId String
+  device          StationDevice @relation(fields: [stationDeviceId], references: [id], onDelete: Cascade)
+  failedCount     Int           @default(0)
+  lastFailedAt    DateTime?
+  lockedAt        DateTime?
+
+  @@id([employeeId, stationDeviceId])
+  @@index([stationDeviceId])
+}
+
+/// The station policy (owner decision D7), one row. NULL = not set by the owner: the approved
+/// defaults apply (idle 5 min, 5 PIN attempts, activation code 15 min).
+model StationPolicy {
+  id                String   @id @default("singleton")
+  idleMinutes       Int?
+  pinMaxAttempts    Int?
+  activationMinutes Int?
+  updatedById       String?
+  updatedAt         DateTime @updatedAt
 }
 
 model WorkItemClaim {
