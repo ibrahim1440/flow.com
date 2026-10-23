@@ -1,9 +1,9 @@
 import "server-only";
-import { SignJWT, jwtVerify } from "jose";
-import type { UserPayload } from "./auth-shared";
 import { tokenExpSeconds } from "./auth/session-policy";
+import { signSessionToken, verifySessionToken, type SessionClaims, type VerifiedSession } from "./auth/session-token";
 
 export * from "./auth-shared";
+export type { SessionClaims, VerifiedSession } from "./auth/session-token";
 
 const BLOCKED_SECRETS = new Set([
   "hiqbah-fallback-secret",
@@ -40,20 +40,15 @@ const secret = new TextEncoder().encode(rawSecret);
  * The token of a server-side session. Its `exp` is the session's absolute deadline
  * (auth/session-policy.ts), never a fixed lifetime: a fixed "8h" ended every active session
  * before the 12-hour limit, and a longer one would let the token outlive it.
+ *
+ * It carries only the slim claims (auth/session-token.ts): no permissions, name or role, so its
+ * size does not depend on the account. Signing refuses a cookie over 2 KB.
  */
-export async function signToken(payload: UserPayload, sessionExpiresAt: Date): Promise<string> {
-  return new SignJWT(payload as unknown as Record<string, unknown>)
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(tokenExpSeconds(sessionExpiresAt))
-    .sign(secret);
+export async function signToken(claims: SessionClaims, sessionExpiresAt: Date): Promise<string> {
+  return signSessionToken(claims, tokenExpSeconds(sessionExpiresAt), secret);
 }
 
-export async function verifyToken(token: string): Promise<UserPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, secret);
-    return payload as unknown as UserPayload;
-  } catch {
-    return null;
-  }
+/** A valid token's claims (a legacy pre-v2 token too, flagged `legacy`), or null. */
+export async function verifyToken(token: string): Promise<VerifiedSession | null> {
+  return verifySessionToken(token, secret);
 }

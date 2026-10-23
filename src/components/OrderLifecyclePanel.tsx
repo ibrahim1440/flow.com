@@ -283,6 +283,7 @@ const ACTIVITY_LABEL_KEYS: Record<string, TranslationKey> = {
   PRODUCTION_SURPLUS_OVERRIDDEN: "activityProductionSurplusOverridden",
   STOCK_RESERVED_FROM_PACKAGING: "activityStockReservedFromPackaging",
   ORDER_ITEMS_EDITED: "activityOrderItemsEdited",
+  ORDER_HANDED_TO_DISPATCH: "activityHandedToDispatch",
 };
 
 

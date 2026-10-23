@@ -123,6 +123,15 @@ export function activityTextAr(a: ActivityLike, statusLabel: (status: string) =>
       out.userText = str(m.reason) ?? (/ Reason: ([\s\S]+)$/.exec(msg)?.[1] ?? null);
       return out;
     }
+    case "ORDER_HANDED_TO_DISPATCH": {
+      const u = num(m.units) ?? num(/^(\d+) unit\(s\)/.exec(msg)?.[1]);
+      const parts: string[] = [];
+      if (u !== null) parts.push(units(u));
+      if (m.partial === true) parts.push("تسليم جزئي");
+      if (str(m.stagingNote)) parts.push(`المكان: ${str(m.stagingNote)}`);
+      out.detail = parts.length ? parts.join(" · ") : null;
+      return out;
+    }
     case "ORDER_ITEMS_EDITED": {
       const r = /: (\d+) changed, (\d+) added, (\d+) removed\.$/.exec(msg);
       if (r) out.detail = `عُدّل ${r[1]} · أُضيف ${r[2]} · حُذف ${r[3]}`;

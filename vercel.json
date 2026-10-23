@@ -5,5 +5,8 @@
       "feature/sales-crm-commissions": true,
       "release/finance-sales-20260927": false
     }
-  }
+  },
+  "crons": [
+    { "path": "/api/cron/hr-document-expiry", "schedule": "0 3 * * *" }
+  ]
 }

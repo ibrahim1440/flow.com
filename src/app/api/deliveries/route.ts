@@ -26,6 +26,7 @@ import {
 import { emitAutomationEvent } from "@/lib/automation/emit";
 import { emitDeliveryProgress } from "@/lib/services/orders/progress-events";
 import { canSeeCustomerContact, CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";
+import { settlePicksOnDelivery } from "@/lib/services/station/prep-settle";
 
 export async function GET() {
   const { user, error } = await requireModule("dispatch");
@@ -300,6 +301,9 @@ export async function POST(request: Request) {
         await tx.deliveryLine.createMany({
           data: lines.map((l) => ({ deliveryId: delivery.id, finishedGoodsLotId: l.lotId, quantityUnits: l.units, quantityKg: l.kg })),
         });
+        // Workstations W4: the units the preparation station picked (and handed to dispatch) for this
+        // line are settled by what was delivered — the handoff never moved stock; this does not either.
+        await settlePicksOnDelivery(tx, { orderItemId, units, lotIds: lines.map((l) => l.lotId), deliveryId: delivery.id });
 
         // Hand back units this line no longer needs — it may hold reservations on lots this
         // shipment never touched.

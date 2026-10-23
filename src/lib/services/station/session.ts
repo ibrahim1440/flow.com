@@ -214,7 +214,8 @@ export async function stationSignIn(request: Request, device: DeviceRow, station
     return r.count;
   }, TX_OPTS);
   const lang = e.preferredLanguage === "en" ? "en" : "ar";
-  const token = await signToken({ id: e.id, name: e.name, role: e.role, permissions: {}, preferredLanguage: lang, cv: credentialVersion(e), sid: sessionId, scope: "STATION" } as never, new Date(now + STATION_SESSION_ABSOLUTE_MS));
+  // The slim session pointer (src/lib/auth/session-token.ts), scope STATION: no name, role or permissions.
+  const token = await signToken({ id: e.id, sid: sessionId, cv: credentialVersion(e), preferredLanguage: lang, scope: "STATION" }, new Date(now + STATION_SESSION_ABSOLUTE_MS));
   await stationAudit({ userId: e.id, action: "STATION_SIGN_IN", result: "SUCCESS", reasonCode: "STATION_PIN", device, metadata: { sessionsReplaced: replaced }, ...info });
   const res = NextResponse.json({ employee: { id: e.id, name: e.name, initials: stationInitials(e.name), supervisor: assignment.supervisor, preferredLanguage: lang }, home: STATION_HOME[station.type] }, { status: 200, headers: { "Cache-Control": "no-store" } });
   res.cookies.set(STATION_SESSION_COOKIE, token, { ...COOKIE_BASE, maxAge: Math.floor(STATION_SESSION_ABSOLUTE_MS / 1000) });
@@ -236,7 +237,7 @@ export async function endStationSession(request: Request, ctx: { device: DeviceR
     const actor = stationActorOf(ctx.employee, ctx.session, ctx.device, false);
     const mine = await prisma.workItemClaim.findMany({ where: { claimedById: ctx.employee.id, status: "ACTIVE" }, select: { id: true } });
     for (const c of mine) {
-      await releaseClaim({ user: actor, claimId: c.id, key: `station-switch-${newRequestKey()}` });
+      await releaseClaim({ user: actor, claimId: c.id, key: `station-switch-${newRequestKey()}`, anyStation: true });
       released++;
     }
   }

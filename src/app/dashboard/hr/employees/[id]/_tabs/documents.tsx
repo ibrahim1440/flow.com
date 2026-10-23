@@ -4,6 +4,7 @@ import { Select } from "@/components/ui/Select";
 import { useCallback, useState } from "react";
 import { Btn, Dialog, Empty, Field, Flag, Notice, useAction, useForm, useHrI18n } from "@/components/hr/ui";
 import { Check, DOC_CATEGORY, SectionHead, daysUntil, fileSize, lbl, mutate, type Doc, type TabProps } from "./shared";
+import { expiryBadge } from "@/lib/hr/expiry-rules";
 
 const MAX = 5 * 1024 * 1024;
 const TYPES = ["application/pdf", "image/png", "image/jpeg"];
@@ -33,7 +34,7 @@ export default function DocumentsTab({ id, profile, readOnly, reload }: TabProps
                     <td data-label={L("الفئة", "Category")}>{lbl(DOC_CATEGORY, d.category, lang)}</td>
                     <td data-label={L("الحجم", "Size")} className="num">{fileSize(d.sizeBytes)}</td>
                     <td data-label={L("ينتهي", "Expires")} className="num">
-                      {d.expiresOn ? (left !== null && left < 0 ? <Flag tone="danger">{L("منتهٍ", "Expired")} {d.expiresOn}</Flag> : left !== null && left <= 60 ? <Flag>{d.expiresOn}</Flag> : d.expiresOn) : "—"}
+                      {d.expiresOn ? <ExpiryCell iso={d.expiresOn} left={left} /> : "—"}
                     </td>
                     <td data-label={L("رُفع", "Uploaded")} className="num">{String(d.createdAt).slice(0, 10)}</td>
                     <td data-label={L("إجراءات", "Actions")}>
@@ -53,6 +54,18 @@ export default function DocumentsTab({ id, profile, readOnly, reload }: TabProps
       {dlg?.kind === "upload" ? <UploadDialog id={id} onClose={close} onDone={done} /> : null}
       {dlg?.kind === "remove" ? <RemoveDialog id={id} d={dlg.d} onClose={close} onDone={done} /> : null}
     </section>
+  );
+}
+
+/** The expiry date and, when it is near or past, the badge «تنتهي خلال N يومًا» / «منتهية» (feat/hr-expiry-email). */
+function ExpiryCell({ iso, left }: { iso: string; left: number | null }) {
+  const { lang } = useHrI18n();
+  const b = left === null ? null : expiryBadge(left, 60);
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+      <span className="hr-num">{iso}</span>
+      {b ? <span data-testid="hr-doc-expiry-badge"><Flag tone={b.tone}>{lang === "en" ? b.en : b.ar}</Flag></span> : null}
+    </span>
   );
 }
 
@@ -87,7 +100,7 @@ function UploadDialog({ id, onClose, onDone }: { id: string; onClose: () => void
         </Field>
         <Field label={L("العنوان *", "Title *")}><input className="hr-input" {...f.bind("title")} /></Field>
         <Field label={L("الفئة", "Category")}><Select className="hr-select" {...f.bind("category")}>{Object.keys(DOC_CATEGORY).map((k) => <option key={k} value={k}>{lbl(DOC_CATEGORY, k, lang)}</option>)}</Select></Field>
-        <Field label={L("تاريخ الانتهاء", "Expiry date")} help={L("يظهر تذكير قبل الانتهاء بستين يومًا", "A reminder appears 60 days before expiry")}><input className="hr-input" type="date" {...f.bind("expiresOn")} /></Field>
+        <Field label={L("تاريخ الانتهاء", "Expiry date")} help={L("يُنبَّه الموظف والموارد البشرية قبل الانتهاء وفق أيام التنبيه في الإعدادات", "The employee and HR are notified before expiry, at the days set in HR settings")}><input className="hr-input" type="date" {...f.bind("expiresOn")} /></Field>
       </div>
       <Check checked={confidential} onChange={setConfidential}>{L("سري", "Confidential")}</Check>
     </Dialog>

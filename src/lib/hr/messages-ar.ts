@@ -15,6 +15,8 @@ const FIELD: Record<string, string> = {
   code: "الرمز", nameAr: "الاسم", name: "الاسم", workDate: "يوم العمل", minutes: "الدقائق", shiftId: "الوردية", accountId: "الحساب", key: "البند",
   sourceNote: "مصدر القاعدة", appliesToGroup: "الفئة المشمولة", tag: "رقم العهدة", category: "الفئة", fullName: "الاسم", kind: "النوع", rating: "التقييم",
   periodLabel: "الفترة", description: "الوصف", occurredOn: "التاريخ", noticeDate: "تاريخ الإشعار", lastWorkingDay: "آخر يوم عمل", eosBasisNote: "أساس نهاية الخدمة",
+  // feat/hr-expiry-email
+  location: "المكان أو الرابط", contactName: "جهة التواصل", contactPhone: "هاتف التواصل", interviewId: "المقابلة", expiryAlertDays: "أيام التنبيه",
 };
 const f = (k: string) => FIELD[k] ?? k;
 const STATUS: Record<string, string> = { DRAFT: "مسودة", REVIEW: "قيد الاعتماد", APPROVED: "معتمد", PAID: "مصروف", CANCELLED: "ملغى", PENDING: "بانتظار القرار", REJECTED: "مرفوض", ACTIVE: "ساري", REQUESTED: "مطلوبة", DISBURSED: "مصروفة", CLOSED: "مغلقة", SUPERSEDED: "مستبدل", ENDED: "منتهٍ" };
@@ -307,6 +309,14 @@ const RULES: Rule[] = [
   // ── Company e-mail (feat/credit-hold: one address per active person or account)
   [/^The company e-mail (\S+) is already used by (.+)\. Each person has their own company e-mail\.$/, (m) => `بريد الشركة ${m[1]} مستخدم لدى ${m[2]}. لكل شخص بريد شركة خاص به.`],
   [/^That e-mail address is not valid\.$/, () => "صيغة البريد الإلكتروني غير صحيحة."],
+  // ── Document-expiry alerts and HR e-mails (feat/hr-expiry-email)
+  [/^expiryAlertDays must be a list of days\.$/, () => "أدخل أيام التنبيه قائمةً من الأرقام (مثل 60، 30، 14، 7، 1)."],
+  [/^expiryAlertDays: each entry must be a whole number of days from 1 to (\d+)\.$/, (m) => `كل يوم تنبيه رقم صحيح من 1 إلى ${m[1]}.`],
+  [/^expiryAlertDays must have 1 to (\d+) entries\.$/, (m) => `أدخل من يوم واحد إلى ${m[1]} أيام للتنبيه.`],
+  [/^Schedule an interview first: the invitation names its date and time\.$/, () => "جدوِل المقابلة أولًا: الدعوة تذكر موعدها."],
+  [/^This end of service was cancelled; no notice is sent\.$/, () => "أُلغي إنهاء الخدمة هذا؛ لا يُرسل إشعار."],
+  [/^This person has no personal e-mail on record\. Confirm sending the notice to the company e-mail instead\.$/, () => "لا يوجد بريد شخصي مسجّل لهذا الموظف. أكّد الإرسال إلى بريد الشركة بدلًا منه."],
+  [/^(\w+) is longer than (\d+) characters\.$/, (m) => `حقل «${f(m[1])}» أطول من ${m[2]} حرفًا.`],
   // ── Generic validation
   [/^(\w+) is required\.$/, (m) => `حقل «${f(m[1])}» مطلوب.`],
   [/^(\w+) must be a date( \(YYYY-MM-DD\))?\.$/, (m) => `حقل «${f(m[1])}» يجب أن يكون تاريخًا.`],

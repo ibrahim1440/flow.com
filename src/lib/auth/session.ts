@@ -13,7 +13,6 @@ import type { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { credentialVersion } from "@/lib/credential-version";
 import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
-import { simpleModePermissions } from "@/lib/simple-mode";
 
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MS } from "./session-policy";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, deviceIdFromCookieHeader, newDeviceId, validDeviceId } from "./device";
@@ -40,16 +39,17 @@ export async function createSession(employeeId: string, method: SessionMethod, m
   });
 }
 
-/** The cookie for a session: the token names the row; it never outlives the absolute deadline. */
+/**
+ * The cookie for a session: the token names the row; it never outlives the absolute deadline.
+ * It carries only the slim claims (./session-token.ts) — the permissions, name and role are read
+ * from the database on every request, so the cookie stays a few hundred bytes for any account.
+ */
 export async function setSessionCookie(response: NextResponse, employeeId: string, session: { id: string; expiresAt: Date; deviceId?: string | null }) {
   // Loaded here, not at the top: the revocation helpers below are used by HR services that also
   // run outside the Next.js server (integration tests), where "server-only" cannot load.
-  const { signToken, parsePermissions, buildDefaultPermissions } = await import("@/lib/auth");
-  const e = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId }, select: { id: true, name: true, role: true, permissions: true, preferredLanguage: true, username: true, pin: true, password: true } });
-  const raw = parsePermissions(e.permissions as string);
-  // SIMPLE MODE: the admin role holds every module (same rule as the session check).
-  const permissions = simpleModePermissions(raw && Object.keys(raw).length > 0 ? raw : buildDefaultPermissions(e.role), e.role);
-  const token = await signToken({ id: e.id, name: e.name, role: e.role, permissions, preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar", cv: credentialVersion({ id: e.id, username: e.username, pin: e.pin, password: e.password }), sid: session.id }, session.expiresAt);
+  const { signToken } = await import("@/lib/auth");
+  const e = await prisma.employee.findUniqueOrThrow({ where: { id: employeeId }, select: { id: true, preferredLanguage: true, username: true, pin: true, password: true } });
+  const token = await signToken({ id: e.id, sid: session.id, cv: credentialVersion({ id: e.id, username: e.username, pin: e.pin, password: e.password }), preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar" }, session.expiresAt);
   const maxAge = Math.max(1, Math.floor((session.expiresAt.getTime() - Date.now()) / 1000));
   response.cookies.set("token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge, path: "/" });
   // The browser id outlives the session (it names the browser, not the sign-in); never a credential.

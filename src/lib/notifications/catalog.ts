@@ -45,8 +45,8 @@ export const CATEGORY_LABEL: Record<Category, Bi & { hintAr: string; hintEn: str
   production: { ar: "الإنتاج", en: "Production", hintAr: "أوامر الإنتاج وجدول التحميص والمحامص ومشكلات المحطات.", hintEn: "Production orders, the roasting schedule, roasters and station problems." },
   quality: { ar: "الجودة", en: "Quality", hintAr: "الدفعات التي تنتظر فحص الجودة.", hintEn: "Batches waiting for quality control." },
   finance: { ar: "المالية", en: "Finance", hintAr: "تحصيلات بانتظار الاعتماد وحدود الائتمان وطلبات الاعتماد المالي.", hintEn: "Collections awaiting approval, credit limits and finance approvals." },
-  hr: { ar: "الموارد البشرية", en: "Human resources", hintAr: "طلبات الإجازة التي تنتظر قرارك.", hintEn: "Leave requests waiting for your decision." },
-  me: { ar: "شؤوني", en: "My work", hintAr: "قسيمة راتبك وإجازاتك ورمز المحطة ووصولك إلى المحطات.", hintEn: "Your payslip, your leave, your station PIN and station access." },
+  hr: { ar: "الموارد البشرية", en: "Human resources", hintAr: "طلبات الإجازة التي تنتظر قرارك ووثائق الموظفين القريبة من الانتهاء.", hintEn: "Leave requests waiting for your decision and employee documents about to expire." },
+  me: { ar: "شؤوني", en: "My work", hintAr: "قسيمة راتبك وإجازاتك ورمز المحطة ووصولك إلى المحطات وانتهاء وثائقك.", hintEn: "Your payslip, your leave, your station PIN, station access and your documents' expiry." },
   system: { ar: "النظام", en: "System", hintAr: "أعطال التخزين وإصلاحها.", hintEn: "Storage incidents and their recovery." },
 };
 
@@ -328,6 +328,33 @@ export const EVENTS: NotificationEventDef[] = [
       link: "/dashboard/production/schedule?view=roasters",
     }),
   },
+  // Workstations W4 · the packaging station.
+  {
+    key: "production.packaging_material_short", category: "production", severity: "warning",
+    label: { ar: "نقص مواد تعبئة في محطة التعبئة", en: "Packaging materials short at the packaging station" },
+    recipients: [{ perm: [{ module: "production", sub: "manage_schedule" }, { module: "production", sub: "manage_roasters" }, { module: "inventory", sub: "receive" }] }],
+    requires: [MOD("inventory")],
+    trigger: "POST /api/station/packaging/preview — a packaging task short of a material (once per material per day)",
+    render: (f) => ({
+      titleAr: `نقص ${s(f.material)} في التعبئة`, titleEn: `${s(f.material)} short at packaging`,
+      bodyAr: `يلزم ${s(f.required)} والمتوفر ${s(f.available)}${f.batchNumber ? ` · الدفعة ${s(f.batchNumber)}` : ""}`,
+      bodyEn: `${s(f.required)} needed, ${s(f.available)} on hand${f.batchNumber ? ` · batch ${s(f.batchNumber)}` : ""}`,
+      link: "/dashboard/inventory?tab=pack",
+    }),
+  },
+  {
+    key: "dispatch.order_handed_off", category: "production", severity: "info",
+    label: { ar: "طلب جُهّز وسُلّم للشحن", en: "An order was prepared and handed to dispatch" },
+    recipients: [{ perm: [{ module: "dispatch", sub: "mark_delivered" }] }], requires: [MOD("dispatch")],
+    trigger: "POST /api/station/handoffs — «تسليم للشحن» at the packaging station (DispatchHandoff, J-18)",
+    render: (f) => ({
+      titleAr: `الطلب #${s(f.orderNumber)} جاهز للشحن${f.partial ? " · جزئي" : ""}`,
+      titleEn: `Order #${s(f.orderNumber)} is ready to ship${f.partial ? " · partial" : ""}`,
+      bodyAr: [`${s(f.units)} وحدة`, f.staging ? `المكان: ${s(f.staging)}` : "", f.packages !== "" && f.packages !== undefined && f.packages !== null ? `${s(f.packages)} طرود` : "", `جهّزه ${s(f.byName)}`].filter(Boolean).join(" · "),
+      bodyEn: [`${s(f.units)} unit(s)`, f.staging ? `Staged at: ${s(f.staging)}` : "", f.packages !== "" && f.packages !== undefined && f.packages !== null ? `${s(f.packages)} parcel(s)` : "", `Prepared by ${s(f.byName)}`].filter(Boolean).join(" · "),
+      link: "/dashboard/dispatch",
+    }),
+  },
   // ── Quality ──
   {
     key: "quality.batch_pending", category: "quality", severity: "info",
@@ -350,6 +377,28 @@ export const EVENTS: NotificationEventDef[] = [
       bodyAr: `${s(f.leaveTypeAr)} · من ${s(f.from)} إلى ${s(f.to)} · ${s(f.days)} يوم`, bodyEn: `${s(f.from)} → ${s(f.to)} · ${s(f.days)} day(s)`,
       link: "/dashboard/hr/leave",
     }),
+  },
+  {
+    key: "hr.document_expiry", category: "hr", severity: "warning",
+    label: { ar: "وثيقة موظف قريبة الانتهاء أو منتهية (هوية، إقامة، عقد، شهادة…)", en: "An employee document expiring soon or expired (ID, iqama, contract, certificate…)" },
+    // The holders are chosen by the daily check itself (lib/hr/services/document-expiry.ts): the HR duty
+    // that sees the item (documents_view / private_view / contracts_manage) with a scope covering the
+    // person, and the admin role while it holds the HR module — never the person themself (they get
+    // «me.document_expiry»), never an account without HR.
+    recipients: [{ person: "holders" }], requires: [MOD("hr")],
+    trigger: "the daily document-expiry check: GET /api/cron/hr-document-expiry (Vercel Cron, 03:00 UTC) and «تشغيل الآن» in HR settings (POST /api/hr/document-expiry/run)",
+    render: (f) => {
+      const n = Number(f.daysLeft ?? 0);
+      const expired = n <= 0;
+      return {
+        severity: expired ? "danger" : n <= 7 ? "warning" : "info",
+        titleAr: expired ? `انتهت ${s(f.labelAr)} — ${s(f.personName)}` : `${s(f.labelAr)} — ${s(f.personName)}: تنتهي بعد ${n} يومًا`,
+        titleEn: expired ? `${s(f.labelEn)} of ${s(f.personName)} has expired` : `${s(f.labelEn)} of ${s(f.personName)} expires in ${n} days`,
+        bodyAr: expired ? `انتهت في ${s(f.expiresOn)}${n < 0 ? ` (منذ ${-n} يومًا)` : ""}. جدّدها وحدّث التاريخ في ملف الموظف.` : `تاريخ الانتهاء ${s(f.expiresOn)}.`,
+        bodyEn: expired ? `Expired on ${s(f.expiresOn)}${n < 0 ? ` (${-n} days ago)` : ""}. Renew it and update the date in the employee file.` : `Expiry date ${s(f.expiresOn)}.`,
+        link: f.employeeId ? `/dashboard/hr/employees/${enc(s(f.employeeId))}?tab=${enc(s(f.tab) || "documents")}` : "/dashboard/hr",
+      };
+    },
   },
   // ── Me (the person's own work) ──
   {
@@ -404,6 +453,24 @@ export const EVENTS: NotificationEventDef[] = [
       bodyAr: "عيّن رمز المحطة من «ملفي» إن لم تفعل بعد.", bodyEn: "Set your station PIN from «My profile» if you have not yet.",
       link: "/dashboard/profile?tab=security",
     }),
+  },
+  {
+    key: "me.document_expiry", category: "me", severity: "warning",
+    label: { ar: "وثيقتك قريبة الانتهاء أو منتهية (هوية، إقامة، شهادة…)", en: "Your document expiring soon or expired (ID, iqama, certificate…)" },
+    recipients: [{ person: "subject" }],
+    trigger: "the daily document-expiry check (GET /api/cron/hr-document-expiry; «تشغيل الآن» in HR settings) — your own documents and identity, never your contract end",
+    render: (f) => {
+      const n = Number(f.daysLeft ?? 0);
+      const expired = n <= 0;
+      return {
+        severity: expired ? "danger" : n <= 7 ? "warning" : "info",
+        titleAr: expired ? `انتهت ${s(f.labelAr)}` : `${s(f.labelAr)} تنتهي بعد ${n} يومًا`,
+        titleEn: expired ? `Your ${s(f.labelEn)} has expired` : `Your ${s(f.labelEn)} expires in ${n} days`,
+        bodyAr: expired ? `انتهت في ${s(f.expiresOn)}. سلّم النسخة المجددة للموارد البشرية.` : `تاريخ الانتهاء ${s(f.expiresOn)}. جدّدها وسلّم النسخة الجديدة للموارد البشرية.`,
+        bodyEn: expired ? `It expired on ${s(f.expiresOn)}. Hand the renewed copy to HR.` : `Expiry date ${s(f.expiresOn)}. Renew it and hand the new copy to HR.`,
+        link: "/dashboard/me",
+      };
+    },
   },
   // ── System ──
   {

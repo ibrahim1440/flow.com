@@ -110,6 +110,9 @@ export const ACTIVITY_TYPES = [
   // order's timeline because "why is this order for 5 when the customer asked for 10?" is a
   // question asked about the order, not about an inventory table.
   "ORDER_ITEMS_EDITED",
+  // Workstations W4 (J-18): the order — or some of its lines — prepared at the packaging station and
+  // handed to the dispatch team. No stock moved; the delivery is still recorded in the ERP.
+  "ORDER_HANDED_TO_DISPATCH",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 

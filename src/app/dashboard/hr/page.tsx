@@ -14,6 +14,7 @@ import {
 } from "@/components/hr/ui";
 import { leaveTypeName, orgName } from "@/lib/i18n/hr";
 import { hrText } from "@/lib/hr/messages-en";
+import { ExpiringDocsCard } from "./expiring-docs-card";
 
 type Org = { nameAr: string | null; nameEn?: string | null };
 type Row = {
@@ -65,6 +66,7 @@ export default function DirectoryPage() {
           title={L("الموظفون", "People")}
           actions={can("people_manage") ? <Btn variant="primary" onClick={() => setCreating(true)}><Plus aria-hidden="true" /> {L("موظف جديد", "New employee")}</Btn> : null}
         />
+        <ExpiringDocsCard />
         <Tabs
           label={L("عروض الموظفين", "Directory views")}
           value={view}

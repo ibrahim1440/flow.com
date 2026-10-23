@@ -50,10 +50,10 @@ export type ClaimView = {
 };
 
 /** The current state of each claim: the last state-changing log row about it. */
-export async function claimStates(db: Db | typeof prisma, claimIds: string[]) {
+export async function claimStates(db: Db | typeof prisma, claimIds: string[], stationType: string = ROASTING_STATION) {
   if (claimIds.length === 0) return new Map<string, { state: string; reason: string | null; at: Date }>();
   const rows = await db.workstationActionLog.findMany({
-    where: { stationType: ROASTING_STATION, itemType: "WorkItemClaim", itemId: { in: claimIds }, status: "SUCCESS", toState: { not: null } },
+    where: { stationType, itemType: "WorkItemClaim", itemId: { in: claimIds }, status: "SUCCESS", toState: { not: null } },
     orderBy: { createdAt: "asc" },
     select: { itemId: true, toState: true, reason: true, createdAt: true },
   });
@@ -70,10 +70,10 @@ export function toClaimView(c: { id: string; itemType: string; itemId: string; c
   };
 }
 
-async function logAction(db: Db, a: { claimId: string; action: string; fromState: string | null; toState: string | null; user: Actor; key: string; reason?: string | null }) {
+async function logAction(db: Db, a: { claimId: string; action: string; fromState: string | null; toState: string | null; user: Actor; key: string; reason?: string | null; stationType?: string }) {
   return db.workstationActionLog.create({
     data: {
-      stationType: ROASTING_STATION, itemType: "WorkItemClaim", itemId: a.claimId, action: a.action,
+      stationType: a.stationType ?? ROASTING_STATION, itemType: "WorkItemClaim", itemId: a.claimId, action: a.action,
       fromState: a.fromState, toState: a.toState, employeeId: a.user.id, employeeName: a.user.name,
       idempotencyKey: a.key, status: "SUCCESS", reason: a.reason ?? null, sourceInterface: "STATION",
     },
@@ -88,9 +88,9 @@ async function replayByKey(db: Db | typeof prisma, key: string, user: Actor) {
   return row;
 }
 
-async function activeClaim(db: Db | typeof prisma, claimId: string) {
+async function activeClaim(db: Db | typeof prisma, claimId: string, anyStation = false) {
   const c = await db.workItemClaim.findUnique({ where: { id: claimId } });
-  if (!c || c.stationType !== ROASTING_STATION) throw AR("المهمة غير موجودة.", "Task not found.", 404, "CLAIM_NOT_FOUND");
+  if (!c || (!anyStation && c.stationType !== ROASTING_STATION)) throw AR("المهمة غير موجودة.", "Task not found.", 404, "CLAIM_NOT_FOUND");
   if (c.status !== "ACTIVE") throw AR("هذه المهمة لم تعد محجوزة. عد إلى الطابور.", "This task is no longer claimed. Go back to the queue.", 409, "CLAIM_NOT_ACTIVE");
   return c;
 }
@@ -241,19 +241,21 @@ export async function resumeClaim(args: { user: Actor; claimId: string; key: str
 }
 
 /** Give the work back to the queue: the claimer, or an admin (supervision). Never silent. */
-export async function releaseClaim(args: { user: Actor; claimId: string; key: string }) {
+export async function releaseClaim(args: { user: Actor; claimId: string; key: string; anyStation?: boolean }) {
   const { user, claimId, key } = args;
   return prisma.$transaction(async (tx) => {
     const replay = await replayByKey(tx, key, user);
     if (replay) return { log: replay, replayed: true };
-    const c = await activeClaim(tx, claimId);
+    // The roasting routes release roasting claims; S5 (endStationSession) releases any station's
+    // claim of the outgoing employee (W4: the packaging station's order claims too).
+    const c = await activeClaim(tx, claimId, args.anyStation === true);
     const supervising = c.claimedById !== user.id;
     if (supervising && user.role !== "admin") throw AR("يحرر المهمة صاحبها أو المسؤول فقط.", "Only the employee who claimed it, or an administrator, can release this task.", 403, "NOT_YOUR_CLAIM");
     // Releasing somebody else's work is the admin role exercised: the admin-role gate (identity).
     if (supervising) await assertAdminRoleGate(user, "station.release_claim");
-    const prev = (await claimStates(tx, [c.id])).get(c.id)?.state ?? "ROASTING";
+    const prev = (await claimStates(tx, [c.id], c.stationType)).get(c.id)?.state ?? (c.stationType === ROASTING_STATION ? "ROASTING" : "PREPARING");
     await tx.workItemClaim.update({ where: { id: c.id }, data: { status: "RELEASED", activeItemRef: null, releasedAt: new Date(), releasedById: user.id, releasedByName: user.name } });
-    const log = await logAction(tx, { claimId: c.id, action: "RELEASE", fromState: prev, toState: "QUEUED", user, key });
+    const log = await logAction(tx, { claimId: c.id, action: "RELEASE", fromState: prev, toState: "QUEUED", user, key, stationType: c.stationType });
     return { log, replayed: false };
   }, TX_OPTS);
 }

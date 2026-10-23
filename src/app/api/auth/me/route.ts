@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { getUser, getUserWithPermissions } from "@/lib/auth-server";
 import { revokeSession } from "@/lib/auth/session";
 import { authAudit } from "@/lib/auth/sign-in";
+import { refreshSessionCookie } from "@/lib/session-cookie";
 
 export async function GET() {
   const user = await getUserWithPermissions();
@@ -14,8 +15,15 @@ export async function GET() {
   }
   // The session id stays in the httpOnly cookie; the page only needs what the session allows.
   const { sessionId, cv, sid, ...rest } = user as typeof user & { cv?: string; sid?: string };
-  void sessionId; void cv; void sid;
-  return NextResponse.json({ user: rest });
+  void cv; void sid;
+  const response = NextResponse.json({ user: rest });
+  // A legacy (pre-v2) token — issued before the slim session cookie, carrying the whole
+  // permission map — is accepted until it expires, and re-issued here in the slim form: the same
+  // session row, so the same deadlines, MFA state and step-up time; nothing about the session
+  // changes but the size of its cookie. The dashboard and the station screens call this route on
+  // every load, so a signed-in browser is converted on its next page load without signing out.
+  if ((await getUser())?.legacy) return refreshSessionCookie(response, user.id, sessionId);
+  return response;
 }
 
 /** Logout revokes the session server-side: the same token replayed afterwards gets 401. */

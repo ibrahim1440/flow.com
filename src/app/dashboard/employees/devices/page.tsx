@@ -176,7 +176,7 @@ function AddStationDialog({ roasters, onClose, onDone }: { roasters: Overview["r
         <Select value={type} onChange={(e) => setType(e.target.value)} data-testid="ur-station-type">
           {Object.keys(TYPE).map((k) => <option key={k} value={k}>{typeWord(k, lang)}</option>)}
         </Select>
-        {type !== "ROASTING" ? <span className="hr-help">{L("شاشة هذا النوع لم تُبنَ بعد؛ محطة التحميص وحدها تعمل الآن.", "This type's screen is not built yet; only the roasting station works now.")}</span> : null}
+        {type === "QUALITY" ? <span className="hr-help">{L("شاشة هذا النوع لم تُبنَ بعد؛ محطتا التحميص والتعبئة والتجهيز تعملان الآن.", "This type's screen is not built yet; the roasting and the packaging & preparation stations work now.")}</span> : type === "PACKAGING" ? <span className="hr-help">{L("تبويبا «التعبئة» و«تجهيز الطلبات»: يعمل فيهما من يملك صلاحية التعبئة أو التسليم والشحن.", "«Packaging» and «Order preparation»: for whoever holds the packaging or the dispatch privilege.")}</span> : null}
       </label>
       <label className="hr-field"><span className="hr-label">{L("الموقع", "Place")}</span><input className="hr-input" value={place} onChange={(e) => setPlace(e.target.value)} maxLength={80} placeholder={L("صالة التحميص", "Roasting hall")} data-testid="ur-station-place" /></label>
       {type === "ROASTING" ? (

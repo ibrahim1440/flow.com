@@ -3,13 +3,14 @@
 import { localizeApiError } from "@/lib/i18n/api-errors";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { AlertTriangle, Trash2, CalendarDays } from "lucide-react";
+import { AlertTriangle, Trash2, CalendarDays, PackageCheck } from "lucide-react";
 import { Bar, Btn, Grams, Notice, OpsBanner, OpsEmpty, OpsLoading, OpsPane, OpsRoot, PageHeader, SecHead, StatusDot, Kg, gUnit, opsDate } from "@/components/ops/ui";
 import EditDateModal, { type EditableBatch } from "@/components/EditDateModal";
 import WorkflowFilterBar, { type FilterOption } from "@/components/WorkflowFilterBar";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../user-context";
-import { hasSubPrivilege } from "@/lib/auth-shared";
+import { canEdit, hasSubPrivilege } from "@/lib/auth-shared";
+import Link from "next/link";
 import { createRequestKeyHolder } from "@/lib/request-key";
 
 import { RestockReason, restockReasonOk } from "@/components/ops/RestockReason";
@@ -411,7 +412,10 @@ export default function PackagingPage() {
     <OpsRoot>
     <div className={`hr-split${packBatch ? " has-preview" : ""}`}>
     <div className="hr-page">
-      <PageHeader title={t("packaging")}>
+      <PageHeader title={t("packaging")} actions={canEdit(user?.permissions ?? {}, "packaging") ? (
+        // Workstations W4: the packaging station («التعبئة» tab), for whoever may pack.
+        <Link href="/station/packaging" className="hr-btn" data-testid="open-packaging-station"><PackageCheck size={15} aria-hidden="true" /> {t("opsOpenPackagingStation")}</Link>
+      ) : null}>
         <span><span className="hr-num">{batches.length}</span> {t("batchesReadyPackage")}</span>
       </PageHeader>
 

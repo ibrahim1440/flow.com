@@ -978,6 +978,7 @@ export const translations = {
   activityProductionBatchUnlinked:  { en: "Batch unlinked from production", ar: "تم إلغاء ربط دفعة" },
   activityProductionSurplusOverridden: { en: "Surplus production authorized", ar: "اعتُمد إنتاج فائض" },
   activityStockReservedFromPackaging:  { en: "Stock reserved from packaging", ar: "حُجز مخزون من التعبئة" },
+  activityHandedToDispatch:           { en: "Prepared and handed to dispatch", ar: "جُهّز وسُلّم للشحن" },
   activityOrderItemsEdited:            { en: "Order lines edited", ar: "عُدّلت بنود الطلب" },
 
   // ── Unified packaging ──────────────────────────────────────────────────
@@ -1176,6 +1177,7 @@ export const translations = {
   opsForStock:            { en: "for stock", ar: "للمخزون" },
   opsRoasterToday:        { en: "Roaster today", ar: "المحمصة اليوم" },
   opsOpenRoastingStation: { en: "Roasting station", ar: "محطة التحميص" },
+  opsOpenPackagingStation: { en: "Packaging & preparation station", ar: "محطة التعبئة والتجهيز" },
   opsRoasterWord:         { en: "Roaster", ar: "المحمصة" },
   opsCapacity:            { en: "Capacity", ar: "السعة" },
   opsCurrentSlot:         { en: "Current slot", ar: "الخانة الجارية" },

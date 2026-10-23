@@ -3,7 +3,7 @@
 // UR-13 «الآن» state. Shared by the guard, the admin screens and the unit tests.
 import { canEdit, hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import { PRIVILEGED_MODULES, PRIVILEGED_SUBS } from "@/lib/auth/privileged";
-import { STATION_PRIVILEGE, type StationType } from "./device";
+import { STATION_PRIVILEGE, STATION_TAB_PRIVILEGE, STATION_TYPE_TABS, type StationTab, type StationType } from "./device";
 
 /**
  * A station session never exercises a privileged key (SOD.md §19: privileged keys are held by
@@ -21,11 +21,25 @@ export function stationPermissions(perms: Permissions): Permissions {
   return out;
 }
 
-/** The module privilege the station's work needs (UR-13 «الإجراءات فيها», UR-S17). */
+/** One module privilege: a sub-privilege, or the module at edit when there is no sub. */
+export function holdsPrivilege(perms: Permissions, need: { module: string; sub: string | null }): boolean {
+  return need.sub ? hasModuleAccess(perms, need.module) && hasSubPrivilege(perms, need.module, need.sub) : canEdit(perms, need.module);
+}
+
+/** The tabs of a packaging station this person may work in (W4); empty for other types. */
+export function stationTabsHeld(perms: Permissions, type: StationType): StationTab[] {
+  return STATION_TYPE_TABS[type].filter((t) => holdsPrivilege(perms, STATION_TAB_PRIVILEGE[t]));
+}
+
+/**
+ * The module privilege the station's work needs (UR-13 «الإجراءات فيها», UR-S17). A station with
+ * tabs (the packaging station, W4) needs the privilege of at least one of its tabs.
+ */
 export function holdsStationPrivilege(perms: Permissions, type: StationType): boolean {
+  if (STATION_TYPE_TABS[type]?.length) return stationTabsHeld(perms, type).length > 0;
   const need = STATION_PRIVILEGE[type];
   if (!need) return false;
-  return need.sub ? hasModuleAccess(perms, need.module) && hasSubPrivilege(perms, need.module, need.sub) : canEdit(perms, need.module);
+  return holdsPrivilege(perms, need);
 }
 
 /** One more wrong PIN: the new count and whether it locks (D7: locked at the policy limit). */

@@ -73,6 +73,7 @@ export const AUDIT_ACTION: Labels = {
   ASSET_ASSIGN: ["تسليم عهدة", "Asset handed over"], ASSET_RETURN: ["استلام عهدة", "Asset returned"], TRAINING_ADD: ["إضافة تدريب", "Training added"], REVIEW_SUBMIT: ["تقييم أداء", "Performance review"], REVIEW_ACKNOWLEDGE: ["اطّلاع على تقييم", "Review acknowledged"], INCIDENT_ADD: ["تسجيل مخالفة", "Incident recorded"],
   SEPARATION_INITIATE: ["بدء إنهاء الخدمة", "End of service started"], SETTLEMENT_RECORD: ["تسجيل التسوية النهائية", "Final settlement recorded"], SEPARATION_COMPLETE: ["إتمام إنهاء الخدمة", "End of service completed"], SEPARATION_CANCEL: ["إلغاء إنهاء الخدمة", "End of service cancelled"],
   APPLICANT_HIRE: ["تعيين من التوظيف", "Hired from recruitment"], PAYROLL_ADJUSTMENT: ["تعديل في مسير رواتب", "Payroll adjustment"],
+  EMAIL_SEPARATION_NOTICE: ["إشعار إنهاء الخدمة بالبريد", "End-of-service notice e-mailed"],
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────

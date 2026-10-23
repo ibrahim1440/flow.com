@@ -35,8 +35,21 @@ export const STATION_PRIVILEGE: Record<StationType, { module: string; sub: strin
   QUALITY: { module: "qc", sub: "create_record" },
   PACKAGING: { module: "packaging", sub: null },
 };
-/** Where a signed-in employee works, per station type (only roasting is built: W1). */
-export const STATION_HOME: Record<StationType, string | null> = { ROASTING: "/station/roasting", QUALITY: null, PACKAGING: null };
+/**
+ * Workstations W4: the packaging station has two tabs that never share a queue, each with its own
+ * module privilege (the same key the ERP checks): «التعبئة» packs released batches (packaging at
+ * edit, as POST /api/roasting-batches/[id]/pack), «تجهيز الطلبات» picks reserved lots and hands the
+ * order to dispatch (dispatch at edit — the dispatch duty; no new key). Signing in at a packaging
+ * station needs either one; each tab's APIs need their own.
+ */
+export type StationTab = "packaging" | "preparation";
+export const STATION_TAB_PRIVILEGE: Record<StationTab, { module: string; sub: string | null }> = {
+  packaging: { module: "packaging", sub: null },
+  preparation: { module: "dispatch", sub: null },
+};
+export const STATION_TYPE_TABS: Record<StationType, StationTab[]> = { ROASTING: [], QUALITY: [], PACKAGING: ["packaging", "preparation"] };
+/** Where a signed-in employee works, per station type (the QC station is not built yet). */
+export const STATION_HOME: Record<StationType, string | null> = { ROASTING: "/station/roasting", QUALITY: null, PACKAGING: "/station/packaging" };
 
 // ── Policy (owner decision D7, 22 Oct 2026): configurable, these are the approved defaults ──
 export const POLICY_DEFAULTS = { idleMinutes: 5, pinMaxAttempts: 5, activationMinutes: 15 } as const;

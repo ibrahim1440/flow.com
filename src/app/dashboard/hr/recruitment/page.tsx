@@ -6,13 +6,14 @@ import { Plus } from "lucide-react";
 // Conversion to an employee is one idempotent server transaction: it never creates a login
 // and converting twice returns the same person.
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Btn, Dialog, Empty, ErrorState, Field, KV, LoadingTable, NoPermission, Notice, PageHeader, STAGE,
   StatusDot, Tabs, hrFetch, money, statusLabel, todayIso, useAction, useCan, useForm, useHr, useHrI18n, useHrMeta, type StatusEntry, dateTimeIn,
   FilterChip,
 } from "@/components/hr/ui";
 import { orgName } from "@/lib/i18n/hr";
+import { EmailLog, EmailOutcome, EmailPreviewFrame, NotConfigured, type EmailLogRow } from "../email-parts";
 
 type Interview = { id: string; scheduledAt: string; kind: string; outcome: string; notes: string | null };
 type Offer = {
@@ -258,6 +259,9 @@ function Preview({ a, nowIso, onClose, onChanged }: { a: Applicant; nowIso: stri
   const act = useAction();
   const [pane, setPane] = useState<Pane>(null);
   const [hired, setHired] = useState<{ employeeId: string; replayed: boolean } | null>(null);
+  // feat/hr-expiry-email: «إرسال دعوة مقابلة» for one interview (opened after scheduling, or from its row).
+  const [invite, setInvite] = useState<string | null>(null);
+  const mails = useHr<{ configured: boolean; log: EmailLogRow[] }>(can("recruit") ? `/api/hr/recruitment/applicants/${a.id}/interview-invite` : null);
   const offer = currentOffer(a);
   const accepted = a.offers.find((o) => o.status === "ACCEPTED") ?? null;
   const sent = a.offers.find((o) => o.status === "SENT") ?? null;
@@ -306,6 +310,7 @@ function Preview({ a, nowIso, onClose, onChanged }: { a: Applicant; nowIso: stri
                 <dt>{i.kind}{i.notes ? <span className="hr-caption"> · {i.notes}</span> : null}</dt>
                 <dd style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                   <span><span className="hr-num">{when(i.scheduledAt)}</span> · <StatusDot map={OUTCOME} value={i.outcome} /></span>
+                  {i.outcome === "PENDING" && open && can("recruit") ? <Btn size="sm" onClick={() => setInvite(i.id)} data-testid="hr-invite-open">{L("إرسال دعوة مقابلة", "Send interview invitation")}</Btn> : null}
                   {i.outcome === "PENDING" && open ? (
                     <span style={{ display: "flex", gap: 4 }}>
                       {(["PASS", "FAIL", "NO_SHOW"] as const).map((o) => (
@@ -318,6 +323,13 @@ function Preview({ a, nowIso, onClose, onChanged }: { a: Applicant; nowIso: stri
             ))}
           </dl>
         ) : <span className="hr-caption">{L("لا مقابلات بعد.", "No interviews yet.")}</span>}
+
+        {mails.data ? (
+          <>
+            <span className="hr-section">{L("رسائل البريد", "E-mails")}</span>
+            <EmailLog rows={mails.data.log} />
+          </>
+        ) : null}
 
         <span className="hr-section">{L("العرض الوظيفي", "Job offer")}</span>
         {offer ? (
@@ -359,7 +371,8 @@ function Preview({ a, nowIso, onClose, onChanged }: { a: Applicant; nowIso: stri
       {pane && typeof pane === "object" ? (
         <StageDialog a={a} stage={pane.stage} label={pane.label} onClose={() => setPane(null)} onDone={() => { setPane(null); onChanged(); }} />
       ) : null}
-      {pane === "interview" ? <InterviewDialog a={a} nowIso={nowIso} onClose={() => setPane(null)} onDone={() => { setPane(null); onChanged(); }} /> : null}
+      {pane === "interview" ? <InterviewDialog a={a} nowIso={nowIso} onClose={() => setPane(null)} onDone={(id) => { setPane(null); onChanged(); if (id && can("recruit")) setInvite(id); }} /> : null}
+      {invite ? <InviteDialog a={a} interviewId={invite} onClose={() => { setInvite(null); void mails.reload(); }} /> : null}
       {pane === "offer" ? <OfferDialog a={a} onClose={() => setPane(null)} onDone={() => { setPane(null); onChanged(); }} /> : null}
       {pane === "hire" ? <HireDialog a={a} onClose={() => setPane(null)} onDone={(r) => { setPane(null); setHired(r); onChanged(); }} /> : null}
     </aside>
@@ -385,15 +398,15 @@ function StageDialog({ a, stage, label, onClose, onDone }: { a: Applicant; stage
   );
 }
 
-function InterviewDialog({ a, nowIso, onClose, onDone }: { a: Applicant; nowIso: string; onClose: () => void; onDone: () => void }) {
+function InterviewDialog({ a, nowIso, onClose, onDone }: { a: Applicant; nowIso: string; onClose: () => void; onDone: (interviewId?: string) => void }) {
   const { L } = useHrI18n();
   const f = useForm({ at: `${nowIso.slice(0, 10)}T10:00`, kind: L("فنية", "Technical"), notes: "" });
   const act = useAction();
   const submit = () => act.run("i", async () => {
     const at = new Date(f.v.at);
     if (Number.isNaN(at.getTime())) throw new Error(L("اختر موعدًا صحيحًا.", "Choose a valid time."));
-    await hrFetch(`/api/hr/recruitment/applicants/${a.id}/interviews`, { json: { scheduledAt: at.toISOString(), kind: f.v.kind, notes: f.v.notes || undefined } });
-    onDone();
+    const created = await hrFetch<{ id: string }>(`/api/hr/recruitment/applicants/${a.id}/interviews`, { json: { scheduledAt: at.toISOString(), kind: f.v.kind, notes: f.v.notes || undefined } });
+    onDone(created?.id);
   });
   return (
     <Dialog open title={L(`مقابلة · ${a.fullName}`, `Interview · ${a.fullName}`)} onClose={onClose} actions={<><Btn variant="primary" busy={act.busy === "i"} disabled={!f.v.at || !f.v.kind.trim()} onClick={submit}>{L("جدولة", "Schedule")}</Btn><Btn onClick={onClose}>{L("إلغاء", "Cancel")}</Btn></>}>
@@ -403,6 +416,57 @@ function InterviewDialog({ a, nowIso, onClose, onDone }: { a: Applicant; nowIso:
         <Field label={L("النوع *", "Type *")}><Combobox className="hr-input" maxLength={60} {...f.bind("kind")} options={L("فنية|إدارية|هاتفية|الموارد البشرية", "Technical|Management|Phone|HR").split("|").map((k) => ({ value: k }))} /></Field>
         <Field label={L("ملاحظات", "Notes")} wide><textarea className="hr-textarea" maxLength={1000} {...f.bind("notes")} /></Field>
       </div>
+    </Dialog>
+  );
+}
+
+type InvitePreview = { configured: boolean; recipient: { email: string | null; missing: string | null }; subject: string; html: string; version: string; status?: string; log?: EmailLogRow[] };
+
+/**
+ * «دعوة مقابلة» (feat/hr-expiry-email): the e-mail as the applicant will receive it, the place or link, the
+ * contact and a free note, then «إرسال». Without a configured provider the preview still works and the
+ * send is recorded as «البريد غير مفعّل بعد».
+ */
+function InviteDialog({ a, interviewId, onClose }: { a: Applicant; interviewId: string; onClose: () => void }) {
+  const { L } = useHrI18n();
+  const f = useForm({ location: "", contactName: "", contactPhone: "", note: "" });
+  const [p, setP] = useState<InvitePreview | null>(null);
+  const [sent, setSent] = useState<InvitePreview | null>(null);
+  const act = useAction();
+  const body = (action: "preview" | "send") => ({ action, interviewId, location: f.v.location || undefined, contactName: f.v.contactName || undefined, contactPhone: f.v.contactPhone || undefined, note: f.v.note || undefined });
+  const refresh = () => act.run("p", async () => setP(await hrFetch<InvitePreview>(`/api/hr/recruitment/applicants/${a.id}/interview-invite`, { json: body("preview") })));
+  const send = () => act.run("s", async () => setSent(await hrFetch<InvitePreview>(`/api/hr/recruitment/applicants/${a.id}/interview-invite`, { json: body("send") })));
+  // The first preview, once, when the dialog opens.
+  useEffect(() => {
+    let live = true;
+    hrFetch<InvitePreview>(`/api/hr/recruitment/applicants/${a.id}/interview-invite`, { json: { action: "preview", interviewId } }).then((r) => { if (live) setP(r); }, () => undefined);
+    return () => { live = false; };
+  }, [a.id, interviewId]);
+  const shown = sent ?? p;
+  return (
+    <Dialog open title={L(`دعوة مقابلة · ${a.fullName}`, `Interview invitation · ${a.fullName}`)} onClose={onClose} testId="hr-invite-dialog"
+      actions={sent ? <Btn variant="primary" onClick={onClose}>{L("إغلاق", "Close")}</Btn> : <><Btn variant="primary" busy={act.busy === "s"} disabled={!p} onClick={send} data-testid="hr-invite-send">{L("إرسال", "Send")}</Btn><Btn busy={act.busy === "p"} onClick={refresh}>{L("تحديث المعاينة", "Refresh preview")}</Btn><Btn variant="ghost" onClick={onClose}>{L("إلغاء", "Cancel")}</Btn></>}>
+      {act.error ? <Notice tone="danger">{act.error}</Notice> : null}
+      {shown ? <NotConfigured configured={shown.configured} /> : null}
+      {sent?.status ? <EmailOutcome status={sent.status} /> : null}
+      {!sent ? (
+        <div className="hr-form">
+          <Field label={L("المكان أو رابط المقابلة", "Place or meeting link")} help={L("رابط https يظهر رابطًا قابلًا للنقر", "An https link is shown as a clickable link")} wide><input className="hr-input" maxLength={300} {...f.bind("location")} /></Field>
+          <Field label={L("جهة التواصل", "Contact person")} help={L("الافتراضي: اسمك", "Default: your name")}><input className="hr-input" maxLength={120} {...f.bind("contactName")} /></Field>
+          <Field label={L("هاتف التواصل", "Contact phone")}><input className="hr-input" dir="ltr" maxLength={40} {...f.bind("contactPhone")} /></Field>
+          <Field label={L("ملاحظة للمتقدم", "Note to the applicant")} wide><textarea className="hr-textarea" maxLength={1000} {...f.bind("note")} /></Field>
+        </div>
+      ) : null}
+      {shown ? (
+        <>
+          <KV rows={[
+            [L("إلى", "To"), shown.recipient.email ? <span key="t" className="hr-num" dir="ltr">{shown.recipient.email}</span> : L("لا يوجد بريد مسجّل للمتقدم", "The applicant has no e-mail on record"), shown.recipient.email ? undefined : "warning"],
+            [L("الموضوع", "Subject"), shown.subject],
+          ]} />
+          <EmailPreviewFrame html={shown.html} title={L("معاينة الرسالة", "E-mail preview")} />
+        </>
+      ) : <LoadingTable rows={3} />}
+      {sent?.log ? <EmailLog rows={sent.log} /> : null}
     </Dialog>
   );
 }

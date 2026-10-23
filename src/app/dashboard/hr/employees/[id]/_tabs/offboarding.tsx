@@ -2,12 +2,13 @@
 // HR-02 · Offboarding: initiate → clearance (assets, advances, pending leave block) →
 // settlement figures (ENTERED, never computed) → complete or cancel.
 import { Select } from "@/components/ui/Select";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Btn, Dialog, Empty, ErrorState, Field, Flag, KV, LoadingTable, Notice, StatusDot, money, todayIso, useAction, useForm, useHr, useHrI18n } from "@/components/hr/ui";
 import { leaveTypeName } from "@/lib/i18n/hr";
 import { hrText } from "@/lib/hr/messages-en";
 import { Check, SEPARATION_TYPE, SectionHead, isAmount, lbl, mutate, type Balance, type TabProps } from "./shared";
 import FinalSettlementPanel from "./final-settlement";
+import { EmailLog, EmailOutcome, EmailPreviewFrame, NotConfigured, type EmailLogRow } from "../../../email-parts";
 
 type Open = { separation: { id: string; type: string; lastWorkingDay: string; status: string } | null; history?: { id: string; status: string }[] };
 type Clearance = {
@@ -25,7 +26,9 @@ export default function OffboardingTab({ id, profile, reload: reloadProfile }: T
   const open = useHr<Open>(`/api/hr/employees/${id}/separation`);
   const sid = open.data?.separation?.id ?? null;
   const clr = useHr<Clearance>(sid ? `/api/hr/separations/${sid}` : null);
-  const [dlg, setDlg] = useState<"start" | "settle" | "cancel" | null>(null);
+  const [dlg, setDlg] = useState<"start" | "settle" | "cancel" | "notice" | null>(null);
+  // feat/hr-expiry-email: «إشعار إنهاء الخدمة» by e-mail, and what was sent.
+  const mails = useHr<{ configured: boolean; log: EmailLogRow[] }>(sid ? `/api/hr/separations/${sid}/notice-email` : null);
   const [result, setResult] = useState<string | null>(null);
   const a = useAction();
   const close = useCallback(() => setDlg(null), []);
@@ -112,6 +115,8 @@ export default function OffboardingTab({ id, profile, reload: reloadProfile }: T
                 [L("آخر يوم عمل", "Last working day"), <span key="l" className="hr-num">{s.lastWorkingDay}</span>],
                 [t("reason"), s.reason],
               ]} />
+              <SectionHead title={L("إشعار إنهاء الخدمة", "End-of-service notice")} actions={<Btn size="sm" onClick={() => setDlg("notice")} data-testid="hr-notice-open">{L("إرسال الإشعار بالبريد", "E-mail the notice")}</Btn>} />
+              {mails.data ? <EmailLog rows={mails.data.log} /> : null}
               <SectionHead title={L("التسوية النهائية", "Final settlement")} actions={<Btn size="sm" onClick={() => setDlg("settle")}>{s.eosAmount || s.otherSettlement || s.leaveEncashmentDays ? L("تعديل التسوية", "Edit settlement") : L("تسجيل التسوية", "Record settlement")}</Btn>} />
               <KV rows={[
                 [L("مكافأة نهاية الخدمة", "End-of-service award"), s.eosAmount ? <span key="e" className="hr-num">{money(s.eosAmount)}</span> : "—"],
@@ -136,6 +141,7 @@ export default function OffboardingTab({ id, profile, reload: reloadProfile }: T
           <FinalSettlementPanel separationId={s.id} />
           {dlg === "settle" ? <SettleDialog sid={s.id} s={s} onClose={close} onDone={after} /> : null}
           {dlg === "cancel" ? <CancelDialog sid={s.id} onClose={close} onDone={after} /> : null}
+          {dlg === "notice" ? <NoticeDialog sid={s.id} name={profile.person.fullNameAr} onClose={() => { setDlg(null); void mails.reload(); }} /> : null}
         </>
       ) : null}
     </div>
@@ -208,6 +214,64 @@ function CancelDialog({ sid, onClose, onDone }: { sid: string; onClose: () => vo
       {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
       <p className="hr-caption" style={{ margin: 0 }}>{L("تعود حالة الموظف إلى «على رأس العمل».", "The employee’s status returns to Active.")}</p>
       <Field label={L("السبب *", "Reason *")}><input className="hr-input" {...f.bind("reason")} /></Field>
+    </Dialog>
+  );
+}
+
+type NoticePreview = {
+  configured: boolean; recipient: { channel: "personal" | "company" | null; email: string | null; needsConfirmation: boolean; missing: string | null };
+  reference: string; subject: string; html: string; version: string; status?: string; log?: EmailLogRow[];
+};
+
+/**
+ * «إشعار إنهاء الخدمة» by e-mail (feat/hr-expiry-email): to the employee's PERSONAL e-mail (shown masked —
+ * private data), the company e-mail only after an explicit confirmation when no personal e-mail is on
+ * record. No amounts: the separation records figures by hand and computes none.
+ */
+function NoticeDialog({ sid, name, onClose }: { sid: string; name: string; onClose: () => void }) {
+  const { L } = useHrI18n();
+  const [note, setNote] = useState("");
+  const [confirmCompany, setConfirmCompany] = useState(false);
+  const [p, setP] = useState<NoticePreview | null>(null);
+  const [sent, setSent] = useState<NoticePreview | null>(null);
+  const a = useAction();
+  const url = `/api/hr/separations/${sid}/notice-email`;
+  useEffect(() => {
+    let live = true;
+    mutate<NoticePreview>(url, { json: { action: "preview" } }).then((r) => { if (live) setP(r); }, () => undefined);
+    return () => { live = false; };
+  }, [url]);
+  const refresh = () => a.run("p", async () => setP(await mutate<NoticePreview>(url, { json: { action: "preview", note: note || undefined } })));
+  const send = () => a.run("s", async () => setSent(await mutate<NoticePreview>(url, { json: { action: "send", note: note || undefined, useCompanyEmail: confirmCompany } })));
+  const shown = sent ?? p;
+  const blocked = !p || (p.recipient.needsConfirmation && !confirmCompany);
+  return (
+    <Dialog open title={L(`إشعار إنهاء الخدمة · ${name}`, `End-of-service notice · ${name}`)} onClose={onClose} testId="hr-notice-dialog"
+      actions={sent ? <Btn variant="primary" onClick={onClose}>{L("إغلاق", "Close")}</Btn> : <><Btn variant="primary" busy={a.busy === "s"} disabled={blocked} onClick={send} data-testid="hr-notice-send">{L("إرسال", "Send")}</Btn><Btn busy={a.busy === "p"} onClick={refresh}>{L("تحديث المعاينة", "Refresh preview")}</Btn><Btn variant="ghost" onClick={onClose}>{L("إلغاء", "Cancel")}</Btn></>}>
+      {a.error ? <Notice tone="danger">{a.error}</Notice> : null}
+      {shown ? <NotConfigured configured={shown.configured} /> : null}
+      {sent?.status ? <EmailOutcome status={sent.status} /> : null}
+      {!sent ? <Field label={L("ملاحظة للموظف", "Note to the employee")} wide><textarea className="hr-textarea" maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} /></Field> : null}
+      {shown ? (
+        <>
+          <KV rows={[
+            [L("إلى", "To"), shown.recipient.channel === "personal" ? <span key="t"><span className="hr-num" dir="ltr">{shown.recipient.email}</span> · {L("البريد الشخصي", "personal e-mail")}</span>
+              : shown.recipient.channel === "company" ? <span key="t"><span className="hr-num" dir="ltr">{shown.recipient.email}</span> · {L("بريد الشركة", "company e-mail")}</span>
+              : L("لا يوجد بريد مسجّل", "No e-mail on record"), shown.recipient.channel === "personal" ? undefined : "warning"],
+            [L("المرجع", "Reference"), <span key="r" className="hr-id">{shown.reference}</span>],
+            [L("الموضوع", "Subject"), shown.subject],
+          ]} />
+          {!sent && shown.recipient.needsConfirmation ? (
+            <>
+              <Notice tone="warning">{L("لا يوجد بريد شخصي مسجّل لهذا الموظف. يمكن الإرسال إلى بريد الشركة بعد تأكيدك؛ قد يفقد الموظف الوصول إليه بعد آخر يوم عمل.", "No personal e-mail is on record for this employee. The notice can go to the company e-mail once you confirm; the employee may lose access to it after the last working day.")}</Notice>
+              <Check checked={confirmCompany} onChange={setConfirmCompany}>{L("أؤكد الإرسال إلى بريد الشركة", "I confirm sending to the company e-mail")}</Check>
+            </>
+          ) : null}
+          <p className="hr-caption" style={{ margin: 0 }}>{L("لا يتضمن الإشعار أي مبالغ: التسوية المالية النهائية تُبلَّغ بشكل مستقل بعد اعتمادها.", "The notice carries no amounts: the final financial settlement is communicated separately once approved.")}</p>
+          <EmailPreviewFrame html={shown.html} title={L("معاينة الرسالة", "E-mail preview")} />
+        </>
+      ) : <LoadingTable rows={3} />}
+      {sent?.log ? <EmailLog rows={sent.log} /> : null}
     </Dialog>
   );
 }

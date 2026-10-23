@@ -476,3 +476,22 @@
   .hr-tabs.is-underline .hr-tab[aria-selected="true"] { background: none; color: var(--hr-text); box-shadow: inset 0 -1.5px 0 var(--hr-primary); }
   .hr-tabs.is-underline .hr-tab[aria-selected="true"] .hr-count { color: var(--hr-muted); }
 }
+
+/* «وثائق قريبة الانتهاء» — the HR dashboard card (feat/hr-expiry-email). */
+.hr-expiry-card { border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.hr-expiry-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.hr-expiry-card-counts { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.hr-expiry-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.hr-expiry-list > li { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; border-top: 1px solid var(--hr-border-subtle); padding: 4px 0; }
+.hr-expiry-list > li:first-child { border-top: 0; }
+.hr-expiry-who { color: var(--hr-text); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hr-expiry-who:hover { color: var(--hr-link); }
+.hr-expiry-when { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+@media (max-width: 767px) {
+  .hr-expiry-list > li { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 0; }
+  .hr-expiry-who { white-space: normal; }
+}
+/* The e-mail preview (interview invitation, end-of-service notice): the rendered e-mail, sandboxed. */
+.hr-email-preview { width: 100%; min-height: 360px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-sm); background: #f6f5f2; }
+.hr-email-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.hr-email-log > li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

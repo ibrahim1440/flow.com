@@ -6,7 +6,7 @@ import { useCreateRequest } from "@/components/shell/page-context";
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { countsAsDelivered, isPipelineStage, orderProgress, progressText, riyadhDay, stageCardOf, PIPELINE_STAGES, type PipelineStage } from "@/lib/order-stage";
-import { Plus, Trash2, UserPlus, X, Pencil, Save, Printer } from "lucide-react";
+import { Plus, Trash2, UserPlus, X, Pencil, Save, Printer, PackageCheck } from "lucide-react";
 import Link from "next/link";
 import { PRINT_PHASE1_NOTE_ID, PrintPhase1Notice, usePrintDocuments } from "@/components/print/Certification";
 import { deliveryShipments } from "@/lib/print/delivery-note";
@@ -143,6 +143,7 @@ export default function OrdersPage() {
   const printing = usePrintDocuments();
   const { t, lang } = useI18n();
   const canCreate = hasSubPrivilege(user?.permissions ?? {}, "orders", "create");
+  const canPrepareAtStation = canEdit(user?.permissions ?? {}, "dispatch");
   const canEditOrder = hasSubPrivilege(user?.permissions ?? {}, "orders", "edit");
   const canDelete = hasSubPrivilege(user?.permissions ?? {}, "orders", "delete");
   const canAddCustomer = canEdit(user?.permissions ?? {}, "customers");
@@ -458,10 +459,18 @@ export default function OrdersPage() {
         <div className="hr-page">
           <PageHeader
             title={t("orders")}
-            actions={canCreate ? (
-              <Btn variant="primary" onClick={() => setShowForm(true)}>
-                <Plus size={16} aria-hidden="true" /> {t("newOrder")}
-              </Btn>
+            actions={canCreate || canPrepareAtStation ? (
+              <>
+                {/* Workstations W4: «تجهيز الطلبات» at the packaging station, for dispatch-module editors. */}
+                {canPrepareAtStation ? (
+                  <Link href="/station/packaging" className="hr-btn" data-testid="open-preparation-station"><PackageCheck size={15} aria-hidden="true" /> {t("opsOpenPackagingStation")}</Link>
+                ) : null}
+                {canCreate ? (
+                  <Btn variant="primary" onClick={() => setShowForm(true)}>
+                    <Plus size={16} aria-hidden="true" /> {t("newOrder")}
+                  </Btn>
+                ) : null}
+              </>
             ) : null}
           >
             <span><span className="hr-num">{orders.length}</span> {t("totalOrdersCount")} · {t("ordBoardCaption")}</span>

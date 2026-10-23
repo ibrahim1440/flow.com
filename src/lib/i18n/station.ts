@@ -286,7 +286,7 @@ export const stationStrings = {
   idleEnded:        { ar: "انتهت الجلسة بعد {n} دقائق دون استخدام.", en: "The session ended after {n} minutes without use." },
   sessionEnded:     { ar: "انتهت الجلسة. اختر اسمك ثم أدخل رمز المحطة.", en: "The session ended. Choose your name, then enter the station PIN." },
   noScreen:         { ar: "شاشة هذا النوع من المحطات لم تُبنَ بعد.", en: "The screen for this kind of station is not built yet." },
-  noScreenBody:     { ar: "محطة التحميص وحدها متاحة الآن. اطلب من مسؤول النظام ربط الجهاز بمحطة تحميص.", en: "Only the roasting station is available now. Ask the administrator to bind the device to a roasting station." },
+  noScreenBody:     { ar: "محطتا التحميص والتعبئة والتجهيز متاحتان الآن. اطلب من مسؤول النظام ربط الجهاز بإحداهما.", en: "The roasting and the packaging & preparation stations are available now. Ask the administrator to bind the device to one of them." },
   // ── Common
   loading:          { ar: "جارٍ التحميل…", en: "Loading…" },
   loadFailed:       { ar: "تعذّر تحميل الطابور.", en: "Couldn’t load the queue." },

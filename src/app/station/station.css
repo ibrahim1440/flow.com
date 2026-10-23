@@ -254,3 +254,91 @@
   .d21 .ws-pinrow { flex-direction: column; gap: 24px; }
   .d21 .ws-actfield { width: 100%; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Workstations W4 · the packaging station: «التعبئة» PA1–PA3 and «تجهيز الطلبات» P1–P7, P5
+   (Figma 630:2 ws-packq / ws-pack / ws-pack-short / ws-pack-done / ws-prepq / ws-prep / ws-prep-ambig /
+   ws-prep-bad / ws-prep-done / ws-handed / ws-pblocked / ws-prep-partial). The approved markup's own
+   inline values; tokens from Direction 2.1.
+   ───────────────────────────────────────────────────────────────────────── */
+/* The two tabs in the station bar (they never share a queue or an action). */
+.d21 .ws-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface-hover); margin-inline-start: 24px; }
+.d21 .ws-tab { height: 44px; padding: 0 18px; border-radius: 10px; display: inline-flex; align-items: center; gap: 10px; font: inherit; font-size: 16px; color: var(--text-muted); background: none; border: 0; cursor: pointer; white-space: nowrap; }
+.d21 .ws-tab[aria-selected="true"] { background: var(--surface); box-shadow: var(--shadow-sheet); font-weight: 600; color: var(--text-primary); }
+.d21 .ws-tab .n { font-size: 14px; color: var(--text-muted); font-weight: 400; }
+.d21 .ws-tab:disabled { cursor: not-allowed; opacity: .55; }
+/* PA2: the count field (one big field) and the material rows. */
+.d21 .ws-mats { display: grid; gap: 8px; }
+.d21 .ws-mat { display: flex; align-items: center; gap: 16px; min-height: 72px; padding: 10px 20px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border-strong); }
+.d21 .ws-mat.bad { box-shadow: inset 0 0 0 1.5px var(--status-danger); background: var(--status-danger-tint); }
+.d21 .ws-mat-t { font-size: 17px; font-weight: 600; line-height: 26px; }
+.d21 .ws-mat-s { font-size: 14px; color: var(--text-muted); line-height: 22px; }
+.d21 .ws-lab-s { font-size: 13.5px; color: var(--text-muted); margin: 4px 0 -4px; }
+.d21 .ws-chips-sm .ws-choice { height: 44px; }
+/* P2: the line, the three numbers and the progress. */
+.d21 .ws-line-h { display: flex; align-items: baseline; gap: 12px; }
+.d21 .ws-line-h b { font: 600 20px/28px var(--f-ui); }
+.d21 .ws-line-h .ws-line-n { margin-inline-start: auto; font-size: 14px; color: var(--text-muted); }
+.d21 .ws-nums { display: flex; gap: 32px; align-items: flex-end; }
+.d21 .ws-nums .big { font: 400 52px/1 var(--f-num); letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.d21 .ws-nums .big.ok { color: var(--action-primary); }
+.d21 .ws-nums .big.rest { color: var(--text-secondary); }
+.d21 .ws-prog { flex: 1; padding-bottom: 10px; }
+.d21 .ws-prog > div { height: 10px; border-radius: 5px; background: var(--surface-hover); overflow: hidden; }
+.d21 .ws-prog i { display: block; height: 100%; background: var(--action-primary); border-radius: 5px; }
+.d21 .ws-lots { display: grid; gap: 8px; }
+.d21 .ws-lot { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 0 20px; border-radius: 12px; }
+.d21 .ws-lot.on { background: var(--surface-selected); box-shadow: inset 0 0 0 2px var(--action-primary); }
+.d21 .ws-lot.bad { background: var(--status-danger-tint); box-shadow: inset 0 0 0 1.5px var(--status-danger); }
+.d21 .ws-lot .ws-lot-l { font-size: 15px; color: var(--text-muted); }
+.d21 .ws-lot .ws-lot-n { font: 500 20px/1 var(--f-mono); direction: ltr; unicode-bidi: isolate; }
+.d21 .ws-lot .ws-lot-u { font-size: 16px; }
+.d21 .ws-lot .ws-lot-u .n { font-weight: 600; }
+.d21 .ws-next { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--text-muted); }
+.d21 .ws-next > span:first-child { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border-control); flex: none; }
+/* The lot entry (mono 32 px). */
+.d21 .ws-entry-col { flex: none; width: 352px; display: grid; gap: 12px; align-content: start; }
+.d21 .ws-entry-l { font-size: 13.5px; color: var(--text-secondary); text-align: center; }
+.d21 .ws-entry { height: 64px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--action-primary-tint); display: flex; align-items: center; justify-content: center; position: relative; }
+.d21 .ws-entry.bad { box-shadow: inset 0 0 0 2px var(--status-danger); }
+.d21 .ws-entry input { width: 100%; height: 100%; border: 0; background: transparent; text-align: center; font: 500 32px/1 var(--f-mono); letter-spacing: .2em; direction: ltr; color: var(--text-primary); outline: none; padding: 0; }
+.d21 .ws-entry-col > .ws-pad { padding: 16px; }
+/* P4 / P6 / PA3 summaries. */
+.d21 .ws-plines { display: grid; }
+.d21 .ws-pline { display: flex; align-items: center; gap: 16px; min-height: 64px; border-bottom: 1px solid var(--border-subtle); }
+.d21 .ws-pline .ws-pline-t { font-size: 17px; font-weight: 600; }
+.d21 .ws-pline .ws-pline-lots { flex: 1; text-align: center; font-size: 13.5px; color: var(--text-muted); }
+.d21 .ws-pline .ws-pline-q { font-size: 16px; white-space: nowrap; }
+.d21 .ws-okhead { display: flex; align-items: center; gap: 16px; }
+.d21 .ws-okhead .ws-mark-ok { width: 56px; height: 56px; }
+.d21 .ws-okhead b { font: 600 24px/32px var(--f-ui); display: block; }
+.d21 .ws-okhead span { font-size: 14px; color: var(--text-secondary); }
+.d21 .ws-sumgrid { display: flex; gap: 0; padding: 18px 24px; border-radius: 12px; background: var(--surface-subtle); }
+.d21 .ws-sumgrid > div { padding: 0 24px; }
+.d21 .ws-sumgrid > div + div { border-inline-start: 1px solid var(--border-subtle); }
+.d21 .ws-sumgrid > div:first-child { padding-inline-start: 0; }
+.d21 .ws-sumgrid .lbl { font-size: 13px; }
+.d21 .ws-sumgrid .v { margin-top: 6px; font-size: 16px; font-weight: 500; white-space: nowrap; }
+.d21 .ws-in { height: 56px; border-radius: 12px; border: 0; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); padding: 0 16px; font: inherit; font-size: 16px; color: var(--text-primary); width: 100%; }
+.d21 .ws-in:focus { outline: none; box-shadow: inset 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--action-primary-tint); }
+.d21 .ws-stepper { display: inline-flex; align-items: center; gap: 8px; }
+.d21 .ws-stepper button { width: 56px; height: 56px; border-radius: 12px; border: 0; box-shadow: inset 0 0 0 1px var(--border-control); background: var(--surface); font: 400 24px/1 var(--f-num); cursor: pointer; color: var(--text-primary); }
+.d21 .ws-stepper .n { min-width: 48px; text-align: center; font-size: 22px; }
+.d21 .ws-check { width: 28px; height: 28px; border-radius: 8px; flex: none; display: grid; place-items: center; box-shadow: inset 0 0 0 1.5px var(--border-control); }
+.d21 .ws-check.on { background: var(--action-primary); color: var(--text-inverse); box-shadow: none; }
+.d21 .ws-pline.pick { cursor: pointer; }
+@media (max-width: 1099px) {
+  .d21 .ws-tabs { margin-inline-start: 8px; }
+  .d21 .ws-tab { padding: 0 12px; }
+  .d21 .ws-entry-col { width: 336px; }
+  .d21 .ws-nums { gap: 20px; }
+}
+@media (max-width: 900px) {
+  .d21 .ws-tabs { margin-inline-start: 0; order: 9; width: 100%; }
+  .d21 .ws-tab { flex: 1; justify-content: center; }
+  .d21 .ws-entry-col { width: 100%; }
+  .d21 .ws-nums { flex-wrap: wrap; }
+  .d21 .ws-sumgrid { flex-wrap: wrap; gap: 12px; }
+  .d21 .ws-sumgrid > div { padding: 0 !important; border: 0 !important; }
+  .d21 .ws-pline { flex-wrap: wrap; padding: 8px 0; }
+}

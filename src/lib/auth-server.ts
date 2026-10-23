@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { withArabicError } from "@/lib/i18n/api-errors";
 import { credentialVersion } from "./credential-version";
 import { NextResponse } from "@/lib/api-response";
-import { verifyToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, canEdit, hasSubPrivilege, type UserPayload, type Permissions } from "./auth";
+import { verifyToken, parsePermissions, buildDefaultPermissions, hasModuleAccess, canEdit, hasSubPrivilege, type UserPayload, type Permissions, type VerifiedSession } from "./auth";
 import { prisma } from "./db";
 import { checkSession, revokeSession, freshEnough, REAUTH_AR, REAUTH_EN, type SessionMethod } from "./auth/session";
 import { isPrivileged, PRIVILEGED_MODULES, PRIVILEGED_SUBS } from "./auth/privileged";
@@ -12,7 +12,11 @@ import { isBcryptHash } from "./auth/secret";
 import { isSimpleMode, simpleModePermissions } from "./simple-mode";
 import { stationDelegate } from "./auth/station-delegate";
 
-export async function getUser(): Promise<UserPayload | null> {
+/**
+ * The verified claims of the session cookie — WHO is calling and which session (id, sid, cv,
+ * language, scope). Never what they may do: that is getUserWithPermissions, from the database.
+ */
+export async function getUser(): Promise<VerifiedSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
   if (!token) return null;
@@ -38,6 +42,12 @@ export async function getUser(): Promise<UserPayload | null> {
  *
  * The cost is nothing new — this query already ran on every authenticated request; it
  * simply selects three columns instead of one.
+ *
+ * Slim session cookie (23 Oct): the token no longer carries the permissions, name or role at all
+ * (src/lib/auth/session-token.ts) — they were never trusted from it, only shipped in it, and the
+ * permission map pushed an admin's cookie past the browser's 4096-byte limit. The name now comes
+ * from this same row too (one more column on the same primary-key lookup), so a rename shows on
+ * the next request, as a permission or role change always has.
  */
 export type SessionUser = UserPayload & {
   permissions: Permissions;
@@ -65,12 +75,12 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   const user = await getUser();
   if (!user) return null;
   // A station session is never an ERP session (checkSession refuses scope STATION as well).
-  if ((user as { scope?: unknown }).scope === "STATION") return null;
+  if (user.scope === "STATION") return null;
 
   let employee = await prisma.employee.findUnique({
     where: { id: user.id },
     select: {
-      active: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true,
+      active: true, name: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true,
       // An exception past its expiry stops applying at once (Figma UR-09, owner §9.2): settled here,
       // before this request is judged, so no session keeps an expired grant.
       permissionOverrides: { where: { endedAt: null, expiresAt: { lte: new Date() } }, select: { id: true }, take: 1 },
@@ -81,7 +91,7 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
     await settleExpiredOverrides(user.id);
     employee = await prisma.employee.findUnique({
       where: { id: user.id },
-      select: { active: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true, permissionOverrides: { where: { id: "-" }, select: { id: true } } },
+      select: { active: true, name: true, role: true, permissions: true, username: true, pin: true, password: true, passwordMustChange: true, permissionOverrides: { where: { id: "-" }, select: { id: true } } },
     });
   }
 
@@ -112,9 +122,14 @@ export async function getUserWithPermissions(): Promise<SessionUser | null> {
   }
   // SIMPLE MODE: two-step verification stays optional (never forced by AUTH_MFA_MODE=required).
   const mfaEnrollmentRequired = !isSimpleMode() && privileged && mfaMode() === "required" && !(await prisma.authMfa.findUnique({ where: { employeeId: user.id }, select: { enrolledAt: true } }))?.enrolledAt;
-  // The live role overwrites the token's copy, so every `user.role === "admin"` call site
-  // downstream reads current state without any of them having to know that.
-  return { ...user, role: employee.role, permissions, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange };
+  // The token carries no name, role or permissions (src/lib/auth/session-token.ts): all three are
+  // the live row's, so every `user.role === "admin"` call site downstream reads current state. A
+  // legacy token's copies of them are ignored, as they always were for role and permissions.
+  const identity: UserPayload & { iat?: number; exp?: number } = {
+    id: user.id, name: employee.name, role: employee.role, permissions, preferredLanguage: user.preferredLanguage, cv: user.cv, sid: user.sid,
+    ...(user.iat !== undefined ? { iat: user.iat } : {}), ...(user.exp !== undefined ? { exp: user.exp } : {}),
+  };
+  return { ...identity, authTime: session.authTime, sessionId: session.id, sessionMethod: session.method, sessionMfa: session.mfa, authFactor: session.authFactor, privileged, mfaEnrollmentRequired, passwordChangeRequired: employee.passwordMustChange };
 }
 
 // DEF-08/09: the English `error` is unchanged; `errorAr` is added when the message is known.

@@ -114,6 +114,11 @@ export async function POST(request: Request) {
       prisma.scheduleEvent.deleteMany(),
       prisma.scheduledSlot.deleteMany(),
       prisma.roastPlan.deleteMany(),
+      // 20261030100000_station_w4: the packaging station's picks and dispatch handoffs describe the
+      // orders cleared next (they would cascade with them; named so the list says every table it clears).
+      prisma.dispatchHandoffLine.deleteMany(),
+      prisma.preparationPick.deleteMany(),
+      prisma.dispatchHandoff.deleteMany(),
       prisma.orderItem.deleteMany(),
       prisma.order.deleteMany(),
       // 20261028100000_credit_hold: the customers' holds and credit log (they would cascade with the

@@ -13,16 +13,16 @@
 import { cookies, headers } from "next/headers";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
-import { verifyToken, parsePermissions, buildDefaultPermissions, type UserPayload } from "@/lib/auth";
+import { verifyToken, parsePermissions, buildDefaultPermissions } from "@/lib/auth";
 import { credentialVersion } from "@/lib/credential-version";
-import { isPrivilegedKey, requireSub, requireEdit, type SessionUser } from "@/lib/auth-server";
+import { forbidden, isPrivilegedKey, requireAuth, requireSub, requireEdit, type SessionUser } from "@/lib/auth-server";
 import { revokeSession } from "@/lib/auth/session";
 import { hashRateLimitKey } from "@/lib/rate-limit";
 import {
-  STATION_DEVICE_COOKIE, STATION_SESSION_COOKIE, STATION_PRIVILEGE, deviceTokenHash, effectivePolicy, validDeviceToken,
-  type StationPolicyValues, type StationType,
+  STATION_DEVICE_COOKIE, STATION_SESSION_COOKIE, STATION_PRIVILEGE, STATION_TAB_PRIVILEGE, STATION_TYPE_TABS, deviceTokenHash, effectivePolicy, validDeviceToken,
+  type StationPolicyValues, type StationTab, type StationType,
 } from "@/lib/station/device";
-import { holdsStationPrivilege, isAdminRole, stationIdleExpired, stationPermissions } from "@/lib/station/access";
+import { holdsPrivilege, holdsStationPrivilege, isAdminRole, stationIdleExpired, stationPermissions } from "@/lib/station/access";
 
 export type StationRow = { id: string; name: string; type: StationType; place: string | null; roasterId: string | null; status: string };
 export type DeviceRow = { id: string; stationId: string; displayName: string; status: string; lastSeenAt: Date | null };
@@ -104,7 +104,7 @@ type LiveStationSession = { id: string; employeeId: string; createdAt: Date; las
  */
 export async function stationSessionFor(device: { id: string; stationId: string }, token: string | null | undefined, opts: { touch: boolean; policy: StationPolicyValues; request?: { ip?: string; userAgent?: string | null } }): Promise<{ session: LiveStationSession; employee: { id: string; name: string; role: string; permissions: string; preferredLanguage: string } } | null> {
   if (!token) return null;
-  const payload = (await verifyToken(token)) as (UserPayload & { scope?: string }) | null;
+  const payload = await verifyToken(token);
   if (!payload?.sid || payload.scope !== "STATION") return null;
   const s = await prisma.authSession.findUnique({ where: { id: payload.sid } });
   if (!s || s.scope !== "STATION" || s.employeeId !== payload.id || s.revokedAt) return null;
@@ -146,18 +146,30 @@ export type StationContext =
   | { mode: null; user: null; station: null; device: null; error: NextResponse };
 
 /**
- * The station guard (H8). `type` is the station screen asking (only ROASTING exists, W1). On a
- * paired device: the five steps above; off a device: the W1 personal ERP session with the same
- * module privilege (requireSub / requireEdit, as the ERP).
+ * The station guard (H8). `type` is the station screen asking; `tab` (W4, the packaging station) is
+ * the tab whose APIs are called — its own module privilege («التعبئة»: packaging at edit; «تجهيز
+ * الطلبات»: dispatch at edit). Without a tab, a station with tabs needs either one (the station's
+ * own reads). On a paired device: the five steps above; off a device: the W1 personal ERP session
+ * with the same module privilege (requireSub / requireEdit, as the ERP).
  */
-export async function requireStationContext(type: StationType): Promise<StationContext> {
-  const need = STATION_PRIVILEGE[type];
+export async function requireStationContext(type: StationType, tab?: StationTab): Promise<StationContext> {
+  const tabbed = !tab && STATION_TYPE_TABS[type].length > 0;
+  const need = tab ? STATION_TAB_PRIVILEGE[tab] : STATION_PRIVILEGE[type];
   // Step 5, asserted where the key is chosen: a station never asks for a privileged key.
   if (isPrivilegedKey(need.module, need.sub ?? undefined)) throw new Error(`station guard: ${need.module}.${need.sub} is privileged`);
+  for (const n of tabbed ? STATION_TYPE_TABS[type].map((t) => STATION_TAB_PRIVILEGE[t]) : []) {
+    if (isPrivilegedKey(n.module, n.sub ?? undefined)) throw new Error(`station guard: ${n.module}.${n.sub} is privileged`);
+  }
   const jar = await cookies();
   const deviceToken = jar.get(STATION_DEVICE_COOKIE)?.value ?? null;
   const fail = (e: StationError) => ({ mode: null, user: null, station: null, device: null, error: e.response() }) as const;
   if (!deviceToken) {
+    if (tabbed) {
+      const r = await requireAuth();
+      if (r.error) return { mode: null, user: null, station: null, device: null, error: r.error };
+      if (!holdsStationPrivilege(r.user.permissions, type)) return { mode: null, user: null, station: null, device: null, error: forbidden() };
+      return { mode: "personal", user: r.user, station: null, device: null, error: null };
+    }
     const r = need.sub ? await requireSub(need.module, need.sub) : await requireEdit(need.module);
     if (r.error) return { mode: null, user: null, station: null, device: null, error: r.error };
     return { mode: "personal", user: r.user, station: null, device: null, error: null };
@@ -173,6 +185,6 @@ export async function requireStationContext(type: StationType): Promise<StationC
   if (!assignment) return fail(NOT_ASSIGNED(live.employee.name, dev.station.name));
   if (dev.station.type !== type) return fail(WRONG_STATION());
   const actor = stationActorOf(live.employee, live.session, dev.device, assignment.supervisor);
-  if (!holdsStationPrivilege(actor.permissions, type)) return fail(NO_PRIVILEGE());
+  if (!(tab ? holdsPrivilege(actor.permissions, need) : holdsStationPrivilege(actor.permissions, type))) return fail(NO_PRIVILEGE());
   return { mode: "device", user: actor, station: dev.station, device: dev.device, error: null };
 }

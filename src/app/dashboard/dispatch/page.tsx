@@ -27,6 +27,8 @@ type ReadyOrder = {
   id: string; orderNumber: number; status: string; createdAt: string;
   customer: { name: string; nameAr: string | null };
   lines: ReadyLine[]; complete: boolean;
+  /** Workstations W4 (J-18): handed to dispatch by the preparation station, not delivered yet. */
+  handoff?: { units: number; lines: Record<string, number>; stagingNote: string | null; packages: number | null; at: string; byName: string } | null;
 };
 type LotRef = { finishedGoodsLotId: string; batchNumber: string | null; quantityUnits: number | null; quantityKg: number; source: "line" | "ledger" };
 type DeliveryRow = {
@@ -116,7 +118,8 @@ export default function DispatchPage() {
   function openOrder(o: ReadyOrder) {
     if (!canDeliver) return;
     setOpen(o);
-    setQty(Object.fromEntries(o.lines.map((l) => [l.orderItemId, l.ready])));
+    // A handed-off order starts at what the preparation station handed over (J-18); else what is ready.
+    setQty(Object.fromEntries(o.lines.map((l) => [l.orderItemId, o.handoff ? Math.min(l.ready, o.handoff.lines[l.orderItemId] ?? 0) : l.ready])));
     setNotes("");
     setSubmitKind(null);
     setSubmitError("");
@@ -323,7 +326,15 @@ export default function DispatchPage() {
                           ? L(`${readyTotal} من ${leftTotal} متبقية`, `${readyTotal} of ${leftTotal} remaining`)
                           : L("جزء جاهز", "Partly ready")}</span>}
                     {o.lines.some((l) => l.reserved > 0) ? <span className="ops-dtag">{L("محجوز للطلب", "Reserved for the order")}</span> : null}
+                    {o.handoff ? <span className="ops-dtag tone-ok" data-testid={`dispatch-handed-${o.orderNumber}`}>{L("جاهز للشحن · سُلّم من التجهيز", "Ready to ship · handed over by preparation")}</span> : null}
                   </span>
+                  {o.handoff ? (
+                    <span className="ops-dcard-s" data-testid={`dispatch-staging-${o.orderNumber}`}>
+                      {L("المكان: ", "Staged at: ")}<bdi>{o.handoff.stagingNote || L("لم يُحدَّد", "not given")}</bdi>
+                      {o.handoff.packages != null ? <> · <span className="hr-num">{o.handoff.packages}</span> {L("طرود", "parcels")}</> : null}
+                      {" · "}<span className="hr-num">{o.handoff.units}</span> {L("وحدة مُجهّزة", "units prepared")} · {L("جهّزه", "by")} <bdi>{o.handoff.byName}</bdi>
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -397,7 +408,7 @@ export default function DispatchPage() {
           testId="delivery-pane"
           label={t("recordDelivery")}
           title={L(`تسليم #${open.orderNumber}`, `Deliver #${open.orderNumber}`)}
-          sub={<bdi>{lang === "ar" ? (open.customer.nameAr || open.customer.name) : open.customer.name}</bdi>}
+          sub={<><bdi>{lang === "ar" ? (open.customer.nameAr || open.customer.name) : open.customer.name}</bdi>{open.handoff ? <> · {L("المكان: ", "Staged at: ")}<bdi>{open.handoff.stagingNote || L("لم يُحدَّد", "not given")}</bdi></> : null}</>}
           busy={submitting}
           onClose={closeOrder}
           footer={

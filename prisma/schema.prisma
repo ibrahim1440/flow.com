@@ -474,6 +474,11 @@ model Order {
 
   activities OrderActivity[]
 
+  // Workstations W4 (additive, relation fields only): the station's verified picks and the
+  // ready-for-dispatch handoffs of this order (J-18).
+  preparationPicks PreparationPick[]
+  dispatchHandoffs DispatchHandoff[]
+
   // Sales CRM (additive, relation fields only).
   opportunityLinks OpportunityOrder[]
   collectionEvents CollectionEvent[]
@@ -519,6 +524,10 @@ model OrderItem {
   productionRequiredQuantity Float?
 
   allocations StockAllocation[]
+
+  // Workstations W4 (additive, relation fields only).
+  preparationPicks     PreparationPick[]
+  dispatchHandoffLines DispatchHandoffLine[]
 
   // ─── SKU-based sales lines ───────────────────────────────────────────────
   // A line created through the Finished Products flow sells whole units of one SKU:
@@ -1988,6 +1997,86 @@ model WorkItemClaim {
   @@index([claimedById])
   @@index([claimedAt])
   @@index([status, expiresAt])
+}
+
+// ─── Workstations W4 · packaging & order preparation (additive) ─────────────────────────────────
+// The preparation tab of the packaging station («تجهيز الطلبات», Figma P1–P7). Two records, neither
+// of which moves stock: the stock leaves only when dispatch confirms the delivery in the ERP
+// (POST /api/deliveries), exactly as before (owner decision D16).
+
+/// One verified pick: units of one finished-goods lot, reserved for this exact order line, counted
+/// at the station after the lot number was checked (W1: the last four characters only when they
+/// match ONE lot reserved for the line, otherwise the full number). PICKED → HANDED_OFF (in a
+/// DispatchHandoff) → DELIVERED (settled by POST /api/deliveries for that line, oldest first).
+/// VOIDED: the line no longer needs it (cancelled order, released reservation). The lot is named
+/// by id and number, without a foreign key (the audit-table convention: the record outlives it).
+model PreparationPick {
+  id                 String           @id @default(cuid())
+  orderId            String
+  order              Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId        String
+  orderItem          OrderItem        @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  finishedGoodsLotId String
+  batchNumber        String
+  units              Int
+  /// PICKED | HANDED_OFF | DELIVERED | VOIDED
+  status             String           @default("PICKED")
+  handoffId          String?
+  handoff            DispatchHandoff? @relation(fields: [handoffId], references: [id], onDelete: SetNull)
+  /// The station request that recorded it (Idempotency-Key); one request may draw from several
+  /// lots that carry the same lot number.
+  requestKey         String
+  pickedById         String
+  pickedByName       String
+  stationId          String?
+  createdAt          DateTime         @default(now())
+  settledAt          DateTime?
+
+  @@unique([requestKey, finishedGoodsLotId])
+  @@index([orderItemId, status])
+  @@index([orderId, status])
+  @@index([handoffId])
+}
+
+/// «تسليم للشحن» (J-18): the order — or some of its lines — prepared, staged and handed to the
+/// dispatch team. Per line, partial, idempotent (requestKey). It does NOT deliver: the ERP dispatch
+/// page shows the order as handed off, with the staging place, and records the delivery.
+model DispatchHandoff {
+  id             String                @id @default(cuid())
+  orderId        String
+  order          Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  requestKey     String                @unique
+  /// Free text until a location model exists (J-16): «رف التسليم ب».
+  stagingNote    String?
+  /// Cartons / parcels staged.
+  packages       Int?
+  units          Int
+  /// Some of the order's open units are not in this handoff.
+  partial        Boolean               @default(false)
+  preparedById   String
+  preparedByName String
+  stationId      String?
+  createdAt      DateTime              @default(now())
+  lines          DispatchHandoffLine[]
+  picks          PreparationPick[]
+
+  @@index([orderId, createdAt])
+  @@index([createdAt])
+}
+
+/// One order line's share of a handoff: its units and the lots they were picked from.
+model DispatchHandoffLine {
+  id          String          @id @default(cuid())
+  handoffId   String
+  handoff     DispatchHandoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+  orderItemId String
+  orderItem   OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  units       Int
+  /// [{ batchNumber, units, lotIds }] — per lot number printed on the box, the lot rows behind it
+  lots        Json
+
+  @@unique([handoffId, orderItemId])
+  @@index([orderItemId])
 }
 
 model WorkstationActionLog {
@@ -4759,6 +4848,10 @@ model HrSettings {
   /// while off only the automatic HR posting workflow writes the ledger. Not writable by the runtime
   /// role (grant-hr-runtime.sql); enabled only by an owner-run Phase 2 migration.
   manualJournalsEnabled Boolean  @default(false)
+  /// Document-expiry notifications (additive, 20261030090000_hr_expiry_email): the days before an
+  /// expiry date at which the daily check notifies the employee and the HR holders (HR settings
+  /// «تنبيهات انتهاء الوثائق»). CHECK: 1–10 entries, each 1–365. Expired items are reminded weekly.
+  expiryAlertDays       Int[]    @default([60, 30, 14, 7, 1])
   updatedBy             String?
   updatedAt             DateTime @updatedAt
 }

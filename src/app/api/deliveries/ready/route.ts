@@ -6,6 +6,7 @@ import { DELIVERY_ALLOWED_STATUSES } from "@/lib/services/order-operations";
 import { lotMatchFilter, roundKg } from "@/lib/services/shelf-allocation";
 import { packSizeLabel } from "@/lib/services/finished-products";
 import { planDispatch, type PlanCandidate } from "@/lib/services/delivery-lots";
+import { openHandoffs } from "@/lib/services/station/prep";
 
 /**
  * GET /api/deliveries/ready — the dispatch screen's «جاهز للتسليم» list (Phase D).
@@ -129,6 +130,9 @@ export async function GET() {
     };
   };
 
+  // Workstations W4 (J-18): the orders the preparation station handed to dispatch — staged, with
+  // the place and the parcels — read as «جاهز للشحن · سُلّم من التجهيز» (additive field `handoff`).
+  const handed = await openHandoffs(prisma, orders.map((o) => o.id));
   const out = [];
   for (const o of orders) {
     const lines: Line[] = [];
@@ -142,7 +146,10 @@ export async function GET() {
       lines: open,
       // The order goes out complete when every open line can be handed over in full now.
       complete: open.every((l) => l.ready >= l.outstanding),
+      handoff: handed.get(o.id) ?? null,
     });
   }
+  // Handed-off orders first: they are staged and waiting for the dispatch team.
+  out.sort((a, b) => Number(!!b.handoff) - Number(!!a.handoff));
   return NextResponse.json({ orders: out });
 }

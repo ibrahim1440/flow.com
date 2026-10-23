@@ -124,6 +124,17 @@ export function StationShell({ children }: { children: ReactNode }) {
     setTask(undefined);
     setPhase({ ...phase, switching: true });
     // The outgoing employee's active task (S5), read from the station queue (a read, not activity).
+    // W4: on a packaging station it is the order being prepared (the preparation tab's claim).
+    if (phase.station.type === "PACKAGING") {
+      void fetch("/api/station/prep/queue", { cache: "no-store", headers: { "x-station-poll": "1" } })
+        .then(async (r) => {
+          if (!r.ok) { setTask(null); return; }
+          const m = (await r.json()).mine;
+          setTask(m ? { title: lang === "ar" ? `تجهيز الطلب #${m.orderNumber}` : `Preparing order #${m.orderNumber}`, ref: null, startedAt: m.claimedAt } : null);
+        })
+        .catch(() => setTask(null));
+      return;
+    }
     void fetch("/api/station/roasting/queue", { cache: "no-store", headers: { "x-station-poll": "1" } })
       .then(async (r) => {
         if (!r.ok) { setTask(null); return; }

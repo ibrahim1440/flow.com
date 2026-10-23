@@ -14,6 +14,7 @@ import type { Lang } from "@/lib/i18n/translations";
 import { hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
 import { useUser } from "../../user-context";
 import { ExternalPersons } from "./external-persons";
+import { ExpiryAlerts } from "./expiry-alerts";
 import { useI18n } from "@/lib/i18n/context";
 
 type Rule = { id: string; code: string; nameAr: string; employeeRatePercent: string; employerRatePercent: string; baseComponents: string[]; appliesToGroup: string; monthlyBaseCap: string | null; sourceNote: string };
@@ -38,7 +39,7 @@ const DED_CAP_FIELD: Record<string, "dCapUnearned" | "dCapLoan" | "dCapStatutory
 type Account = { id: string; code: string; nameAr: string | null; nameEn: string | null; type?: string };
 type Overview = { policies: Policy[]; accountMap: { keys: { key: string; account: Account | null }[]; postable: Account[] }; settings: { accountingEnabled: boolean; updatedAt?: string } };
 type LeaveType = { id: string; code: string; nameAr: string; paid: boolean; tracksBalance: boolean; accrualDaysPerYear: string | null; allowNegative: boolean; active: boolean; isProposal: boolean };
-type View = "policy" | "accounts" | "leave" | "rules" | "accounting" | "external";
+type View = "policy" | "accounts" | "leave" | "rules" | "accounting" | "expiry" | "external";
 
 const POLICY_STATUS: Record<string, StatusEntry> = { DRAFT: ["مسودة", "neutral", "Draft"], ACTIVE: ["سارية", "success", "Active"], RETIRED: ["متقاعدة", "cancelled", "Retired"] };
 const COMPONENTS_BI: [string, string, string][] = [["BASIC", "الأساسي", "Basic"], ["HOUSING", "السكن", "Housing"], ["TRANSPORT", "النقل", "Transport"], ["OTHER", "بدلات أخرى", "Other allowances"]];
@@ -63,7 +64,10 @@ export default function HrSettingsPage() {
   const allowed = hasModuleAccess(perms, "hr") && hasSubPrivilege(perms, "hr", "policy_manage");
   const editor = hasModuleAccess(perms, "employees") && hasSubPrivilege(perms, "employees", "edit");
   const ov = useHr<Overview>(allowed ? "/api/hr/policy" : null);
-  const [view, setView] = useState<View>(() => (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "external") ? "external" : "policy");
+  const [view, setView] = useState<View>(() => {
+    const v = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("view") : null;
+    return v === "external" || v === "expiry" ? v : "policy";
+  });
   const [newPolicy, setNewPolicy] = useState(false);
   const { L } = useHrI18n();
   // «جديد» from the shell (A-3): `?new=policy` opens the same draft form as the header button
@@ -90,11 +94,12 @@ export default function HrSettingsPage() {
           { key: "leave", label: L("أنواع الإجازات", "Leave types") },
           { key: "rules", label: L("قواعد الاشتراكات", "Contribution rules") },
           { key: "accounting", label: L("المحاسبة", "Accounting") },
+          { key: "expiry", label: L("تنبيهات الوثائق", "Document alerts") },
           ...(editor ? [{ key: "external" as const, label: L("الأشخاص الخارجيون", "External persons") }] : []),
         ]}
       />
-      {view === "external" ? null : <Notice tone="warning">{L("كل القيم مقترحات للتجربة ولم تعتمدها الإدارة أو المحاسب. لا تتضمن الحزمة نسب تأمينات أو صيغة نهاية خدمة أو صيغة ملف حماية الأجور؛ تُدخل من مصدر رسمي ويُراجعها المحاسب.", "All values are trial proposals not approved by management or the accountant. No social-insurance rates, end-of-service formula or wage-protection file format is included; they are entered from an official source and reviewed by the accountant.")}</Notice>}
-      {view === "external" ? <ExternalPersons /> : view === "leave" ? <LeaveTypes /> : (
+      {view === "external" || view === "expiry" ? null : <Notice tone="warning">{L("كل القيم مقترحات للتجربة ولم تعتمدها الإدارة أو المحاسب. لا تتضمن الحزمة نسب تأمينات أو صيغة نهاية خدمة أو صيغة ملف حماية الأجور؛ تُدخل من مصدر رسمي ويُراجعها المحاسب.", "All values are trial proposals not approved by management or the accountant. No social-insurance rates, end-of-service formula or wage-protection file format is included; they are entered from an official source and reviewed by the accountant.")}</Notice>}
+      {view === "external" ? <ExternalPersons /> : view === "expiry" ? <ExpiryAlerts /> : view === "leave" ? <LeaveTypes /> : (
         <>
           {ov.error ? <ErrorState error={ov.error} onRetry={ov.reload} /> : null}
           {ov.loading && !ov.data ? <LoadingTable /> : null}
