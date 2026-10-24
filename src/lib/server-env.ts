@@ -36,6 +36,7 @@
 import { evaluateDatabaseUrl } from "./db-config";
 import { evaluatePinLookupSecret } from "./pin-lookup";
 import { evaluateMfaKey } from "./auth/totp";
+import { evaluateZatcaKey } from "./zatca/crypto";
 
 /**
  * Every reason this environment cannot serve traffic, or an empty list.
@@ -64,6 +65,11 @@ export function evaluateServerEnv(
   // "MFA not configured" and lock every enrolled account out of sign-in, with nothing in any log.
   const mfa = evaluateMfaKey(env);
   if (!mfa.ok) problems.push(mfa.reason);
+
+  // ZATCA A4: the same rule for the key that encrypts the EGS private keys and CSID secrets. Unset is allowed (the
+  // onboarding then refuses, e-invoicing stays off); set but undecodable would lock every stored key away.
+  const zatca = evaluateZatcaKey(env);
+  if (!zatca.ok) problems.push(zatca.reason);
 
   return problems;
 }

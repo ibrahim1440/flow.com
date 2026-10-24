@@ -1,9 +1,11 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { auditInventoryReceipt } from "@/lib/services/inventory-receiving";
 import { parseStockQuantity } from "@/lib/services/stock-quantity";
+import { onMaterialReceipt } from "@/lib/accounting/ops/inventory-events";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -40,6 +42,16 @@ export async function POST(request: Request, { params }: Params) {
   if (!supplierId && !reference)
     return NextResponse.json({ error: "Name the supplier or the delivery reference (delivery note, invoice number).", code: "RECEIVE_SOURCE_REQUIRED" }, { status: 400 });
   const notes = typeof b.notes === "string" && b.notes.trim() ? b.notes.trim().slice(0, 500) : null;
+  // Accounting A3 (optional): the unit cost of what arrived. With a supplier it makes the receipt a costed GRN
+  // (a purchase record, Dr inventory / Cr GRNI); without one the quantity arrives at zero cost and the supplier
+  // invoice's stock line capitalises it.
+  let unitCost: number | null = null;
+  if (b.unitCost !== undefined && b.unitCost !== null && b.unitCost !== "") {
+    const n = typeof b.unitCost === "number" ? b.unitCost : typeof b.unitCost === "string" && /^\d{1,12}(\.\d{1,6})?$/.test(b.unitCost.trim()) ? Number(b.unitCost) : NaN;
+    if (!Number.isFinite(n) || n < 0 || n > 1e9)
+      return NextResponse.json({ error: "تكلفة الوحدة رقم عشري ≥ 0.", errorEn: "unitCost is a decimal ≥ 0.", code: "RECEIVE_UNIT_COST_INVALID" }, { status: 400 });
+    unitCost = n;
+  }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -74,7 +86,12 @@ export async function POST(request: Request, { params }: Params) {
         },
       });
       const updated = await tx.materialItem.update({ where: { id }, data: { quantityOnHand: newQuantity } });
+      const purchase = supplier && unitCost !== null && unitCost > 0
+        ? await tx.purchaseRecord.create({ data: { supplierId: supplier.id, type: "PACKAGING", itemId: id, materialItemId: id, quantity, costPerUnit: unitCost, totalCost: +(quantity * unitCost).toFixed(4), purchaseDate: new Date(), notes: [reference ? `Ref: ${reference}` : null, notes].filter(Boolean).join(" · ") || null, userId: user.id } })
+        : null;
+      await onMaterialReceipt(tx, { sourceId: purchase?.id ?? movement.id, materialItemId: id, supplierId: purchase ? supplier!.id : null, qty: quantity, unitCost: purchase ? unitCost : null, actor: user.id, movementId: movement.id });
       await auditInventoryReceipt(tx, user, { entityId: id, opening: false, movementId: movement.id, quantity, previousQuantity, newQuantity, supplier, reference, notes });
+      await flushPostings(tx);
       return { material: updated, movement };
     });
     return NextResponse.json(result, { status: 201 });

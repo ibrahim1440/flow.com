@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { explodeBom, roundKg } from "./finished-products";
+import { onPackaging, type PackedLot } from "@/lib/accounting/ops/inventory-events";
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -77,6 +78,8 @@ export type LineOutcome = {
   becomesStandard?: boolean;
   /** Set for loss lines: why the coffee did not reach a package. */
   reason?: string;
+  /** Accounting A3: the packaging materials this line draws (pack lines), so their cost follows its lots. */
+  materials?: { materialItemId: string; quantity: number }[];
 };
 
 export type MaterialRequirement = {
@@ -242,10 +245,14 @@ export async function previewPackaging(
         );
         continue;
       }
+      const lineMaterials: { materialItemId: string; quantity: number }[] = [];
       for (const req of bom) {
         if (req.type !== "MATERIAL" || !req.materialItemId) continue;
         materialNeed.set(req.materialItemId, (materialNeed.get(req.materialItemId) ?? 0) + req.quantityRequired);
+        lineMaterials.push({ materialItemId: req.materialItemId, quantity: req.quantityRequired });
       }
+      const last = outcomes[outcomes.length - 1];
+      if (last && last.kind === "pack") last.materials = lineMaterials;
       continue;
     }
 
@@ -425,9 +432,12 @@ export async function commitPackaging(
     skus: Map<string, SkuFacts>;
     userId: string | null;
     operationId: string | null;
+    /** Accounting A3: the submit's idempotency key — the source id of the run's cost movements and entry. */
+    requestKey?: string | null;
   },
 ): Promise<CommitResult> {
   const { batch, preview, skus, userId, operationId } = args;
+  const costLots: PackedLot[] = [];
 
   if (preview.problems.length > 0) {
     throw { _appCode: 409, message: preview.problems[0] };
@@ -593,6 +603,7 @@ export async function commitPackaging(
         standardUnitsCreated += 1;
         partialPackagesCompleted += 1;
       }
+      costLots.push({ lotId: line.lotId, grams: line.gramsConsumed, skuId: line.productSkuId, productId: null, lineIndex: line.lineIndex });
       lots.push({
         id: line.lotId,
         productSkuId: line.productSkuId,
@@ -654,6 +665,7 @@ export async function commitPackaging(
         },
       });
       standardUnitsCreated += line.packages;
+      costLots.push({ lotId: lot.id, grams: line.gramsConsumed, skuId: sku.id, productId: sku.productId, lineIndex: line.lineIndex });
       lots.push({
         id: lot.id,
         productSkuId: sku.id,
@@ -712,6 +724,7 @@ export async function commitPackaging(
         },
       });
       partialPackagesCreated += 1;
+      costLots.push({ lotId: lot.id, grams: line.actualGramsEach, skuId: sku.id, productId: sku.productId, lineIndex: line.lineIndex });
       lots.push({
         id: lot.id,
         productSkuId: sku.id,
@@ -726,6 +739,17 @@ export async function commitPackaging(
   const after = await tx.roastingBatch.findUniqueOrThrow({
     where: { id: batch.id },
     select: { roastedAvailableKg: true },
+  });
+
+  // Accounting A3: roasted coffee and materials out at their averages, the lots in at coffee + materials cost,
+  // declared loss to WASTAGE — the PACKAGING_RUN entry, in this transaction.
+  const lineMaterials = new Map<number, Map<string, number>>();
+  for (const l of preview.lines) if (l.materials?.length) lineMaterials.set(l.lineIndex, new Map(l.materials.map((m) => [m.materialItemId, m.quantity])));
+  await onPackaging(tx, {
+    batchId: batch.id, batchNumber: batch.batchNumber, productId: batch.productId, runKey: args.requestKey ?? null,
+    packedGrams: preview.standardGrams + preview.partialGrams, lossGrams: preview.lossGrams, batchEmpty: after.roastedAvailableKg <= KG_EPSILON,
+    materials: materialsConsumed.map((m) => ({ materialItemId: m.materialItemId, qty: m.quantity })),
+    lineMaterials, lots: costLots, actor: userId ?? "system",
   });
 
   return {

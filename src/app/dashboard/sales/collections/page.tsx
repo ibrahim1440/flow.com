@@ -9,6 +9,8 @@ import {
 import { Ico } from "@/components/shell/icons";
 import { usePhone, useD21Phone } from "@/components/shell/page-context";
 import { splitTitle } from "@/components/d21/labels";
+import { useUser } from "../../user-context";
+import { canViewInvoices } from "@/lib/services/invoicing/access";
 
 /**
  * Collections — one screen, two jobs, built to GX A-01 (Figma 1459:15522, EN 1459:16043; the
@@ -146,6 +148,9 @@ function StatusDot({ status, ar }: { status: string; ar: boolean }) {
 }
 
 export default function CollectionsPage() {
+  // Sales invoicing A2: «الفواتير والتحصيل» is one hub (Figma ZT-10); an invoices viewer gets its tabs here too.
+  const viewer = useUser();
+  const invoicesTabs = !!viewer && canViewInvoices(viewer.permissions);
   const lang = useLang();
   const ar = lang === "ar";
   const phone = usePhone();
@@ -738,6 +743,14 @@ export default function CollectionsPage() {
         </div>
       </div>
 
+      {invoicesTabs ? (
+        <nav className="hr-tabs is-underline" aria-label={ar ? "الفواتير والتحصيل" : "Invoices & collections"} data-testid="hub-tabs" style={{ marginBottom: 12 }}>
+          <Link className="hr-tab" href="/dashboard/sales/invoices">{ar ? "فواتير المبيعات" : "Sales invoices"}</Link>
+          <Link className="hr-tab" href="/dashboard/sales/invoices?tab=notes">{ar ? "الإشعارات الدائنة والمدينة" : "Credit & debit notes"}</Link>
+          <span className="hr-tab" aria-selected="true" aria-current="page">{ar ? "التحصيلات" : "Collections"}</span>
+          <Link className="hr-tab" href="/dashboard/sales/receivables">{ar ? "أعمار الذمم وكشوف العملاء" : "AR aging & statements"}</Link>
+        </nav>
+      ) : null}
       <dl className="metrics c-metrics">
         <div data-testid="stat-pending">
           <dt>{ar ? "بانتظار التحقق" : "Awaiting verification"}</dt>

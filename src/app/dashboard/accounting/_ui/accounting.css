@@ -1,0 +1,99 @@
+/* Accounting core A1 — the module's own pieces on top of the Direction 2.1 HR / operations kit
+   ([data-hr-root] tokens only; no new colour). Figma ACC-20 / 23 / 24 / 25 / 80. */
+.acct .acct-meta { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--hr-text-2); font-size: 13px; }
+.acct .acct-pill { display: inline-flex; gap: 4px; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12.5px; font-weight: 500; }
+.acct .acct-pill.is-on { background: var(--hr-success-tint); color: var(--hr-success); }
+.acct .acct-pill.is-off { background: var(--hr-warning-tint); color: var(--hr-warning); }
+.acct .hr-page { gap: 0; }
+.acct .acct-tabs { margin-top: 4px; }
+.acct .acct-tabs a.hr-tab { text-decoration: none; }
+.acct .acct-body { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; min-width: 0; }
+.acct .acct-msg { cursor: pointer; }
+.acct .acct-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.acct .acct-row > .hr-field { min-width: 160px; }
+.acct .acct-grow { flex: 1 1 260px; }
+.acct .acct-card { border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.acct .acct-card h2, .acct .acct-card h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 21px; }
+.acct .acct-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.acct .acct-hint { font-size: 12.5px; color: var(--hr-muted); margin: 0; }
+.acct .acct-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.acct .acct-checks li { display: flex; gap: 8px; align-items: center; font-size: 13.5px; }
+.acct .acct-checks .ok { color: var(--hr-success); }
+.acct .acct-checks .no { color: var(--hr-warning); }
+.acct .hr-table td.num, .acct .hr-table th.num { text-align: end; }
+.acct .hr-table tr.is-header td { font-weight: 600; }
+.acct .hr-table tr.is-total td { font-weight: 600; border-top: 1px solid var(--hr-border-strong); }
+.acct .hr-table tr.is-muted td { color: var(--hr-muted); }
+.acct .acct-indent { display: inline-block; }
+.acct .acct-code { font-family: var(--hr-mono); font-size: 12.5px; color: var(--hr-text-2); direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.acct .acct-flags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.acct .acct-seg { display: inline-flex; border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); padding: 2px; gap: 2px; background: var(--hr-subtle); }
+.acct .acct-seg a, .acct .acct-seg button { appearance: none; border: 0; background: none; font: inherit; font-size: 13px; padding: 4px 12px; border-radius: var(--hr-r-sm); color: var(--hr-text-2); text-decoration: none; cursor: pointer; }
+.acct .acct-seg [aria-current="page"], .acct .acct-seg [aria-pressed="true"] { background: var(--hr-surface); color: var(--hr-text); font-weight: 500; box-shadow: inset 0 0 0 1px var(--hr-border-strong); }
+.acct .acct-balanced { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 500; }
+.acct .acct-balanced.is-ok { color: var(--hr-success); }
+.acct .acct-balanced.is-bad { color: var(--hr-danger); }
+.acct .acct-lines .hr-input, .acct .acct-lines .hq-select { min-width: 110px; }
+.acct .acct-lines td { vertical-align: top; padding-top: 6px; padding-bottom: 6px; height: auto; }
+.acct .acct-amount { text-align: end; direction: ltr; font-family: var(--hr-num); }
+.acct .acct-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--hr-border-subtle); padding-top: 12px; }
+.acct .acct-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.acct .acct-kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 24px; }
+.acct .acct-kv-grid > div { display: flex; flex-direction: column; gap: 2px; }
+.acct .acct-kv-grid dt { font-size: 12.5px; color: var(--hr-muted); }
+.acct .acct-kv-grid dd { margin: 0; font-size: 14px; }
+.acct pre.acct-csv { margin: 0; padding: 8px; background: var(--hr-subtle); border-radius: var(--hr-r-sm); font-size: 12px; overflow-x: auto; direction: ltr; text-align: left; }
+/* Accounting A3 — the metric strip (Figma ACC-50 / 53 / 100), status pills and the posting preview. */
+.acct .acct-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-block: 1px solid var(--hr-border-subtle); }
+.acct .acct-metric { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-inline-start: 1px solid var(--hr-border-subtle); min-width: 0; }
+.acct .acct-metric:first-child { border-inline-start: 0; }
+.acct .acct-metric .k { font-size: 12.5px; color: var(--hr-muted); }
+.acct .acct-metric .v { font-size: 22px; font-weight: 500; font-family: var(--hr-num); direction: ltr; text-align: end; unicode-bidi: isolate; }
+.acct .acct-metric .v.is-bad { color: var(--hr-danger); }
+.acct .acct-metric .s { font-size: 12px; color: var(--hr-text-2); }
+.acct .acct-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); padding: 3px; }
+.acct .acct-chips button { appearance: none; border: 0; background: none; font: inherit; font-size: 13px; padding: 4px 10px; border-radius: var(--hr-r-sm); color: var(--hr-text-2); cursor: pointer; display: inline-flex; gap: 6px; }
+.acct .acct-chips button[aria-pressed="true"] { background: var(--hr-surface); color: var(--hr-text); box-shadow: inset 0 0 0 1px var(--hr-border-strong); font-weight: 500; }
+.acct .acct-split { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
+.acct .acct-bad { color: var(--hr-danger); }
+.acct .acct-good { color: var(--hr-success); }
+.acct .acct-warn { color: var(--hr-warning); }
+@media (max-width: 1100px) { .acct .acct-split { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 767px) {
+  .acct .acct-metric { border-inline-start: 0; border-top: 1px solid var(--hr-border-subtle); }
+  .acct .acct-metric:first-child { border-top: 0; }
+  .acct .acct-row > .hr-field { min-width: 0; flex: 1 1 100%; }
+  .acct .acct-hide-m { display: none; }
+  .acct .acct-cards { grid-template-columns: minmax(0, 1fr); }
+}
+/* Accounting A5 — statements (Figma ACC-27 / 28 / 85), the VAT return, the close checklist and the dashboard. */
+.acct .acct-aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.acct .acct-side h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.acct .acct-kv { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.acct .acct-kv > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; font-size: 13px; }
+.acct .acct-kv dt { color: var(--hr-muted); }
+.acct .acct-kv dd { margin: 0; }
+.acct .acct-th-sub { display: block; font-size: 11.5px; font-weight: 400; color: var(--hr-muted); }
+.acct .hr-table tr.is-sub td { font-weight: 500; background: var(--hr-subtle); }
+.acct .hr-table tr.is-grand td { font-size: 15px; }
+.acct .hr-table tr.is-clickable a { color: inherit; text-decoration: none; }
+.acct .hr-table tr.is-clickable a:hover { text-decoration: underline; }
+.acct .acct-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.acct .acct-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.acct .acct-status.is-PASS { color: var(--hr-success); }
+.acct .acct-status.is-WARN { color: var(--hr-warning); }
+.acct .acct-status.is-FAIL { color: var(--hr-danger); }
+.acct .acct-status.is-NA { color: var(--hr-muted); }
+.acct .acct-issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.acct .acct-issues li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--hr-border-subtle); font-size: 13.5px; }
+.acct .acct-issues li:last-child { border-bottom: 0; }
+.acct .acct-chart { width: 100%; height: 220px; }
+.acct .acct-toggle { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--hr-border-subtle); }
+.acct .acct-toggle:last-of-type { border-bottom: 0; }
+.acct .acct-toggle input { margin-top: 3px; width: 18px; height: 18px; }
+.acct .acct-toggle b { display: block; font-weight: 500; font-size: 14px; }
+@media (max-width: 767px) {
+  .acct .acct-issues li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .acct .acct-kv > div { grid-template-columns: 100px minmax(0, 1fr); }
+}
+.acct .acct-banner-note { border: 1px solid var(--hr-border-subtle); background: var(--hr-warning-tint); border-radius: var(--hr-r-md); padding: 8px 12px; }

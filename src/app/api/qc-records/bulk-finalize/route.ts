@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { specBlocksPanelPass } from "@/lib/services/qc/inspection";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -98,6 +99,7 @@ export async function POST(request: Request) {
         const r = await applyQcDecision(tx, { batch: b, outcome, check, min, actor: user });
         if (r.decided) { decided.push(b.id); lossKg += r.lossKg; } else skipped.push(b.id);
       }
+      await flushPostings(tx);
       return { decided, skipped, lossKg: +lossKg.toFixed(3) };
     }, TX_OPTS);
     await autoPrepareAfterBatches(result.decided, "qc_decision", { id: user.id, name: user.name });

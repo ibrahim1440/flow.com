@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { assertBatchesNotHeld } from "@/lib/services/qc/hold-guard";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
@@ -8,6 +9,8 @@ import { auditPrivilegedInventory } from "@/lib/services/inventory-privileged-au
 import { audit } from "@/lib/hr/core";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
+import { onRoastCancelled } from "@/lib/accounting/ops/inventory-events";
+import { batchProductId } from "@/lib/services/qc/profiles";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -83,7 +86,7 @@ export async function DELETE(request: Request, { params }: Params) {
 
   const batch = await prisma.roastingBatch.findUnique({
     where: { id },
-    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, roastedBeanQuantity: true, productionOrderId: true, batchNumber: true },
+    select: { orderItemId: true, greenBeanId: true, greenBeanQuantity: true, roastedBeanQuantity: true, productionOrderId: true, batchNumber: true, productId: true },
   });
 
   if (!batch) {
@@ -188,6 +191,10 @@ export async function DELETE(request: Request, { params }: Params) {
     // coffee it consumed and whether it went back to stock or is written off, the roasted output
     // lost, and the reason (required for a restock, optional otherwise).
     const restocked = restock && !!batch.greenBeanId && batch.greenBeanQuantity > 0;
+    // Accounting A3: the green comes back at its original cost (and what the roast expensed is credited back), or
+    // the roasted stock left is written off — before the batch row goes.
+    const restockMovement = restocked ? await tx.inventoryMovement.findFirst({ where: { sourceDocType: "ROASTING_BATCH", sourceDocId: id, type: "IN", category: "RAW_MATERIAL" }, orderBy: { timestamp: "desc" }, select: { id: true } }) : null;
+    await onRoastCancelled(tx, { batchId: id, batchNumber: batch.batchNumber, greenBeanId: batch.greenBeanId, greenKg: batch.greenBeanQuantity, restock: restocked, productId: await batchProductId(tx, { productId: batch.productId, orderItemId: batch.orderItemId }), reason: cancelReason, actor: user!.id, movementId: restockMovement?.id ?? null });
     await audit(tx, {
       action: "ROASTING_BATCH_CANCELLED", entityType: "RoastingBatch", entityId: id, actorId: user!.id,
       reason: cancelReason,
@@ -205,6 +212,7 @@ export async function DELETE(request: Request, { params }: Params) {
     if (batch.productionOrderId) {
       await recalcProductionOrderStatus(batch.productionOrderId, tx);
     }
+    await flushPostings(tx);
   });
 
   return NextResponse.json({ success: true });

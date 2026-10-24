@@ -2,6 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
+import { setAuditContext, auditFromRequest } from "@/lib/accounting/audit";
 
 export async function GET() {
   const { error } = await requireModule("accounting");
@@ -15,7 +16,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { error } = await requireSub("accounting", "settings_manage");
+  const { user, error } = await requireSub("accounting", "settings_manage");
   if (error) return error;
 
   let body: unknown;
@@ -52,8 +53,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const period = await prisma.fiscalPeriod.create({
-      data: { year, periodNo, startDate: start, endDate: end },
+    // A single period by hand (the usual path is POST /api/accounting/fiscal-years: twelve months at once).
+    const period = await prisma.$transaction(async (tx) => {
+      await setAuditContext(tx, auditFromRequest(request, user.id));
+      const fy = await tx.fiscalYear.findUnique({ where: { tenantId_year: { tenantId: "hiqbah", year } }, select: { id: true } });
+      return tx.fiscalPeriod.create({ data: { year, periodNo, startDate: start, endDate: end, fiscalYearId: fy?.id ?? null } });
     });
     return NextResponse.json(period, { status: 201 });
   } catch (err) {

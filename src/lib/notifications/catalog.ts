@@ -552,6 +552,36 @@ export const EVENTS: NotificationEventDef[] = [
   },
   // ── System ──
   {
+    // ZATCA Phase 2 A4: a document ZATCA rejected, could not take (CSID / clearance switched off / conflict), or
+    // accepted with warnings — the owner acts (a rejection is corrected with a credit note and a new invoice).
+    key: "finance.zatca_attention", category: "finance", severity: "danger",
+    label: { ar: "مستند فوترة إلكترونية يحتاج انتباهك", en: "An e-invoice needs your attention" },
+    recipients: [{ perm: [{ module: "accounting", sub: "zatca_view" }] }], requires: [MOD("accounting")],
+    trigger: "submitDocument (lib/zatca/pipeline.ts): REJECTED / ERROR / accepted with warnings; certificateAlerts (the cron): a production certificate expiring within 30 / 7 days",
+    render: (f) => {
+      const st = s(f.state);
+      const warn = st.endsWith("_WITH_WARNINGS");
+      if (st === "CERT_EXPIRING") {
+        return {
+          severity: "warning",
+          titleAr: `شهادة الفوترة الإلكترونية للوحدة ${s(f.number)} تنتهي خلال ${s(f.detail)} يومًا`,
+          titleEn: `The e-invoicing certificate of ${s(f.number)} expires in ${s(f.detail)} days`,
+          bodyAr: "جدّدها برمز تحقق جديد من بوابة فاتورة قبل الانتهاء، وإلا توقف الإرسال إلى الهيئة.",
+          bodyEn: "Renew it with a new OTP from the Fatoora portal before it expires, or sending to ZATCA stops.",
+          link: "/dashboard/accounting/zatca",
+        };
+      }
+      return {
+        severity: warn ? "warning" : "danger",
+        titleAr: warn ? `قبلت الهيئة المستند ${s(f.number)} مع ملاحظات` : st === "REJECTED" ? `رفضت الهيئة المستند ${s(f.number)}` : `تعذّر إرسال المستند ${s(f.number)} إلى الهيئة`,
+        titleEn: warn ? `ZATCA accepted ${s(f.number)} with warnings` : st === "REJECTED" ? `ZATCA rejected ${s(f.number)}` : `${s(f.number)} could not be sent to ZATCA`,
+        bodyAr: st === "REJECTED" ? `المستند يبقى صادرًا؛ التصحيح بإشعار دائن ثم فاتورة جديدة. ${s(f.detail)}` : s(f.detail),
+        bodyEn: st === "REJECTED" ? `The document stays issued; correct it with a credit note and a new invoice. ${s(f.detail)}` : s(f.detail),
+        link: f.invoiceId ? `/dashboard/sales/invoices/${enc(s(f.invoiceId))}` : "/dashboard/accounting/zatca",
+      };
+    },
+  },
+  {
     key: "system.storage_incident", category: "system", severity: "danger",
     label: { ar: "تعطّل تخزين ملفات العملاء", en: "Customer file storage incident" },
     recipients: [{ perm: [{ module: "settings", edit: true }] }],

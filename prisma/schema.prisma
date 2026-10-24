@@ -36,21 +36,21 @@ model Employee {
 
   // Sales CRM & commissions (additive). Relation fields only — no columns are added to
   // this table, so the deployed build reads it unchanged.
-  leadsOwned            Lead[]                  @relation("LeadOwner")
-  opportunitiesOwned    Opportunity[]           @relation("OpportunityOwner")
-  opportunitySplits     OpportunityOwner[]      @relation("OpportunitySplitOwner")
-  activitiesOwned       Activity[]              @relation("ActivityOwner")
-  commissionAssignments CommissionAssignment[]  @relation("CommissionAssignee")
-  commissionAccruals    CommissionAccrual[]     @relation("CommissionEarner")
-  commissionLedger      CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
-  salesTargets          SalesTarget[]           @relation("SalesTargetOwner")
+  leadsOwned               Lead[]                    @relation("LeadOwner")
+  opportunitiesOwned       Opportunity[]             @relation("OpportunityOwner")
+  opportunitySplits        OpportunityOwner[]        @relation("OpportunitySplitOwner")
+  activitiesOwned          Activity[]                @relation("ActivityOwner")
+  commissionAssignments    CommissionAssignment[]    @relation("CommissionAssignee")
+  commissionAccruals       CommissionAccrual[]       @relation("CommissionEarner")
+  commissionLedger         CommissionLedgerEntry[]   @relation("CommissionLedgerOwner")
+  salesTargets             SalesTarget[]             @relation("SalesTargetOwner")
   /// Commission plan builder (additive, 20261101090000_commission_builder).
-  commissionPeriodResults CommissionPeriodResult[] @relation("CommissionPeriodResultOwner")
+  commissionPeriodResults  CommissionPeriodResult[]  @relation("CommissionPeriodResultOwner")
   commissionBonusDecisions CommissionBonusDecision[] @relation("CommissionBonusDecisionOwner")
-  collectionsSubmitted  SalesCollection[]       @relation("CollectionSubmitter")
-  collectionsDecided    SalesCollection[]       @relation("CollectionDecider")
-  collectionsReversed   SalesCollection[]       @relation("CollectionReverser")
-  evidenceUploaded      CollectionEvidence[]    @relation("EvidenceUploader")
+  collectionsSubmitted     SalesCollection[]         @relation("CollectionSubmitter")
+  collectionsDecided       SalesCollection[]         @relation("CollectionDecider")
+  collectionsReversed      SalesCollection[]         @relation("CollectionReverser")
+  evidenceUploaded         CollectionEvidence[]      @relation("EvidenceUploader")
 
   // Native HR (additive). The HR person this login belongs to, if any. A login account is
   // never required to be an HR person and an HR person never requires a login.
@@ -60,33 +60,33 @@ model Employee {
   externalPerson HrExternalPerson? @relation("HrExternalPersonAccount")
 
   // Owner security decision (username + PIN): server-side sessions and MFA (additive).
-  authSessions      AuthSession[]
+  authSessions       AuthSession[]
   // Workstations W2 (20261027090000_station_w2; additive, relation fields only): the stations this
   // login may sign in at (UR-13) and its own station PIN (never unique, no lookup index).
   stationAssignments StationAssignment[]
   stationPin         StationPin?
-  authMfa           AuthMfa?
-  authRecoveryCodes AuthRecoveryCode[]
+  authMfa            AuthMfa?
+  authRecoveryCodes  AuthRecoveryCode[]
 
   // Customer account (additive): the accounts this employee is responsible for.
-  customerAccounts Customer[] @relation("CustomerAccountOwner")
-  customerFiles    CustomerFile[] @relation("CustomerFileUploader")
+  customerAccounts        Customer[]               @relation("CustomerAccountOwner")
+  customerFiles           CustomerFile[]           @relation("CustomerFileUploader")
   // In-app notifications (additive, 20261029090000_notifications): this account's inbox (the bell)
   // and its per-category e-mail choices.
   notifications           Notification[]           @relation("NotificationRecipient")
   notificationPreferences NotificationPreference[] @relation("NotificationPreferenceOwner")
   /// Direct browser-to-Blob uploads this account started (additive, 20261029100000_blob_client_upload).
-  customerFileUploads CustomerFileUpload[] @relation("CustomerFileUploadRequester")
+  customerFileUploads     CustomerFileUpload[]     @relation("CustomerFileUploadRequester")
   // Credit hold (additive, 20261028100000_credit_hold).
-  customerHoldsPlaced CustomerSalesHold[] @relation("CustomerHoldCreator")
-  customerHoldsLifted CustomerSalesHold[] @relation("CustomerHoldLifter")
-  customerCreditLog   CustomerCreditLog[] @relation("CustomerCreditActor")
+  customerHoldsPlaced     CustomerSalesHold[]      @relation("CustomerHoldCreator")
+  customerHoldsLifted     CustomerSalesHold[]      @relation("CustomerHoldLifter")
+  customerCreditLog       CustomerCreditLog[]      @relation("CustomerCreditActor")
   /// «البريد الإلكتروني للشركة» of an account with NO linked HR person (additive,
   /// 20261028100000_credit_hold). A linked account's company e-mail is its person's
   /// HrEmployee.workEmail — one source of truth (lib/notify/recipients.ts). Every system
   /// notification is e-mailed to the company e-mail. Unique among active people and accounts
   /// (case-insensitive), enforced by the application.
-  workEmail           String?
+  workEmail               String?
 
   // Users, roles & permissions (Figma Phase 8, 20261022090000_users_roles; additive).
   /// The custom role this account follows (role = "custom"); null = a system template or none.
@@ -163,26 +163,26 @@ model PermissionOverride {
 /// One signed-in session; the token names it (jti). Valid only while not revoked and within
 /// the idle and absolute deadlines. authTime is the last strong authentication (step-up).
 model AuthSession {
-  id            String    @id
-  employeeId    String
-  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id              String    @id
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   /// PIN | USERNAME_PIN | PASSWORD
-  method        String
-  mfa           Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  lastSeenAt    DateTime  @default(now())
-  authTime      DateTime  @default(now())
+  method          String
+  mfa             Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+  authTime        DateTime  @default(now())
   /// PIN | PASSWORD — the secret of the last strong authentication (sign-in or step-up); null = not
   /// recorded (before 20261017230000). A privileged stock change needs PIN (owner decision 4).
-  authFactor    String?
-  expiresAt     DateTime
-  revokedAt     DateTime?
-  revokedReason String?
-  ipHash        String?
-  userAgent     String?
+  authFactor      String?
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  revokedReason   String?
+  ipHash          String?
+  userAgent       String?
   /// The browser the session was opened from: an opaque random id from the httpOnly hq_device
   /// cookie (not a credential). Groups the own profile's device list; null = before 20261019120000.
-  deviceId      String?
+  deviceId        String?
   /// Workstations W2 (20261027090000_station_w2): ERP | STATION. A STATION session is opened by a
   /// station PIN on a registered station device, is bound to that station and device, and is refused
   /// by every ERP API (getUserWithPermissions); method = STATION_PIN.
@@ -270,11 +270,11 @@ model Customer {
   // ─── Credit warnings and the sales hold (additive, migration 20261028100000_credit_hold) ──
   /// «مدة الإيقاف الافتراضية»: the duration (days, 1–365) the «إيقاف البيع» dialog proposes.
   /// NULL = not set (the dialog proposes 14 days).
-  defaultHoldDays  Int?
+  defaultHoldDays Int?
   /// Every hold placed on this customer (at most one unlifted — partial unique index).
-  salesHolds       CustomerSalesHold[]
+  salesHolds      CustomerSalesHold[]
   /// Append-only: every grace, hold, lift and automatic lift.
-  creditLog        CustomerCreditLog[]
+  creditLog       CustomerCreditLog[]
 
   // ─── New-client commission exclusion (additive, 20261101090000_commission_builder) ──────
   /// «مستثنى من عمولة العميل الجديد»: the customer was in the active client base or already in
@@ -413,20 +413,20 @@ model CustomerFile {
 /// its customer's deletion so that its blob is still swept.
 model CustomerFileUpload {
   /// The id the CustomerFile row will take (cf + 24 hex), also inside the pathname.
-  id            String    @id
-  customerId    String
+  id             String    @id
+  customerId     String
   /// customers/<customerId>/<id>-<safe name> — the ONLY pathname the upload token is scoped to.
-  pathname      String    @unique
-  category      String
-  title         String?
+  pathname       String    @unique
+  category       String
+  title          String?
   /// The uploader's file name (the stored name takes its extension from the bytes at finalize).
-  fileName      String
+  fileName       String
   /// What the browser declared; the finalize step checks the blob itself.
-  declaredBytes Int
-  declaredType  String
-  requestedById String?
-  requestedBy   Employee? @relation("CustomerFileUploadRequester", fields: [requestedById], references: [id], onDelete: SetNull)
-  createdAt     DateTime  @default(now())
+  declaredBytes  Int
+  declaredType   String
+  requestedById  String?
+  requestedBy    Employee? @relation("CustomerFileUploadRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
   /// The upload token's own expiry (short); the slot itself may be finalized for up to 50 minutes.
   tokenExpiresAt DateTime
 
@@ -624,12 +624,12 @@ model RoastingBatch {
   /// in force (SystemConfig.qcMinEvaluators, default 2), by a holder of qc › finalize_override, with
   /// a written reason and an explicit confirmation. NULL = no exceptional approval (every batch
   /// before this column, and every normal decision). CHECK: true ⇒ reason, actor and time present.
-  qcOverride         Boolean?
-  qcOverrideReason   String?
-  qcOverrideById     String?
-  qcOverrideAt       DateTime?
+  qcOverride       Boolean?
+  qcOverrideReason String?
+  qcOverrideById   String?
+  qcOverrideAt     DateTime?
   /// The minimum in force when the exceptional approval was taken (the setting may change later).
-  qcOverrideMin      Int?
+  qcOverrideMin    Int?
 
   productionOrderId String?
   productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
@@ -642,7 +642,7 @@ model RoastingBatch {
   /// Client-supplied Idempotency-Key of the POST that recorded this batch (same pattern as
   /// Delivery.requestKey). Nullable: a caller that sends none records as before. Unique, so two
   /// retries of one roast collapse to a single batch.
-  requestKey String?  @unique
+  requestKey String? @unique
   /// SHA-256 over the normalized roast intent: the same key with a different intent is a 422.
   intentHash String?
 
@@ -650,8 +650,8 @@ model RoastingBatch {
   /// batch was recorded from, or NULL (recorded without a slot — every batch before the schedule).
   /// Planned and actual stay separate: the slot keeps its planned green, the batch its measured
   /// weights. One batch per slot (unique).
-  scheduledSlotId   String?        @unique
-  scheduledSlot     ScheduledSlot? @relation(fields: [scheduledSlotId], references: [id], onDelete: SetNull)
+  scheduledSlotId String?        @unique
+  scheduledSlot   ScheduledSlot? @relation(fields: [scheduledSlotId], references: [id], onDelete: SetNull)
 
   // ─── QC station W3 (additive, migration 20261031090000_station_w3_qc) ───
   /// The roast-profile version this batch was roasted to: the product's APPROVED version when the
@@ -670,7 +670,6 @@ model RoastingBatch {
   qcPermittedUse         String?
   /// Converted from another product by an approved disposition (the product it was roasted as).
   convertedFromProductId String?
-
 
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -780,7 +779,6 @@ model QcRecord {
   reinspectionOfId   String?
   cleaningNote       String?
   stationId          String?
-
 
   @@index([date])
   @@index([batchId, date])
@@ -1006,16 +1004,37 @@ model SystemConfig {
   /// Settings › Inventory: green coffee below this many kg is flagged «مخزون منخفض» on the
   /// inventory screen. NULL = not set by the owner: the built-in 20 kg applies, exactly as
   /// before this column existed. CHECK > 0 and ≤ 100000.
-  inventoryLowStockGreenKg     Decimal? @db.Decimal(10, 3)
+  inventoryLowStockGreenKg Decimal? @db.Decimal(10, 3)
   /// Settings › Invoicing & tax: the VAT percent a NEW quotation line starts with. NULL = the
   /// built-in 15%. Issued documents keep the rate each line carries. CHECK 0–100.
-  invoiceDefaultVatPercent     Decimal? @db.Decimal(5, 2)
+  invoiceDefaultVatPercent Decimal? @db.Decimal(5, 2)
 
   // ─── QC (additive, migration 20261023090000_production_qc_simplify) ─────────────────────
   /// Settings › Production & roasting › QC: the minimum number of evaluators a batch needs before
   /// the QC decision (owner decision D1). NULL = not set by the owner: the built-in 2 applies.
   /// CHECK 1–10. Fewer than this is an exceptional approval (qc › finalize_override, D2).
-  qcMinEvaluators              Int?
+  qcMinEvaluators Int?
+
+  // ─── Sales invoicing A2 (additive, migration 20261103090000_sales_invoicing) ─────────────
+  /// «بادئة سلسلة الفواتير»: the series of a tax invoice number (INV → INV-000001). NULL = "INV".
+  /// Each series has its own gapless counter (SalesDocumentCounter); a new prefix starts a new series.
+  invoicePrefix           String?
+  /// The credit note series. NULL = "CN".
+  creditNotePrefix        String?
+  /// The debit note series. NULL = "DN".
+  debitNotePrefix         String?
+  /// «نقطة الفوترة»: MANUAL (default, NULL) or ON_DELIVERY (a recorded delivery opens a DRAFT
+  /// invoice for what it shipped; it is reviewed and issued by a person — never issued automatically).
+  invoicingPoint          String?
+  /// Default payment terms (days) of a new invoice when the customer has none. NULL = 30.
+  invoiceDefaultTermsDays Int?
+  /// The structured national address of the seller (ZATCA BR-KSA-09), frozen into every issued invoice.
+  sellerBuildingNo        String?
+  sellerStreet            String?
+  sellerDistrict          String?
+  sellerCity              String?
+  sellerPostalCode        String?
+  sellerAdditionalNo      String?
 }
 
 /// Settings › Production & roasting › Roasters (Figma 377:2, ROASTERS.md §4; RM1–RM5). Machine
@@ -1024,29 +1043,29 @@ model SystemConfig {
 /// CHECKs (migration): 0 < min ≤ target ≤ max ≤ nominal, 0 < cycle ≤ 1440, a reason for
 /// MAINTENANCE / STOPPED; unique name (case-insensitive) and one default per type (partial index).
 model Roaster {
-  id                String              @id @default(cuid())
+  id                String               @id @default(cuid())
   name              String
   /// «الشركة المصنّعة والطراز» — optional free text.
   manufacturerModel String?
   /// PRODUCTION | SAMPLE
   type              String
-  nominalCapacityKg Decimal             @db.Decimal(10, 3)
-  defaultTargetKg   Decimal             @db.Decimal(10, 3)
-  minBatchKg        Decimal             @db.Decimal(10, 3)
-  maxBatchKg        Decimal             @db.Decimal(10, 3)
+  nominalCapacityKg Decimal              @db.Decimal(10, 3)
+  defaultTargetKg   Decimal              @db.Decimal(10, 3)
+  minBatchKg        Decimal              @db.Decimal(10, 3)
+  maxBatchKg        Decimal              @db.Decimal(10, 3)
   cycleMinutes      Int
   /// Employee id (no FK, audit convention): must be assigned and hold production › start_batch.
   defaultOperatorId String?
   /// AVAILABLE | MAINTENANCE | STOPPED | RETIRED
-  status            String              @default("AVAILABLE")
+  status            String               @default("AVAILABLE")
   statusReason      String?
   statusUntil       DateTime?
-  statusSince       DateTime            @default(now())
-  isDefault         Boolean             @default(false)
+  statusSince       DateTime             @default(now())
+  isDefault         Boolean              @default(false)
   createdById       String?
   updatedById       String?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
   /// Scheduling (RM6–RM8, migration 20261026090000_roast_schedule): the working days and hours slots
   /// are placed in, Asia/Riyadh, 0 = Sunday — {"days":[0,1,2,3,4],"start":"07:00","end":"15:00"}.
   /// NULL = not set by the owner: the built-in Sunday–Thursday 07:00–15:00 applies (ROASTERS.md §4,
@@ -1262,6 +1281,14 @@ model Supplier {
   contact   String?
   createdAt DateTime         @default(now())
   purchases PurchaseRecord[]
+
+  // ── Accounting A3 (20261104090000_ops_posting): the supplier as an AP party ──
+  /// The supplier's VAT registration number (15 digits in KSA), shown on its invoices and statement.
+  vatNumber        String?
+  /// Default credit terms in days (the due date a new supplier invoice proposes). NULL = 30.
+  paymentTermsDays Int?
+  supplierInvoices SupplierInvoice[]
+  supplierPayments SupplierPayment[]
 }
 
 model PurchaseRecord {
@@ -1959,18 +1986,18 @@ model AuthAuditLog {
 /// station PIN. A roasting station names its roaster (Roaster id, no FK: the audit convention of
 /// Roaster.defaultOperatorId; roasters are retired, never deleted). Retired, never deleted.
 model Station {
-  id            String              @id @default(cuid())
+  id            String                 @id @default(cuid())
   name          String
   /// ROASTING | QUALITY | PACKAGING
   type          String
   place         String?
   roasterId     String?
   /// ACTIVE | RETIRED
-  status        String              @default("ACTIVE")
+  status        String                 @default("ACTIVE")
   createdById   String?
   createdByName String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
   devices       StationDevice[]
   assignments   StationAssignment[]
   deviceLinks   StationDeviceStation[]
@@ -1984,27 +2011,27 @@ model Station {
 /// Activation sets the httpOnly hq_station cookie, an opaque 32-byte random token stored only as
 /// tokenHash. Revocation (REVOKED) ends every session on the device at its next request.
 model StationDevice {
-  id                  String              @id @default(cuid())
+  id                  String                 @id @default(cuid())
   stationId           String
-  station             Station             @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  station             Station                @relation(fields: [stationId], references: [id], onDelete: Restrict)
   displayName         String
   /// WS-XXXX, shown by the device on S1 before it is activated.
   deviceCode          String
   /// SHA-256 of the hq_station cookie token (never the token). NULL until activated.
-  tokenHash           String?             @unique
+  tokenHash           String?                @unique
   /// PENDING | ACTIVE | REVOKED
-  status              String              @default("PENDING")
+  status              String                 @default("PENDING")
   /// Keyed hash of the one-time activation code; cleared when used, cancelled or exhausted.
   activationCodeHash  String?
   activationExpiresAt DateTime?
   /// Wrong activation codes against this device's current code (the code is dropped at the limit).
-  activationAttempts  Int                 @default(0)
+  activationAttempts  Int                    @default(0)
   activatedAt         DateTime?
   lastSeenAt          DateTime?
   userAgent           String?
   registeredById      String?
   registeredByName    String?
-  registeredAt        DateTime            @default(now())
+  registeredAt        DateTime               @default(now())
   revokedAt           DateTime?
   revokedById         String?
   revokedByName       String?
@@ -2215,7 +2242,8 @@ model WorkstationActionLog {
 }
 
 // ─── Accounting S0 Foundation ──────────────────────────────────────────────
-// Single-tenant (no tenantId — no Tenant model exists; see docs/saas-readiness.md).
+// Single-tenant deployment. Accounting core A1 (20261102090000) adds tenantId (default "hiqbah", NOT NULL) to every
+// accounting table; RLS is NOT enabled (docs/accounting/POSTING-CONTRACT.md §8 explains why).
 // Money fields use Decimal (not Float) — debit=credit integrity cannot tolerate
 // floating-point rounding error. This is a deliberate deviation from the Float
 // convention used elsewhere in this schema, scoped only to these tables.
@@ -2291,6 +2319,31 @@ model AccountingSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   updatedBy String?
+
+  // ── Accounting core A1 (20261102090000_accounting_core) ──
+  /// Single tenant today; every accounting row carries the tenant so a later RLS switch-on is a policy, not a rewrite.
+  tenantId         String    @default("hiqbah")
+  /// The owner's activation. While false — and for any date before goLiveDate — the posting engine is a
+  /// no-op that records nothing, so live operations are unaffected (src/lib/accounting/posting-engine.ts).
+  accountingActive Boolean   @default(false)
+  /// The first business day (Asia/Riyadh) the ledger is kept in the ERP; the opening entry is dated on it.
+  goLiveDate       DateTime? @db.Date
+  activatedAt      DateTime?
+  activatedBy      String?
+  /// «تهيئة دليل الحسابات»: when, by whom and from which template the chart was seeded (opt-in).
+  coaSeededAt      DateTime?
+  coaSeededBy      String?
+  coaTemplate      String?
+  /// The posted opening-balance entry (the wizard), once posted.
+  openingEntryId   String?   @unique
+
+  // ── Accounting A5 (20261106090000_accounting_reports): segregation of duties as a setting ──
+  /// A manual journal may be approved by its own preparer (A2 credit / debit notes: issued by their preparer; A3
+  /// supplier invoices: posted by their preparer / submitter). Each use is recorded (sodBypass) and listed in the
+  /// SoD exceptions report. SIMPLE MODE (one owner) allows it whatever this says.
+  sodAllowSelfApproval Boolean @default(true)
+  /// The approver of a manual journal may also post it (else a third person posts). Listed in the report.
+  sodApproverMayPost   Boolean @default(true)
 }
 
 model Account {
@@ -2313,9 +2366,29 @@ model Account {
   journalEntryLines JournalEntryLine[]
   hrAccountMaps     HrAccountMap[]
 
+  // ── Accounting core A1 ──
+  tenantId           String               @default("hiqbah")
+  /// DEBIT | CREDIT. Inserted as 'AUTO' (the default) and resolved from the type by the database
+  /// (ledger_account_guard): ASSET / EXPENSE → DEBIT, the others → CREDIT. Contra accounts set it explicitly.
+  normalBalance      String               @default("AUTO")
+  /// Sub-ledger control kind (AR, AP, INVENTORY, VAT_INPUT, VAT_OUTPUT, CASH, BANK, FIXED_ASSET, PAYROLL,
+  /// COMMISSION, CLEARING) or null. AR / AP lines must name their party.
+  controlType        String?
+  /// Control accounts refuse MANUAL journals (they are fed by their sub-ledgers through the engine).
+  allowManualJournal Boolean              @default(true)
+  description        String?
+  roles              AccountRole[]
+  openingLines       OpeningBalanceLine[]
+  /// Accounting A3: the expense categories of supplier bills that post here.
+  expenseCategories  ExpenseCategory[]
+  /// Accounting A5: the statement line (CURRENT_ASSET … ZAKAT, CHECK); NULL = inferred from the chart
+  /// (src/lib/accounting/statements.ts → reportGroupOf).
+  reportGroup        String?
+
   @@index([type])
   @@index([parentId])
   @@index([isActive])
+  @@index([controlType])
 }
 
 model TaxCategory {
@@ -2353,9 +2426,21 @@ model FiscalPeriod {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
+  // ── Accounting core A1 ── LOCKED is the soft close («مقفلة مؤقتًا»); CLOSED is final until a
+  // permissioned, reasoned reopen (ledger_period_guard: leaving CLOSED needs reopenReason/By/At).
+  tenantId     String      @default("hiqbah")
+  fiscalYearId String?
+  fiscalYear   FiscalYear? @relation(fields: [fiscalYearId], references: [id])
+  reopenedAt   DateTime?
+  reopenedBy   String?
+  reopenReason String?
+  reopenCount  Int         @default(0)
+
   journalEntries JournalEntry[]
+  closeReviews   PeriodCloseReview[]
 
   @@unique([year, periodNo])
+  @@index([fiscalYearId])
   @@index([status])
   @@index([startDate, endDate])
 }
@@ -2402,10 +2487,38 @@ model JournalEntry {
   qoyodExportRecords QoyodExportRecord[]
   hrLinks            HrJournalLink[]
 
+  // ── Accounting core A1 (posting engine, src/lib/accounting/posting-engine.ts) ──
+  tenantId       String    @default("hiqbah")
+  /// The source document: e.g. SALES_INVOICE / <invoice id> / ISSUED. Every engine entry names it.
+  sourceType     String?
+  sourceId       String?
+  sourceEvent    String?
+  /// One entry per source event: unique per tenant (retries return the same entry).
+  idempotencyKey String?
+  /// sha256 of the normalised lines — a retry with different lines is refused (IDEMPOTENCY_CONFLICT).
+  payloadHash    String?
+  /// Gapless per tenant and year, assigned by the database when the entry becomes POSTED (JE-2026-000123).
+  postingYear    Int?
+  postingSeq     Int?
+  reversedAt     DateTime?
+  reversedBy     String?
+  rejectedAt     DateTime?
+  rejectedBy     String?
+  rejectReason   String?
+  /// SIMPLE MODE: the approver was also the preparer (logged; the four-eyes rule is bypassed, not removed).
+  sodBypass      Boolean   @default(false)
+  /// The rounding residue the engine posted to the ROUNDING role (null when none).
+  roundingAmount Decimal?  @db.Decimal(18, 2)
+  /// Optional supporting documents: [{ name, url }].
+  attachments    Json?
+
+  @@unique([tenantId, idempotencyKey])
+  @@unique([tenantId, postingYear, postingSeq])
   @@index([status])
   @@index([fiscalPeriodId])
   @@index([entryDate])
   @@index([sourceModule, sourceDocumentId])
+  @@index([sourceType, sourceId])
 }
 
 model JournalEntryLine {
@@ -2427,7 +2540,112 @@ model JournalEntryLine {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ── Accounting core A1: dimensions (all optional; no foreign keys — the ledger outlives a reset of
+  // the operational records and is never rewritten; the engine validates them when it posts) ──
+  tenantId     String  @default("hiqbah")
+  lineNo       Int?
+  branchId     String?
+  costCenterId String?
+  /// CUSTOMER | SUPPLIER | EMPLOYEE (with partyId) — the AR / AP / employee sub-ledger key.
+  partyType    String?
+  partyId      String?
+  /// COFFEE_PRODUCT | PRODUCT_SKU | GREEN_BEAN | MATERIAL (with itemId).
+  itemType     String?
+  itemId       String?
+
   @@index([journalEntryId])
+  @@index([accountId])
+  @@index([accountId, journalEntryId])
+  @@index([partyType, partyId])
+}
+
+/// A Gregorian fiscal year and its twelve monthly periods (src/lib/accounting/fiscal-years.ts).
+model FiscalYear {
+  id        String         @id @default(cuid())
+  tenantId  String         @default("hiqbah")
+  year      Int
+  startDate DateTime
+  endDate   DateTime
+  /// OPEN | CLOSED (year-end close is A5).
+  status    String         @default("OPEN")
+  /// Accounting A5: the year-end close (P&L closed to retained earnings by the CLOSING entry).
+  closedAt       DateTime?
+  closedBy       String?
+  closingEntryId String?
+  createdAt DateTime       @default(now())
+  createdBy String?
+  updatedAt DateTime       @updatedAt
+  periods   FiscalPeriod[]
+
+  @@unique([tenantId, year])
+}
+
+/// System posting roles → accounts. Later phases post ONLY by role (src/lib/accounting/roles.ts), never by
+/// an account number. Changing a mapping is audited and never changes a posted entry.
+model AccountRole {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("hiqbah")
+  role      String
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@unique([tenantId, role])
+  @@index([accountId])
+}
+
+/// The accounting audit trail: who, when, what, before / after, IP and device. Written by the database
+/// (ledger_audit_row) for every change of the chart, roles, years, periods, settings, journal entries and
+/// the opening grid, with the actor and request context the application sets per transaction
+/// (src/lib/accounting/audit.ts). Append-only.
+model AccountingAuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String   @default("hiqbah")
+  at         DateTime @default(now())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  reason     String?
+  ip         String?
+  userAgent  String?
+
+  @@index([entityType, entityId, at])
+  @@index([at])
+}
+
+/// Gapless counters (UPDATE … RETURNING inside the posting transaction; never a sequence).
+model AccountingCounter {
+  tenantId String @default("hiqbah")
+  scope    String
+  year     Int
+  value    Int    @default(0)
+
+  @@id([tenantId, scope, year])
+}
+
+/// The opening-balance wizard's grid (a CSV import or manual entry), posted once as the OPENING entry at the
+/// go-live date against the OPENING_BALANCE_EQUITY role. Frozen by the database once that entry exists.
+model OpeningBalanceLine {
+  id           String   @id @default(cuid())
+  tenantId     String   @default("hiqbah")
+  lineNo       Int
+  accountId    String
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  debit        Decimal  @default(0) @db.Decimal(18, 2)
+  credit       Decimal  @default(0) @db.Decimal(18, 2)
+  partyType    String?
+  partyId      String?
+  branchId     String?
+  costCenterId String?
+  description  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  updatedBy    String?
+
   @@index([accountId])
 }
 
@@ -3033,9 +3251,9 @@ model CommissionPlanVersion {
   /// it; baseRatePercent is 0 and there are no tiers). Immutable like the rest of the version.
   components Json?
 
-  tiers       CommissionTier[]
-  assignments CommissionAssignment[]
-  accruals    CommissionAccrual[]
+  tiers          CommissionTier[]
+  assignments    CommissionAssignment[]
+  accruals       CommissionAccrual[]
   periodResults  CommissionPeriodResult[]
   bonusDecisions CommissionBonusDecision[]
 
@@ -3358,21 +3576,21 @@ model CommissionBonusDecision {
 /// commission activation date: no COMPONENTS commission is computed on a collection before it, and
 /// the monthly run refuses until it is set. Additive, 20261101090000_commission_builder.
 model CommissionSettings {
-  id                  String    @id @default("singleton")
+  id                   String    @id @default("singleton")
   /// A client is new when it bought nothing within this window before its acquisition (default 12 months).
-  newClientWindowValue Int      @default(12)
-  newClientWindowUnit  String   @default("MONTHS")
+  newClientWindowValue Int       @default(12)
+  newClientWindowUnit  String    @default("MONTHS")
   /// A client lapses after this long with no collected order (default 12 months); its sequence
   /// commission stops, and a later purchase is a re-acquisition under the new-client window rule.
-  lapseValue          Int       @default(12)
-  lapseUnit           String    @default("MONTHS")
+  lapseValue           Int       @default(12)
+  lapseUnit            String    @default("MONTHS")
   /// Eligibility after acquisition; NULL = forever (until the client lapses).
-  eligibilityValue    Int?
-  eligibilityUnit     String?
+  eligibilityValue     Int?
+  eligibilityUnit      String?
   /// Commission activation date. NULL = not activated yet.
-  activationDate      DateTime?
-  updatedById         String?
-  updatedAt           DateTime  @default(now()) @updatedAt
+  activationDate       DateTime?
+  updatedById          String?
+  updatedAt            DateTime  @default(now()) @updatedAt
 }
 
 /// Every change to the commission settings, the opening setup of a customer, or a customer's
@@ -3512,6 +3730,9 @@ model SalesCollection {
   collectionEvent   CollectionEvent? @relation("CollectionCommissionEvent", fields: [collectionEventId], references: [id])
 
   evidence CollectionEvidence[]
+
+  /// Sales invoicing A2 (additive, relation field only): how this receipt was applied to invoices.
+  arApplications ArApplication[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -6451,35 +6672,35 @@ model SystemAlert {
 /// read; rows older than 90 days are removed (lib/notifications/retention.ts). The recipient's own
 /// rows only: every route filters by the session's account, never by a client-sent id.
 model Notification {
-  id          String    @id @default(cuid())
-  recipientId String
-  recipient   Employee  @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  id             String    @id @default(cuid())
+  recipientId    String
+  recipient      Employee  @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   /// The catalogue key (sales.quote_decided, hr.payslip_issued, …; CHECK on shape).
-  kind        String
+  kind           String
   /// sales | production | quality | finance | hr | me | system (CHECK).
-  category    String
+  category       String
   /// info | success | warning | danger (CHECK).
-  severity    String    @default("info")
-  titleAr     String
-  titleEn     String
-  bodyAr      String    @default("")
-  bodyEn      String    @default("")
+  severity       String    @default("info")
+  titleAr        String
+  titleEn        String
+  bodyAr         String    @default("")
+  bodyEn         String    @default("")
   /// An app path (starts with /dashboard; CHECK), or NULL.
-  link        String?
-  entityType  String?
-  entityId    String?
+  link           String?
+  entityType     String?
+  entityId       String?
   /// Who did it (never a recipient of their own act). No FK: the actor may be deleted.
-  actorId     String?
+  actorId        String?
   /// The event instance: unique per recipient, so one event never produces two rows for one person.
   /// Also groups the e-mail of one event (at most one immediate e-mail per event).
-  dedupeKey   String
+  dedupeKey      String
   /// NONE (no e-mail for this row) | PENDING | SENDING | SENT | FAILED | OFF (the person's choice) |
   /// NO_ADDRESS | NOT_CONFIGURED | EXPIRED (CHECK).
-  emailState  String    @default("NONE")
+  emailState     String    @default("NONE")
   emailClaimedAt DateTime?
-  emailedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  readAt      DateTime?
+  emailedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  readAt         DateTime?
 
   @@unique([recipientId, dedupeKey])
   @@index([recipientId, createdAt])
@@ -6672,4 +6893,611 @@ model QcDisposition {
 
   @@index([status, createdAt])
   @@index([batchId])
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════
+//  SALES INVOICING + ACCOUNTS RECEIVABLE — accounting phase A2 (additive,
+//  migration 20261103090000_sales_invoicing). docs/accounting/POSTING-CONTRACT.md §4, §7a.
+//
+//  • A tax invoice (STANDARD, B2B) or simplified tax invoice (SIMPLIFIED, B2C), a credit note or a
+//    debit note — one table, `kind`. A note always names its original and carries a reason.
+//  • DRAFT → ISSUED (immutable; the database numbers it gaplessly per series and refuses every later
+//    change except the A4 ZATCA columns) or DRAFT → CANCELLED. An issued document is corrected only
+//    by a credit / debit note.
+//  • Customer, order, order line and delivery are plain ids (no foreign keys), like the ledger's
+//    dimensions: a legal document outlives a reset of operational data. The issued snapshot carries
+//    every particular the document states.
+//  • Money Decimal(18,2); VAT per E-10: per (category, rate), on the taxable total, rounded once.
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+model SalesInvoice {
+  id                 String         @id @default(cuid())
+  tenantId           String         @default("hiqbah")
+  /// The document UUID (ZATCA cbc:UUID), set by the database at creation, never changed.
+  uuid               String         @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// INVOICE | CREDIT_NOTE | DEBIT_NOTE (CHECK) — ZATCA 388 / 381 / 383.
+  kind               String         @default("INVOICE")
+  /// STANDARD (tax invoice, B2B, 0100000) | SIMPLIFIED (simplified tax invoice, B2C, 0200000).
+  family             String         @default("STANDARD")
+  /// DRAFT | ISSUED | CANCELLED (CHECK). CANCELLED only from DRAFT.
+  status             String         @default("DRAFT")
+  /// Set at issue: the series (prefix) the number comes from; seq and number by the database.
+  series             String?
+  seq                Int?
+  number             String?
+  customerId         String
+  orderId            String?
+  quoteId            String?
+  /// A credit / debit note: the invoice it corrects (ZATCA BillingReference).
+  originalInvoiceId  String?
+  originalInvoice    SalesInvoice?  @relation("InvoiceNotes", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  notesIssued        SalesInvoice[] @relation("InvoiceNotes")
+  /// A note's reason code (RETURN | PRICE_ADJUSTMENT | DISCOUNT | CANCELLATION | AMENDMENT | OTHER) and text (KSA-10).
+  reasonCode         String?
+  reason             String?
+  /// The Riyadh business day and time of issue (ZATCA IssueDate / IssueTime, AST).
+  issueDate          DateTime?      @db.Date
+  issueTime          String?
+  issuedAt           DateTime?
+  /// The supply date (KSA-5) and, for a continuous supply, its end (KSA-24).
+  supplyDate         DateTime?      @db.Date
+  supplyEndDate      DateTime?      @db.Date
+  dueDate            DateTime?      @db.Date
+  paymentTermsDays   Int?
+  currency           String         @default("SAR")
+  /// Σ line net (after line discounts) · Σ line discounts · taxable · VAT (E-10) · payable.
+  lineExtensionTotal Decimal        @default(0) @db.Decimal(18, 2)
+  discountTotal      Decimal        @default(0) @db.Decimal(18, 2)
+  taxableTotal       Decimal        @default(0) @db.Decimal(18, 2)
+  taxTotal           Decimal        @default(0) @db.Decimal(18, 2)
+  grandTotal         Decimal        @default(0) @db.Decimal(18, 2)
+  /// [{ category, rate, taxable, tax, exemptionReasonCode, exemptionReason }] — the VAT breakdown.
+  taxBreakdown       Json?
+  /// The buyer's particulars (name, VAT, CR, structured address): editable on a draft, frozen at issue.
+  buyer              Json
+  /// The seller's particulars, frozen at issue (NULL on a draft).
+  seller             Json?
+  notes              String?
+  /// MANUAL | ORDER | DELIVERY — how the draft was opened.
+  source             String         @default("MANUAL")
+  /// Idempotent creation (an automatic draft per delivery: "delivery:<id>"; a client key otherwise).
+  requestKey         String?        @unique
+  createdById        String
+  issuedById         String?
+  /// SIMPLE MODE: a credit / debit note issued by its own preparer (four-eyes bypassed, recorded).
+  sodBypass          Boolean        @default(false)
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancelReason       String?
+  // ── A4 (ZATCA Phase 2) placeholders: nullable; nothing writes them in A2 ──
+  zatcaIcv           BigInt?
+  zatcaPih           String?
+  zatcaInvoiceHash   String?
+  zatcaQr            String?
+  zatcaStatus        String?
+  zatcaXmlRef        String?
+  // ── A4: an invoice created from an external order source (e.g. the Salla web shop, later) ──
+  /// The sales channel the document came from (e.g. SALLA, WEBSITE, CAFE), with the order reference there:
+  /// one document per (channel, external order) — a second request for the same order returns the first.
+  channel            String?
+  externalOrderRef   String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  lines              SalesInvoiceLine[]
+  applications       ArApplication[]    @relation("ArTarget")
+  creditApplications ArApplication[]    @relation("ArCreditSource")
+
+  @@unique([tenantId, number])
+  @@unique([tenantId, channel, externalOrderRef])
+  @@index([customerId, status])
+  @@index([orderId])
+  @@index([originalInvoiceId])
+  @@index([kind, status, createdAt])
+  @@index([status, issueDate])
+}
+
+model SalesInvoiceLine {
+  id                  String             @id @default(cuid())
+  tenantId            String             @default("hiqbah")
+  invoiceId           String
+  invoice             SalesInvoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position            Int                @default(0)
+  /// The order line it invoices (over-invoicing is refused by the database), the delivery it came from.
+  orderItemId         String?
+  deliveryId          String?
+  productSkuId        String?
+  /// A note's line: the original invoice line it credits / debits (a credit is capped by it).
+  originalLineId      String?
+  originalLine        SalesInvoiceLine?  @relation("NoteLines", fields: [originalLineId], references: [id], onDelete: Restrict)
+  noteLines           SalesInvoiceLine[] @relation("NoteLines")
+  description         String
+  descriptionEn       String?
+  skuCode             String?
+  quantity            Decimal            @db.Decimal(12, 3)
+  /// UNIT | KG
+  unit                String             @default("UNIT")
+  unitPrice           Decimal            @db.Decimal(18, 2)
+  discountPercent     Decimal            @default(0) @db.Decimal(5, 2)
+  discountAmount      Decimal            @default(0) @db.Decimal(18, 2)
+  /// S | Z | E | O (UNCL5305), with the exemption reason (code + text) for Z / E / O.
+  taxCategory         String             @default("S")
+  taxRatePercent      Decimal            @default(15) @db.Decimal(5, 2)
+  exemptionReasonCode String?
+  exemptionReason     String?
+  /// round(qty × price) − discount; the line VAT is informational (KSA-11), the document's is E-10.
+  lineNet             Decimal            @db.Decimal(18, 2)
+  lineTax             Decimal            @db.Decimal(18, 2)
+  lineTotal           Decimal            @db.Decimal(18, 2)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([invoiceId, position])
+  @@index([orderItemId])
+  @@index([originalLineId])
+}
+
+/// One gapless counter per (tenant, series), advanced by the database inside the issue transaction.
+model SalesDocumentCounter {
+  tenantId String @default("hiqbah")
+  series   String
+  value    Int    @default(0)
+
+  @@id([tenantId, series])
+}
+
+/// AR matching: a receipt (an APPROVED SalesCollection) or a credit note's credit applied to an
+/// invoice / debit note of the same customer. Never edited: an application is REVERSED (unapplied).
+/// The database refuses applying more than the receipt / credit holds or more than the invoice owes.
+model ArApplication {
+  id            String           @id @default(cuid())
+  tenantId      String           @default("hiqbah")
+  customerId    String
+  invoiceId     String
+  invoice       SalesInvoice     @relation("ArTarget", fields: [invoiceId], references: [id], onDelete: Restrict)
+  collectionId  String?
+  collection    SalesCollection? @relation(fields: [collectionId], references: [id], onDelete: Restrict)
+  creditNoteId  String?
+  creditNote    SalesInvoice?    @relation("ArCreditSource", fields: [creditNoteId], references: [id], onDelete: Restrict)
+  amount        Decimal          @db.Decimal(18, 2)
+  /// The Riyadh business day of the application (its posting date).
+  appliedDate   DateTime         @db.Date
+  /// Made when the receipt was approved (posted inside its RECEIVED entry), or later (its own APPLIED entry).
+  atReceipt     Boolean          @default(false)
+  /// APPLIED | REVERSED
+  status        String           @default("APPLIED")
+  createdById   String
+  createdAt     DateTime         @default(now())
+  reversedAt    DateTime?
+  reversedById  String?
+  reverseReason String?
+
+  @@index([invoiceId, status])
+  @@index([collectionId, status])
+  @@index([creditNoteId, status])
+  @@index([customerId, status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Accounting A3 — posting from operations (migration 20261104090000_ops_posting).
+// docs/accounting/POSTING-CONTRACT.md §4 and §10. The inventory COST sub-ledger (perpetual, moving weighted
+// average per stock-holding entity), the minimal AP sub-ledger (supplier invoices, payments, allocations),
+// expense categories, costing settings, the opening inventory valuation and the commission ↔ ledger sync.
+// Ids of operational entities are stored WITHOUT foreign keys (like the ledger's dimensions): the cost
+// sub-ledger is part of the books and outlives a reset of operational data.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// One costed stock holder: a green-coffee lot (GreenBean), a packaging / café material (MaterialItem), a roast's
+/// unpacked roasted coffee (RoastingBatch) or a finished-goods lot (FinishedGoodsLot). qty is in the entity's
+/// own unit (kg for coffee, the material's unit), value in SAR. Moving weighted average: avgCost = value / qty.
+/// CHECKs: qty ≥ 0, value ≥ 0, and an empty holder carries no value.
+model CostItem {
+  id         String     @id @default(cuid())
+  tenantId   String     @default("hiqbah")
+  /// GREEN_BEAN | MATERIAL | ROASTED_BATCH | FG_LOT
+  kind       String
+  entityId   String
+  /// The inventory posting role its value sits under (INVENTORY_GREEN, INVENTORY_PACKAGING, INVENTORY_CAFE,
+  /// INVENTORY_ROASTED, INVENTORY_PACKED), fixed when the holder is first costed.
+  role       String
+  qty        Decimal    @default(0) @db.Decimal(18, 4)
+  value      Decimal    @default(0) @db.Decimal(18, 2)
+  avgCost    Decimal    @default(0) @db.Decimal(18, 6)
+  /// The unit cost of the last receipt (the "last known cost" the opening valuation proposes).
+  lastInCost Decimal?   @db.Decimal(18, 6)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  moves      CostMove[]
+
+  @@unique([tenantId, kind, entityId])
+  @@index([role])
+}
+
+/// One movement of the cost sub-ledger, with the unit-cost snapshot it moved at. Append-only (cost_move_guard):
+/// the only change ever made is resolving glState PENDING → POSTED / SKIPPED / NONE (and journalEntryId) in the
+/// transaction that wrote it; a PENDING row is refused at commit. One row per (source event, holder, lineKey).
+model CostMove {
+  id                  String   @id @default(cuid())
+  tenantId            String   @default("hiqbah")
+  costItemId          String
+  costItem            CostItem @relation(fields: [costItemId], references: [id], onDelete: Restrict)
+  businessDay         DateTime @db.Date
+  /// RECEIPT | ISSUE | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT | REVALUATION | OPENING | WRITE_OFF | RETURN
+  kind                String
+  /// Signed: + in, − out.
+  qty                 Decimal  @db.Decimal(18, 4)
+  value               Decimal  @db.Decimal(18, 2)
+  unitCost            Decimal  @db.Decimal(18, 6)
+  qtyAfter            Decimal  @db.Decimal(18, 4)
+  valueAfter          Decimal  @db.Decimal(18, 2)
+  sourceModule        String
+  sourceType          String
+  sourceId            String
+  sourceEvent         String
+  lineKey             String   @default("")
+  inventoryMovementId String?
+  journalEntryId      String?
+  /// PENDING (inside its transaction only) | POSTED | SKIPPED (engine off / before go-live) | NONE (nothing to
+  /// post: a transfer within one role, a zero value) | OPENING (the opening inventory valuation)
+  glState             String   @default("PENDING")
+  reason              String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+
+  @@unique([tenantId, sourceType, sourceId, sourceEvent, costItemId, lineKey])
+  @@index([costItemId, createdAt])
+  @@index([sourceType, sourceId])
+  @@index([glState, businessDay])
+}
+
+/// Costing policy (singleton). abnormalRoastLossPct: a roast's loss (green − roasted, % of green) above it is
+/// ABNORMAL and its cost is expensed to ROAST_LOSS; NULL = every loss is normal and absorbed into roasted cost.
+model CostingSettings {
+  id                   String    @id @default("singleton")
+  abnormalRoastLossPct Decimal?  @db.Decimal(5, 2)
+  /// true: a roast's abnormal boundary is its product's expected loss + 5 points (CoffeeProduct.expectedRoastLoss —
+  /// the boundary the roasting station already flags «فوق الحد»); abnormalRoastLossPct is then the fallback.
+  abnormalUseProductLimit Boolean @default(false)
+  openingAppliedAt     DateTime?
+  openingAppliedBy     String?
+  updatedBy            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+/// The opening inventory valuation: the unit cost the owner entered for a holder (else the last known cost is
+/// proposed). Applied once per go-live into the cost sub-ledger and the opening-balance grid.
+model InventoryOpeningCost {
+  id        String   @id @default(cuid())
+  kind      String
+  entityId  String
+  unitCost  Decimal  @db.Decimal(18, 6)
+  note      String?
+  updatedBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([kind, entityId])
+}
+
+/// A non-stock purchase category (rent, maintenance, utilities…) → the expense account its bill lines post to.
+model ExpenseCategory {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  nameAr    String
+  nameEn    String?
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  isActive  Boolean  @default(true)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoiceLines SupplierInvoiceLine[]
+}
+
+/// A supplier invoice (bill): DRAFT → SUBMITTED → POSTED (approve = post, by an AP holder other than the
+/// submitter) → CANCELLED (reversed, only while nothing is paid). Totals are the sums of the lines (VAT per line).
+model SupplierInvoice {
+  id             String    @id @default(cuid())
+  tenantId       String    @default("hiqbah")
+  /// «SINV-2026-000001», gapless per year among issued numbers (assigned at creation).
+  number         String    @unique
+  supplierId     String
+  supplier       Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  /// The supplier's own invoice number; unique per supplier among live invoices.
+  supplierRef    String
+  invoiceDate    DateTime  @db.Date
+  dueDate        DateTime  @db.Date
+  /// DRAFT | SUBMITTED | POSTED | CANCELLED
+  status         String    @default("DRAFT")
+  netTotal       Decimal   @default(0) @db.Decimal(18, 2)
+  vatTotal       Decimal   @default(0) @db.Decimal(18, 2)
+  grossTotal     Decimal   @default(0) @db.Decimal(18, 2)
+  paidTotal      Decimal   @default(0) @db.Decimal(18, 2)
+  notes          String?
+  createdBy      String
+  /// The last person who changed the draft (SoD: neither preparer, last editor nor submitter posts it).
+  lastEditedBy   String?
+  submittedBy    String?
+  submittedAt    DateTime?
+  postedBy       String?
+  postedAt       DateTime?
+  journalEntryId String?
+  cancelledBy    String?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  lines       SupplierInvoiceLine[]
+  allocations SupplierPaymentAllocation[]
+
+  @@index([supplierId, status])
+  @@index([status, dueDate])
+}
+
+/// GRN: matched to one receipt (PurchaseRecord) — Dr GRNI at the receipt's value, the difference is a price
+/// variance. STOCK: a stock line without a costed receipt (stockKind + stockItemId) — capitalised into the holder.
+/// EXPENSE: a non-stock line (expenseCategoryId → its account).
+model SupplierInvoiceLine {
+  id                String           @id @default(cuid())
+  invoiceId         String
+  invoice           SupplierInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNo            Int
+  kind              String
+  /// PurchaseRecord.id (no FK: the receipt register is operational data).
+  purchaseRecordId  String?
+  stockKind         String?
+  stockItemId       String?
+  expenseCategoryId String?
+  expenseCategory   ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: Restrict)
+  description       String
+  quantity          Decimal?         @db.Decimal(18, 4)
+  net               Decimal          @db.Decimal(18, 2)
+  vatRate           Decimal          @default(15) @db.Decimal(5, 2)
+  vat               Decimal          @db.Decimal(18, 2)
+  gross             Decimal          @db.Decimal(18, 2)
+  /// Filled when posted: the receipt's value (GRN), the price variance, and the part of it capitalised.
+  matchedValue      Decimal?         @db.Decimal(18, 2)
+  variance          Decimal?         @db.Decimal(18, 2)
+  capitalized       Decimal?         @db.Decimal(18, 2)
+
+  @@unique([invoiceId, lineNo])
+  @@index([purchaseRecordId])
+}
+
+/// A payment to a supplier, applied in full to its posted invoices. POSTED → VOIDED (reversed).
+model SupplierPayment {
+  id             String    @id @default(cuid())
+  tenantId       String    @default("hiqbah")
+  number         String    @unique
+  supplierId     String
+  supplier       Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  paymentDate    DateTime  @db.Date
+  amount         Decimal   @db.Decimal(18, 2)
+  /// BANK_TRANSFER | CASH | CHEQUE
+  method         String
+  reference      String?
+  /// POSTED | VOIDED
+  status         String    @default("POSTED")
+  journalEntryId String?
+  createdBy      String
+  voidedBy       String?
+  voidedAt       DateTime?
+  voidReason     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  allocations SupplierPaymentAllocation[]
+
+  @@index([supplierId, paymentDate])
+}
+
+model SupplierPaymentAllocation {
+  id        String          @id @default(cuid())
+  paymentId String
+  payment   SupplierPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount    Decimal         @db.Decimal(18, 2)
+  createdAt DateTime        @default(now())
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
+}
+
+/// Commission ↔ ledger (one row per login × Riyadh month): what the ledger holds as approved commission
+/// (postedTotal) and what was approved while the engine posted nothing (baselineTotal — part of the opening
+/// balances, never posted later). The next accrual posts approved − posted − baseline.
+model CommissionGlSync {
+  id            String   @id @default(cuid())
+  employeeId    String
+  periodStart   DateTime
+  postedTotal   Decimal  @default(0) @db.Decimal(18, 2)
+  baselineTotal Decimal  @default(0) @db.Decimal(18, 2)
+  postings      Int      @default(0)
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@unique([employeeId, periodStart])
+}
+
+// ── ZATCA Phase 2 (Fatoora) e-invoicing — accounting phase A4 (20261105090000_zatca_phase2) ──────────────────
+// The e-invoice generation solution (EGS) units, their CSIDs, the signed / cleared documents and the Fatoora log.
+// The database keeps the chain: an EGS unit's ICV only ever moves by one, together with its last hash; a document's
+// ICV and PIH are the EGS unit's next value and previous hash (checked against the previous document); the signed
+// XML is stored byte for byte and never changes; the cleared XML is written once; nothing here is deleted.
+
+/// The e-invoicing switch (one row, "singleton"): OFF (issuing works exactly as A2) | SANDBOX | SIMULATION |
+/// PRODUCTION. The server must also allow it (ZATCA_ENABLED=true; PRODUCTION also ZATCA_PRODUCTION_ALLOWED=true).
+model ZatcaSettings {
+  id          String   @id @default("singleton")
+  tenantId    String   @default("hiqbah")
+  mode        String   @default("OFF")
+  /// The EGS unit that signs what this ERP issues (one at a time; must be of the mode's environment).
+  activeEgsId String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// An EGS unit: this ERP's own e-invoice generation solution towards ZATCA (separate from any other system the
+/// taxpayer uses — its own CSID, ICV counter and PIH chain).
+model ZatcaEgsUnit {
+  id                   String    @id @default(cuid())
+  tenantId             String    @default("hiqbah")
+  /// SANDBOX (developer portal) | SIMULATION | PRODUCTION — fixed at creation.
+  environment          String
+  name                 String
+  /// CSR subject: CN, SN (1-…|2-…|3-…), O, OU (branch), UID (VAT), title (TSCZ), registeredAddress, businessCategory.
+  commonName           String
+  serialNumber         String    @unique
+  organizationName     String
+  branchName           String
+  branchId             String?
+  vatNumber            String
+  invoiceTypes         String    @default("1100")
+  location             String
+  industry             String
+  /// NONE → COMPLIANCE → PRODUCTION → RENEWED; REVOKED (CSID state).
+  csidState            String    @default("NONE")
+  /// The private key (PKCS#8 PEM), AES-256-GCM with ZATCA_KEY_ENCRYPTION_KEY. Never returned, never logged.
+  privateKeyEnc        String?
+  publicKeyPem         String?
+  csrPem               String?
+  keyVersion           Int       @default(0)
+  /// A renewal in progress: the new key and CSR until ZATCA issues the renewed CSID.
+  pendingPrivateKeyEnc String?
+  pendingCsrPem        String?
+  /// The last ICV used (0 = none yet) and the hash of that document (the initial PIH before the first).
+  icv                  BigInt    @default(0)
+  lastHash             String    @default("NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==")
+  lastDocumentAt       DateTime?
+  /// The compliance checks run against the compliance CSID: [{ type, ok, status, at, warnings, errors }].
+  complianceChecks     Json?
+  complianceCheckedAt  DateTime?
+  retiredAt            DateTime?
+  createdById          String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  csids     ZatcaCsid[]
+  documents ZatcaDocument[]
+
+  @@index([environment, csidState])
+}
+
+/// A CSID ZATCA issued to an EGS unit (compliance or production). Token and secret are stored encrypted.
+model ZatcaCsid {
+  id            String       @id @default(cuid())
+  tenantId      String       @default("hiqbah")
+  egsId         String
+  egs           ZatcaEgsUnit @relation(fields: [egsId], references: [id], onDelete: Restrict)
+  /// COMPLIANCE | PRODUCTION
+  kind          String
+  requestId     String
+  tokenEnc      String
+  secretEnc     String
+  keyVersion    Int
+  certSerial    String
+  certIssuer    String
+  certSha256    String
+  certNotBefore DateTime?
+  certNotAfter  DateTime?
+  /// ACTIVE | SUPERSEDED | REVOKED
+  status        String       @default("ACTIVE")
+  createdById   String
+  createdAt     DateTime     @default(now())
+  supersededAt  DateTime?
+
+  @@index([egsId, kind, status])
+}
+
+/// The e-invoice of one issued SalesInvoice: its place in the EGS chain, the signed XML (bytes, as signed), the
+/// cleared XML (bytes, as ZATCA returned it), and the submission queue state (clearance or reporting).
+model ZatcaDocument {
+  id                String       @id @default(cuid())
+  tenantId          String       @default("hiqbah")
+  invoiceId         String       @unique
+  egsId             String
+  egs               ZatcaEgsUnit @relation(fields: [egsId], references: [id], onDelete: Restrict)
+  csidId            String
+  environment       String
+  icv               BigInt
+  pih               String
+  invoiceHash       String
+  uuid              String
+  /// CLEARANCE (standard, B2B) | REPORTING (simplified, B2C)
+  flow              String
+  signedXml         Bytes
+  signedXmlSha256   String
+  clearedXml        Bytes?
+  clearedXmlSha256  String?
+  qr                String
+  /// PENDING | CLEARED | CLEARED_WITH_WARNINGS | REPORTED | REPORTED_WITH_WARNINGS | REJECTED | ERROR
+  status            String       @default("PENDING")
+  attempts          Int          @default(0)
+  nextAttemptAt     DateTime?
+  leaseUntil        DateTime?
+  lastHttpStatus    Int?
+  lastError         String?
+  warnings          Json?
+  errors            Json?
+  signedAt          DateTime
+  reportingDeadline DateTime?
+  submittedAt       DateTime?
+  decidedAt         DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@unique([egsId, icv])
+  @@index([status, nextAttemptAt])
+  @@index([flow, status, signedAt])
+}
+
+/// Every request to Fatoora and its answer (secrets, OTP, keys and invoice bodies left out). Append-only.
+model ZatcaLog {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("hiqbah")
+  egsId       String?
+  documentId  String?
+  /// COMPLIANCE_CSID | COMPLIANCE_CHECK | PRODUCTION_CSID | RENEW_CSID | CLEARANCE | REPORTING
+  action      String
+  environment String
+  method      String
+  endpoint    String
+  httpStatus  Int?
+  outcome     String
+  durationMs  Int?
+  attempt     Int?
+  request     Json?
+  response    Json?
+  actorId     String?
+  at          DateTime @default(now())
+
+  @@index([egsId, at])
+  @@index([documentId, at])
+  @@index([action, at])
+}
+
+/// Accounting A5 (20261106090000_accounting_reports): the month-end close checklist as it stood when it was run —
+/// a review, the soft close, the final close or the year-end close — with who ran it and the note on any warning
+/// accepted. Evidence for the auditor: append-only in the database (ledger_close_review_guard).
+model PeriodCloseReview {
+  id             String       @id @default(cuid())
+  tenantId       String       @default("hiqbah")
+  fiscalPeriodId String
+  fiscalPeriod   FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Restrict)
+  /// REVIEW | SOFT_CLOSE | CLOSE | YEAR_END
+  action         String
+  /// [{ key, status: PASS | WARN | FAIL | NA, count, amount, ar, en, href }]
+  results        Json
+  blocking       Int          @default(0)
+  warnings       Int          @default(0)
+  note           String?
+  actorId        String
+  at             DateTime     @default(now())
+
+  @@index([fiscalPeriodId, at])
 }

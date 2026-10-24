@@ -11,6 +11,7 @@ import { OpsLoading, OpsRoot, PageHeader, useL } from "@/components/ops/ui";
 import { useD21Phone } from "@/components/shell/page-context";
 import { Sec, SettingsFrame } from "../../_components/tools-ui";
 import { SingleSetting } from "../_parts/single-setting";
+import { InvoiceDocumentsSettings } from "../_parts/invoice-documents";
 import "../_parts/sections.css";
 
 type Inv = {
@@ -49,10 +50,11 @@ export default function InvoicingSettingsPage() {
             <Sec title={L("التسجيل الضريبي", "Tax registration")} caption={L("يُعدَّل في «المنشأة» ويُطبع في المستندات", "Edited on «Organisation» and printed on the documents")} testId="tax-registration">
               <dl className="ss-kv is-wide">
                 <dt>{L("الرقم الضريبي", "VAT number")}</dt><dd>{s.registration.vatNumber ? <bdi className="hr-num">{s.registration.vatNumber}</bdi> : notSet}</dd>
-                <dt>{L("السجل التجاري", "Commercial registration")}</dt><dd>{s.registration.crNumber ? <bdi className="hr-num">{s.registration.crNumber}</bdi> : notSet}</dd>
+                <dt>{L("الرقم الوطني الموحد (السجل التجاري)", "Unified national number (CR)")}</dt><dd>{s.registration.crNumber ? <bdi className="hr-num">{s.registration.crNumber}</bdi> : notSet}</dd>
               </dl>
               <div className="tl-acts"><Link href="/dashboard/settings" className="hr-btn is-sm" style={{ textDecoration: "none" }}>{L("تعديل في «المنشأة»", "Edit on «Organisation»")}</Link></div>
             </Sec>
+            <InvoiceDocumentsSettings />
           </div>
         )}
       </SettingsFrame>

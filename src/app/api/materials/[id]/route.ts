@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit, stockChangeGate } from "@/lib/auth-server";
@@ -148,7 +149,9 @@ export async function PATCH(request: Request, { params }: Params) {
         });
       }
 
-      return tx.materialItem.update({ where: { id }, data });
+      const updated = await tx.materialItem.update({ where: { id }, data });
+      await flushPostings(tx);
+      return updated;
     });
 
     return NextResponse.json(result);

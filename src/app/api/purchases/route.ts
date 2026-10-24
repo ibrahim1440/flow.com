@@ -1,8 +1,10 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handlePrismaError } from "@/lib/api-error";
 import { parsePeriod, periodStart } from "@/lib/inventory/purchases-query";
+import { onGreenReceipt } from "@/lib/accounting/ops/inventory-events";
 
 /**
  * The purchase register. Without parameters: the newest 200 (unchanged). With `period` (30 | 90 |
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
         include: { supplier: true },
       });
 
-      await tx.inventoryMovement.create({
+      const movement = await tx.inventoryMovement.create({
         data: {
           type: "IN",
           category: "RAW_MATERIAL",
@@ -108,6 +110,11 @@ export async function POST(request: Request) {
         data: { quantityKg: { increment: quantity } },
       });
 
+      // Accounting A3: the receipt is a GRN — costed into the green lot's moving average, and (once accounting is
+      // live) posted Dr INVENTORY_GREEN / Cr GRNI for the supplier, in this transaction.
+      await onGreenReceipt(tx, { purchaseId: purchase.id, greenBeanId: itemId, supplierId, qtyKg: quantity, unitCost: costPerUnit, purchaseDate: purchase.purchaseDate, actor: user.id, movementId: movement.id });
+
+      await flushPostings(tx);
       return { purchase, updatedBean };
     });
 

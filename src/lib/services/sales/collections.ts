@@ -2,6 +2,8 @@ import type { Prisma as PrismaNS } from "@/generated/prisma/client";
 import { Decimal, ZERO, roundMoney } from "../commissions/engine";
 import { accrueForCollection } from "../commissions/accrual";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+// Sales invoicing A2: the AR sub-ledger and the ledger postings of a receipt (approved → RECEIVED, reversed → reversal).
+import { onCollectionApproved, onCollectionReversed } from "@/lib/services/invoicing/ar";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -447,6 +449,8 @@ export async function approveCollection(
   });
 
   const outcomes = await accrueForCollection(tx, event.id, input.actorId);
+  // A2: apply the receipt to its order's open invoices and post it (a no-op before accounting's go-live).
+  await onCollectionApproved(tx, row.id, input.actorId);
   await emitCollectionStatus(tx, row.id, "PENDING_VERIFICATION", "APPROVED", input.actorId);
 
   return {
@@ -548,6 +552,8 @@ export async function reverseCollection(
   });
 
   const outcomes = await accrueForCollection(tx, row.collectionEventId, input.actorId);
+  // A2: the receipt's AR applications and every ledger posting of it are reversed with it.
+  await onCollectionReversed(tx, row.id, reason, input.actorId);
   await emitCollectionStatus(tx, row.id, "APPROVED", "REVERSED", input.actorId);
 
   return {

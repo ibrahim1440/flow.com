@@ -472,6 +472,35 @@ const RESOLVERS: Record<string, Resolver> = {
     };
   },
 
+  // Sales invoicing A2: the issued document (its frozen total and due date), the customer, the order's owner.
+  "sales.invoice_status_changed": async (db, e, lang, actor) => {
+    const inv = await db.salesInvoice.findUnique({
+      where: { id: e.subjectId },
+      select: { kind: true, number: true, grandTotal: true, currency: true, dueDate: true, customerId: true, orderId: true },
+    });
+    if (!inv) return null;
+    const [customer, order] = await Promise.all([
+      db.customer.findUnique({ where: { id: inv.customerId }, select: CUSTOMER_SELECT }),
+      inv.orderId ? db.order.findUnique({ where: { id: inv.orderId }, select: { orderNumber: true, owner: { select: EMPLOYEE_SELECT } } }) : Promise.resolve(null),
+    ]);
+    return {
+      vars: {
+        "invoice.number": inv.number ?? "",
+        "invoice.kind": inv.kind,
+        "invoice.total": moneyText(inv.grandTotal, inv.currency),
+        "invoice.dueDate": inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : "",
+        "order.number": order ? String(order.orderNumber) : "",
+        "customer.name": customerName(customer, lang),
+        ...common(e, actor),
+      },
+      people: {
+        customer: customerPerson(customer, lang),
+        order_owner: employeePerson(order?.owner),
+        actor: employeePerson(actor),
+      },
+    };
+  },
+
   "sales.task_due": async (db, e, lang) => {
     const a = await db.activity.findUnique({
       where: { id: e.subjectId },

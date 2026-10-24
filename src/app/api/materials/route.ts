@@ -1,3 +1,4 @@
+import { onOpeningStock } from "@/lib/accounting/ops/inventory-events";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireEdit } from "@/lib/auth-server";
@@ -153,6 +154,9 @@ export async function POST(request: Request) {
           entityId: created.id, opening: true, movementId: movement.id,
           quantity: quantityOnHand, previousQuantity: 0, newQuantity: quantityOnHand, supplier: null, reference: null, notes: null,
         });
+        // Accounting A3: stock a material is created with carries no cost; the opening valuation (or the
+        // supplier invoice's stock line) costs it.
+        await onOpeningStock(tx, { kind: "MATERIAL", entityId: created.id, qty: quantityOnHand, actor: user.id, movementId: movement.id });
       }
       return created;
     });

@@ -5,6 +5,7 @@
 import type { Db } from "@/lib/hr/core";
 import { auditPrivilegedInventory } from "./inventory-privileged-audit";
 import { ADJUSTMENT_NOOP_THRESHOLD } from "./stock-quantity";
+import { onAdjustment } from "@/lib/accounting/ops/inventory-events";
 
 export {
   normalizeAdjustmentReason,
@@ -113,6 +114,9 @@ export async function applyInventoryAdjustment(
   }
 
   // The responsible person, not only the login (owner decision, inventory Option A).
+  // Accounting A3: the count's gain / loss at the moving average → INVENTORY_VARIANCE (reason carried).
+  await onAdjustment(tx, { kind: a.kind, entityId: a.entityId, qtyChange: quantityChanged, newQty: newQuantity, movementId: movement.id, reason: a.reason, actor: user.id });
+
   await auditPrivilegedInventory(tx, user, {
     action: "INVENTORY_ADJUSTED",
     entityType: a.kind === "GREEN_BEAN" ? "GreenBean" : "MaterialItem",

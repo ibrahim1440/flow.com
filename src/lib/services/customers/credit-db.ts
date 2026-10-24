@@ -43,6 +43,22 @@ export async function loadCreditFlags(db: Db, customerIds: string[], now: Date):
   const out = new Map<string, CreditFlags & { termsDays: number | null }>();
   if (customerIds.length === 0) return out;
   const customers = await db.customer.findMany({ where: { id: { in: customerIds } }, select: { id: true, creditLimit: true, paymentTermsDays: true } });
+  // Sales invoicing A2: where accounting is active, the outstanding balance is the customer's invoice open balance
+  // (issued invoices and debit notes − credit notes − receipts) and «متأخر السداد» counts from each invoice's due
+  // date. Otherwise (accounting not active) the figures below are unchanged: accepted quotations, approved
+  // collections, first deliveries — backward compatible.
+  const acct = await db.accountingSettings.findUnique({ where: { id: "singleton" }, select: { accountingActive: true } });
+  if (acct?.accountingActive) {
+    // Loaded on demand: this module is imported by pure catalogues that never open a database.
+    const { invoiceCreditFigures } = await import("@/lib/services/invoicing/ar");
+    const figures = await invoiceCreditFigures(db, customers.map((c) => c.id), now);
+    for (const c of customers) {
+      const f = figures.get(c.id)!;
+      const limit = c.creditLimit == null ? null : new Decimal(c.creditLimit.toString());
+      out.set(c.id, { ...creditFlags(limit, new Decimal(f.outstanding.toString()), f.open.map((o) => ({ unpaid: new Decimal(o.unpaid.toString()), daysOverdue: o.daysOverdue }))), termsDays: c.paymentTermsDays });
+    }
+    return out;
+  }
   const quotes = await db.quote.findMany({
     where: { status: "ACCEPTED", opportunity: { customerId: { in: customerIds } } },
     select: {

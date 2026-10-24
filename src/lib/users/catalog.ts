@@ -32,12 +32,13 @@ export const MODULE_AR: Record<string, Bi> = {
   finance: { ar: "المالية", en: "Finance" },
   automation: { ar: "الأتمتة والواتساب", en: "Automation & WhatsApp" },
   hr: { ar: "الموارد البشرية", en: "Human resources" },
+  purchases: { ar: "المشتريات وفواتير الموردين", en: "Purchases & supplier invoices" },
 };
 
 /** P-6 · the owner's groups → existing modules (users.py GROUPS; HR and automation placed by this batch). */
 export const GROUPS: { key: string; ar: string; en: string; modules: string[] }[] = [
   { key: "sales", ar: "المبيعات", en: "Sales", modules: ["orders", "customers", "sales", "commissions"] },
-  { key: "inventory", ar: "المخزون", en: "Inventory", modules: ["inventory"] },
+  { key: "inventory", ar: "المخزون", en: "Inventory", modules: ["inventory", "purchases"] },
   { key: "production", ar: "الإنتاج", en: "Production", modules: ["production", "history"] },
   { key: "quality", ar: "الجودة", en: "Quality", modules: ["qc", "cupping"] },
   { key: "packing", ar: "التعبئة والتجهيز", en: "Packing & dispatch", modules: ["packaging", "labels", "dispatch"] },
@@ -59,12 +60,15 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     cancel_batch: "إلغاء الدفعات وحذفها", edit_date: "تعديل تاريخ الدفعة بأثر رجعي",
     manage_roasters: "إدارة المحامص وصيانتها وإسناد المشغّلين", manage_schedule: "إدارة جدول التحميص واعتماد الخطط",
   },
-  inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة" },
+  inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة", valuation: "تقييم المخزون وتكلفة الإنتاج" },
+  purchases: { invoices: "إدخال فواتير الموردين وتقديمها للاعتماد" },
   sales: {
     lead_write: "إنشاء العملاء المحتملين وتعديلهم", lead_assign: "إسناد العميل المحتمل أو تغيير مالكه", lead_convert: "تحويل العميل المحتمل إلى عميل وصفقة",
     lead_import: "استيراد عملاء محتملين من ملف", lead_export: "تصدير العملاء المحتملين", deal_close: "إغلاق الصفقة بربح أو خسارة", deal_reopen: "إعادة فتح صفقة مغلقة",
     quote_write: "إنشاء عروض الأسعار وتعديلها", quote_approve_discount: "اعتماد خصم فوق حد الاعتماد", stage_manage: "ضبط مراحل الصفقات",
     collection_submit: "تسجيل تحصيل على صفقة يملكها", collection_view_team: "عرض تحصيلات الفريق",
+    invoices_view: "عرض فواتير المبيعات والإشعارات", invoices_create: "إنشاء مسودات الفواتير وتعديلها", invoices_issue: "إصدار الفاتورة الضريبية",
+    invoices_cancel: "إلغاء مسودة فاتورة", invoices_credit_note: "إعداد الإشعارات الدائنة والمدينة وإصدارها",
   },
   customers: { manage: "إدارة تفضيلات تحميص العملاء", sales_hold: "إيقاف البيع للعملاء" },
   commissions: {
@@ -87,6 +91,11 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     settings_manage: "إدارة إعدادات المحاسبة", coa_manage: "إدارة دليل الحسابات", tax_category_manage: "إدارة الفئات الضريبية",
     period_lock: "قفل الفترات المحاسبية", period_close: "إقفال الفترات المحاسبية", journal_create: "إنشاء قيود اليومية", journal_submit: "تقديم قيود اليومية",
     journal_approve: "اعتماد قيود اليومية", journal_post: "ترحيل قيود اليومية", journal_reverse: "عكس القيود المرحّلة", export_view: "عرض سجلات التصدير",
+    period_reopen: "إعادة فتح فترة مقفلة نهائيًا", opening_balance: "الأرصدة الافتتاحية (إدخالها وترحيلها)",
+    ar: "الذمم المدينة: تخصيص التحصيلات وكشوف العملاء وأعمار الديون",
+    ap: "الذمم الدائنة: ترحيل فواتير الموردين وتسجيل السداد",
+    zatca_view: "الفوترة الإلكترونية: عرض الوحدات وسجل الإرسال والطابور", zatca_onboard: "الفوترة الإلكترونية: تسجيل الوحدات وتجديد الشهادات وتشغيل الربط",
+    zatca_resubmit: "الفوترة الإلكترونية: إعادة إرسال مستند معلّق أو متعثر", zatca_xml: "الفوترة الإلكترونية: تنزيل ملف XML الموقّع أو المعتمد",
   },
   finance: {
     txn_enter: "إدخال الحركات البنكية واستيرادها وتصنيفها", reconcile: "مطابقة الحسابات مع كشوف البنك",

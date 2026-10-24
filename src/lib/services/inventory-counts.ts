@@ -10,6 +10,7 @@
  *   · post                         — inventory › adjust through stockChangeGate (privileged:
  *     verified individual, username + PIN, fresh step-up; SIMPLE MODE as elsewhere).
  */
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { prisma } from "@/lib/db";
 import type { Db } from "@/lib/hr/core";
 import { parseStockQuantity } from "./stock-quantity";
@@ -244,6 +245,7 @@ export async function postCountSession(user: AdjustmentUser, id: string, reason:
       if (!r.noChange) booked++;
     }
     await tx.inventoryCountSession.update({ where: { id }, data: { status: "POSTED", postedById: user.id, postedAt: new Date(), postReason: reason } });
+    await flushPostings(tx);
     return { id, booked, lines: lines.length };
   }, { timeout: 30_000 });
 }

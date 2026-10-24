@@ -1,3 +1,4 @@
+import { onOpeningStock } from "@/lib/accounting/ops/inventory-events";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAnyModule, requireSub } from "@/lib/auth-server";
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     if (quantityKg > 0) {
       bean = await prisma.$transaction(async (tx) => {
         const created = await tx.greenBean.create({ data });
-        await tx.inventoryMovement.create({
+        const movement = await tx.inventoryMovement.create({
           data: {
             type:              "IN",
             category:          "RAW_MATERIAL",
@@ -76,6 +77,8 @@ export async function POST(request: Request) {
             notes:             "Opening balance",
           },
         });
+        // Accounting A3: an opening balance carries no cost; the opening valuation costs it.
+        await onOpeningStock(tx, { kind: "GREEN_BEAN", entityId: created.id, qty: quantityKg, actor: user.id, movementId: movement.id });
         return created;
       });
     } else {

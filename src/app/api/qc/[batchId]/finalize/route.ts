@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { specBlocksPanelPass } from "@/lib/services/qc/inspection";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -77,6 +78,7 @@ export async function POST(request: Request, { params }: Params) {
       if (!r.decided) {
         throw { _appCode: 409, message: "This batch was finalized by someone else while you were deciding. Please reload and check the outcome." };
       }
+      await flushPostings(tx);
       return r;
     }, TX_OPTS);
     // Phase B item 4: the order this batch was roasted for is recomputed after the decision

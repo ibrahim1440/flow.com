@@ -1,4 +1,5 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
+import { syncCommissionPeriod } from "@/lib/accounting/ops/commissions-gl";
 import {
   Decimal, ZERO, roundMoney, qualifyingBase, commissionOnCumulativeBase,
   selectPlanVersion, riyadhMonthStart, riyadhMonthEnd,
@@ -520,6 +521,9 @@ export async function postDelta(
     select: { id: true },
   });
 
+  // Accounting A3: a correction against an approved month changes what the ledger holds as approved.
+  if (frozen) await syncCommissionPeriod(tx, outcome.employeeId, outcome.periodStart, opts.actorId ?? "system");
+
   const allocation = outcome.delta.isNegative()
     ? await allocateCompensation(tx, {
         entryId: entry.id,
@@ -679,6 +683,8 @@ export async function approvePeriod(
     where: { employeeId, periodStart, status: "ACCRUED" },
     data: { status: "APPROVED", approvedById: approverId, approvedAt: new Date() },
   });
+  // Accounting A3: the approved month is booked (Dr COMMISSION_EXPENSE / Cr COMMISSION_PAYABLE), in this transaction.
+  if (res.count > 0) await syncCommissionPeriod(tx, employeeId, periodStart, approverId);
   return res.count;
 }
 
@@ -718,6 +724,8 @@ export async function adjust(
     },
     select: { id: true },
   });
+  // Accounting A3: a correction of an approved month is booked as the difference (no-op while it awaits approval).
+  await syncCommissionPeriod(tx, input.employeeId, input.periodStart, input.actorId);
   return entry.id;
 }
 

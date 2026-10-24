@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { batchProductId, resolveApprovedVersionId } from "@/lib/services/qc/profiles";
 import { NextResponse } from "@/lib/api-response";
 import { Prisma } from "@/generated/prisma/client";
@@ -30,6 +31,7 @@ import { completeStationClaim } from "@/lib/services/station/claims";
 import { linkBatchToSlot, ScheduleError } from "@/lib/services/schedule/schedule-db";
 import { scheduleError } from "@/lib/services/schedule/http";
 import { lossVerdict } from "@/lib/station/shared";
+import { onRoast } from "@/lib/accounting/ops/inventory-events";
 
 /**
  * The single live production order raised from this order line, or null when there is
@@ -687,11 +689,8 @@ export async function POST(request: Request) {
     // QC station W3 (owner decision 1): the batch is judged against the roast-profile version
     // APPROVED for its product (and green coffee) NOW, stored on the batch — never re-derived later
     // and never the batch itself. None approved → its QC shows «المواصفة قيد المعايرة».
-    const profileVersionId = await resolveApprovedVersionId(
-      tx,
-      await batchProductId(tx, { productId: isStockBatch ? (productId as string) : null, orderItemId: isStockBatch ? null : (orderItemId as string) }),
-      greenBeanId,
-    );
+    const roastProductId = await batchProductId(tx, { productId: isStockBatch ? (productId as string) : null, orderItemId: isStockBatch ? null : (orderItemId as string) });
+    const profileVersionId = await resolveApprovedVersionId(tx, roastProductId, greenBeanId);
     const newBatch = await tx.roastingBatch.create({
       data: {
         orderItemId: isStockBatch ? null : orderItemId,
@@ -729,7 +728,7 @@ export async function POST(request: Request) {
     }
 
     if (previousQuantity !== null && newQuantity !== null) {
-      await tx.inventoryMovement.create({
+      const greenMovement = await tx.inventoryMovement.create({
         data: {
           type:              "OUT",
           category:          "RAW_MATERIAL",
@@ -758,6 +757,9 @@ export async function POST(request: Request) {
           ].filter(Boolean).join(" ") || null,
         },
       });
+      // Accounting A3: green out at the lot's moving average into WIP, roasted coffee in at the green cost
+      // (normal loss absorbed, abnormal loss above the owner's threshold to ROAST_LOSS) — in this transaction.
+      await onRoast(tx, { batchId: newBatch.id, batchNumber: newBatch.batchNumber, greenBeanId, greenKg: qty, roastedKg: roastedQty, productId: roastProductId, actor: user.id, movementId: greenMovement.id });
     }
 
     if (!isStockBatch) await recalcOrderItemStatus(orderItemId as string, tx);
@@ -828,6 +830,8 @@ export async function POST(request: Request) {
       actorId: user.id,
     });
 
+    // Accounting A3: the roast's queued entries post last, after every row it locks (see flushPostings).
+    await flushPostings(tx);
     return { ...newBatch, scheduledSlotId: scheduledSlotId ?? newBatch.scheduledSlotId, greenSource, roaster: roasterCheck ? { id: roasterCheck.roaster.id, name: roasterCheck.roaster.name, acknowledged: !!roasterCheck.ack, adminBypass: roasterCheck.bypass } : null, ...(queueMode ? { queue: { allocatedTo: newBatch.orderItemId, demandKg: queueEvidence?.demandKg ?? 0, toStockKg: queueEvidence?.toStockKg ?? 0 } } : {}) };
   }, TX_OPTS);
 

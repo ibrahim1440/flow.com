@@ -1,0 +1,27 @@
+/* Sales invoicing A2 — on top of the A1 accounting kit (acct.css) and the Direction 2.1 tokens ([data-hr-root]); no new colour.
+   Figma ZT-01 / ZT-10 / ZT-11 / ZT-14. */
+.inv .inv-seg { display: inline-flex; border: 1px solid var(--hr-border-strong); border-radius: var(--hr-r-md); padding: 2px; gap: 2px; background: var(--hr-subtle); flex-wrap: wrap; }
+.inv .inv-seg button { appearance: none; border: 0; background: none; font: inherit; font-size: 13px; padding: 4px 12px; border-radius: var(--hr-r-sm); color: var(--hr-text-2); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.inv .inv-seg button[aria-pressed="true"] { background: var(--hr-surface); color: var(--hr-text); font-weight: 500; box-shadow: inset 0 0 0 1px var(--hr-border-strong); }
+.inv .inv-sub { display: block; font-size: 12px; color: var(--hr-muted); }
+.inv .inv-late { color: var(--hr-danger); }
+.inv .inv-grid2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+.inv .inv-totals { display: flex; flex-direction: column; gap: 6px; min-width: 240px; }
+.inv .inv-totals > div { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+.inv .inv-totals > div.g { font-weight: 600; border-top: 1px solid var(--hr-border-strong); padding-top: 8px; font-size: 15px; }
+.inv .inv-totals dd { margin: 0; font-family: var(--hr-num); direction: ltr; }
+.inv .inv-lines td { vertical-align: top; }
+.inv .inv-lines .hr-input { min-width: 72px; }
+.inv .inv-lines .w-desc { min-width: 200px; }
+.inv .inv-check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.inv .inv-check li::before { content: "•"; color: var(--hr-warning); margin-inline-end: 6px; }
+.inv .inv-qr { width: 132px; height: 132px; border: 1px dashed var(--hr-border-strong); border-radius: var(--hr-r-sm); display: grid; place-items: center; text-align: center; font-size: 11.5px; color: var(--hr-muted); padding: 8px; }
+.inv .inv-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; background: var(--hr-subtle); color: var(--hr-text-2); }
+.inv .inv-chip.is-warn { background: var(--hr-warning-tint); color: var(--hr-warning); }
+.inv .inv-chip.is-ok { background: var(--hr-success-tint); color: var(--hr-success); }
+.inv .inv-aging td.num, .inv .inv-aging th.num { white-space: nowrap; }
+@media (max-width: 1023px) { .inv .inv-grid2 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 767px) {
+  .inv .inv-hide-m { display: none; }
+  .inv .inv-lines { display: block; overflow-x: auto; }
+}

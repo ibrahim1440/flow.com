@@ -358,6 +358,11 @@ export const NAV: NavNode[] = [
         id: "finance.collections",
         ar: "التحصيلات", en: "Collections",
         href: "/dashboard/sales/collections",
+        // Sales invoicing A2 (Figma ZT-10): «الفواتير والتحصيل» is the hub of the tax invoices, the credit / debit
+        // notes, the collections and the AR aging / statements — tabs of one destination, as drawn. The invoice and
+        // AR pages belong to it, with its audience unchanged (access parity); each page's API decides what is shown
+        // (sales › invoices_view, scoped for a rep, or accounting › ar).
+        alsoMatches: ["/dashboard/sales/invoices", "/dashboard/sales/receivables"],
         anyOf: [sales(), ...DECIDES_COLLECTIONS],
         shell: {
           ar: "الفواتير والتحصيل", en: "Invoices & collections", icon: "invoice",
@@ -582,6 +587,15 @@ export const NAV: NavNode[] = [
         href: "/dashboard/purchases",
         anyOf: [{ module: "inventory" }],
         shell: { icon: "truck", trailRoot: "inventory" },
+      },
+      {
+        // Accounting A3: supplier invoices — entered by purchasing (purchases › invoices), approved and posted by
+        // accounts payable (accounting › ap). Figma ACC-50 / 51.
+        id: "stock.supplierInvoices",
+        ar: "فواتير الموردين", en: "Supplier invoices",
+        href: "/dashboard/purchases/invoices",
+        anyOf: [{ module: "purchases", sub: "invoices" }, { module: "accounting", sub: "ap" }],
+        shell: { icon: "note", trailRoot: "inventory" },
       },
       {
         id: "stock.products",

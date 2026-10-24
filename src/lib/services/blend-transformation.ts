@@ -1,6 +1,7 @@
 // A value import, not a type-only one: Prisma.join below builds the IN list for the
 // FOR UPDATE query, and Prisma.InventoryMovementCreateManyInput is used as a type from the
 // same namespace.
+import { onBlend } from "@/lib/accounting/ops/inventory-events";
 import { Prisma } from "@/generated/prisma/client";
 
 type PrismaTx = Prisma.TransactionClient;
@@ -309,4 +310,6 @@ export async function recordBlendMovements(
   });
 
   await tx.inventoryMovement.createMany({ data: rows });
+  // Accounting A3: the cost moves with the coffee (sources out at their averages, the blend in at their sum).
+  await onBlend(tx, { blendBatchId: params.blendBatchId, consumed: params.consumed, actor: params.userId ?? "system" });
 }

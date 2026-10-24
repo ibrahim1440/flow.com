@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { NextResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { requireAuth, stockChangeGate } from "@/lib/auth-server";
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
       });
       if (booked.noChange) return { noChange: true as const, currentQuantity: booked.previousQuantity };
       const updatedBean = await tx.greenBean.findUniqueOrThrow({ where: { id: entityId } });
+      await flushPostings(tx);
       return { noChange: false as const, updatedBean, quantityChanged: booked.quantityChanged };
     });
 

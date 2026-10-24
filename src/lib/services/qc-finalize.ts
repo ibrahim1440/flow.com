@@ -2,6 +2,9 @@ import type { Prisma } from "@/generated/prisma/client";
 import { recalcOrderItemStatus } from "@/lib/services/order-fulfillment";
 import { recalcProductionOrderStatus } from "@/lib/services/production-planning";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { onRoastedWriteOff } from "@/lib/accounting/ops/inventory-events";
+import { batchProductId } from "@/lib/services/qc/profiles";
+import type { Src } from "@/lib/accounting/ops/cost-ledger";
 
 type Tx = Prisma.TransactionClient;
 
@@ -39,6 +42,8 @@ export async function applyQcDecision(tx: Tx, args: {
   check: QcDecisionOk;
   min: number;
   actor: { id: string };
+  /** Accounting A3: the source event the write-off of a rejection posts under (default: the batch's QC_REJECTED). */
+  costSource?: Src;
 }): Promise<QcDecisionApplied> {
   const { batch, outcome, check, min, actor } = args;
   const now = new Date();
@@ -68,7 +73,7 @@ export async function applyQcDecision(tx: Tx, args: {
     const available = +(row?.roastedAvailableKg ?? 0).toFixed(3);
     if (available > 0) {
       await tx.roastingBatch.update({ where: { id: batch.id }, data: { roastedAvailableKg: 0 } });
-      await tx.inventoryMovement.create({
+      const lossMovement = await tx.inventoryMovement.create({
         data: {
           type: "LOSS",
           category: "ROASTED_COFFEE",
@@ -83,6 +88,14 @@ export async function applyQcDecision(tx: Tx, args: {
         },
       });
       lossKg = available;
+      // Accounting A3: the rejected roast's cost → WASTAGE (Dr WASTAGE / Cr INVENTORY_ROASTED), in this transaction.
+      const full = await tx.roastingBatch.findUnique({ where: { id: batch.id }, select: { productId: true, orderItemId: true } });
+      await onRoastedWriteOff(tx, {
+        batchId: batch.id, kg: available, closeOut: true,
+        src: args.costSource ?? { module: "production", type: "ROAST_BATCH", id: batch.id, event: "QC_REJECTED" },
+        productId: full ? await batchProductId(tx, { productId: full.productId, orderItemId: full.orderItemId }) : null,
+        memo: `شطب دفعة مرفوضة في الجودة ${row?.batchNumber ?? ""}`, reason: check.decisionReason, actor: actor.id, movementId: lossMovement.id,
+      });
     }
   }
 

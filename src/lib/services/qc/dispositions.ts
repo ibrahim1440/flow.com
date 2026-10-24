@@ -15,6 +15,7 @@
 // Never CONVERT or BLEND a batch held for foreign objects (blending never hides a defect it cannot
 // clean). Requested by QC (qc › manage); decided by qc › dispose (privileged, step-up — the route),
 // never by the requester nor the inspector of the hold.
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { prisma, TX_OPTS } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { readQcSettings } from "@/lib/services/settings/sections";
@@ -25,6 +26,7 @@ import { recalcProductionOrderStatus } from "@/lib/services/production-planning"
 import { DISPOSITION_KINDS, DISPOSITION_WORD, QC_HOLD_STATUS, meetsSpec, snapshotOf, type DispositionKind, type SensoryResult } from "@/lib/qc/spec";
 import { batchProductId, refuse, resolveApprovedVersionId, VERSION_SELECT } from "./profiles";
 import { measurementsOf, nextNumber, sodBlock } from "./exceptions";
+import { onRoastedWriteOff } from "@/lib/accounting/ops/inventory-events";
 
 type Actor = { id: string; name: string };
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -151,7 +153,7 @@ export async function decideDisposition(actor: Actor, id: string, raw: Record<st
       let movementId: string | null = null;
       if (qty >= available - 0.0005) {
         // The whole remainder: the existing QC write-off (LOSS · ROASTED_COFFEE, status «مرفوضة»).
-        const applied = await applyQcDecision(tx, { batch: { id: b.id, status: QC_HOLD_STATUS, orderItemId: b.orderItemId, productionOrderId: b.productionOrderId, batchNumber: b.batchNumber }, outcome: "Rejected", check: { ok: true, overrideApplied: false, decisionReason: `إتلاف ${d.number}: ${d.reason}`.slice(0, 500), overrideReason: null }, min, actor });
+        const applied = await applyQcDecision(tx, { batch: { id: b.id, status: QC_HOLD_STATUS, orderItemId: b.orderItemId, productionOrderId: b.productionOrderId, batchNumber: b.batchNumber }, outcome: "Rejected", check: { ok: true, overrideApplied: false, decisionReason: `إتلاف ${d.number}: ${d.reason}`.slice(0, 500), overrideReason: null }, min, actor, costSource: { module: "inventory", type: "QC_DISPOSITION", id: d.id, event: "EXECUTED" } });
         if (!applied.decided) throw refuse(409, "NOT_HELD", "الدفعة لم تعد محجوزة.", "The batch is no longer held.");
         movementId = (await tx.inventoryMovement.findFirst({ where: { referenceEntityId: b.id, type: "LOSS", category: "ROASTED_COFFEE" }, orderBy: { timestamp: "desc" }, select: { id: true } }))?.id ?? null;
       } else if (qty > 0) {
@@ -161,9 +163,13 @@ export async function decideDisposition(actor: Actor, id: string, raw: Record<st
           data: { type: "LOSS", category: "ROASTED_COFFEE", referenceEntityId: b.id, quantityChanged: -qty, previousQuantity: available, newQuantity: kg3(available - qty), sourceDocType: "ROASTING_BATCH", sourceDocId: b.id, userId: actor.id, notes: `QC disposal ${d.number} of held batch ${b.batchNumber}: ${d.reason}`.slice(0, 1000) },
         });
         movementId = mv.id;
+        // Accounting A3: the destroyed kilograms at the roast's cost → WASTAGE.
+        await onRoastedWriteOff(tx, { batchId: b.id, kg: qty, closeOut: false, src: { module: "inventory", type: "QC_DISPOSITION", id: d.id, event: "EXECUTED" }, productId: await batchProductId(tx, b), memo: `إتلاف ${d.number} · دفعة ${b.batchNumber}`, reason: d.reason, actor: actor.id, movementId: mv.id });
       }
       await tx.qcDisposition.update({ where: { id }, data: { status: "EXECUTED", ...decided, executedAt: now, executedById: actor.id, movementId, quantityKg: qty > 0 ? qty : d.quantityKg } });
       await say("APPROVED");
+      // Accounting A3: the write-off entry posts last, after every row this transaction locks.
+      await flushPostings(tx);
       return { status: "EXECUTED", destroyedKg: qty, movementId };
     }
     // CONVERT: re-check against the target's CURRENT approved version (it may have changed since the request).

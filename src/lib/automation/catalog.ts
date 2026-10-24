@@ -115,6 +115,13 @@ export const COLLECTION_STATUS_OPTIONS: EnumOption[] = [
   { value: "REVERSED", ar: "معكوس", en: "Reversed" },
 ];
 
+/** Sales invoicing A2: the document kinds an «invoice issued» event names. */
+export const INVOICE_KIND_OPTIONS: EnumOption[] = [
+  { value: "INVOICE", ar: "فاتورة ضريبية", en: "Tax invoice" },
+  { value: "CREDIT_NOTE", ar: "إشعار دائن", en: "Credit note" },
+  { value: "DEBIT_NOTE", ar: "إشعار مدين", en: "Debit note" },
+];
+
 const APPROVAL_TYPE_OPTIONS: EnumOption[] = [
   { value: "BUDGET_APPROVAL", ar: "اعتماد ميزانية", en: "Budget approval" },
   { value: "ALLOCATION_RULES", ar: "قواعد التوزيع", en: "Allocation rules" },
@@ -362,6 +369,27 @@ export const EVENTS: EventDef[] = [
       ...COMMON_VARS,
     ],
     recipients: ["customer", "deal_owner", "actor"],
+  },
+  {
+    // Sales invoicing A2 (20261103090000_sales_invoicing): a tax invoice / credit / debit note was issued.
+    key: "sales.invoice_status_changed",
+    group: "sales",
+    ar: "صدرت فاتورة",
+    en: "Invoice issued",
+    description: {
+      ar: "عند إصدار فاتورة ضريبية أو إشعار دائن أو مدين لعميل.",
+      en: "When a tax invoice, credit note or debit note is issued to a customer.",
+    },
+    variables: [
+      v("invoice.number", "رقم المستند", "Document number", "INV-000123"),
+      v("invoice.kind", "نوع المستند", "Document kind", "INVOICE", "enum", INVOICE_KIND_OPTIONS),
+      v("invoice.total", "الإجمالي شامل الضريبة", "Total incl. VAT", "22,862.00 SAR"),
+      v("invoice.dueDate", "تاريخ الاستحقاق", "Due date", "2026-11-30"),
+      v("order.number", "رقم الطلب", "Order number", "1042"),
+      v("customer.name", "اسم العميل", "Customer name", "مقهى الركن"),
+      ...COMMON_VARS,
+    ],
+    recipients: ["customer", "order_owner", "actor"],
   },
   {
     key: "sales.task_due",

@@ -48,6 +48,9 @@ export const ALL_MODULES = [
   // Native HR — people, contracts, time, leave, payroll, advances. Self-service is not a
   // module: every login reaches its own HR record at /dashboard/me, scoped server-side.
   "hr",
+  // Accounting A3 (20261104090000): purchasing documents — entering supplier invoices (drafts). Posting them,
+  // paying them and the AP ledger stay accounting › ap. Nobody holds it by a role default.
+  "purchases",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -73,6 +76,7 @@ export const MODULE_LABELS: Record<string, string> = {
   finance: "Finance (Cash & Budget)",
   automation: "Automation / WhatsApp",
   hr: "Human Resources",
+  purchases: "Purchases (supplier invoices)",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -92,6 +96,15 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     // receipt from also being able to bless it.
     { key: "collection_submit", label: "Record a collection against an owned deal" },
     { key: "collection_view_team", label: "See the team's collections, not only my own" },
+    // ── Sales invoicing A2 (20261103090000_sales_invoicing) ── new capabilities nobody held: permission-backfill
+    // writes them adminOnly. Issuing and credit / debit notes are privileged (verified individual + step-up); a
+    // note is not issued by its own preparer (four-eyes; SIMPLE MODE records the bypass). A rep who holds
+    // invoices_view without lead_assign sees only the invoices of the customers they own.
+    { key: "invoices_view", label: "See sales invoices and credit / debit notes" },
+    { key: "invoices_create", label: "Create and edit invoice drafts (manual, from an order or a delivery)" },
+    { key: "invoices_issue", label: "Issue a tax invoice (numbered, final)" },
+    { key: "invoices_cancel", label: "Cancel an invoice draft (before issue)" },
+    { key: "invoices_credit_note", label: "Prepare and issue credit / debit notes" },
   ],
   // Fine-grained on purpose: every key below decides either what somebody is paid or who
   // gets to see it, and "manage_plans" in particular must never fall to the person the
@@ -121,6 +134,9 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "receive", label: "Receive new beans" },
     { key: "adjust", label: "Edit / adjust stock" },
     { key: "override", label: "Override inventory (force restock cancelled batches)" },
+    // Accounting A3: the cost of stock (average costs, values, production cost per roast). A new capability —
+    // not part of the inventory role (see buildDefaultPermissions); permission-backfill writes it adminOnly.
+    { key: "valuation", label: "See inventory valuation and production costs" },
   ],
   orders: [
     { key: "create", label: "Create new orders" },
@@ -206,6 +222,27 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "journal_post", label: "Post journal entries" },
     { key: "journal_reverse", label: "Reverse posted journal entries" },
     { key: "export_view", label: "View Qoyod export records" },
+    // Accounting core A1 (20261102090000): reopening a CLOSED period is its own duty (reasoned, audited,
+    // step-up); the opening-balance wizard (enter / import the grid, post it once at the go-live date).
+    // New capabilities nobody held — permission-backfill writes them adminOnly.
+    { key: "period_reopen", label: "Reopen a closed fiscal period (with a reason)" },
+    { key: "opening_balance", label: "Enter, import and post the opening balances" },
+    // Sales invoicing A2: the AR sub-ledger — apply receipts and credits to invoices, statements, aging.
+    { key: "ar", label: "Accounts receivable: apply receipts, statements and aging" },
+    // Accounting A3 (20261104090000): the AP ledger — approve and post supplier invoices (never one's own),
+    // record and void supplier payments, cancel posted invoices. Step-up; adminOnly in the backfill.
+    { key: "ap", label: "Accounts payable: post supplier invoices, record supplier payments" },
+    // ZATCA Phase 2 A4 (20261105090000_zatca_phase2) — new capabilities nobody held: permission-backfill writes them
+    // adminOnly. Onboarding (EGS units, OTP, CSIDs, renewal, the e-invoicing switch, the numbering cut-over) is also
+    // admin-role only, with step-up.
+    { key: "zatca_view", label: "E-invoicing (ZATCA): see the EGS units, the submission log and the queue" },
+    { key: "zatca_onboard", label: "E-invoicing (ZATCA): onboard / renew EGS units and switch e-invoicing (admin + step-up)" },
+    { key: "zatca_resubmit", label: "E-invoicing (ZATCA): send a pending or failed document again" },
+    { key: "zatca_xml", label: "E-invoicing (ZATCA): download the signed / cleared XML" },
+  ],
+  // Accounting A3: entering supplier invoices (drafts) and submitting them for approval.
+  purchases: [
+    { key: "invoices", label: "Enter supplier invoices and submit them for approval" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester
@@ -307,7 +344,7 @@ export function buildDefaultPermissions(role: string): Permissions {
       // and every view, and signs in with its PIN alone. adjust / override are granted only
       // individually, to an authorised supervisor, through the second-person permission flow.
       return {
-        dashboard: allEdit("dashboard"), inventory: allEdit("inventory", ["adjust", "override"]),
+        dashboard: allEdit("dashboard"), inventory: allEdit("inventory", ["adjust", "override", "valuation"]),
         orders: none(), production: none(), qc: none(),
         packaging: none(), dispatch: none(), history: none(),
         analytics: none(), labels: none(), employees: none(), cupping: none(), settings: none(),

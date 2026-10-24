@@ -1,24 +1,18 @@
 import { NextResponse } from "@/lib/api-response";
 import { requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
 import { submitJournalEntry } from "@/lib/accounting/journal-service";
-import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
+import { acctError } from "@/lib/accounting/http";
+import { auditFromRequest } from "@/lib/accounting/audit";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function PATCH(_request: Request, { params }: Params) {
+export async function PATCH(request: Request, { params }: Params) {
   const { user, error } = await requireSub("accounting", "journal_submit");
   if (error) return error;
-
   const { id } = await params;
-
   try {
-    const entry = await submitJournalEntry(id, user.id);
-    return NextResponse.json(entry);
+    return NextResponse.json(await submitJournalEntry(id, auditFromRequest(request, user.id)));
   } catch (err) {
-    if (err instanceof AccountingError) {
-      return NextResponse.json(accountingErrorJson(err), { status: err.status });
-    }
-    return handlePrismaError(err);
+    return acctError(err);
   }
 }

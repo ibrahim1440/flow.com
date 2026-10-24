@@ -48,6 +48,8 @@ export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
   ["qc", "finalize_override"],
   // QC station W3 (owner decision 4, UR-S19): the exception approver and the disposal decider.
   ["qc", "approve_exception"], ["qc", "dispose"],
+  // Sales invoicing A2: issuing a tax invoice and the credit / debit notes (verified individual + step-up).
+  ["sales", "invoices_issue"], ["sales", "invoices_credit_note"],
 ];
 
 /** Why an account is privileged (empty = operational). Stable keys, for the audit and the report. */

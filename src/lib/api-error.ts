@@ -1,6 +1,9 @@
 import { NextResponse } from "@/lib/api-response";
 import { withArabicError } from "@/lib/i18n/api-errors";
 import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_DISABLED_EN } from "@/lib/accounting/manual-journals-messages";
+import { ledgerDbRefusal } from "@/lib/accounting/refusals";
+import { AccountingError, accountingErrorJson } from "@/lib/accounting/errors";
+import { opsDbRefusal } from "@/lib/accounting/ops/refusals";
 
 /**
  * A refusal the domain raised deliberately, mapped to the status it asked for.
@@ -39,6 +42,15 @@ export function handlePrismaError(err: unknown): NextResponse {
   if (/LEDGER: manual journals are disabled \(Phase 1\)/.test(msg)) {
     return NextResponse.json({ error: MANUAL_JOURNALS_DISABLED_AR, errorEn: MANUAL_JOURNALS_DISABLED_EN, code: MANUAL_JOURNALS_DISABLED }, { status: 409 });
   }
+  // Accounting core A1 (20261102090000): the ledger's own guards (balance, immutability, closed period,
+  // postable account, go-live, the opening grid …) — a coded 409 refusal, never a crash.
+  const ledger = ledgerDbRefusal(msg);
+  if (ledger) return NextResponse.json(accountingErrorJson(ledger), { status: ledger.status });
+  // Accounting A3 (20261104090000): a posting refused inside an operation (an unmapped role, a closed period …) is
+  // a coded refusal of the operation, never a crash; so are the cost / AP sub-ledger guards.
+  if (err instanceof AccountingError) return NextResponse.json(accountingErrorJson(err), { status: err.status });
+  const ops = opsDbRefusal(msg);
+  if (ops) return NextResponse.json(accountingErrorJson(ops), { status: ops.status });
   if (/a journal posted by HR is (reversed|changed)|journal posted by HR/i.test(msg)) {
     return NextResponse.json({ error: "قيد الموارد البشرية لا يُعكس ولا يُعدّل إلا من خلال الموارد البشرية.", errorEn: "A journal posted by HR is reversed or changed only through HR.", code: "HR_JOURNAL" }, { status: 409 });
   }

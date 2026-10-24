@@ -1,3 +1,4 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
 import { autoPrepareAfterBatches } from "@/lib/services/orders/preparation";
 import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
@@ -190,6 +191,7 @@ export async function POST(request: Request, { params }: Params) {
         skus: prepared.skus,
         userId: user.id,
         operationId: null,
+        requestKey: key.key,
       });
 
       // ── Claim the new units for the order they were roasted for ───────────
@@ -338,6 +340,8 @@ export async function POST(request: Request, { params }: Params) {
         actorId: user.id,
       });
 
+      // Accounting A3: the packaging run's entry posts last, after every row this transaction locks.
+      await flushPostings(tx);
       return responseBody;
     }, TX_OPTS);
 

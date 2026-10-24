@@ -786,6 +786,14 @@ export default function OrdersPage() {
                   [t("opsPaymentCol"), <StatusBadge key="p" status={order.paymentStatus} />],
                 ]} />
 
+                {/* Sales invoicing A2: «إنشاء فاتورة من الطلب» (invoices_create) and the order's invoices (invoices_view). */}
+                {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_create") || hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_view") ? (
+                  <div className="hr-meta" style={{ gap: 8 }} data-testid={`order-invoicing-${order.orderNumber}`}>
+                    {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_create") ? <Link href={`/dashboard/sales/invoices/new?orderId=${encodeURIComponent(order.id)}`} className="hr-btn is-sm" data-testid="order-create-invoice">{lang === "ar" ? "إنشاء فاتورة من الطلب" : "Invoice this order"}</Link> : null}
+                    {hasSubPrivilege(user?.permissions ?? {}, "sales", "invoices_view") ? <Link href={`/dashboard/sales/invoices?orderId=${encodeURIComponent(order.id)}`} className="hr-btn is-ghost is-sm">{lang === "ar" ? "فواتير الطلب" : "Order invoices"}</Link> : null}
+                  </div>
+                ) : null}
+
                 <section>
                   <h3 className="hr-label" style={{ margin: "0 0 4px" }}>{t("orderItemsLabel")}</h3>
                   <ul className="ops-list">

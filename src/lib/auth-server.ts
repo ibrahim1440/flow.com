@@ -180,6 +180,15 @@ export const STEP_UP_KEYS: ReadonlySet<string> = new Set([
   "settings.reset", "settings.training_reset",
   "inventory.adjust", "inventory.override", "orders.approve",
   "accounting.journal_approve", "accounting.journal_post", "accounting.journal_reverse", "accounting.period_lock", "accounting.period_close",
+  // Accounting core A1: reopening a closed period steps up (activation, role mapping, the chart seed and the
+  // opening post step up inline, requirePrivilegedAction).
+  "accounting.period_reopen",
+  // Sales invoicing A2: issuing a tax invoice and a credit / debit note step up.
+  "sales.invoices_issue", "sales.invoices_credit_note",
+  // Accounting A3: posting a supplier invoice, recording / voiding a supplier payment, cancelling an invoice.
+  "accounting.ap",
+  // ZATCA Phase 2 A4: onboarding (OTP, CSIDs, renewal, the e-invoicing switch, the numbering cut-over) steps up.
+  "accounting.zatca_onboard",
   "finance.budget_approve", "finance.transfer_approve", "finance.spend_override_approve", "finance.period_close", "finance.payment",
   // Owner decision 19 Oct: a power user changing another account's access steps up like the administrator.
   "employees.manage_access",

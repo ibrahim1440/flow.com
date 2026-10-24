@@ -9,6 +9,7 @@ import { componentsVersionForPeriod, computeBuilderPeriod, serializePeriod } fro
 import { isReservedByPayroll, lockCommissionPeriod } from "@/lib/hr/services/commission-bridge";
 import { isPayrollLive, payrollLockedRefusal } from "@/lib/hr/payroll-lock";
 import { isSimpleMode } from "@/lib/simple-mode";
+import { postCommissionPayout } from "@/lib/accounting/ops/commissions-gl";
 
 /**
  * POST /api/commissions/review/actions — approve a period, adjust it, or record a payout.
@@ -280,6 +281,8 @@ export async function POST(request: Request) {
         where: { employeeId, periodStart, status: "APPROVED" },
         data: { status: "PAID" },
       });
+      // Accounting A3: the payout clears the payable (Dr COMMISSION_PAYABLE / Cr BANK), in this transaction.
+      await postCommissionPayout(tx, { ledgerEntryId: entry.id, employeeId, periodStart, amount, actorId: user.id });
 
       const after = await periodStatement(tx, employeeId, periodStart);
       return { entryId: entry.id, after };

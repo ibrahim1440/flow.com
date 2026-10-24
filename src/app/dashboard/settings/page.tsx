@@ -487,7 +487,9 @@ export default function SettingsPage() {
           <Field label={L("الرقم الضريبي", "VAT number")} help={L("15 رقمًا يبدأ وينتهي بـ 3", "15 digits, starting and ending with 3")}>
             <input className="hr-input" dir="ltr" inputMode="numeric" value={seller.sellerVatNumber} maxLength={40} onChange={(e) => setSeller({ ...seller, sellerVatNumber: e.target.value })} data-testid="seller-vat" />
           </Field>
-          <Field label={L("السجل التجاري", "Commercial registration")} help={L("10 أرقام", "10 digits")}>
+          {/* A5 (owner, 24 Oct 2026): this field holds the MoC UNIFIED national number (700…, e.g. 7029175754) — the seller's
+              CRN on every invoice (ZATCA PartyIdentification schemeID="CRN"); the old CR number is also valid but not used. */}
+          <Field label={L("الرقم الوطني الموحد (السجل التجاري)", "Unified national number (CR)")} help={L("10 أرقام — الرقم الموحد من وزارة التجارة (يبدأ بـ 7)، ويُطبع على الفواتير كرقم السجل", "10 digits — the MoC unified number (starts with 7), printed on invoices as the CR")}>
             <input className="hr-input" dir="ltr" inputMode="numeric" value={seller.sellerCrNumber} maxLength={40} onChange={(e) => setSeller({ ...seller, sellerCrNumber: e.target.value })} data-testid="seller-cr" />
           </Field>
           <Field label={L("الهاتف", "Phone")}>

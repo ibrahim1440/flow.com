@@ -52,6 +52,7 @@ export type StatusSourceKey =
   | "deal_stage"
   | "deal_outcome"
   | "collection"
+  | "sales_invoice"
   | "finance_approval";
 
 /** How the sync reads the source's current statuses (sync.ts runs these). */
@@ -217,6 +218,20 @@ export const STATUS_SOURCES: StatusSource[] = [
     defaultTemplate: "مرحبًا {{customer.name}}، دفعتكم بمبلغ {{collection.amount}} أصبحت «{{status.name}}».",
   },
   {
+    // Sales invoicing A2: «صدرت فاتورة» — OFF by default (every new rule row is), editable like the others.
+    key: "sales_invoice",
+    ar: "الفواتير الضريبية",
+    en: "Tax invoices",
+    description: { ar: "عند إصدار فاتورة ضريبية أو إشعار دائن أو مدين للعميل.", en: "When a tax invoice, credit note or debit note is issued to the customer." },
+    known: [s("ISSUED", "صدرت", "Issued")],
+    collector: { kind: "static" },
+    userDefined: false,
+    events: ["sales.invoice_status_changed"],
+    fires: ["ISSUED"],
+    recipients: ["customer", "order_owner", "actor", "admins"],
+    defaultTemplate: "مرحبًا {{customer.name}}، صدرت لكم {{invoice.kind}} رقم {{invoice.number}} بإجمالي {{invoice.total}} شامل الضريبة، تستحق في {{invoice.dueDate}}.",
+  },
+  {
     key: "finance_approval",
     ar: "طلبات الاعتماد المالي",
     en: "Finance approvals",
@@ -322,6 +337,8 @@ export function statusesOfEvent(eventType: string, payload: unknown): StatusHit[
     }
     case "sales.collection_status_changed":
       return hit("collection", p.to);
+    case "sales.invoice_status_changed":
+      return hit("sales_invoice", p.to);
     case "finance.approval_requested":
       return hit("finance_approval", "PENDING");
     case "finance.approval_decided":

@@ -145,6 +145,12 @@ export async function POST(request: Request) {
       // a slot outlives its customer by design so the orphan sweep still deletes its blob (an hour on).
       prisma.productSKU.deleteMany(),
       prisma.coffeeProduct.deleteMany(),
+      // 20261104090000_ops_posting (accounting A3): the supplier invoices and payments name the suppliers cleared
+      // next (ON DELETE RESTRICT): payments first (their allocations cascade), then the invoices (their lines
+      // cascade). The ledger, the cost sub-ledger (append-only) and the expense categories are NOT cleared — the
+      // books outlive a reset of operational data, like the A1 ledger.
+      prisma.supplierPayment.deleteMany(),
+      prisma.supplierInvoice.deleteMany(),
       prisma.supplier.deleteMany(),
     ]);
     await deleteCustomerFileBlobs(prisma, blobs.map((b) => b.blobPathname));

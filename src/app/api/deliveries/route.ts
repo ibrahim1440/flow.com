@@ -1,3 +1,5 @@
+import { flushPostings } from "@/lib/accounting/ops/cost-ledger";
+import { onDelivery } from "@/lib/accounting/ops/inventory-events";
 import { autoCloseAfterDelivery, autoPrepareOrder } from "@/lib/services/orders/preparation";
 import { settleProductionOrders } from "@/lib/services/production-schedule";
 import { assertLotsNotHeld } from "@/lib/services/qc/hold-guard";
@@ -25,6 +27,7 @@ import {
   type OrderStatus,
 } from "@/lib/services/order-operations";
 import { emitAutomationEvent } from "@/lib/automation/emit";
+import { draftOnDelivery } from "@/lib/services/invoicing/service";
 import { emitDeliveryProgress } from "@/lib/services/orders/progress-events";
 import { canSeeCustomerContact, CUSTOMER_DELIVERY_SELECT } from "@/lib/auth/customer-detail";
 import { settlePicksOnDelivery } from "@/lib/services/station/prep-settle";
@@ -268,6 +271,7 @@ export async function POST(request: Request) {
         // ── Ship lot by lot: reservation first, then free units (consumeFinishedUnits) ──
         const kgShares = splitKg(shippedKg, plan.map((p) => kgForUnits(sku, p.units)));
         const lines: { lotId: string; batchNumber: string; units: number; kg: number }[] = [];
+        const costLines: { lotId: string; kg: number; emptied: boolean; units: number; unitsBefore: number }[] = [];
         for (const [i, p] of plan.entries()) {
           const shipped = await consumeFinishedUnits(tx, orderItem, p.lotId, p.units, user.id);
           if (!shipped) {
@@ -299,7 +303,10 @@ export async function POST(request: Request) {
             },
           });
           lines.push({ lotId: p.lotId, batchNumber: lot.batchNumber, units: p.units, kg: kgShares[i] });
+          costLines.push({ lotId: p.lotId, kg: kgShares[i], emptied: shipped.newUnits <= 0, units: p.units, unitsBefore: shipped.previousUnits });
         }
+        // Accounting A3: COGS at each lot's cost (Dr COGS · customer / Cr INVENTORY_PACKED), with the delivery.
+        await onDelivery(tx, { deliveryId: delivery.id, lines: costLines, actor: user.id });
         // Traceability (gap G09): which lots, how much from each. Sums equal the Delivery.
         await tx.deliveryLine.createMany({
           data: lines.map((l) => ({ deliveryId: delivery.id, finishedGoodsLotId: l.lotId, quantityUnits: l.units, quantityKg: l.kg })),
@@ -335,6 +342,8 @@ export async function POST(request: Request) {
         // Owner decision O2 (Phase B item 8): the last delivery closes the order, in this same
         // transaction, when completionRefusal passes — never while a reservation is live.
         const closed = await autoCloseAfterDelivery(tx, orderItem.orderId, { id: user.id, name: user.name });
+        // Accounting A3: the COGS entry posts last, after every row this transaction locks.
+        await flushPostings(tx);
         return { delivery, replayed: false, orderId: orderItem.orderId, closed };
       }
 
@@ -424,6 +433,7 @@ export async function POST(request: Request) {
       // reservation on the lot first and only touches free stock for the remainder.
       const kgShares = splitKg(qty, kgPlan.map((p) => p.kg));
       const kgLines: { lotId: string; batchNumber: string; kg: number }[] = [];
+      const kgCostLines: { lotId: string; kg: number; emptied: boolean }[] = [];
       for (const [i, p] of kgPlan.entries()) {
         const shipped = await consumeShelfStock(tx, orderItem, p.lotId, kgShares[i], user.id);
         if (!shipped) {
@@ -454,7 +464,10 @@ export async function POST(request: Request) {
           },
         });
         kgLines.push({ lotId: p.lotId, batchNumber: lot.batchNumber, kg: kgShares[i] });
+        kgCostLines.push({ lotId: p.lotId, kg: kgShares[i], emptied: shipped.newQuantity <= 0 });
       }
+      // Accounting A3: COGS at each lot's cost, with the delivery.
+      await onDelivery(tx, { deliveryId: delivery.id, lines: kgCostLines, actor: user.id });
       await tx.deliveryLine.createMany({
         data: kgLines.map((l) => ({ deliveryId: delivery.id, finishedGoodsLotId: l.lotId, quantityUnits: null, quantityKg: l.kg })),
       });
@@ -479,6 +492,7 @@ export async function POST(request: Request) {
       });
       await emitDeliveryProgress(tx, { orderId: orderItem.orderId, orderItemId, deliveryId: delivery.id, units: null, kg: qty, actorId: user.id });
       const closed = await autoCloseAfterDelivery(tx, orderItem.orderId, { id: user.id, name: user.name });
+      await flushPostings(tx);
 
       return { delivery, replayed: false, orderId: orderItem.orderId, closed };
     }, TX_OPTS);
@@ -490,6 +504,12 @@ export async function POST(request: Request) {
       const actor = { id: user.id, name: user.name };
       if (outcome.closed) await settleProductionOrders({ orderId: outcome.orderId }, actor);
       else await autoPrepareOrder(outcome.orderId, "delivery", actor);
+    }
+    // Sales invoicing A2 — the invoicing point «عند التسليم» (Settings › Invoicing): what shipped opens (or extends)
+    // the order's draft invoice, reviewed and issued by a person. After the commit: a failure never undoes the
+    // delivery (the quantity stays on «إنشاء فاتورة من الطلب»). A no-op when the point is MANUAL (the default).
+    if (!outcome.replayed) {
+      await draftOnDelivery(outcome.delivery.id, user.id).catch((e: unknown) => console.error("[deliveries] invoice draft on delivery not created:", e instanceof Error ? e.message : e));
     }
     return NextResponse.json(await withLines(outcome.delivery), { status: outcome.replayed ? 200 : 201 });
   } catch (err: unknown) {

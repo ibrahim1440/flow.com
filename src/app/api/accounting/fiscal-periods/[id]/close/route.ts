@@ -1,12 +1,14 @@
 import { NextResponse } from "@/lib/api-response";
 import { requireAdminAction, requireSub } from "@/lib/auth-server";
-import { handlePrismaError } from "@/lib/api-error";
-import { closeFiscalPeriod } from "@/lib/accounting/fiscal-period-service";
-import { AccountingError } from "@/lib/accounting/errors";
+import { closePeriodWithChecklist } from "@/lib/accounting/close";
+import { acctError } from "@/lib/accounting/http";
+import { auditFromRequest } from "@/lib/accounting/audit";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function PATCH(_request: Request, { params }: Params) {
+/** Final close («إقفال نهائي»): LOCKED → CLOSED; the database then refuses every posting into it. A5: through the close
+ *  checklist — refused while a check FAILs, a WARN needs { note } — and recorded with it (PeriodCloseReview). */
+export async function PATCH(request: Request, { params }: Params) {
   const { user, error } = await requireSub("accounting", "period_close");
   if (error) return error;
   // Defense in depth: there is no role hierarchy above "admin" yet (see saas-readiness.md),
@@ -14,16 +16,12 @@ export async function PATCH(_request: Request, { params }: Params) {
   // The admin role is privileged: the same verified-individual gate, with a recent step-up.
   const refused = await requireAdminAction(user, "accounting.period_close", { stepUp: true, message: "Insufficient permissions." });
   if (refused) return refused;
-
   const { id } = await params;
-
   try {
-    const period = await closeFiscalPeriod(id, user.id);
-    return NextResponse.json(period);
+    const body = (await request.json().catch(() => null)) as { note?: unknown } | null;
+    const r = await closePeriodWithChecklist(id, body?.note, auditFromRequest(request, user.id));
+    return NextResponse.json(r.period);
   } catch (err) {
-    if (err instanceof AccountingError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
-    }
-    return handlePrismaError(err);
+    return acctError(err);
   }
 }
