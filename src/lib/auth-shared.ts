@@ -100,6 +100,9 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "view_own", label: "See my own commission" },
     { key: "view_team", label: "See the team's commission" },
     { key: "manage_plans", label: "Create / edit commission plans and assignments" },
+    // The commission settings (new-client window, lapse, eligibility, activation date) and the
+    // opening setup of existing customers — and, after activation, the audited order-sequence edit.
+    { key: "manage_settings", label: "Commission settings and the opening setup of existing customers" },
     { key: "approve", label: "Approve accrued commission" },
     { key: "record_payout", label: "Record a commission payout" },
     { key: "sandbox_collections", label: "Record sandbox collection events (non-production only)" },

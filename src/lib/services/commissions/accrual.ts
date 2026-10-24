@@ -4,6 +4,10 @@ import {
   selectPlanVersion, riyadhMonthStart, riyadhMonthEnd,
   type PlanRules,
 } from "./engine";
+import {
+  componentsVersionForPeriod, computeBuilderPeriod, isComponentsVersion, upsertPeriodResult,
+  type BuilderPeriod,
+} from "./builder-period";
 
 type Tx = PrismaNS.TransactionClient;
 
@@ -52,7 +56,23 @@ export type AccrualOutcome = {
   eventBase: PrismaNS.Decimal;
   /** The share applied to this event, recorded so the row explains itself. */
   sharePercent: PrismaNS.Decimal;
+  /**
+   * Set when the governing version is a COMPONENTS version (commission plan builder): the
+   * month's A / B / C computation the target amount above came from. Absent for tiered plans.
+   */
+  builder?: BuilderPeriod;
 };
+
+/**
+ * Serialise recomputations of one employee-month. The same advisory key the payroll bridge and
+ * the standalone payout take (hr/services/commission-bridge.ts lockCommissionPeriod), so a
+ * collection approval, a monthly run and a payout of the same month queue rather than race —
+ * a COMPONENTS month is a function of the WHOLE month (bonus brackets, over-target bands), so two
+ * concurrent recomputations would each post a difference against the same baseline.
+ */
+export async function lockEmployeePeriod(tx: Tx, employeeId: string, periodStart: Date): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"commission-period:" + employeeId + ":" + periodStart.toISOString()}))`;
+}
 
 export type CollectionInput = {
   id: string;
@@ -166,12 +186,56 @@ export async function recomputeEmployeePeriod(
    * expected to discard everything but the figure.
    */
   projectedExtraBase?: PrismaNS.Decimal,
+  /**
+   * COMPONENTS plans only: who the projected collection is from and which order it pays, so the
+   * projection is sequenced like the real collection will be. Ignored by tiered plans.
+   */
+  projectedContext?: { customerId: string | null; orderKey: string | null },
 ): Promise<AccrualOutcome | null> {
   const periodStart = riyadhMonthStart(at);
   const periodEnd = riyadhMonthEnd(at);
 
-  const planVersionId = await planVersionForEmployeeAt(tx, employeeId, at);
+  // A COMPONENTS month is computed as a whole under one version (the one in force at month end);
+  // a tiered plan keeps its selection by the date the cash arrived, exactly as before.
+  const planVersionId = (await componentsVersionForPeriod(tx, employeeId, at)) ?? (await planVersionForEmployeeAt(tx, employeeId, at));
   if (!planVersionId) return null;
+
+  if (await isComponentsVersion(tx, planVersionId)) {
+    const builder = await computeBuilderPeriod(tx, {
+      employeeId, planVersionId, at,
+      projected: projectedExtraBase
+        ? { customerId: projectedContext?.customerId ?? null, orderKey: projectedContext?.orderKey ?? null, base: projectedExtraBase, at }
+        : undefined,
+    });
+    const cumulativeBase = roundMoney(builder.computation.collectedBase);
+    const targetAmount = builder.computation.totalVariable;
+    let eventBase = ZERO;
+    let eventShare = new Decimal(100);
+    if (forEventId) {
+      const line = builder.detail.find((l) => l.ref === forEventId);
+      if (line) eventBase = new Decimal(line.base);
+      const ev = await tx.collectionEvent.findUnique({ where: { id: forEventId }, select: { id: true, opportunityId: true, collectedAt: true } });
+      if (ev) {
+        const mine = (await sharesForCollection(tx, ev, ev.collectedAt)).find((s) => s.employeeId === employeeId);
+        if (mine) eventShare = mine.sharePercent;
+      }
+    }
+    const recorded = await tx.commissionLedgerEntry.aggregate({
+      where: { employeeId, periodStart, type: { in: ["ACCRUAL", "REVERSAL"] } },
+      _sum: { amount: true },
+    });
+    const alreadyRecorded = roundMoney(recorded._sum.amount ?? ZERO);
+    const delta = roundMoney(targetAmount.minus(alreadyRecorded));
+    const effectiveRatePercent = cumulativeBase.isZero()
+      ? ZERO
+      : targetAmount.dividedBy(cumulativeBase).times(100).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
+    return {
+      employeeId, planVersionId, periodStart,
+      cumulativeBase, targetAmount, alreadyRecorded, delta, effectiveRatePercent,
+      eventBase, sharePercent: eventShare, builder,
+    };
+  }
+
   const rules = await loadPlanRules(tx, planVersionId);
 
   // Every qualifying collection this employee has a share of, in this period.
@@ -503,15 +567,100 @@ export async function accrueForCollection(
   const shares = await sharesForCollection(tx, event, event.collectedAt);
   const outcomes: AccrualOutcome[] = [];
 
-  for (const share of shares) {
+  // Employee order, so two approvals sharing the same people take the period locks in one order.
+  for (const share of [...shares].sort((a, b) => a.employeeId.localeCompare(b.employeeId))) {
+    await lockEmployeePeriod(tx, share.employeeId, riyadhMonthStart(event.collectedAt));
     const outcome = await recomputeEmployeePeriod(
       tx, share.employeeId, event.collectedAt, actorId, collectionEventId,
     );
     if (!outcome) continue;
     await postDelta(tx, outcome, { collectionEventId, actorId });
+    if (outcome.builder) await upsertPeriodResult(tx, share.employeeId, outcome.builder, actorId);
     outcomes.push(outcome);
   }
   return outcomes;
+}
+
+export type MonthRunOutcome = {
+  employeeId: string;
+  periodStart: Date;
+  planVersionId: string;
+  delta: PrismaNS.Decimal;
+  posted: boolean;
+  /** A difference that had no collection of the month to attach to (reported, not hidden). */
+  unposted: boolean;
+  /** Posted against a collection whose accrual is already approved or paid. */
+  againstApproved: boolean;
+  builder: BuilderPeriod;
+};
+
+/**
+ * The monthly run of a COMPONENTS plan for one employee: recompute the whole month and post the
+ * difference against what the ledger already holds — the same cumulative-target-then-difference
+ * the collection path uses, so running twice posts nothing the second time, and a collection
+ * reversed since the last run comes back as a negative movement.
+ *
+ * Why a run is needed at all when every approval and reversal already recomputes: the month also
+ * moves without a collection — the target is set or changed, a management decision is taken on
+ * the discretionary bracket, a client is excluded. Such a difference is attached to the month's
+ * latest collection of this employee (the movement needs a source; preferring one whose accrual
+ * is still open), so the per-collection rows keep adding up to the ledger.
+ */
+export async function runBuilderMonth(
+  tx: Tx,
+  employeeId: string,
+  at: Date,
+  actorId: string | null,
+): Promise<MonthRunOutcome | null> {
+  const periodStart = riyadhMonthStart(at);
+  const periodEnd = riyadhMonthEnd(at);
+  await lockEmployeePeriod(tx, employeeId, periodStart);
+  const versionId = await componentsVersionForPeriod(tx, employeeId, at);
+  if (!versionId) return null;
+
+  const events = await tx.collectionEvent.findMany({
+    where: { collectedAt: { gte: periodStart, lt: periodEnd } },
+    orderBy: [{ collectedAt: "desc" }, { id: "desc" }],
+    select: { id: true, opportunityId: true, collectedAt: true, status: true },
+  });
+  const mine: { id: string; status: string; frozen: boolean }[] = [];
+  for (const e of events) {
+    const shares = await sharesForCollection(tx, e, e.collectedAt);
+    if (!shares.some((s) => s.employeeId === employeeId)) continue;
+    const acc = await tx.commissionAccrual.findUnique({
+      where: { collectionEventId_employeeId_planVersionId: { collectionEventId: e.id, employeeId, planVersionId: versionId } },
+      select: { status: true },
+    });
+    mine.push({ id: e.id, status: e.status, frozen: acc?.status === "APPROVED" || acc?.status === "PAID" });
+  }
+  const anchor =
+    mine.find((m) => m.status === "RECORDED" && !m.frozen) ??
+    mine.find((m) => m.status === "RECORDED") ??
+    mine[0] ?? null;
+
+  const outcome = await recomputeEmployeePeriod(tx, employeeId, new Date(periodEnd.getTime() - 1), actorId, anchor?.id);
+  if (!outcome || !outcome.builder) return null;
+
+  let posted = false;
+  let unposted = false;
+  if (!outcome.delta.isZero()) {
+    if (anchor) {
+      const r = await postDelta(tx, outcome, {
+        collectionEventId: anchor.id, actorId,
+        reason: anchor.frozen
+          ? "Monthly commission run: correction against an approved period; the approved accrual is unchanged."
+          : "Monthly commission run.",
+      });
+      posted = r.posted;
+    } else {
+      unposted = true;
+    }
+  }
+  await upsertPeriodResult(tx, employeeId, outcome.builder, actorId);
+  return {
+    employeeId, periodStart, planVersionId: outcome.planVersionId, delta: outcome.delta,
+    posted, unposted, againstApproved: !!anchor?.frozen && posted, builder: outcome.builder,
+  };
 }
 
 /**
@@ -633,10 +782,12 @@ export async function projectedCommissionFor(
   employeeId: string,
   at: Date,
   extraBase: PrismaNS.Decimal,
+  /** COMPONENTS plans: whose order the pending collection pays (the client and its document). */
+  context?: { customerId: string | null; orderKey: string | null },
 ): Promise<PrismaNS.Decimal | null> {
   const before = await recomputeEmployeePeriod(tx, employeeId, at, null);
   if (!before) return null;
-  const after = await recomputeEmployeePeriod(tx, employeeId, at, null, undefined, extraBase);
+  const after = await recomputeEmployeePeriod(tx, employeeId, at, null, undefined, extraBase, context);
   if (!after) return null;
   return roundMoney(after.targetAmount.minus(before.targetAmount));
 }

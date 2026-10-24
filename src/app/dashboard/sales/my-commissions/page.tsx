@@ -7,6 +7,7 @@ import { ACCRUAL_STATUS_SPECS, formatMoney, formatDay, num, api } from "../_comp
 import {
   useInitialMonth, PerfHeader, Bar, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
 } from "../_components/perf";
+import { MyPlan, type MyPlanPayload } from "./my-plan";
 
 /**
  * My commissions — Direction 2.1, GX A-P05 «أهدافي وعمولاتي» (`1225:3172` / EN `1230:128990`,
@@ -51,7 +52,7 @@ type Accrual = {
   };
 };
 
-type Payload = {
+type Payload = Partial<MyPlanPayload> & {
   periodStart: string;
   periodEnd: string;
   statement: { accrued: string; adjustments: string; paid: string; outstanding: string };
@@ -225,6 +226,9 @@ export default function MyCommissionsPage() {
               </p>
             </div>
           </div>
+
+          {/* ── «خطتي»: the plan, this month's estimate and the computed months (plan builder) ── */}
+          {data.plan && <MyPlan ar={ar} data={{ plan: data.plan, builder: data.builder ?? null, history: data.history ?? [], fixedPay: data.fixedPay ?? null }} />}
 
           {/* ── «أهدافي»: the month's target, achieved against it and what remains ── */}
           {data.progress && data.progress.target !== null && (

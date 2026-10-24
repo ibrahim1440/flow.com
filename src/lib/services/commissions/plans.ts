@@ -1,5 +1,6 @@
 import type { Prisma as PrismaNS } from "@/generated/prisma/client";
-import { Decimal, validatePlanRules, findOverlappingAssignment, type PlanRules } from "./engine";
+import { Decimal, validatePlanRules, findOverlappingAssignment, parseFiniteDecimal, type PlanRules } from "./engine";
+import { parseComponents, type Components } from "./builder";
 import { isSimpleMode } from "@/lib/simple-mode";
 
 type Tx = PrismaNS.TransactionClient;
@@ -34,7 +35,69 @@ export type VersionInput = {
   effectiveFrom: Date;
   effectiveTo: Date | null;
   tiers: TierInput[];
+  /**
+   * Commission plan builder: a COMPONENTS version (order sequence, target bonus, over-target
+   * incentive) instead of the tiered rules. Null / absent = the tiered version exactly as before.
+   */
+  components?: Components | null;
 };
+
+/**
+ * Request JSON → a validated version input. Shared by plan creation, a new version and the edit
+ * of a not-yet-used version. Amounts and rates arrive as strings and become Decimals here; NaN,
+ * Infinity and hex are refused (parseFiniteDecimal). With `components`, the tiered fields are
+ * ignored: a COMPONENTS version has base rate 0 and no tiers.
+ */
+export function parseVersionBody(b: Record<string, unknown>): VersionInput {
+  const dec = (v: unknown, field: string): Decimal => {
+    const d = parseFiniteDecimal(v);
+    if (!d) throw { _appCode: 400, message: `${field} is not a number.` };
+    return d;
+  };
+  const effectiveFrom = new Date(String(b.effectiveFrom ?? ""));
+  if (Number.isNaN(effectiveFrom.getTime())) {
+    throw { _appCode: 400, message: "effectiveFrom is required and must be a date." };
+  }
+  let effectiveTo: Date | null = null;
+  if (b.effectiveTo) {
+    effectiveTo = new Date(String(b.effectiveTo));
+    if (Number.isNaN(effectiveTo.getTime())) throw { _appCode: 400, message: "effectiveTo is not a date." };
+  }
+  const currency = typeof b.currency === "string" ? b.currency : "SAR";
+
+  if (b.components !== undefined && b.components !== null) {
+    const { components, problems } = parseComponents(b.components);
+    if (!components) {
+      throw { _appCode: 400, message: problems[0].messageAr, errorEn: problems[0].message, problems };
+    }
+    return { baseRatePercent: new Decimal(0), tierMode: "INCREMENTAL", currency, effectiveFrom, effectiveTo, tiers: [], components };
+  }
+
+  const rawTiers = Array.isArray(b.tiers) ? b.tiers : [];
+  if (rawTiers.length > 20) throw { _appCode: 400, message: "A plan version may have at most 20 tiers." };
+  const tiers: TierInput[] = rawTiers.map((raw, i) => {
+    const t = (raw ?? {}) as Record<string, unknown>;
+    return {
+      fromAmount: dec(t.fromAmount ?? "0", `Tier ${i + 1} start`),
+      toAmount:
+        t.toAmount === null || t.toAmount === undefined || t.toAmount === ""
+          ? null
+          : dec(t.toAmount, `Tier ${i + 1} end`),
+      ratePercent: dec(t.ratePercent ?? "0", `Tier ${i + 1} rate`),
+    };
+  });
+  return {
+    baseRatePercent: dec(b.baseRatePercent ?? "0", "The base rate"),
+    tierMode: b.tierMode === "RETROACTIVE" ? "RETROACTIVE" : "INCREMENTAL",
+    currency,
+    effectiveFrom,
+    effectiveTo,
+    tiers,
+  };
+}
+
+const componentsJson = (c: Components | null | undefined) =>
+  c ? (JSON.parse(JSON.stringify(c)) as PrismaNS.InputJsonValue) : undefined;
 
 function rulesOf(input: VersionInput): PlanRules {
   return {
@@ -54,7 +117,9 @@ function rulesOf(input: VersionInput): PlanRules {
  * save at a time.
  */
 export function assertVersionValid(input: VersionInput): void {
-  const problems = validatePlanRules(rulesOf(input));
+  // A COMPONENTS version has no base rate or tiers to check; its components were validated when
+  // parsed. Currency and dates are checked by the same rules as every version.
+  const problems = validatePlanRules(input.components ? { ...rulesOf(input), baseRatePercent: new Decimal(0), tiers: [] } : rulesOf(input));
   if (input.effectiveTo && input.effectiveTo.getTime() <= input.effectiveFrom.getTime()) {
     problems.push({ code: "PERIOD_EMPTY", message: "The end date must be after the start date." });
   }
@@ -71,6 +136,7 @@ export async function createPlan(
     name: string;
     nameAr?: string | null;
     description?: string | null;
+    templateKey?: string | null;
     version: VersionInput;
     actorId: string;
   },
@@ -93,6 +159,7 @@ export async function createPlan(
       name: input.name.trim(),
       nameAr: input.nameAr?.trim() || null,
       description: input.description?.trim() || null,
+      templateKey: input.templateKey ?? null,
       createdById: input.actorId,
     },
     select: { id: true },
@@ -108,6 +175,7 @@ export async function createPlan(
       currency: input.version.currency,
       effectiveFrom: input.version.effectiveFrom,
       effectiveTo: input.version.effectiveTo,
+      components: componentsJson(input.version.components),
       createdById: input.actorId,
       tiers: {
         create: input.version.tiers.map((t, i) => ({
@@ -133,8 +201,8 @@ export async function createPlan(
  */
 export async function addPlanVersion(
   tx: Tx,
-  input: { planId: string; version: VersionInput; actorId: string },
-): Promise<{ planVersionId: string; version: number; closedPrevious: boolean }> {
+  input: { planId: string; version: VersionInput; actorId: string; moveAssignees?: boolean },
+): Promise<{ planVersionId: string; version: number; closedPrevious: boolean; movedAssignees: number }> {
   assertVersionValid(input.version);
 
   const plan = await tx.commissionPlan.findUnique({
@@ -177,6 +245,7 @@ export async function addPlanVersion(
       currency: input.version.currency,
       effectiveFrom: input.version.effectiveFrom,
       effectiveTo: input.version.effectiveTo,
+      components: componentsJson(input.version.components),
       createdById: input.actorId,
       tiers: {
         create: input.version.tiers.map((t, i) => ({
@@ -190,7 +259,82 @@ export async function addPlanVersion(
     select: { id: true, version: true },
   });
 
-  return { planVersionId: created.id, version: created.version, closedPrevious };
+  // Optionally carry the people on the previous version over to this one from its start date:
+  // each open assignment to an earlier version of this plan ends where the new version starts
+  // and a new assignment begins there. The past keeps the version it was computed with.
+  let movedAssignees = 0;
+  if (input.moveAssignees && latest) {
+    const from = input.version.effectiveFrom;
+    const open = await tx.commissionAssignment.findMany({
+      where: {
+        planId: input.planId,
+        planVersionId: { not: created.id },
+        effectiveFrom: { lt: from },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: from } }],
+      },
+      select: { id: true, employeeId: true, effectiveTo: true, employee: { select: { active: true } } },
+    });
+    for (const a of open) {
+      if (!a.employee.active) continue;
+      // SIMPLE MODE: a single owner may act on their own record.
+      if (!isSimpleMode() && a.employeeId === input.actorId) continue;
+      await tx.commissionAssignment.update({ where: { id: a.id }, data: { effectiveTo: from } });
+      await tx.commissionAssignment.create({
+        data: { employeeId: a.employeeId, planId: input.planId, planVersionId: created.id, effectiveFrom: from, effectiveTo: a.effectiveTo, createdById: input.actorId },
+      });
+      movedAssignees++;
+    }
+  }
+
+  return { planVersionId: created.id, version: created.version, closedPrevious, movedAssignees };
+}
+
+/**
+ * Edit a COMPONENTS version in place — only while nothing at all hangs off it: no assignment, no
+ * accrual, no ledger movement, no monthly result and no decision. Until then it has governed
+ * nobody's pay and an edit restates nothing (a freshly made template plan is the case this is
+ * for). From the first assignment on, a change is a new version, as for every plan.
+ */
+export async function updateUnusedVersion(
+  tx: Tx,
+  input: { planId: string; planVersionId: string; version: VersionInput; actorId: string },
+): Promise<{ planVersionId: string }> {
+  if (!input.version.components) {
+    throw { _appCode: 400, message: "Only a COMPONENTS version can be edited in place; change a tiered plan with a new version." };
+  }
+  assertVersionValid(input.version);
+  const v = await tx.commissionPlanVersion.findUnique({
+    where: { id: input.planVersionId },
+    select: {
+      id: true, planId: true, components: true,
+      _count: { select: { accruals: true, assignments: true, ledgerEntries: true, periodResults: true, bonusDecisions: true } },
+    },
+  });
+  if (!v || v.planId !== input.planId) throw { _appCode: 404, message: "Plan version not found." };
+  if (v.components === null) throw { _appCode: 400, message: "This is a tiered version; change it with a new version." };
+  const c = v._count;
+  if (c.accruals + c.assignments + c.ledgerEntries + c.periodResults + c.bonusDecisions > 0) {
+    throw {
+      _appCode: 409,
+      message: "هذه النسخة مُسندة أو استُحقّت تحتها عمولة؛ التعديل يكون بإصدار جديد بتاريخ سريان.",
+      errorEn: "This version is assigned or has commission under it; change it with a new version and an effective date.",
+    };
+  }
+  const prev = await tx.commissionPlanVersion.findFirst({
+    where: { planId: input.planId, id: { not: v.id }, effectiveFrom: { gte: input.version.effectiveFrom } },
+    select: { id: true },
+  });
+  if (prev) throw { _appCode: 409, message: "A version cannot start on or before an earlier version of the same plan." };
+  await tx.commissionPlanVersion.update({
+    where: { id: v.id },
+    data: {
+      components: componentsJson(input.version.components),
+      currency: input.version.currency,
+      effectiveFrom: input.version.effectiveFrom,
+      effectiveTo: input.version.effectiveTo,
+    },
+  });
+  return { planVersionId: v.id };
 }
 
 /**

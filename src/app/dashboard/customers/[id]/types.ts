@@ -128,6 +128,8 @@ export type Account = {
   statement: Statement | null;
   /** The credit warning, grace and hold (feat/credit-hold; GET /api/customers/[id]/credit's shape). */
   creditState?: CreditState | null;
+  /** «مستثنى من عمولة العميل الجديد» — present only for a sales manager / admin / plan or settings manager. */
+  newClientCommission?: { newClientCommissionExcluded: boolean; newClientExclusionReason: string | null; newClientExclusionAt: string | null } | null;
   files: CustomerFile[];
   /** `direct`: files over 4 MB upload from the browser straight to the private Blob store (up to 20 MB). */
   fileLimits?: { maxBytes: number; direct?: boolean };

@@ -677,6 +677,28 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "You do not hold the duty required to decide this request.": "لا تحمل الصلاحية اللازمة للبت في هذا الطلب.",
   "zatcaTaxCategoryCode must be a string or null.": "رمز فئة ضريبة ZATCA يجب أن يكون نصًا أو فارغًا.",
   "Zero amount": "مبلغ صفري.",
+  // ── Commission plan builder (feat/commission-builder) ──
+  "The CSV is empty.": "ملف CSV فارغ.",
+  "The CSV is larger than 2 MB.": "ملف CSV أكبر من 2 ميغابايت.",
+  "action must be approve, adjust, payout or decide.": "الإجراء يجب أن يكون اعتماداً أو تسوية أو صرفاً أو قراراً.",
+  "A decided bonus cannot be negative.": "لا تكون المكافأة المقرَّرة سالبة.",
+  "A decision needs a reason.": "القرار يحتاج سبباً.",
+  "This employee's plan for that month has no target bonus to decide.": "خطة هذا الموظف في ذلك الشهر ليس فيها مكافأة مستهدف تحتاج قراراً.",
+  "The month does not reach a bracket that takes a management decision (a discretionary bracket, or one management may override).": "الشهر لا يبلغ شريحة تحتاج قرار الإدارة (شريحة تقديرية أو شريحة يجوز للإدارة تغيير مبلغها).",
+  "The month reaches the discretionary bonus bracket. Record management's decision (an amount or zero, with a reason) before approving.": "الشهر في شريحة المكافأة التقديرية. سجّل قرار الإدارة (مبلغاً أو صفراً مع السبب) قبل الاعتماد.",
+  "The ledger does not yet hold what this month computes to under its plan. Run the month first, then approve.": "السجل لا يطابق بعدُ ما يُحتسب لهذا الشهر وفق خطته. نفّذ «احتساب الشهر» أولاً ثم اعتمد.",
+  "A month that has not started cannot be run.": "لا يُحتسب شهر لم يبدأ بعد.",
+  "The target must be a number above zero.": "المستهدف رقم أكبر من صفر.",
+  "Every order-mix value must be a number of 0 or more.": "كل قيمة في توزيع الطلبات رقم صفر أو أكثر.",
+  "Every scenario needs a percentage of target or an amount of 0 or more.": "كل سيناريو يحتاج نسبة من المستهدف أو مبلغاً صفراً أو أكثر.",
+  "The fixed pay must be a number of 0 or more.": "الراتب الثابت رقم صفر أو أكثر.",
+  "A management amount must be a number of 0 or more.": "مبلغ الإدارة رقم صفر أو أكثر.",
+  "Unknown template.": "قالب غير معروف.",
+  "excluded must be true or false.": "قيمة الاستثناء يجب أن تكون نعم أو لا.",
+  "Excluding a client from the new-client commission needs a reason.": "استثناء العميل من عمولة العميل الجديد يحتاج سبباً.",
+  "Only a COMPONENTS version can be edited in place; change a tiered plan with a new version.": "لا تُعدَّل في مكانها إلا نسخة بالمكوّنات؛ الخطة بالشرائح تُغيَّر بإصدار جديد.",
+  "This is a tiered version; change it with a new version.": "هذه نسخة بالشرائح؛ غيّرها بإصدار جديد.",
+  "A version cannot start on or before an earlier version of the same plan.": "لا تبدأ نسخة في تاريخ نسخة سابقة من الخطة نفسها أو قبله.",
 };
 
 /**
@@ -890,4 +912,7 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["type must be one of ${[...ACCOUNT_TYPES].join(\", \")}.", "النوع يجب أن يكون أحد: {0}."],
   ["Unrecognised date for format ${mapping.dateFormat}", "تاريخ غير معروف للصيغة {0}"],
   ["WhatsApp is not connected (state: ${state.state}).", "واتساب غير متصل (الحالة: {0})."],
+  // ── Commission plan builder (feat/commission-builder) ──
+  ["Collection ${e.id} is in ${e.currency} but the plan pays in ${version.currency}. There is no exchange-rate policy configured, so this cannot be converted.", "التحصيل {0} بعملة {1} والخطة تدفع بـ {2}، ولا توجد سياسة صرف عملات."],
+  ["A stored plan version is not valid: ${problems[0]?.message ?? \"unknown\"}", "نسخة خطة محفوظة غير صالحة: {0}"],
 ];

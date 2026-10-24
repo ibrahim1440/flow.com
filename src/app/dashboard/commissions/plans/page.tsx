@@ -6,6 +6,8 @@ import {
   useLang, Button, Field, TextInput, Select, TextArea, Modal, Alert, api, num, formatDay, formatMoney,
 } from "../../sales/_components/ui";
 import { PerfHeader, PerfNotice, PerfLoading, PerfNote } from "../../sales/_components/perf";
+import { PlanBuilder, type BuilderMode } from "./builder";
+import type { Components, TemplateExplanation } from "@/lib/services/commissions/builder";
 
 /**
  * Commission plan administration — Direction 2.1, GX A-P07 «خطط العمولات» (`1228:113728`,
@@ -158,8 +160,93 @@ type Version = {
   effectiveFrom: string;
   effectiveTo: string | null;
   tiers: Tier[];
-  _count: { accruals: number; assignments: number };
+  /** Commission plan builder: null for a tiered version. */
+  components: Components | null;
+  _count: { accruals: number; assignments: number; ledgerEntries?: number; periodResults?: number; bonusDecisions?: number };
 };
+
+type Template = {
+  key: string; code: string; nameAr: string; nameEn: string; descriptionAr: string; descriptionEn: string;
+  components: Components; explanations: TemplateExplanation[];
+};
+
+/** Nothing hangs off the version yet: it can still be edited in place. */
+const unused = (v: Version) =>
+  v._count.accruals + v._count.assignments + (v._count.ledgerEntries ?? 0) + (v._count.periodResults ?? 0) + (v._count.bonusDecisions ?? 0) === 0;
+
+/**
+ * A COMPONENTS version, read like the policy page: the order rows, the bonus brackets and the
+ * over-target bands, each switched on or off.
+ */
+function ComponentsVersion({ ar, lang, plan, version: v, onEdit }: { ar: boolean; lang: "ar" | "en"; plan: Plan; version: Version; onEdit: () => void }) {
+  const c = v.components!;
+  const ended = !!v.effectiveTo;
+  const frozen = v._count.accruals > 0;
+  const range = (from: string, to: string | null) => (to === null ? (ar ? `${from}% فأكثر` : `${from}% and above`) : ar ? `${from}% – أقل من ${to}%` : `${from}% – below ${to}%`);
+  const off = <span className="st" style={{ fontSize: 12.5 }}>{ar ? "متوقف" : "off"}</span>;
+  return (
+    <div className="perf-card" data-testid={`version-${plan.code}-${v.version}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ fontWeight: 600 }}>
+          {ar ? (plan.nameAr ?? plan.name) : plan.name} · {ar ? `النسخة ${num(v.version, "ar")}` : `version ${v.version}`}
+        </b>
+        <span className={`st ${ended ? "" : "ok"}`} style={{ fontSize: 12.5 }}>{ended ? (ar ? "منتهية" : "ended") : (ar ? "سارية" : "in force")}</span>
+        <span className="perf-code">{ar ? "بالمكوّنات" : "components"}</span>
+        <span style={{ flex: 1 }} />
+        {frozen
+          ? <span className="st in" style={{ fontSize: 12.5 }}>{ar ? "مجمَّدة — لها استحقاقات" : "frozen — it has accruals"}</span>
+          : <span className="st" style={{ fontSize: 12.5 }}>{num(v._count.assignments, lang)} {ar ? "إسناد" : v._count.assignments === 1 ? "assignment" : "assignments"}</span>}
+        {!ended && (
+          <button type="button" className="btn g sm" onClick={onEdit} data-testid={`edit-${plan.code}-${v.version}`}>
+            {unused(v) ? (ar ? "تعديل" : "Edit") : (ar ? "تعديل بإصدار جديد" : "Change (new version)")}
+          </button>
+        )}
+      </div>
+      <div className="sm" style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
+        {ar ? "شهرية · ريال سعودي · على المحصّل والمعتمد فقط" : "monthly · SAR · on collected and approved money only"}
+        {" · "}{ar ? "سريان من" : "from"} <span className="n">{formatDay(v.effectiveFrom, lang)}</span>{" "}
+        {ar ? "حتى" : "until"} {v.effectiveTo ? <span className="n">{formatDay(v.effectiveTo, lang)}</span> : (ar ? "مفتوح" : "open")}
+      </div>
+      <div className="cb-sum">
+        <div data-testid={`sum-order-${plan.code}-${v.version}`}>
+          <b>{ar ? "أ. عمولة العملاء الجدد" : "A. New-client commission"}</b>{" "}
+          {c.orderSequence.enabled ? (
+            <span>
+              {c.orderSequence.rows.map((r, i) => (
+                <span key={i} className="cb-pill">{ar ? `الطلب ${i + 1}${i === c.orderSequence.rows.length - 1 ? "+" : ""}` : `order ${i + 1}${i === c.orderSequence.rows.length - 1 ? "+" : ""}`} <span className="n">{r.ratePercent}%</span></span>
+              ))}
+              <span className="cb-pill">{ar ? "العملاء الحاليون" : "existing"} <span className="n">{c.orderSequence.existingClientRatePercent}%</span></span>
+              {c.orderSequence.inheritSettings ? (
+                <span className="sm" style={{ color: "var(--text-muted)" }}>{ar ? "فترة العميل الجديد والانقطاع والأهلية من «إعدادات العمولات»" : "new-client window, lapse and eligibility from the commission settings"}</span>
+              ) : <span className="sm" style={{ color: "var(--text-muted)" }}>
+                {ar ? "فترة العميل الجديد" : "new-client window"}{" "}
+                {c.orderSequence.newClientWindow ? `${c.orderSequence.newClientWindow.value} ${c.orderSequence.newClientWindow.unit === "DAYS" ? (ar ? "يوم" : "days") : (ar ? "شهر" : "months")}` : (ar ? "أي وقت" : "ever")}
+                {" · "}{ar ? "الأهلية" : "eligibility"}{" "}
+                {c.orderSequence.eligibilityAfterAcquisition ? `${c.orderSequence.eligibilityAfterAcquisition.value} ${c.orderSequence.eligibilityAfterAcquisition.unit === "DAYS" ? (ar ? "يوم" : "days") : (ar ? "شهر" : "months")}` : (ar ? "حتى الانقطاع" : "until the lapse")}
+                {" · "}{ar ? "الانقطاع" : "lapse"}{" "}
+                {c.orderSequence.lapse ? `${c.orderSequence.lapse.value} ${c.orderSequence.lapse.unit === "DAYS" ? (ar ? "يوم" : "days") : (ar ? "شهر" : "months")}` : (ar ? "لا ينقطع" : "never")}
+              </span>}
+            </span>
+          ) : off}
+        </div>
+        <div data-testid={`sum-bonus-${plan.code}-${v.version}`}>
+          <b>{ar ? "ب. مكافأة المستهدف" : "B. Target bonus"}</b>{" "}
+          {c.targetBonus.enabled ? c.targetBonus.brackets.map((b, i) => (
+            <span key={i} className="cb-pill">{range(b.fromPercent, b.toPercent)} →{" "}
+              {b.kind === "FIXED" ? <span className="n">{formatMoney(b.amount ?? "0", 0)}{b.overridable ? (ar ? " أو بديل" : " or override") : ""}</span> : b.kind === "DISCRETIONARY" ? (ar ? "تقديري" : "discretionary") : (ar ? "لا شيء" : "none")}
+            </span>
+          )) : off}
+        </div>
+        <div data-testid={`sum-over-${plan.code}-${v.version}`}>
+          <b>{ar ? "ج. الحافز الحدّي" : "C. Marginal incentive"}</b>{" "}
+          {c.overTarget.enabled ? c.overTarget.bands.map((b, i) => (
+            <span key={i} className="cb-pill">{range(b.fromPercent, b.toPercent)} → <span className="n">{b.ratePercent}%</span> {ar ? "على الزائد" : "on the excess"}</span>
+          )) : off}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type Plan = {
   id: string;
@@ -168,6 +255,7 @@ type Plan = {
   nameAr: string | null;
   description: string | null;
   isActive: boolean;
+  templateKey: string | null;
   versions: Version[];
   _count: { assignments: number };
 };
@@ -194,8 +282,11 @@ export default function CommissionPlansPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [dialog, setDialog] = useState<
-    { kind: "plan" } | { kind: "version"; plan: Plan } | { kind: "assign" } | null
+    { kind: "plan" } | { kind: "version"; plan: Plan } | { kind: "assign" } | { kind: "templates" } | null
   >(null);
+  const [editor, setEditor] = useState<BuilderMode | null>(null);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [canSeePay, setCanSeePay] = useState(false);
 
   /**
    * Reload counter. The fetch lives in the effect; mutations refresh by bumping this instead of
@@ -207,14 +298,16 @@ export default function CommissionPlansPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [p, a] = await Promise.all([
-        api<{ plans: Plan[] }>("/api/commissions/plans"),
+      const [p, a, tp] = await Promise.all([
+        api<{ plans: Plan[]; canSeePay?: boolean }>("/api/commissions/plans"),
         api<{ assignments: Assignment[]; employees: { id: string; name: string; role: string }[] }>(
           "/api/commissions/assignments",
         ),
+        api<{ templates: Template[] }>("/api/commissions/templates"),
       ]);
       if (cancelled) return;
-      if (p.ok) setPlans(p.data.plans);
+      if (tp.ok) setTemplates(tp.data.templates);
+      if (p.ok) { setPlans(p.data.plans); setCanSeePay(!!p.data.canSeePay); }
       else setError(p.data.error ?? (ar ? "تعذّر تحميل الخطط." : "Could not load the plans."));
       if (a.ok) {
         setAssignments(a.data.assignments);
@@ -227,11 +320,32 @@ export default function CommissionPlansPage() {
 
   if (loading) return <PerfLoading ar={ar} />;
 
+  /** Open the builder on a plan's latest version. */
+  const explanationsOf = (plan: Plan) => templates.find((t) => t.key === plan.templateKey)?.explanations ?? null;
+  const editPlan = (plan: Plan, v: Version) => setEditor({
+    kind: "edit", planId: plan.id, planCode: plan.code, planName: ar ? (plan.nameAr ?? plan.name) : plan.name,
+    versionId: v.id, version: v.version, components: v.components!, effectiveFrom: v.effectiveFrom,
+    explanations: explanationsOf(plan), editableInPlace: unused(v),
+  });
+
+  if (editor) {
+    return (
+      <div className="pg">
+        <PlanBuilder ar={ar} mode={editor} canSeePay={canSeePay} employees={employees}
+          onClose={() => setEditor(null)}
+          onSaved={(msg) => { setEditor(null); setSuccess(msg); reload(); }} />
+      </div>
+    );
+  }
+
   const live = assignments.filter((a) => a.live).length;
   const done = (msg: string) => { setDialog(null); setSuccess(msg); reload(); };
 
   const actions = (
     <>
+      <button type="button" className="btn" onClick={() => setDialog({ kind: "templates" })} data-testid="use-template">
+        {ar ? "قالب جاهز" : "Ready-made template"}
+      </button>
       <button type="button" className="btn" onClick={() => setDialog({ kind: "assign" })} data-testid="new-assignment">
         {ar ? "إسناد موظّف إلى خطة" : "Assign someone to a plan"}
       </button>
@@ -268,14 +382,19 @@ export default function CommissionPlansPage() {
                 <b style={{ fontWeight: 600, fontSize: 15 }}>{ar ? (plan.nameAr ?? plan.name) : plan.name}</b>
                 {plan.description && <span className="sm" style={{ color: "var(--text-muted)", fontSize: 12.5 }}>{plan.description}</span>}
                 {!plan.isActive && <span className="perf-code">{ar ? "غير نشطة" : "inactive"}</span>}
+                {plan.templateKey && <span className="perf-code">{ar ? "من قالب جاهز" : "from a template"}</span>}
                 <span style={{ flex: 1 }} />
-                <button type="button" className="btn g sm" onClick={() => setDialog({ kind: "version", plan })} data-testid={`new-version-${plan.code}`}>
+                <button type="button" className="btn g sm"
+                  onClick={() => (plan.versions[0]?.components ? editPlan(plan, plan.versions[0]) : setDialog({ kind: "version", plan }))}
+                  data-testid={`new-version-${plan.code}`}>
                   <svg className="ico s" viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
                   {ar ? "إصدار جديد" : "New version"}
                 </button>
               </div>
               {plan.versions.map((v) => (
-                <PlanVersion key={v.id} ar={ar} lang={lang} plan={plan} version={v} />
+                v.components
+                  ? <ComponentsVersion key={v.id} ar={ar} lang={lang} plan={plan} version={v} onEdit={() => editPlan(plan, v)} />
+                  : <PlanVersion key={v.id} ar={ar} lang={lang} plan={plan} version={v} />
               ))}
             </div>
           ))}
@@ -347,7 +466,29 @@ export default function CommissionPlansPage() {
         </PerfNote>
       </div>
 
-      {dialog?.kind === "plan" && <PlanDialog ar={ar} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === "plan" && (
+        <PlanDialog ar={ar} onClose={() => setDialog(null)} onDone={done}
+          onComponents={() => {
+            setDialog(null);
+            const base = templates[0]?.components;
+            if (base) setEditor({ kind: "create", components: base, explanations: null });
+          }} />
+      )}
+      {dialog?.kind === "templates" && (
+        <TemplatesDialog ar={ar} templates={templates} onClose={() => setDialog(null)}
+          onCreated={async (planId, msg) => {
+            setDialog(null);
+            setSuccess(msg);
+            // Open the new plan straight in the builder: it is editable in place until somebody is put on it.
+            const res = await api<{ plans: Plan[] }>("/api/commissions/plans");
+            if (res.ok) {
+              setPlans(res.data.plans);
+              const plan = res.data.plans.find((p) => p.id === planId);
+              if (plan?.versions[0]?.components) editPlan(plan, plan.versions[0]);
+            }
+          }}
+          onError={setError} />
+      )}
       {dialog?.kind === "version" && <PlanDialog ar={ar} plan={dialog.plan} onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === "assign" && (
         <AssignDialog ar={ar} plans={plans} employees={employees} onClose={() => setDialog(null)} onDone={done} />
@@ -420,10 +561,53 @@ function EndAssignmentButton({
   );
 }
 
+function TemplatesDialog({ ar, templates, onClose, onCreated, onError }: {
+  ar: boolean; templates: Template[]; onClose: () => void; onCreated: (planId: string, msg: string) => void; onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal wide title={ar ? "قالب جاهز" : "Ready-made templates"} onClose={onClose} testId="templates-dialog">
+      <p className="text-sm text-oo-text-secondary">
+        {ar
+          ? "ينشئ القالب خطة جديدة قابلة للتعديل بكل قيمها، بالقيم نفسها تماماً. لا يُسند أحد إليها حتى تفعل ذلك بنفسك."
+          : "A template creates a new plan with exactly these values, every one of them editable. Nobody is put on it until you do so."}
+      </p>
+      {templates.map((t) => (
+        <div key={t.key} className="perf-card" data-testid={`template-${t.key}`}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="perf-code">{t.code}</span>
+            <b style={{ fontWeight: 600 }}>{ar ? t.nameAr : t.nameEn}</b>
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn p sm" disabled={busy} data-testid={`use-template-${t.key}`}
+              onClick={async () => {
+                setBusy(true);
+                const res = await api<{ planId: string }>("/api/commissions/templates", { method: "POST", body: { templateKey: t.key } });
+                setBusy(false);
+                if (res.ok) onCreated(res.data.planId, ar ? `أُنشئت خطة من القالب «${t.nameAr}».` : `A plan was created from “${t.nameEn}”.`);
+                else onError(res.data.error ?? "");
+              }}>
+              {ar ? `استخدم قالب: ${t.nameAr}` : `Use template: ${t.nameEn}`}
+            </button>
+          </div>
+          <p className="sm" style={{ margin: 0, color: "var(--text-secondary)" }}>{ar ? t.descriptionAr : t.descriptionEn}</p>
+          <ul className="cb-explain">
+            {t.explanations.map((e) => (
+              <li key={e.key} data-testid={`template-explain-${e.key}`}>
+                <b>{e.key === "general" ? (ar ? "قاعدة عامة" : "General rule") : e.key === "orderSequence" ? (ar ? "أ. عمولات العملاء الجدد" : "A. New-client commission") : e.key === "targetBonus" ? (ar ? "ب. مكافأة تحقيق المستهدف الشهري" : "B. Monthly target bonus") : (ar ? "ج. الحوافز الإضافية بعد تجاوز المستهدف" : "C. Over-target incentive")}</b>
+                {" — "}{ar ? e.ar : e.en}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
 function PlanDialog({
-  ar, plan, onClose, onDone,
+  ar, plan, onClose, onDone, onComponents,
 }: {
-  ar: boolean; plan?: Plan; onClose: () => void; onDone: (m: string) => void;
+  ar: boolean; plan?: Plan; onClose: () => void; onDone: (m: string) => void; onComponents?: () => void;
 }) {
   const isNewVersion = !!plan;
   const [code, setCode] = useState("");
@@ -493,6 +677,19 @@ function PlanDialog({
       }
     >
       {err && <Alert kind="error">{err}</Alert>}
+
+      {!isNewVersion && onComponents && (
+        <div className="perf-card" data-testid="plan-kind">
+          <b style={{ fontWeight: 600 }}>{ar ? "خطة بالمكوّنات" : "A plan made of components"}</b>
+          <span className="sm" style={{ color: "var(--text-secondary)" }}>
+            {ar
+              ? "عمولة العملاء الجدد حسب ترتيب الطلب، ومكافأة المستهدف، والحافز الحدّي فوق المستهدف — في منشئ الخطط مع المحاكاة."
+              : "New-client commission by order sequence, a target bonus and a marginal over-target incentive — in the plan builder, with the simulation."}
+          </span>
+          <span><button type="button" className="btn sm" onClick={onComponents} data-testid="plan-kind-components">{ar ? "افتح منشئ الخطط" : "Open the plan builder"}</button></span>
+          <span className="sm" style={{ color: "var(--text-muted)" }}>{ar ? "أو أكمل أدناه لخطة بنسبة أساس وشرائح." : "Or continue below for a base rate with tiers."}</span>
+        </div>
+      )}
 
       {!isNewVersion && (
         <>
@@ -606,7 +803,9 @@ function AssignDialog({
   const options = plans.flatMap((p) =>
     p.versions.map((v) => ({
       id: v.id,
-      label: `${p.code} v${v.version} — ${v.baseRatePercent}%${v.tiers.length ? ` +${v.tiers.length} ${ar ? "شرائح" : "tiers"}` : ""}`,
+      label: v.components
+        ? `${p.code} v${v.version} — ${ar ? (p.nameAr ?? p.name) : p.name} (${ar ? "بالمكوّنات" : "components"})${v.effectiveTo ? (ar ? " · منتهية" : " · ended") : ""}`
+        : `${p.code} v${v.version} — ${v.baseRatePercent}%${v.tiers.length ? ` +${v.tiers.length} ${ar ? "شرائح" : "tiers"}` : ""}`,
     })),
   );
 

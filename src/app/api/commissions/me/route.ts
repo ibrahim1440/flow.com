@@ -5,6 +5,9 @@ import { handlePrismaError } from "@/lib/api-error";
 import { riyadhMonthStart, riyadhMonthEnd, ZERO } from "@/lib/services/commissions/engine";
 import { periodStatement } from "@/lib/services/commissions/accrual";
 import { netCollectedByEmployee, targetProgress } from "@/lib/services/sales/performance";
+import { componentsVersionForPeriod, computeBuilderPeriod, serializePeriod } from "@/lib/services/commissions/builder-period";
+import { nextThreshold, readComponents, templateByKey } from "@/lib/services/commissions/builder";
+import { fixedPayFor, maySeePay } from "@/lib/services/commissions/fixed-pay";
 
 /**
  * GET /api/commissions/me — what the signed-in employee has earned in a period.
@@ -85,6 +88,63 @@ export async function GET(request: Request) {
     const achieved = (await netCollectedByEmployee(prisma, periodStart, periodEnd)).get(user.id);
     const progress = target ? targetProgress(target.targetAmount, achieved ?? ZERO) : null;
 
+    // ── Commission plan builder ──
+    // The plan the caller is on for the month, and — for a COMPONENTS plan — the month's estimate
+    // (A, B, C, achievement, the next threshold), computed live from collected and approved money
+    // only, read-only. The caller's own figures and nobody else's: every id is the session's.
+    const assignment = await prisma.commissionAssignment.findFirst({
+      where: { employeeId: user.id, effectiveFrom: { lt: periodEnd }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: periodStart } }] },
+      orderBy: { effectiveFrom: "desc" },
+      select: {
+        effectiveFrom: true, effectiveTo: true,
+        plan: { select: { code: true, name: true, nameAr: true, templateKey: true } },
+        planVersion: { select: { id: true, version: true, baseRatePercent: true, tierMode: true, components: true, currency: true, effectiveFrom: true } },
+      },
+    });
+    let plan = null;
+    let builder = null;
+    if (assignment) {
+      const components = assignment.planVersion.components !== null ? readComponents(assignment.planVersion.components) : null;
+      const template = assignment.plan.templateKey ? templateByKey(assignment.plan.templateKey) : null;
+      plan = {
+        code: assignment.plan.code, name: assignment.plan.name, nameAr: assignment.plan.nameAr,
+        version: assignment.planVersion.version, kind: components ? "COMPONENTS" : "TIERED",
+        baseRatePercent: assignment.planVersion.baseRatePercent, currency: assignment.planVersion.currency,
+        assignedFrom: assignment.effectiveFrom, assignedTo: assignment.effectiveTo,
+        components, explanations: template?.explanations ?? null,
+      };
+      const versionId = await componentsVersionForPeriod(prisma, user.id, at);
+      if (versionId) {
+        const p = await computeBuilderPeriod(prisma, { employeeId: user.id, planVersionId: versionId, at });
+        const next = nextThreshold(p.components, p.computation.qualifiedBase, p.computation.target);
+        builder = {
+          ...serializePeriod(p),
+          next: next ? { percent: next.percent, amountToGo: next.amountToGo.toFixed(2) } : null,
+          estimate: true,
+        };
+      }
+    }
+    const history = await prisma.commissionPeriodResult.findMany({
+      where: { employeeId: user.id },
+      orderBy: { periodStart: "desc" },
+      take: 12,
+      select: {
+        periodStart: true, targetAmount: true, qualifiedBase: true, achievementPercent: true,
+        clientCommission: true, targetBonus: true, overTargetIncentive: true, totalVariable: true, decisionStatus: true,
+        planVersion: { select: { version: true, plan: { select: { code: true } } } },
+      },
+    });
+    const money = (d: { toFixed: (n: number) => string } | null) => (d === null ? null : d.toFixed(2));
+    const historyOut = history.map((h) => ({
+      ...h,
+      targetAmount: money(h.targetAmount), qualifiedBase: money(h.qualifiedBase),
+      achievementPercent: h.achievementPercent === null ? null : h.achievementPercent.toFixed(6),
+      clientCommission: money(h.clientCommission), targetBonus: money(h.targetBonus),
+      overTargetIncentive: money(h.overTargetIncentive), totalVariable: money(h.totalVariable),
+    }));
+    // Fixed pay only for a caller who holds an HR pay duty; never otherwise, the earner included.
+    const fixedPay = maySeePay(user.permissions) ? await fixedPayFor(prisma, user.id, at) : null;
+
     // Says plainly where the money figures came from. Every accrual in this build traces to
     // the sandbox source, and the screen must not present that as a settled payable.
     const sources = [...new Set(accruals.map((a) => a.collectionEvent.sourceSystem))];
@@ -98,6 +158,10 @@ export async function GET(request: Request) {
       ledger,
       target,
       progress,
+      plan,
+      builder,
+      history: historyOut,
+      fixedPay,
       collectionSources: sources,
       sandbox: sandboxOnly,
       notice: sandboxOnly

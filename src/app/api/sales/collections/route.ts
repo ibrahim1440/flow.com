@@ -107,6 +107,8 @@ export async function GET(request: Request) {
         try {
           const amount = await projectedCommissionFor(
             prisma, ownerId, r.collectedAt, new Decimal(r.amountNet.toString()),
+            // A COMPONENTS plan sequences the client's orders: say whose and which document.
+            { customerId: r.customer?.id ?? null, orderKey: r.quote?.id ? `q:${r.quote.id}` : r.opportunity?.id ? `o:${r.opportunity.id}` : null },
           );
           if (amount) projected[r.id] = amount.toFixed(2);
         } catch {

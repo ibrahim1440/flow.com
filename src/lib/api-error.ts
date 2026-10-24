@@ -15,11 +15,11 @@ import { MANUAL_JOURNALS_DISABLED, MANUAL_JOURNALS_DISABLED_AR, MANUAL_JOURNALS_
  */
 export function handleDomainError(err: unknown): NextResponse {
   if (err && typeof err === "object" && "_appCode" in err) {
-    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string };
+    const e = err as { _appCode: number; message?: string; errorEn?: string; errorAr?: string; code?: string; problems?: unknown };
     const status = Number.isInteger(e._appCode) && e._appCode >= 400 && e._appCode < 600 ? e._appCode : 400;
     // A coded refusal (e.g. REAUTH_REQUIRED, IDENTITY_NOT_VERIFIED) keeps its code, so the client can act on it.
     // DEF-08/09: an English refusal also carries its Arabic (`errorAr`) when it is known.
-    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}) }), { status });
+    return NextResponse.json(withArabicError({ error: e.message ?? "Refused.", ...(e.errorEn ? { errorEn: e.errorEn } : {}), ...(e.errorAr ? { errorAr: e.errorAr } : {}), ...(e.code ? { code: e.code } : {}), ...(Array.isArray(e.problems) ? { problems: e.problems } : {}) }), { status });
   }
   return handlePrismaError(err);
 }

@@ -44,6 +44,9 @@ model Employee {
   commissionAccruals    CommissionAccrual[]     @relation("CommissionEarner")
   commissionLedger      CommissionLedgerEntry[] @relation("CommissionLedgerOwner")
   salesTargets          SalesTarget[]           @relation("SalesTargetOwner")
+  /// Commission plan builder (additive, 20261101090000_commission_builder).
+  commissionPeriodResults CommissionPeriodResult[] @relation("CommissionPeriodResultOwner")
+  commissionBonusDecisions CommissionBonusDecision[] @relation("CommissionBonusDecisionOwner")
   collectionsSubmitted  SalesCollection[]       @relation("CollectionSubmitter")
   collectionsDecided    SalesCollection[]       @relation("CollectionDecider")
   collectionsReversed   SalesCollection[]       @relation("CollectionReverser")
@@ -272,6 +275,22 @@ model Customer {
   salesHolds       CustomerSalesHold[]
   /// Append-only: every grace, hold, lift and automatic lift.
   creditLog        CustomerCreditLog[]
+
+  // ─── New-client commission exclusion (additive, 20261101090000_commission_builder) ──────
+  /// «مستثنى من عمولة العميل الجديد»: the customer was in the active client base or already in
+  /// negotiation before the salesperson started (commission policy, section A). No such flag
+  /// existed on the customer or on deal assignment, so it is a manual decision by a sales
+  /// manager. While true, the order-sequence component pays the plan's existing-client rate.
+  newClientCommissionExcluded Boolean   @default(false)
+  /// Why (required while excluded; CHECK).
+  newClientExclusionReason    String?
+  newClientExclusionById      String?
+  newClientExclusionAt        DateTime?
+  /// Opening setup «تهيئة العملاء الحاليين قبل تفعيل العمولات»: how many collected orders this
+  /// customer already had before commissions were activated, so the next is order N+1 of the
+  /// sequence. NULL = not set: a customer created before the activation date is then an EXISTING
+  /// client (existing-client rate); a customer created after it follows the new-client rules.
+  commissionPriorOrders       Int?
 
   @@index([accountOwnerId])
 }
@@ -2977,6 +2996,9 @@ model CommissionPlan {
   nameAr      String?
   description String?
   isActive    Boolean @default(true)
+  /// The ready-made template («قالب جاهز») the plan was created from, e.g. HIQBAH_CURRENT.
+  /// Informational only; the plan's rules are its versions. Null for hand-built plans.
+  templateKey String?
 
   versions    CommissionPlanVersion[]
   assignments CommissionAssignment[]
@@ -3004,9 +3026,18 @@ model CommissionPlanVersion {
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
+  /// Commission plan builder (additive, 20261101090000_commission_builder). NULL = a TIERED
+  /// version (baseRatePercent + tiers), exactly as before. An object = a COMPONENTS version:
+  /// order-sequence commission on new clients, target-achievement bonus brackets and the
+  /// marginal over-target incentive (lib/services/commissions/builder.ts parses and validates
+  /// it; baseRatePercent is 0 and there are no tiers). Immutable like the rest of the version.
+  components Json?
+
   tiers       CommissionTier[]
   assignments CommissionAssignment[]
   accruals    CommissionAccrual[]
+  periodResults  CommissionPeriodResult[]
+  bonusDecisions CommissionBonusDecision[]
 
   ledgerEntries CommissionLedgerEntry[]
   createdById   String?
@@ -3248,6 +3279,120 @@ model CommissionLedgerCorrection {
 
   @@unique([entryId, correctsEntryId])
   @@index([correctsEntryId])
+}
+
+/// The monthly result of a COMPONENTS plan for one employee: A (order-sequence commission on new
+/// clients), B (target-achievement bonus), C (marginal over-target incentive), the achievement and
+/// the differences from target. A PROJECTION, rewritten by every recomputation of the period (a
+/// collection approved or reversed, the monthly run, a management decision); the append-only
+/// ledger stays the authority on what is owed, and each recomputation posts its difference there.
+/// Additive, 20261101090000_commission_builder.
+model CommissionPeriodResult {
+  id            String                @id @default(cuid())
+  employeeId    String
+  employee      Employee              @relation("CommissionPeriodResultOwner", fields: [employeeId], references: [id], onDelete: Restrict)
+  periodStart   DateTime
+  periodEnd     DateTime
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  currency      String                @default("SAR")
+
+  /// The month's target (SalesTarget), null when none is set.
+  targetAmount       Decimal? @db.Decimal(18, 2)
+  /// Collected base counted toward the target (the plan's achievement base).
+  qualifiedBase      Decimal  @db.Decimal(18, 2)
+  /// Every collected base of the month with this employee's share, new clients or not.
+  collectedBase      Decimal  @db.Decimal(18, 2)
+  achievementPercent Decimal? @db.Decimal(12, 6)
+  diffAmount         Decimal? @db.Decimal(18, 2)
+  diffPercent        Decimal? @db.Decimal(12, 6)
+
+  clientCommission    Decimal @db.Decimal(18, 2)
+  targetBonus         Decimal @db.Decimal(18, 2)
+  overTargetIncentive Decimal @db.Decimal(18, 2)
+  totalVariable       Decimal @db.Decimal(18, 2)
+
+  /// The bonus bracket reached (index into the version's brackets), its kind, and whether a
+  /// management decision is required (DISCRETIONARY) / recorded.
+  bracketIndex   Int?
+  bracketKind    String?
+  decisionStatus String  @default("NONE")
+  /// Per-row and per-collection detail, for the screens (rates, sequence, client status).
+  breakdown      Json
+
+  computedAt   DateTime @default(now())
+  computedById String?
+
+  @@unique([employeeId, periodStart])
+  @@index([periodStart])
+  @@index([planVersionId])
+}
+
+/// A management decision on the target bonus of one employee-month: the discretionary amount of a
+/// DISCRETIONARY bracket (80–99% in the owner's model), or an OVERRIDE of an overridable bracket's
+/// fixed amount (≥150%). Taken in the commission review with the approve privilege, never by the
+/// person it pays. Append-only: a new decision supersedes the live one (supersededAt), so the
+/// history reads as what was decided. It applies only while the month still reaches the same
+/// bracket of the same plan version. Additive, 20261101090000_commission_builder.
+model CommissionBonusDecision {
+  id            String                @id @default(cuid())
+  employeeId    String
+  employee      Employee              @relation("CommissionBonusDecisionOwner", fields: [employeeId], references: [id], onDelete: Restrict)
+  periodStart   DateTime
+  planVersionId String
+  planVersion   CommissionPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  bracketIndex  Int
+  /// DISCRETIONARY | OVERRIDE (CHECK).
+  kind          String
+  amount        Decimal               @db.Decimal(18, 2)
+  reason        String
+  decidedById   String
+  decidedAt     DateTime              @default(now())
+  supersededAt  DateTime?
+
+  @@index([employeeId, periodStart])
+}
+
+/// «إعدادات العمولات» — one row (id 'singleton'). The new-client window, the lapse period, the
+/// eligibility duration (all inherited by a COMPONENTS plan unless the plan overrides them) and the
+/// commission activation date: no COMPONENTS commission is computed on a collection before it, and
+/// the monthly run refuses until it is set. Additive, 20261101090000_commission_builder.
+model CommissionSettings {
+  id                  String    @id @default("singleton")
+  /// A client is new when it bought nothing within this window before its acquisition (default 12 months).
+  newClientWindowValue Int      @default(12)
+  newClientWindowUnit  String   @default("MONTHS")
+  /// A client lapses after this long with no collected order (default 12 months); its sequence
+  /// commission stops, and a later purchase is a re-acquisition under the new-client window rule.
+  lapseValue          Int       @default(12)
+  lapseUnit           String    @default("MONTHS")
+  /// Eligibility after acquisition; NULL = forever (until the client lapses).
+  eligibilityValue    Int?
+  eligibilityUnit     String?
+  /// Commission activation date. NULL = not activated yet.
+  activationDate      DateTime?
+  updatedById         String?
+  updatedAt           DateTime  @default(now()) @updatedAt
+}
+
+/// Every change to the commission settings, the opening setup of a customer, or a customer's
+/// new-client exclusion — before and after, by whom, why. Append-only by the application.
+/// Additive, 20261101090000_commission_builder.
+model CommissionAuditLog {
+  id         String   @id @default(cuid())
+  /// SETTINGS | OPENING | EXCLUSION (CHECK).
+  kind       String
+  customerId String?
+  /// INLINE | CSV | SETTINGS | CUSTOMER_FILE (CHECK).
+  source     String
+  before     Json?
+  after      Json?
+  reason     String?
+  actorId    String
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([kind, createdAt])
 }
 
 /// A monthly sales target for a person. Deliberately separate from commission: hitting

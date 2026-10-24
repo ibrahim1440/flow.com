@@ -4,7 +4,8 @@ import { requireAuth, privilegedGate } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { hasSubPrivilege } from "@/lib/auth-shared";
 import { ZERO, roundMoney, riyadhMonthStart, parseFiniteDecimal } from "@/lib/services/commissions/engine";
-import { approvePeriod, adjust, periodStatement } from "@/lib/services/commissions/accrual";
+import { approvePeriod, adjust, periodStatement, lockEmployeePeriod, runBuilderMonth } from "@/lib/services/commissions/accrual";
+import { componentsVersionForPeriod, computeBuilderPeriod, serializePeriod } from "@/lib/services/commissions/builder-period";
 import { isReservedByPayroll, lockCommissionPeriod } from "@/lib/hr/services/commission-bridge";
 import { isPayrollLive, payrollLockedRefusal } from "@/lib/hr/payroll-lock";
 import { isSimpleMode } from "@/lib/simple-mode";
@@ -38,8 +39,11 @@ export async function POST(request: Request) {
   const b = (body ?? {}) as Record<string, unknown>;
 
   const action = typeof b.action === "string" ? b.action : "";
-  if (!["approve", "adjust", "payout"].includes(action)) {
-    return NextResponse.json({ error: "action must be approve, adjust or payout." }, { status: 400 });
+  // `decide`: the management decision a COMPONENTS plan asks for — the discretionary bonus of the
+  // 80–99% bracket, or an override of the ≥150% amount. The same privilege, step-up and
+  // nobody-on-their-own-pay rule as approve and adjust, because it decides what somebody is paid.
+  if (!["approve", "adjust", "payout", "decide"].includes(action)) {
+    return NextResponse.json({ error: "action must be approve, adjust, payout or decide." }, { status: 400 });
   }
 
   const employeeId = typeof b.employeeId === "string" ? b.employeeId : "";
@@ -81,8 +85,65 @@ export async function POST(request: Request) {
     });
     if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
 
+    if (action === "decide") {
+      const parsed = parseFiniteDecimal(b.amount ?? "");
+      if (!parsed) return NextResponse.json({ error: "amount is not a number." }, { status: 400 });
+      const amount = roundMoney(parsed);
+      if (amount.lessThan(ZERO)) return NextResponse.json({ error: "A decided bonus cannot be negative." }, { status: 400 });
+      const reason = typeof b.reason === "string" ? b.reason.trim() : "";
+      if (reason.length < 3) return NextResponse.json({ error: "A decision needs a reason." }, { status: 400 });
+
+      const out = await prisma.$transaction(async (tx) => {
+        await lockEmployeePeriod(tx, employeeId, periodStart);
+        const versionId = await componentsVersionForPeriod(tx, employeeId, at);
+        if (!versionId) throw { _appCode: 409, message: "This employee's plan for that month has no target bonus to decide." };
+        const now = await computeBuilderPeriod(tx, { employeeId, planVersionId: versionId, at });
+        const br = now.computation.bracket;
+        const kind = br?.kind === "DISCRETIONARY" ? "DISCRETIONARY" : br?.kind === "FIXED" && br.overridable ? "OVERRIDE" : null;
+        if (!br || !kind) {
+          throw { _appCode: 409, message: "The month does not reach a bracket that takes a management decision (a discretionary bracket, or one management may override)." };
+        }
+        await tx.commissionBonusDecision.updateMany({
+          where: { employeeId, periodStart, supersededAt: null },
+          data: { supersededAt: new Date() },
+        });
+        const decision = await tx.commissionBonusDecision.create({
+          data: { employeeId, periodStart, planVersionId: versionId, bracketIndex: br.index, kind, amount, reason, decidedById: user.id },
+          select: { id: true },
+        });
+        const run = await runBuilderMonth(tx, employeeId, at, user.id);
+        return { decisionId: decision.id, kind, run };
+      }, TX_OPTS);
+      return NextResponse.json({
+        decisionId: out.decisionId,
+        kind: out.kind,
+        delta: out.run?.delta.toFixed(2) ?? "0.00",
+        result: out.run ? serializePeriod(out.run.builder) : null,
+      }, { status: 201 });
+    }
+
     if (action === "approve") {
       const result = await prisma.$transaction(async (tx) => {
+        // A COMPONENTS month is approved only as the rules stand now: no discretionary decision
+        // outstanding, and the ledger already holding what the month computes to (otherwise the
+        // monthly run has not caught up with a target change or a decision — run it first).
+        const versionId = await componentsVersionForPeriod(tx, employeeId, at);
+        if (versionId) {
+          const now = await computeBuilderPeriod(tx, { employeeId, planVersionId: versionId, at });
+          if (now.computation.decisionStatus === "PENDING") {
+            throw {
+              _appCode: 409, code: "COMMISSION_DECISION_PENDING",
+              message: "The month reaches the discretionary bonus bracket. Record management's decision (an amount or zero, with a reason) before approving.",
+            };
+          }
+          const st = await periodStatement(tx, employeeId, periodStart);
+          if (!st.accrued.equals(now.computation.totalVariable)) {
+            throw {
+              _appCode: 409, code: "COMMISSION_RUN_REQUIRED",
+              message: "The ledger does not yet hold what this month computes to under its plan. Run the month first, then approve.",
+            };
+          }
+        }
         const count = await approvePeriod(tx, employeeId, periodStart, user.id);
         const statement = await periodStatement(tx, employeeId, periodStart);
         return { count, statement };

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireModule } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
 import { canEdit, hasModuleAccess, hasSubPrivilege } from "@/lib/auth-shared";
-import { seesAllSales, collectionWhere, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { seesAllSales, collectionWhere, managesNewClientExclusion, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
 import {
   Decimal, acceptedDocumentPerDeal, creditPosition, monthlyQuantities, orderRhythm, outstandingBalance,
   salesLast12Months, statementOfAccount, usualItems, type OrderRow,
@@ -364,6 +364,16 @@ export async function GET(_request: Request, { params }: Params) {
       statement,
       creditState,
       files,
+      // «مستثنى من عمولة العميل الجديد» — only for the people who may set it (managesNewClientExclusion).
+      newClientCommission: managesNewClientExclusion(p, user.role)
+        ? await prisma.customer.findUnique({
+            where: { id },
+            select: {
+              newClientCommissionExcluded: true, newClientExclusionReason: true, newClientExclusionAt: true,
+              newClientExclusionById: true,
+            },
+          })
+        : null,
       // 20 MB with the private Blob store, 5 MB in the database (services/customers/file-store.ts).
       fileLimits: { maxBytes: uploadLimit().maxBytes, direct: directUploadOffered() },
       openDeal: primary ? {

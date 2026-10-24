@@ -15,6 +15,7 @@
 //     assets_manage, performance_manage;
 //   · sensitive approvals and payments: hr › advances_approve, advances_disburse,
 //     leave_approve, attendance_approve; commissions › approve, record_payout, manage_plans,
+//     manage_settings (commission settings and the opening setup: they decide what is paid),
 //     collection_verify, collection_reject, collection_reverse; sales › quote_approve_discount;
 //   · destructive administration: settings › reset, training_reset;
 //   · system administration: automation › manage_connection (which number sends, and whether).
@@ -38,6 +39,7 @@ export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
   ["hr", "leave_manage"], ["hr", "assets_manage"], ["hr", "performance_manage"],
   ["hr", "advances_approve"], ["hr", "advances_disburse"], ["hr", "leave_approve"], ["hr", "attendance_approve"],
   ["commissions", "approve"], ["commissions", "record_payout"], ["commissions", "manage_plans"],
+  ["commissions", "manage_settings"],
   ["commissions", "collection_verify"], ["commissions", "collection_reject"], ["commissions", "collection_reverse"],
   ["sales", "quote_approve_discount"],
   ["settings", "reset"], ["settings", "training_reset"],

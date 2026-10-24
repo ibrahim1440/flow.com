@@ -170,6 +170,21 @@ export async function GET(request: Request) {
       { accrued: ZERO, adjustments: ZERO, paid: ZERO, outstanding: ZERO },
     );
 
+    // COMPONENTS plans (commission plan builder): the month's A / B / C per employee as last
+    // computed, with the bracket reached and whether a management decision is outstanding.
+    const periodResults = await prisma.commissionPeriodResult.findMany({
+      where: { periodStart },
+      orderBy: { employeeId: "asc" },
+      take: 500,
+      select: {
+        employeeId: true, targetAmount: true, qualifiedBase: true, collectedBase: true, achievementPercent: true,
+        diffAmount: true, diffPercent: true, clientCommission: true, targetBonus: true, overTargetIncentive: true,
+        totalVariable: true, bracketIndex: true, bracketKind: true, decisionStatus: true, breakdown: true, computedAt: true,
+        employee: { select: { id: true, name: true, active: true } },
+        planVersion: { select: { id: true, version: true, plan: { select: { code: true, name: true, nameAr: true } } } },
+      },
+    });
+
     const sources = [...new Set(accruals.map((a) => a.collectionEvent.sourceSystem))];
     const sandboxOnly = sources.length > 0 && sources.every((s) => s === "SANDBOX");
 
@@ -178,6 +193,14 @@ export async function GET(request: Request) {
       periodEnd,
       employees: statements,
       accruals,
+      // Money as the rest of this response writes it: two places, never "1362.5".
+      periodResults: periodResults.map((r) => ({
+        ...r,
+        targetAmount: r.targetAmount?.toFixed(2) ?? null, qualifiedBase: r.qualifiedBase.toFixed(2), collectedBase: r.collectedBase.toFixed(2),
+        achievementPercent: r.achievementPercent?.toFixed(6) ?? null, diffAmount: r.diffAmount?.toFixed(2) ?? null, diffPercent: r.diffPercent?.toFixed(6) ?? null,
+        clientCommission: r.clientCommission.toFixed(2), targetBonus: r.targetBonus.toFixed(2),
+        overTargetIncentive: r.overTargetIncentive.toFixed(2), totalVariable: r.totalVariable.toFixed(2),
+      })),
       totals: {
         accrued: totals.accrued.toFixed(2),
         adjustments: totals.adjustments.toFixed(2),
@@ -188,6 +211,9 @@ export async function GET(request: Request) {
         approve: hasSubPrivilege(user.permissions, "commissions", "approve"),
         recordPayout: hasSubPrivilege(user.permissions, "commissions", "record_payout"),
         managePlans: hasSubPrivilege(user.permissions, "commissions", "manage_plans"),
+        // The management decision of a COMPONENTS month is an approver's act (same rules as approve).
+        decide: hasSubPrivilege(user.permissions, "commissions", "approve"),
+        run: hasSubPrivilege(user.permissions, "commissions", "approve") || hasSubPrivilege(user.permissions, "commissions", "manage_plans"),
       },
       collectionSources: sources,
       sandbox: sandboxOnly,

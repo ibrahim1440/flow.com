@@ -444,6 +444,22 @@ export const NAV: NavNode[] = [
             anyOf: [commissions("manage_plans")],
             requiresAll: IN_SALES,
           },
+          {
+            // Commission plan builder — owner decisions of 24 Oct: the new-client window, the lapse
+            // period, the eligibility and the activation date, for `commissions › manage_settings`.
+            id: "finance.performance.settings",
+            ar: "إعدادات العمولات", en: "Commission settings",
+            href: "/dashboard/commissions/settings",
+            anyOf: [commissions("manage_settings")],
+          },
+          {
+            // The one-time opening setup of existing customers (and, after activation, the audited
+            // «تعديل ترتيب الطلب»), the same permission.
+            id: "finance.performance.opening",
+            ar: "تهيئة العملاء الحاليين", en: "Existing customers setup",
+            href: "/dashboard/commissions/opening",
+            anyOf: [commissions("manage_settings")],
+          },
         ],
       },
       {

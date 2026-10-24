@@ -36,6 +36,17 @@ export function seesTeamReports(permissions: Permissions | Record<string, unknow
   return role === "admin" || seesAllSales(permissions);
 }
 
+/**
+ * Who may see and set a customer's «مستثنى من عمولة العميل الجديد» flag (commission plan builder):
+ * the sales manager (`lead_assign`, the same mark as the team reports), the admin, and the holder of
+ * `commissions › manage_plans`. Never a rep — the flag decides somebody's commission, and the rep it
+ * would pay is the person who must not set it.
+ */
+export function managesNewClientExclusion(permissions: Permissions | Record<string, unknown>, role: string | null | undefined): boolean {
+  return seesTeamReports(permissions, role) || hasSubPrivilege(permissions as Permissions, "commissions", "manage_plans")
+    || hasSubPrivilege(permissions as Permissions, "commissions", "manage_settings");
+}
+
 /** A Prisma `where` fragment scoping by owner, or `{}` for someone who sees everything. */
 export function ownerScope(
   permissions: Permissions | Record<string, unknown>,

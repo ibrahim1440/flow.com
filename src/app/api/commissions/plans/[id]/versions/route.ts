@@ -2,8 +2,7 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import { Decimal, parseFiniteDecimal } from "@/lib/services/commissions/engine";
-import { addPlanVersion, type TierInput, type VersionInput } from "@/lib/services/commissions/plans";
+import { addPlanVersion, parseVersionBody } from "@/lib/services/commissions/plans";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,48 +15,6 @@ type Params = { params: Promise<{ id: string }> };
  * effective date; the old one keeps governing the money earned under it, and
  * `selectPlanVersion` picks by the date the cash arrived.
  */
-function parseVersion(b: Record<string, unknown>): VersionInput {
-  // Finite decimals only: a NaN rate or bound passes every range check and is stored as NaN.
-  const dec = (v: unknown, field: string): Decimal => {
-    const d = parseFiniteDecimal(v);
-    if (!d) throw { _appCode: 400, message: `${field} is not a number.` };
-    return d;
-  };
-
-  const effectiveFrom = new Date(String(b.effectiveFrom ?? ""));
-  if (Number.isNaN(effectiveFrom.getTime())) {
-    throw { _appCode: 400, message: "effectiveFrom is required and must be a date." };
-  }
-  let effectiveTo: Date | null = null;
-  if (b.effectiveTo) {
-    effectiveTo = new Date(String(b.effectiveTo));
-    if (Number.isNaN(effectiveTo.getTime())) throw { _appCode: 400, message: "effectiveTo is not a date." };
-  }
-
-  const rawTiers = Array.isArray(b.tiers) ? b.tiers : [];
-  if (rawTiers.length > 20) throw { _appCode: 400, message: "A plan version may have at most 20 tiers." };
-  const tiers: TierInput[] = rawTiers.map((raw, i) => {
-    const t = (raw ?? {}) as Record<string, unknown>;
-    return {
-      fromAmount: dec(t.fromAmount ?? "0", `Tier ${i + 1} start`),
-      toAmount:
-        t.toAmount === null || t.toAmount === undefined || t.toAmount === ""
-          ? null
-          : dec(t.toAmount, `Tier ${i + 1} end`),
-      ratePercent: dec(t.ratePercent ?? "0", `Tier ${i + 1} rate`),
-    };
-  });
-
-  return {
-    baseRatePercent: dec(b.baseRatePercent ?? "0", "The base rate"),
-    tierMode: b.tierMode === "RETROACTIVE" ? "RETROACTIVE" : "INCREMENTAL",
-    currency: typeof b.currency === "string" ? b.currency : "SAR",
-    effectiveFrom,
-    effectiveTo,
-    tiers,
-  };
-}
-
 export async function POST(request: Request, { params }: Params) {
   const { user, error } = await requireSub("commissions", "manage_plans");
   if (error) return error;
@@ -71,10 +28,12 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    const version = parseVersion((body ?? {}) as Record<string, unknown>);
+    const b = (body ?? {}) as Record<string, unknown>;
+    const version = parseVersionBody(b);
 
     const created = await prisma.$transaction(
-      (tx) => addPlanVersion(tx, { planId: id, version, actorId: user.id }),
+      // `moveAssignees`: carry the people on earlier versions of this plan over from the new start date.
+      (tx) => addPlanVersion(tx, { planId: id, version, actorId: user.id, moveAssignees: b.moveAssignees === true }),
       TX_OPTS,
     );
 

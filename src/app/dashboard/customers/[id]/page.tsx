@@ -583,6 +583,27 @@ export default function CustomerAccountPage({ params }: { params: Promise<{ id: 
         <dt>{L("التوصيل", "Delivery")}</dt><dd style={{ whiteSpace: "pre-line" }}>{c.address ?? notSet}</dd>
         <dt>{L("المصدر", "Source")}</dt><dd>{sourceText ?? (sections.sales ? L("أُضيف مباشرة", "Added directly") : "—")}</dd>
       </dl>
+      {data.newClientCommission && (
+        <label className="cb-check" style={{ marginTop: 10, display: "flex", alignItems: "flex-start" }} data-testid="new-client-exclusion">
+          <input type="checkbox" checked={data.newClientCommission.newClientCommissionExcluded} disabled={busy}
+            data-testid="new-client-exclusion-box"
+            onChange={async (e) => {
+              const excluded = e.target.checked;
+              const reason = excluded ? window.prompt(L("سبب الاستثناء (كان نشطاً أو جارٍ التفاوض معه قبل المندوب):", "Why is the client excluded (active or in negotiation before the rep)?")) ?? "" : "";
+              if (excluded && reason.trim().length < 3) return;
+              setBusy(true);
+              const r = await api(`/api/customers/${id}/commission-exclusion`, { method: "PATCH", body: { excluded, reason } });
+              setBusy(false);
+              if (r.ok) reload(); else setNotice({ text: r.data.error ?? "", ok: false });
+            }} />
+          <span>
+            {L("مستثنى من عمولة العميل الجديد", "Excluded from new-client commission")}
+            {data.newClientCommission.newClientCommissionExcluded && data.newClientCommission.newClientExclusionReason && (
+              <span className="acc-muted" style={{ display: "block", fontSize: 12 }}>{data.newClientCommission.newClientExclusionReason}</span>
+            )}
+          </span>
+        </label>
+      )}
     </section>
   );
 

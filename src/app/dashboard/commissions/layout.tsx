@@ -7,6 +7,7 @@ import { direction21Viewport } from "@/components/shell/viewport";
 import "@/components/d21/reference.css";
 import "../d21.css";
 import "../sales/_components/perf.css";
+import "./builder.css";
 
 export const viewport = direction21Viewport;
 
