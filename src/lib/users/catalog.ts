@@ -34,6 +34,7 @@ export const MODULE_AR: Record<string, Bi> = {
   hr: { ar: "الموارد البشرية", en: "Human resources" },
   marketing: { ar: "التسويق الذكي", en: "Smart marketing" },
   purchases: { ar: "المشتريات وفواتير الموردين", en: "Purchases & supplier invoices" },
+  workspace: { ar: "مساحة عملي", en: "My Workspace" },
 };
 
 /** P-6 · the owner's groups → existing modules (users.py GROUPS; HR and automation placed by this batch). */
@@ -47,7 +48,7 @@ export const GROUPS: { key: string; ar: string; en: string; modules: string[] }[
   { key: "finance", ar: "المالية", en: "Finance", modules: ["finance"] },
   { key: "hr", ar: "الموارد البشرية", en: "Human resources", modules: ["hr"] },
   { key: "marketing", ar: "التسويق", en: "Marketing", modules: ["marketing"] },
-  { key: "admin", ar: "الإدارة", en: "Administration", modules: ["employees", "dashboard", "analytics"] },
+  { key: "admin", ar: "الإدارة", en: "Administration", modules: ["employees", "dashboard", "analytics", "workspace"] },
   { key: "settings", ar: "الإعدادات", en: "Settings", modules: ["settings", "automation"] },
 ];
 
@@ -64,6 +65,7 @@ export const SUB_AR: Record<string, Record<string, string>> = {
   },
   inventory: { receive: "استلام البن الأخضر", adjust: "تسوية المخزون وتعديله", override: "تجاوز المخزون للدفعات الملغاة", valuation: "تقييم المخزون وتكلفة الإنتاج" },
   purchases: { invoices: "إدخال فواتير الموردين وتقديمها للاعتماد" },
+  workspace: { assign_any: "إسناد المهام لأي موظف وإدارة أي مهمة", team_view: "عرض مهام وتقويم وأعباء جميع الموظفين" },
   sales: {
     lead_write: "إنشاء العملاء المحتملين وتعديلهم", lead_assign: "إسناد العميل المحتمل أو تغيير مالكه", lead_convert: "تحويل العميل المحتمل إلى عميل وصفقة",
     lead_import: "استيراد عملاء محتملين من ملف", lead_export: "تصدير العملاء المحتملين", deal_close: "إغلاق الصفقة بربح أو خسارة", deal_reopen: "إعادة فتح صفقة مغلقة",

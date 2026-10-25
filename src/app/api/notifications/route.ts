@@ -32,6 +32,12 @@ export async function GET(request: Request) {
           const { deliverPendingEmails } = await import("@/lib/notifications/deliver");
           await deliverPendingEmails({ limit: 50 });
         }
+        // «مساحة عملي»: the task / appointment reminders that are due — after the e-mail delivery, in a small
+        // batch with its own short budget (at most once a minute per instance); failures stay inside it.
+        try {
+          const { maybeRunReminders } = await import("@/lib/workspace/server/reminders");
+          await maybeRunReminders();
+        } catch { /* the scheduler retries */ }
       });
     } catch { /* outside a request */ }
     return NextResponse.json(out);

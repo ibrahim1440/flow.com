@@ -53,6 +53,10 @@ export const ALL_MODULES = [
   // Accounting A3 (20261104090000): purchasing documents — entering supplier invoices (drafts). Posting them,
   // paying them and the AP ledger stay accounting › ap. Nobody holds it by a role default.
   "purchases",
+  // «مساحة عملي» (feat/my-workspace): one's own tasks, calendar and requests need no grant (like «خدماتي»);
+  // the module carries only the reach beyond oneself and one's HR direct reports. Nobody holds it by a role
+  // default except the administrator template.
+  "workspace",
 ] as const;
 
 export type ModuleKey = (typeof ALL_MODULES)[number];
@@ -80,6 +84,7 @@ export const MODULE_LABELS: Record<string, string> = {
   hr: "Human Resources",
   marketing: "Smart Marketing",
   purchases: "Purchases (supplier invoices)",
+  workspace: "My Workspace (team reach)",
 };
 
 export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string }[]> = {
@@ -246,6 +251,11 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
   // Accounting A3: entering supplier invoices (drafts) and submitting them for approval.
   purchases: [
     { key: "invoices", label: "Enter supplier invoices and submit them for approval" },
+  ],
+  // «مساحة عملي»: everyone assigns work to themself and their HR direct reports and sees that team.
+  workspace: [
+    { key: "assign_any", label: "Assign tasks to any colleague (cross-department) and manage any task" },
+    { key: "team_view", label: "See every colleague's tasks, calendar and workload" },
   ],
   // Finance duties are separated on purpose: preparing a budget or a rule does not, by this
   // key alone, allow approving it; and no request can be decided by its own requester

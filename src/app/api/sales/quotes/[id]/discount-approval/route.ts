@@ -9,11 +9,20 @@ import { isSimpleMode } from "@/lib/simple-mode";
 
 type Params = { params: Promise<{ id: string }> };
 
+const figure = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : null);
+function expectedOf(v: unknown) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const e = v as Record<string, unknown>;
+  return { effectiveDiscountPercent: figure(e.effectiveDiscountPercent), grandTotal: figure(e.grandTotal) };
+}
+
 /**
  * POST /api/sales/quotes/[id]/discount-approval — approve or refuse the discount on a draft
  * (Figma 181:1609, the list's preview drawer; and the quotation page).
  *
- * Body: { decision: "APPROVE" | "REJECT", note?: string } (a refusal needs a note).
+ * Body: { decision: "APPROVE" | "REJECT", note?: string, expected?: { effectiveDiscountPercent?, grandTotal? } }
+ * (a refusal needs a note). `expected` («مساحة عملي»): the figures the approver was shown — a quotation
+ * changed since is refused 409 STALE_REQUEST under the lock.
  *
  * The privilege is the one that already authorises a discount above the threshold:
  * sales › quote_approve_discount, through `requireSub` — so its privileged gate (verified
@@ -61,6 +70,7 @@ export async function POST(request: Request, { params }: Params) {
       threshold: await discountThreshold(tx),
       // SIMPLE MODE: the one admin may approve a discount on a quotation they raised.
       forbidSelfApproval: !isSimpleMode(),
+      expected: expectedOf(b.expected),
     }), TX_OPTS);
     return NextResponse.json(result);
   } catch (err) {

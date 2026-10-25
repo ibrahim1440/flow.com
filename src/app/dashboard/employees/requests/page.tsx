@@ -1,5 +1,6 @@
 "use client";
 
+import { defaultLandingFor } from "@/lib/workspace/landing";
 import { Select } from "@/components/ui/Select";
 import { useState, useEffect } from "react";
 import { Plus, Pencil, Eye, EyeOff, Lock, Navigation, Trash2, AlertTriangle } from "lucide-react";
@@ -58,6 +59,7 @@ function parsePerms(raw: string | Permissions): Permissions {
 }
 
 const ROUTE_OPTIONS: { value: string; label: string; module: string | null }[] = [
+  { value: "/dashboard/workspace",   label: "My Workspace",    module: null },
   { value: "/dashboard",             label: "Dashboard",       module: "dashboard" },
   { value: "/dashboard/inventory",   label: "Inventory",       module: "inventory" },
   { value: "/dashboard/orders",      label: "Orders",          module: "orders" },
@@ -134,7 +136,7 @@ function EmployeesInner() {
 
   function openNew() {
     setEditingId(null);
-    setForm({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: "/dashboard", active: true, phoneNumber: "" });
+    setForm({ name: "", username: "", pin: "", password: "", role: "custom", defaultRoute: defaultLandingFor("custom"), active: true, phoneNumber: "" });
     setPermissions(buildDefaultPermissions("custom"));
     setDeleteConfirm(false);
     setEditingHeldInv(false);
@@ -162,6 +164,9 @@ function EmployeesInner() {
         !routeOpt?.module ||
         routeOpt.module === "dashboard" ||
         hasModuleAccess(newPerms, routeOpt.module);
+      // A NEW account follows the landing rule of its role (lib/workspace/landing.ts); an existing
+      // account keeps its choice while it stays reachable.
+      if (!editingId) return { ...f, role, defaultRoute: defaultLandingFor(role) };
       return { ...f, role, defaultRoute: stillAccessible ? f.defaultRoute : "/dashboard" };
     });
     setPermissions(newPerms);

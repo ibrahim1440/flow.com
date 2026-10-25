@@ -581,6 +581,105 @@ export const EVENTS: NotificationEventDef[] = [
       };
     },
   },
+  // ── «مساحة عملي» · tasks, reviews, appointments (feat/my-workspace). Person-addressed only: the assignee,
+  // the asker, the reviewer, the manager an overdue task escalates to, an appointment's participants. The
+  // planned reminders are written by lib/workspace/server/reminders.ts and sent once (dedupe per due instant).
+  {
+    key: "me.task_assigned", category: "me", severity: "info",
+    label: { ar: "أُسندت إليك مهمة", en: "A task was assigned to you" },
+    recipients: [{ person: "assignee" }],
+    trigger: "createTask / reassignTask (lib/workspace/server/tasks.ts)",
+    render: (f) => ({
+      severity: f.priority === "URGENT" ? "warning" : "info",
+      titleAr: `مهمة جديدة: ${s(f.title)}`, titleEn: `New task: ${s(f.title)}`,
+      bodyAr: [f.by ? `من ${s(f.by)}` : "", f.due ? `تُستحق ${s(f.due)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [f.by ? `From ${s(f.by)}` : "", f.dueEn ? `Due ${s(f.dueEn)}` : ""].filter(Boolean).join(" · "),
+      link: f.taskId ? `/dashboard/workspace/tasks?task=${enc(s(f.taskId))}` : "/dashboard/workspace",
+    }),
+  },
+  {
+    key: "me.task_due_soon", category: "me", severity: "info",
+    label: { ar: "اقترب موعد مهمتك", en: "Your task is due soon" },
+    recipients: [{ person: "recipient" }],
+    trigger: "the workspace reminder runner (DUE_SOON / SNOOZE)",
+    render: (f) => ({
+      titleAr: `تذكير: ${s(f.title)}`, titleEn: `Reminder: ${s(f.title)}`,
+      bodyAr: f.due ? `تُستحق ${s(f.due)}` : "", bodyEn: f.dueEn ? `Due ${s(f.dueEn)}` : "",
+      link: f.taskId ? `/dashboard/workspace/tasks?task=${enc(s(f.taskId))}` : "/dashboard/workspace",
+    }),
+  },
+  {
+    key: "me.task_overdue", category: "me", severity: "warning",
+    label: { ar: "تأخرت مهمتك", en: "Your task is overdue" },
+    recipients: [{ person: "recipient" }],
+    trigger: "the workspace reminder runner (OVERDUE)",
+    render: (f) => ({
+      titleAr: `متأخرة: ${s(f.title)}`, titleEn: `Overdue: ${s(f.title)}`,
+      bodyAr: f.due ? `كان موعدها ${s(f.due)}` : "", bodyEn: f.dueEn ? `It was due ${s(f.dueEn)}` : "",
+      link: f.taskId ? `/dashboard/workspace/tasks?task=${enc(s(f.taskId))}` : "/dashboard/workspace",
+    }),
+  },
+  {
+    key: "me.task_escalated", category: "me", severity: "warning",
+    label: { ar: "مهمة متأخرة في فريقك", en: "An overdue task in your team" },
+    recipients: [{ person: "recipient" }],
+    trigger: "the workspace reminder runner (ESCALATION, WorkSettings.escalateAfterHours after the deadline) — to the asker and the assignee's manager",
+    render: (f) => ({
+      titleAr: `مهمة متأخرة لدى ${s(f.assignee)}: ${s(f.title)}`, titleEn: `Overdue with ${s(f.assignee)}: ${s(f.title)}`,
+      bodyAr: f.due ? `كان موعدها ${s(f.due)}` : "", bodyEn: f.dueEn ? `It was due ${s(f.dueEn)}` : "",
+      link: f.taskId ? `/dashboard/workspace/tasks?task=${enc(s(f.taskId))}` : "/dashboard/workspace",
+    }),
+  },
+  {
+    key: "me.task_review", category: "me", severity: "info",
+    label: { ar: "مهمة بانتظار مراجعتك", en: "A task awaits your review" },
+    recipients: [{ person: "reviewer" }],
+    trigger: "transitionTask complete → IN_REVIEW",
+    render: (f) => ({
+      titleAr: `بانتظار مراجعتك: ${s(f.title)}`, titleEn: `Awaiting your review: ${s(f.title)}`,
+      bodyAr: f.by ? `أنجزها ${s(f.by)}` : "", bodyEn: f.by ? `Completed by ${s(f.by)}` : "",
+      link: f.taskId ? `/dashboard/workspace/tasks?task=${enc(s(f.taskId))}` : "/dashboard/workspace",
+    }),
+  },
+  {
+    key: "me.task_updated", category: "me", severity: "info",
+    label: { ar: "تغيّرت مهمة تخصك (اكتملت، أُعيدت، أُلغيت، تغيّر موعدها)", en: "A task of yours changed (done, returned, cancelled, rescheduled)" },
+    recipients: [{ person: "recipient" }],
+    trigger: "transitionTask / updateTask — to the asker when the work is done, to the assignee when it is returned, cancelled or rescheduled",
+    render: (f) => {
+      const what: Record<string, [string, string]> = {
+        DONE: ["اكتملت", "was completed"], RETURNED: ["أُعيدت للتنفيذ", "was returned for more work"],
+        CANCELLED: ["أُلغيت", "was cancelled"], DUE_CHANGED: ["تغيّر موعدها", "was rescheduled"], ON_HOLD: ["توقفت", "was put on hold"],
+      };
+      const w = what[s(f.change)] ?? ["تغيّرت", "changed"];
+      return {
+        severity: f.change === "DONE" ? "success" : f.change === "CANCELLED" || f.change === "RETURNED" ? "warning" : "info",
+        titleAr: `المهمة «${s(f.title)}» ${w[0]}`, titleEn: `Task «${s(f.title)}» ${w[1]}`,
+        bodyAr: [f.by ? `بواسطة ${s(f.by)}` : "", s(f.note), f.due ? `الموعد ${s(f.due)}` : ""].filter(Boolean).join(" · "),
+        bodyEn: [f.by ? `By ${s(f.by)}` : "", s(f.note), f.dueEn ? `Due ${s(f.dueEn)}` : ""].filter(Boolean).join(" · "),
+        link: f.taskId ? `/dashboard/workspace/tasks?task=${enc(s(f.taskId))}` : "/dashboard/workspace",
+      };
+    },
+  },
+  {
+    key: "me.appointment", category: "me", severity: "info",
+    label: { ar: "موعد: دعوة، تغيير، إلغاء، أو تذكير", en: "Appointment: invitation, change, cancellation or reminder" },
+    recipients: [{ person: "recipient" }],
+    trigger: "createAppointment / updateAppointment / cancelAppointment and the reminder runner (APPOINTMENT)",
+    render: (f) => {
+      const what: Record<string, [string, string]> = {
+        INVITED: ["دُعيت إلى", "You were invited to"], CHANGED: ["تغيّر موعد", "Rescheduled:"],
+        CANCELLED: ["أُلغي", "Cancelled:"], SOON: ["يبدأ قريبًا", "Starting soon:"],
+      };
+      const w = what[s(f.change)] ?? ["موعد", "Appointment:"];
+      return {
+        severity: f.change === "CANCELLED" ? "warning" : "info",
+        titleAr: `${w[0]} «${s(f.title)}»`, titleEn: `${w[1]} «${s(f.title)}»`,
+        bodyAr: [s(f.when), s(f.where)].filter(Boolean).join(" · "), bodyEn: [s(f.whenEn), s(f.where)].filter(Boolean).join(" · "),
+        link: f.appointmentId ? `/dashboard/workspace/calendar?appointment=${enc(s(f.appointmentId))}` : "/dashboard/workspace/calendar",
+      };
+    },
+  },
   {
     key: "system.storage_incident", category: "system", severity: "danger",
     label: { ar: "تعطّل تخزين ملفات العملاء", en: "Customer file storage incident" },

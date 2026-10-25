@@ -85,6 +85,7 @@ export const ALLOWED_DEFAULT_ROUTES = new Set([
   "/dashboard/purchases",
   "/dashboard/settings",
   "/dashboard/profile",
+  "/dashboard/workspace",
 ]);
 
 /** Friendly pre-check on the keyed lookup; UNIQUE(pinLookup) is the real arbiter. */

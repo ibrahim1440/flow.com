@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useWsBadge } from "@/lib/workspace/badge-client";
 import { usePathname, useRouter } from "next/navigation";
 import { Circle, LogOut, UserRound } from "lucide-react";
 import {
@@ -329,6 +330,9 @@ export function AppShell({
 
   const { top, groups, menu: menuItems } = useMemo(() => sidebarGroups(tree, lang, lit, viewer), [tree, lang, lit, viewer]);
   const roleLabel = (ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) || user.role;
+  // «مساحة عملي»: overdue + due today + waiting for my decision, refreshed on navigation and every 2 min.
+  const wsBadge = useWorkspaceBadge(tree.some((n) => n.id === "workspace"), pathname);
+
   const navItem = (it: Item, parent?: NavNode) => {
     const label = text(it.node, lang, viewer);
     return (
@@ -336,6 +340,9 @@ export function AppShell({
         <Link href={it.href} className="d21-nav" aria-current={it.current} data-testid={`nav-${it.node.id}`} title={label}>
           <NodeIcon node={it.node} fallback={parent} />
           <span>{label}</span>
+          {it.node.id === "workspace" && wsBadge > 0 ? (
+            <span className="d21-badge" data-testid="nav-workspace-badge" aria-label={ar ? `${wsBadge} بحاجة إلى تصرفك` : `${wsBadge} need your action`}>{wsBadge > 99 ? "99+" : wsBadge}</span>
+          ) : null}
         </Link>
       </li>
     );
@@ -368,6 +375,7 @@ export function AppShell({
   };
   const moduleHref = !litGroup && active.group ? firstDestination(viewer, active.group) : null;
   const meNode = tree.find((n) => n.id === "me");
+  const wsNode = tree.find((n) => n.id === "workspace");
   const dests = useMemo(() => destinations(tree, lang, viewer), [tree, lang, viewer]);
   // The phone header keeps naming the section on a list page with a Segmented control (reference
   // crm-390: «الصفقات» over the pipeline); otherwise it names the last crumb.
@@ -524,7 +532,10 @@ export function AppShell({
           <nav className="d21-tabbar" aria-label={ar ? "التنقل السريع" : "Quick navigation"}>
             <Link href="/dashboard" aria-current={pathname === "/dashboard" ? "page" : undefined}><Ico name="home" />{ar ? "الرئيسية" : "Home"}</Link>
             {litGroup && litGroup.label ? <Link href={litGroup.items[0].href} aria-current="true" data-testid="tab-group"><NodeIcon node={litGroup.items[0].node} fallback={NAV.find((n) => n.id === litGroup.id)} />{litGroup.label}</Link>
-              : active.group && moduleHref ? <Link href={moduleHref} aria-current="true" data-testid="tab-group"><NodeIcon node={active.group} />{text(active.group, lang)}</Link> : null}
+              : active.group && moduleHref ? <Link href={moduleHref} aria-current="true" data-testid="tab-group"><NodeIcon node={active.group} />{text(active.group, lang)}</Link>
+              // «مساحة عملي» takes the slot when no section holds it (the workspace itself, the dashboard,
+              // «خدماتي»): the reference's «الوارد» position, never displacing the current section.
+              : wsNode ? <Link href={wsNode.href!} aria-current={active.leaf?.id === "workspace" ? "page" : undefined} data-testid="tab-workspace" className="d21-tab-ws"><Ico name="inbox" />{text(wsNode, lang)}{wsBadge > 0 ? <span className="d21-badge" aria-label={ar ? `${wsBadge} بحاجة إلى تصرفك` : `${wsBadge} need your action`}>{wsBadge > 99 ? "99+" : wsBadge}</span> : null}</Link> : null}
             {single ? (
               <div className="d21-fab-slot" data-d21-new>
                 <Link href={single.href} className="d21-fab" aria-label={ar ? `جديد: ${single.labelAr}` : `New: ${single.labelEn}`} data-testid="d21-fab"><Ico name="plus" /></Link>
@@ -696,4 +707,9 @@ function MoreSheet({ lang, onClose, children }: { lang: string; onClose: () => v
       <nav className="d21-more-body" aria-label={ar ? "كل الأقسام" : "All sections"}>{children}</nav>
     </div>
   );
+}
+
+/** The «مساحة عملي» sidebar count (shared, at most one request a minute). Fails quietly: no number, never an error. */
+function useWorkspaceBadge(enabled: boolean, pathname: string): number {
+  return useWsBadge(enabled, pathname)?.count ?? 0;
 }

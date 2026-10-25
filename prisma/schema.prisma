@@ -106,6 +106,16 @@ model Employee {
   pinResetRequired      Boolean              @default(false)
 
   @@index([accessRoleId])
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasksAssigned      WorkTask[]                   @relation("WorkTaskAssignee")
+  workTasksCreated       WorkTask[]                   @relation("WorkTaskCreator")
+  workTasksReviewing     WorkTask[]                   @relation("WorkTaskReviewer")
+  workTaskComments       WorkTaskComment[]            @relation("WorkTaskCommentAuthor")
+  workTaskAttachments    WorkTaskAttachment[]         @relation("WorkTaskAttachmentUploader")
+  workTasksWatching      WorkTaskWatcher[]            @relation("WorkTaskWatcher")
+  workAppointments       WorkAppointment[]            @relation("WorkAppointmentOrganizer")
+  workAppointmentInvites WorkAppointmentParticipant[] @relation("WorkAppointmentParticipant")
+  workReminders          WorkReminder[]               @relation("WorkReminderRecipient")
 }
 
 /// A custom access role (Figma UR-05 / UR-06): a named permission template. The system templates
@@ -293,6 +303,9 @@ model Customer {
   commissionPriorOrders       Int?
 
   @@index([accountOwnerId])
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasks        WorkTask[]        @relation("WorkTaskCustomer")
+  workAppointments WorkAppointment[] @relation("WorkAppointmentCustomer")
 }
 
 /// «إيقاف البيع» — a manual sales hold, placed by a person holding customers › sales_hold (never
@@ -2780,6 +2793,9 @@ model Lead {
   @@index([status, nextFollowUpAt])
   @@index([normalizedCompany])
   @@index([normalizedPhone])
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasks        WorkTask[]        @relation("WorkTaskLead")
+  workAppointments WorkAppointment[] @relation("WorkAppointmentLead")
 }
 
 /// The proof that a lead became a customer and an opportunity.
@@ -2899,6 +2915,9 @@ model Opportunity {
   @@index([stageId, outcome])
   @@index([outcome, closedAt])
   @@index([nextFollowUpAt])
+  /// «مساحة عملي» (additive, 20261108090000_my_workspace): relation fields only.
+  workTasks        WorkTask[]        @relation("WorkTaskOpportunity")
+  workAppointments WorkAppointment[] @relation("WorkAppointmentOpportunity")
 }
 
 /// Split attribution. Percentages are stored, not inferred, and the service requires
@@ -7629,6 +7648,8 @@ model MktCampaign {
 
   @@index([status])
   @@index([productId])
+  /// «مساحة عملي» (additive): occasions linked to this campaign.
+  workOccasions WorkOccasion[] @relation("WorkOccasionCampaign")
 }
 
 /// A content asset (design, photo, video, source file, copy). Versions keep every upload; the
@@ -8239,4 +8260,308 @@ model MktWebhookEvent {
 
   @@unique([source, eventKey])
   @@index([status, receivedAt])
+}
+
+// ─── «مساحة عملي» · My Workspace (additive, 20261108090000_my_workspace) ─────────────────────────
+// docs/workspace/INTEGRATION.md. New tables only: the work that had no home (tasks, appointments,
+// marketing occasions, the reminder outbox). Approvals stay in their departments; the workspace reads
+// and decides them through the departments' own services. Status / kind columns are strings with a
+// CHECK (the marketing convention). "WorkTaskEvent" is append-only (trigger).
+
+/// A unit of work with ONE accountable owner (the assignee). Overdue is derived (dueAt < now and not
+/// DONE / CANCELLED), never a status; completing late keeps completedAt > dueAt for ever.
+model WorkTask {
+  id                  String        @id @default(cuid())
+  /// TASK | FOLLOW_UP (a customer follow-up whose result goes to the CRM timeline) (CHECK)
+  kind                String        @default("TASK")
+  title               String
+  description         String?
+  /// NOT_STARTED | IN_PROGRESS | ON_HOLD | IN_REVIEW | DONE | CANCELLED (CHECK)
+  status              String        @default("NOT_STARTED")
+  /// Required while ON_HOLD (CHECK).
+  holdReason          String?
+  /// LOW | NORMAL | HIGH | URGENT (CHECK)
+  priority            String        @default("NORMAL")
+  assigneeId          String
+  assignee            Employee      @relation("WorkTaskAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  createdById         String
+  createdBy           Employee      @relation("WorkTaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  /// The deadline, a UTC instant (shown in Asia/Riyadh).
+  dueAt               DateTime
+  /// How the deadline was chosen: CLOCK (actual hours) | BUSINESS (working hours) | EXACT (CHECK).
+  dueBasis            String        @default("EXACT")
+  /// Reserved execution time — distinct from the deadline (a due date never blocks a whole day).
+  plannedStartAt      DateTime?
+  plannedMinutes      Int?
+  requiresReview      Boolean       @default(false)
+  reviewerId          String?
+  reviewer            Employee?     @relation("WorkTaskReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  /// Minutes before dueAt for the «قبل الاستحقاق» reminder; NULL = none.
+  remindBeforeMinutes Int?          @default(60)
+  /// FOLLOW_UP channel: CALL | VISIT | MEETING (CHECK).
+  channel             String?
+  customerId          String?
+  customer            Customer?     @relation("WorkTaskCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  leadId              String?
+  lead                Lead?         @relation("WorkTaskLead", fields: [leadId], references: [id], onDelete: SetNull)
+  opportunityId       String?
+  opportunity         Opportunity?  @relation("WorkTaskOpportunity", fields: [opportunityId], references: [id], onDelete: SetNull)
+  /// Any other document, by type and id (an order, a quote, an invoice …) with its label at link time.
+  refType             String?
+  refId               String?
+  refLabel            String?
+  occasionId          String?
+  occasion            WorkOccasion? @relation(fields: [occasionId], references: [id], onDelete: SetNull)
+  /// The CRM Activity that recorded this follow-up's result (one result per task).
+  resultActivityId    String?       @unique
+  /// Recurrence: DAILY | WEEKLY | MONTHLY (CHECK), every `recurInterval`, until `recurUntil`. The series
+  /// is the first task's id; the next occurrence is created when one is completed (unique per series).
+  recurRule           String?
+  recurInterval       Int?
+  recurUntil          DateTime?
+  seriesId            String?
+  occurrence          Int           @default(1)
+  startedAt           DateTime?
+  submittedAt         DateTime?
+  completedAt         DateTime?
+  completedById       String?
+  cancelledAt         DateTime?
+  cancelledById       String?
+  cancelReason        String?
+  /// Optimistic concurrency: every write bumps it; a write naming an older version is refused (409).
+  version             Int           @default(1)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  checklist   WorkTaskChecklistItem[]
+  comments    WorkTaskComment[]
+  watchers    WorkTaskWatcher[]
+  attachments WorkTaskAttachment[]
+  events    WorkTaskEvent[]
+  reminders WorkReminder[]
+
+  @@unique([seriesId, occurrence])
+  @@index([assigneeId, status, dueAt])
+  @@index([createdById, status])
+  @@index([status, dueAt])
+  @@index([customerId])
+  @@index([occasionId])
+}
+
+model WorkTaskChecklistItem {
+  id       String    @id @default(cuid())
+  taskId   String
+  task     WorkTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label    String
+  position Int       @default(0)
+  doneAt   DateTime?
+  doneById String?
+
+  @@index([taskId, position])
+}
+
+model WorkTaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      WorkTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    Employee @relation("WorkTaskCommentAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+/// A file on a task (PDF, JPEG or PNG — the type proven by the bytes; at most 5 MB, kept in the row).
+/// Read only by the people who may see the task; never a public URL.
+model WorkTaskAttachment {
+  id           String   @id @default(cuid())
+  taskId       String
+  task         WorkTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  content      Bytes
+  uploadedById String
+  uploadedBy   Employee @relation("WorkTaskAttachmentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+model WorkTaskWatcher {
+  taskId     String
+  task       WorkTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee @relation("WorkTaskWatcher", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, employeeId])
+  @@index([employeeId])
+}
+
+/// The history of a task: created, assigned, status changes, due changes, review, comments … Append-only.
+model WorkTaskEvent {
+  id      String   @id @default(cuid())
+  taskId  String
+  task    WorkTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  actorId String?
+  /// CREATED | ASSIGNED | REASSIGNED | STATUS | DUE_CHANGED | UPDATED | REVIEW_APPROVED | REVIEW_RETURNED |
+  /// RESULT_RECORDED | CANCELLED | CHECKLIST | COMMENTED | REMINDER_SNOOZED
+  action  String
+  data    Json     @default("{}")
+  at      DateTime @default(now())
+
+  @@index([taskId, at])
+}
+
+/// A time actually reserved: a meeting, a visit, a call. Ending is not the activity done — the result is
+/// recorded explicitly (a CRM Activity when linked to a customer / lead / deal).
+model WorkAppointment {
+  id                  String       @id @default(cuid())
+  /// MEETING | VISIT | CALL | OTHER (CHECK)
+  kind                String       @default("MEETING")
+  title               String
+  notes               String?
+  startAt             DateTime
+  endAt               DateTime
+  location            String?
+  meetingUrl          String?
+  /// Outside attendees, free text (a customer's contact person).
+  externalAttendees   String?
+  organizerId         String
+  organizer           Employee     @relation("WorkAppointmentOrganizer", fields: [organizerId], references: [id], onDelete: Restrict)
+  /// SCHEDULED | DONE | CANCELLED (CHECK)
+  status              String       @default("SCHEDULED")
+  customerId          String?
+  customer            Customer?    @relation("WorkAppointmentCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  leadId              String?
+  lead                Lead?        @relation("WorkAppointmentLead", fields: [leadId], references: [id], onDelete: SetNull)
+  opportunityId       String?
+  opportunity         Opportunity? @relation("WorkAppointmentOpportunity", fields: [opportunityId], references: [id], onDelete: SetNull)
+  taskId              String?
+  remindBeforeMinutes Int?         @default(30)
+  recurRule           String?
+  recurInterval       Int?
+  recurUntil          DateTime?
+  seriesId            String?
+  occurrence          Int          @default(1)
+  outcomeActivityId   String?      @unique
+  cancelledAt         DateTime?
+  cancelledById       String?
+  cancelReason        String?
+  version             Int          @default(1)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  participants WorkAppointmentParticipant[]
+  reminders    WorkReminder[]
+
+  @@unique([seriesId, occurrence])
+  @@index([organizerId, startAt])
+  @@index([startAt, endAt])
+  @@index([customerId])
+}
+
+model WorkAppointmentParticipant {
+  appointmentId String
+  appointment   WorkAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee        @relation("WorkAppointmentParticipant", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@id([appointmentId, employeeId])
+  @@index([employeeId])
+}
+
+/// A marketing occasion, exhibition or campaign moment on the calendar. Imported dates keep their source
+/// and when they were last verified; nothing is assumed to recur on the same date. DRAFT until reviewed.
+model WorkOccasion {
+  id             String       @id @default(cuid())
+  name           String
+  /// OCCASION | EXHIBITION | CAMPAIGN | HOLIDAY (CHECK)
+  kind           String       @default("OCCASION")
+  startDate      DateTime     @db.Date
+  endDate        DateTime     @db.Date
+  location       String?
+  notes          String?
+  sourceUrl      String?
+  sourceNote     String?
+  lastVerifiedAt DateTime?
+  /// DRAFT | CONFIRMED | CANCELLED (CHECK)
+  status         String       @default("DRAFT")
+  campaignId     String?
+  campaign       MktCampaign? @relation("WorkOccasionCampaign", fields: [campaignId], references: [id], onDelete: SetNull)
+  createdById    String
+  confirmedById  String?
+  confirmedAt    DateTime?
+  version        Int          @default(1)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  tasks WorkTask[]
+
+  @@index([startDate, endDate])
+  @@index([status])
+}
+
+/// The reminder outbox. Rows are planned when a task / appointment is written and re-planned when it
+/// changes (old rows CANCELLED in the same transaction). The runner claims due rows (SKIP LOCKED),
+/// re-checks them against the record (`anchorAt` must still be its due / start instant) and notifies
+/// through lib/notifications (dedupe per recipient + key): a retry or a second runner never sends twice.
+model WorkReminder {
+  id            String           @id @default(cuid())
+  taskId        String?
+  task          WorkTask?        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  appointmentId String?
+  appointment   WorkAppointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  /// DUE_SOON | OVERDUE | ESCALATION | APPOINTMENT | SNOOZE (CHECK)
+  kind          String
+  recipientId   String
+  recipient     Employee         @relation("WorkReminderRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  fireAt        DateTime
+  /// The due / start instant the reminder was computed for.
+  anchorAt      DateTime
+  /// PENDING | SENDING | SENT | CANCELLED | SKIPPED | FAILED (CHECK)
+  status        String           @default("PENDING")
+  attempts      Int              @default(0)
+  lastError     String?
+  claimedAt     DateTime?
+  sentAt        DateTime?
+  dedupeKey     String           @unique
+  createdAt     DateTime         @default(now())
+
+  @@index([status, fireAt])
+  @@index([taskId])
+  @@index([appointmentId])
+}
+
+/// Workspace policy (one row). Working hours are a PROPOSAL (hoursConfirmed = false) until the owner
+/// confirms them; quick deadlines count clock hours unless «ساعات الدوام» is chosen.
+model WorkSettings {
+  id                         String   @id @default("default")
+  /// 0 = Sunday … 6 = Saturday.
+  workDays                   Int[]    @default([0, 1, 2, 3, 4])
+  dayStart                   String   @default("08:00")
+  dayEnd                     String   @default("17:00")
+  hoursConfirmed             Boolean  @default(false)
+  defaultRemindBeforeMinutes Int      @default(60)
+  /// Hours overdue before the escalation to the assigner / the assignee's manager; NULL = no escalation.
+  escalateAfterHours         Int?     @default(4)
+  updatedById                String?
+  updatedAt                  DateTime @updatedAt
+}
+
+/// One run of the workspace jobs (reminders, escalations): when, by what, what it did.
+model WorkJobRun {
+  id         String    @id @default(cuid())
+  /// cron | request | manual
+  trigger    String
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  /// RUNNING | SUCCEEDED | FAILED (CHECK)
+  status     String    @default("RUNNING")
+  summary    Json      @default("{}")
+  error      String?
+
+  @@index([startedAt])
 }

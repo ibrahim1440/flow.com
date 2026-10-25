@@ -2,11 +2,8 @@ import { NextResponse } from "@/lib/api-response";
 import { prisma, TX_OPTS } from "@/lib/db";
 import { requireModule, requireSub } from "@/lib/auth-server";
 import { handleDomainError } from "@/lib/api-error";
-import {
-  ACTIVITY_OUTCOMES, qualifies, qualifyLeadFromActivity, markLeadNotInterested,
-  lockLeadForAutomation,
-} from "@/lib/services/sales/qualification";
-import { seesAllSales, NOT_FOUND_MESSAGE } from "@/lib/services/sales/scope";
+import { seesAllSales } from "@/lib/services/sales/scope";
+import { parseActivity, logLeadOrDealActivity } from "@/lib/services/sales/activity-log";
 
 const TYPES = ["CALL", "VISIT", "MEETING", "NOTE", "TASK", "SAMPLE_FOLLOW_UP"];
 
@@ -130,130 +127,12 @@ export async function POST(request: Request) {
   }
   const b = (body ?? {}) as Record<string, unknown>;
 
-  const type = typeof b.type === "string" && TYPES.includes(b.type) ? b.type : null;
-  if (!type) {
-    return NextResponse.json({ error: "type must be one of: " + TYPES.join(", ") }, { status: 400 });
-  }
-  // The outcome is what the automation reads. Optional, because an activity logged before
-  // outcomes existed had none and a caller that does not care about qualification should
-  // not be forced to invent one.
-  const outcome =
-    typeof b.outcome === "string" && (ACTIVITY_OUTCOMES as string[]).includes(b.outcome)
-      ? (b.outcome as string)
-      : null;
-  if (b.outcome !== undefined && b.outcome !== null && !outcome) {
-    return NextResponse.json(
-      { error: "outcome must be one of: " + ACTIVITY_OUTCOMES.join(", ") },
-      { status: 400 },
-    );
-  }
-
-  const subject = typeof b.subject === "string" ? b.subject.trim() : "";
-  if (subject.length < 2) {
-    return NextResponse.json({ error: "An activity needs a subject." }, { status: 400 });
-  }
-
-  const leadId = typeof b.leadId === "string" && b.leadId ? b.leadId : null;
-  const opportunityId = typeof b.opportunityId === "string" && b.opportunityId ? b.opportunityId : null;
-  if (!leadId && !opportunityId) {
-    return NextResponse.json(
-      { error: "An activity attaches to a lead or a deal. Say which." },
-      { status: 400 },
-    );
-  }
-
-  let dueAt: Date | null = null;
-  if (typeof b.dueAt === "string" && b.dueAt) {
-    dueAt = new Date(b.dueAt);
-    if (Number.isNaN(dueAt.getTime())) {
-      return NextResponse.json({ error: "dueAt is not a date." }, { status: 400 });
-    }
-  }
-  if (type === "TASK" && !dueAt) {
-    // A task with no due date never appears on an overdue list and is therefore never done.
-    return NextResponse.json({ error: "A task needs a due date." }, { status: 400 });
-  }
-
-  const scopeAll = seesAllSales(user.permissions);
-
   try {
-    let customerId: string | null = null;
-
-    if (leadId) {
-      const lead = await prisma.lead.findFirst({
-        where: { id: leadId, ...(scopeAll ? {} : { ownerId: user.id }) },
-        select: { id: true, conversion: { select: { customerId: true } } },
-      });
-      if (!lead) return NextResponse.json({ error: "Lead not found." }, { status: 404 });
-      customerId = lead.conversion?.customerId ?? null;
-    }
-    if (opportunityId) {
-      const deal = await prisma.opportunity.findFirst({
-        where: { id: opportunityId, ...(scopeAll ? {} : { ownerId: user.id }) },
-        select: { id: true, customerId: true },
-      });
-      if (!deal) return NextResponse.json({ error: "Deal not found." }, { status: 404 });
-      customerId = customerId ?? deal.customerId;
-    }
-
-    // The activity and whatever it triggers are ONE transaction. A qualification that
-    // half-committed — a deal with no activity explaining it, or an activity claiming a
-    // meeting with no deal — is worse than either failing.
-    const result = await prisma.$transaction(async (tx) => {
-      // Before the activity, not after: the insert below takes a foreign-key share lock on
-      // the lead, and the automation then wants an exclusive one. Two concurrent callers
-      // each holding the share lock and each waiting for the other's is a deadlock, and
-      // PostgreSQL answers it by killing one of them. Locking first makes the second caller
-      // simply wait. See `lockLeadForAutomation`.
-      if (leadId && (qualifies(outcome) || outcome === "NOT_INTERESTED")) {
-        const present = await lockLeadForAutomation(tx, leadId);
-        if (!present) throw { _appCode: 404, message: NOT_FOUND_MESSAGE };
-      }
-
-      const activity = await tx.activity.create({
-        data: {
-          type: type as never,
-          subject,
-          outcome: outcome as never,
-          body: typeof b.body === "string" ? b.body.trim() || null : null,
-          leadId,
-          opportunityId,
-          customerId,
-          dueAt,
-          // Completing at creation is the ordinary case for a call that just happened.
-          completedAt: b.completed === true ? new Date() : null,
-          // Never taken from the request. The person logging the call owns the record of it.
-          ownerId: user.id,
-        },
-        select: {
-          id: true, type: true, subject: true, outcome: true,
-          dueAt: true, completedAt: true, createdAt: true,
-        },
-      });
-
-      // ── The lifecycle ────────────────────────────────────────────────────────────
-      // Only ever from a LEAD. An activity logged against a deal that already exists has
-      // nothing to qualify, and "not interested" on a live deal is not a reason to close
-      // it — losing a deal is an explicit act with a required reason and its own control.
-      let qualification = null;
-      if (leadId && qualifies(outcome)) {
-        qualification = await qualifyLeadFromActivity(tx, {
-          leadId,
-          activityId: activity.id,
-          outcome,
-          actorId: user.id,
-        });
-      } else if (leadId && outcome === "NOT_INTERESTED") {
-        await markLeadNotInterested(tx, {
-          leadId,
-          reason: typeof b.body === "string" ? b.body : null,
-          actorId: user.id,
-        });
-      }
-
-      return { activity, qualification };
-    }, TX_OPTS);
-
+    // The rules — type, outcome, subject, the lead-or-deal attachment, a task's due date, owner scope,
+    // the caller owning the record, and the qualification in the same transaction — live in
+    // lib/services/sales/activity-log.ts, shared with the customer composer and the workspace.
+    const a = parseActivity(b, { leadOrDeal: true });
+    const result = await prisma.$transaction((tx) => logLeadOrDealActivity(tx, { id: user.id, permissions: user.permissions }, a), TX_OPTS);
     // The opportunity comes back so the screen can offer "Open deal" instead of making the
     // person go and look for what just appeared.
     return NextResponse.json(result, { status: 201 });

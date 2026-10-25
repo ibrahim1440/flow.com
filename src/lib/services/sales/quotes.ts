@@ -867,6 +867,19 @@ export async function reviseQuote(
  *     approver may still approve later) but tells the rep to change the discount;
  *   · either decision is cleared the moment the lines are saved with different figures.
  */
+/** Whether the figures an approver saw differ from the quotation now (2-decimal comparison). */
+export function isStale(expected: { effectiveDiscountPercent?: string | null; grandTotal?: string | null }, priced: PricedQuote): boolean {
+  const same = (shown: string | null | undefined, now: Decimal) => {
+    if (shown === undefined || shown === null || shown === "") return true;
+    try {
+      return new Decimal(shown).toDecimalPlaces(2).equals(now.toDecimalPlaces(2));
+    } catch {
+      return false;
+    }
+  };
+  return !same(expected.effectiveDiscountPercent, priced.effectiveDiscountPercent) || !same(expected.grandTotal, priced.grandTotal);
+}
+
 export async function decideDiscount(
   tx: Tx,
   input: {
@@ -877,6 +890,12 @@ export async function decideDiscount(
     threshold: Decimal;
     forbidSelfApproval: boolean;
     at?: Date;
+    /**
+     * «مساحة عملي» (additive): the figures the approver was shown. When given, a quotation whose effective
+     * discount or grand total has changed since is refused (409 STALE_REQUEST) under the lock, so a decision
+     * is never applied to figures nobody looked at. Absent: unchanged behaviour.
+     */
+    expected?: { effectiveDiscountPercent?: string | null; grandTotal?: string | null };
   },
 ): Promise<{ state: DiscountApprovalState; effectiveDiscountPercent: string }> {
   const at = input.at ?? new Date();
@@ -904,6 +923,13 @@ export async function decideDiscount(
       _appCode: 409,
       message: `This discount (${priced.effectiveDiscountPercent.toDecimalPlaces(2).toString()}%) is within the ${input.threshold.toString()}% threshold and needs no approval.`,
       code: "NO_APPROVAL_NEEDED",
+    };
+  }
+  if (input.expected && isStale(input.expected, priced)) {
+    throw {
+      _appCode: 409,
+      message: "The quotation changed after you opened it. Review the new figures before deciding.",
+      code: "STALE_REQUEST",
     };
   }
   const note = (input.note ?? "").trim();

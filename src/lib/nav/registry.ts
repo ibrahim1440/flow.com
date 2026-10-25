@@ -228,6 +228,11 @@ export const NAV: NavNode[] = [
   // «لوحة التشغيل» / "Operations dashboard" (20:236). Since the owner's regrouping (19 Oct 2026)
   // it heads the sidebar ungrouped, with «خدماتي», above the sections; it still offers the
   // operations «جديد» (an order).
+  // «مساحة عملي» (feat/my-workspace): every login — one's own work, decisions, calendar and requests; the
+  // team and any reach beyond oneself are decided per request by the API. First of the ungrouped entries
+  // (Figma Phase 11, 1737:2); its pages (اليوم · مهامي · بانتظار اعتمادي · التقويم · طلباتي · الفريق) are the
+  // page's own tabs, because «الفريق» depends on the HR reporting line, not on a permission the tree can read.
+  { id: "workspace", ar: "مساحة عملي", en: "My Workspace", icon: ListChecks, href: "/dashboard/workspace", shell: { icon: "inbox" } },
   { id: "dashboard", ar: "لوحة التحكم", en: "Dashboard", icon: LayoutDashboard, href: "/dashboard", shell: { ar: "لوحة التشغيل", en: "Operations dashboard", icon: "pulse", creates: "operations" } },
   {
     // GX D-P02 (1494:3302): no sidebar item of its own; «لوحة التشغيل» is highlighted and the

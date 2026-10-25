@@ -60,6 +60,7 @@ const ALLOWED_DEFAULT_ROUTES = new Set([
   "/dashboard/purchases",
   "/dashboard/settings",
   "/dashboard/profile",
+  "/dashboard/workspace",
 ]);
 
 

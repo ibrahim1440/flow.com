@@ -143,6 +143,7 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "One or more products do not exist.": "منتج واحد أو أكثر غير موجود.",
   "Only SAR deals are supported; there is no exchange-rate policy configured.": "الصفقات بالريال السعودي فقط؛ لا توجد سياسة صرف.",
   "Only a draft's discount is approved here; an issued quotation is already decided.": "يُعتمد هنا خصم المسودة فقط؛ العرض الصادر محسوم.",
+  "The quotation changed after you opened it. Review the new figures before deciding.": "تغيّر عرض السعر بعد فتحه. راجِع الأرقام الجديدة قبل اتخاذ القرار.",
   "Only an admin can authorize surplus production.": "يعتمد الإنتاج الزائد مسؤول النظام فقط.",
   "Only an approved collection can be reversed.": "يُعكس التحصيل المعتمد فقط.",
   "Only the order owner or an admin can change order status.": "يغيّر حالة الطلب مالكه أو مسؤول النظام فقط.",

@@ -1,5 +1,6 @@
 // Shared by the sign-in, second-factor and step-up routes: the audit row of an authentication
 // event, the short-lived second-factor challenge, and completing a sign-in into a session.
+import { OPEN_LANDING_ROUTES } from "@/lib/workspace/landing";
 import { NextResponse } from "@/lib/api-response";
 import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "@/lib/db";
@@ -39,6 +40,8 @@ const ROUTE_MODULE_MAP: Record<string, string> = {
   "/dashboard/labels": "labels", "/dashboard/employees": "employees",
 };
 function resolveRoute(defaultRoute: string, permissions: ReturnType<typeof parsePermissions>): string {
+  // «مساحة عملي» needs no module: everything in it is scoped to the person by its API.
+  if (OPEN_LANDING_ROUTES.has(defaultRoute)) return defaultRoute;
   const mod = ROUTE_MODULE_MAP[defaultRoute];
   if (!mod || mod === "dashboard") return "/dashboard";
   if (hasModuleAccess(permissions, mod)) return defaultRoute;

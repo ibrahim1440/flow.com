@@ -1,0 +1,193 @@
+/*
+ * «مساحة عملي» — the section's own classes (Figma Phase 11, 1737:2), on top of the HR / ops kit and the
+ * Direction 2.1 tokens (--hr-* aliases, scoped by [data-hr-root]). Colour is never the only signal: every
+ * state also has a word, an icon or a shape. Breakpoints: ≥1280 desktop, 768–1279 compact, <768 phone.
+ */
+.ws-root { --ws-hour: 48px; }
+.ws-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* Pages as tabs (the approved underline tab). */
+.ws-tabs ul { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; border-bottom: 1px solid var(--hr-border-subtle); overflow-x: auto; scrollbar-width: none; }
+.ws-tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 10px 12px; color: var(--hr-text-2); text-decoration: none; font-size: 14px; white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ws-tabs a:hover { color: var(--hr-text); }
+.ws-tabs a[aria-current="page"] { color: var(--hr-text); font-weight: 600; border-bottom-color: var(--hr-primary); }
+.ws-tabs .hr-count { font-family: var(--hr-num); font-size: 12px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--hr-subtle); display: inline-flex; align-items: center; justify-content: center; }
+
+/* Segmented groups (scope, type, view). */
+.ws-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: var(--hr-r-md); background: var(--hr-subtle); align-self: flex-start; }
+.ws-seg button { appearance: none; border: 0; background: none; font: inherit; font-size: 13px; padding: 6px 12px; border-radius: var(--hr-r-sm); color: var(--hr-text-2); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.ws-seg button[aria-pressed="true"] { background: var(--hr-surface); color: var(--hr-text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), inset 0 0 0 1px var(--hr-border-subtle); }
+.ws-tool { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Today: the four counters (filters, not KPI cards). */
+.ws-counters { display: grid; grid-template-columns: repeat(3, minmax(0, 140px)) minmax(0, 1fr); gap: 8px; }
+.ws-counter { appearance: none; font: inherit; text-align: start; display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; border-radius: var(--hr-r-md); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); color: var(--hr-text-2); text-decoration: none; cursor: pointer; font-size: 13px; }
+.ws-counter b { font: 600 22px/1.2 var(--hr-num); color: var(--hr-text); }
+.ws-counter .ws-counter-text { font: 600 14px/1.4 var(--hr-font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-counter.is-danger > span:first-child { color: var(--hr-danger); }
+.ws-counter[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--hr-primary); background: var(--hr-primary-tint); }
+.ws-counter.is-static { cursor: default; }
+.ws-counter:hover:not(.is-static) { background: var(--hr-hover); }
+
+.ws-today { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.ws-schedule { position: sticky; top: 0; padding: 14px 16px; border-radius: var(--hr-r-lg); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+.hr-split.has-preview .ws-today { grid-template-columns: minmax(0, 1fr); }
+
+/* Rows: one line of work with its type, what, where, when and ONE named action. */
+.ws-group { margin-block: 4px 12px; }
+.ws-group-title { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--hr-muted); }
+.ws-group.is-overdue .ws-group-title, .ws-group.is-overdue .ws-group-title .hr-caption { color: var(--hr-danger); }
+.ws-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hr-border-subtle); }
+.ws-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 4px; border-bottom: 1px solid var(--hr-border-subtle); }
+.ws-row.is-selected { background: var(--hr-selected); }
+.ws-row-main { appearance: none; border: 0; background: none; font: inherit; color: inherit; text-align: start; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 4px 0; cursor: pointer; text-decoration: none; }
+.ws-row-main.is-static { cursor: default; }
+.ws-row-main:focus-visible { outline: 2px solid var(--hr-primary); outline-offset: 2px; border-radius: var(--hr-r-xs); }
+.ws-row-title { font-size: 14.5px; font-weight: 600; color: var(--hr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-row-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12.5px; color: var(--hr-text-2); }
+.ws-row-actions { display: flex; gap: 6px; flex: none; }
+.ws-row > .hr-btn, .ws-row > a.hr-btn { flex: none; }
+.ws-note { font-size: 12.5px; color: var(--hr-text-2); }
+.ws-row.is-request { align-items: flex-start; }
+
+.ws-type { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 500; background: var(--hr-subtle); color: var(--hr-text-2); white-space: nowrap; }
+.ws-type:is(.is-leave, .is-advance, .is-discount, .is-finance, .is-marketing, .is-approval) { background: var(--hr-primary-tint); color: var(--hr-primary); }
+.ws-type.is-follow_up, .ws-type.is-crm { background: var(--hr-info-tint); color: var(--hr-info); }
+.ws-due { white-space: nowrap; }
+.ws-due.is-overdue { color: var(--hr-danger); font-weight: 600; }
+.ws-due.is-overdue > span[aria-hidden] { font-size: 8px; vertical-align: middle; }
+.ws-more { appearance: none; border: 0; background: none; font: inherit; color: var(--hr-text-2); font-size: 13px; padding: 8px 0; cursor: pointer; }
+.ws-loadmore { display: flex; justify-content: center; padding: 12px; }
+
+/* Today's schedule: blocks for appointments, a dot for a deadline, the «الآن» line. */
+.ws-slots { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ws-slot { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; }
+.ws-slot-time { font-family: var(--hr-num); color: var(--hr-muted); padding-top: 6px; }
+.ws-slot-body { display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: var(--hr-text); min-width: 0; }
+.ws-slot.is-block .ws-slot-body { padding: 6px 10px; border-radius: var(--hr-r-sm); background: var(--hr-subtle); border-inline-start: 3px solid var(--hr-primary); }
+.ws-slot.is-marker .ws-slot-body { padding: 6px 0; }
+.ws-slot.is-marker .ws-slot-body > span:first-child::before { content: "◆ "; color: var(--hr-primary); font-size: 10px; }
+.ws-now { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #bd7d47; font-weight: 600; }
+.ws-now::after { content: ""; flex: 1; height: 2px; background: #bd7d47; border-radius: 1px; }
+
+/* The panes and dialogs. */
+.ws-pane-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ws-kv { margin: 0; }
+.ws-desc { margin: 0; white-space: pre-wrap; line-height: 1.7; }
+.ws-check, .ws-files, .ws-comments, .ws-overlaps, .ws-clashes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ws-check label { display: flex; gap: 8px; align-items: center; min-height: 32px; }
+.ws-check .is-done { text-decoration: line-through; color: var(--hr-muted); }
+.ws-comments p { margin: 2px 0 0; white-space: pre-wrap; }
+.ws-inline { display: flex; gap: 8px; align-items: flex-end; margin-top: 6px; }
+.ws-inline > .hr-input { flex: 1; }
+.ws-history summary { cursor: pointer; font-weight: 600; font-size: 13px; padding-block: 6px; }
+.ws-history ol { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ws-snooze { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ws-upload { position: relative; cursor: pointer; margin-top: 6px; }
+.ws-choices { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-choices > legend { margin-bottom: 6px; }
+.ws-choice { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 16px; box-shadow: inset 0 0 0 1px var(--hr-border-strong); font-size: 13px; cursor: pointer; background: var(--hr-surface); }
+.ws-choice > input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ws-choice.is-on { box-shadow: inset 0 0 0 2px var(--hr-primary); background: var(--hr-primary-tint); color: var(--hr-primary); font-weight: 600; }
+.ws-choice:focus-within { outline: 2px solid var(--hr-primary); outline-offset: 2px; }
+.ws-check-line { display: flex; gap: 8px; align-items: center; font-size: 13.5px; min-height: 32px; }
+.ws-row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ws-due-preview { margin: 0; padding: 8px 12px; border-radius: var(--hr-r-sm); background: var(--hr-subtle); font-size: 13.5px; }
+.ws-search { position: relative; }
+.ws-options { list-style: none; margin: 4px 0 0; padding: 4px; border-radius: var(--hr-r-sm); box-shadow: var(--shadow-pop); background: var(--hr-surface); max-height: 220px; overflow: auto; }
+.ws-options button { appearance: none; border: 0; background: none; font: inherit; width: 100%; text-align: start; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.ws-options button:hover, .ws-options button:focus-visible { background: var(--hr-hover); }
+.ws-picked { display: flex; gap: 8px; align-items: center; min-height: 36px; }
+.ws-watchers { display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow: auto; }
+.ws-dialog { width: min(640px, 100%); }
+.ws-bulk { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+
+/* Calendar. */
+.ws-calbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.ws-calnav { display: flex; align-items: center; gap: 6px; }
+.ws-caltitle { margin: 0 8px; font-size: 16px; font-weight: 600; }
+.ws-layers { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-layer { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 15px; font-size: 13px; cursor: pointer; box-shadow: inset 0 0 0 1px var(--hr-border-strong); background: var(--hr-surface); }
+.ws-layer > input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ws-layer:focus-within { outline: 2px solid var(--hr-primary); outline-offset: 2px; }
+.ws-layer:not(.is-on) { color: var(--hr-muted); }
+.ws-layer:not(.is-on) .ws-swatch { opacity: 0.35; }
+.ws-swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--ws-c, var(--hr-primary)); }
+.layer-mine { --ws-c: #5c5c38; } .layer-tasks { --ws-c: #28241a; } .layer-team { --ws-c: #8a8a6a; } .layer-occasions { --ws-c: #bd7d47; } .layer-leave { --ws-c: #6f8fa6; }
+.ws-ev { appearance: none; border: 0; font: inherit; font-size: 12px; text-align: start; width: 100%; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: 5px; cursor: pointer; color: var(--hr-text); background: color-mix(in srgb, var(--ws-c, #5c5c38) 14%, var(--hr-surface)); border-inline-start: 3px solid var(--ws-c, #5c5c38); }
+.ws-ev:focus-visible { outline: 2px solid var(--hr-primary); outline-offset: 1px; }
+.ws-ev.is-task_due, .ws-ev.is-crm_due { background: none; border-inline-start: 0; padding-inline: 2px; }
+.ws-ev.is-overdue { color: var(--hr-danger); font-weight: 600; }
+.ws-ev.is-pending { border-inline-start-style: dashed; }
+.ws-ev.is-appointment { height: 100%; white-space: normal; }
+
+.ws-tgrid { --cols: var(--ws-days); border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); background: var(--hr-surface); overflow: auto; max-height: calc(100dvh - 300px); }
+.ws-tg-head, .ws-tg-allday { display: grid; grid-template-columns: 72px repeat(var(--cols), minmax(110px, 1fr)); position: sticky; z-index: 2; background: var(--hr-surface); }
+.ws-tg-head { top: 0; border-bottom: 1px solid var(--hr-border-subtle); }
+.ws-tg-head > span { padding: 8px; font-size: 12.5px; font-weight: 600; text-align: center; }
+.ws-tg-head > span.is-today { color: var(--hr-primary); }
+.ws-tg-allday { top: 36px; border-bottom: 1px solid var(--hr-border-subtle); }
+.ws-tg-allday > * { padding: 4px; display: flex; flex-direction: column; gap: 2px; min-height: 26px; }
+.ws-tg-allday > .hr-caption { align-items: center; justify-content: center; }
+.ws-tg-body { display: grid; grid-template-columns: 72px repeat(var(--cols), minmax(110px, 1fr)); }
+.ws-tg-hours > span { display: block; height: var(--ws-hour); font: 11px/1 var(--hr-num); color: var(--hr-muted); padding: 4px 8px; text-align: end; }
+.ws-tg-col { position: relative; height: calc(15 * var(--ws-hour)); border-inline-start: 1px solid var(--hr-border-subtle); background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--ws-hour) - 1px), var(--hr-border-subtle) calc(var(--ws-hour) - 1px) var(--ws-hour)); }
+.ws-tg-col.is-today { background-color: color-mix(in srgb, var(--hr-primary) 4%, transparent); }
+.ws-tg-item { position: absolute; inset-inline: 4px; }
+.ws-tg-item.is-marker { transform: translateY(-50%); z-index: 1; }
+.ws-tg-now { position: absolute; inset-inline: 0; height: 2px; background: #bd7d47; z-index: 3; }
+.ws-tg-now::before { content: ""; position: absolute; inset-inline-start: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #bd7d47; }
+
+.ws-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--hr-border-subtle); border-radius: var(--hr-r-md); overflow: hidden; background: var(--hr-surface); }
+.ws-month-head { padding: 8px; font-size: 12px; font-weight: 600; color: var(--hr-muted); text-align: center; border-bottom: 1px solid var(--hr-border-subtle); }
+.ws-month-cell { min-height: 104px; padding: 4px; display: flex; flex-direction: column; gap: 2px; border-inline-start: 1px solid var(--hr-border-subtle); border-bottom: 1px solid var(--hr-border-subtle); min-width: 0; }
+.ws-month-cell.is-other { background: var(--hr-canvas); }
+.ws-month-cell.is-other .ws-month-day { color: var(--hr-muted); }
+.ws-month-day { appearance: none; border: 0; background: none; font: 600 12.5px/1 var(--hr-num); padding: 4px; border-radius: 6px; align-self: flex-start; cursor: pointer; color: var(--hr-text); }
+.ws-month-cell.is-today .ws-month-day { background: var(--hr-primary); color: var(--hr-inverse); }
+.ws-month-more { appearance: none; border: 0; background: none; font: inherit; font-size: 12px; color: var(--hr-link); text-align: start; cursor: pointer; padding: 0 4px; }
+
+.ws-agenda { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.ws-agenda-day { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--hr-text-2); }
+.ws-agenda-day.is-today { color: var(--hr-primary); }
+.ws-agenda ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ws-agenda-item { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 8px; align-items: center; min-height: 40px; }
+.ws-agenda-time { font: 12px/1.3 var(--hr-num); color: var(--hr-muted); }
+.ws-agenda .ws-ev { padding: 8px 10px; font-size: 13.5px; white-space: normal; }
+.ws-cal-note, .ws-empty-cal { margin: 0; }
+
+/* Compact (768–1279): the schedule moves under the list; the counters wrap. */
+@media (max-width: 1279px) {
+  .ws-today { grid-template-columns: minmax(0, 1fr); }
+  .ws-schedule { position: static; }
+  .ws-counters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ws-counter.is-wide { grid-column: 1 / -1; }
+}
+/* Phone (<768): one column; the schedule first (a strip), rows wrap their action under the text. */
+@media (max-width: 767px) {
+  .ws-root { --ws-hour: 40px; }
+  .ws-counters { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .ws-counter { padding: 8px 10px; }
+  .ws-counter b { font-size: 20px; }
+  /* Today's schedule becomes a horizontal day strip above the list (Figma 1740:180340). */
+  .ws-today { display: flex; flex-direction: column-reverse; gap: 12px; }
+  .ws-schedule { padding: 10px 0 4px; background: none; box-shadow: none; }
+  .ws-schedule > .hr-section { padding-inline: 2px; }
+  .ws-slots { flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 6px; scroll-snap-type: x proximity; scrollbar-width: none; }
+  .ws-slot { flex: none; width: 168px; grid-template-columns: minmax(0, 1fr); gap: 2px; scroll-snap-align: start; padding: 8px 10px; border-radius: var(--hr-r-md); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+  .ws-slot-time { padding: 0; }
+  .ws-slot.is-block .ws-slot-body { padding: 0; background: none; border: 0; }
+  .ws-slot-body > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-now { flex: none; flex-direction: column; justify-content: center; gap: 2px; width: 44px; font-size: 11px; }
+  .ws-now::after { width: 2px; height: 40px; flex: none; }
+  .ws-row { flex-wrap: wrap; gap: 6px 10px; }
+  .ws-row-main { flex-basis: calc(100% - 100px); }
+  .ws-row > .hr-btn, .ws-row > a.hr-btn, .ws-row-actions { margin-inline-start: auto; }
+  .ws-row-title { white-space: normal; }
+  .ws-row2 { grid-template-columns: minmax(0, 1fr); }
+  .ws-tabs a { padding: 10px 8px; font-size: 13.5px; }
+  .ws-month-cell { min-height: 64px; }
+  .ws-month-cell .ws-ev { font-size: 0; height: 6px; padding: 0; border-radius: 3px; border: 0; background: var(--ws-c, #5c5c38); }
+  .ws-agenda-item { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .ws-tg-head, .ws-tg-allday, .ws-tg-body { grid-template-columns: 52px repeat(var(--cols), minmax(140px, 1fr)); }
+}
