@@ -1,8 +1,8 @@
 "use client";
 // HR self-service request dialogs — the leave request (with its live quote), the advance request and
-// the reason dialog of a cancellation. Moved unchanged out of «خدماتي» (dashboard/me) so «مساحة عملي ·
-// طلباتي» uses the very same forms against the same /api/hr/me endpoints (feat/my-workspace).
-import { useEffect, useRef, useState } from "react";
+// the reason dialog of a cancellation, against the /api/hr/me endpoints. Used by «خدماتي» (dashboard/me),
+// the only place an employee submits and follows their own requests (the workspace's «طلباتي» tab moved there).
+import { useRef, useState } from "react";
 import { Select } from "@/components/ui/Select";
 import { Btn, Dialog, Empty, Field, Flag, KV, Notice, ProposalTag, days, hrFetch, money, useAction, useForm, useHrI18n } from "@/components/hr/ui";
 import { DateRangeSummary, QuoteNotes, quoteRows, useLeaveQuote } from "@/components/hr/leave-quote";
@@ -117,42 +117,3 @@ export function ReasonDialog({ title, confirm, url, onClose, onDone, children }:
   );
 }
 
-// ── For pages outside «خدماتي» («مساحة عملي · طلباتي»): the same dialogs, fed by GET /api/hr/me ──────
-
-function useSelf() {
-  const [ctx, setCtx] = useState<SelfLeaveCtx | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    hrFetch<SelfLeaveCtx & { linked: boolean }>("/api/hr/me")
-      .then((d) => { if (alive) { if (d.linked) setCtx(d); else setError("NOT_LINKED"); } })
-      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { alive = false; };
-  }, []);
-  return { ctx, error };
-}
-
-export function LeaveRequestDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const { ctx, error } = useSelf();
-  const { L } = useHrI18n();
-  if (!ctx) return <Dialog open title={L("طلب إجازة", "Leave request")} onClose={onClose} actions={<Btn onClick={onClose}>{L("إغلاق", "Close")}</Btn>}>{error ? <Notice tone="danger">{error}</Notice> : <span className="hr-caption">{L("جارٍ التحميل…", "Loading…")}</span>}</Dialog>;
-  return <LeaveDialog d={ctx} onClose={onClose} onDone={onDone} />;
-}
-
-export function AdvanceRequestDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const { ctx, error } = useSelf();
-  const { L } = useHrI18n();
-  if (!ctx) return <Dialog open title={L("طلب سلفة", "Advance request")} onClose={onClose} actions={<Btn onClick={onClose}>{L("إغلاق", "Close")}</Btn>}>{error ? <Notice tone="danger">{error}</Notice> : <span className="hr-caption">{L("جارٍ التحميل…", "Loading…")}</span>}</Dialog>;
-  return <AdvanceDialog today={ctx.today} onClose={onClose} onDone={onDone} />;
-}
-
-export function CancelRequestDialog({ kind, id, onClose, onDone }: { kind: "LEAVE" | "ADVANCE"; id: string; onClose: () => void; onDone: () => void }) {
-  const { L } = useHrI18n();
-  return kind === "LEAVE" ? (
-    <ReasonDialog title={L("إلغاء إجازة معتمدة", "Cancel approved leave")} confirm={L("إلغاء الإجازة", "Cancel leave")} url={`/api/hr/me/leave/${encodeURIComponent(id)}/cancel`} onClose={onClose} onDone={onDone}>
-      <p className="hr-caption" style={{ margin: 0 }}>{L("قبل بدايتها تعود الأيام إلى رصيدك بحركة عكسية؛ بعد بدايتها يحتاج الإلغاء موافقة الموارد البشرية.", "Before it starts the days return to your balance; after it starts, cancelling needs HR.")}</p>
-    </ReasonDialog>
-  ) : (
-    <ReasonDialog title={L("إلغاء طلب السلفة", "Cancel advance request")} confirm={L("إلغاء الطلب", "Cancel request")} url={`/api/hr/me/advances/${encodeURIComponent(id)}/cancel`} onClose={onClose} onDone={onDone}>{null}</ReasonDialog>
-  );
-}

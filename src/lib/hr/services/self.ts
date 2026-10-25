@@ -34,6 +34,10 @@ export async function overview(actor: HrActor, now: Date) {
     prisma.hrAttendanceCorrection.findMany({ where: { employeeId: p.id }, orderBy: { createdAt: "desc" }, take: 10 }),
     prisma.hrReview.findMany({ where: { employeeId: p.id, status: { in: ["SUBMITTED", "ACKNOWLEDGED"] } }, orderBy: { createdAt: "desc" }, take: 5 }),
   ]);
+  // The decider's name beside a decision («خدماتي · طلباتي» shows who approved or rejected, with the reason).
+  const deciderIds = [...reqs.map((r) => r.decidedBy), ...advances.map((a) => a.decidedBy), ...corrections.map((c) => c.decidedBy)].filter((x): x is string => !!x);
+  const deciders = new Map(deciderIds.length ? (await prisma.employee.findMany({ where: { id: { in: [...new Set(deciderIds)] } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]) : []);
+  const decidedByName = (id: string | null) => (id ? deciders.get(id) ?? null : null);
   return {
     linked: true as const,
     timezone: tz,
@@ -43,11 +47,11 @@ export async function overview(actor: HrActor, now: Date) {
     contract: contract ? { contractNo: contract.contractNo, type: contract.type, endDate: contract.endDate ? dayString(contract.endDate) : null } : null,
     privateMasked: { iban: mask(p.private?.iban), idNumber: mask(p.private?.idNumber), emergency: p.private?.emergencyName ? `${p.private.emergencyName} · ${mask(p.private.emergencyPhone) ?? ""}` : null },
     leaveBalances: leaves,
-    leaveRequests: reqs.map((r) => ({ ...requestDto(r), leaveType: r.leaveType.nameAr, leaveTypeCode: r.leaveType.code })),
-    advances: await Promise.all(advances.map((a) => advanceDto(prisma, a.id))),
+    leaveRequests: reqs.map((r) => ({ ...requestDto(r), leaveType: r.leaveType.nameAr, leaveTypeCode: r.leaveType.code, decidedByName: decidedByName(r.decidedBy) })),
+    advances: await Promise.all(advances.map(async (a) => ({ ...(await advanceDto(prisma, a.id)), decidedByName: decidedByName(a.decidedBy) }))),
     today_attendance: att ? attendanceDto(att, tz) : null,
     payslips: lines.map((l) => ({ lineId: l.id, periodMonth: l.run.periodMonth, kind: l.run.kind, runNo: l.run.runNo, status: l.run.status, gross: l.gross.toFixed(2), net: l.net.toFixed(2) })),
-    corrections: corrections.map((c) => ({ id: c.id, workDate: dayString(c.workDate), status: c.status, reason: c.reason, checkIn: c.requestedCheckIn ? localTime(c.requestedCheckIn, tz) : null, checkOut: c.requestedCheckOut ? localTime(c.requestedCheckOut, tz) : null })),
+    corrections: corrections.map((c) => ({ id: c.id, workDate: dayString(c.workDate), status: c.status, reason: c.reason, decisionNote: c.decisionNote, decidedByName: decidedByName(c.decidedBy), checkIn: c.requestedCheckIn ? localTime(c.requestedCheckIn, tz) : null, checkOut: c.requestedCheckOut ? localTime(c.requestedCheckOut, tz) : null })),
     todayShift: await shiftFor(prisma, p.id, today),
     reviews: reviews.map((r) => ({ id: r.id, periodLabel: r.periodLabel, rating: r.rating, status: r.status, strengths: r.strengths, improvements: r.improvements })),
   };

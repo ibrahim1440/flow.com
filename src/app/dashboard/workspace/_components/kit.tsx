@@ -67,7 +67,7 @@ export type CrmDue = { id: string; type: string; subject: string; dueAt: string;
 
 export const TYPE_LABEL: Record<string, [string, string]> = {
   TASK: ["مهمة", "Task"], FOLLOW_UP: ["متابعة عميل", "Follow-up"], APPROVAL: ["اعتماد", "Approval"], APPOINTMENT: ["موعد", "Appointment"], CRM: ["متابعة", "Follow-up"],
-  LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], DISCOUNT: ["خصم", "Discount"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
+  LEAVE: ["إجازة", "Leave"], ADVANCE: ["سلفة", "Advance"], CORRECTION: ["تصحيح", "Correction"], DISCOUNT: ["خصم", "Discount"], FINANCE: ["مالية", "Finance"], MARKETING: ["تسويق", "Marketing"],
   MEETING: ["اجتماع", "Meeting"], VISIT: ["زيارة", "Visit"], CALL: ["مكالمة", "Call"], OTHER: ["موعد", "Appointment"],
 };
 export const OUTCOMES: [string, string, string][] = [
@@ -126,13 +126,15 @@ export function recordOf(t: Pick<Task, "customer" | "lead" | "opportunity" | "re
 
 // ── The page frame ────────────────────────────────────────────────────────────────────
 
-type TabKey = "today" | "tasks" | "approvals" | "calendar" | "requests" | "team";
+// «مساحة عملي» is for work. The person's own HR requests (leave, advances, corrections) are submitted and
+// followed in «خدماتي» (/dashboard/me#requests); «اليوم» shows only a compact card of the pending ones,
+// and the old /dashboard/workspace/requests redirects there (next.config.ts).
+type TabKey = "today" | "tasks" | "approvals" | "calendar" | "team";
 const TABS: { key: TabKey; href: string; ar: string; en: string }[] = [
   { key: "today", href: "/dashboard/workspace", ar: "اليوم", en: "Today" },
   { key: "tasks", href: "/dashboard/workspace/tasks", ar: "مهامي", en: "My tasks" },
   { key: "approvals", href: "/dashboard/workspace/approvals", ar: "بانتظار اعتمادي", en: "Pending my approval" },
   { key: "calendar", href: "/dashboard/workspace/calendar", ar: "التقويم", en: "Calendar" },
-  { key: "requests", href: "/dashboard/workspace/requests", ar: "طلباتي", en: "My requests" },
   { key: "team", href: "/dashboard/workspace/team", ar: "الفريق", en: "Team" },
 ];
 
@@ -148,7 +150,7 @@ export function WsShell({ open, wide, children }: { open?: boolean; wide?: boole
   );
 }
 
-/** The workspace page: title, the six pages as tabs (the team only for a team), the content. */
+/** The workspace page: title, the five pages as tabs (the team only for a team), the content. */
 export function WsPage({ title, sub, actions, children, testId }: { title: string; sub?: ReactNode; actions?: ReactNode; children: ReactNode; testId?: string }) {
   const L = useL();
   const pathname = usePathname();

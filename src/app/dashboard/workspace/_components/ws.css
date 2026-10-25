@@ -30,7 +30,21 @@
 .ws-counter:hover:not(.is-static) { background: var(--hr-hover); }
 
 .ws-today { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
-.ws-schedule { position: sticky; top: 0; padding: 14px 16px; border-radius: var(--hr-r-lg); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+.ws-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ws-schedule { padding: 14px 16px; border-radius: var(--hr-r-lg); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); }
+
+/* «طلباتي المعلقة»: the person's own pending HR requests, compact, pointing to «خدماتي» (same card as the schedule). */
+.ws-mine { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--hr-r-lg); background: var(--hr-surface); box-shadow: inset 0 0 0 1px var(--hr-border-subtle); min-width: 0; }
+.ws-mine-head .hr-section { margin: 0; }
+.ws-mine-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ws-mine-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-top: 1px solid var(--hr-border-subtle); }
+.ws-mine-item:first-child { border-top: 0; padding-top: 2px; }
+.ws-mine-item:last-child { padding-bottom: 2px; }
+.ws-mine-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.ws-mine-title { font-size: 13.5px; font-weight: 600; color: var(--hr-text); overflow-wrap: anywhere; }
+.ws-mine-link { align-self: flex-start; font-size: 13px; font-weight: 600; color: var(--hr-primary); text-decoration: none; padding: 4px 0; }
+.ws-mine-link:hover { text-decoration: underline; }
+.ws-mine-link:focus-visible { outline: 2px solid var(--hr-primary); outline-offset: 2px; border-radius: var(--hr-r-xs); }
 .hr-split.has-preview .ws-today { grid-template-columns: minmax(0, 1fr); }
 
 /* Rows: one line of work with its type, what, where, when and ONE named action. */
@@ -48,10 +62,9 @@
 .ws-row-actions { display: flex; gap: 6px; flex: none; }
 .ws-row > .hr-btn, .ws-row > a.hr-btn { flex: none; }
 .ws-note { font-size: 12.5px; color: var(--hr-text-2); }
-.ws-row.is-request { align-items: flex-start; }
 
 .ws-type { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 500; background: var(--hr-subtle); color: var(--hr-text-2); white-space: nowrap; }
-.ws-type:is(.is-leave, .is-advance, .is-discount, .is-finance, .is-marketing, .is-approval) { background: var(--hr-primary-tint); color: var(--hr-primary); }
+.ws-type:is(.is-leave, .is-advance, .is-correction, .is-discount, .is-finance, .is-marketing, .is-approval) { background: var(--hr-primary-tint); color: var(--hr-primary); }
 .ws-type.is-follow_up, .ws-type.is-crm { background: var(--hr-info-tint); color: var(--hr-info); }
 .ws-due { white-space: nowrap; }
 .ws-due.is-overdue { color: var(--hr-danger); font-weight: 600; }
@@ -159,7 +172,7 @@
 /* Compact (768–1279): the schedule moves under the list; the counters wrap. */
 @media (max-width: 1279px) {
   .ws-today { grid-template-columns: minmax(0, 1fr); }
-  .ws-schedule { position: static; }
+  .ws-side { position: static; }
   .ws-counters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ws-counter.is-wide { grid-column: 1 / -1; }
 }
@@ -170,7 +183,12 @@
   .ws-counter { padding: 8px 10px; }
   .ws-counter b { font-size: 20px; }
   /* Today's schedule becomes a horizontal day strip above the list (Figma 1740:180340). */
-  .ws-today { display: flex; flex-direction: column-reverse; gap: 12px; }
+  /* The schedule strip first, then the list, then «طلباتي المعلقة» last (it is not work). */
+  .ws-today { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+  .ws-side { display: contents; }
+  .ws-schedule { order: 0; }
+  .ws-today > .ws-list { order: 1; }
+  .ws-mine { order: 2; }
   .ws-schedule { padding: 10px 0 4px; background: none; box-shadow: none; }
   .ws-schedule > .hr-section { padding-inline: 2px; }
   .ws-slots { flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 6px; scroll-snap-type: x proximity; scrollbar-width: none; }

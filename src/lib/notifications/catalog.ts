@@ -500,7 +500,8 @@ export const EVENTS: NotificationEventDef[] = [
       titleAr: f.decision === "APPROVE" ? "اعتُمد طلب إجازتك" : "رُفض طلب إجازتك",
       titleEn: f.decision === "APPROVE" ? "Your leave request was approved" : "Your leave request was rejected",
       bodyAr: [`من ${s(f.from)} إلى ${s(f.to)}`, s(f.note)].filter(Boolean).join(" · "), bodyEn: [`${s(f.from)} → ${s(f.to)}`, s(f.note)].filter(Boolean).join(" · "),
-      link: "/dashboard/me",
+      // The employee follows their own requests in «خدماتي» (not «مساحة عملي»): straight to that section.
+      link: "/dashboard/me#requests",
     }),
   },
   {

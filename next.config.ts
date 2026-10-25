@@ -114,6 +114,10 @@ const nextConfig: NextConfig = {
       // automatic and «الطلبات» is the status board. Old links and bookmarks land there; the
       // Orders route guard (orders module) then applies as it always did.
       { source: "/dashboard/workstation/preparation", destination: "/dashboard/orders", permanent: false },
+      // «مساحة عملي · طلباتي» moved to «خدماتي» (owner decision: the workspace is for work, «خدماتي» is the
+      // only place for one's own HR). Bookmarks and old notification links land on the requests section;
+      // «خدماتي» is every login's, so nobody loses their own requests.
+      { source: "/dashboard/workspace/requests", destination: "/dashboard/me#requests", permanent: false },
     ];
   },
 };

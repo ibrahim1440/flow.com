@@ -11,6 +11,7 @@ import { CreateTaskDialog, TaskPane } from "./_components/task-ui";
 import { useUser } from "../user-context";
 import { DecisionPane } from "./_components/approval-ui";
 import { AppointmentDialog } from "./_components/calendar-ui";
+import { PendingRequestsCard } from "./_components/pending-requests";
 
 type Today = {
   now: string; day: string;
@@ -186,10 +187,14 @@ export default function TodayPage() {
                 ) : null}
               </section>
 
-              <aside className="ws-schedule" aria-labelledby="ws-sched">
-                <h2 id="ws-sched" className="hr-section">{L("جدول اليوم", "Today's schedule")}</h2>
-                <ScheduleList data={data} now={now} />
-              </aside>
+              <div className="ws-side">
+                <aside className="ws-schedule" aria-labelledby="ws-sched">
+                  <h2 id="ws-sched" className="hr-section">{L("جدول اليوم", "Today's schedule")}</h2>
+                  <ScheduleList data={data} now={now} />
+                </aside>
+                {/* The person's own pending HR requests — followed in «خدماتي», shown here only as a pointer. */}
+                <PendingRequestsCard now={now} />
+              </div>
             </div>
           </>
         ) : null}

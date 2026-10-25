@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 // whose subject is always the caller's own linked record (never a request parameter).
 // Check-in/out uses the server clock — the client never sends a time.
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ADVANCE_STATUS, Btn, Dialog, Empty, ErrorState, Field, KV, LoadingTable, Metrics, Notice, PageHeader, REQUEST_STATUS,
   StatusDot, hrFetch, money, useAction, useForm, useHr, useHrI18n, type StatusEntry,
@@ -16,11 +16,11 @@ import { dayCount } from "../hr/leave/parts";
 import "./me.css";
 
 type Balance = { leaveTypeId: string; code: string; nameAr: string; paid: boolean; tracksBalance: boolean; isProposal: boolean; balance: string; pending: string; available: string };
-type LeaveReq = { id: string; leaveTypeId: string; leaveType: string; leaveTypeCode?: string; startDate: string; endDate: string; days: string; status: string; reason: string | null; createdAt: string; decisionNote: string | null; cancelReason: string | null };
-type Advance = { id: string; advanceNo: string; amount: string; installmentCount: number; firstInstallmentMonth: string; status: string; createdAt: string; outstanding: string; decisionNote: string | null };
+type LeaveReq = { id: string; leaveTypeId: string; leaveType: string; leaveTypeCode?: string; startDate: string; endDate: string; days: string; status: string; reason: string | null; createdAt: string; decisionNote: string | null; cancelReason: string | null; decidedByName?: string | null };
+type Advance = { id: string; advanceNo: string; amount: string; installmentCount: number; firstInstallmentMonth: string; status: string; createdAt: string; outstanding: string; decisionNote: string | null; cancelReason?: string | null; decidedByName?: string | null };
 type Attendance = { id: string; workDate: string; checkIn: string | null; checkOut: string | null; status: "OPEN" | "CLOSED" | "ABSENT"; lateMinutes: number | null; workedMinutes: number | null; overtimeMinutes: number | null };
 type Payslip = { lineId: string; periodMonth: string; kind: string; runNo: number; status: string; gross: string; net: string };
-type Correction = { id: string; workDate: string; status: string; reason: string };
+type Correction = { id: string; workDate: string; status: string; reason: string; decisionNote?: string | null; decidedByName?: string | null };
 type Review = { id: string; periodLabel: string; rating: number; status: string; strengths: string | null; improvements: string | null };
 type Linked = {
   linked: true; timezone: string; today: string; policyConfigured: boolean;
@@ -46,6 +46,13 @@ export default function MePage() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const act = useAction();
   const { L, lang, month } = useHrI18n();
+  // «/dashboard/me#requests» (the old «مساحة عملي · طلباتي» URL redirects here; notifications link here):
+  // the section renders only after the overview loads, so the browser's own jump to the anchor misses it.
+  const ready = !!data?.linked;
+  useEffect(() => {
+    if (!ready || typeof window === "undefined" || window.location.hash !== "#requests") return;
+    document.getElementById("requests")?.scrollIntoView({ block: "start" });
+  }, [ready]);
 
   if (error) return <div className="hr-page"><PageHeader title={L("خدماتي", "My HR")} /><ErrorState error={error} onRetry={reload} /></div>;
   if (loading && !data) return <div className="hr-page"><PageHeader title={L("خدماتي", "My HR")} /><LoadingTable /></div>;
@@ -87,7 +94,7 @@ export default function MePage() {
       <div className="me-metrics"><MetricsRow d={d} /></div>
 
       <div className="hr-cols-2">
-        <section className="hr-stack" aria-labelledby="me-requests">
+        <section className="hr-stack me-requests" id="requests" aria-labelledby="me-requests" data-testid="me-requests">
           <h2 id="me-requests" className="hr-section">{L("طلباتي", "My requests")}</h2>
           <Requests d={d} busy={act.busy} onWithdraw={withdraw} onCancelLeave={(r) => setDialog({ cancelLeave: r })} onCancelAdvance={(a) => setDialog({ cancelAdvance: a })} />
           <p className="hr-caption" style={{ margin: 0 }}>{L("إلغاء إجازة معتمدة قبل بدايتها يعيد الأيام إلى رصيدك بحركة عكسية. بعد بدايتها يحتاج الإلغاء موافقة الموارد البشرية.", "Cancelling approved leave before it starts returns the days to your balance with a reversing movement. After it starts, cancelling needs HR approval.")}</p>
@@ -207,18 +214,29 @@ function MetricsRow({ d }: { d: Linked }) {
 
 // ── Requests ───────────────────────────────────────────────────────────────────────
 
-type ReqRow = { key: string; date: string; title: React.ReactNode; sub?: string; status: React.ReactNode; action: React.ReactNode };
+type ReqRow = { key: string; date: string; title: React.ReactNode; sub?: string; notes?: string[]; status: React.ReactNode; action: React.ReactNode };
 
 function Requests({ d, busy, onWithdraw, onCancelLeave, onCancelAdvance }: { d: Linked; busy: string | null; onWithdraw: (id: string) => void; onCancelLeave: (r: LeaveReq) => void; onCancelAdvance: (a: Advance) => void }) {
   const { L, lang, month } = useHrI18n();
   const rows = useMemo(() => {
     const out: ReqRow[] = [];
+    // Who holds the next step, the decision's reason (with who decided) and a cancellation's reason —
+    // what «مساحة عملي · طلباتي» showed before the employee's requests moved here.
+    const mgr = d.person.manager;
+    const decided = (note: string | null | undefined, by: string | null | undefined, rejected: boolean) =>
+      note ? `${rejected ? L("سبب الرفض: ", "Reason: ") : L("ملاحظة: ", "Note: ")}${note}${by ? ` — ${by}` : ""}` : null;
+    const notesOf = (...n: (string | null | undefined | false)[]) => n.filter((x): x is string => !!x);
     for (const r of d.leaveRequests) {
       const before = r.startDate > d.today;
       out.push({
         key: `l:${r.id}`, date: r.startDate,
         title: <>{L(`إجازة ${r.leaveType}`, `${reqType(r, lang)} leave`)} · {dayCount(r.days, lang)}</>,
         sub: `${r.startDate} → ${r.endDate}`,
+        notes: notesOf(
+          r.status === "PENDING" && (mgr ? L(`بانتظار اعتماد ${mgr} أو الموارد البشرية`, `Awaiting ${mgr} or HR`) : L("بانتظار اعتماد الموارد البشرية", "Awaiting HR")),
+          decided(r.decisionNote, r.decidedByName, r.status === "REJECTED"),
+          r.cancelReason && L(`سبب الإلغاء: ${r.cancelReason}`, `Cancelled: ${r.cancelReason}`),
+        ),
         status: <StatusDot map={MY_REQUEST_STATUS} value={r.status} />,
         action: r.status === "PENDING" ? <Btn size="sm" variant="ghost" busy={busy === `w:${r.id}`} onClick={() => onWithdraw(r.id)}>{L("سحب", "Withdraw")}</Btn>
           : r.status === "APPROVED" && before ? <Btn size="sm" variant="ghost" onClick={() => onCancelLeave(r)}>{L("إلغاء", "Cancel")}</Btn>
@@ -226,13 +244,19 @@ function Requests({ d, busy, onWithdraw, onCancelLeave, onCancelAdvance }: { d: 
       });
     }
     for (const c of d.corrections) {
-      out.push({ key: `c:${c.id}`, date: c.workDate, title: L("تصحيح حضور", "Attendance correction"), sub: c.reason, status: <StatusDot map={CORRECTION_STATUS} value={c.status} />, action: null });
+      out.push({ key: `c:${c.id}`, date: c.workDate, title: L("تصحيح حضور", "Attendance correction"), sub: c.reason, notes: notesOf(decided(c.decisionNote, c.decidedByName, c.status === "REJECTED")), status: <StatusDot map={CORRECTION_STATUS} value={c.status} />, action: null });
     }
     for (const a of d.advances) {
       out.push({
         key: `a:${a.id}`, date: String(a.createdAt).slice(0, 10),
         title: <>{L("سلفة", "Advance")} <span className="hr-num">{money(a.amount)}</span></>,
         sub: L(`${a.advanceNo} · ${a.installmentCount} قسط من ${a.firstInstallmentMonth}${a.status === "DISBURSED" ? ` · المتبقي ${money(a.outstanding)}` : ""}`, `${a.advanceNo} · ${a.installmentCount} instalments from ${month(a.firstInstallmentMonth)}${a.status === "DISBURSED" ? ` · remaining ${money(a.outstanding)}` : ""}`),
+        notes: notesOf(
+          a.status === "REQUESTED" && L("بانتظار اعتماد الموارد البشرية", "Awaiting HR approval"),
+          a.status === "APPROVED" && L("بانتظار الصرف من الموارد البشرية", "Awaiting disbursement by HR"),
+          decided(a.decisionNote, a.decidedByName, a.status === "REJECTED"),
+          a.cancelReason && L(`سبب الإلغاء: ${a.cancelReason}`, `Cancelled: ${a.cancelReason}`),
+        ),
         status: <StatusDot map={ADVANCE_STATUS} value={a.status} />,
         action: a.status === "REQUESTED" ? <Btn size="sm" variant="ghost" onClick={() => onCancelAdvance(a)}>{L("إلغاء", "Cancel")}</Btn> : null,
       });
@@ -249,7 +273,7 @@ function Requests({ d, busy, onWithdraw, onCancelLeave, onCancelAdvance }: { d: 
         <tbody>
           {rows.map((r) => (
             <tr key={r.key}>
-              <td data-label={L("الطلب", "Request")} className="strong m-title">{r.title}{r.sub ? <div className="hr-caption" style={{ fontWeight: 400 }}><span className="hr-iso" dir={/^\d{4}-\d{2}-\d{2} → /.test(r.sub) ? "ltr" : undefined}>{r.sub}</span></div> : null}</td>
+              <td data-label={L("الطلب", "Request")} className="strong m-title">{r.title}{r.sub ? <div className="hr-caption" style={{ fontWeight: 400 }}><span className="hr-iso" dir={/^\d{4}-\d{2}-\d{2} → /.test(r.sub) ? "ltr" : undefined}>{r.sub}</span></div> : null}{r.notes?.map((n) => <div key={n} className="hr-caption me-req-note">{n}</div>)}</td>
               <td data-label={L("التاريخ", "Date")} className="num hr-hide-compact">{r.date}</td>
               <td data-label={L("الحالة", "Status")}>{r.status}</td>
               <td data-label={L("إجراء", "Action")} className="m-end"><span className="hr-mobile-only">{r.status}</span>{r.action}</td>

@@ -27,3 +27,8 @@
 @media (max-width: 767px) {
   [data-hr-root] .me-mobilebar .hr-btn { height: 44px; }
 }
+
+/* «طلباتي» — the anchor of /dashboard/me#requests (the old «مساحة عملي · طلباتي» URL, notifications):
+   clear the sticky header; who holds the next step and a decision's reason sit under the request. */
+[data-hr-root] .me-requests { scroll-margin-top: 72px; }
+[data-hr-root] .me-req-note { font-weight: 400; white-space: normal; }

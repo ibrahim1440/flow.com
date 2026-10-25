@@ -38,7 +38,7 @@ export function dirOf(l: Lang): "rtl" | "ltr" {
 export function toggleLabel(current: Lang): { text: string; lang: Lang; name: string } {
   return current === "ar"
     ? { text: "EN", lang: "en", name: "English" }
-    : { text: "عربي", lang: "ar", name: "العربية" };
+    : { text: "ع", lang: "ar", name: "العربية" };
 }
 
 /** The accessible name, in the CURRENT language (what a screen reader user is listening to). */

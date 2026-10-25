@@ -169,15 +169,21 @@ export async function team(actor: WsActor, now = new Date()) {
   };
 }
 
-/** My HR requests with who holds the next step. Self-service: the subject is always the caller. */
+/**
+ * My HR requests with who holds the next step. Self-service: the subject is always the caller. Read by the
+ * «طلباتي المعلقة» card on «اليوم» (the requests themselves are submitted and followed in «خدماتي»).
+ * `pending` counts what still waits for someone else's decision: leave PENDING, an advance REQUESTED,
+ * an attendance correction PENDING.
+ */
 export async function myRequests(actor: WsActor) {
   const p = await prisma.hrEmployee.findUnique({ where: { accountId: actor.id }, select: { id: true, manager: { select: { fullNameAr: true } } } });
-  if (!p) return { linked: false as const, items: [] };
-  const [leave, advances] = await Promise.all([
+  if (!p) return { linked: false as const, items: [], pending: 0 };
+  const [leave, advances, corrections] = await Promise.all([
     prisma.hrLeaveRequest.findMany({ where: { employeeId: p.id }, include: { leaveType: { select: { nameAr: true, code: true } } }, orderBy: { createdAt: "desc" }, take: 30 }),
     prisma.hrAdvance.findMany({ where: { employeeId: p.id }, orderBy: { createdAt: "desc" }, take: 10 }),
+    prisma.hrAttendanceCorrection.findMany({ where: { employeeId: p.id }, orderBy: { createdAt: "desc" }, take: 10 }),
   ]);
-  const deciders = new Map((await prisma.employee.findMany({ where: { id: { in: [...leave.map((l) => l.decidedBy), ...advances.map((a) => a.decidedBy)].filter((x): x is string => !!x) } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
+  const deciders = new Map((await prisma.employee.findMany({ where: { id: { in: [...leave.map((l) => l.decidedBy), ...advances.map((a) => a.decidedBy), ...corrections.map((c) => c.decidedBy)].filter((x): x is string => !!x) } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
   const mgr = p.manager?.fullNameAr ?? null;
   const items = [
     ...leave.map((l) => ({
@@ -186,6 +192,7 @@ export async function myRequests(actor: WsActor) {
       reason: l.reason, decisionNote: l.decisionNote, cancelReason: l.cancelReason, decidedBy: l.decidedBy ? deciders.get(l.decidedBy) ?? null : null,
       step: l.status === "PENDING" ? { ar: mgr ? `بانتظار اعتماد ${mgr} أو الموارد البشرية` : "بانتظار اعتماد الموارد البشرية", en: mgr ? `Awaiting ${mgr} or HR` : "Awaiting HR" } : null,
       canWithdraw: l.status === "PENDING", canCancel: l.status === "APPROVED",
+      pending: l.status === "PENDING",
     })),
     ...advances.map((a) => ({
       type: "ADVANCE" as const, id: a.id, title: `سلفة ${a.advanceNo}`, status: a.status, createdAt: a.createdAt, amount: a.amount.toString(),
@@ -195,7 +202,15 @@ export async function myRequests(actor: WsActor) {
         : a.status === "APPROVED" ? { ar: "معتمدة — بانتظار الصرف من الموارد البشرية", en: "Approved — awaiting disbursement by HR" }
         : a.status === "DISBURSED" ? { ar: "صُرفت — تُستقطع من الراتب", en: "Paid out — being deducted from payroll" } : null,
       canWithdraw: false, canCancel: a.status === "REQUESTED",
+      pending: a.status === "REQUESTED",
+    })),
+    ...corrections.map((c) => ({
+      type: "CORRECTION" as const, id: c.id, title: "تصحيح حضور", status: c.status, createdAt: c.createdAt, workDate: c.workDate.toISOString().slice(0, 10),
+      reason: c.reason, decisionNote: c.decisionNote, cancelReason: null, decidedBy: c.decidedBy ? deciders.get(c.decidedBy) ?? null : null,
+      step: c.status === "PENDING" ? { ar: mgr ? `بانتظار اعتماد ${mgr}` : "بانتظار اعتماد المدير", en: mgr ? `Awaiting ${mgr}` : "Awaiting your manager" } : null,
+      canWithdraw: false, canCancel: false,
+      pending: c.status === "PENDING",
     })),
   ].sort((x, y) => +new Date(y.createdAt) - +new Date(x.createdAt));
-  return { linked: true as const, items };
+  return { linked: true as const, items, pending: items.filter((i) => i.pending).length };
 }
