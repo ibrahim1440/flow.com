@@ -48,6 +48,8 @@ export const ALL_MODULES = [
   // Native HR — people, contracts, time, leave, payroll, advances. Self-service is not a
   // module: every login reaches its own HR record at /dashboard/me, scoped server-side.
   "hr",
+  // Smart Marketing — campaigns, content, publishing, budgets, analytics, WhatsApp marketing.
+  "marketing",
   // Accounting A3 (20261104090000): purchasing documents — entering supplier invoices (drafts). Posting them,
   // paying them and the AP ledger stay accounting › ap. Nobody holds it by a role default.
   "purchases",
@@ -76,6 +78,7 @@ export const MODULE_LABELS: Record<string, string> = {
   finance: "Finance (Cash & Budget)",
   automation: "Automation / WhatsApp",
   hr: "Human Resources",
+  marketing: "Smart Marketing",
   purchases: "Purchases (supplier invoices)",
 };
 
@@ -266,6 +269,23 @@ export const MODULE_SUB_PRIVILEGES: Record<string, { key: string; label: string 
     { key: "manage_rules", label: "Create / edit / switch on automation rules" },
     { key: "manage_connection", label: "Link or unlink the WhatsApp number, set the sending mode, send a test" },
     { key: "manage_messages", label: "Retry or cancel individual messages" },
+  ],
+  // Smart Marketing. Viewing shows plans, content and organic results; money (revenue, CAC,
+  // ROAS), customer contact data and every action that reaches outside the system are keys of
+  // their own. Approving never lets anyone approve their own request (service + DB CHECK).
+  marketing: [
+    { key: "content_manage", label: "Create / edit content, assets, posts and the calendar" },
+    { key: "campaigns_manage", label: "Create / edit campaigns, UTMs and targets" },
+    { key: "publish", label: "Submit content for publishing and run the publishing queue" },
+    { key: "approve", label: "Approve or reject marketing requests (never one's own)" },
+    { key: "budget_manage", label: "Plan budgets and spending limits" },
+    { key: "revenue_view", label: "See revenue, attribution, CAC, ROAS and profitability" },
+    { key: "customers_data", label: "See store customers' contact data, consent and message log" },
+    { key: "messaging_manage", label: "Manage WhatsApp templates, journeys and message campaigns" },
+    { key: "ads_manage", label: "Change live ad campaigns on the ad platforms" },
+    { key: "integrations_manage", label: "Connect platforms, store tokens and webhook secrets" },
+    { key: "automation_manage", label: "Marketing settings, approval policy and the kill switches" },
+    { key: "ai_use", label: "Use the AI studio (generates drafts, costs API usage)" },
   ],
   // Viewing the module alone shows nothing sensitive. Each key is one duty, and the
   // approving keys never let anyone approve their own request or their own pay (enforced in

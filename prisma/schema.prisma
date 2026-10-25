@@ -1229,6 +1229,13 @@ model CoffeeProduct {
   roastPlans         RoastPlan[]
   roastProfiles      RoastProfile[]
 
+  // Smart Marketing (additive, relation fields only, 20261107090000_marketing_foundation).
+  mktCampaigns MktCampaign[]
+  mktAssets    MktAsset[]
+  mktPosts     MktPost[]
+  mktEconomics MktProductEconomics?
+
+
   // BOM lines that consume this coffee as roasted/intermediate stock.
   bomComponents BomComponent[]
 
@@ -7500,4 +7507,736 @@ model PeriodCloseReview {
   at             DateTime     @default(now())
 
   @@index([fiscalPeriodId, at])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// SMART MARKETING DEPARTMENT («قسم التسويق الذكي») — additive, migration
+// 20261107090000_marketing_foundation. docs/marketing/ARCHITECTURE.md is the reference.
+//
+// Conventions kept from the rest of the schema: status columns are TEXT with a CHECK in the
+// migration (not Prisma enums); money is Decimal(18,2) in the row's own currency; every metric
+// a platform may not report is NULLABLE — NULL means «غير متاح», never zero. Employee ids are
+// plain columns (the audit trail outlives an account), the product link is a real foreign key.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+/// The single settings row (id "default"): kill switches, approval policy, messaging limits.
+model MktSettings {
+  id                   String   @id @default("default")
+  /// Emergency stops. Each is read by the worker before every external write; ALL stops everything.
+  killAll              Boolean  @default(false)
+  killPublishing       Boolean  @default(false)
+  killAds              Boolean  @default(false)
+  killMessaging        Boolean  @default(false)
+  /// IANA zone the company reports in (platform timestamps are stored UTC and converted for display).
+  timezone             String   @default("Asia/Riyadh")
+  currency             String   @default("SAR")
+  /// Which actions need a second person: { publish, aiPublish, campaignCreate, budgetIncrease,
+  /// campaignPause, trackingChange, sensitiveReply, messageCampaign } → boolean. Missing = required.
+  approvalPolicy       Json     @default("{}")
+  /// Messaging guard rails.
+  maxMessagesPerDay    Int      @default(500)
+  maxMarketingPerCustomerPerWeek Int @default(2)
+  quietHoursStart      Int      @default(22) // hour, company timezone
+  quietHoursEnd        Int      @default(9)
+  /// Attribution defaults.
+  attributionModel     String   @default("LAST_TOUCH")
+  attributionWindowDays Int     @default(7)
+  updatedById          String?
+  updatedAt            DateTime @updatedAt
+}
+
+/// Brand kit: what generated or reviewed content must respect. One row per brand (id "default").
+model MktBrandKit {
+  id            String   @id @default("default")
+  brandNameAr   String   @default("حقبة")
+  brandNameEn   String   @default("Hiqbah")
+  /// [{ name, hex }]
+  colors        Json     @default("[]")
+  /// [{ role, family }]
+  fonts         Json     @default("[]")
+  toneAr        String?
+  toneEn        String?
+  /// Approved phrasing, banned words, claims that need evidence.
+  doList        String[] @default([])
+  dontList      String[] @default([])
+  /// Approved example captions / posts.
+  examples      String[] @default([])
+  logoAssetId   String?
+  updatedById   String?
+  updatedAt     DateTime @updatedAt
+}
+
+/// Product economics for marketing decisions (break-even ROAS, target CAC). Entered, never guessed.
+model MktProductEconomics {
+  productId               String        @id
+  product                 CoffeeProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Average selling price per order in SAR (incl. or excl. VAT is stated by vatIncluded).
+  avgOrderValue           Decimal?      @db.Decimal(18, 2)
+  vatIncluded             Boolean       @default(false)
+  /// Gross margin as a fraction 0–1 (price minus cost of goods).
+  grossMarginPct          Decimal?      @db.Decimal(6, 4)
+  /// Variable cost per order besides COGS (shipping subsidy, payment fee, packaging) in SAR.
+  variableCostPerOrder    Decimal?      @db.Decimal(18, 2)
+  /// The owner's target acquisition cost for a new customer of this product, SAR.
+  targetCac               Decimal?      @db.Decimal(18, 2)
+  /// Typical days between repeat purchases (for replenishment reminders).
+  repurchaseCycleDays     Int?
+  updatedById             String?
+  updatedAt               DateTime      @updatedAt
+}
+
+/// A marketing campaign — the spine every post, ad, message, budget line and order links to.
+model MktCampaign {
+  id              String         @id @default(cuid())
+  name            String
+  /// AWARENESS | ENGAGEMENT | TRAFFIC | LEADS | CONVERSIONS | SALES | RETENTION (CHECK)
+  objective       String
+  /// DRAFT | PLANNED | ACTIVE | PAUSED | COMPLETED | ARCHIVED (CHECK)
+  status          String         @default("DRAFT")
+  /// Channels this campaign runs on (platform keys, see lib/marketing/platforms.ts).
+  channels        String[]       @default([])
+  productId       String?
+  product         CoffeeProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  audience        String?
+  offer           String?
+  landingUrl      String?
+  /// utm_campaign value; unique so an order's UTM resolves to exactly one campaign.
+  utmCampaign     String         @unique
+  startAt         DateTime?
+  endAt           DateTime?
+  plannedBudget   Decimal?       @db.Decimal(18, 2)
+  currency        String         @default("SAR")
+  /// Decision targets (NULL = use the product economics; none at all = «بيانات غير كافية»).
+  targetCac       Decimal?       @db.Decimal(18, 2)
+  targetRoas      Decimal?       @db.Decimal(8, 3)
+  /// Minimum evidence before the decision engine judges: spend and conversions.
+  minSpendForDecision   Decimal? @db.Decimal(18, 2)
+  minConversionsForDecision Int?
+  /// Ids of this campaign on each ad platform: { META: "...", TIKTOK: "..." }.
+  externalRefs    Json           @default("{}")
+  notes           String?
+  ownerId         String?
+  createdById     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  posts           MktPost[]
+  assets          MktAsset[]
+  budgets         MktBudget[]
+  metrics         MktMetricSnapshot[]
+  decisions       MktDecision[]
+  messages        MktMessage[]
+  storeOrders     MktStoreOrder[]
+
+  @@index([status])
+  @@index([productId])
+}
+
+/// A content asset (design, photo, video, source file, copy). Versions keep every upload; the
+/// original is never overwritten.
+model MktAsset {
+  id               String            @id @default(cuid())
+  title            String
+  /// IMAGE | VIDEO | DESIGN_SOURCE | DOCUMENT | COPY (CHECK)
+  kind             String
+  tags             String[]          @default([])
+  campaignId       String?
+  campaign         MktCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  productId        String?
+  product          CoffeeProduct?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// Usage rights: OWNED | LICENSED | UGC_PERMISSION | STOCK | UNKNOWN (CHECK).
+  rights           String            @default("UNKNOWN")
+  rightsNote       String?
+  /// COPY assets carry their text here instead of a file.
+  text             String?
+  /// The brief this asset answers (objective, audience, message, offer, cta, size, platform).
+  brief            Json?
+  /// True when the content was produced by the AI studio (approval policy may differ).
+  aiGenerated      Boolean           @default(false)
+  archived         Boolean           @default(false)
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  versions         MktAssetVersion[]
+  postLinks        MktPostAsset[]
+
+  @@index([campaignId])
+  @@index([productId])
+  @@index([kind, archived])
+}
+
+/// One uploaded file of an asset. Immutable once written.
+model MktAssetVersion {
+  id            String    @id @default(cuid())
+  assetId       String
+  asset         MktAsset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  version       Int
+  /// The first version is the original and is kept forever.
+  isOriginal    Boolean   @default(false)
+  fileName      String
+  /// Proven from the file signature, never the browser's claim.
+  mimeType      String
+  sizeBytes     Int
+  sha256        String
+  width         Int?
+  height        Int?
+  /// Bytes in the row (no Blob store configured) — exactly one of content / blobPathname (CHECK).
+  content       Bytes?
+  blobPathname  String?   @unique
+  note          String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([assetId, version])
+}
+
+/// A planned or published piece of organic content. One post, one or more platform variants.
+model MktPost {
+  id            String          @id @default(cuid())
+  title         String
+  campaignId    String?
+  campaign      MktCampaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  productId     String?
+  product       CoffeeProduct?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// AWARENESS | ENGAGEMENT | TRAFFIC | CONVERSIONS | SALES (CHECK)
+  objective     String
+  audience      String?
+  /// POST | REEL | STORY | VIDEO | CAROUSEL | SHORT | ARTICLE | PIN (CHECK)
+  contentType   String          @default("POST")
+  caption       String          @default("")
+  hashtags      String[]        @default([])
+  link          String?
+  cta           String?
+  /// UTC instant; displayed in MktSettings.timezone.
+  scheduledAt   DateTime?
+  /// DRAFT | IN_REVIEW | APPROVED | SCHEDULED | PUBLISHING | PUBLISHED | PARTIAL | FAILED | CANCELLED (CHECK)
+  status        String          @default("DRAFT")
+  brief         Json?
+  aiGenerated   Boolean         @default(false)
+  createdById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  variants      MktPostVariant[]
+  assets        MktPostAsset[]
+  changes       MktPostChange[]
+
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([campaignId])
+}
+
+/// The post as it goes to one platform: its own caption/hashtags and its own publishing result.
+model MktPostVariant {
+  id              String        @id @default(cuid())
+  postId          String
+  post            MktPost       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform        String
+  /// NULL = use the post's caption / hashtags.
+  caption         String?
+  hashtags        String[]      @default([])
+  /// PENDING | QUEUED | PUBLISHING | PUBLISHED | FAILED | MANUAL_REQUIRED | MANUAL_DONE | CANCELLED (CHECK)
+  status          String        @default("PENDING")
+  externalPostId  String?
+  externalUrl     String?
+  publishedAt     DateTime?
+  /// Who confirmed a manual publication, and the URL they gave as evidence.
+  manualConfirmedById String?
+  lastError       String?
+  updatedAt       DateTime      @updatedAt
+  jobs            MktPublishJob[]
+
+  @@unique([postId, platform])
+  @@index([status])
+}
+
+model MktPostAsset {
+  postId     String
+  post       MktPost         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  assetId    String
+  asset      MktAsset        @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  /// Pinned version; NULL = the asset's latest at publish time.
+  versionId  String?
+  position   Int             @default(0)
+
+  @@id([postId, assetId])
+}
+
+/// Append-only: every change of a post's schedule, status or content, by whom and why.
+model MktPostChange {
+  id        String   @id @default(cuid())
+  postId    String
+  post      MktPost  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actorName String?
+  field     String
+  before    String?
+  after     String?
+  reason    String?
+  at        DateTime @default(now())
+
+  @@index([postId, at])
+}
+
+/// One attempt-set to publish one variant. The idempotency key makes a retry the same job,
+/// never a second post.
+model MktPublishJob {
+  id             String         @id @default(cuid())
+  variantId      String
+  variant        MktPostVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  idempotencyKey String         @unique
+  /// QUEUED | RUNNING | SUCCEEDED | FAILED | MANUAL_REQUIRED | CANCELLED (CHECK)
+  status         String         @default("QUEUED")
+  attempts       Int            @default(0)
+  runAt          DateTime
+  lockedAt       DateTime?
+  lastError      String?
+  externalId     String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([status, runAt])
+}
+
+/// Two-person approval of a marketing action. Requester can never decide (service + CHECK).
+model MktApproval {
+  id            String    @id @default(cuid())
+  /// POST | CAMPAIGN | BUDGET_CHANGE | AD_CHANGE | MESSAGE_CAMPAIGN | TRACKING_CHANGE | SENSITIVE_REPLY (CHECK)
+  subjectType   String
+  subjectId     String
+  /// The action approved: publish, ai_publish, create, increase, pause, send …
+  action        String
+  /// PENDING | APPROVED | REJECTED | CANCELLED (CHECK)
+  status        String    @default("PENDING")
+  /// What exactly is being approved (a snapshot, so a later edit cannot ride on an old approval).
+  payload       Json      @default("{}")
+  payloadHash   String
+  requestedById String
+  requestedByName String?
+  requestNote   String?
+  decidedById   String?
+  decidedByName String?
+  decisionNote  String?
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([subjectType, subjectId])
+}
+
+/// A connection to an external platform. Tokens are AES-256-GCM encrypted with
+/// MARKETING_TOKEN_KEY; the ciphertext never leaves the server.
+model MktConnection {
+  id              String    @id @default(cuid())
+  /// Platform key (lib/marketing/platforms.ts), one row each.
+  platform        String    @unique
+  /// NOT_CONFIGURED | PENDING | CONNECTED | EXPIRED | ERROR | DISABLED (CHECK)
+  status          String    @default("NOT_CONFIGURED")
+  accountId       String?
+  accountName     String?
+  scopes          String[]  @default([])
+  tokenCiphertext String?
+  tokenExpiresAt  DateTime?
+  /// Non-secret settings (ad account id, page id, phone number id …).
+  config          Json      @default("{}")
+  lastCheckedAt   DateTime?
+  lastError       String?
+  connectedById   String?
+  updatedAt       DateTime  @updatedAt
+}
+
+/// A budget line for a period (YYYY-MM month or YYYY-Qn quarter).
+model MktBudget {
+  id            String       @id @default(cuid())
+  period        String
+  /// TOTAL | PLATFORM | CAMPAIGN | PRODUCT (CHECK)
+  scope         String
+  /// Platform key / product id when scope says so (campaign uses campaignId).
+  scopeRef      String?
+  campaignId    String?
+  campaign      MktCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  planned       Decimal      @db.Decimal(18, 2)
+  dailyCap      Decimal?     @db.Decimal(18, 2)
+  /// The most an automatic rule may add in one step, as a fraction (0.2 = +20%).
+  maxAutoIncreasePct Decimal? @db.Decimal(6, 4)
+  currency      String       @default("SAR")
+  note          String?
+  createdById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([period, scope, scopeRef, campaignId])
+  @@index([period])
+}
+
+/// Daily performance as a platform (or a person, for MANUAL) reported it. Every metric nullable.
+model MktMetricSnapshot {
+  id               String       @id @default(cuid())
+  /// The day in the company timezone, as a date.
+  day              DateTime     @db.Date
+  platform         String
+  /// ACCOUNT | CAMPAIGN | ADSET | AD | POST (CHECK)
+  level            String
+  /// The platform's id of the object (campaign/ad/post), or "account".
+  externalId       String
+  campaignId       String?
+  campaign         MktCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  /// PAID | ORGANIC (CHECK)
+  kind             String       @default("PAID")
+  currency         String       @default("SAR")
+  spend            Decimal?     @db.Decimal(18, 2)
+  impressions      Int?
+  reach            Int?
+  clicks           Int?
+  linkClicks       Int?
+  landingPageViews Int?
+  videoViews       Int?
+  engagements      Int?
+  followersDelta   Int?
+  leads            Int?
+  purchases        Int?
+  /// Platform-reported conversion value (platform attribution — never summed across platforms).
+  conversionValue  Decimal?     @db.Decimal(18, 2)
+  /// API | MANUAL | IMPORT (CHECK)
+  source           String
+  fetchedAt        DateTime     @default(now())
+  enteredById      String?
+
+  @@unique([day, platform, level, externalId, source])
+  @@index([campaignId, day])
+  @@index([day])
+}
+
+/// Store customers mirrored from the e-commerce platform — read-only copy.
+model MktStoreCustomer {
+  id             String    @id @default(cuid())
+  source         String    @default("STORE")
+  externalId     String
+  name           String?
+  /// E.164 without "+", normalised (9665…).
+  phone          String?
+  email          String?
+  firstOrderAt   DateTime?
+  ordersCount    Int       @default(0)
+  /// Optional link to the ERP B2B customer when the same party buys both ways.
+  erpCustomerId  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  orders         MktStoreOrder[]
+  carts          MktCart[]
+
+  @@unique([source, externalId])
+  @@index([phone])
+}
+
+/// Store orders mirrored from the e-commerce platform — the revenue truth for attribution.
+model MktStoreOrder {
+  id               String            @id @default(cuid())
+  source           String            @default("STORE")
+  externalId       String
+  orderNumber      String?
+  customerId       String?
+  customer         MktStoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  /// Platform status as received, and the normalised one:
+  /// PENDING | PAID | FULFILLED | CANCELLED | REFUNDED | PARTIALLY_REFUNDED (CHECK)
+  rawStatus        String?
+  status           String
+  currency         String            @default("SAR")
+  subtotal         Decimal?          @db.Decimal(18, 2)
+  discount         Decimal?          @db.Decimal(18, 2)
+  shipping         Decimal?          @db.Decimal(18, 2)
+  tax              Decimal?          @db.Decimal(18, 2)
+  total            Decimal           @db.Decimal(18, 2)
+  refunded         Decimal           @default(0) @db.Decimal(18, 2)
+  couponCode       String?
+  placedAt         DateTime
+  cancelledAt      DateTime?
+  /// First order of this customer at this store (new-customer acquisition).
+  isFirstOrder     Boolean?
+  utmSource        String?
+  utmMedium        String?
+  utmCampaign      String?
+  utmContent       String?
+  utmTerm          String?
+  landingUrl       String?
+  referrer         String?
+  /// Resolved from utmCampaign (or a message click) by the attribution job.
+  campaignId       String?
+  campaign         MktCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  /// Product lines: [{ sku, name, qty, price }]
+  lines            Json              @default("[]")
+  /// SHA-256 of the last payload applied (an identical webhook is a no-op).
+  payloadHash      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  touches          MktTouch[]
+
+  @@unique([source, externalId])
+  @@index([placedAt])
+  @@index([campaignId])
+}
+
+/// A marketing touch on a customer's path (click, message, visit) — the input of attribution.
+model MktTouch {
+  id           String         @id @default(cuid())
+  /// The phone or store customer id the touch belongs to.
+  subjectKey   String
+  at           DateTime
+  /// UTM | WHATSAPP | AD_CLICK | ORGANIC | REFERRAL (CHECK)
+  channel      String
+  platform     String?
+  campaignId   String?
+  messageId    String?
+  orderId      String?
+  order        MktStoreOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  detail       Json           @default("{}")
+
+  @@index([subjectKey, at])
+  @@index([orderId])
+}
+
+/// Abandoned carts mirrored from the store.
+model MktCart {
+  id               String            @id @default(cuid())
+  source           String            @default("STORE")
+  externalId       String
+  customerId       String?
+  customer         MktStoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  phone            String?
+  value            Decimal?          @db.Decimal(18, 2)
+  currency         String            @default("SAR")
+  /// Link back to the cart, only if the store supplied one.
+  recoveryUrl      String?
+  lines            Json              @default("[]")
+  abandonedAt      DateTime
+  /// OPEN | CONVERTED | EXPIRED (CHECK)
+  status           String            @default("OPEN")
+  convertedOrderExternalId String?
+  convertedAt      DateTime?
+  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime          @default(now())
+
+  @@unique([source, externalId])
+  @@index([status, abandonedAt])
+}
+
+/// The central consent ledger for a channel. The latest event decides; nothing is deleted.
+model MktConsent {
+  /// E.164 digits (9665…) — one row per phone and channel.
+  phone        String
+  channel      String   @default("WHATSAPP")
+  /// OPTED_IN | OPTED_OUT (CHECK)
+  status       String
+  /// CHECKOUT | FORM | IN_STORE | REPLY_STOP | ADMIN | IMPORT (CHECK)
+  source       String
+  evidence     String?
+  updatedAt    DateTime @updatedAt
+  events       MktConsentEvent[]
+
+  @@id([phone, channel])
+}
+
+model MktConsentEvent {
+  id        String     @id @default(cuid())
+  phone     String
+  channel   String
+  consent   MktConsent @relation(fields: [phone, channel], references: [phone, channel], onDelete: Cascade)
+  status    String
+  source    String
+  evidence  String?
+  actorId   String?
+  at        DateTime   @default(now())
+
+  @@index([phone, channel, at])
+}
+
+/// WhatsApp message templates as approved by Meta (synced or entered).
+model MktWaTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  language    String   @default("ar")
+  /// MARKETING | UTILITY | AUTHENTICATION (CHECK)
+  category    String
+  /// APPROVED | PENDING | REJECTED | PAUSED | DISABLED | LOCAL_DRAFT (CHECK)
+  status      String   @default("LOCAL_DRAFT")
+  body        String
+  /// Ordered variable names the body's {{1}}, {{2}} … stand for.
+  variables   String[] @default([])
+  /// What the template is for: ABANDONED_CART, WELCOME, ORDER_UPDATE, PROMOTION …
+  purpose     String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@unique([name, language])
+}
+
+/// A lifecycle journey (abandoned cart, welcome, win-back …): trigger, steps, exits.
+model MktJourney {
+  id          String   @id @default(cuid())
+  /// ABANDONED_CART | WELCOME | POST_PURCHASE | REVIEW_REQUEST | REPLENISH | WINBACK | CROSS_SELL (CHECK)
+  kind        String   @unique
+  name        String
+  active      Boolean  @default(false)
+  /// { steps: [{ waitMinutes, templateId, discountAllowed }], maxMessages, minCartValue, … }
+  config      Json     @default("{}")
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+  enrollments MktJourneyEnrollment[]
+}
+
+/// One subject (a cart, an order, a customer) going through a journey. Unique per journey and
+/// subject, so a repeated webhook can never enrol the same cart twice.
+model MktJourneyEnrollment {
+  id          String     @id @default(cuid())
+  journeyId   String
+  journey     MktJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  subjectKey  String
+  phone       String?
+  /// ACTIVE | COMPLETED | STOPPED | FAILED (CHECK)
+  status      String     @default("ACTIVE")
+  stepIndex   Int        @default(0)
+  nextRunAt   DateTime?
+  stopReason  String?
+  context     Json       @default("{}")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  messages    MktMessage[]
+
+  @@unique([journeyId, subjectKey])
+  @@index([status, nextRunAt])
+}
+
+/// An outbound marketing / service message (WhatsApp Cloud API).
+model MktMessage {
+  id            String                @id @default(cuid())
+  channel       String                @default("WHATSAPP")
+  phone         String
+  enrollmentId  String?
+  enrollment    MktJourneyEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  campaignId    String?
+  campaign      MktCampaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  templateId    String?
+  /// MARKETING | UTILITY | SERVICE (CHECK) — consent rules differ.
+  category      String
+  /// Rendered preview of what the customer sees.
+  preview       String
+  variables     Json                  @default("[]")
+  /// One message per purpose and subject, ever: retries reuse the row.
+  dedupeKey     String                @unique
+  /// QUEUED | SENDING | SENT | DELIVERED | READ | FAILED | SKIPPED | CANCELLED (CHECK)
+  status        String                @default("QUEUED")
+  statusNote    String?
+  attempts      Int                   @default(0)
+  scheduledAt   DateTime
+  /// The WhatsApp message id (wamid) returned by the Cloud API.
+  providerId    String?               @unique
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  readAt        DateTime?
+  failedAt      DateTime?
+  /// Cost as billed/estimated, in currency.
+  cost          Decimal?              @db.Decimal(18, 4)
+  currency      String                @default("SAR")
+  /// The tracked link in the message (carries utm_campaign + a message id).
+  trackedUrl    String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([phone, createdAt])
+  @@index([campaignId])
+}
+
+/// Decision engine verdicts — one row per evaluation, kept to compare with what happened next.
+model MktDecision {
+  id               String      @id @default(cuid())
+  campaignId       String
+  campaign         MktCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  /// SCALE | KEEP | OPTIMIZE | TEST | PAUSE | HUMAN_REVIEW | INSUFFICIENT_DATA (CHECK)
+  verdict          String
+  periodStart      DateTime
+  periodEnd        DateTime
+  /// The figures used, the targets, the rules that fired, the limitations.
+  evidence         Json
+  confidence       String
+  reasoning        String
+  requiresApproval Boolean     @default(true)
+  /// PROPOSED | ACCEPTED | DISMISSED | EXECUTED (CHECK)
+  status           String      @default("PROPOSED")
+  outcomeNote      String?
+  decidedById      String?
+  createdAt        DateTime    @default(now())
+
+  @@index([campaignId, createdAt])
+}
+
+/// Alerts raised by jobs and rules. dedupeKey keeps one open alert per condition.
+model MktAlert {
+  id          String    @id @default(cuid())
+  kind        String
+  /// INFO | WARNING | CRITICAL (CHECK)
+  severity    String
+  title       String
+  detail      String?
+  subjectType String?
+  subjectId   String?
+  /// OPEN | ACKNOWLEDGED | RESOLVED (CHECK)
+  status      String    @default("OPEN")
+  dedupeKey   String    @unique
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  resolvedById String?
+
+  @@index([status, createdAt])
+}
+
+/// Every run of a marketing job (publisher, sync, journeys, alerts) and what it did.
+model MktJobRun {
+  id          String    @id @default(cuid())
+  job         String
+  trigger     String
+  /// RUNNING | SUCCEEDED | FAILED | SKIPPED (CHECK)
+  status      String
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  summary     Json      @default("{}")
+  error       String?
+
+  @@index([job, startedAt])
+}
+
+/// Append-only audit trail of everything that changes marketing state or reaches outside.
+model MktAuditLog {
+  id          String   @id @default(cuid())
+  /// USER | RULE | SYSTEM | WEBHOOK (CHECK)
+  actorKind   String
+  actorId     String?
+  actorName   String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  note        String?
+  at          DateTime @default(now())
+
+  @@index([entityType, entityId, at])
+  @@index([at])
+}
+
+/// Webhook deliveries received (store, WhatsApp) — kept for idempotency and diagnosis.
+model MktWebhookEvent {
+  id          String    @id @default(cuid())
+  source      String
+  /// The provider's event id, or a hash of the body when it sends none.
+  eventKey    String
+  topic       String?
+  signatureOk Boolean
+  payload     Json
+  /// RECEIVED | PROCESSED | IGNORED | FAILED (CHECK)
+  status      String    @default("RECEIVED")
+  error       String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@unique([source, eventKey])
+  @@index([status, receivedAt])
 }

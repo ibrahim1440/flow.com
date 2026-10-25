@@ -32,6 +32,7 @@ export const MODULE_AR: Record<string, Bi> = {
   finance: { ar: "المالية", en: "Finance" },
   automation: { ar: "الأتمتة والواتساب", en: "Automation & WhatsApp" },
   hr: { ar: "الموارد البشرية", en: "Human resources" },
+  marketing: { ar: "التسويق الذكي", en: "Smart marketing" },
   purchases: { ar: "المشتريات وفواتير الموردين", en: "Purchases & supplier invoices" },
 };
 
@@ -45,6 +46,7 @@ export const GROUPS: { key: string; ar: string; en: string; modules: string[] }[
   { key: "accounting", ar: "المحاسبة", en: "Accounting", modules: ["accounting"] },
   { key: "finance", ar: "المالية", en: "Finance", modules: ["finance"] },
   { key: "hr", ar: "الموارد البشرية", en: "Human resources", modules: ["hr"] },
+  { key: "marketing", ar: "التسويق", en: "Marketing", modules: ["marketing"] },
   { key: "admin", ar: "الإدارة", en: "Administration", modules: ["employees", "dashboard", "analytics"] },
   { key: "settings", ar: "الإعدادات", en: "Settings", modules: ["settings", "automation"] },
 ];
@@ -103,6 +105,14 @@ export const SUB_AR: Record<string, Record<string, string>> = {
     allocate: "تشغيل التخصيص والحجز وتسجيل المدفوعات", transfer_approve: "اعتماد التحويل بين فئات التخصيص",
     spend_override_approve: "اعتماد الصرف فوق حد الفئة أو رصيدها", period_close: "إقفال فترات الميزانية أو إعادة فتحها",
     all_branches: "الوصول على مستوى المنشأة (كل الفروع)", settings_manage: "إدارة إعدادات المالية والحسابات والفئات ووصول الفروع",
+  },
+  marketing: {
+    content_manage: "إنشاء المحتوى والتصاميم والمنشورات وتعديل التقويم", campaigns_manage: "إنشاء الحملات وتعديلها وروابط التتبع والأهداف",
+    publish: "إرسال المحتوى للنشر وتشغيل قائمة النشر", approve: "اعتماد طلبات التسويق أو رفضها (لا يعتمد طلبه)",
+    budget_manage: "تخطيط الميزانيات وحدود الإنفاق", revenue_view: "الاطلاع على الإيرادات والإسناد وتكلفة الاكتساب والعائد والربحية",
+    customers_data: "الاطلاع على بيانات تواصل عملاء المتجر والموافقات وسجل الرسائل", messaging_manage: "إدارة قوالب الواتساب والرحلات وحملات الرسائل",
+    ads_manage: "تعديل الحملات الإعلانية الحية على المنصات", integrations_manage: "ربط المنصات وحفظ التوكنات وأسرار الويبهوك",
+    automation_manage: "إعدادات التسويق وسياسة الاعتماد ومفاتيح الإيقاف الطارئ", ai_use: "استخدام استوديو الذكاء الاصطناعي (ينشئ مسودات بتكلفة)",
   },
   automation: {
     manage_rules: "إنشاء قواعد الأتمتة وتعديلها وتشغيلها", manage_connection: "ربط رقم الواتساب أو فصله وضبط الإرسال",

@@ -58,6 +58,8 @@
     "test:hr:http": "node scripts/hr/run-http-suites.mjs",
     "test:hr:shell": "node --test tests/hr/visual/shell.test.mjs",
     "hr:fixture": "tsx --env-file=.env scripts/hr/seed-preview-fixture.ts",
+    "test:marketing:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/marketing/unit/*.test.ts",
+    "test:marketing:http": "tsx --test --test-concurrency=1 tests/marketing/http/*.test.ts",
     "test:accounting:unit": "tsx --import ./tests/support/simple-mode-off.mjs --test tests/accounting/unit/*.test.ts",
     "test:accounting:db": "tsx --import ./tests/support/simple-mode-off.mjs --test --test-concurrency=1 --test-force-exit tests/accounting/db/*.test.ts",
     "test:accounting:http": "tsx --test --test-concurrency=1 tests/accounting/http/*.test.ts",
@@ -67,6 +69,7 @@
     "zatca:mock": "tsx tests/zatca/mock-fatoora.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@libsql/client": "^0.17.3",
     "@prisma/adapter-libsql": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",

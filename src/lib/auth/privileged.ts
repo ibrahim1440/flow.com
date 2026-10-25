@@ -18,7 +18,9 @@
 //     manage_settings (commission settings and the opening setup: they decide what is paid),
 //     collection_verify, collection_reject, collection_reverse; sales › quote_approve_discount;
 //   · destructive administration: settings › reset, training_reset;
-//   · system administration: automation › manage_connection (which number sends, and whether).
+//   · system administration: automation › manage_connection (which number sends, and whether);
+//     marketing › ads_manage, integrations_manage, automation_manage (live ad spend, platform
+//     credentials, the kill switches and the approval policy).
 //   · operations (owner decision, 16 Oct, DECISIONS-2026-10-16.md): inventory › adjust,
 //     inventory › override, orders › approve — also step-up and verified-individual at action
 //     time (requirePrivilegedAction);
@@ -48,6 +50,9 @@ export const PRIVILEGED_SUBS: [module: string, sub: string][] = [
   ["qc", "finalize_override"],
   // QC station W3 (owner decision 4, UR-S19): the exception approver and the disposal decider.
   ["qc", "approve_exception"], ["qc", "dispose"],
+  // Smart Marketing: what reaches outside the system with the company's money, accounts or
+  // customers' phones — live ad changes, platform credentials, the kill switches and policy.
+  ["marketing", "ads_manage"], ["marketing", "integrations_manage"], ["marketing", "automation_manage"],
   // Sales invoicing A2: issuing a tax invoice and the credit / debit notes (verified individual + step-up).
   ["sales", "invoices_issue"], ["sales", "invoices_credit_note"],
 ];

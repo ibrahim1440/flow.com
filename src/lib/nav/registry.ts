@@ -5,7 +5,7 @@ import {
   ClipboardList, UserPlus, KanbanSquare, Percent, CalendarCheck, FileText, Target, BarChart3,
   ScrollText, Briefcase, Landmark, Boxes, Workflow, Zap, MessageSquareText, QrCode,
   Contact, UserRound, CalendarDays, Banknote, Laptop,
-  Flame, ListChecks, Coffee, Bell,
+  Flame, ListChecks, Coffee, Bell, Megaphone,
 } from "lucide-react";
 import { hasModuleAccess, hasSubPrivilege, type Permissions } from "@/lib/auth-shared";
 import type { D21IconName } from "@/components/shell/icons";
@@ -173,7 +173,7 @@ export const SHELL_GROUPS: Record<string, { ar: string; en: string }> = {
  * flow, how it is made, how it is checked, what it is made from, then who buys it, the money
  * and the people. A group not listed follows, in registry order.
  */
-export const SHELL_GROUP_ORDER = ["orders", "production", "quality", "inventory", "sales", "finance", "hr", "team"];
+export const SHELL_GROUP_ORDER = ["orders", "production", "quality", "inventory", "sales", "finance", "hr", "marketing", "team"];
 
 /**
  * The gear menu, in this order (GX F-P01 settings navigation: «المنشأة · المستخدمون والصلاحيات ·
@@ -185,6 +185,7 @@ const sales = (sub?: string): Ability => ({ module: "sales", ...(sub ? { sub } :
 const commissions = (sub?: string): Ability => ({ module: "commissions", ...(sub ? { sub } : {}) });
 const IN_SALES: Ability[] = [sales()];
 const hr = (sub?: string): Ability => ({ module: "hr", ...(sub ? { sub } : {}) });
+const mkt = (sub?: string): Ability => ({ module: "marketing", ...(sub ? { sub } : {}) });
 const FINANCE: Ability = { module: "finance" };
 const ACCOUNTING: Ability = { module: "accounting" };
 /** Who decides a collection (verify, reject, reverse) — Finance's half of the queue. */
@@ -700,6 +701,56 @@ export const NAV: NavNode[] = [
       { id: "hr.recruitment", ar: "التوظيف", en: "Recruitment", icon: UserPlus, href: "/dashboard/hr/recruitment", anyOf: [hr("recruit")] },
       { id: "hr.assets", ar: "العهد", en: "Assets", icon: Laptop, href: "/dashboard/hr/assets", anyOf: [hr("assets_manage")] },
       { id: "hr.settings", ar: "إعدادات الموارد البشرية", en: "HR settings", icon: Settings, href: "/dashboard/hr/settings", anyOf: [hr("policy_manage"), { module: "employees", sub: "edit" }] }, // account editors: «الأشخاص الخارجيون» (Option A)
+    ],
+  },
+  {
+    // Smart Marketing «التسويق» (feat/smart-marketing, docs/marketing). One module; each page and
+    // API re-checks its own key. Money (attribution), customers' phones (WhatsApp) and the policy
+    // screens are gated on their keys here too, so nobody is shown a page they cannot use.
+    id: "marketing",
+    ar: "التسويق", en: "Marketing",
+    icon: Megaphone,
+    anyOf: [mkt()],
+    shell: { icon: "chart" },
+    children: [
+      { id: "marketing.overview", ar: "نظرة عامة", en: "Overview", icon: BarChart3, href: "/dashboard/marketing", anyOf: [mkt()] },
+      {
+        id: "marketing.plan",
+        ar: "التخطيط والمحتوى", en: "Planning & content",
+        icon: CalendarDays,
+        anyOf: [mkt()],
+        children: [
+          { id: "marketing.campaigns", ar: "الحملات", en: "Campaigns", href: "/dashboard/marketing/campaigns", anyOf: [mkt()] },
+          { id: "marketing.calendar", ar: "تقويم النشر", en: "Publishing calendar", href: "/dashboard/marketing/calendar", anyOf: [mkt()] },
+          { id: "marketing.library", ar: "مكتبة التصاميم", en: "Asset library", href: "/dashboard/marketing/library", anyOf: [mkt()] },
+          { id: "marketing.studio", ar: "استوديو الذكاء الاصطناعي", en: "AI studio", href: "/dashboard/marketing/studio", anyOf: [mkt("ai_use")] },
+        ],
+      },
+      {
+        id: "marketing.execute",
+        ar: "التنفيذ", en: "Execution",
+        icon: Zap,
+        anyOf: [mkt()],
+        children: [
+          { id: "marketing.publishing", ar: "مركز النشر", en: "Publishing hub", href: "/dashboard/marketing/publishing", anyOf: [mkt()] },
+          { id: "marketing.approvals", ar: "الموافقات", en: "Approvals", href: "/dashboard/marketing/approvals", anyOf: [mkt()] },
+          { id: "marketing.whatsapp", ar: "الواتساب والعملاء", en: "WhatsApp & customers", href: "/dashboard/marketing/whatsapp", anyOf: [mkt("customers_data"), mkt("messaging_manage")] },
+        ],
+      },
+      {
+        id: "marketing.measure",
+        ar: "القياس", en: "Measurement",
+        icon: Target,
+        anyOf: [mkt()],
+        children: [
+          { id: "marketing.analytics", ar: "التحليلات والمؤشرات", en: "Analytics & KPIs", href: "/dashboard/marketing/analytics", anyOf: [mkt()] },
+          { id: "marketing.budgets", ar: "الميزانيات", en: "Budgets", href: "/dashboard/marketing/budgets", anyOf: [mkt("budget_manage"), mkt("revenue_view")] },
+          { id: "marketing.attribution", ar: "المبيعات والإسناد", en: "Sales & attribution", href: "/dashboard/marketing/attribution", anyOf: [mkt("revenue_view")] },
+          { id: "marketing.reports", ar: "التقارير", en: "Reports", href: "/dashboard/marketing/reports", anyOf: [mkt()] },
+        ],
+      },
+      { id: "marketing.integrations", ar: "التكاملات", en: "Integrations", icon: Workflow, href: "/dashboard/marketing/integrations", anyOf: [mkt()] },
+      { id: "marketing.settings", ar: "إعدادات التسويق", en: "Marketing settings", icon: Settings, href: "/dashboard/marketing/settings", anyOf: [mkt()] },
     ],
   },
   {
