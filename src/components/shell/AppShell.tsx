@@ -12,6 +12,7 @@ import {
 } from "@/lib/nav/registry";
 import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
 import { NotificationsBell } from "@/components/notifications/NotificationsBell";
+import { LanguageToggle } from "./LanguageToggle";
 import "./alerts-bell.css";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { Ico, type D21IconName } from "./icons";
@@ -452,6 +453,9 @@ export function AppShell({
                 {menuItems.map((it) => (
                   <Link key={it.node.id} role="menuitem" href={it.href} data-testid={`nav-${it.node.id}`} onClick={() => setMenu(false)}>{text(it.node, lang, viewer)}</Link>
                 ))}
+                {/* The quick language switch, also here (owner, 25 Oct 2026): the account menu is where
+                    SaaS dashboards keep it; the top bar's «EN / عربي» is the one-tap path. */}
+                <LanguageToggle variant="menu" onDone={() => setMenu(false)} />
                 <button role="menuitem" type="button" className="danger" onClick={onLogout}>{ar ? "تسجيل الخروج" : "Sign out"}</button>
               </div>
             ) : null}
@@ -470,6 +474,8 @@ export function AppShell({
             {phoneHeader?.sub ? <div className="sub">{phoneHeader.sub}</div> : null}
           </div>
           <span className="sp" />
+          {/* The quick language switch: one tap from every screen, beside the bell (owner, 25 Oct 2026). */}
+          <LanguageToggle testId="lang-toggle-phone" />
           {!phoneHeader?.back ? <NotificationsBell lang={ar ? "ar" : "en"} phone /> : null}
           {phoneHeader?.action ? (
             <Link href={phoneHeader.action.href} className="d21-ib" aria-label={phoneHeader.action.label} data-testid="ph-action"><Ico name={phoneHeader.action.icon} /></Link>
@@ -494,6 +500,8 @@ export function AppShell({
               <span className="sp" />
               {/* feat/notifications: «التنبيهات», the bell of every signed-in account (the storage
                   alerts of feat/credit-hold are its «system» notifications). */}
+              {/* The quick language switch (owner, 25 Oct 2026): «EN» / «عربي», one tap, in place. */}
+              <LanguageToggle />
               <NotificationsBell lang={ar ? "ar" : "en"} />
               {single ? (
                 <div className="d21-new" data-d21-new>
@@ -594,6 +602,7 @@ export function AppShell({
               </div>
             );
           })}
+          <LanguageToggle variant="row" onDone={() => setMore(false)} />
           <button type="button" className="d21-more-row danger" onClick={onLogout}><LogOut aria-hidden /><span>{ar ? "تسجيل الخروج" : "Sign out"}</span></button>
         </MoreSheet>
       ) : null}

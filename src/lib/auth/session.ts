@@ -16,6 +16,7 @@ import { extractIp, hashRateLimitKey } from "@/lib/rate-limit";
 
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MS } from "./session-policy";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, deviceIdFromCookieHeader, newDeviceId, validDeviceId } from "./device";
+import { LANG_COOKIE, LANG_COOKIE_MAX_AGE } from "@/lib/i18n/language-switch";
 
 export { SESSION_IDLE_MS, SESSION_ABSOLUTE_MS };
 /** lastSeenAt is written at most this often (not on every request). */
@@ -52,6 +53,9 @@ export async function setSessionCookie(response: NextResponse, employeeId: strin
   const token = await signToken({ id: e.id, sid: session.id, cv: credentialVersion({ id: e.id, username: e.username, pin: e.pin, password: e.password }), preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar" }, session.expiresAt);
   const maxAge = Math.max(1, Math.floor((session.expiresAt.getTime() - Date.now()) / 1000));
   response.cookies.set("token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge, path: "/" });
+  // The quick language switch: the sign-in screen after a sign-out speaks the account's saved
+  // language (a display preference, never a credential — see lib/i18n/language-switch.ts).
+  response.cookies.set(LANG_COOKIE, e.preferredLanguage === "en" ? "en" : "ar", { httpOnly: false, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: LANG_COOKIE_MAX_AGE, path: "/" });
   // The browser id outlives the session (it names the browser, not the sign-in); never a credential.
   if (validDeviceId(session.deviceId)) response.cookies.set(DEVICE_COOKIE, session.deviceId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: DEVICE_COOKIE_MAX_AGE, path: "/" });
   return response;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
+import { LANG_COOKIE, asLang } from "@/lib/i18n/language-switch";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +20,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
   const user = token ? await verifyToken(token) : null;
-  const lang = user?.preferredLanguage ?? "ar";
+  // Signed out: the language the sign-in screen last used (`hq_lang`, the quick language switch);
+  // signed in, the account's saved language from the token always wins.
+  const lang = user?.preferredLanguage ?? asLang(cookieStore.get(LANG_COOKIE)?.value) ?? "ar";
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   return (

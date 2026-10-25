@@ -15,6 +15,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { StationCtx, clearStationDrafts, loginUrl, type StationInfo, type StationUser } from "./context";
 import { LanguageProvider } from "@/lib/i18n/context";
+import { useLanguageSwitcher } from "@/lib/i18n/use-language-switcher";
+import { applyDocumentLang } from "@/lib/i18n/language-switch";
 import type { Lang } from "@/lib/i18n/translations";
 import { STATION_IDLE_MS } from "@/lib/station/shared";
 import { st } from "@/lib/i18n/station";
@@ -52,6 +54,15 @@ export function StationShell({ children }: { children: ReactNode }) {
   const [roster, setRoster] = useState<RosterEntry[] | null>(null);
   const lang: Lang = phase.p === "personal" ? (phase.user.preferredLanguage === "en" ? "en" : "ar") : phase.p === "in" ? phase.emp.preferredLanguage : "ar";
   const t = useCallback((k: Parameters<typeof st>[0], v?: Record<string, string | number>) => st(k, lang, v), [lang]);
+  // The quick language switch, for a PERSONAL session only (W1: the person's own ERP session at
+  // a browser — their profile language, saved as in the ERP). A shared device (W2) follows each
+  // signed-in employee's saved language and never offers it: the PIN flows are untouched.
+  const setPersonalLang = useCallback((l: Lang) => setPhase((p) => (p.p === "personal" ? { ...p, user: { ...p.user, preferredLanguage: l } } : p)), []);
+  const switcher = useLanguageSwitcher(lang, setPersonalLang);
+  // <html lang/dir> follow the session's language (a client navigation from the sign-in screen
+  // keeps the root layout's <html> as that screen left it). Only once a session is known.
+  const known = phase.p === "personal" || phase.p === "in";
+  useEffect(() => { if (known) applyDocumentLang(lang); }, [known, lang]);
 
   // ── What this browser is: a paired device (W2) or a personal session (W1) ───────────────────
   const personal = useCallback(async () => {
@@ -239,7 +250,7 @@ export function StationShell({ children }: { children: ReactNode }) {
     } else {
       body = (
         <StationCtx value={{ user, mode: phase.p === "in" ? "device" : "personal", station, signOut, lock, switchEmployee, stations: phase.p === "in" ? phase.stations : undefined }}>
-          <LanguageProvider lang={lang}>{children}</LanguageProvider>
+          <LanguageProvider lang={lang} switcher={phase.p === "personal" ? switcher : undefined}>{children}</LanguageProvider>
         </StationCtx>
       );
     }

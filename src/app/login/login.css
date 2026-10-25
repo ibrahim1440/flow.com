@@ -73,6 +73,10 @@
 .lg-sbtn { appearance: none; align-self: center; width: auto !important; display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px; border-radius: 7px; border: 0; background: none; font: 500 12.5px/18px var(--f-ui); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
 .lg-sbtn:hover { background: var(--surface-hover); }
 .lg-langbar .lg-sbtn { color: var(--text-secondary); }
+/* Quick language switch (owner, 25 Oct 2026): the toggle is a visible, outlined control with the
+   language glyph, not a quiet text link — and a 44 px target on the phone. */
+.lg-langbar .lg-lang { gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface); }
+.lg-langbar .lg-lang svg { width: 16px; height: 16px; stroke-width: 1.5; flex: none; }
 /* AU-01p: the Sukun spinner beside the disabled button (22 px, 2 px track, Clay arc). */
 .lg-busyrow { display: flex; align-items: center; gap: 5.5px; }
 .lg-busyrow .lg-btn { flex: 1; }
@@ -142,4 +146,10 @@
   .lg-langbar { top: 18px; inset-inline-end: 16px; z-index: 2; }
   .lg-langbar .lg-sbtn { color: var(--brand-on-surface); }
   .lg-langbar .lg-sbtn:hover { background: rgb(255 253 247 / 0.12); }
+  .lg-langbar .lg-lang { height: 44px; min-width: 44px; background: none; border-color: rgb(255 253 247 / 0.32); }
+  /* The brand line never runs under the toggle: it keeps clear of it and wraps to a second line. */
+  .lg-langbar .lg-lang svg { display: none; }
+  .lg-panel { padding-inline-end: 112px; }
+  .lg-moment { min-width: 0; }
+  .lg-moment span { display: block; font-size: 15px; line-height: 20px; }
 }

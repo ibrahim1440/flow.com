@@ -342,3 +342,15 @@
 }
 .d21-tabbar .d21-tab-ws { position: relative; }
 .d21-tabbar .d21-tab-ws > .d21-badge { position: absolute; top: 2px; inset-inline-start: calc(50% + 4px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: var(--text-primary); color: var(--surface); font: 600 10px/1 var(--f-num); }
+
+/* Quick language switch (owner, 25 Oct 2026; components/shell/LanguageToggle): the language it
+   switches TO, beside the bell — desktop top bar, phone header, station bar. A 32 px reference
+   button that widens for «عربي»; on the phone the 44 px touch target comes from `.d21-mtop .d21-ib::before`. */
+.d21-lang { position: relative; display: flex; align-items: center; flex: none; }
+.d21-lang-btn { width: auto; min-width: 32px; padding: 0 7px; border: 1px solid var(--border-subtle); font: 600 12.5px/1 var(--f-ui); letter-spacing: 0.02em; color: var(--text-secondary); }
+.d21-lang-btn span[lang="ar"] { font-size: 13.5px; letter-spacing: 0; }
+.d21-lang-btn:hover { border-color: var(--border-strong); }
+.d21-lang-btn[data-pending] { opacity: 0.6; cursor: progress; }
+.d21-lang-err { position: absolute; top: calc(100% + 6px); inset-inline-end: 0; z-index: 80; display: none; white-space: nowrap; padding: 6px 10px; border-radius: 8px; background: var(--status-danger-tint); color: var(--status-danger); font-size: 12.5px; box-shadow: var(--shadow-pop); }
+.d21-lang-err[data-show] { display: block; }
+.d21-menu .d21-lang-ico { width: 16px; height: 16px; stroke-width: 1.5; color: var(--text-muted); }

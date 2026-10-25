@@ -6,6 +6,7 @@
 import { useContext, type ReactNode } from "react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { StationCtx } from "./context";
+import { LanguageToggle } from "@/components/shell/LanguageToggle";
 
 export const CheckIco = ({ size = "" }: { size?: "" | "s" | "l" }) => (
   <svg className={`ico${size ? " " + size : ""}`} viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
@@ -35,6 +36,8 @@ export function StationBar(props: {
       <div className="ws-id"><span className="ws-k">{en ? "Station: " : "المحطة: "}</span><b data-testid="station-name">{props.station}</b>{props.location ? <div className="ws-loc">{props.location}</div> : null}</div>
       {props.extra}
       <span className="ws-sp" />
+      {/* The quick language switch: a personal session only (the context has no switcher on a shared device). */}
+      <LanguageToggle testId="station-lang" />
       <span className={`st ${props.conn.tone}`} data-testid="station-conn" role="status">{props.conn.label}</span>
       <span className="ws-upd"><span className="ws-upd-w">{props.updatedWord} </span><span className="n">{props.updated}</span></span>
       {props.emp ? (

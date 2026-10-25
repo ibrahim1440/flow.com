@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { useRouter } from "next/navigation";
-import { WifiOff } from "lucide-react";
+import { Languages, WifiOff } from "lucide-react";
 
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { cameForExpiredSession, SESSION_EXPIRED_AR, SESSION_EXPIRED_EN } from "@/lib/session-expired";
@@ -11,6 +11,8 @@ import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { BrandMark } from "@/components/brand/BrandMark";
 import "@/components/shell/direction-2.1.css";
 import "./login.css";
+import { LoginLangContext } from "./lang-context";
+import { applyDocumentLang, toggleAriaLabel, writeLangCookie } from "@/lib/i18n/language-switch";
 
 // Owner security decision (16 Oct, Option A). Three ways in:
 //   · "pin"           — PIN alone: operational accounts only (a privileged account is refused
@@ -83,7 +85,10 @@ function stationReturn(search: string): string | null {
 }
 
 export default function LoginPage() {
-  const [lang, setLang] = useState<Lang>("ar");
+  // The pre-sign-in language: the `hq_lang` cookie (read by the layout), else the older
+  // localStorage choice, else Arabic. After sign-in the account's saved language wins.
+  const savedLang = useContext(LoginLangContext);
+  const [lang, setLang] = useState<Lang>(savedLang ?? "ar");
   // SIMPLE MODE: username + password is the only method shown, and the default (SHOW_PIN_SIGN_IN).
   const [mode, setMode] = useState<Mode>(SHOW_PIN_SIGN_IN ? "pin" : "password");
   const [pin, setPin] = useState("");
@@ -109,12 +114,16 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    try { const l = localStorage.getItem("login-lang"); if (l === "en" || l === "ar") setLang(l); /* eslint-disable-line react-hooks/set-state-in-effect -- the saved choice exists only in the browser */ } catch { /* storage unavailable */ }
-  }, []);
+    if (savedLang) return;
+    try { const l = localStorage.getItem("login-lang"); if (l === "en" || l === "ar") { setLang(l); applyDocumentLang(l); } /* eslint-disable-line react-hooks/set-state-in-effect -- the saved choice exists only in the browser */ } catch { /* storage unavailable */ }
+  }, [savedLang]);
   function toggleLang() {
     const next: Lang = lang === "ar" ? "en" : "ar";
     setLang(next);
     setNote(null);
+    // The whole document follows (<html lang/dir>), and the choice is remembered for the next visit.
+    applyDocumentLang(next);
+    writeLangCookie(next);
     try { localStorage.setItem("login-lang", next); } catch { /* storage unavailable */ }
   }
 
@@ -256,7 +265,7 @@ export default function LoginPage() {
       </aside>
 
       <div className="lg-langbar">
-        <button type="button" onClick={toggleLang} data-testid="login-lang" className="lg-sbtn" lang={lang === "ar" ? "en" : "ar"}>{t.lang}</button>
+        <button type="button" onClick={toggleLang} data-testid="login-lang" className="lg-sbtn lg-lang" aria-label={toggleAriaLabel(lang)}><Languages aria-hidden /><span lang={lang === "ar" ? "en" : "ar"}>{t.lang}</span></button>
       </div>
 
       {/* D-P1-7: the sign-in form is the page's main landmark. */}

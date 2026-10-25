@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { routeAllowed, type Viewer } from "@/lib/nav/registry";
 import { LanguageProvider, useI18n } from "@/lib/i18n/context";
+import { useLanguageSwitcher } from "@/lib/i18n/use-language-switcher";
+import { applyDocumentLang } from "@/lib/i18n/language-switch";
+import type { Lang } from "@/lib/i18n/translations";
 import { UserContext, type User } from "./user-context";
 import { AppShell } from "@/components/shell/AppShell";
 import { StepUpProvider } from "@/components/auth/StepUp";
@@ -83,6 +86,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       .finally(() => setLoading(false));
   }, [router]);
 
+  // The quick language switch (owner, 25 Oct 2026): the language lives in `user`, so a tap
+  // re-renders every screen in place — same URL, same filters, no reload.
+  const setLang = useCallback((l: Lang) => setUser((u) => (u ? { ...u, preferredLanguage: l } : u)), []);
+  const switcher = useLanguageSwitcher(user?.preferredLanguage === "en" ? "en" : "ar", setLang);
+  // <html lang/dir> follow the account's language. The root layout sets them on a full load, but
+  // the sign-in screen enters the dashboard by client navigation, which keeps the root layout's
+  // <html> as the sign-in screen left it (its own pre-sign-in language).
+  const userLang = user?.preferredLanguage;
+  useEffect(() => { if (userLang === "ar" || userLang === "en") applyDocumentLang(userLang); }, [userLang]);
+
   // The session check every route shows first, drawn in Direction 2.1 (UI batch 2).
   if (loading) return <ShellLoading />;
 
@@ -90,7 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <UserContext value={{ user }}>
-      <LanguageProvider lang={user.preferredLanguage ?? "ar"}>
+      <LanguageProvider lang={user.preferredLanguage ?? "ar"} switcher={switcher}>
         <StepUpProvider lang={user.preferredLanguage === "en" ? "en" : "ar"} privileged={!!user.privileged}>
           {user.mfaEnrollmentRequired ? (
             // AUTH_MFA_MODE=required: a privileged account without two-step verification may only enroll.

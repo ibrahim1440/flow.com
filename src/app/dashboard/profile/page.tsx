@@ -68,7 +68,7 @@ function useWhen() {
 }
 
 export default function ProfilePage() {
-  const { t, lang } = useI18n();
+  const { t, lang, switcher } = useI18n();
   const L = useL();
   const ar = lang === "ar";
   const user = useUser();
@@ -109,6 +109,10 @@ export default function ProfilePage() {
       .catch(() => setLoadError(true));
   }, [activityN]);
   useEffect(() => { void load(); }, [load]);
+  // The header's quick switch changed the saved language while this form was open: the form
+  // follows it, so saving the phone number afterwards never puts the old language back.
+  const [seenLang, setSeenLang] = useState(lang);
+  if (seenLang !== lang) { setSeenLang(lang); setPreferredLanguage(lang === "en" ? "en" : "ar"); }
 
   useD21Title(t("myProfile"));
 
@@ -123,8 +127,12 @@ export default function ProfilePage() {
       try { body = text ? JSON.parse(text) : {}; } catch { /* not JSON */ }
       if (!res.ok) throw new Error(body.error ?? t("error"));
       setInfoMsg({ ok: true, text: t("profileSaved") });
-      // Full reload so the root layout picks up the new JWT lang/dir
-      if (preferredLanguage !== lang) setTimeout(() => window.location.reload(), 600);
+      // The saved language applies in place (the quick switch's path: same URL, no reload); a
+      // screen without the switch falls back to the full reload it always did.
+      if (preferredLanguage !== lang) {
+        if (switcher) setTimeout(() => switcher.apply(preferredLanguage), 600);
+        else setTimeout(() => window.location.reload(), 600);
+      }
     } catch (err: unknown) {
       setInfoMsg({ ok: false, text: err instanceof Error ? err.message : t("error") });
     } finally {
