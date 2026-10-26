@@ -17,11 +17,11 @@
 // messages the customer received and clicked, tracked links. A touch AFTER the order never counts.
 
 export type AttributionModel = "FIRST_TOUCH" | "LAST_TOUCH" | "LINEAR";
-export const ATTRIBUTION_MODELS: { key: AttributionModel | "DATA_DRIVEN"; ar: string; available: boolean; noteAr: string }[] = [
-  { key: "LAST_TOUCH", ar: "آخر نقطة تواصل", available: true, noteAr: "الحملة الأخيرة قبل الطلب تأخذ الطلب كاملاً." },
-  { key: "FIRST_TOUCH", ar: "أول نقطة تواصل", available: true, noteAr: "أول حملة داخل نافذة الإسناد تأخذ الطلب كاملاً." },
-  { key: "LINEAR", ar: "توزيع متساوٍ", available: true, noteAr: "تتقاسم كل الحملات داخل النافذة الطلب بالتساوي." },
-  { key: "DATA_DRIVEN", ar: "مبني على البيانات", available: false, noteAr: "غير متاح: يحتاج بيانات مسارات وأحجام تحويل كافية لم تتوفر بعد." },
+export const ATTRIBUTION_MODELS: { key: AttributionModel | "DATA_DRIVEN"; ar: string; en: string; available: boolean; noteAr: string; noteEn: string }[] = [
+  { key: "LAST_TOUCH", ar: "آخر نقطة تواصل", en: "Last touch", available: true, noteAr: "الحملة الأخيرة قبل الطلب تأخذ الطلب كاملاً.", noteEn: "The last campaign before the order takes the whole order." },
+  { key: "FIRST_TOUCH", ar: "أول نقطة تواصل", en: "First touch", available: true, noteAr: "أول حملة داخل نافذة الإسناد تأخذ الطلب كاملاً.", noteEn: "The first campaign inside the attribution window takes the whole order." },
+  { key: "LINEAR", ar: "توزيع متساوٍ", en: "Even split", available: true, noteAr: "تتقاسم كل الحملات داخل النافذة الطلب بالتساوي.", noteEn: "Every campaign inside the window shares the order equally." },
+  { key: "DATA_DRIVEN", ar: "مبني على البيانات", en: "Data-driven", available: false, noteAr: "غير متاح: يحتاج بيانات مسارات وأحجام تحويل كافية لم تتوفر بعد.", noteEn: "Not available: it needs enough path and conversion volume data, which is not there yet." },
 ];
 
 export type Touch = { at: Date; campaignId: string | null; channel: string };

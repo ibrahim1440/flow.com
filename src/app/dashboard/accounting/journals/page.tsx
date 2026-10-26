@@ -5,14 +5,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { OpsLoading } from "@/components/ops/ui";
 import { Select } from "@/components/ui/Select";
-import { AcctShell, StatusTag, STATUS_AR, TYPE_AR, money, useApi, useLang, type Setup } from "../_ui/shell";
+import { AcctShell, StatusTag, STATUS_AR, TYPE_AR, money, sourceLabel, useApi, useLang, type Setup } from "../_ui/shell";
 
-const SOURCE: Record<string, [string, string]> = {
-  manual: ["يدوي", "Manual"], hr: ["الموارد البشرية", "HR"], accounting: ["المحاسبة", "Accounting"], sales: ["المبيعات", "Sales"],
-  purchasing: ["المشتريات", "Purchasing"], inventory: ["المخزون", "Inventory"], production: ["الإنتاج", "Production"],
-  payroll: ["الرواتب", "Payroll"], commissions: ["العمولات", "Commissions"], pos: ["نقاط البيع", "POS"],
-};
-const sourceLabel = (m: string, L: (ar: string, en: string) => string) => { const e = SOURCE[m]; return e ? L(e[0], e[1]) : m; };
 type Row = { id: string; ref: string | null; entryNo: number; entryDate: string; type: string; status: string; description: string | null; totalDebit: string; sourceModule: string; sourceType: string | null; sourceId: string | null; lineCount: number; sodBypass: boolean };
 type List = { items: Row[]; total: number; take: number; skip: number; byStatus: Record<string, number> };
 

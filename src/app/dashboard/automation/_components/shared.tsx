@@ -263,3 +263,55 @@ function TabLabel({ full, short }: { full: string; short: string }) {
     </>
   );
 }
+
+/**
+ * «لغة رسائل الموظفين» (owner language decision 3): the language automation messages reach employees
+ * in when they have not chosen one on their profile. GET / PUT /api/automation/settings/employee-language
+ * (edit: automation › manage_rules; audited). Customers' messages are not affected.
+ */
+export function EmployeeLanguageSetting({ lang }: { lang: "ar" | "en" }) {
+  const ar = lang === "ar";
+  const L = (a: string, e: string) => (ar ? a : e);
+  const [s, setS] = useState<{ employeeMessageLang: "ar" | "en" | null; effective: "ar" | "en"; can: { edit: boolean } } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api<{ employeeMessageLang: "ar" | "en" | null; effective: "ar" | "en"; can: { edit: boolean } }>("/api/automation/settings/employee-language").then((r) => {
+      if (!cancelled && r.ok) setS(r.data);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  if (!s) return null;
+  async function choose(v: "ar" | "en") {
+    if (busy || !s || v === s.effective) return;
+    setBusy(true);
+    setMsg(null);
+    const r = await api<{ employeeMessageLang: "ar" | "en" | null; effective: "ar" | "en"; can: { edit: boolean } }>("/api/automation/settings/employee-language", { method: "PUT", body: { employeeMessageLang: v } });
+    setBusy(false);
+    if (!r.ok) return setMsg({ ok: false, text: (ar ? r.data.error : (r.data as { errorEn?: string }).errorEn ?? r.data.error) ?? L("تعذّر الحفظ.", "Could not save.") });
+    setS(r.data);
+    setMsg({ ok: true, text: L("حُفظ. تصل رسائل الموظفين بهذه اللغة ما لم يختر الموظف غيرها في ملفه.", "Saved. Employee messages use this language unless the employee chose another on their profile.") });
+  }
+  return (
+    <section className="tl-sec" data-testid="employee-lang-setting">
+      <header>
+        <h2>{L("لغة رسائل الموظفين", "Employee message language")}</h2>
+        <p>{L("لغة رسائل واتساب التي تصل الموظفين من القواعد وإشعارات الحالات · لكل موظف أن يختار لغته في «ملفي الشخصي» · رسائل العملاء لا تتغير", "The language of the WhatsApp messages rules and status notifications send to employees · each employee may choose their own on «My profile» · customer messages do not change")}</p>
+      </header>
+      <div className="tl-body">
+        <span className="ops-seg" role="group" aria-label={L("لغة رسائل الموظفين", "Employee message language")}>
+          {(["ar", "en"] as const).map((v) => (
+            <button key={v} type="button" lang={v} aria-pressed={s.effective === v} disabled={!s.can.edit || busy} onClick={() => void choose(v)} data-testid={`employee-lang-${v}`}>
+              {v === "ar" ? "العربية" : "English"}
+            </button>
+          ))}
+        </span>
+        <p className="tl-foot" style={{ margin: "8px 0 0" }}>
+          {s.employeeMessageLang === null ? L("المعمول به الآن: الافتراضي (العربية)", "In force now: the default (Arabic)") : L("المعمول به الآن: القيمة المحفوظة", "In force now: the saved value")}
+        </p>
+        {msg ? <div role={msg.ok ? "status" : "alert"} className={`hr-notice tone-${msg.ok ? "success" : "danger"}`} data-testid="employee-lang-msg">{msg.text}</div> : null}
+      </div>
+    </section>
+  );
+}

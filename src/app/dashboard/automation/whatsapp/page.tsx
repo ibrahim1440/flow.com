@@ -8,6 +8,7 @@ import { api, useLang } from "../../sales/_components/ui";
 import { formatPhone, normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { AutomationHeader, Phone, SEND_MODE_LABELS, connectionLabel, noteText, useAutomationAbilities } from "../_components/shared";
 import { SettingsFrame } from "../../_components/tools-ui";
+import { localizeApiError } from "@/lib/i18n/api-errors";
 
 /**
  * Linking the WhatsApp number, and deciding whether anything is sent — Direction 2.1 (UI batch
@@ -206,7 +207,7 @@ export default function WhatsAppConnectionPage() {
 
         {!status && !error ? <OpsLoading /> : null}
 
-        {status && !status.configured && <Notice tone="danger">{status.configError}</Notice>}
+        {status && !status.configured && <Notice tone="danger">{localizeApiError({ error: status.configError }, ar ? "ar" : "en") ?? status.configError}</Notice>}
 
         {status ? (
           <div className="tl-cols">

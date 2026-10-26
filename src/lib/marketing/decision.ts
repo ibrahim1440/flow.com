@@ -118,7 +118,7 @@ export function decide(input: DecisionInput, tol: Tolerances = DEFAULT_TOLERANCE
     return base("INSUFFICIENT_DATA", ["لا توجد بيانات إنفاق لهذه الحملة في الفترة."], "اربط الحساب الإعلاني أو أدخل الإنفاق يدوياً.", "لا أثر قبل توفر البيانات.", "—", false, { confidence: "LOW" });
   }
   if (minSpend === null && targetRoas === null) {
-    return base("INSUFFICIENT_DATA", ["لا يوجد هدف تكلفة اكتساب ولا هدف عائد ولا اقتصاديات منتج."], "حدد هدف CAC أو ROAS للحملة أو أدخل هامش المنتج.", "بدون هدف لا يمكن الحكم على الأداء.", "—", false, { confidence: "LOW" });
+    return base("INSUFFICIENT_DATA", ["لا يوجد هدف تكلفة اكتساب (CAC) ولا هدف عائد (ROAS) ولا اقتصاديات منتج."], "حدد هدف CAC أو ROAS للحملة أو أدخل هامش المنتج.", "بدون هدف لا يمكن الحكم على الأداء.", "—", false, { confidence: "LOW" });
   }
   if (minSpend !== null && input.spend < minSpend) {
     return base("INSUFFICIENT_DATA", [`الإنفاق (${round(input.spend)}) أقل من حد الحكم (${round(minSpend)}).`], "استمر حتى يبلغ الإنفاق حد البيانات الكافية.", "قرار مبكر قد يوقف حملة جيدة.", "—", false, { confidence: "LOW" });
@@ -150,24 +150,24 @@ export function decide(input: DecisionInput, tol: Tolerances = DEFAULT_TOLERANCE
 
   const belowBE = be !== null && roas !== null && roas < be;
   if (belowBE && roas! < be! * tol.pauseBelowBreakEven) {
-    return base("PAUSE", [`العائد ${round(roas!)} أقل بكثير من نقطة التعادل ${be} وفق هامش المساهمة.`], "إيقاف مؤقت ومراجعة الربحية والعرض.", "يوقف خسارة في كل طلب منسوب.", "قد يخسر القيمة طويلة المدى للعملاء الجدد إن كانت مرتفعة.", true);
+    return base("PAUSE", [`العائد (ROAS) ${round(roas!)} أقل بكثير من نقطة التعادل ${be} وفق هامش المساهمة.`], "إيقاف مؤقت ومراجعة الربحية والعرض.", "يوقف خسارة في كل طلب منسوب.", "قد يخسر القيمة طويلة المدى للعملاء الجدد إن كانت مرتفعة.", true);
   }
   const cacOver = targetCac !== null && cac !== null && cac > targetCac;
   const roasUnder = targetRoas !== null && roas !== null && roas < targetRoas;
   if (belowBE || cacOver || roasUnder) {
     const reasons: string[] = [];
-    if (belowBE) reasons.push(`العائد ${round(roas!)} أقل من نقطة التعادل ${be}.`);
-    if (cacOver) reasons.push(`تكلفة الاكتساب ${round(cac!)} أعلى من الهدف ${targetCac}.`);
-    if (roasUnder && !belowBE) reasons.push(`العائد ${round(roas!)} أقل من الهدف ${round(targetRoas!)}.`);
-    return base("OPTIMIZE", reasons, "حسّن الاستهداف أو التصميم أو العرض، واختبر نسخة A/B قبل زيادة الإنفاق.", "خفض تكلفة الاكتساب نحو الهدف.", "التعديل المتكرر يعيد مرحلة التعلم في المنصة.", true);
+    if (belowBE) reasons.push(`العائد (ROAS) ${round(roas!)} أقل من نقطة التعادل ${be}.`);
+    if (cacOver) reasons.push(`تكلفة الاكتساب (CAC) ${round(cac!)} أعلى من الهدف ${targetCac}.`);
+    if (roasUnder && !belowBE) reasons.push(`العائد (ROAS) ${round(roas!)} أقل من الهدف ${round(targetRoas!)}.`);
+    return base("OPTIMIZE", reasons, "حسّن الاستهداف أو التصميم أو العرض، واختبر نسخة A/B قبل زيادة الإنفاق.", "خفض تكلفة الاكتساب (CAC) نحو الهدف.", "التعديل المتكرر يعيد مرحلة التعلم في المنصة.", true);
   }
 
   // On or above target. Scale only with headroom and a clear margin.
   const scaleBar = targetRoas !== null ? targetRoas * (1 + tol.scaleMargin) : null;
   if (scaleBar !== null && roas !== null && roas >= scaleBar && (input.budgetHeadroom === null || input.budgetHeadroom > 0)) {
     const step = maxAutoIncrease !== null ? Math.min(maxAutoIncrease, 0.2) : 0.2;
-    return base("SCALE", [`العائد ${round(roas)} أعلى من الهدف بهامش ${Math.round(tol.scaleMargin * 100)}% أو أكثر.`, cac !== null && targetCac !== null ? `تكلفة الاكتساب ${round(cac)} ضمن الهدف ${targetCac}.` : "ضمن حدود الربحية."],
-      `زيادة تدريجية للميزانية بحد أقصى ${Math.round(step * 100)}% ضمن سقف الميزانية.`, "مزيد من الطلبات بعائد قريب من الحالي.", "العائد يتناقص عادة مع التوسع؛ راقب CAC بعد كل خطوة.", true, { maxStep: step });
+    return base("SCALE", [`العائد (ROAS) ${round(roas)} أعلى من الهدف بهامش ${Math.round(tol.scaleMargin * 100)}% أو أكثر.`, cac !== null && targetCac !== null ? `تكلفة الاكتساب (CAC) ${round(cac)} ضمن الهدف ${targetCac}.` : "ضمن حدود الربحية."],
+      `زيادة تدريجية للميزانية بحد أقصى ${Math.round(step * 100)}% ضمن سقف الميزانية.`, "مزيد من الطلبات بعائد قريب من الحالي.", "العائد (ROAS) يتناقص عادة مع التوسع؛ راقب تكلفة الاكتساب (CAC) بعد كل خطوة.", true, { maxStep: step });
   }
   return base("KEEP", ["الأداء ضمن الأهداف."], "استمر دون تغيير وراقب.", "استقرار النتائج.", "—", false);
 }

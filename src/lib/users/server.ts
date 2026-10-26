@@ -39,7 +39,7 @@ import { accessActor, isPowerUserAccount, powerUserRefusal, POWER_REFUSAL_TEXT }
 import { AUDIT_ACTIONS, describe } from "./audit";
 import type { SessionUser } from "@/lib/auth-server";
 
-type Viewer = { id: string; role: string; permissions: Permissions };
+type Viewer = { id: string; role: string; permissions: Permissions; preferredLanguage?: "ar" | "en" };
 
 /** The users area's abilities for a viewer (pages hide what the routes refuse). */
 export function usersCaps(v: Viewer) {
@@ -194,7 +194,7 @@ export async function profile(id: string, viewer: Viewer) {
     id: e.id, name: e.name, username: e.username, phoneNumber: e.phoneNumber, role: roleOf(e), customized: isCustomized(effective, template),
     status: statusOf(e, locked), active: e.active, self: viewer.id === e.id,
     lock: locked ? { attempts: lock!.count, since: iso(lock!.last) } : null,
-    hr: e.hrPerson ? { id: e.hrPerson.id, name: e.hrPerson.fullNameAr, nameEn: e.hrPerson.fullNameEn, jobTitle: e.hrPerson.jobTitle, department: e.hrPerson.department?.nameAr ?? null } : null,
+    hr: e.hrPerson ? { id: e.hrPerson.id, name: e.hrPerson.fullNameAr, nameEn: e.hrPerson.fullNameEn, jobTitle: e.hrPerson.jobTitle, department: e.hrPerson.department?.nameAr ?? null, departmentEn: e.hrPerson.department?.nameEn ?? null } : null,
     external: !!e.externalPerson,
     // «البريد الإلكتروني للشركة» (feat/credit-hold): the linked HR person's, else the account's own.
     companyEmail: { email: (e.hrPerson ? e.hrPerson.workEmail : e.workEmail) ?? null, source: e.hrPerson ? "hr" : "account" },
@@ -208,7 +208,7 @@ export async function profile(id: string, viewer: Viewer) {
       .then((sp) => ({ set: !!sp, setAt: iso(sp?.setAt), locked: (sp?.attempts.length ?? 0) > 0 })),
     template, effective, groups, overrides,
     sensitive: sensitiveActive(effective).map((ref) => ({ key: cellKey(ref), module: ref.module, sub: ref.sub, source: effectOf(ref, getCell(effective, ref), getCell(template, ref)) ? "override" : "role" })),
-    events: events.filter((x) => AUDIT_ACTIONS[x.action]).map((x) => ({ ...describe(x, actors), device: describeUserAgent(x.userAgent) })),
+    events: events.filter((x) => AUDIT_ACTIONS[x.action]).map((x) => ({ ...describe(x, actors, viewer.preferredLanguage === "en" ? "en" : "ar"), device: describeUserAgent(x.userAgent) })),
     powerUser: isPowerUserAccount(e.role, effective),
     caps: { ...caps, manageThis: caps.manage && viewer.id !== e.id, accessThis: viewer.id !== e.id && (caps.manage || (caps.powerUser && !isAdminAccount(e))) },
     computedAt: new Date().toISOString(),

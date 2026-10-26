@@ -9,7 +9,7 @@ import { useState } from "react";
 import { Btn, Field, Notice, OpsPane, useL } from "@/components/ops/ui";
 import { HrApiError, money } from "@/components/hr/ui";
 import { ago, dayOf, monthOf } from "@/lib/workspace/format";
-import { TypeChip, useLang, wsFetch, type ApprovalItem } from "./kit";
+import { TypeChip, approvalTitle, useLang, wsFetch, type ApprovalItem } from "./kit";
 
 type Outcome = { kind: "ok" | "stale" | "decided" | "error"; text: string };
 
@@ -100,7 +100,7 @@ export function DecisionPane({ item, onClose, onDecided }: { item: ApprovalItem;
   );
 
   return (
-    <OpsPane label={L("قرار الطلب", "Decision")} title={item.title} sub={<TypeChip type={item.type} />} testId="decision-pane" onClose={onClose} busy={!!busy} footer={footer} drawer="open">
+    <OpsPane label={L("قرار الطلب", "Decision")} title={approvalTitle(item, lang, false)} sub={<TypeChip type={item.type} />} testId="decision-pane" onClose={onClose} busy={!!busy} footer={footer} drawer="open">
       <div className="hr-stack">
         {out ? <Notice tone={out.kind === "ok" ? "success" : out.kind === "error" ? "danger" : "warning"}>{out.text}</Notice> : null}
         {item.warnings.map((w, i) => <Notice key={i} tone="warning">{lang === "ar" ? w.ar : w.en}</Notice>)}

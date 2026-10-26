@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { applyDocumentLang, dirOf, otherLang, toggleAriaLabel, toggleLabel } from "@/lib/i18n/language-switch";
 import { LanguageProvider } from "@/lib/i18n/context";
 import "@/components/shell/direction-2.1.css";
 import "@/components/hr/hr.css";
@@ -30,6 +31,8 @@ export function GuestShell({ lang, onLang, title, step, foot, children, kicker, 
   testId?: string;
 }) {
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
+  // The document follows the page (owner language decision 2): <html lang/dir> as the guest reads it.
+  useEffect(() => { applyDocumentLang(lang); }, [lang]);
   const order: GuestStep[] = ["name", "cups", "done"];
   const at = step ? order.indexOf(step) : -1;
   const stepLabel: Record<GuestStep, string> = { name: L("الاسم", "Name"), cups: L("الأكواب", "Cups"), done: L("اكتمل", "Done") };
@@ -48,9 +51,12 @@ export function GuestShell({ lang, onLang, title, step, foot, children, kicker, 
           </div>
           <span className="gc-spacer" />
           <span className="gc-nologin">{L("لا يلزم تسجيل الدخول", "No sign-in needed")}</span>
-          <button type="button" className="gc-lang" lang={lang === "ar" ? "en" : "ar"} onClick={() => onLang(lang === "ar" ? "en" : "ar")} data-testid="guest-lang">
-            {lang === "ar" ? "English" : "العربية"}
-          </button>
+          {/* The header's language switch (Quick language switch, 25 Oct 2026): «EN» / «ع», same look and accessible name. */}
+          <span className="d21-lang">
+            <button type="button" className="d21-ib d21-lang-btn" onClick={() => onLang(otherLang(lang))} aria-label={toggleAriaLabel(lang)} title={toggleLabel(lang).name} data-testid="guest-lang">
+              <span lang={toggleLabel(lang).lang} dir={dirOf(toggleLabel(lang).lang)} aria-hidden>{toggleLabel(lang).text}</span>
+            </button>
+          </span>
         </header>
         <main className="gc-main">
           {title ? (

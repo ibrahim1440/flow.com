@@ -90,3 +90,8 @@ export function localizeApiError(body: ErrorBody | unknown, lang: "ar" | "en" = 
   if (error && isArabicText(error)) return error;
   return arabicForApiError(error) ?? arabicForApiError(errorEn) ?? error ?? errorEn;
 }
+
+/** The message for a request that never reached the server (the browser's own "Failed to fetch"), in the page's language. */
+export function networkErrorText(lang: "ar" | "en" = docLang()): string {
+  return lang === "en" ? "Could not reach the server." : "تعذّر الاتصال بالخادم.";
+}

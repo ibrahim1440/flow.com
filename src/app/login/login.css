@@ -24,6 +24,8 @@
 .lg-moment { position: absolute; inset-inline-start: 56px; bottom: 56px; width: 440px; max-width: calc(100% - 112px); text-align: start; }
 /* Brand/Moment: Amiri Bold 44/63.8 (517:2803); the rule 40×1 Sand Beige, then UI/Body. */
 .lg-moment p.q { margin: 0 0 19.6px; font: 700 44px/63.8px "Amiri", var(--f-ui); color: var(--brand-on-surface); }
+/* Owner language decision 1: the English line is longer; a smaller size keeps it to the same block. */
+.lg-moment p.q:lang(en) { font-size: 36px; line-height: 50px; }
 .lg-moment i { display: block; width: 40px; height: 1px; background: var(--brand-on-surface-soft); margin-bottom: 12px; }
 .lg-moment span { display: block; font: 400 14px/22px var(--f-ui); color: var(--brand-on-surface-soft); }
 

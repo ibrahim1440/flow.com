@@ -26,6 +26,7 @@ type Report = {
 
 export default function ReportsPage() {
   const lang = useLang();
+  const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
   usePageTitle("التقارير", "Reports", lang);
   const [kind, setKind] = useState<"DAILY" | "WEEKLY" | "MONTHLY">("WEEKLY");
   const [anchor, setAnchor] = useState(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh" }).format(new Date()));
@@ -35,32 +36,32 @@ export default function ReportsPage() {
   const printing = usePrintDocuments();
   return (
     <div className="mkt" data-testid="mkt-reports">
-      <PageHeader title="التقارير الإدارية" subtitle="اليومي: أمس · الأسبوعي: آخر 7 أيام · الشهري: الشهر الكامل السابق. بتوقيت الرياض." actions={<>
-        <div className="mkt-seg" role="group">{(["DAILY", "WEEKLY", "MONTHLY"] as const).map((k) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>{{ DAILY: "يومي", WEEKLY: "أسبوعي", MONTHLY: "شهري" }[k]}</button>)}</div>
+      <PageHeader title={L("التقارير الإدارية", "Management reports")} subtitle={L("اليومي: أمس · الأسبوعي: آخر 7 أيام · الشهري: الشهر الكامل السابق. بتوقيت الرياض.", "Daily: yesterday · weekly: the last 7 days · monthly: the previous full month. Riyadh time.")} actions={<>
+        <div className="mkt-seg" role="group">{(["DAILY", "WEEKLY", "MONTHLY"] as const).map((k) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>{(lang === "ar" ? { DAILY: "يومي", WEEKLY: "أسبوعي", MONTHLY: "شهري" } : { DAILY: "Daily", WEEKLY: "Weekly", MONTHLY: "Monthly" })[k]}</button>)}</div>
         <TextInput id="anchor" type="date" value={anchor} onChange={setAnchor} />
         <a className="mkt-chip" href={`/api/marketing/reports?${qs}&format=csv`} data-testid="csv">CSV</a>
         <a className="mkt-chip" href={`/api/marketing/reports?${qs}&format=xlsx`} data-testid="xlsx">Excel</a>
-        <button type="button" className="mkt-chip" disabled={printing !== true} aria-describedby={printing === true ? undefined : PRINT_PHASE1_NOTE_ID} onClick={() => { if (printing === true) window.print(); }}>طباعة / PDF</button>
+        <button type="button" className="mkt-chip" disabled={printing !== true} aria-describedby={printing === true ? undefined : PRINT_PHASE1_NOTE_ID} onClick={() => { if (printing === true) window.print(); }}>{L("طباعة / PDF", "Print / PDF")}</button>
       </>} />
       {printing === false ? <PrintPhase1Notice /> : null}
       <Banner>{error}</Banner>
       {loading && !data ? <Spinner /> : data ? <>
-        <p className="mkt-muted">الفترة: <bdi>{data.period.label}</bdi> ({fmtDate(data.period.from, true)} → {fmtDate(data.period.to, true)}) · أُعد {fmtDate(data.generatedAt, true)}</p>
-        <Sec title="المؤشرات">
-          <table className="mkt-table"><thead><tr><th>المؤشر</th><th className="n">القيمة</th><th className="n">التغير</th><th>المصدر</th></tr></thead><tbody>{Object.entries(data.figures).map(([k, f]) => { const d = KPI[f.kpi as KpiKey]; return <tr key={k}><td>{d?.ar ?? k}</td><td className="n">{fmt(f.value, { unit: d?.unit })}</td><td className="n">{f.changePct === null ? "—" : `${f.changePct}%`}</td><td className="mkt-muted">{f.source}</td></tr>; })}</tbody></table>
+        <p className="mkt-muted">{L("الفترة:", "Period:")} <bdi>{data.period.label}</bdi> ({fmtDate(data.period.from, true)} → {fmtDate(data.period.to, true)}) · {L("أُعد", "Prepared")} {fmtDate(data.generatedAt, true)}</p>
+        <Sec title={L("المؤشرات", "KPIs")}>
+          <table className="mkt-table"><thead><tr><th>{L("المؤشر", "KPI")}</th><th className="n">{L("القيمة", "Value")}</th><th className="n">{L("التغير", "Change")}</th><th>{L("المصدر", "Source")}</th></tr></thead><tbody>{Object.entries(data.figures).map(([k, f]) => { const d = KPI[f.kpi as KpiKey]; return <tr key={k}><td>{d ? L(d.ar, d.en) : k}</td><td className="n">{fmt(f.value, { unit: d?.unit, lang })}</td><td className="n">{f.changePct === null ? "—" : `${f.changePct}%`}</td><td className="mkt-muted">{lang === "ar" ? f.source : f.sourceEn ?? f.source}</td></tr>; })}</tbody></table>
         </Sec>
         <div className="mkt-grid-2">
-          <Sec title="المنصات">{data.platforms.length ? <table className="mkt-table"><tbody>{data.platforms.map((p) => <tr key={p.platform}><td>{platformName(p.platform)}</td><td className="n">{fmt(p.spend, { unit: "SAR" })}</td><td className="n">CTR {fmt(p.ctr, { unit: "pct" })}</td></tr>)}</tbody></table> : <p className="mkt-muted">لا بيانات.</p>}</Sec>
-          <Sec title="المحتوى حسب المنصة">{data.contentByPlatform.length ? <table className="mkt-table"><tbody>{data.contentByPlatform.map((p) => <tr key={p.platform}><td>{platformName(p.platform)}</td><td className="n">وصول {fmt(p.reach, { unit: "count" })}</td><td className="n">تفاعل {fmt(p.engagements, { unit: "count" })}</td></tr>)}</tbody></table> : <p className="mkt-muted">لا بيانات.</p>}</Sec>
-          <Sec title="أفضل وأضعف الحملات">{[...data.best.map((c) => ["أفضل", c] as const), ...data.worst.map((c) => ["أضعف", c] as const)].map(([t, c], i) => <div key={i} className="mkt-item"><span>{t}: {c.name}</span><Chip>{c.scoreKpi === "roas" ? fmt(c.score, { unit: "x" }) : fmt(c.score, { unit: "pct" })}</Chip></div>)}{!data.best.length ? <p className="mkt-muted">لا بيانات كافية.</p> : null}</Sec>
-          <Sec title="المنشورات">{data.posts.published.length} منشور · فشل {data.posts.failed.length}{data.posts.failed.map((p, i) => <div key={i} className="mkt-muted">{p.post.title} · {platformName(p.platform)}: {p.lastError}</div>)}</Sec>
+          <Sec title={L("المنصات", "Platforms")}>{data.platforms.length ? <table className="mkt-table"><tbody>{data.platforms.map((p) => <tr key={p.platform}><td>{platformName(p.platform, lang)}</td><td className="n">{fmt(p.spend, { unit: "SAR", lang })}</td><td className="n">{L("نسبة النقر (CTR)", "CTR")} {fmt(p.ctr, { unit: "pct", lang })}</td></tr>)}</tbody></table> : <p className="mkt-muted">{L("لا بيانات.", "No data.")}</p>}</Sec>
+          <Sec title={L("المحتوى حسب المنصة", "Content by platform")}>{data.contentByPlatform.length ? <table className="mkt-table"><tbody>{data.contentByPlatform.map((p) => <tr key={p.platform}><td>{platformName(p.platform, lang)}</td><td className="n">{L("وصول", "Reach")} {fmt(p.reach, { unit: "count", lang })}</td><td className="n">{L("تفاعل", "Engagements")} {fmt(p.engagements, { unit: "count", lang })}</td></tr>)}</tbody></table> : <p className="mkt-muted">{L("لا بيانات.", "No data.")}</p>}</Sec>
+          <Sec title={L("أفضل وأضعف الحملات", "Best and weakest campaigns")}>{[...data.best.map((c) => [L("أفضل", "Best"), c] as const), ...data.worst.map((c) => [L("أضعف", "Weakest"), c] as const)].map(([t, c], i) => <div key={i} className="mkt-item"><span>{t}: {c.name}</span><Chip>{c.scoreKpi === "roas" ? fmt(c.score, { unit: "x", lang }) : fmt(c.score, { unit: "pct", lang })}</Chip></div>)}{!data.best.length ? <p className="mkt-muted">{L("لا بيانات كافية.", "Not enough data.")}</p> : null}</Sec>
+          <Sec title={L("المنشورات", "Posts")}>{L(`${data.posts.published.length} منشور · فشل ${data.posts.failed.length}`, `${data.posts.published.length} published · ${data.posts.failed.length} failed`)}{data.posts.failed.map((p, i) => <div key={i} className="mkt-muted">{p.post.title} · {platformName(p.platform, lang)}: {p.lastError}</div>)}</Sec>
         </div>
-        {data.attribution ? <Sec title="الإسناد والمبيعات"><table className="mkt-table"><tbody>{data.attribution.byCampaign.map((c) => <tr key={c.campaignId}><td>{c.campaign?.name ?? c.campaignId}</td><td className="n">{fmt(c.revenue, { unit: "SAR" })}</td><td className="n">{fmt(c.orders)} طلب</td></tr>)}<tr><td>غير منسوب</td><td className="n">{fmt(data.attribution.unattributed.revenue, { unit: "SAR" })}</td><td className="n">{data.attribution.unattributed.orders} طلب</td></tr></tbody></table></Sec> : null}
-        <Sec title="التوصيات والأولويات">{data.decisions.length ? data.decisions.map((d, i) => <div key={i} className="mkt-item"><div><div className="t">{d.campaign}</div><div className="s">{d.reasoning}</div></div><Chip>{VERDICT_LABELS[d.verdict]?.ar}</Chip></div>) : <p className="mkt-muted">لم تُقيّم حملات في الفترة.</p>}</Sec>
-        <Sec title="التنبيهات">{data.alerts.length ? data.alerts.map((a, i) => <div key={i}>• {a.title}</div>) : <p className="mkt-muted">لا تنبيهات.</p>}</Sec>
-        {data.budget ? <Sec title="الميزانية">{data.budget.lines.map((l, i) => <div key={i}>{l.scope}: مخطط {fmt(l.planned, { unit: "SAR" })} · فعلي {fmt(l.pacing.actual, { unit: "SAR" })}</div>)}</Sec> : null}
-        <Sec title="رسائل واتساب">{Object.entries(data.messages).map(([k, n]) => <Chip key={k}>{k}: {n}</Chip>)}</Sec>
-        <p className="mkt-muted">إرسال التقارير بالبريد للمستخدمين المصرح لهم: المرحلة الثانية (يعتمد على مزود البريد المضبوط في النظام).</p>
+        {data.attribution ? <Sec title={L("الإسناد والمبيعات", "Attribution & sales")}><table className="mkt-table"><tbody>{data.attribution.byCampaign.map((c) => <tr key={c.campaignId}><td>{c.campaign?.name ?? c.campaignId}</td><td className="n">{fmt(c.revenue, { unit: "SAR", lang })}</td><td className="n">{L(`${fmt(c.orders, { lang })} طلب`, `${fmt(c.orders, { lang })} orders`)}</td></tr>)}<tr><td>{L("غير منسوب", "Unattributed")}</td><td className="n">{fmt(data.attribution.unattributed.revenue, { unit: "SAR", lang })}</td><td className="n">{L(`${data.attribution.unattributed.orders} طلب`, `${data.attribution.unattributed.orders} orders`)}</td></tr></tbody></table></Sec> : null}
+        <Sec title={L("التوصيات والأولويات", "Recommendations & priorities")}>{data.decisions.length ? data.decisions.map((d, i) => <div key={i} className="mkt-item"><div><div className="t">{d.campaign}</div><div className="s">{d.reasoning}</div></div><Chip>{VERDICT_LABELS[d.verdict] ? L(VERDICT_LABELS[d.verdict].ar, VERDICT_LABELS[d.verdict].en) : d.verdict}</Chip></div>) : <p className="mkt-muted">{L("لم تُقيّم حملات في الفترة.", "No campaigns were evaluated in this period.")}</p>}</Sec>
+        <Sec title={L("التنبيهات", "Alerts")}>{data.alerts.length ? data.alerts.map((a, i) => <div key={i}>• {a.title}</div>) : <p className="mkt-muted">{L("لا تنبيهات.", "No alerts.")}</p>}</Sec>
+        {data.budget ? <Sec title={L("الميزانية", "Budget")}>{data.budget.lines.map((l, i) => <div key={i}>{l.scope}: {L("مخطط", "planned")} {fmt(l.planned, { unit: "SAR", lang })} · {L("فعلي", "actual")} {fmt(l.pacing.actual, { unit: "SAR", lang })}</div>)}</Sec> : null}
+        <Sec title={L("رسائل واتساب", "WhatsApp messages")}>{Object.entries(data.messages).map(([k, n]) => <Chip key={k}>{k}: {n}</Chip>)}</Sec>
+        <p className="mkt-muted">{L("إرسال التقارير بالبريد للمستخدمين المصرح لهم: المرحلة الثانية (يعتمد على مزود البريد المضبوط في النظام).", "Emailing reports to authorised users: phase 2 (depends on the email provider configured in the system).")}</p>
       </> : null}
     </div>
   );

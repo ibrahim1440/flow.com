@@ -38,8 +38,8 @@ function readCampaign(body: Record<string, unknown>, partial: boolean) {
   if (has("startAt")) data.startAt = date(body.startAt, "البداية");
   if (has("endAt")) data.endAt = date(body.endAt, "النهاية");
   if (has("plannedBudget")) data.plannedBudget = num(body.plannedBudget, "الميزانية المخططة", { min: 0 });
-  if (has("targetCac")) data.targetCac = num(body.targetCac, "هدف تكلفة الاكتساب", { min: 0 });
-  if (has("targetRoas")) data.targetRoas = num(body.targetRoas, "هدف العائد", { min: 0, max: 1000 });
+  if (has("targetCac")) data.targetCac = num(body.targetCac, "هدف تكلفة الاكتساب (CAC)", { min: 0 });
+  if (has("targetRoas")) data.targetRoas = num(body.targetRoas, "هدف العائد (ROAS)", { min: 0, max: 1000 });
   if (has("minSpendForDecision")) data.minSpendForDecision = num(body.minSpendForDecision, "حد الإنفاق للحكم", { min: 0 });
   if (has("minConversionsForDecision")) data.minConversionsForDecision = num(body.minConversionsForDecision, "حد الطلبات للحكم", { min: 0, int: true });
   if (has("notes")) data.notes = str(body.notes, "ملاحظات", { max: 4000 });
@@ -175,7 +175,7 @@ export async function upsertEconomics(productId: string, body: Record<string, un
   if (!product) throw notFound();
   const gm = num(body.grossMarginPct, "هامش الربح", { min: 0, max: 100 });
   const data = {
-    avgOrderValue: num(body.avgOrderValue, "متوسط قيمة الطلب", { min: 0 }),
+    avgOrderValue: num(body.avgOrderValue, "متوسط قيمة الطلب (AOV)", { min: 0 }),
     vatIncluded: body.vatIncluded === true,
     grossMarginPct: gm === null ? null : gm / 100,
     variableCostPerOrder: num(body.variableCostPerOrder, "التكاليف المتغيرة", { min: 0 }),

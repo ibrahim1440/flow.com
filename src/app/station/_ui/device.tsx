@@ -34,7 +34,7 @@ export function DeviceBar({ lang, station, extra }: { lang: Lang; station: Stati
   }, []);
   const location = station ? [station.roaster?.name, station.place].filter(Boolean).join(" · ") : undefined;
   return (
-    <StationBar station={station?.name ?? t("deviceNew")} location={location || undefined} extra={extra}
+    <StationBar lang={lang} station={station?.name ?? t("deviceNew")} location={location || undefined} extra={extra}
       conn={online ? { tone: "ok", label: t("connected") } : { tone: "er", label: t("offline") }} updated={now} updatedWord="" />
   );
 }

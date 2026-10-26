@@ -9,7 +9,7 @@ import { useUser } from "../../user-context";
 import { sampleContext } from "@/lib/automation/catalog";
 import { renderTemplate } from "@/lib/automation/template";
 import {
-  defaultTemplateOf, getStatusSource, sourceEventDef, sourceVariables, STATUS_RECIPIENT_LABELS, STATUS_SOURCES,
+  defaultTemplateOf, getStatusSource, statusEnglishDefault, sourceEventDef, sourceVariables, STATUS_RECIPIENT_LABELS, STATUS_SOURCES,
   type StatusRecipient, type StatusSource,
 } from "@/lib/automation/status-rules/sources";
 import { AutomationHeader, Bubble, LoadError, Phone, whenParts, type Connection } from "../_components/shared";
@@ -40,6 +40,8 @@ type Rule = {
   enabled: boolean;
   recipients: StatusRecipient[];
   template: string;
+  /** Owner language decision 3: the English text employees who receive English get. */
+  templateEn: string;
   renotify: boolean;
   active: boolean;
   canFire: boolean;
@@ -347,6 +349,10 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
     rule.recipients.length ? rule.recipients : source ? [source.recipients[0]] : [],
   );
   const [template, setTemplate] = useState(rule.template || (source ? defaultTemplateOf(source, rule.statusKey) : ""));
+  // Prefilled with the built-in English while the Arabic is the untouched built-in text.
+  const [templateEn, setTemplateEn] = useState(rule.templateEn || (source ? statusEnglishDefault(source, rule.statusKey, rule.template || defaultTemplateOf(source, rule.statusKey)) ?? "" : ""));
+  const [focus, setFocus] = useState<"ar" | "en">("ar");
+  const areaEn = useRef<HTMLTextAreaElement>(null);
   const [renotify, setRenotify] = useState(rule.renotify);
   const [busy, setBusy] = useState<"" | "save" | "test">("");
   const [error, setError] = useState("");
@@ -356,16 +362,20 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
   if (!source) return null;
   const def = sourceEventDef(source);
   const preview = renderTemplate(def, template, { ...sampleContext(def), "status.name": rule.labelAr }, "ar");
+  const previewEn = renderTemplate(def, templateEn, { ...sampleContext(def), "status.name": rule.labelEn || rule.labelAr }, "en");
   const locked = !rule.active || !rule.canFire;
 
   function insert(key: string) {
-    const el = area.current;
+    const en = focus === "en";
+    const el = en ? areaEn.current : area.current;
+    const text = en ? templateEn : template;
+    const set = en ? setTemplateEn : setTemplate;
     const token = `{{${key}}}`;
-    if (!el) return setTemplate((t) => t + token);
-    const start = el.selectionStart ?? template.length;
-    const end = el.selectionEnd ?? template.length;
-    const next = template.slice(0, start) + token + template.slice(end);
-    setTemplate(next);
+    if (!el) return set((t) => t + token);
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + token + text.slice(end);
+    set(next);
     requestAnimationFrame(() => {
       el.focus();
       el.selectionStart = el.selectionEnd = start + token.length;
@@ -375,7 +385,7 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
   async function save() {
     setBusy("save");
     setError("");
-    const r = await api<{ rule: Partial<Rule> }>(`/api/automation/status-rules/${rule.id}`, { method: "PUT", body: { enabled: locked ? false : enabled, recipients, template, renotify } });
+    const r = await api<{ rule: Partial<Rule> }>(`/api/automation/status-rules/${rule.id}`, { method: "PUT", body: { enabled: locked ? false : enabled, recipients, template, templateEn, renotify } });
     setBusy("");
     if (!r.ok) return setError(r.data.error ?? "");
     onSaved({ id: rule.id, ...r.data.rule });
@@ -450,8 +460,11 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
           </div>
         </fieldset>
 
-        <Field label={L("نص الرسالة", "Message")} help={L("اضغط متغيرًا لإدراجه. «اسم الحالة» يُكتب بالعربية.", "Click a variable to insert it.")}>
-          <textarea ref={area} id="status-template" className="hr-input" rows={4} value={template} onChange={(e) => setTemplate(e.target.value)} dir="auto" data-testid="status-template" style={{ minHeight: 96, resize: "vertical" }} />
+        <Field label={L("نص الرسالة (العربية)", "Message (Arabic)")} help={L("يصل العميلَ دائمًا، والموظفين الذين يستقبلون بالعربية. اضغط متغيرًا لإدراجه. «اسم الحالة» يُكتب بالعربية.", "Always sent to the customer, and to employees who receive Arabic. Click a variable to insert it.")}>
+          <textarea ref={area} id="status-template" className="hr-input" rows={4} value={template} onChange={(e) => setTemplate(e.target.value)} onFocus={() => setFocus("ar")} dir="auto" data-testid="status-template" style={{ minHeight: 96, resize: "vertical" }} />
+        </Field>
+        <Field label={L("نص الرسالة (الإنجليزية)", "Message (English)")} help={L("للموظفين الذين يستقبلون بالإنجليزية («ملفي الشخصي» أو لغة رسائل الموظفين) · فارغ = النص العربي", "For employees who receive English («My profile» or the employee message language) · empty = the Arabic text")}>
+          <textarea ref={areaEn} id="status-template-en" className="hr-input" rows={3} value={templateEn} onChange={(e) => setTemplateEn(e.target.value)} onFocus={() => setFocus("en")} dir="ltr" lang="en" data-testid="status-template-en" style={{ minHeight: 72, resize: "vertical" }} />
         </Field>
         <div className="tl-vars" aria-label={L("المتغيرات", "Variables")}>
           {sourceVariables(source).map((v) => (
@@ -463,6 +476,7 @@ function RuleDialog({ rule, lang, conn, onClose, onSaved }: { rule: Rule; lang: 
         <div className="hr-stack" style={{ gap: 6 }}>
           <span className="hr-label">{L("معاينة بالبيانات التجريبية", "Preview with sample data")}</span>
           <Bubble text={preview} lang={lang} testId="status-preview" />
+          {templateEn.trim() ? <Bubble text={previewEn} lang={lang} testId="status-preview-en" /> : null}
           <ModeLine conn={conn} lang={lang} />
         </div>
       </div>

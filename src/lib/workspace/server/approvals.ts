@@ -18,6 +18,7 @@ import { discountThreshold } from "@/lib/services/sales/quote-settings";
 import { discountApprovalState, priceQuote } from "@/lib/services/sales/quotes";
 import { seesAllSales } from "@/lib/services/sales/scope";
 import { approvalQueue } from "@/lib/finance/server/approvals";
+import { leaveTypeName } from "@/lib/i18n/hr";
 import { resolveScope as finScope } from "@/lib/finance/server/context";
 import { listApprovals as mktList } from "@/lib/marketing/server/approvals";
 import { parseDay } from "@/lib/hr/dates";
@@ -30,8 +31,12 @@ export type ApprovalItem = {
   type: ApprovalType;
   id: string;
   title: string;
+  /** The title in English (the Arabic `title` stays as it was for the Arabic screen). */
+  titleEn?: string;
   requester: string | null;
   subject: string | null;
+  /** The subject in English where it differs (a person's English name, a type label). */
+  subjectEn?: string | null;
   createdAt: string;
   /** Type-specific facts for the decision pane. */
   facts: Record<string, unknown>;
@@ -77,7 +82,8 @@ async function leaveItems(actor: WsActor): Promise<ApprovalItem[]> {
     if (peers.length) warnings.push({ ar: `${peers.length} من الزملاء في إجازة خلال الفترة نفسها`, en: `${peers.length} colleague(s) on leave in the same period` });
     out.push({
       key: `LEAVE:${r.id}`, type: "LEAVE", id: r.id,
-      title: `${r.leaveType.nameAr} · ${Number(r.days)} يوم`, requester: r.requestedByName, subject: r.employee.fullNameAr,
+      title: `${r.leaveType.nameAr} · ${Number(r.days)} يوم`, titleEn: `${leaveTypeName(r.leaveType, "en")} · ${Number(r.days)} ${Number(r.days) === 1 ? "day" : "days"}`,
+      requester: r.requestedByName, subject: r.employee.fullNameAr,
       createdAt: iso(r.createdAt),
       facts: {
         leaveType: r.leaveType.nameAr, paid: r.leaveType.paid, startDate: r.startDate, endDate: r.endDate, days: r.days, reason: r.reason,
@@ -102,7 +108,7 @@ async function advanceItems(actor: WsActor): Promise<ApprovalItem[]> {
       const amount = Number(r.amount), n = Number(r.installmentCount) || 1;
       return {
         key: `ADVANCE:${r.id}`, type: "ADVANCE" as const, id: r.id,
-        title: `سلفة ${r.advanceNo}`, requester: r.requestedByName, subject: r.employee.fullNameAr, createdAt: iso(r.createdAt),
+        title: `سلفة ${r.advanceNo}`, titleEn: `Advance ${r.advanceNo}`, requester: r.requestedByName, subject: r.employee.fullNameAr, createdAt: iso(r.createdAt),
         facts: { advanceNo: r.advanceNo, amount: r.amount, installmentCount: n, installment: (amount / n).toFixed(2), firstInstallmentMonth: r.firstInstallmentMonth, reason: r.reason, employeeNo: r.employee.employeeNo },
         warnings: [],
         decide: { url: `/api/hr/advances/${encodeURIComponent(r.id)}/decide`, rejectNeedsReason: true as const },
@@ -136,7 +142,7 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
     const grand = priced.grandTotal.toFixed(2);
     out.push({
       key: `DISCOUNT:${q.id}`, type: "DISCOUNT", id: q.id,
-      title: `خصم ${pct}% · عرض ${q.quoteNumber}`, requester: q.createdById ? creators.get(q.createdById) ?? null : null, subject: q.customer?.name ?? q.opportunity.title,
+      title: `خصم ${pct}% · عرض ${q.quoteNumber}`, titleEn: `Discount ${pct}% · quotation ${q.quoteNumber}`, requester: q.createdById ? creators.get(q.createdById) ?? null : null, subject: q.customer?.name ?? q.opportunity.title,
       createdAt: iso(q.updatedAt),
       facts: {
         quoteNumber: q.quoteNumber, revision: q.revision, customer: q.customer?.name ?? null, deal: q.opportunity.title, dealOwner: q.opportunity.owner?.name ?? null,
@@ -152,6 +158,13 @@ async function discountItems(actor: WsActor): Promise<ApprovalItem[]> {
 }
 
 const FIN_TYPE_AR: Record<string, string> = { BUDGET_APPROVAL: "اعتماد ميزانية", ALLOCATION_RULES: "قواعد التوزيع", CATEGORY_TRANSFER: "تحويل بين البنود", SPEND_OVERRIDE: "تجاوز حد الصرف", PERIOD_REOPEN: "إعادة فتح فترة" };
+const FIN_TYPE_EN: Record<string, string> = { BUDGET_APPROVAL: "Budget approval", ALLOCATION_RULES: "Allocation rules", CATEGORY_TRANSFER: "Transfer between categories", SPEND_OVERRIDE: "Spending limit override", PERIOD_REOPEN: "Reopen a period" };
+/** The marketing request's subject type, in both languages (the screen showed the raw code). */
+const MKT_SUBJECT: Record<string, { ar: string; en: string }> = {
+  POST: { ar: "منشور", en: "Post" }, CAMPAIGN: { ar: "حملة", en: "Campaign" }, MESSAGE_CAMPAIGN: { ar: "حملة رسائل واتساب", en: "WhatsApp message campaign" },
+  JOURNEY: { ar: "رحلة عملاء آلية", en: "Automated customer journey" }, BUDGET_CHANGE: { ar: "تغيير ميزانية", en: "Budget change" }, AD_CHANGE: { ar: "تعديل إعلان", en: "Ad change" },
+  TRACKING_CHANGE: { ar: "إعداد تتبع", en: "Tracking setup" }, SENSITIVE_REPLY: { ar: "رد حساس", en: "Sensitive reply" },
+};
 
 async function financeItems(actor: WsActor): Promise<ApprovalItem[]> {
   if (!hasModuleAccess(actor.permissions, "finance")) return [];
@@ -161,7 +174,7 @@ async function financeItems(actor: WsActor): Promise<ApprovalItem[]> {
   const names = new Map(q.people.map((p) => [p.id, p.name]));
   return q.toDecide.map((r) => ({
     key: `FINANCE:${r.id}`, type: "FINANCE" as const, id: r.id,
-    title: FIN_TYPE_AR[r.type] ?? r.type, requester: names.get(r.requestedBy) ?? null, subject: r.summary ?? null, createdAt: iso(r.requestedAt),
+    title: FIN_TYPE_AR[r.type] ?? r.type, titleEn: FIN_TYPE_EN[r.type] ?? r.type, requester: names.get(r.requestedBy) ?? null, subject: r.summary ?? null, createdAt: iso(r.requestedAt),
     facts: { type: r.type, summary: r.summary, entityType: r.entityType },
     warnings: [],
     decide: { url: `/api/finance/approvals/${encodeURIComponent(r.id)}/decide`, rejectNeedsReason: true as const, stepUp: true },
@@ -174,7 +187,8 @@ async function marketingItems(actor: WsActor): Promise<ApprovalItem[]> {
   const rows = await mktList({ status: "PENDING" }, { id: actor.id, name: actor.name ?? "", permissions: actor.permissions, role: actor.role });
   return rows.filter((r) => r.canDecide).map((r) => ({
     key: `MARKETING:${r.id}`, type: "MARKETING" as const, id: r.id,
-    title: r.subjectTitle ?? r.subjectType, requester: r.requestedByName, subject: r.subjectType, createdAt: iso(r.createdAt),
+    title: r.subjectTitle ?? MKT_SUBJECT[r.subjectType]?.ar ?? r.subjectType, titleEn: r.subjectTitle ?? MKT_SUBJECT[r.subjectType]?.en ?? r.subjectType,
+    requester: r.requestedByName, subject: MKT_SUBJECT[r.subjectType]?.ar ?? r.subjectType, subjectEn: MKT_SUBJECT[r.subjectType]?.en ?? r.subjectType, createdAt: iso(r.createdAt),
     facts: { subjectType: r.subjectType, action: r.action, note: r.requestNote },
     warnings: [],
     decide: { url: `/api/marketing/approvals/${encodeURIComponent(r.id)}`, rejectNeedsReason: true as const },

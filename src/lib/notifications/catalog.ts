@@ -81,6 +81,8 @@ export type NotificationEventDef = {
 };
 
 const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+/** A fact's English form when the producer sent one (`<key>En`), else the fact itself (a name with no English). */
+const sEn = (f: Record<string, unknown>, key: string) => s(f[`${key}En`] ?? f[key]);
 const enc = encodeURIComponent;
 
 const ORDER_STATUS_AR: Record<string, string> = {
@@ -262,7 +264,7 @@ export const EVENTS: NotificationEventDef[] = [
     trigger: "createScheduledProductionOrder — manual and automatic shortfall (automation event production.order_created)",
     render: (f) => ({
       titleAr: `أمر إنتاج جديد ${s(f.productionNumber)}: ${s(f.units)} × ${s(f.sku)}`,
-      titleEn: `New production order ${s(f.productionNumber)}: ${s(f.units)} × ${s(f.sku)}`,
+      titleEn: `New production order ${s(f.productionNumber)}: ${s(f.units)} × ${sEn(f, "sku")}`,
       bodyAr: f.greenKg ? `بن أخضر متوقع ${s(f.greenKg)} كغ` : "", bodyEn: f.greenKg ? `${s(f.greenKg)} kg green expected` : "",
       link: f.productionOrderId ? `/dashboard/production-orders/${enc(s(f.productionOrderId))}` : "/dashboard/production-orders",
     }),
@@ -275,7 +277,7 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({
       titleAr: Number(f.count ?? 1) > 1 ? `أُسندت إليك ${s(f.count)} دفعات تحميص على ${s(f.roasterName)}` : `أُسندت إليك دفعة تحميص على ${s(f.roasterName)}`,
       titleEn: Number(f.count ?? 1) > 1 ? `${s(f.count)} roasting slots assigned to you on ${s(f.roasterName)}` : `A roasting slot assigned to you on ${s(f.roasterName)}`,
-      bodyAr: [s(f.productName), s(f.when)].filter(Boolean).join(" · "), bodyEn: [s(f.productName), s(f.when)].filter(Boolean).join(" · "),
+      bodyAr: [s(f.productName), s(f.when)].filter(Boolean).join(" · "), bodyEn: [sEn(f, "productName"), s(f.when)].filter(Boolean).join(" · "),
       link: `/dashboard/production/schedule${f.day ? `?date=${enc(s(f.day))}` : ""}`,
     }),
   },
@@ -299,7 +301,7 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({
       titleAr: Number(f.count ?? 1) > 1 ? `أُلغيت ${s(f.count)} دفعات تحميص مسندة إليك على ${s(f.roasterName)}` : `أُلغيت دفعة تحميص مسندة إليك على ${s(f.roasterName)}`,
       titleEn: Number(f.count ?? 1) > 1 ? `${s(f.count)} of your roasting slots on ${s(f.roasterName)} were cancelled` : `Your roasting slot on ${s(f.roasterName)} was cancelled`,
-      bodyAr: [s(f.when), s(f.reason)].filter(Boolean).join(" · "), bodyEn: [s(f.when), s(f.reason)].filter(Boolean).join(" · "),
+      bodyAr: [s(f.when), s(f.reason)].filter(Boolean).join(" · "), bodyEn: [s(f.when), sEn(f, "reason")].filter(Boolean).join(" · "),
       link: `/dashboard/production/schedule${f.day ? `?date=${enc(s(f.day))}` : ""}`,
     }),
   },
@@ -363,7 +365,7 @@ export const EVENTS: NotificationEventDef[] = [
     trigger: "POST /api/roasting-batches — a batch recorded «Pending QC» (automation event production.batch_roasted)",
     render: (f) => ({
       titleAr: `الدفعة ${s(f.batchNumber)} تنتظر فحص الجودة`, titleEn: `Batch ${s(f.batchNumber)} awaits quality control`,
-      bodyAr: s(f.productName), bodyEn: s(f.productName), link: "/dashboard/qc",
+      bodyAr: s(f.productName), bodyEn: sEn(f, "productName"), link: "/dashboard/qc",
     }),
   },
   // QC station W3 (owner decisions 23 Oct 2026): hold, exception, disposition, profile approval.
@@ -378,7 +380,7 @@ export const EVENTS: NotificationEventDef[] = [
       titleAr: `الدفعة ${s(f.batchNumber)} محجوزة${f.foreign ? " · أجسام غريبة" : ""}`,
       titleEn: `Batch ${s(f.batchNumber)} is held${f.foreign ? " · foreign objects" : ""}`,
       bodyAr: [s(f.productName), s(f.reasonsAr), f.inspectorName ? `فحصها ${s(f.inspectorName)}` : ""].filter(Boolean).join(" · "),
-      bodyEn: [s(f.productName), s(f.reasonsEn), f.inspectorName ? `Inspected by ${s(f.inspectorName)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [sEn(f, "productName"), s(f.reasonsEn), f.inspectorName ? `Inspected by ${s(f.inspectorName)}` : ""].filter(Boolean).join(" · "),
       link: "/dashboard/qc?tab=held",
     }),
   },
@@ -391,7 +393,7 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({
       titleAr: `طلب استثناء ${s(f.number)} · الدفعة ${s(f.batchNumber)}`, titleEn: `Exception request ${s(f.number)} · batch ${s(f.batchNumber)}`,
       bodyAr: [s(f.productName), s(f.reasonAr), f.requesterName ? `طلبه ${s(f.requesterName)}` : ""].filter(Boolean).join(" · "),
-      bodyEn: [s(f.productName), s(f.reasonEn), f.requesterName ? `Requested by ${s(f.requesterName)}` : ""].filter(Boolean).join(" · "),
+      bodyEn: [sEn(f, "productName"), s(f.reasonEn), f.requesterName ? `Requested by ${s(f.requesterName)}` : ""].filter(Boolean).join(" · "),
       link: f.exceptionId ? `/dashboard/qc?tab=exceptions&id=${enc(s(f.exceptionId))}` : "/dashboard/qc?tab=exceptions",
     }),
   },
@@ -440,7 +442,7 @@ export const EVENTS: NotificationEventDef[] = [
     render: (f) => ({
       titleAr: `اعتُمد ${s(f.profileName)} · الإصدار ${s(f.version)}`, titleEn: `${s(f.profileName)} · version ${s(f.version)} approved`,
       bodyAr: `${s(f.productName)} · حبوب ${s(f.whole)} · مطحون ${s(f.ground)} (${s(f.scale)})`,
-      bodyEn: `${s(f.productName)} · whole ${s(f.whole)} · ground ${s(f.ground)} (${s(f.scale)})`,
+      bodyEn: `${sEn(f, "productName")} · whole ${s(f.whole)} · ground ${s(f.ground)} (${s(f.scale)})`,
       link: "/dashboard/qc?tab=profiles",
     }),
   },

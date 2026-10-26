@@ -14,11 +14,11 @@ import { lastDays } from "../kpi";
  */
 
 export const JOBS = [
-  { key: "publisher", ar: "قائمة النشر", schedule: "كل دقيقة إلى 15 دقيقة (حسب المجدول)", detail: "ينشر المنشورات المستحقة أو يحولها للنشر اليدوي، ويعيد المحاولة بأمان." },
-  { key: "journeys", ar: "رحلات العملاء", schedule: "مع كل تشغيل", detail: "يقيّم السلال المتروكة: إيقاف، انتظار، أو تجهيز رسالة." },
-  { key: "sender", ar: "مرسل واتساب", schedule: "مع كل تشغيل", detail: "يرسل الرسائل المستحقة بعد فحص الموافقة والحدود والإيقاف الطارئ." },
-  { key: "alerts", ar: "التنبيهات", schedule: "مع كل تشغيل", detail: "الميزانيات، فشل النشر، الربط، البيانات المتأخرة، رموز UTM المجهولة." },
-  { key: "decisions", ar: "محرك القرارات", schedule: "مرة يومياً", detail: "يقيّم الحملات النشطة آخر 7 أيام ويحفظ التوصية مع أدلتها (لا ينفّذ شيئاً)." },
+  { key: "publisher", ar: "قائمة النشر", en: "Publishing queue", schedule: "كل دقيقة إلى 15 دقيقة (حسب المجدول)", scheduleEn: "Every 1 to 15 minutes (per the scheduler)", detail: "ينشر المنشورات المستحقة أو يحولها للنشر اليدوي، ويعيد المحاولة بأمان.", detailEn: "Publishes due posts or hands them to manual publishing, and retries safely." },
+  { key: "journeys", ar: "رحلات العملاء", en: "Customer journeys", schedule: "مع كل تشغيل", scheduleEn: "Every run", detail: "يقيّم السلال المتروكة: إيقاف، انتظار، أو تجهيز رسالة.", detailEn: "Evaluates abandoned carts: stop, wait, or prepare a message." },
+  { key: "sender", ar: "مرسل واتساب", en: "WhatsApp sender", schedule: "مع كل تشغيل", scheduleEn: "Every run", detail: "يرسل الرسائل المستحقة بعد فحص الموافقة والحدود والإيقاف الطارئ.", detailEn: "Sends due messages after checking consent, limits and the emergency stop." },
+  { key: "alerts", ar: "التنبيهات", en: "Alerts", schedule: "مع كل تشغيل", scheduleEn: "Every run", detail: "الميزانيات، فشل النشر، الربط، البيانات المتأخرة، رموز UTM المجهولة.", detailEn: "Budgets, publishing failures, connections, late data, unknown UTM codes." },
+  { key: "decisions", ar: "محرك القرارات", en: "Decision engine", schedule: "مرة يومياً", scheduleEn: "Once a day", detail: "يقيّم الحملات النشطة آخر 7 أيام ويحفظ التوصية مع أدلتها (لا ينفّذ شيئاً).", detailEn: "Evaluates active campaigns over the last 7 days and stores the recommendation with its evidence (acts on nothing)." },
 ] as const;
 
 async function record<T>(job: string, trigger: string, fn: () => Promise<T>): Promise<{ job: string; status: string; summary?: T; error?: string }> {

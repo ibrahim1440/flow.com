@@ -9,7 +9,9 @@
  * with skipDuplicates.
  */
 import type { Prisma } from "@/generated/prisma/client";
-import { adminRecipients, type EventContext, type Person, type StoredEvent } from "../context";
+import type { Lang } from "../catalog";
+import { adminRecipients, employeeMessageLangs, type EventContext, type Person, type StoredEvent } from "../context";
+import { resolveMessageLang, staffIdOf, type MsgLang } from "../employee-lang";
 import type { EffectiveMode } from "../settings";
 import { parseRecipients, planStatusMessages } from "./rules";
 import { statusesOfEvent, type StatusRecipient } from "./sources";
@@ -22,7 +24,9 @@ export async function processStatusRules(
   tx: Tx,
   ev: StoredEvent,
   mode: EffectiveMode,
-  contextFor: () => Promise<EventContext | null>,
+  contextFor: (lang?: Lang) => Promise<EventContext | null>,
+  /** Owner language decision 3: the automation default for employees who have not chosen (null = Arabic). */
+  employeeDefault: MsgLang | null = null,
 ): Promise<StatusEvalReport> {
   const out: StatusEvalReport = { queued: 0, skipped: 0 };
   const hits = statusesOfEvent(ev.eventType, ev.payload);
@@ -42,14 +46,23 @@ export async function processStatusRules(
     const recipients = parseRecipients(rule.recipients);
     const people: Partial<Record<StatusRecipient, Person[]>> = { ...ctx.people };
     if (recipients.includes("admins")) people.admins = admins ??= await adminRecipients(tx);
+    // The employees among the recipients, and whether any of them receives English: only then is the
+    // event's English context resolved.
+    const staff = recipients.flatMap((k) => people[k] ?? []).filter((p) => staffIdOf(p.key));
+    const staffLangs = await employeeMessageLangs(tx, staff);
+    const wantsEn = staff.some((p) => resolveMessageLang(staffLangs.get(staffIdOf(p.key)!), employeeDefault) === "en");
+    const ctxEn = wantsEn ? await contextFor("en") : null;
 
     const planned = planStatusMessages({
-      rule: { source: rule.source, statusKey: rule.statusKey, labelAr: rule.labelAr, recipients, template: rule.template, renotify: rule.renotify },
+      rule: { source: rule.source, statusKey: rule.statusKey, labelAr: rule.labelAr, labelEn: rule.labelEn, recipients, template: rule.template, templateEn: rule.templateEn, renotify: rule.renotify },
       subject: { type: ev.subjectType, id: ev.subjectId },
       eventId: ev.id,
       vars: ctx.vars,
       people,
       mode,
+      varsEn: ctxEn?.vars ?? null,
+      staffLangs,
+      employeeDefault,
     });
     if (planned.length === 0) continue;
     const created = await tx.whatsAppMessage.createMany({

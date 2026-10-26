@@ -295,7 +295,7 @@ export async function recordInspection(actor: Actor, key: string, raw: Record<st
       const { notify } = await import("@/lib/notifications/notify");
       await notify(tx, {
         event: "quality.batch_held", dedupeKey: rec.id, actorId: actor.id, entity: { type: "RoastingBatch", id: b.id },
-        facts: { batchNumber: b.batchNumber, productName: name.nameAr || name.nameEn, foreign: v.foreign ? 1 : "", inspectorName: actor.name, reasonsAr: v.holdReasons.map((x) => HOLD_REASON_WORD[x].ar).join("، "), reasonsEn: v.holdReasons.map((x) => HOLD_REASON_WORD[x].en).join(", ") },
+        facts: { batchNumber: b.batchNumber, productName: name.nameAr || name.nameEn, productNameEn: name.nameEn || name.nameAr, foreign: v.foreign ? 1 : "", inspectorName: actor.name, reasonsAr: v.holdReasons.map((x) => HOLD_REASON_WORD[x].ar).join("، "), reasonsEn: v.holdReasons.map((x) => HOLD_REASON_WORD[x].en).join(", ") },
       });
     } else if (outcome === "RELEASED") {
       const applied = await applyQcDecision(tx, {

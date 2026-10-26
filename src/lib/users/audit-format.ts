@@ -5,7 +5,7 @@
 // a permission change — the expandable before / after of each key with the reason. No secret is in
 // the log to begin with (employee-audit.ts); the export (O-6) is a sensitive action, itself audited.
 import type { Prisma } from "@/generated/prisma/client";
-import { moduleLabel, subLabel, LEVEL_AR, SYSTEM_ROLES, NO_ACCESS_ROLE } from "./catalog";
+import { moduleLabel, subLabel, LEVEL_AR, LEVEL_EN, SYSTEM_ROLES, NO_ACCESS_ROLE } from "./catalog";
 
 export type AuditCategory = "all" | "permissions" | "accounts" | "signin";
 type Def = { ar: string; en: string; cat: Exclude<AuditCategory, "all"> };
@@ -55,6 +55,7 @@ export const AUDIT_ACTIONS: Record<string, Def> = {
 
 const SOURCE: Record<string, { ar: string; en: string }> = { WEB: { ar: "ويب", en: "Web" }, STATION: { ar: "محطة", en: "Station" }, SYSTEM: { ar: "النظام", en: "System" } };
 const METHOD_AR: Record<string, string> = { PASSWORD: "بكلمة المرور", USERNAME_PIN: "باسم المستخدم والرمز", PIN: "بالرمز" };
+const METHOD_EN: Record<string, string> = { PASSWORD: "with password", USERNAME_PIN: "with username and PIN", PIN: "with PIN" };
 
 export type AuditFilters = { q?: string; cat?: AuditCategory; days?: number | null; source?: "all" | "web" | "station" | "system"; before?: string | null; take?: number };
 
@@ -77,12 +78,16 @@ const cellName = (path: string, lang: "ar" | "en" = "ar") => {
   if (k === "access") return moduleLabel(m, lang);
   return subLabel(m, k, lang);
 };
-const valueWord = (path: string, v: unknown) => {
-  if (path.endsWith(".access")) return LEVEL_AR[String(v)] ?? (v === null ? "—" : String(v));
-  return v === true ? "مسموح" : v === false ? "غير مسموح" : "—";
+const valueWord = (path: string, v: unknown, lang: "ar" | "en" = "ar") => {
+  if (path.endsWith(".access")) return (lang === "en" ? LEVEL_EN : LEVEL_AR)[String(v)] ?? (v === null ? "—" : String(v));
+  return v === true ? (lang === "en" ? "Allowed" : "مسموح") : v === false ? (lang === "en" ? "Not allowed" : "غير مسموح") : "—";
 };
-const roleName = (key: unknown) => (typeof key === "string" ? SYSTEM_ROLES.find((r) => r.key === key)?.ar ?? (key === "custom" ? NO_ACCESS_ROLE.ar : key) : "—");
-const day = (iso: string) => new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" }).format(new Date(iso));
+const roleName = (key: unknown, lang: "ar" | "en" = "ar") => {
+  if (typeof key !== "string") return "—";
+  const r = SYSTEM_ROLES.find((x) => x.key === key) ?? (key === "custom" ? NO_ACCESS_ROLE : null);
+  return r ? (lang === "en" ? r.en : r.ar) : key;
+};
+const day = (iso: string, lang: "ar" | "en" = "ar") => new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "ar-SA-u-nu-latn-ca-gregory", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" }).format(new Date(iso));
 
 export type AuditEntry = {
   id: string; at: string; actor: string; actorId: string | null; action: string; label: string; labelEn: string; cat: string; result: string;
@@ -93,91 +98,103 @@ export type AuditEntry = {
 /** One row in the screen's words. Never reads a credential: the log holds none. */
 export type Row = { id: string; userId: string | null; action: string; result: string; reasonCode: string | null; sourceInterface: string; metadata: Prisma.JsonValue; occurredAt: Date };
 
-export function describe(r: Row, names: Map<string, string>): AuditEntry {
+/**
+ * One log row in the viewer's words. `lang` defaults to Arabic (the export and the existing
+ * callers); an English viewer gets every phrase — action, target, details, source — in English.
+ */
+export function describe(r: Row, names: Map<string, string>, lang: "ar" | "en" = "ar"): AuditEntry {
+  const T = (ar: string, en: string) => (lang === "en" ? en : ar);
   const m = (r.metadata ?? {}) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- free-form audit metadata, read field by field
   const def = AUDIT_ACTIONS[r.action] ?? { ar: r.action, en: r.action, cat: "accounts" };
-  const actor = r.userId ? names.get(r.userId) ?? "—" : "النظام";
-  let label = def.ar;
+  const actor = r.userId ? names.get(r.userId) ?? "—" : T("النظام", "System");
+  let label = T(def.ar, def.en);
   let target = typeof m.targetName === "string" ? m.targetName : m.targetEmployeeId ? names.get(m.targetEmployeeId) ?? "—" : "—";
   let details = "";
   let diff: AuditEntry["diff"] = null;
   const reason = typeof m.reason === "string" ? m.reason : null;
+  const methodWord = (k: string) => (lang === "en" ? METHOD_EN : METHOD_AR)[k];
+  const cell = (path: string) => cellName(path, lang);
+  const value = (path: string, v: unknown) => valueWord(path, v, lang);
+  const role = (k: unknown) => roleName(k, lang);
+  const sep = T("، ", ", ");
   switch (r.action) {
     case "SIGN_IN": case "MFA_SIGN_IN": {
       target = actor;
-      if (r.result === "SUCCESS") details = METHOD_AR[String(m.method ?? r.reasonCode ?? "")] ?? (r.action === "MFA_SIGN_IN" ? "بالتحقق بخطوتين" : "");
-      else { label = r.result === "REFUSED" ? "رُفض الدخول" : "محاولة دخول فاشلة"; details = r.reasonCode === "TEMP_PASSWORD_EXPIRED" ? "كلمة مرور مؤقتة منتهية" : METHOD_AR[String(r.reasonCode ?? "")] ?? ""; }
+      if (r.result === "SUCCESS") details = methodWord(String(m.method ?? r.reasonCode ?? "")) ?? (r.action === "MFA_SIGN_IN" ? T("بالتحقق بخطوتين", "with two-step verification") : "");
+      else { label = r.result === "REFUSED" ? T("رُفض الدخول", "Sign-in refused") : T("محاولة دخول فاشلة", "Failed sign-in attempt"); details = r.reasonCode === "TEMP_PASSWORD_EXPIRED" ? T("كلمة مرور مؤقتة منتهية", "Temporary password expired") : methodWord(String(r.reasonCode ?? "")) ?? ""; }
       break;
     }
     case "SIGN_OUT": target = actor; break;
     case "PASSWORD_CHANGED_SELF": target = actor; break;
     case "EMPLOYEE_CREATED":
-      details = [`الدور: ${roleName(m.role)}`, m.temporaryPassword ? "كلمة مرور مؤقتة" : null, m.hrLinked ? "مرتبط بملف الموظف" : null].filter(Boolean).join(" · ");
+      details = [T(`الدور: ${role(m.role)}`, `Role: ${role(m.role)}`), m.temporaryPassword ? T("كلمة مرور مؤقتة", "temporary password") : null, m.hrLinked ? T("مرتبط بملف الموظف", "linked to the HR record") : null].filter(Boolean).join(" · ");
       break;
     case "EMPLOYEE_ROLE_CHANGED":
-      details = `${roleName(m.oldRole)} ← ${roleName(m.newRole)}`;
+      details = lang === "en" ? `${role(m.oldRole)} → ${role(m.newRole)}` : `${role(m.oldRole)} ← ${role(m.newRole)}`;
       break;
     case "EMPLOYEE_PERMISSIONS_CHANGED": case "PERMISSION_OVERRIDE_EXPIRED": {
+      const arrow = T("←", "→");
       const changes = (Array.isArray(m.changes) ? m.changes : []) as { path: string; from: unknown; to: unknown }[];
       const overrides = (Array.isArray(m.overrides) ? m.overrides : []) as { cell: string; effect: string; value: string }[];
-      const until = typeof m.expiresAt === "string" ? ` حتى ${day(m.expiresAt)}` : "";
+      const until = typeof m.expiresAt === "string" ? T(` حتى ${day(m.expiresAt)}`, ` until ${day(m.expiresAt, "en")}`) : "";
       if (r.action === "PERMISSION_OVERRIDE_EXPIRED") {
         const items = (Array.isArray(m.overrides) ? m.overrides : []) as { module: string; sub: string | null; restored: boolean }[];
-        details = items.map((o) => `«${o.sub ? subLabel(o.module, o.sub) : moduleLabel(o.module)}»${o.restored ? " · عاد إلى قيمة الدور" : ""}`).join(" · ") || "تلقائيًا عند تاريخ الانتهاء";
+        details = items.map((o) => T(`«${o.sub ? subLabel(o.module, o.sub) : moduleLabel(o.module)}»${o.restored ? " · عاد إلى قيمة الدور" : ""}`, `“${o.sub ? subLabel(o.module, o.sub, "en") : moduleLabel(o.module, "en")}”${o.restored ? " · back to the role's value" : ""}`)).join(" · ") || T("تلقائيًا عند تاريخ الانتهاء", "automatically at the end date");
       } else if (overrides.length) {
         details = overrides.map((o) => {
           const [mod, sub] = o.cell.split(".");
-          const name = sub ? subLabel(mod, sub) : `${moduleLabel(mod)} · ${LEVEL_AR[o.value] ?? o.value}`;
-          return o.effect === "GRANT" ? `منح «${name}»${until}` : `منع «${name}»`;
+          const name = sub ? subLabel(mod, sub, lang) : `${moduleLabel(mod, lang)} · ${(lang === "en" ? LEVEL_EN : LEVEL_AR)[o.value] ?? o.value}`;
+          return o.effect === "GRANT" ? T(`منح «${name}»${until}`, `granted “${name}”${until}`) : T(`منع «${name}»`, `denied “${name}”`);
         }).join(" · ");
       } else {
-        details = changes.slice(0, 3).map((c) => `${cellName(c.path)}: ${valueWord(c.path, c.from)} ← ${valueWord(c.path, c.to)}`).join(" · ") + (changes.length > 3 ? ` · +${changes.length - 3}` : "");
+        details = changes.slice(0, 3).map((c) => `${cell(c.path)}: ${value(c.path, c.from)} ${arrow} ${value(c.path, c.to)}`).join(" · ") + (changes.length > 3 ? ` · +${changes.length - 3}` : "");
       }
-      if (m.via === "ROLE" && typeof m.roleName === "string") details = `عبر دور «${m.roleName}» · ${details}`;
-      diff = changes.map((c) => ({ key: c.path.endsWith(".access") ? c.path : `${c.path.split(".")[0]}.sub.${c.path.split(".")[1]}`, label: cellName(c.path), before: valueWord(c.path, c.from), after: valueWord(c.path, c.to) }));
+      if (m.via === "ROLE" && typeof m.roleName === "string") details = T(`عبر دور «${m.roleName}» · ${details}`, `through the role “${m.roleName}” · ${details}`);
+      diff = changes.map((c) => ({ key: c.path.endsWith(".access") ? c.path : `${c.path.split(".")[0]}.sub.${c.path.split(".")[1]}`, label: cell(c.path), before: value(c.path, c.from), after: value(c.path, c.to) }));
       break;
     }
     case "ROLE_CREATED": case "ROLE_UPDATED": {
-      target = `دور «${m.roleName ?? "—"}»`;
+      target = T(`دور «${m.roleName ?? "—"}»`, `role “${m.roleName ?? "—"}”`);
       const changes = (Array.isArray(m.changes) ? m.changes : []) as { path: string; from: unknown; to: unknown }[];
       const added = changes.filter((c) => c.to === true || (c.path.endsWith(".access") && c.to !== "none" && c.to !== null));
       const removed = changes.filter((c) => !added.includes(c));
+      const q = (s: string) => T(`«${s}»`, `“${s}”`);
       details = r.action === "ROLE_CREATED"
-        ? (m.basedOn ? `نسخة من ${roleName(m.basedOn)}` : "دور مخصص جديد")
-        : [added.length ? `أضاف ${added.slice(0, 2).map((c) => `«${cellName(c.path)}${c.path.endsWith(".access") ? ` · ${valueWord(c.path, c.to)}` : ""}»`).join("، ")}${added.length > 2 ? ` و${added.length - 2} أخرى` : ""}` : null,
-           removed.length ? `أزال ${removed.slice(0, 2).map((c) => `«${cellName(c.path)}»`).join("، ")}${removed.length > 2 ? ` و${removed.length - 2} أخرى` : ""}` : null].filter(Boolean).join(" · ");
-      if (Array.isArray(m.members) && m.members.length) details += ` · يسري على ${m.members.length === 1 ? "مستخدم واحد" : m.members.length === 2 ? "مستخدمَين" : `${m.members.length} مستخدمين`}`;
-      diff = changes.length ? changes.map((c) => ({ key: c.path, label: cellName(c.path), before: valueWord(c.path, c.from), after: valueWord(c.path, c.to) })) : null;
+        ? (m.basedOn ? T(`نسخة من ${role(m.basedOn)}`, `a copy of ${role(m.basedOn)}`) : T("دور مخصص جديد", "new custom role"))
+        : [added.length ? `${T("أضاف", "added")} ${added.slice(0, 2).map((c) => q(`${cell(c.path)}${c.path.endsWith(".access") ? ` · ${value(c.path, c.to)}` : ""}`)).join(sep)}${added.length > 2 ? T(` و${added.length - 2} أخرى`, ` and ${added.length - 2} more`) : ""}` : null,
+           removed.length ? `${T("أزال", "removed")} ${removed.slice(0, 2).map((c) => q(cell(c.path))).join(sep)}${removed.length > 2 ? T(` و${removed.length - 2} أخرى`, ` and ${removed.length - 2} more`) : ""}` : null].filter(Boolean).join(" · ");
+      if (Array.isArray(m.members) && m.members.length) details += lang === "en" ? ` · applies to ${m.members.length === 1 ? "one user" : `${m.members.length} users`}` : ` · يسري على ${m.members.length === 1 ? "مستخدم واحد" : m.members.length === 2 ? "مستخدمَين" : `${m.members.length} مستخدمين`}`;
+      diff = changes.length ? changes.map((c) => ({ key: c.path, label: cell(c.path), before: value(c.path, c.from), after: value(c.path, c.to) })) : null;
       break;
     }
     case "EMPLOYEE_CREDENTIAL_CHANGED":
-      if (m.kind === "TEMPORARY_PASSWORD") { label = "أعاد تعيين كلمة المرور"; details = "كلمة مؤقتة · تُعرض مرة واحدة"; }
-      else if (m.kind === "PIN_CLEARED") { label = "أعاد تعيين رمز المحطة"; details = "يعيّن الموظف رمزًا جديدًا بنفسه"; }
-      else details = (Array.isArray(m.credentials) ? m.credentials : []).map((c: string) => (c === "pin" ? "الرمز" : c === "password" ? "كلمة المرور" : c)).join(" · ");
+      if (m.kind === "TEMPORARY_PASSWORD") { label = T("أعاد تعيين كلمة المرور", "Reset the password"); details = T("كلمة مؤقتة · تُعرض مرة واحدة", "temporary password · shown once"); }
+      else if (m.kind === "PIN_CLEARED") { label = T("أعاد تعيين رمز المحطة", "Reset the station PIN"); details = T("يعيّن الموظف رمزًا جديدًا بنفسه", "the employee sets a new PIN themselves"); }
+      else details = (Array.isArray(m.credentials) ? m.credentials : []).map((c: string) => (c === "pin" ? T("الرمز", "PIN") : c === "password" ? T("كلمة المرور", "password") : c)).join(" · ");
       break;
-    case "ACCOUNT_UNLOCKED": details = `${m.attemptsCleared ?? 0} محاولات فاشلة مُسحت`; break;
-    case "SESSION_ENDED_ADMIN": case "DEVICE_SESSIONS_ENDED_ADMIN": case "SESSIONS_ENDED_ADMIN": details = `${m.sessions ?? 0} جلسات`; break;
-    case "AUDIT_EXPORTED": target = "سجل الصلاحيات"; details = `${m.rows ?? 0} سطرًا`; break;
+    case "ACCOUNT_UNLOCKED": details = T(`${m.attemptsCleared ?? 0} محاولات فاشلة مُسحت`, `${m.attemptsCleared ?? 0} failed attempts cleared`); break;
+    case "SESSION_ENDED_ADMIN": case "DEVICE_SESSIONS_ENDED_ADMIN": case "SESSIONS_ENDED_ADMIN": details = T(`${m.sessions ?? 0} جلسات`, `${m.sessions ?? 0} sessions`); break;
+    case "AUDIT_EXPORTED": target = T("سجل الصلاحيات", "Permissions log"); details = T(`${m.rows ?? 0} سطرًا`, `${m.rows ?? 0} rows`); break;
     // Workstations W2: the device or station named, never a PIN, code or token.
     case "STATION_SIGN_IN": case "STATION_SIGN_OUT": case "STATION_SWITCH": case "STATION_PIN_FAILED": case "STATION_PIN_LOCKED": case "STATION_PIN_SET":
       target = actor;
-      if (r.action === "STATION_SIGN_IN" && r.result !== "SUCCESS") label = r.reasonCode === "NOT_ASSIGNED" ? "محاولة دخول لمحطة غير مكلّف بها" : r.reasonCode === "ADMIN_ROLE" ? "رُفض دخول المسؤول من محطة" : "رُفض الدخول من محطة";
-      details = [m.deviceName, r.reasonCode === "IDLE" ? "خمول" : r.reasonCode === "LOCK" ? "قفل" : null, typeof m.claimsReleased === "number" && m.claimsReleased ? `حُرّرت ${m.claimsReleased} مهمة` : null].filter(Boolean).join(" · ");
+      if (r.action === "STATION_SIGN_IN" && r.result !== "SUCCESS") label = r.reasonCode === "NOT_ASSIGNED" ? T("محاولة دخول لمحطة غير مكلّف بها", "Sign-in attempt at a station not assigned") : r.reasonCode === "ADMIN_ROLE" ? T("رُفض دخول المسؤول من محطة", "Administrator sign-in at a station refused") : T("رُفض الدخول من محطة", "Station sign-in refused");
+      details = [m.deviceName, r.reasonCode === "IDLE" ? T("خمول", "idle") : r.reasonCode === "LOCK" ? T("قفل", "locked") : null, typeof m.claimsReleased === "number" && m.claimsReleased ? T(`حُرّرت ${m.claimsReleased} مهمة`, `${m.claimsReleased} tasks released`) : null].filter(Boolean).join(" · ");
       break;
-    case "STATION_CREATED": case "STATION_UPDATED": case "STATION_POLICY_CHANGED": target = m.stationName ? `محطة «${m.stationName}»` : "المحطات"; break;
+    case "STATION_CREATED": case "STATION_UPDATED": case "STATION_POLICY_CHANGED": target = m.stationName ? T(`محطة «${m.stationName}»`, `station “${m.stationName}”`) : T("المحطات", "Stations"); break;
     case "STATION_REGISTERED": case "STATION_CODE_ISSUED": case "STATION_CODE_CANCELLED": case "STATION_ACTIVATED": case "STATION_REVOKED": case "STATION_DEVICE_STATIONS":
-      target = m.deviceName ? `جهاز «${m.deviceName}»` : "جهاز محطة"; details = m.stationName ? `المحطة: ${m.stationName}` : ""; break;
+      target = m.deviceName ? T(`جهاز «${m.deviceName}»`, `device “${m.deviceName}”`) : T("جهاز محطة", "station device"); details = m.stationName ? T(`المحطة: ${m.stationName}`, `Station: ${m.stationName}`) : ""; break;
     case "STATION_ACCESS_CHANGED": {
       const ch = (Array.isArray(m.changes) ? m.changes : []) as { stationName: string; to: string }[];
-      details = ch.map((c) => `${c.stationName}: ${c.to === "NONE" ? "غير مسموح" : c.to === "SUPERVISOR" ? "مسموح · مشرف" : "مسموح"}`).join(" · ");
+      details = ch.map((c) => `${c.stationName}: ${c.to === "NONE" ? T("غير مسموح", "not allowed") : c.to === "SUPERVISOR" ? T("مسموح · مشرف", "allowed · supervisor") : T("مسموح", "allowed")}`).join(" · ");
       break;
     }
   }
-  if (reason && !details.includes(reason) && r.action !== "EMPLOYEE_PERMISSIONS_CHANGED" && r.action !== "ROLE_UPDATED") details = details ? `${details} · السبب: ${reason}` : `السبب: ${reason}`;
+  if (reason && !details.includes(reason) && r.action !== "EMPLOYEE_PERMISSIONS_CHANGED" && r.action !== "ROLE_UPDATED") details = details ? T(`${details} · السبب: ${reason}`, `${details} · reason: ${reason}`) : T(`السبب: ${reason}`, `Reason: ${reason}`);
   return {
     id: r.id, at: r.occurredAt.toISOString(), actor, actorId: r.userId, action: r.action, label, labelEn: def.en, cat: def.cat, result: r.result,
     target, targetId: typeof m.targetEmployeeId === "string" ? m.targetEmployeeId : r.action.startsWith("SIGN") ? r.userId : null,
-    source: SOURCE[r.sourceInterface]?.ar ?? r.sourceInterface, details, reason, diff,
+    source: SOURCE[r.sourceInterface] ? T(SOURCE[r.sourceInterface].ar, SOURCE[r.sourceInterface].en) : r.sourceInterface, details, reason, diff,
   };
 }
 

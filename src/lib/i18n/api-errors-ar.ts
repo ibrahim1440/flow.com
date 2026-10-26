@@ -222,6 +222,9 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "The base rate must be between 0% and 100%.": "النسبة الأساسية من 0% إلى 100%.",
   "The company name is required.": "اسم الشركة مطلوب.",
   "The default VAT is a percentage from 0 to 100, with at most two decimals.": "ضريبة القيمة المضافة الافتراضية نسبة من 0 إلى 100 بمنزلتين على الأكثر.",
+  // Settings › Organisation › the sign-in line (owner language decision 1).
+  "The sign-in line must be text.": "شعار صفحة الدخول يجب أن يكون نصًا.",
+  "The sign-in line cannot contain < > or control characters.": "لا يقبل شعار صفحة الدخول الرمزين < > ولا رموز التحكم.",
   "The end date must be after the assignment started.": "تاريخ النهاية بعد بداية الإسناد.",
   "The end date must be after the start date.": "تاريخ النهاية بعد تاريخ البداية.",
   "The expected value cannot be negative.": "القيمة المتوقعة لا تكون سالبة.",
@@ -700,6 +703,12 @@ export const API_ERRORS_AR: Readonly<Record<string, string>> = {
   "Only a COMPONENTS version can be edited in place; change a tiered plan with a new version.": "لا تُعدَّل في مكانها إلا نسخة بالمكوّنات؛ الخطة بالشرائح تُغيَّر بإصدار جديد.",
   "This is a tiered version; change it with a new version.": "هذه نسخة بالشرائح؛ غيّرها بإصدار جديد.",
   "A version cannot start on or before an earlier version of the same plan.": "لا تبدأ نسخة في تاريخ نسخة سابقة من الخطة نفسها أو قبله.",
+  // The staff WhatsApp connection's configuration check (src/lib/whatsapp/evolution.ts), shown on the automation screen.
+  "WhatsApp is not configured on this deployment (WHATSAPP_API_URL, WHATSAPP_INSTANCE, WHATSAPP_API_KEY).": "واتساب غير مهيأ على هذا الخادم (WHATSAPP_API_URL، WHATSAPP_INSTANCE، WHATSAPP_API_KEY).",
+  "WHATSAPP_API_URL is not a valid URL.": "WHATSAPP_API_URL ليس رابطًا صالحًا.",
+  "WHATSAPP_API_URL must use https.": "WHATSAPP_API_URL يجب أن يستخدم https.",
+  "WHATSAPP_INSTANCE is not a valid instance name.": "WHATSAPP_INSTANCE ليس اسم نسخة صالحًا.",
+  "WHATSAPP_API_KEY is too short to be a real key.": "WHATSAPP_API_KEY أقصر من أن يكون مفتاحًا حقيقيًا.",
 };
 
 /**
@@ -811,6 +820,8 @@ export const API_ERROR_TEMPLATES_AR: ReadonlyArray<readonly [string, string]> = 
   ["The discount threshold is a percentage from 0 to ${DISCOUNT_MAX}, with at most two decimals.", "حد الخصم نسبة من 0 إلى {0} بمنزلتين على الأكثر."],
   ["The file needs a companyName column. Recognised headings are: ", "الملف يحتاج عمود اسم الشركة. العناوين المعروفة: "],
   ["The low-stock line is a weight in kg greater than 0 and at most ${LOW_STOCK_GREEN_KG_MAX.toLocaleString(\"en\")}, with at most three decimals.", "حد انخفاض المخزون وزن بالكيلوغرام أكبر من 0 وحتى {0} بثلاث منازل على الأكثر."],
+  ["The Arabic sign-in line must be ${LOGIN_TAGLINE_MAX} characters or fewer.", "النص العربي لشعار صفحة الدخول {0} حرفًا على الأكثر."],
+  ["The English sign-in line must be ${LOGIN_TAGLINE_MAX} characters or fewer.", "النص الإنجليزي لشعار صفحة الدخول {0} حرفًا على الأكثر."],
   ["The minimum number of evaluators is a whole number from 1 to ${QC_MIN_EVALUATORS_MAX}.", "الحد الأدنى للمقيّمين عدد صحيح من 1 إلى {0}."],
   ["The notes are longer than ${NOTES_MAX} characters.", "الملاحظات أطول من {0} حرف."],
   ["The reason must be at least ${ADJUSTMENT_REASON_MIN_LENGTH} characters — enough for somebody reconciling this later to know what happened.", "السبب {0} أحرف على الأقل، بما يكفي لمن يراجع لاحقًا أن يعرف ما حدث."],

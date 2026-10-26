@@ -20,6 +20,8 @@ export type StatusRuleView = {
   enabled: boolean;
   recipients: string[];
   template: string;
+  /** Owner language decision 3: the English text employees who receive English get ("" = none). */
+  templateEn: string;
   renotify: boolean;
   active: boolean;
   canFire: boolean;
@@ -64,6 +66,7 @@ export async function readStatusRules(db: Tx): Promise<{ rules: StatusRuleView[]
         enabled: r.enabled,
         recipients: parseRecipients(r.recipients),
         template: r.template,
+        templateEn: r.templateEn ?? "",
         renotify: r.renotify,
         active: r.active && !!src,
         canFire: !!src && statusCanFire(src, r.statusKey),

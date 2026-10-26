@@ -23,12 +23,14 @@ export function initials(name: string): string {
 export function StationBar(props: {
   station: string; location?: string; conn: { tone: "ok" | "in" | "er"; label: string }; updated: string; updatedWord: string;
   emp?: { name: string; tag: string }; lockLabel?: string; switchLabel?: string; onLock?: () => void; onSwitch?: () => void; extra?: ReactNode;
+  /** The device screens (before anybody signs in) pass their language; a session's bar reads it from the session. */
+  lang?: "ar" | "en";
 }) {
   // W3 (owner decision 7): the bar always says WHICH station and WHO — «المحطة: … · المستخدم: …» —
   // and a device that serves several stations offers «تبديل المحطة» (the S5 handover, then the
   // station choice before the next employee).
   const ctx = useContext(StationCtx);
-  const en = ctx?.user.preferredLanguage === "en";
+  const en = ctx ? ctx.user.preferredLanguage === "en" : props.lang === "en";
   const multi = ctx?.mode === "device" && (ctx.stations?.length ?? 0) > 1;
   return (
     <header className="ws-bar" data-testid="station-bar">

@@ -14,6 +14,8 @@ import { CONDITION_OPS, CONDITION_OP_LABELS, OPS_WITHOUT_VALUE, type ConditionOp
 import { normalizePhoneForWhatsApp } from "@/lib/automation/phone";
 import { MAX_STEPS, MAX_WAIT_MINUTES } from "@/lib/automation/rules";
 import { renderTemplate, TEMPLATE_MAX_LENGTH, unknownPlaceholders } from "@/lib/automation/template";
+import { DEFAULT_RULE_TEMPLATES, ruleEnglishDefault } from "@/lib/automation/employee-lang";
+import { isStaffRecipient } from "@/lib/automation/rules";
 import { PlusIco, Sec } from "../../_components/tools-ui";
 import { Bubble, useAutomationAbilities } from "./shared";
 
@@ -34,7 +36,8 @@ import { Bubble, useAutomationAbilities } from "./shared";
 type ConditionDraft = { field: string; op: ConditionOp; value: string };
 type WaitUnit = "minutes" | "hours" | "days";
 type StepDraft =
-  | { key: number; type: "whatsapp"; kind: RecipientKind; employeeId: string; phone: string; phoneName: string; template: string }
+  // templateEn: the English text of a staff step (owner language decision 3); unused for the customer / a typed number.
+  | { key: number; type: "whatsapp"; kind: RecipientKind; employeeId: string; phone: string; phoneName: string; template: string; templateEn: string }
   | { key: number; type: "wait"; amount: string; unit: WaitUnit };
 
 export type StoredRule = {
@@ -56,22 +59,11 @@ let keySeq = 1;
 const nextKey = () => keySeq++;
 
 // Internal wording by default: most rules message staff, not customers. A rule written for a
-// customer replaces the text anyway.
-const DEFAULT_TEMPLATE: Record<string, string> = {
-  "order.created": "طلب جديد رقم {{order.number}} للعميل {{customer.name}}:\n{{order.items}}\nسجله: {{actor.name}}",
-  "order.status_changed": "الطلب {{order.number}} ({{customer.name}}) صار: {{status.to}}.",
-  "delivery.recorded": "تسليم للطلب {{order.number}} ({{customer.name}}): {{delivery.quantity}} من {{delivery.item}}.",
-  "production.batch_roasted": "دفعة {{batch.number}} ({{batch.product}}) تحمصت: {{batch.greenKg}} كغ بن أخضر.",
-  "qc.batch_finalized": "نتيجة الجودة للدفعة {{batch.number}} ({{batch.product}}): {{qc.outcome}}.",
-  "packaging.completed": "تغليف الدفعة {{batch.number}}: {{pack.units}} عبوة كاملة.",
-  "production.order_created": "أمر إنتاج {{production.number}}: {{production.units}} وحدة من {{production.sku}} للطلب {{order.number}}.",
-  "sales.quote_status_changed": "عرض السعر {{quote.number}} لـ {{customer.name}}: {{quote.status}} ({{quote.total}}).",
-  "sales.task_due": "تذكير: {{task.subject}} — {{task.related}} (موعدها {{task.dueAt}}).",
-  "finance.approval_requested": "طلب اعتماد جديد ينتظرك: {{approval.summary}}\nمن: {{approval.requester}}",
-  "finance.approval_decided": "طلبك «{{approval.summary}}»: {{approval.decision}}.",
-};
+// customer replaces the text anyway. Both languages (owner language decision 3): employees receive
+// the Arabic or the English text (src/lib/automation/employee-lang.ts).
+const DEFAULT_AR: Record<string, string> = Object.fromEntries(Object.entries(DEFAULT_RULE_TEMPLATES).map(([k, v]) => [k, v.ar]));
 
-function toDraftSteps(raw: unknown): StepDraft[] {
+function toDraftSteps(raw: unknown, eventType: string): StepDraft[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((s: Record<string, unknown>) => {
     if (s.type === "wait") {
@@ -80,6 +72,8 @@ function toDraftSteps(raw: unknown): StepDraft[] {
       return { key: nextKey(), type: "wait", amount: String(m / UNIT_MINUTES[unit]), unit };
     }
     const to = (s.to ?? {}) as Record<string, string>;
+    const template = String(s.template ?? "");
+    const stored = typeof s.templateEn === "string" ? s.templateEn : "";
     return {
       key: nextKey(),
       type: "whatsapp",
@@ -87,7 +81,9 @@ function toDraftSteps(raw: unknown): StepDraft[] {
       employeeId: to.employeeId ?? "",
       phone: to.phone ?? "",
       phoneName: to.name ?? "",
-      template: String(s.template ?? ""),
+      template,
+      // A step saved before the English text existed: an untouched built-in Arabic gets the built-in English.
+      templateEn: stored || ruleEnglishDefault(eventType, template) || "",
     };
   });
 }
@@ -104,7 +100,8 @@ function defaultRecipient(event: EventDef | undefined): RecipientKind {
 
 function newMessageStep(event: EventDef | undefined): StepDraft {
   const kind = defaultRecipient(event);
-  return { key: nextKey(), type: "whatsapp", kind, employeeId: "", phone: "", phoneName: "", template: event ? DEFAULT_TEMPLATE[event.key] ?? "" : "" };
+  const d = event ? DEFAULT_RULE_TEMPLATES[event.key] : undefined;
+  return { key: nextKey(), type: "whatsapp", kind, employeeId: "", phone: "", phoneName: "", template: d?.ar ?? "", templateEn: d?.en ?? "" };
 }
 
 export function RuleEditor({ rule }: { rule: StoredRule | null }) {
@@ -123,7 +120,7 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
     rule ? toDraftConditions(rule.conditions) : [{ field: "status.to", op: "eq", value: "Ready for Shipping" }],
   );
   const [steps, setSteps] = useState<StepDraft[]>(() =>
-    rule ? toDraftSteps(rule.steps) : [newMessageStep(getEvent("order.status_changed"))],
+    rule ? toDraftSteps(rule.steps, rule.eventType) : [newMessageStep(getEvent("order.status_changed"))],
   );
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -154,8 +151,10 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
       ss.map((s) => {
         if (s.type !== "whatsapp") return s;
         const kind = allowed.includes(s.kind) ? s.kind : defaultRecipient(next);
-        const untouched = Object.values(DEFAULT_TEMPLATE).includes(s.template) || !s.template.trim();
-        return { ...s, kind, template: untouched ? DEFAULT_TEMPLATE[key] ?? "" : s.template };
+        const untouched = Object.values(DEFAULT_AR).includes(s.template) || !s.template.trim();
+        const untouchedEn = Object.values(DEFAULT_RULE_TEMPLATES).some((d) => d.en === s.templateEn) || !s.templateEn.trim();
+        const d = DEFAULT_RULE_TEMPLATES[key];
+        return { ...s, kind, template: untouched ? d?.ar ?? "" : s.template, templateEn: untouchedEn ? d?.en ?? "" : s.templateEn };
       }),
     );
   }
@@ -185,6 +184,7 @@ export function RuleEditor({ rule }: { rule: StoredRule | null }) {
           : {
               type: "whatsapp",
               template: s.template,
+              ...(isStaffRecipient(s.kind) && s.templateEn.trim() ? { templateEn: s.templateEn } : {}),
               to:
                 s.kind === "employee"
                   ? { kind: "employee", employeeId: s.employeeId }
@@ -461,19 +461,29 @@ function MessageStepFields({
 }) {
   const ar = lang === "ar";
   const ref = useRef<HTMLTextAreaElement>(null);
-  const preview = useMemo(() => renderTemplate(event, step.template, sampleContext(event), locale), [event, step.template, locale]);
+  const refEn = useRef<HTMLTextAreaElement>(null);
+  // Owner language decision 3: a staff step has an Arabic and an English text; each employee gets the
+  // one of their language («خدماتي», else the automation default, else Arabic).
+  const staff = isStaffRecipient(step.kind);
+  const [focus, setFocus] = useState<"template" | "templateEn">("template");
+  const bilingual = staff && !!step.templateEn.trim();
+  const preview = useMemo(() => renderTemplate(event, step.template, sampleContext(event), bilingual ? "ar" : locale), [event, step.template, locale, bilingual]);
+  const previewEn = useMemo(() => renderTemplate(event, step.templateEn, sampleContext(event), "en"), [event, step.templateEn]);
   const unknown = unknownPlaceholders(event, step.template);
+  const unknownEn = staff ? unknownPlaceholders(event, step.templateEn) : [];
   const phoneCheck = step.kind === "phone" && step.phone ? normalizePhoneForWhatsApp(step.phone) : null;
   const chosenEmployee = employees.find((e) => e.id === step.employeeId);
 
   function insert(key: string) {
     const token = `{{${key}}}`;
-    const el = ref.current;
-    if (!el) return onChange({ template: step.template + token });
-    const start = el.selectionStart ?? step.template.length;
+    const field = staff ? focus : "template";
+    const el = field === "templateEn" ? refEn.current : ref.current;
+    const text = step[field];
+    if (!el) return onChange({ [field]: text + token });
+    const start = el.selectionStart ?? text.length;
     const end = el.selectionEnd ?? start;
-    const next = step.template.slice(0, start) + token + step.template.slice(end);
-    onChange({ template: next });
+    const next = text.slice(0, start) + token + text.slice(end);
+    onChange({ [field]: next });
     requestAnimationFrame(() => {
       el.focus();
       el.setSelectionRange(start + token.length, start + token.length);
@@ -523,12 +533,13 @@ function MessageStepFields({
         <div className="hr-stack" style={{ gap: 6 }}>
           <span className="hr-label">{ar ? "معاينة ببيانات مثال" : "Preview with sample data"}</span>
           <Bubble text={preview} lang={lang} testId={`preview-${index}`} />
+          {staff && step.templateEn.trim() ? <Bubble text={previewEn} lang={lang} testId={`preview-en-${index}`} /> : null}
         </div>
       </div>
 
       <div className="hr-stack" style={{ gap: 6 }}>
         <label htmlFor={`tpl-${step.key}`} className="hr-label">
-          {ar ? "نص الرسالة" : "Message"} <span style={{ color: "var(--status-danger)" }}>*</span>
+          {staff ? (ar ? "النص العربي" : "Arabic text") : ar ? "نص الرسالة" : "Message"} <span style={{ color: "var(--status-danger)" }}>*</span>
         </label>
         <textarea
           ref={ref}
@@ -540,6 +551,7 @@ function MessageStepFields({
           disabled={readOnly}
           maxLength={TEMPLATE_MAX_LENGTH}
           onChange={(e) => onChange({ template: e.target.value })}
+          onFocus={() => setFocus("template")}
           className="hr-textarea"
           style={{ lineHeight: "22px" }}
         />
@@ -553,6 +565,40 @@ function MessageStepFields({
             <bdi dir="ltr">{unknown.map((k) => `{{${k}}}`).join(" ")}</bdi>
           </p>
         )}
+        {staff ? (
+          <>
+            <label htmlFor={`tpl-en-${step.key}`} className="hr-label" style={{ marginTop: 8 }}>
+              {ar ? "النص الإنجليزي" : "English text"}
+            </label>
+            <textarea
+              ref={refEn}
+              id={`tpl-en-${step.key}`}
+              data-testid={`template-en-${index}`}
+              rows={4}
+              dir="ltr"
+              lang="en"
+              value={step.templateEn}
+              disabled={readOnly}
+              maxLength={TEMPLATE_MAX_LENGTH}
+              onChange={(e) => onChange({ templateEn: e.target.value })}
+              onFocus={() => setFocus("templateEn")}
+              className="hr-textarea"
+              style={{ lineHeight: "22px" }}
+            />
+            <span className="hr-caption">
+              <span className="hr-num">{step.templateEn.length} / {TEMPLATE_MAX_LENGTH}</span>
+              {ar
+                ? " · يستقبل كل موظف النص بلغته في «خدماتي»، أو بلغة رسائل الموظفين في إعدادات الأتمتة · فارغ = النص العربي"
+                : " · each employee receives the text in the language set on «My services», else the employee message language in the automation settings · empty = the Arabic text"}
+            </span>
+            {unknownEn.length > 0 && (
+              <p className="hr-caption" style={{ margin: 0, color: "var(--status-danger)", fontWeight: 600 }} role="alert">
+                {ar ? "متغيرات غير معروفة في النص الإنجليزي: " : "Unknown variables in the English text: "}
+                <bdi dir="ltr">{unknownEn.map((k) => `{{${k}}}`).join(" ")}</bdi>
+              </p>
+            )}
+          </>
+        ) : null}
         {!readOnly && (
           <div className="tl-vars">
             {event.variables.map((v) => (

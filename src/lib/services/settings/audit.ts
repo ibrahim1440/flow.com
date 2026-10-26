@@ -4,7 +4,9 @@
 // nothing in the code updates or deletes a row.
 import type { Prisma } from "@/generated/prisma/client";
 
-export type SettingsSection = "production" | "inventory" | "invoicing";
+// "organisation" (the sign-in line) and "automation" (the employee message language): migration
+// 20261110090000_i18n_preferences widened the section CHECK.
+export type SettingsSection = "production" | "inventory" | "invoicing" | "organisation" | "automation";
 export type SettingsAction =
   | "SETTINGS_UPDATED" | "ROASTER_CREATED" | "ROASTER_UPDATED" | "ROASTER_STATUS_CHANGED"
   | "MAINTENANCE_CREATED" | "MAINTENANCE_UPDATED" | "OPERATOR_ASSIGNED" | "OPERATOR_UNASSIGNED"

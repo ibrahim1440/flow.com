@@ -8,7 +8,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { OpsRoot, PageHeader, Notice } from "@/components/ops/ui";
-import { localizeApiError } from "@/lib/i18n/api-errors";
+import { localizeApiError, networkErrorText } from "@/lib/i18n/api-errors";
 import { useI18n } from "@/lib/i18n/context";
 import "./accounting.css";
 
@@ -35,15 +35,24 @@ export function useLang() {
   return { lang, ar: lang !== "en", L };
 }
 
+/** A journal's source module in the viewer's language (the list and the entry page). */
+const JOURNAL_SOURCE: Record<string, [string, string]> = {
+  manual: ["يدوي", "Manual"], hr: ["الموارد البشرية", "HR"], accounting: ["المحاسبة", "Accounting"], sales: ["المبيعات", "Sales"],
+  purchasing: ["المشتريات", "Purchasing"], inventory: ["المخزون", "Inventory"], production: ["الإنتاج", "Production"],
+  payroll: ["الرواتب", "Payroll"], commissions: ["العمولات", "Commissions"], pos: ["نقاط البيع", "POS"],
+};
+export const sourceLabel = (m: string, L: (ar: string, en: string) => string) => { const e = JOURNAL_SOURCE[m]; return e ? L(e[0], e[1]) : m; };
+
 /** fetch for the accounting pages: JSON in and out; a refusal throws its text in the viewer's language
  *  (the body's Arabic, else the shared Arabic table, else the English — src/lib/i18n/api-errors.ts). */
 export async function acctFetch<T = unknown>(url: string, init?: { method?: string; json?: unknown }): Promise<T> {
+  // A request that never reached the server reads in the page's language, not the browser's "Failed to fetch".
   const res = await fetch(url, {
     method: init?.method ?? (init?.json !== undefined ? "POST" : "GET"),
     headers: init?.json !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: init?.json !== undefined ? JSON.stringify(init.json) : undefined,
     cache: "no-store",
-  });
+  }).catch(() => { throw new Error(networkErrorText()); });
   const ct = res.headers.get("content-type") ?? "";
   const body = ct.includes("application/json") ? await res.json().catch(() => ({})) : null;
   if (!res.ok) throw new Error(localizeApiError(body) ?? `HTTP ${res.status}`);

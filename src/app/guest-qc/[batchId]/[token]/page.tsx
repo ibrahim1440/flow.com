@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
-import { GuestShell, type GuestLang } from "../../../guest-cupping/GuestShell";
+import { GuestShell } from "../../../guest-cupping/GuestShell";
+import { useGuestLang } from "@/app/guest-cupping/guest-lang";
 import "@/components/ops/ops.css";
 import "./guest-qc.css";
 
@@ -42,7 +43,8 @@ export default function GuestQCPage({ params, searchParams }: { params: Promise<
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [lang, setLang] = useState<GuestLang>("ar");
+  // Owner language decision 2: the guest's browser language first; the toggle switches.
+  const [lang, setLang] = useGuestLang();
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
 
   const [testerName, setTesterName] = useState(presetName);

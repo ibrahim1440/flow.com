@@ -14,6 +14,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { buildDefaultPermissions, hasSubPrivilege, parsePermissions } from "@/lib/auth-shared";
 import type { DynamicRecipient, Lang } from "./catalog";
 import type { RenderContext } from "./template";
+import { asMsgLang, staffIdOf, type MsgLang } from "./employee-lang";
 
 type Db = Prisma.TransactionClient;
 
@@ -580,6 +581,18 @@ export async function resolveEventContext(db: Db, e: StoredEvent, lang: Lang): P
 /** A specific employee chosen in a step. */
 export async function employeeRecipient(db: Db, employeeId: string): Promise<Person[]> {
   return employeePerson(await employee(db, employeeId));
+}
+
+/**
+ * Owner language decision 3: each employee's own WhatsApp message language (Employee.whatsappLanguage,
+ * null = «حسب إعداد النظام»), for the employee recipients among `people`. One query; customers and
+ * typed numbers are not looked up.
+ */
+export async function employeeMessageLangs(db: Db, people: Person[]): Promise<Map<string, MsgLang | null>> {
+  const ids = [...new Set(people.map((p) => staffIdOf(p.key)).filter((id): id is string => !!id))];
+  if (ids.length === 0) return new Map();
+  const rows = await db.employee.findMany({ where: { id: { in: ids } }, select: { id: true, whatsappLanguage: true } });
+  return new Map(rows.map((r) => [r.id, asMsgLang(r.whatsappLanguage)]));
 }
 
 /** «المالك / المدير»: every active employee holding the admin role (status notifications). */

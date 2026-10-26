@@ -85,7 +85,7 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
       if (!po) return;
       await notify(tx, {
         event: "production.order_created", dedupeKey: po.id, actorId, entity,
-        facts: { productionNumber: po.productionNumber, units: po.targetUnits, sku: po.productSku.nameAr || po.productSku.name || po.productSku.skuCode, greenKg: Math.round(po.expectedGreenBeanKg * 100) / 100, productionOrderId: po.id },
+        facts: { productionNumber: po.productionNumber, units: po.targetUnits, sku: po.productSku.nameAr || po.productSku.name || po.productSku.skuCode, skuEn: po.productSku.name || po.productSku.skuCode, greenKg: Math.round(po.expectedGreenBeanKg * 100) / 100, productionOrderId: po.id },
       });
       return;
     }
@@ -94,7 +94,7 @@ export async function notifyFromAutomationEvent(tx: Tx, e: Input): Promise<void>
       if (!b || b.status !== "Pending QC") return;
       await notify(tx, {
         event: "quality.batch_pending", dedupeKey: b.id, actorId, entity,
-        facts: { batchNumber: b.batchNumber, productName: b.product ? b.product.productNameAr || b.product.productNameEn : "" },
+        facts: { batchNumber: b.batchNumber, productName: b.product ? b.product.productNameAr || b.product.productNameEn : "", productNameEn: b.product?.productNameEn ?? "" },
       });
       return;
     }

@@ -17,14 +17,14 @@ import {
 } from "../messaging-rules";
 
 export const JOURNEY_KINDS = ["ABANDONED_CART", "WELCOME", "POST_PURCHASE", "REVIEW_REQUEST", "REPLENISH", "WINBACK", "CROSS_SELL"] as const;
-export const JOURNEY_LABELS: Record<string, { ar: string; implemented: boolean; noteAr: string }> = {
-  ABANDONED_CART: { ar: "استعادة السلة المتروكة", implemented: true, noteAr: "يعمل عند وصول بيانات السلال من المتجر." },
-  WELCOME: { ar: "الترحيب بالعملاء الجدد", implemented: false, noteAr: "المرحلة الخامسة — بعد اعتماد قالب ترحيب." },
-  POST_PURCHASE: { ar: "متابعة ما بعد الشراء", implemented: false, noteAr: "المرحلة الخامسة." },
-  REVIEW_REQUEST: { ar: "طلب التقييم بعد الاستلام", implemented: false, noteAr: "يحتاج حالة التسليم من المتجر." },
-  REPLENISH: { ar: "تذكير إعادة الشراء", implemented: false, noteAr: "يعتمد على دورة إعادة الشراء المدخلة لكل منتج." },
-  WINBACK: { ar: "استعادة العملاء غير النشطين", implemented: false, noteAr: "المرحلة الخامسة." },
-  CROSS_SELL: { ar: "منتجات مرتبطة", implemented: false, noteAr: "المرحلة الخامسة." },
+export const JOURNEY_LABELS: Record<string, { ar: string; en: string; implemented: boolean; noteAr: string; noteEn: string }> = {
+  ABANDONED_CART: { ar: "استعادة السلة المتروكة", en: "Abandoned cart recovery", implemented: true, noteAr: "يعمل عند وصول بيانات السلال من المتجر.", noteEn: "Runs once cart data arrives from the store." },
+  WELCOME: { ar: "الترحيب بالعملاء الجدد", en: "Welcome new customers", implemented: false, noteAr: "المرحلة الخامسة — بعد اعتماد قالب ترحيب.", noteEn: "Phase 5 — after a welcome template is approved." },
+  POST_PURCHASE: { ar: "متابعة ما بعد الشراء", en: "Post-purchase follow-up", implemented: false, noteAr: "المرحلة الخامسة.", noteEn: "Phase 5." },
+  REVIEW_REQUEST: { ar: "طلب التقييم بعد الاستلام", en: "Review request after delivery", implemented: false, noteAr: "يحتاج حالة التسليم من المتجر.", noteEn: "Needs the delivery status from the store." },
+  REPLENISH: { ar: "تذكير إعادة الشراء", en: "Repurchase reminder", implemented: false, noteAr: "يعتمد على دورة إعادة الشراء المدخلة لكل منتج.", noteEn: "Based on the repurchase cycle entered for each product." },
+  WINBACK: { ar: "استعادة العملاء غير النشطين", en: "Win back inactive customers", implemented: false, noteAr: "المرحلة الخامسة.", noteEn: "Phase 5." },
+  CROSS_SELL: { ar: "منتجات مرتبطة", en: "Related products", implemented: false, noteAr: "المرحلة الخامسة.", noteEn: "Phase 5." },
 };
 
 // ── Consent ledger ─────────────────────────────────────────────────────────────────────────

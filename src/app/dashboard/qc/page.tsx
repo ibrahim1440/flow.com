@@ -460,7 +460,7 @@ export default function QCPage() {
 
       const data = await res.json();
       if (!res.ok) { toast.error(localizeApiError(data, lang) || t("error")); return; }
-      toast.success(editingRecordId ? "QC record corrected." : t("saveRecord"));
+      toast.success(editingRecordId ? (lang === "ar" ? "صُحّح سجل الجودة." : "QC record corrected.") : t("saveRecord"));
       if (editingRecordId) {
         setCorrectionsCache((prev) => {
           const next = { ...prev };
@@ -1098,7 +1098,7 @@ export default function QCPage() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeForm}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-extrabold text-charcoal mb-1">
-              {editingRecordId ? "Correct QC Record" : t("submitQcRecord")}
+              {editingRecordId ? (lang === "ar" ? "تصحيح سجل الجودة" : "Correct QC Record") : t("submitQcRecord")}
             </h2>
             <p className="text-xs text-brown/60 mb-4">{t("qcFormSubtitle")}</p>
             <form onSubmit={handleSubmit} className="space-y-3">
@@ -1132,9 +1132,8 @@ export default function QCPage() {
                   <Select value={form.processing} onChange={(e) => setForm({ ...form, processing: e.target.value })}
                     className="w-full px-3 py-2 border-2 border-border rounded-xl focus:border-orange focus:ring-2 focus:ring-orange/20 outline-none transition-colors">
                     <option value="">—</option>
-                    <option>Natural</option><option>Washed</option><option>Honey</option>
-                    <option>Anaerobic</option><option>Innoculated</option><option>Co-Fermented</option>
-                    <option>Extended Natural</option>
+                    {/* The stored value stays the English method name; only the label follows the language. */}
+                    {([["Natural", "مجففة"], ["Washed", "مغسولة"], ["Honey", "عسلية"], ["Anaerobic", "لاهوائية"], ["Innoculated", "ملقّحة"], ["Co-Fermented", "تخمير مشترك"], ["Extended Natural", "مجففة ممتدة"]] as const).map(([v, ar]) => <option key={v} value={v}>{lang === "ar" ? ar : v}</option>)}
                   </Select>
                 </div>
               </div>

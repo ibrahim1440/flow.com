@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { SectionPages } from "@/components/shell/page-context";
 import "./hr.css";
 import { useI18n } from "@/lib/i18n/context";
+import { localizeApiError, networkErrorText } from "@/lib/i18n/api-errors";
 import { hrTr, monthLabel, type HrKey } from "@/lib/i18n/hr";
 import type { Lang } from "@/lib/i18n/translations";
 
@@ -45,9 +46,8 @@ export class HrApiError extends Error {
  * exact English as `errorEn` (src/lib/hr/http.ts). Other routes may return one `error` only.
  */
 export function pickError(body: unknown, status: number, lang: Lang = docLang()): string {
-  const b = (body ?? {}) as { error?: string; errorEn?: string };
-  if (lang === "en") return b.errorEn ?? b.error ?? `HTTP ${status}`;
-  return b.error ?? b.errorEn ?? `HTTP ${status}`;
+  // The shared picker: the body's Arabic (errorAr, an Arabic error, the shared table) for Arabic, errorEn for English.
+  return localizeApiError(body, lang) ?? `HTTP ${status}`;
 }
 
 export async function hrFetch<T = unknown>(url: string, init?: { method?: string; json?: unknown; form?: FormData }): Promise<T> {
@@ -56,7 +56,7 @@ export async function hrFetch<T = unknown>(url: string, init?: { method?: string
     headers: init?.json !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: init?.form ?? (init?.json !== undefined ? JSON.stringify(init.json) : undefined),
     cache: "no-store",
-  });
+  }).catch(() => { throw new HrApiError(networkErrorText(), 0, null); });
   const ct = res.headers.get("content-type") ?? "";
   const body = ct.includes("application/json") ? await res.json().catch(() => ({})) : null;
   if (!res.ok) throw new HrApiError(pickError(body, res.status), res.status, (body as { code?: string })?.code ?? null);

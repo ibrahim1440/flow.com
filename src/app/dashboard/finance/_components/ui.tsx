@@ -10,6 +10,7 @@
 // primitives (`hr-btn`, `hr-table`, `hr-notice`, `hr-state`, the HR Dialog) with finance.css for
 // the few finance-only blocks. No colour, size or pattern here is new: tokens only.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { localizeApiError, networkErrorText } from "@/lib/i18n/api-errors";
 import { useI18n } from "@/lib/i18n/context";
 import { formatSAR } from "@/lib/finance/money";
 import { Dialog as HrDialog } from "@/components/hr/ui";
@@ -54,9 +55,10 @@ export async function api<T = unknown>(url: string, init?: RequestInit & { json?
     ...init,
     headers: init?.json !== undefined ? { "Content-Type": "application/json", ...(init?.headers ?? {}) } : init?.headers,
     body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
-  });
+  }).catch(() => { throw new ApiError(networkErrorText(), 0); });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError((data && data.error) || `Request failed (${res.status})`, res.status, data?.details);
+  // The refusal in the page's language (the body's Arabic, else the shared table), as the other modules do.
+  if (!res.ok) throw new ApiError((data && localizeApiError(data)) || `Request failed (${res.status})`, res.status, data?.details);
   return data as T;
 }
 

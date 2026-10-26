@@ -12,9 +12,12 @@ import {
 import { conflictMessageAr, conflictMessageEn, effectivePermissions, payrollDutyConflicts, PAYROLL_DUTY_AR, PAYROLL_DUTY_EN, REVIEWED_GRANT_SUB_AR, REVIEWED_GRANT_SUB_EN, type PayrollSodDuty, type ReviewedGrantSub } from "@/lib/hr/sod";
 import { hrText } from "@/lib/hr/messages-en";
 import { formatDate } from "@/lib/utils";
+import { shortDate } from "@/components/d21/format";
+import { moduleLabel, subLabel } from "@/lib/users/catalog";
 import { useUser } from "../../user-context";
 import { MfaPanel } from "../MfaPanel";
 import { useI18n } from "@/lib/i18n/context";
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { PIN_LENGTH } from "@/lib/pin-policy";
 import { Btn, Dot, Empty, Field, Flag, Notice, OpsRoot, PageHeader } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
@@ -72,6 +75,12 @@ const ROUTE_OPTIONS: { value: string; label: string; module: string | null }[] =
   { value: "/dashboard/labels",      label: "Labels",          module: "labels" },
   { value: "/dashboard/employees",   label: "Employees",       module: "employees" },
 ];
+
+/** A landing page's name in the viewer's language (the workspace has no module of its own). */
+function routeOptionLabel(opt: { label: string; module: string | null }, lang: "ar" | "en"): string {
+  if (lang === "en") return opt.label;
+  return opt.module ? moduleLabel(opt.module, "ar") : "مساحة عملي";
+}
 
 const ACCESS_ICONS: Record<AccessLevel, typeof Pencil> = {
   edit: Pencil,
@@ -217,7 +226,7 @@ function EmployeesInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) { const d = await res.json(); showToast(false, (ar ? d.error : d.errorEn ?? d.error) ?? "Failed to create employee"); return; }
+      if (!res.ok) { const d = await res.json(); showToast(false, localizeApiError(d, lang) ?? L("تعذّر إنشاء الموظف.", "Failed to create employee")); return; }
       const created = await res.json();
       pendingNote = created.pendingApproval ?? null;
       // Option A: a new login is nobody's yet, so payroll / administration duties are not granted.
@@ -235,14 +244,14 @@ function EmployeesInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) { const d = await res.json(); showToast(false, (ar ? d.error : d.errorEn ?? d.error) ?? "Failed to update employee"); return; }
+      if (!res.ok) { const d = await res.json(); showToast(false, localizeApiError(d, lang) ?? L("تعذّر تحديث الموظف.", "Failed to update employee")); return; }
       pendingNote = (await res.json()).pendingApproval ?? null;
     }
     setShowForm(false);
     // Owner decision 1b: a grant of a segregated duty (or the admin role) waits for a second editor;
     // so do inventory adjust / override (Option A) and a credential change of a sensitive account.
     if (pendingNote) showToast(true, pendingToast(pendingNote as PendingApproval, ar));
-    else showToast(true, editingId ? "Employee updated successfully." : "Employee created successfully.");
+    else showToast(true, editingId ? L("حُدّثت بيانات الموظف.", "Employee updated successfully.") : L("أُنشئ الموظف.", "Employee created successfully."));
     loadEmployees();
     void loadPermissionRequests();
   }
@@ -264,7 +273,7 @@ function EmployeesInner() {
     const url = decision === "WITHDRAW" ? `/api/employees/permission-requests/${req.id}/withdraw` : decision === "ACKNOWLEDGE" ? `/api/employees/permission-requests/${req.id}/acknowledge` : `/api/employees/permission-requests/${req.id}/decide`;
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(decision === "WITHDRAW" || decision === "ACKNOWLEDGE" ? {} : { decision, expected: req.fingerprint, note, attested: decision === "APPROVE" }) });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(false, (ar ? d.error : d.errorEn ?? d.error) ?? "Failed"); return; }
+    if (!res.ok) { showToast(false, localizeApiError(d, lang) ?? L("تعذّر التنفيذ.", "Failed")); return; }
     showToast(true, decision === "ACKNOWLEDGE" ? (ar ? "سُجّلت مراجعة السحب." : "Revocation reviewed.") : decision === "APPROVE" ? (ar ? "اعتُمد المنح وطُبّق." : "Grant approved and applied.") : decision === "REJECT" ? (ar ? "رُفض الطلب." : "Request rejected.") : (ar ? "سُحب الطلب." : "Request withdrawn."));
     loadEmployees();
     void loadPermissionRequests();
@@ -277,12 +286,12 @@ function EmployeesInner() {
       const res = await fetch(`/api/employees/${editingId}`, { method: "DELETE" });
       if (!res.ok) {
         const d = await res.json();
-        showToast(false, d.error ?? "Failed to delete employee.");
+        showToast(false, localizeApiError(d, lang) ?? L("تعذّر حذف الموظف.", "Failed to delete employee."));
         setDeleteConfirm(false);
         return;
       }
       setShowForm(false);
-      showToast(true, "Employee deleted successfully.");
+      showToast(true, L("حُذف الموظف.", "Employee deleted successfully."));
       loadEmployees();
     } finally {
       setDeleting(false);
@@ -308,7 +317,8 @@ function EmployeesInner() {
 
   // Compute label for current employee default route for cards
   function routeLabel(route: string) {
-    return ROUTE_OPTIONS.find((r) => r.value === route)?.label ?? "Dashboard";
+    const opt = ROUTE_OPTIONS.find((r) => r.value === route);
+    return opt ? routeOptionLabel(opt, lang) : L("لوحة التشغيل", "Dashboard");
   }
 
   return (
@@ -449,7 +459,7 @@ function EmployeesInner() {
                     <td className="hr-hide-compact">
                       <span className="emp-route"><Navigation size={12} aria-hidden="true" /> {routeLabel(emp.defaultRoute || "/dashboard")}</span>
                     </td>
-                    <td className="hr-hide-compact hr-num hr-muted">{formatDate(emp.createdAt)}</td>
+                    <td className="hr-hide-compact hr-num hr-muted">{ar ? shortDate(emp.createdAt, "ar") : formatDate(emp.createdAt)}</td>
                     <td>
                       <span className="emp-status">
                         {status}
@@ -568,7 +578,7 @@ function EmployeesInner() {
                 const accessible = !opt.module || opt.module === "dashboard" || hasModuleAccess(permissions, opt.module);
                 return (
                   <option key={opt.value} value={opt.value} disabled={!accessible}>
-                    {opt.label}{!accessible ? ` (${t("noAccess")})` : ""}
+                    {routeOptionLabel(opt, lang)}{!accessible ? ` (${t("noAccess")})` : ""}
                   </option>
                 );
               })}
@@ -600,8 +610,8 @@ function EmployeesInner() {
                 return (
                   <div key={mod} className="emp-perm">
                     <div className="emp-permrow">
-                      <span className="emp-strong">{MODULE_LABELS[mod]}</span>
-                      <span className="ops-seg" role="group" aria-label={MODULE_LABELS[mod]}>
+                      <span className="emp-strong">{ar ? moduleLabel(mod, "ar") : MODULE_LABELS[mod]}</span>
+                      <span className="ops-seg" role="group" aria-label={ar ? moduleLabel(mod, "ar") : MODULE_LABELS[mod]}>
                         {(["edit", "view", "none"] as AccessLevel[]).map((level) => {
                           const Icon = ACCESS_ICONS[level];
                           const active = perm.access === level;
@@ -630,7 +640,7 @@ function EmployeesInner() {
                           return (
                             <label key={sub.key} className={enabled ? "is-on" : undefined}>
                               <input type="checkbox" checked={enabled} onChange={() => toggleSub(mod, sub.key)} />
-                              <span>{sub.label}</span>
+                              <span>{subLabel(mod, sub.key, lang)}</span>
                             </label>
                           );
                         })}

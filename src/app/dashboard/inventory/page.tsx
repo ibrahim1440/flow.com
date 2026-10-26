@@ -123,7 +123,7 @@ function BeanForm({
   function TranslateBtn({ sourceKey, targetKey, targetLang }: { sourceKey: keyof FormState; targetKey: keyof FormState; targetLang: "ar" | "en" }) {
     const busy = translating[targetKey];
     const hasSource = !!(form[sourceKey] as string)?.trim();
-    const label = targetLang === "ar" ? t("translateToAr") : "Translate to English";
+    const label = targetLang === "ar" ? t("translateToAr") : L("ترجمة إلى الإنجليزية", "Translate to English");
     return (
       <Btn size="sm" variant="ghost" className="hr-iconbtn" title={label} aria-label={label}
         onClick={() => translate(sourceKey, targetKey, targetLang)} disabled={busy || !hasSource}>
@@ -163,7 +163,7 @@ function BeanForm({
             </Field>
             <Field label={labelAr}>
               <span className="stk-pair">
-                <input className="hr-input" dir="rtl" placeholder="اختياري" value={form[arKey] as string} onChange={(e) => set(arKey, e.target.value)} />
+                <input className="hr-input" dir="rtl" placeholder={L("اختياري", "Optional")} value={form[arKey] as string} onChange={(e) => set(arKey, e.target.value)} />
                 <TranslateBtn sourceKey={enKey} targetKey={arKey} targetLang="ar" />
               </span>
             </Field>

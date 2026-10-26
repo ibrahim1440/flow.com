@@ -7,7 +7,7 @@ import { Btn, Dot, Empty, OpsBanner, OpsLoading, OpsRoot, useL } from "@/compone
 import { useD21Phone } from "@/components/shell/page-context";
 import { api, useLang } from "../sales/_components/ui";
 import { EVENT_GROUPS, getEvent, RECIPIENT_LABELS, type RecipientKind } from "@/lib/automation/catalog";
-import { AutomationHeader, LoadError, type Connection, useAutomationAbilities } from "./_components/shared";
+import { AutomationHeader, EmployeeLanguageSetting, LoadError, type Connection, useAutomationAbilities } from "./_components/shared";
 import { PlusIco, SettingsFrame } from "../_components/tools-ui";
 
 /**
@@ -169,6 +169,7 @@ export default function AutomationRulesPage() {
             </div>
           </>
         ) : null}
+        {rows ? <EmployeeLanguageSetting lang={lang} /> : null}
       </SettingsFrame>
     </OpsRoot>
   );

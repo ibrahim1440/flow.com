@@ -183,6 +183,7 @@ export function Alert({
   children: ReactNode;
   onDismiss?: () => void;
 }) {
+  const lang = useLang();
   if (!children) return null;
   const tone =
     kind === "error"
@@ -201,7 +202,7 @@ export function Alert({
     >
       <span className="flex-1">{children}</span>
       {onDismiss && (
-        <button onClick={onDismiss} className="opacity-60 hover:opacity-100 font-black" aria-label="Dismiss">
+        <button onClick={onDismiss} className="opacity-60 hover:opacity-100 font-black" aria-label={lang === "ar" ? "إخفاء" : "Dismiss"}>
           ×
         </button>
       )}
@@ -231,10 +232,11 @@ export function EmptyState({ children }: { children: ReactNode }) {
 }
 
 export function Spinner() {
+  const lang = useLang();
   return (
     <div data-ui="spinner" className="flex items-center justify-center h-64" role="status" aria-live="polite">
       <div className="h-10 w-10 animate-spin rounded-full border-4 border-oo-action-primary border-t-transparent" />
-      <span className="sr-only">Loading</span>
+      <span className="sr-only">{lang === "ar" ? "جارٍ التحميل" : "Loading"}</span>
     </div>
   );
 }
@@ -760,6 +762,7 @@ export function Modal({
   wide?: boolean;
 }) {
   const box = useModalFocus(onClose);
+  const lang = useLang();
 
   return (
     <div
@@ -783,7 +786,7 @@ export function Modal({
           <h2 className="text-lg font-extrabold text-oo-text-primary">{title}</h2>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={lang === "ar" ? "إغلاق" : "Close"}
             className="text-oo-text-muted hover:text-oo-text-primary font-black text-xl leading-none px-2"
           >
             ×

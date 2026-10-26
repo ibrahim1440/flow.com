@@ -225,17 +225,17 @@ export function missingEnv(p: PlatformDef, env: Record<string, string | undefine
 }
 
 /** Pre-publish warnings for one platform variant: caption length, hashtags, media. */
-export function variantWarnings(platform: string, caption: string, hashtags: string[], mediaKinds: string[]): string[] {
+export function variantWarnings(platform: string, caption: string, hashtags: string[], mediaKinds: string[], lang: "ar" | "en" = "ar"): string[] {
   const p = PLATFORM[platform];
   const out: string[] = [];
   if (!p?.limits) return out;
   const text = [caption, hashtags.map((h) => `#${h.replace(/^#/, "")}`).join(" ")].filter(Boolean).join("\n\n");
-  if (p.limits.captionMax && [...text].length > p.limits.captionMax) out.push(`النص أطول من حد ${p.ar} (${p.limits.captionMax} حرفاً).`);
-  if (p.limits.hashtagsMax && hashtags.length > p.limits.hashtagsMax) out.push(`عدد الوسوم يتجاوز حد ${p.ar} (${p.limits.hashtagsMax}).`);
+  if (p.limits.captionMax && [...text].length > p.limits.captionMax) out.push(lang === "en" ? `The text is longer than the ${p.en} limit (${p.limits.captionMax} characters).` : `النص أطول من حد ${p.ar} (${p.limits.captionMax} حرفاً).`);
+  if (p.limits.hashtagsMax && hashtags.length > p.limits.hashtagsMax) out.push(lang === "en" ? `More hashtags than the ${p.en} limit (${p.limits.hashtagsMax}).` : `عدد الوسوم يتجاوز حد ${p.ar} (${p.limits.hashtagsMax}).`);
   const needsMedia = ["INSTAGRAM", "TIKTOK", "YOUTUBE", "PINTEREST", "SNAPCHAT"].includes(platform);
-  if (needsMedia && mediaKinds.length === 0) out.push(`${p.ar} يتطلب صورة أو فيديو.`);
+  if (needsMedia && mediaKinds.length === 0) out.push(lang === "en" ? `${p.en} needs an image or a video.` : `${p.ar} يتطلب صورة أو فيديو.`);
   if (platform === "TIKTOK" || platform === "YOUTUBE") {
-    if (mediaKinds.length && !mediaKinds.includes("video")) out.push(`${p.ar} يحتاج فيديو.`);
+    if (mediaKinds.length && !mediaKinds.includes("video")) out.push(lang === "en" ? `${p.en} needs a video.` : `${p.ar} يحتاج فيديو.`);
   }
   return out;
 }
@@ -252,3 +252,92 @@ export const ASPECT_GUIDE: { platform: string; format: string; ratio: string; px
   { platform: "LINKEDIN", format: "منشور", ratio: "1.91:1 أو 1:1", px: "1200×627" },
   { platform: "PINTEREST", format: "دبوس", ratio: "2:3", px: "1000×1500" },
 ];
+
+/**
+ * The English of the registry's Arabic notes and requirements (the integrations screen in English).
+ * Keyed by the Arabic text exactly as written above; a missing entry falls back to the Arabic.
+ */
+const PLATFORM_TEXT_EN: Record<string, string> = {
+  "نشر نص/رابط/صورة على الصفحة عبر Graph API (/{page-id}/feed و /photos).": "Publishes text, links and images to the Page through the Graph API (/{page-id}/feed and /photos).",
+  "Meta Marketing API — قراءة الحملات والإنفاق في المرحلة الثالثة.": "Meta Marketing API — reading campaigns and spend comes in phase 3.",
+  "تطبيق Meta للمطورين مرتبط بـ Business Manager": "A Meta developer app linked to Business Manager",
+  "صلاحيات pages_manage_posts و pages_read_engagement (تتطلب App Review)": "The pages_manage_posts and pages_read_engagement permissions (App Review required)",
+  "Page access token طويل الأمد": "A long-lived Page access token",
+  "نشر صورة عبر Content Publishing API (إنشاء حاوية ثم media_publish). القصص والريلز يدوياً في هذا الإصدار.": "Publishes an image through the Content Publishing API (create a container, then media_publish). Stories and Reels are manual in this release.",
+  "ضمن Meta Marketing API.": "Part of the Meta Marketing API.",
+  "حساب Instagram احترافي مرتبط بصفحة فيسبوك": "A professional Instagram account linked to a Facebook Page",
+  "صلاحية instagram_content_publish (App Review)": "The instagram_content_publish permission (App Review)",
+  "الصورة برابط عام HTTPS يمكن لـ Meta جلبه": "The image at a public HTTPS URL that Meta can fetch",
+  "Content Posting API يتطلب تدقيق التطبيق؛ قبل التدقيق يُنشر المحتوى خاصاً فقط، لذا النشر يدوي حالياً.": "The Content Posting API requires an app audit; before it, content can only be posted privately, so publishing is manual for now.",
+  "TikTok Business API (REST مباشر؛ حزمة SDK الرسمية غير مؤكدة المصدر — انظر OSS-VETTING).": "TikTok Business API (direct REST; the official SDK's provenance is unconfirmed — see OSS-VETTING).",
+  "حساب TikTok for Business": "A TikTok for Business account",
+  "تطبيق مطور مدقَّق لنشر عام": "An audited developer app for public posting",
+  "حساب إعلاني ووصول Marketing API": "An ad account and Marketing API access",
+  "لا يوجد API عام لنشر القصص العضوية للحسابات العامة؛ النشر يدوي.": "There is no public API for posting organic Stories from public accounts; publishing is manual.",
+  "Snapchat Marketing API (OAuth2، REST).": "Snapchat Marketing API (OAuth2, REST).",
+  "Snapchat Business Manager": "Snapchat Business Manager",
+  "تطبيق OAuth معتمد للـ Marketing API": "An approved OAuth app for the Marketing API",
+  "نشر التغريدات عبر X API v2 يتطلب باقة مدفوعة؛ يدوي حتى يُعتمد الاشتراك.": "Posting through X API v2 needs a paid plan; manual until the subscription is approved.",
+  "X Ads API يتطلب موافقة منفصلة.": "The X Ads API needs a separate approval.",
+  "اشتراك X API (Basic أو أعلى) للكتابة": "An X API subscription (Basic or higher) to write",
+  "موافقة X Ads API للإعلانات": "X Ads API approval for ads",
+  "رفع الفيديو عبر YouTube Data API يحتاج OAuth وحصة يومية؛ يدوي في هذا الإصدار.": "Uploading video through the YouTube Data API needs OAuth and a daily quota; manual in this release.",
+  "إعلانات يوتيوب عبر Google Ads API.": "YouTube ads through the Google Ads API.",
+  "مشروع Google Cloud مع YouTube Data API v3": "A Google Cloud project with YouTube Data API v3",
+  "شاشة موافقة OAuth موثّقة": "A verified OAuth consent screen",
+  "Posts API لصفحات الشركات يتطلب Community Management API المعتمد.": "The Posts API for company pages needs an approved Community Management API.",
+  "صفحة شركة": "A company page",
+  "اعتماد LinkedIn Community Management API": "LinkedIn Community Management API approval",
+  "Pinterest API v5 يتيح إنشاء الدبابيس بعد اعتماد التطبيق؛ يدوي حالياً.": "Pinterest API v5 allows creating Pins once the app is approved; manual for now.",
+  "حساب Pinterest للأعمال": "A Pinterest business account",
+  "تطبيق Pinterest معتمد بصلاحية pins:write": "An approved Pinterest app with the pins:write scope",
+  "منشورات الملف التجاري عبر Business Profile APIs تتطلب طلب وصول من Google.": "Business Profile posts through the Business Profile APIs need an access request to Google.",
+  "ملف تجاري موثّق": "A verified Business Profile",
+  "الموافقة على Business Profile APIs": "Approval for the Business Profile APIs",
+  "قراءة الحملات والإنفاق والنتائج (ads_read)، ثم التعديل (ads_management) بموافقة.": "Reads campaigns, spend and results (ads_read), then edits them (ads_management) with an approval.",
+  "حساب إعلاني في Business Manager": "An ad account in Business Manager",
+  "Marketing API: ads_read ثم ads_management (App Review)": "Marketing API: ads_read, then ads_management (App Review)",
+  "TikTok Business API — التقارير ثم إدارة الحملات.": "TikTok Business API — reports, then campaign management.",
+  "TikTok Ads Manager": "TikTok Ads Manager",
+  "وصول Marketing API للتطبيق": "Marketing API access for the app",
+  "Snapchat Marketing API — الإحصاءات ثم الإدارة.": "Snapchat Marketing API — statistics, then management.",
+  "حساب إعلاني": "An ad account",
+  "تطبيق OAuth": "An OAuth app",
+  "Google Ads API عبر REST الرسمي (لا مكتبة Node رسمية؛ انظر OSS-VETTING).": "Google Ads API through the official REST interface (no official Node library; see OSS-VETTING).",
+  "حساب Google Ads (MCC يُفضّل)": "A Google Ads account (an MCC is preferred)",
+  "Developer token بوصول Basic على الأقل": "A developer token with at least Basic access",
+  "OAuth": "OAuth",
+  "يتطلب موافقة X Ads API.": "Needs X Ads API approval.",
+  "موافقة X Ads API": "X Ads API approval",
+  "خاصية GA4": "A GA4 property",
+  "حساب خدمة بصلاحية قراءة على الخاصية": "A service account with read access to the property",
+  "Analytics Data API مفعّل": "The Analytics Data API enabled",
+  "حاوية GTM": "A GTM container",
+  "صلاحية قراءة؛ أي نشر لإصدار جديد يمر بموافقة واختبار (لا ينشر النظام تلقائياً)": "Read access; publishing any new version goes through approval and testing (the system never publishes on its own)",
+  "موقع موثّق في Search Console": "A verified site in Search Console",
+  "حساب خدمة مضاف كمستخدم": "A service account added as a user",
+  "حساب WhatsApp Business على Meta Cloud API (رقم مخصص وموثّق)": "A WhatsApp Business account on the Meta Cloud API (a dedicated, verified number)",
+  "قوالب رسائل معتمدة من Meta لكل رسالة تبدأها الشركة": "Meta-approved message templates for every message the company starts",
+  "موافقة صريحة من العميل على الرسائل التسويقية، وخيار إلغاء الاشتراك": "Explicit customer consent to marketing messages, and an opt-out",
+  "تُحتسب تكلفة لكل رسالة حسب الفئة والدولة (تسعير Meta)": "Each message is charged by category and country (Meta pricing)",
+  "كرزون شريك رسمي لـ Meta (WhatsApp Solution Partner) ويرسل عبر Cloud API — ليس واجهة غير رسمية": "Karzoun is an official Meta partner (WhatsApp Solution Partner) and sends through the Cloud API — not an unofficial interface",
+  "مفتاح API من نوع «مساحة العمل» (Developer › API keys) بأقل صلاحيات لازمة، ومعرّف تكامل الواتساب": "A workspace API key (Developer › API keys) with the least permissions needed, and the WhatsApp integration ID",
+  "القوالب تُنشأ وتُعتمد في كرزون/WhatsApp Manager ثم «مزامنة» هنا": "Templates are created and approved in Karzoun / WhatsApp Manager, then “synced” here",
+  "Webhook من كرزون (core:customer.update) لمزامنة إلغاء الاشتراك، موقّع بـ X-Karzoun-Signature-256": "A Karzoun webhook (core:customer.update) to sync opt-outs, signed with X-Karzoun-Signature-256",
+  "إذا كانت أتمتة السلة المتروكة مفعّلة داخل كرزون نفسه فأوقف إحداهما حتى لا يصل العميل تذكيران": "If abandoned-cart automation is also on inside Karzoun, turn one of them off so the customer does not get two reminders",
+  "مستقبل Webhooks موقّع (HMAC) بصيغة موحّدة «Hiqbah Store Webhook v1» + استيراد CSV معلن كإدخال يدوي": "A signed (HMAC) webhook receiver in one format, “Hiqbah Store Webhook v1”, plus a CSV import declared as manual entry",
+  "ربط سلة المباشر يُبنى ضمن مسار ربط سلة في النظام ويغذي الصيغة نفسها": "The direct Salla connection is built in the system's Salla integration track and feeds the same format",
+  "مفتاح Anthropic API على الخادم فقط": "An Anthropic API key on the server only",
+  "تكلفة حسب الاستخدام": "Pay-as-you-go cost",
+  "كل مخرجات الاستوديو مسودات تمر بالموافقة": "Everything the studio produces is a draft that goes through approval",
+};
+
+/** A registry note or requirement in the viewer's language (the Arabic when no English is known). */
+export function platformText(ar: string, lang: "ar" | "en"): string {
+  return lang === "en" ? (PLATFORM_TEXT_EN[ar] ?? ar) : ar;
+}
+
+/** The size guide's format names in English. */
+export const ASPECT_FORMAT_EN: Record<string, string> = {
+  "منشور": "Post", "قصة / ريلز": "Story / Reel", "فيديو": "Video", "قصة / إعلان": "Story / ad", "صورة": "Image", "فيديو / Shorts": "Video / Shorts", "دبوس": "Pin",
+};

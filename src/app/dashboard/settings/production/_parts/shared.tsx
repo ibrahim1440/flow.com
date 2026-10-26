@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useI18n } from "@/lib/i18n/context";
+import { localizeApiError } from "@/lib/i18n/api-errors";
 import { dateTimeIn } from "@/components/hr/ui";
 import { Btn, Dot, PageHeader, type Tone } from "@/components/ops/ui";
 import { Ico } from "@/components/shell/icons";
@@ -54,7 +55,7 @@ export async function call<T>(url: string, method = "GET", body?: unknown): Prom
 }
 
 export function errText(d: ApiError, ar: boolean, fallbackAr = "تعذّر الحفظ. لم يتغير شيء.", fallbackEn = "Could not save. Nothing was changed.") {
-  return (ar ? d.error : d.errorEn ?? d.error) ?? (ar ? fallbackAr : fallbackEn);
+  return localizeApiError(d, ar ? "ar" : "en") ?? (ar ? fallbackAr : fallbackEn);
 }
 
 /** The overview (roasters, maintenance), reloaded on demand. */

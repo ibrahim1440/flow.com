@@ -95,7 +95,7 @@ export async function requestException(actor: Actor, key: string, raw: Record<st
     const { notify } = await import("@/lib/notifications/notify");
     await notify(tx, {
       event: "quality.exception_requested", dedupeKey: e.id, actorId: actor.id, exclude: [m.inspectorId], entity: { type: "QcException", id: e.id },
-      facts: { number, batchNumber: b.batchNumber, productName: b.product?.productNameAr || b.product?.productNameEn || "", reasonAr: EXCEPTION_REASON_WORD[reason].ar, reasonEn: EXCEPTION_REASON_WORD[reason].en, requesterName: actor.name, exceptionId: e.id },
+      facts: { number, batchNumber: b.batchNumber, productName: b.product?.productNameAr || b.product?.productNameEn || "", productNameEn: b.product?.productNameEn || "", reasonAr: EXCEPTION_REASON_WORD[reason].ar, reasonEn: EXCEPTION_REASON_WORD[reason].en, requesterName: actor.name, exceptionId: e.id },
     });
     return e.id;
   }, TX_OPTS);

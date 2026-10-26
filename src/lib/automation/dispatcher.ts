@@ -22,9 +22,10 @@ import { prisma } from "@/lib/db";
 import { getConnectionState, sendText } from "@/lib/whatsapp/evolution";
 import { getEvent, type Lang } from "./catalog";
 import { firstFailingCondition } from "./conditions";
-import { employeeRecipient, resolveEventContext, type EventContext, type Person, type StoredEvent } from "./context";
+import { employeeMessageLangs, employeeRecipient, resolveEventContext, type EventContext, type Person, type StoredEvent } from "./context";
+import { pickStaffTemplate, resolveMessageLang, ruleEnglishDefault, staffIdOf, type MsgLang } from "./employee-lang";
 import { normalizePhoneForWhatsApp } from "./phone";
-import { parseStoredConditions, parseStoredSteps, stepOffsetsMinutes, type Recipient } from "./rules";
+import { isStaffRecipient, parseStoredConditions, parseStoredSteps, stepOffsetsMinutes, type Recipient } from "./rules";
 import { effectiveMode, readSettings, SETTINGS_ID, type EffectiveMode } from "./settings";
 import { renderTemplate } from "./template";
 import { processStatusRules } from "./status-rules/evaluate";
@@ -178,7 +179,7 @@ async function processPendingEvents(report: DispatchReport, deadline: number) {
   for (const { id } of candidates) {
     if (Date.now() > deadline) return;
     try {
-      const done = await prisma.$transaction((tx) => processOneEvent(tx, id, mode, report));
+      const done = await prisma.$transaction((tx) => processOneEvent(tx, id, mode, report, settings.employeeMessageLang));
       if (done) report.eventsProcessed++;
     } catch (err) {
       report.eventsFailed++;
@@ -196,7 +197,7 @@ async function processPendingEvents(report: DispatchReport, deadline: number) {
 }
 
 /** Returns false when another dispatcher holds the event or already finished it. */
-async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: DispatchReport): Promise<boolean> {
+async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: DispatchReport, employeeDefault: MsgLang | null = null): Promise<boolean> {
   const locked = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "AutomationEvent" WHERE id = ${id} AND status = 'PENDING' FOR UPDATE SKIP LOCKED`;
   if (locked.length === 0) return false;
@@ -275,6 +276,27 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
         scheduledAt,
       };
       const body = renderTemplate(def!, step.template, ctx.vars, lang);
+      // Owner language decision 3: an employee gets the step's text in their language — their own
+      // choice, else the automation default, else Arabic (employee-lang.ts). Customers and typed
+      // numbers get `body`, exactly as before.
+      const staffStep = isStaffRecipient(step.to.kind);
+      const langs = staffStep ? await employeeMessageLangs(tx, people) : new Map<string, MsgLang | null>();
+      const bodies = new Map<string, string>();
+      const bodyFor = async (person: Person): Promise<string> => {
+        const staffId = staffStep ? staffIdOf(person.key) : null;
+        if (!staffId) return body;
+        const pick = pickStaffTemplate(
+          { template: step.template, templateEn: step.templateEn, englishDefault: ruleEnglishDefault(ev.eventType, step.template), fallbackLang: lang },
+          resolveMessageLang(langs.get(staffId), employeeDefault),
+        );
+        if (pick.template === step.template && pick.lang === lang) return body;
+        const k = `${pick.lang}\u0000${pick.template}`;
+        if (!bodies.has(k)) {
+          const c = await contextFor(pick.lang);
+          bodies.set(k, c ? renderTemplate(def!, pick.template, c.vars, pick.lang) : body);
+        }
+        return bodies.get(k)!;
+      };
 
       if (people.length === 0) {
         rows.push({ ...base, dedupeKey: `${run.id}:${i}:none`, body, status: "SKIPPED", statusNote: "No recipient for this event (for example, the order has no owner yet)." });
@@ -284,7 +306,7 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
       for (const person of people) {
         const dedupeKey = `${run.id}:${i}:${person.key}`;
         const phone = normalizePhoneForWhatsApp(person.phone);
-        const row = { ...base, dedupeKey, recipientName: person.name, body };
+        const row = { ...base, dedupeKey, recipientName: person.name, body: await bodyFor(person) };
         if (!phone.ok) {
           rows.push({ ...row, phone: null, status: "SKIPPED", statusNote: phone.reason });
         } else if (seenPhones.has(phone.phone)) {
@@ -316,7 +338,7 @@ async function processOneEvent(tx: Tx, id: string, mode: EffectiveMode, report: 
 
   // «إشعارات الحالات»: the switched-on status rules this event matches (status-rules/evaluate.ts).
   if (def) {
-    const st = await processStatusRules(tx, event, mode, () => contextFor("ar"));
+    const st = await processStatusRules(tx, event, mode, (l: Lang = "ar") => contextFor(l), employeeDefault);
     report.messagesQueued += st.queued;
     report.messagesSkipped += st.skipped;
   }

@@ -20,6 +20,8 @@ import type { AuditContext } from "@/lib/services/employee-audit";
 
 export type RoleSummary = {
   id: string; system: boolean; key: string | null; name: string; nameEn: string; description: string;
+  /** The system templates' English description; a custom role's is the one its author wrote. */
+  descriptionEn: string;
   members: number; sensitive: number; updatedAt: string | null; updatedByName: string | null; version: number;
   permissions: Cells;
 };
@@ -40,13 +42,13 @@ export async function listRoles(opts: { includeNoAccess?: boolean } = {}): Promi
   const sys = SYSTEM_ROLES.map((r): RoleSummary => {
     const t = templateCells(r.key);
     return {
-      id: r.key, system: true, key: r.key, name: r.ar, nameEn: r.en, description: r.descAr,
+      id: r.key, system: true, key: r.key, name: r.ar, nameEn: r.en, description: r.descAr, descriptionEn: r.descEn,
       members: counts.filter((c) => c.role === r.key && !c.accessRoleId).reduce((a, c) => a + c._count._all, 0),
       sensitive: sensitiveCount(t), updatedAt: null, updatedByName: null, version: 0, permissions: t,
     };
   });
   const noAccess: RoleSummary[] = opts.includeNoAccess ? [{
-    id: "custom", system: true, key: "custom", name: NO_ACCESS_ROLE.ar, nameEn: NO_ACCESS_ROLE.en, description: NO_ACCESS_ROLE.descAr,
+    id: "custom", system: true, key: "custom", name: NO_ACCESS_ROLE.ar, nameEn: NO_ACCESS_ROLE.en, description: NO_ACCESS_ROLE.descAr, descriptionEn: NO_ACCESS_ROLE.descEn,
     members: counts.filter((c) => c.role === "custom" && !c.accessRoleId).reduce((a, c) => a + c._count._all, 0),
     sensitive: 0, updatedAt: null, updatedByName: null, version: 0, permissions: templateCells("custom"),
   }] : [];
@@ -55,7 +57,7 @@ export async function listRoles(opts: { includeNoAccess?: boolean } = {}): Promi
   return [...sys, ...custom.map((r): RoleSummary => {
     const t = templateCells("custom", r.permissions);
     return {
-      id: r.id, system: false, key: null, name: r.name, nameEn: r.name, description: r.description ?? "",
+      id: r.id, system: false, key: null, name: r.name, nameEn: r.name, description: r.description ?? "", descriptionEn: r.description ?? "",
       members: counts.filter((c) => c.accessRoleId === r.id).reduce((a, c) => a + c._count._all, 0),
       sensitive: sensitiveCount(t), updatedAt: r.updatedAt.toISOString(), updatedByName: who.get(r.updatedById ?? r.createdById ?? "") ?? null,
       version: r.version, permissions: t,

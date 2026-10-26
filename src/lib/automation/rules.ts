@@ -22,7 +22,15 @@ export type Recipient =
   | { kind: "employee"; employeeId: string }
   | { kind: "phone"; phone: string; name?: string };
 
-export type WhatsAppStep = { type: "whatsapp"; to: Recipient; template: string };
+/**
+ * `templateEn` (owner language decision 3): the English text of a step addressed to staff (anyone but
+ * the customer or a typed number), sent to employees who receive English (employee-lang.ts). Absent on
+ * customer and phone steps — their text is the rule's own, in the rule's language, as always.
+ */
+export type WhatsAppStep = { type: "whatsapp"; to: Recipient; template: string; templateEn?: string };
+
+/** A step whose recipients are employees: the step may carry an English text (employee-lang.ts). */
+export const isStaffRecipient = (kind: string): boolean => kind !== "customer" && kind !== "phone";
 export type WaitStep = { type: "wait"; minutes: number };
 export type Step = WhatsAppStep | WaitStep;
 
@@ -124,10 +132,24 @@ export function validateRuleInput(body: unknown): RuleValidation {
       if (!to || !(allowed as string[]).includes(kind)) {
         return errors.push(`Step ${n}: choose who receives the message.`);
       }
+      // The English text of a staff step (optional; empty = none). Ignored for the customer and a typed number.
+      let en: { templateEn?: string } = {};
+      if (isStaffRecipient(kind) && s.templateEn !== undefined && s.templateEn !== null) {
+        if (typeof s.templateEn !== "string") return errors.push(`Step ${n}: the English message must be text.`);
+        const templateEn = s.templateEn.trim();
+        if (templateEn.length > TEMPLATE_MAX_LENGTH) {
+          return errors.push(`Step ${n}: the English message must be ${TEMPLATE_MAX_LENGTH} characters or fewer.`);
+        }
+        const unknownEn = unknownPlaceholders(event, templateEn);
+        if (unknownEn.length) {
+          return errors.push(`Step ${n}: unknown variable${unknownEn.length > 1 ? "s" : ""} in the English message ${unknownEn.map((k) => `{{${k}}}`).join(", ")}.`);
+        }
+        if (templateEn) en = { templateEn };
+      }
       if (kind === "employee") {
         const employeeId = str(to.employeeId);
         if (!employeeId) return errors.push(`Step ${n}: choose an employee.`);
-        return steps.push({ type: "whatsapp", to: { kind: "employee", employeeId }, template });
+        return steps.push({ type: "whatsapp", to: { kind: "employee", employeeId }, template, ...en });
       }
       if (kind === "phone") {
         const phone = normalizePhoneForWhatsApp(str(to.phone));
@@ -139,7 +161,7 @@ export function validateRuleInput(body: unknown): RuleValidation {
           template,
         });
       }
-      steps.push({ type: "whatsapp", to: { kind: kind as Exclude<RecipientKind, "employee" | "phone"> }, template });
+      steps.push({ type: "whatsapp", to: { kind: kind as Exclude<RecipientKind, "employee" | "phone"> }, template, ...en });
     });
 
     if (steps.length === rawSteps.length) {

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n/context";
 import { useUser } from "../../user-context";
+import { ROLE_LABELS, ROLE_LABELS_AR } from "@/lib/auth-shared";
 import { ACCRUAL_STATUS_SPECS, formatMoney, formatDay, num, api } from "../_components/ui";
 import {
   useInitialMonth, PerfHeader, Bar, MonthChip, PerfNotice, PerfSandbox, PerfLoading, PerfNote, Metrics, AccrualDot,
@@ -149,7 +150,7 @@ export default function MyCommissionsPage() {
   const pct = (v: string) => `${Number(v).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}%`;
 
   const meta = [
-    <>{user?.name}{user?.role ? ` · ${user.role}` : ""}</>,
+    <>{user?.name}{user?.role ? ` · ${(ar ? ROLE_LABELS_AR[user.role] : ROLE_LABELS[user.role]) ?? user.role}` : ""}</>,
     ...(data?.target
       ? [
           <span key="t">

@@ -11,34 +11,42 @@ import { validatePin } from "@/lib/pin-policy";
 import { pinLookup, pinVerifierInput, requirePinLookupSecret } from "@/lib/pin-lookup";
 import { pinSetThrottle, pinUnavailable, isPinLookupConflict } from "@/lib/pin-set-guard";
 import { refreshSessionCookie, setFreshSession } from "@/lib/session-cookie";
+import { asMsgLang } from "@/lib/automation/employee-lang";
 
-// GET — fetch current user's profile details (phone, language)
+// GET — fetch current user's profile details (phone, language, WhatsApp message language)
 export async function GET() {
   const { user, error } = await requireAuth();
   if (error) return error;
 
   const employee = await prisma.employee.findUnique({
     where: { id: user.id },
-    select: { phoneNumber: true, preferredLanguage: true },
+    select: { phoneNumber: true, preferredLanguage: true, whatsappLanguage: true },
   });
   if (!employee) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json({ phoneNumber: employee.phoneNumber ?? "", preferredLanguage: employee.preferredLanguage });
+  return NextResponse.json({ phoneNumber: employee.phoneNumber ?? "", preferredLanguage: employee.preferredLanguage, whatsappLanguage: asMsgLang(employee.whatsappLanguage) });
 }
 
-// PATCH — update phone number and/or language preference
+// PATCH — update phone number and/or language preference, and/or the language automation WhatsApp
+// messages reach this person in (owner language decision 3): whatsappLanguage "ar" | "en", or
+// null / "" / "system" = «حسب إعداد النظام». The person's own choice only; no other account is touched.
 export async function PATCH(request: Request) {
   try {
     const { user, error } = await requireAuth();
     if (error) return error;
 
     const body = await request.json();
-    const { phoneNumber, preferredLanguage } = body;
+    const { phoneNumber, preferredLanguage, whatsappLanguage } = body;
 
     const update: Record<string, unknown> = {};
     if (phoneNumber !== undefined) update.phoneNumber = phoneNumber || null;
     if (preferredLanguage === "ar" || preferredLanguage === "en") {
       update.preferredLanguage = preferredLanguage;
+    }
+    if (whatsappLanguage !== undefined) {
+      if (whatsappLanguage === null || whatsappLanguage === "" || whatsappLanguage === "system") update.whatsappLanguage = null;
+      else if (asMsgLang(whatsappLanguage)) update.whatsappLanguage = whatsappLanguage;
+      else return NextResponse.json({ error: "لغة رسائل واتساب غير صالحة.", errorEn: "whatsappLanguage must be ar, en or system.", code: "INVALID_LANGUAGE" }, { status: 400 });
     }
 
     if (Object.keys(update).length === 0) {

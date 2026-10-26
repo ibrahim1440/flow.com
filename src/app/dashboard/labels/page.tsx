@@ -115,7 +115,7 @@ function LabelsInner() {
                 return (
                   <tr key={p.id} aria-selected={on} className="is-clickable" onClick={() => toggle(p.id)}>
                     <td className="m-end lbl-check" onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} aria-label={`${L("تحديد", "Select")} ${p.productNameEn}`} style={{ width: 18, height: 18 }} />
+                      <input type="checkbox" checked={on} onChange={() => toggle(p.id)} aria-label={`${L("تحديد", "Select")} ${lang === "ar" ? p.productNameAr || p.productNameEn : p.productNameEn}`} style={{ width: 18, height: 18 }} />
                     </td>
                     <td className="m-title">
                       <span className="lbl-name">{lang === "ar" ? p.productNameAr || p.productNameEn : p.productNameEn}</span>

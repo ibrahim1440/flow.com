@@ -198,25 +198,27 @@ export async function reschedulePost(id: string, body: Record<string, unknown>, 
 
 export type Readiness = { blocking: string[]; warnings: string[]; perPlatform: Record<string, string[]> };
 
-export async function readiness(p: PostRow): Promise<Readiness> {
+/** The readiness notes, in the viewer's language (Arabic unless asked otherwise). */
+export async function readiness(p: PostRow, lang: "ar" | "en" = "ar"): Promise<Readiness> {
+  const T = (ar: string, en: string) => (lang === "en" ? en : ar);
   const blocking: string[] = [];
   const warnings: string[] = [];
   const perPlatform: Record<string, string[]> = {};
-  if (p.variants.length === 0) blocking.push("اختر منصة واحدة على الأقل.");
-  if (!p.caption.trim() && p.variants.every((v) => !v.caption?.trim()) && p.assets.length === 0) blocking.push("المنشور بلا نص ولا وسائط.");
-  if (p.scheduledAt && p.scheduledAt.getTime() < Date.now() - 60_000) warnings.push("موعد النشر في الماضي؛ سيُنشر عند أول تشغيل لقائمة النشر.");
-  if (!p.scheduledAt) warnings.push("لا يوجد موعد نشر؛ سيبقى معتمداً دون جدولة.");
+  if (p.variants.length === 0) blocking.push(T("اختر منصة واحدة على الأقل.", "Choose at least one platform."));
+  if (!p.caption.trim() && p.variants.every((v) => !v.caption?.trim()) && p.assets.length === 0) blocking.push(T("المنشور بلا نص ولا وسائط.", "The post has no text and no media."));
+  if (p.scheduledAt && p.scheduledAt.getTime() < Date.now() - 60_000) warnings.push(T("موعد النشر في الماضي؛ سيُنشر عند أول تشغيل لقائمة النشر.", "The publish time is in the past; it will go out on the next run of the publishing queue."));
+  if (!p.scheduledAt) warnings.push(T("لا يوجد موعد نشر؛ سيبقى معتمداً دون جدولة.", "No publish time; it will stay approved but unscheduled."));
   const kinds = p.assets.map((a) => (a.asset.versions[0] ? kindOfMime(a.asset.versions[0].mimeType as MediaType) : a.asset.kind === "COPY" ? "text" : "unknown"));
   for (const v of p.variants) {
-    const w = variantWarnings(v.platform, v.caption ?? p.caption, v.hashtags.length ? v.hashtags : p.hashtags, kinds);
+    const w = variantWarnings(v.platform, v.caption ?? p.caption, v.hashtags.length ? v.hashtags : p.hashtags, kinds, lang);
     if (w.length) perPlatform[v.platform] = w;
-    if (PLATFORM[v.platform]?.organic?.adapter !== "IMPLEMENTED") (perPlatform[v.platform] ??= []).push("النشر على هذه المنصة يدوي: سيُجهّز المحتوى ويُطلب تأكيد الرابط بعد نشره.");
+    if (PLATFORM[v.platform]?.organic?.adapter !== "IMPLEMENTED") (perPlatform[v.platform] ??= []).push(T("النشر على هذه المنصة يدوي: سيُجهّز المحتوى ويُطلب تأكيد الرابط بعد نشره.", "Publishing on this platform is manual: the content is prepared, and the link is confirmed after it is posted."));
   }
-  if (p.link && !p.campaignId) warnings.push("المنشور يحتوي رابطاً دون حملة؛ لن يُتتبع أثره في المبيعات.");
+  if (p.link && !p.campaignId) warnings.push(T("المنشور يحتوي رابطاً دون حملة؛ لن يُتتبع أثره في المبيعات.", "The post has a link but no campaign; its effect on sales will not be tracked."));
   const dup = p.caption.trim()
     ? await prisma.mktPost.findFirst({ where: { id: { not: p.id }, status: { not: "CANCELLED" }, caption: p.caption }, select: { title: true } })
     : null;
-  if (dup) warnings.push(`النص مطابق لمنشور آخر («${dup.title}»).`);
+  if (dup) warnings.push(T(`النص مطابق لمنشور آخر («${dup.title}»).`, `The text matches another post ("${dup.title}").`));
   return { blocking, warnings, perPlatform };
 }
 

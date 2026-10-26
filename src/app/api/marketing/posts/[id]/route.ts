@@ -4,10 +4,10 @@ import { prisma } from "@/lib/db";
 
 type P = { id: string };
 
-export const GET = route<P>(undefined, async (_req, { params }) => {
+export const GET = route<P>(undefined, async (_req, { params, user }) => {
   const p = await getPost(params.id);
   const [ready, history, approvals] = await Promise.all([
-    readiness(p), postHistory(params.id),
+    readiness(p, user.preferredLanguage === "en" ? "en" : "ar"), postHistory(params.id),
     prisma.mktApproval.findMany({ where: { subjectType: "POST", subjectId: params.id }, orderBy: { createdAt: "desc" }, take: 10 }),
   ]);
   return { post: serializePost(p), readiness: ready, history, approvals };

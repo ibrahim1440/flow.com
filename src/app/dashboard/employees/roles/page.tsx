@@ -11,7 +11,7 @@ import { Ico } from "@/components/shell/icons";
 import { usersWord } from "@/lib/users/model";
 import { SectionHead, Tag, UsersFrame, api, errText, fmtDate, useLangL, useUsersChrome } from "../_ui/shared";
 
-type Role = { id: string; system: boolean; name: string; nameEn: string; description: string; members: number; sensitive: number; updatedAt: string | null; updatedByName: string | null };
+type Role = { id: string; system: boolean; name: string; nameEn: string; description: string; descriptionEn?: string; members: number; sensitive: number; updatedAt: string | null; updatedByName: string | null };
 
 export default function RolesPage() {
   const { lang, ar, L } = useLangL();
@@ -49,7 +49,7 @@ export default function RolesPage() {
                   <tr key={r.id} data-testid={`ur-role-${r.id}`}>
                     <td style={{ fontWeight: 600 }}>{ar ? r.name : r.nameEn}</td>
                     <td>{kind(r)}</td>
-                    <td className="ur-hide-rail ur-wrap" style={{ maxWidth: 320, color: "var(--text-secondary)", fontSize: 13 }}>{r.description || "—"}</td>
+                    <td className="ur-hide-rail ur-wrap" style={{ maxWidth: 320, color: "var(--text-secondary)", fontSize: 13 }}>{(ar ? r.description : r.descriptionEn ?? r.description) || "—"}</td>
                     <td className="num">{r.members}</td>
                     <td className="num">{r.sensitive}</td>
                     <td className="ur-wrap">{r.updatedAt ? <>{fmtDate(r.updatedAt, lang)}{r.updatedByName ? <span className="ur-sub2">{r.updatedByName}</span> : null}</> : "—"}</td>

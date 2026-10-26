@@ -80,6 +80,12 @@ export type StatusSource = Label & {
   defaultTemplate: string;
   /** A status's own suggested message, when it has one; otherwise `defaultTemplate`. */
   defaultTemplates?: Record<string, string>;
+  /**
+   * The English of the built-in messages (owner language decision 3): what an EMPLOYEE who receives
+   * English gets while the status still carries the built-in Arabic. Customers always get the Arabic.
+   */
+  defaultTemplateEn: string;
+  defaultTemplatesEn?: Record<string, string>;
 };
 
 const s = (value: string, ar: string, en: string): EnumOption => ({ value, ar, en });
@@ -96,6 +102,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["order.status_changed"],
     recipients: ["customer", "order_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، طلبكم رقم {{order.number}} أصبح «{{status.name}}».",
+    defaultTemplateEn: "Hello {{customer.name}}, your order {{order.number}} is now “{{status.name}}”.",
   },
   {
     // feat/wa-status-rules: the order-level states that are not a stored Order.status — the owner's
@@ -115,10 +122,16 @@ export const STATUS_SOURCES: StatusSource[] = [
     fires: ["pending_production", "part_delivered", "resumed"],
     recipients: ["customer", "order_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، طلبكم رقم {{order.number}}: {{status.name}}.",
+    defaultTemplateEn: "Hello {{customer.name}}, your order {{order.number}}: {{status.name}}.",
     defaultTemplates: {
       pending_production: "مرحبًا {{customer.name}}، طلبكم رقم {{order.number}} بانتظار الإنتاج: نحمّص قهوتكم طازجة، وسنخبركم حين يجهز.",
       part_delivered: "مرحبًا {{customer.name}}، سُلِّم جزء من طلبكم رقم {{order.number}}، وسنخبركم عند تسليم الباقي.",
       resumed: "مرحبًا {{customer.name}}، استُؤنف العمل على طلبكم رقم {{order.number}} بعد تعليقه مؤقتاً، وسنخبركم بكل جديد.",
+    },
+    defaultTemplatesEn: {
+      pending_production: "Hello {{customer.name}}, your order {{order.number}} is waiting for production: we roast your coffee fresh and will let you know when it is ready.",
+      part_delivered: "Hello {{customer.name}}, part of your order {{order.number}} has been delivered; we will let you know when the rest is delivered.",
+      resumed: "Hello {{customer.name}}, work on your order {{order.number}} has resumed after a short pause; we will keep you posted.",
     },
   },
   {
@@ -132,6 +145,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["delivery.recorded"],
     recipients: ["customer", "order_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، تم تسليم {{delivery.quantity}} من {{delivery.item}} من طلبكم رقم {{order.number}} ({{status.name}}).",
+    defaultTemplateEn: "Hello {{customer.name}}, {{delivery.quantity}} of {{delivery.item}} from your order {{order.number}} has been delivered ({{status.name}}).",
   },
   {
     key: "roast_batch",
@@ -149,6 +163,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     fires: ["Pending QC", "Passed", "Rejected", "Packaged"],
     recipients: ["order_owner", "actor", "admins"],
     defaultTemplate: "الدفعة {{batch.number}} ({{batch.product}}) أصبحت «{{status.name}}».",
+    defaultTemplateEn: "Batch {{batch.number}} ({{batch.product}}) is now “{{status.name}}”.",
   },
   {
     key: "production_order",
@@ -167,6 +182,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     fires: ["PENDING"],
     recipients: ["order_owner", "actor", "admins"],
     defaultTemplate: "أمر إنتاج جديد {{production.number}}: {{production.units}} من {{production.sku}} لطلب {{order.number}}.",
+    defaultTemplateEn: "New production order {{production.number}}: {{production.units}} of {{production.sku}} for order {{order.number}}.",
   },
   {
     key: "quote",
@@ -180,6 +196,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     fires: ["ISSUED", "ACCEPTED", "REJECTED", "EXPIRED"],
     recipients: ["customer", "deal_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، عرض السعر {{quote.number}} أصبح «{{status.name}}».",
+    defaultTemplateEn: "Hello {{customer.name}}, quotation {{quote.number}} is now “{{status.name}}”.",
   },
   {
     key: "deal_stage",
@@ -192,6 +209,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["sales.deal_stage_changed"],
     recipients: ["customer", "deal_owner", "actor", "admins"],
     defaultTemplate: "الصفقة «{{deal.title}}» انتقلت إلى مرحلة «{{status.name}}».",
+    defaultTemplateEn: "The deal “{{deal.title}}” moved to the “{{status.name}}” stage.",
   },
   {
     key: "deal_outcome",
@@ -204,6 +222,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["sales.deal_stage_changed"],
     recipients: ["customer", "deal_owner", "actor", "admins"],
     defaultTemplate: "الصفقة «{{deal.title}}» أصبحت «{{status.name}}».",
+    defaultTemplateEn: "The deal “{{deal.title}}” is now “{{status.name}}”.",
   },
   {
     key: "collection",
@@ -216,6 +235,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["sales.collection_status_changed"],
     recipients: ["customer", "deal_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، دفعتكم بمبلغ {{collection.amount}} أصبحت «{{status.name}}».",
+    defaultTemplateEn: "Hello {{customer.name}}, your payment of {{collection.amount}} is now “{{status.name}}”.",
   },
   {
     // Sales invoicing A2: «صدرت فاتورة» — OFF by default (every new rule row is), editable like the others.
@@ -230,6 +250,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     fires: ["ISSUED"],
     recipients: ["customer", "order_owner", "actor", "admins"],
     defaultTemplate: "مرحبًا {{customer.name}}، صدرت لكم {{invoice.kind}} رقم {{invoice.number}} بإجمالي {{invoice.total}} شامل الضريبة، تستحق في {{invoice.dueDate}}.",
+    defaultTemplateEn: "Hello {{customer.name}}, {{invoice.kind}} {{invoice.number}} has been issued to you for {{invoice.total}} including VAT, due on {{invoice.dueDate}}.",
   },
   {
     key: "finance_approval",
@@ -242,6 +263,7 @@ export const STATUS_SOURCES: StatusSource[] = [
     events: ["finance.approval_requested", "finance.approval_decided"],
     recipients: ["requester", "approver", "admins"],
     defaultTemplate: "طلب الاعتماد «{{approval.summary}}» أصبح «{{status.name}}».",
+    defaultTemplateEn: "The approval request “{{approval.summary}}” is now “{{status.name}}”.",
   },
 ];
 
@@ -254,6 +276,16 @@ export function getStatusSource(key: string): StatusSource | undefined {
 /** The message the editor suggests for a status switched on without one. */
 export function defaultTemplateOf(source: StatusSource, statusKey: string): string {
   return source.defaultTemplates?.[statusKey] ?? source.defaultTemplate;
+}
+
+/** The English of the built-in message (owner language decision 3). */
+export function defaultTemplateEnOf(source: StatusSource, statusKey: string): string {
+  return source.defaultTemplatesEn?.[statusKey] ?? source.defaultTemplateEn;
+}
+
+/** The built-in English of a status whose Arabic text is still the built-in Arabic; else null. */
+export function statusEnglishDefault(source: StatusSource, statusKey: string, arabic: string): string | null {
+  return defaultTemplateOf(source, statusKey).trim() === arabic.trim() ? defaultTemplateEnOf(source, statusKey) : null;
 }
 
 /** Whether an event can ever announce this status. */

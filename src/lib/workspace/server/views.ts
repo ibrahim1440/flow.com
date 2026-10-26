@@ -12,6 +12,7 @@ import { listTasks } from "./tasks";
 import { myApprovalCount, myApprovals } from "./approvals";
 import { appointmentsBetween } from "./appointments";
 import { listOccasions, canSeeOccasions } from "./occasions";
+import { leaveTypeName } from "@/lib/i18n/hr";
 
 const DAY = 86_400_000;
 
@@ -111,12 +112,12 @@ export async function calendar(actor: WsActor, from: Date, to: Date, layers: Cal
   }
   if (want.has("leave")) {
     const accounts = [actor.id, ...teamIds];
-    const persons = await prisma.hrEmployee.findMany({ where: { accountId: { in: accounts } }, select: { id: true, accountId: true, fullNameAr: true } });
+    const persons = await prisma.hrEmployee.findMany({ where: { accountId: { in: accounts } }, select: { id: true, accountId: true, fullNameAr: true, fullNameEn: true } });
     const byPerson = new Map(persons.map((p) => [p.id, p]));
     const dayFrom = new Date(`${riyadhDay(from)}T00:00:00Z`), dayTo = new Date(`${riyadhDay(new Date(to.getTime() - 1))}T00:00:00Z`);
     const rows = persons.length ? await prisma.hrLeaveRequest.findMany({
       where: { employeeId: { in: persons.map((p) => p.id) }, status: { in: ["APPROVED", "PENDING"] }, startDate: { lte: dayTo }, endDate: { gte: dayFrom } },
-      select: { id: true, employeeId: true, status: true, startDate: true, endDate: true, leaveType: { select: { nameAr: true } } }, take: 500,
+      select: { id: true, employeeId: true, status: true, startDate: true, endDate: true, leaveType: { select: { code: true, nameAr: true } } }, take: 500,
     }) : [];
     // The type of someone else's leave (sick leave, say) is HR information: only a holder of an HR leave
     // duty reads it; everyone else sees «إجازة».
@@ -126,7 +127,8 @@ export async function calendar(actor: WsActor, from: Date, to: Date, layers: Cal
       // A colleague's PENDING request is theirs and their approver's business, not the team calendar's.
       if (l.status === "PENDING" && p.accountId !== actor.id) continue;
       const kind = p.accountId === actor.id || seesLeaveType ? l.leaveType.nameAr : "إجازة";
-      events.push({ id: `l:${l.id}`, kind: "LEAVE", layer: "leave", allDay: true, title: `${p.fullNameAr} · ${kind}`, start: l.startDate.toISOString().slice(0, 10), end: l.endDate.toISOString().slice(0, 10), status: l.status, mine: p.accountId === actor.id });
+      const kindEn = p.accountId === actor.id || seesLeaveType ? leaveTypeName(l.leaveType, "en") : "Leave";
+      events.push({ id: `l:${l.id}`, kind: "LEAVE", layer: "leave", allDay: true, title: `${p.fullNameAr} · ${kind}`, titleEn: `${p.fullNameEn || p.fullNameAr} · ${kindEn}`, start: l.startDate.toISOString().slice(0, 10), end: l.endDate.toISOString().slice(0, 10), status: l.status, mine: p.accountId === actor.id });
     }
   }
   if (want.has("occasions") && canSeeOccasions(actor)) {

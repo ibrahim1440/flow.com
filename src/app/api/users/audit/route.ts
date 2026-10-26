@@ -12,7 +12,8 @@ export async function GET(request: Request) {
   if (error) return error;
   if (!isUsersAdmin(user)) return ADMIN_READ_ONLY();
   try {
-    return NextResponse.json(await queryAudit(parseFilters(new URL(request.url).searchParams)), noStore);
+    // The viewer's language: the log's words (action, target, details, source) read in it.
+    return NextResponse.json(await queryAudit(parseFilters(new URL(request.url).searchParams), 50, user.preferredLanguage === "en" ? "en" : "ar"), noStore);
   } catch (e) {
     return usersErrorResponse(e);
   }

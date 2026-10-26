@@ -9,7 +9,8 @@ import type { Person } from "../context";
 import { normalizePhoneForWhatsApp } from "../phone";
 import type { EffectiveMode } from "../settings";
 import { renderTemplate, TEMPLATE_MAX_LENGTH, unknownPlaceholders, type RenderContext } from "../template";
-import { getStatusSource, sourceEventDef, statusCanFire, type StatusRecipient } from "./sources";
+import { getStatusSource, sourceEventDef, statusCanFire, statusEnglishDefault, type StatusRecipient } from "./sources";
+import { pickStaffTemplate, resolveMessageLang, staffIdOf, type MsgLang } from "../employee-lang";
 
 // ─── Reconcile ─────────────────────────────────────────────────────────────────
 
@@ -133,7 +134,8 @@ export function syncMessage(r: SyncReport, lang: "ar" | "en"): string {
 
 // ─── Validation ────────────────────────────────────────────────────────────────
 
-export type StatusRuleInput = { enabled: boolean; recipients: StatusRecipient[]; template: string; renotify: boolean };
+/** templateEn (owner language decision 3): the English text for employees who receive English; "" = none. */
+export type StatusRuleInput = { enabled: boolean; recipients: StatusRecipient[]; template: string; templateEn?: string; renotify: boolean };
 
 export type StatusRuleValidation =
   | { ok: true; value: StatusRuleInput }
@@ -191,6 +193,20 @@ export function validateStatusRuleInput(
     }
   }
 
+  let templateEn = current.templateEn ?? "";
+  if (body.templateEn !== undefined) {
+    if (body.templateEn !== null && typeof body.templateEn !== "string") return bad("النص الإنجليزي غير صالح.", "templateEn must be text.");
+    templateEn = (body.templateEn ?? "").trim();
+    if (templateEn.length > TEMPLATE_MAX_LENGTH) {
+      return bad(`النص الإنجليزي أطول من ${TEMPLATE_MAX_LENGTH} حرف.`, `The English text must be ${TEMPLATE_MAX_LENGTH} characters or fewer.`);
+    }
+    const unknownEn = unknownPlaceholders(sourceEventDef(source), templateEn);
+    if (unknownEn.length) {
+      const list = unknownEn.map((k) => `{{${k}}}`).join(", ");
+      return bad(`متغير غير معروف في النص الإنجليزي: ${list}`, `Unknown variable in the English text: ${list}`);
+    }
+  }
+
   if (enabled) {
     if (!rule.active) return bad("هذه الحالة لم تعد مستخدمة في النظام، فلا يمكن تفعيلها.", "This status is no longer in use, so it cannot be switched on.", 409);
     if (!statusCanFire(source, rule.statusKey)) {
@@ -199,7 +215,7 @@ export function validateStatusRuleInput(
     if (recipients.length === 0) return bad("اختر مستلمًا واحدًا على الأقل.", "Choose at least one recipient.");
     if (!template) return bad("اكتب نص الرسالة.", "Write the message.");
   }
-  return { ok: true, value: { enabled, recipients, template, renotify } };
+  return { ok: true, value: { enabled, recipients, template, templateEn, renotify } };
 }
 
 export function parseRecipients(raw: unknown): StatusRecipient[] {
@@ -255,17 +271,40 @@ export function statusDedupeKey(e: {
  * is SKIPPED, OFF records what it would have sent, TEST redirects to the test number.
  */
 export function planStatusMessages(input: {
-  rule: { source: string; statusKey: string; labelAr: string; recipients: StatusRecipient[]; template: string; renotify?: boolean };
+  rule: { source: string; statusKey: string; labelAr: string; labelEn?: string; recipients: StatusRecipient[]; template: string; templateEn?: string | null; renotify?: boolean };
   subject: { type: string; id: string };
   /** The automation event being processed (the entry); used in the key when the rule re-notifies. */
   eventId?: string;
   vars: RenderContext;
   people: Partial<Record<StatusRecipient, Person[]>>;
   mode: EffectiveMode;
+  /**
+   * Owner language decision 3. The English variables of the event (null: not resolved — every
+   * employee then gets the Arabic), each employee's own choice by employee id, and the default.
+   */
+  varsEn?: RenderContext | null;
+  staffLangs?: Map<string, MsgLang | null>;
+  employeeDefault?: MsgLang | null;
 }): PlannedMessage[] {
   const source = getStatusSource(input.rule.source);
   if (!source) return [];
-  const body = renderTemplate(sourceEventDef(source), input.rule.template, { ...input.vars, "status.name": input.rule.labelAr }, "ar");
+  const def = sourceEventDef(source);
+  const body = renderTemplate(def, input.rule.template, { ...input.vars, "status.name": input.rule.labelAr }, "ar");
+  // The text an employee gets: English when they receive English and there is an English text
+  // (stored, or the built-in English of the untouched built-in Arabic). Customers always get `body`.
+  const englishDefault = statusEnglishDefault(source, input.rule.statusKey, input.rule.template);
+  let bodyEn: string | null | undefined;
+  const bodyFor = (person: Person): string => {
+    const staffId = staffIdOf(person.key);
+    if (!staffId || !input.varsEn) return body;
+    const pick = pickStaffTemplate(
+      { template: input.rule.template, templateEn: input.rule.templateEn, englishDefault, fallbackLang: "ar" },
+      resolveMessageLang(input.staffLangs?.get(staffId), input.employeeDefault),
+    );
+    if (pick.lang !== "en") return body;
+    bodyEn ??= renderTemplate(def, pick.template, { ...input.varsEn, "status.name": input.rule.labelEn || input.rule.labelAr }, "en");
+    return bodyEn;
+  };
   const rows: PlannedMessage[] = [];
   const seenPeople = new Set<string>();
   const seenPhones = new Set<string>();
@@ -289,7 +328,7 @@ export function planStatusMessages(input: {
     for (const person of people) {
       if (seenPeople.has(person.key)) continue;
       seenPeople.add(person.key);
-      const base = { dedupeKey: key(person.key), recipientKind: kind, recipientName: person.name, body };
+      const base = { dedupeKey: key(person.key), recipientKind: kind, recipientName: person.name, body: bodyFor(person) };
       const phone = normalizePhoneForWhatsApp(person.phone);
       if (!phone.ok) {
         rows.push({ ...base, phone: null, status: "SKIPPED", statusNote: phone.reason });

@@ -80,6 +80,40 @@ export default function SettingsPage() {
     }
   }
 
+  // ── The sign-in line (owner language decision 1; GET/PUT /api/settings/login-tagline: admin role,
+  //    step-up, audited in SettingsAuditLog). Empty = the built-in line of that language. ──
+  type Tagline = { ar: string | null; en: string | null; effective: { ar: string; en: string }; limits: { max: number; defaults: { ar: string; en: string } } };
+  const [tagline, setTagline] = useState<Tagline | null>(null);
+  const [tagAr, setTagAr] = useState("");
+  const [tagEn, setTagEn] = useState("");
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagMsg, setTagMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/settings/login-tagline", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Tagline | null) => { if (d) { setTagline(d); setTagAr(d.ar ?? ""); setTagEn(d.en ?? ""); } })
+      .catch(() => {});
+  }, []);
+  async function saveTagline(e: React.FormEvent | null, values?: { taglineAr: string; taglineEn: string }) {
+    e?.preventDefault();
+    const body = values ?? { taglineAr: tagAr.trim(), taglineEn: tagEn.trim() };
+    setTagSaving(true);
+    setTagMsg(null);
+    try {
+      const res = await fetch("/api/settings/login-tagline", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setTagMsg({ ok: false, text: L(j.error ?? "تعذّر الحفظ. لم يتغير شيء.", j.errorEn ?? j.error ?? "Could not save. Nothing was changed.") }); return; }
+      setTagline(j as Tagline);
+      setTagAr(j.ar ?? "");
+      setTagEn(j.en ?? "");
+      setTagMsg({ ok: true, text: L("حُفظ. تعرض صفحة الدخول الشعار الجديد من الآن.", "Saved. The sign-in page shows the new line from now on.") });
+    } catch {
+      setTagMsg({ ok: false, text: L("تعذّر الحفظ. لم يتغير شيء.", "Could not save. Nothing was changed.") });
+    } finally {
+      setTagSaving(false);
+    }
+  }
+
   // ── Cupping close policy (E6, admin only; the API enforces role and range) ──
   const [minScorers, setMinScorers] = useState("");
   const [cupSaving, setCupSaving] = useState(false);
@@ -338,6 +372,8 @@ export default function SettingsPage() {
               {row("sessions", L("الجلسات والأجهزة", "Sessions & devices"), L("أجهزتي وجلساتي · في «ملفي الشخصي»", "My devices and sessions · in «My profile»"), { href: "/dashboard/profile?tab=devices", testId: "row-sessions" })}
               {row("seller", L("بيانات المنشأة في المستندات", "Company details on documents"), L("تُطبع في عرض السعر", "Printed on the quotation"), { testId: "row-seller" })}
               {shown("seller") ? <div className="tl-mpanel">{sellerForm()}</div> : null}
+              {row("tagline", L("شعار صفحة الدخول", "Sign-in page line"), L("بالعربية والإنجليزية", "In Arabic and English"), { testId: "row-tagline" })}
+              {shown("tagline") ? <div className="tl-mpanel">{taglineForm()}</div> : null}
               {row("cupping", t("cuppingPolicyTitle"), L("إغلاق جلسات التذوق", "Closing cupping sessions"), { testId: "row-cupping" })}
               {shown("cupping") ? <div className="tl-mpanel">{cuppingForm()}</div> : null}
               {row("tools", L("أدوات الإدارة", "Administration tools"), L("إعادة الضبط · بيئة تدريب فقط", "Resets · training environment only"), { danger: true, testId: "row-tools" })}
@@ -370,6 +406,11 @@ export default function SettingsPage() {
               {/* The seller block of the quotation document (code addition, batch "Sales") */}
               <Sec title={L("بيانات المنشأة في المستندات", "Company details on documents")} caption={L("الاسم النظامي والعنوان والرقم الضريبي والسجل التجاري وبيانات التحويل البنكي · تُطبع في عرض السعر وتُثبَّت عند الإصدار", "Legal name, address, VAT and CR numbers, bank transfer details · printed on the quotation, frozen at issue")} testId="seller-section">
                 {sellerForm()}
+              </Sec>
+
+              {/* The sign-in line (owner language decision 1, code addition) */}
+              <Sec title={L("شعار صفحة الدخول", "Sign-in page line")} caption={L("السطر تحت الشعار في صفحة الدخول · يظهر بلغة الصفحة · فارغ = النص الافتراضي", "The line under the brand on the sign-in page · shown in the page's language · empty = the default text")} testId="tagline-section">
+                {taglineForm()}
               </Sec>
 
               {/* Cupping close policy (E6, code addition) */}
@@ -514,6 +555,30 @@ export default function SettingsPage() {
           </div>
         </form>
         {msgNotice(sellerMsg)}
+      </>
+    );
+  }
+
+  function taglineForm() {
+    const max = tagline?.limits.max ?? 120;
+    const defaults = tagline?.limits.defaults;
+    const custom = !!(tagline?.ar || tagline?.en);
+    const count = (v: string) => [...v.trim()].length;
+    return (
+      <>
+        <form onSubmit={(e) => void saveTagline(e)} noValidate className="hr-form">
+          <Field label={L("النص العربي", "Arabic text")} help={L(`حتى ${max} حرفًا · فارغ = «${defaults?.ar ?? ""}»`, `Up to ${max} characters · empty = «${defaults?.ar ?? ""}»`)}>
+            <input className="hr-input" dir="rtl" lang="ar" value={tagAr} maxLength={max + 20} placeholder={defaults?.ar} onChange={(e) => setTagAr(e.target.value)} aria-invalid={count(tagAr) > max || undefined} data-testid="tagline-ar" />
+          </Field>
+          <Field label={L("النص الإنجليزي", "English text")} help={L(`حتى ${max} حرفًا · فارغ = «${defaults?.en ?? ""}»`, `Up to ${max} characters · empty = “${defaults?.en ?? ""}”`)}>
+            <input className="hr-input" dir="ltr" lang="en" value={tagEn} maxLength={max + 20} placeholder={defaults?.en} onChange={(e) => setTagEn(e.target.value)} aria-invalid={count(tagEn) > max || undefined} data-testid="tagline-en" />
+          </Field>
+          <div className="is-wide tl-acts">
+            <Btn type="submit" variant="primary" disabled={tagSaving || !tagline || count(tagAr) > max || count(tagEn) > max} busy={tagSaving} data-testid="tagline-save">{L("حفظ الشعار", "Save the line")}</Btn>
+            {custom ? <Btn variant="ghost" disabled={tagSaving} onClick={() => void saveTagline(null, { taglineAr: "", taglineEn: "" })} data-testid="tagline-reset">{L("العودة إلى الافتراضي", "Back to the default")}</Btn> : null}
+          </div>
+        </form>
+        {msgNotice(tagMsg, "tagline-msg")}
       </>
     );
   }

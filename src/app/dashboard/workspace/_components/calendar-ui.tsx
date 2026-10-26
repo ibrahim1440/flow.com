@@ -14,7 +14,7 @@ import { OUTCOMES, TypeChip, useLang, useWs, wsFetch, type Appointment } from ".
 import { LinkPicker, usePeople } from "./task-ui";
 
 export type CalEvent = {
-  id: string; kind: "APPOINTMENT" | "TASK_DUE" | "CRM_DUE" | "LEAVE" | "OCCASION" | "CAMPAIGN"; layer: string; title: string;
+  id: string; kind: "APPOINTMENT" | "TASK_DUE" | "CRM_DUE" | "LEAVE" | "OCCASION" | "CAMPAIGN"; layer: string; title: string; titleEn?: string;
   start: string; end: string; allDay?: boolean; overdue?: boolean; priority?: string; assignee?: string; taskId?: string; status?: string; mine?: boolean;
   record?: string | null; openUrl?: string; appointment?: Appointment; occasion?: { id: string; name: string; status: string; sourceUrl: string | null; sourceNote: string | null; lastVerifiedAt: string | null; version: number; _count: { tasks: number }; kind: string };
 };
@@ -43,10 +43,11 @@ export const addDaysIso = (day: string, n: number) => new Date(new Date(`${day}T
 function EventChip({ e, onOpen }: { e: CalEvent; onOpen: (e: CalEvent) => void }) {
   const L = useL();
   const lang = useLang();
-  const label = e.kind === "TASK_DUE" || e.kind === "CRM_DUE" ? `${timeOf(e.start, lang)} · ${e.title}` : e.kind === "APPOINTMENT" ? `${timeOf(e.start, lang)} ${e.title}` : e.title;
+  const title = lang === "en" ? e.titleEn ?? e.title : e.title;
+  const label = e.kind === "TASK_DUE" || e.kind === "CRM_DUE" ? `${timeOf(e.start, lang)} · ${title}` : e.kind === "APPOINTMENT" ? `${timeOf(e.start, lang)} ${title}` : title;
   const what = { APPOINTMENT: L("موعد", "Appointment"), TASK_DUE: L("استحقاق مهمة", "Task due"), CRM_DUE: L("متابعة", "Follow-up"), LEAVE: L("إجازة", "Leave"), OCCASION: L("مناسبة", "Occasion"), CAMPAIGN: L("حملة", "Campaign") }[e.kind];
   return (
-    <button type="button" className={`ws-ev is-${e.kind.toLowerCase()} layer-${e.layer}${e.overdue ? " is-overdue" : ""}${e.status === "PENDING" ? " is-pending" : ""}`} onClick={() => onOpen(e)} title={`${what}: ${e.title}`}>
+    <button type="button" className={`ws-ev is-${e.kind.toLowerCase()} layer-${e.layer}${e.overdue ? " is-overdue" : ""}${e.status === "PENDING" ? " is-pending" : ""}`} onClick={() => onOpen(e)} title={`${what}: ${title}`}>
       <span className="hr-sr">{what}: </span>{e.kind === "TASK_DUE" || e.kind === "CRM_DUE" ? <span aria-hidden="true">◆ </span> : null}{label}{e.overdue ? <span className="hr-sr"> — {L("متأخرة", "overdue")}</span> : null}
     </button>
   );

@@ -206,7 +206,7 @@ export async function approveVersion(actor: Actor, versionId: string, raw: Recor
     const { notify } = await import("@/lib/notifications/notify");
     await notify(tx, {
       event: "production.profile_approved", dedupeKey: done.id, actorId: actor.id, entity: { type: "RoastProfileVersion", id: done.id },
-      facts: { profileName: v.profile.name, version: done.version, productName: v.profile.product.productNameAr || v.profile.product.productNameEn, whole: `${done.wholeTarget} ± ${done.wholeTol}`, ground: `${done.groundTarget} ± ${done.groundTol}`, scale: done.scale },
+      facts: { profileName: v.profile.name, version: done.version, productName: v.profile.product.productNameAr || v.profile.product.productNameEn, productNameEn: v.profile.product.productNameEn, whole: `${done.wholeTarget} ± ${done.wholeTol}`, ground: `${done.groundTarget} ± ${done.groundTol}`, scale: done.scale },
     });
     return { version: done, retired: retired.count };
   }, TX_OPTS);

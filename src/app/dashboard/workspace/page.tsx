@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { Btn, Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, useL } from "@/components/ops/ui";
 import { dayOf, dueLabel, greeting, overdueBy, timeOf, ago } from "@/lib/workspace/format";
-import { DueText, PriorityMark, TypeChip, WsPage, WsShell, recordOf, useLang, useNow, useSelection, useWs, type ApprovalItem, type Appointment, type CrmDue, type Task } from "./_components/kit";
+import { DueText, PriorityMark, TypeChip, approvalTitle, WsPage, WsShell, recordOf, useLang, useNow, useSelection, useWs, type ApprovalItem, type Appointment, type CrmDue, type Task } from "./_components/kit";
 import { CreateTaskDialog, TaskPane } from "./_components/task-ui";
 import { useUser } from "../user-context";
 import { DecisionPane } from "./_components/approval-ui";
@@ -104,7 +104,7 @@ export default function TodayPage() {
         <li key={r.key} className="ws-row">
           <TypeChip type={a.type} />
           <button type="button" className="ws-row-main" onClick={() => setApprovalKey(a.key)}>
-            <span className="ws-row-title">{a.title}{a.subject ? ` · ${a.subject}` : ""}</span>
+            <span className="ws-row-title">{approvalTitle(a, lang)}</span>
             <span className="ws-row-meta"><span>{a.requester}</span><span>{ago(a.createdAt, lang, now)}</span>{a.warnings.length ? <span className="hr-flag tone-warning"><span>{lang === "ar" ? a.warnings[0].ar : a.warnings[0].en}</span></span> : null}</span>
           </button>
           <Btn size="sm" variant="primary" onClick={() => setApprovalKey(a.key)}>{L("مراجعة واعتماد", "Review & decide")}</Btn>
@@ -140,7 +140,7 @@ export default function TodayPage() {
 
   return (
     <WsShell open={!!(taskId || selectedApproval)}>
-      <WsPage title={name ? `${greeting(lang, now)}، ${name}` : L("اليوم", "Today")} sub={<span className="hr-caption">{dayOf(now, lang, now)}</span>} actions={actions} testId="ws-today">
+      <WsPage title={name ? `${greeting(lang, now)}${L("، ", ", ")}${name}` : L("اليوم", "Today")} sub={<span className="hr-caption">{dayOf(now, lang, now)}</span>} actions={actions} testId="ws-today">
         {toast ? <OpsBanner tone="success" onClose={() => setToast(null)}>{toast}</OpsBanner> : null}
         {error ? <OpsError message={error.message} onRetry={reload} /> : null}
         {loading && !data ? <OpsLoading /> : null}

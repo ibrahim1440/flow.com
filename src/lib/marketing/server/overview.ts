@@ -14,9 +14,10 @@ import { PLATFORM } from "../platforms";
  * the caller may not see (revenue without marketing › revenue_view) is omitted, not zeroed.
  */
 
-export type Figure = { value: Num; previous: Num; changePct: Num; kpi: string; source: string; lastUpdated: Date | null };
+export type Figure = { value: Num; previous: Num; changePct: Num; kpi: string; source: string; sourceEn: string; lastUpdated: Date | null };
 
-const fig = (kpi: string, value: Num, previous: Num, source: string, lastUpdated: Date | null): Figure => ({ kpi, value, previous, changePct: change(value, previous), source, lastUpdated });
+/** `source` is the Arabic description of where the figure comes from; `sourceEn` the same in English. */
+const fig = (kpi: string, value: Num, previous: Num, source: [string, string], lastUpdated: Date | null): Figure => ({ kpi, value, previous, changePct: change(value, previous), source: source[0], sourceEn: source[1], lastUpdated });
 
 async function periodBlock(from: Date, to: Date) {
   const m = await periodMetrics({ from, to });
@@ -47,12 +48,14 @@ export async function commandCenter(from: Date, to: Date, actor: Actor) {
   const prev = previousPeriod(from, to);
   const [cur, old, settings] = await Promise.all([periodBlock(from, to), periodBlock(prev.from, prev.to), loadSettings()]);
   const upd = cur.metrics.lastUpdated;
-  const adsSrc = cur.metrics.sources.length ? `منصات الإعلان (${cur.metrics.sources.join("، ")})` : "لا توجد بيانات إنفاق";
-  const storeSrc = "طلبات المتجر الإلكتروني";
+  const adsAr = cur.metrics.sources.length ? `منصات الإعلان (${cur.metrics.sources.join("، ")})` : "لا توجد بيانات إنفاق";
+  const adsEn = cur.metrics.sources.length ? `Ad platforms (${cur.metrics.sources.join(", ")})` : "No spend data";
+  const adsSrc: [string, string] = [adsAr, adsEn];
+  const storeSrc: [string, string] = ["طلبات المتجر الإلكتروني", "Online store orders"];
   const lastOrder = await prisma.mktStoreOrder.findFirst({ orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
 
   const figures: Record<string, Figure> = {
-    spend: fig("spend", cur.totalSpend, old.totalSpend, `${adsSrc} + تكلفة رسائل واتساب`, upd),
+    spend: fig("spend", cur.totalSpend, old.totalSpend, [`${adsAr} + تكلفة رسائل واتساب`, `${adsEn} + WhatsApp messaging cost`], upd),
     impressions: fig("impressions", cur.d.impressions, old.d.impressions, adsSrc, upd),
     linkClicks: fig("linkClicks", cur.d.linkClicks, old.d.linkClicks, adsSrc, upd),
     ctr: fig("ctr", cur.d.ctr, old.d.ctr, adsSrc, upd),
@@ -66,11 +69,11 @@ export async function commandCenter(from: Date, to: Date, actor: Actor) {
       orders: fig("orders", ordersKnown ? cur.attr.totals.orders : null, ordersKnown ? old.attr.totals.orders : null, storeSrc, lastOrder?.updatedAt ?? null),
       netRevenue: fig("netRevenue", ordersKnown ? cur.attr.totals.netRevenue : null, ordersKnown ? old.attr.totals.netRevenue : null, storeSrc, lastOrder?.updatedAt ?? null),
       newCustomers: fig("newCustomers", ordersKnown ? cur.attr.totals.newCustomers : null, ordersKnown ? old.attr.totals.newCustomers : null, storeSrc, lastOrder?.updatedAt ?? null),
-      cac: fig("cac", cur.blendedCac, old.blendedCac, `${adsSrc} ÷ ${storeSrc} (إجمالي)`, upd),
-      cpa: fig("cpa", cur.e.cpa, old.e.cpa, `الإنفاق ÷ الطلبات المنسوبة (${cur.attr.model})`, upd),
-      cvr: fig("cvr", cur.e.cvr, old.e.cvr, `الطلبات المنسوبة ÷ نقرات الرابط`, upd),
-      roas: fig("roas", cur.e.roas, old.e.roas, `الإيراد المنسوب (${cur.attr.model}, ${cur.attr.windowDays} يوم) ÷ إنفاق الإعلانات`, upd),
-      mer: fig("mer", cur.e.mer, old.e.mer, "صافي إيراد المتجر ÷ إجمالي الإنفاق التسويقي", upd),
+      cac: fig("cac", cur.blendedCac, old.blendedCac, [`${adsAr} ÷ ${storeSrc[0]} (إجمالي)`, `${adsEn} ÷ ${storeSrc[1]} (total)`], upd),
+      cpa: fig("cpa", cur.e.cpa, old.e.cpa, [`الإنفاق ÷ الطلبات المنسوبة (${cur.attr.model})`, `Spend ÷ attributed orders (${cur.attr.model})`], upd),
+      cvr: fig("cvr", cur.e.cvr, old.e.cvr, [`الطلبات المنسوبة ÷ نقرات الرابط`, "Attributed orders ÷ link clicks"], upd),
+      roas: fig("roas", cur.e.roas, old.e.roas, [`الإيراد المنسوب (${cur.attr.model}, ${cur.attr.windowDays} يوم) ÷ إنفاق الإعلانات`, `Attributed revenue (${cur.attr.model}, ${cur.attr.windowDays} days) ÷ ad spend`], upd),
+      mer: fig("mer", cur.e.mer, old.e.mer, ["صافي إيراد المتجر ÷ إجمالي الإنفاق التسويقي", "Store net revenue ÷ total marketing spend"], upd),
     });
   }
 

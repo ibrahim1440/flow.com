@@ -50,11 +50,18 @@ export type Task = {
   roles: string[]; actions: string[];
 };
 export type ApprovalItem = {
-  key: string; type: "LEAVE" | "ADVANCE" | "DISCOUNT" | "FINANCE" | "MARKETING"; id: string; title: string; requester: string | null; subject: string | null; createdAt: string;
+  key: string; type: "LEAVE" | "ADVANCE" | "DISCOUNT" | "FINANCE" | "MARKETING"; id: string; title: string; titleEn?: string; requester: string | null; subject: string | null; subjectEn?: string | null; createdAt: string;
   facts: Record<string, unknown>; warnings: { ar: string; en: string }[];
   decide: { url: string; rejectNeedsReason: true; expected?: Record<string, string>; stepUp?: boolean };
   openUrl: string; notice?: { ar: string; en: string };
 };
+/** An approval item's title and subject in the viewer's language (the server sends both). */
+export function approvalTitle(a: Pick<ApprovalItem, "title" | "titleEn" | "subject" | "subjectEn">, lang: "ar" | "en", withSubject = true): string {
+  const title = lang === "en" ? a.titleEn ?? a.title : a.title;
+  const subject = lang === "en" ? a.subjectEn ?? a.subject : a.subject;
+  return withSubject && subject ? `${title} · ${subject}` : title;
+}
+
 export type Appointment = {
   id: string; kind: "MEETING" | "VISIT" | "CALL" | "OTHER"; title: string; notes: string | null; startAt: string; endAt: string; location: string | null; meetingUrl: string | null;
   externalAttendees: string | null; organizerId: string; status: "SCHEDULED" | "DONE" | "CANCELLED"; customerId: string | null; leadId: string | null; opportunityId: string | null;

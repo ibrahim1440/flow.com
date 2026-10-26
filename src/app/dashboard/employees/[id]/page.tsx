@@ -28,7 +28,7 @@ type Event = { id: string; at: string; actor: string; actorId: string | null; ac
 type Profile = {
   id: string; name: string; username: string | null; role: { key: string; id: string; name: string; nameEn: string; system: boolean }; customized: boolean;
   status: UserStatus; active: boolean; self: boolean; lock: { attempts: number; since: string | null } | null;
-  hr: { id: string; name: string; jobTitle: string; department: string | null } | null; external: boolean;
+  hr: { id: string; name: string; nameEn?: string | null; jobTitle: string; department: string | null; departmentEn?: string | null } | null; external: boolean;
   /** «البريد الإلكتروني للشركة»: the linked HR person's «بريد الشركة», else the account's own (feat/credit-hold). */
   companyEmail?: { email: string | null; source: "hr" | "account" };
   createdAt: string; createdByName: string | null; lastPermissionChange: { at: string; byName: string | null } | null;
@@ -256,7 +256,7 @@ function Overview({ p, goLog, editEmail }: { p: Profile; goLog: () => void; edit
         <dl className="ur-props">
           <div><dt>{L("الاسم المعروض", "Display name")}</dt><dd>{p.name}</dd></div>
           <div><dt>{L("اسم المستخدم", "Username")}</dt><dd>{p.username ? <Latin>{p.username}</Latin> : "—"}</dd></div>
-          <div><dt>{L("ملف الموظف", "HR record")}</dt><dd>{p.hr ? <Link href={`/dashboard/hr/employees/${p.hr.id}`}>{p.hr.name}{p.hr.department ? ` · ${p.hr.department}` : ""}</Link> : p.external ? L("شخص خارجي موثّق", "Verified external person") : L("غير مرتبط", "Not linked")}</dd></div>
+          <div><dt>{L("ملف الموظف", "HR record")}</dt><dd>{p.hr ? <Link href={`/dashboard/hr/employees/${p.hr.id}`}>{(ar ? p.hr.name : p.hr.nameEn || p.hr.name)}{(ar ? p.hr.department : p.hr.departmentEn || p.hr.department) ? ` · ${ar ? p.hr.department : p.hr.departmentEn || p.hr.department}` : ""}</Link> : p.external ? L("شخص خارجي موثّق", "Verified external person") : L("غير مرتبط", "Not linked")}</dd></div>
           <div data-testid="ur-company-email"><dt>{L("البريد الإلكتروني للشركة", "Company e-mail")}</dt><dd>{p.companyEmail?.email ? <Latin>{p.companyEmail.email}</Latin> : <span className="ur-muted">{L("لا يوجد بريد مسجّل", "No e-mail on record")}</span>}
             {editEmail ? <> · <button type="button" className="ur-link" onClick={editEmail} data-testid="ur-email-edit">{L("تعديل", "Edit")}</button></> : null}</dd></div>
           <div><dt>{L("الدور", "Role")}</dt><dd><span className="ur-role">{ar ? p.role.name : p.role.nameEn}{p.customized ? <Tag>{L("مخصص", "Custom")}</Tag> : null}</span></dd></div>
@@ -275,7 +275,7 @@ function Overview({ p, goLog, editEmail }: { p: Profile; goLog: () => void; edit
           {p.sensitive.length ? (
             <div className="ur-sensbox" data-testid="ur-sensitive">
               <SensFlag lang={lang} />
-              <span>{p.sensitive.slice(0, 3).map(sensLabel).join("، ")}{p.sensitive.length > 3 ? (ar ? ` و${p.sensitive.length - 3} أخرى` : ` and ${p.sensitive.length - 3} more`) : ""} · {p.sensitive.every((s) => s.source === "override") ? L("ممنوح كاستثناء", "granted as an exception") : L("من الدور", "from the role")}</span>
+              <span>{p.sensitive.slice(0, 3).map(sensLabel).join(ar ? "، " : ", ")}{p.sensitive.length > 3 ? (ar ? ` و${p.sensitive.length - 3} أخرى` : ` and ${p.sensitive.length - 3} more`) : ""} · {p.sensitive.every((s) => s.source === "override") ? L("ممنوح كاستثناء", "granted as an exception") : L("من الدور", "from the role")}</span>
             </div>
           ) : null}
         </div>
@@ -285,7 +285,7 @@ function Overview({ p, goLog, editEmail }: { p: Profile; goLog: () => void; edit
         <ol className="ur-tl is-compact">
           {recent.map((e, i) => (
             <li key={e.id} className={i === 0 ? "is-first" : undefined}>
-              <div className="ur-tlt">{e.details ? `${e.label} «${e.details}»`.replace(/«(.{60}).+»$/, "«$1…»") : e.label}{e.actor !== "النظام" ? ` · ${e.actor}` : ""}</div>
+              <div className="ur-tlt">{e.details ? (ar ? `${e.label} «${e.details}»`.replace(/«(.{60}).+»$/, "«$1…»") : `${e.label} “${e.details}”`.replace(/“(.{60}).+”$/, "“$1…”")) : e.label}{e.actorId ? ` · ${e.actor}` : ""}</div>
               <div className="ur-tlw">{fmtDate(e.at, lang)} · {fmtTime(e.at)}</div>
             </li>
           ))}

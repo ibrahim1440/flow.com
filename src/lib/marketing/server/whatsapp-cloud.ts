@@ -45,6 +45,23 @@ function providerReady(env: Record<string, string | undefined>): { ok: true } | 
 
 export type CloudConfig = { token: string; phoneNumberId: string; wabaId: string | null; appSecret: string | null; verifyToken: string | null };
 
+/** The English of the WhatsApp provider readiness reasons above (the integrations screen in English). */
+const READY_EN: Record<string, string> = {
+  "لم يُضبط مزوّد واتساب: كرزون (KARZOUN_API_URL, KARZOUN_API_KEY, KARZOUN_WA_INTEGRATION_ID) أو Cloud API المباشر (WHATSAPP_CLOUD_*).": "No WhatsApp provider is configured: Karzoun (KARZOUN_API_URL, KARZOUN_API_KEY, KARZOUN_WA_INTEGRATION_ID) or the direct Cloud API (WHATSAPP_CLOUD_*).",
+  "واتساب Cloud API غير مضبوط (WHATSAPP_CLOUD_TOKEN, WHATSAPP_CLOUD_PHONE_NUMBER_ID).": "The WhatsApp Cloud API is not configured (WHATSAPP_CLOUD_TOKEN, WHATSAPP_CLOUD_PHONE_NUMBER_ID).",
+  "WHATSAPP_CLOUD_PHONE_NUMBER_ID غير صالح.": "WHATSAPP_CLOUD_PHONE_NUMBER_ID is not valid.",
+  "الإرسال الفعلي غير مفعّل على الخادم (MARKETING_WA_LIVE_ENABLED) ولا يوجد رقم اختبار.": "Live sending is not switched on on the server (MARKETING_WA_LIVE_ENABLED) and there is no test number.",
+  "كرزون غير مضبوط (KARZOUN_API_URL, KARZOUN_API_KEY, KARZOUN_WA_INTEGRATION_ID).": "Karzoun is not configured (KARZOUN_API_URL, KARZOUN_API_KEY, KARZOUN_WA_INTEGRATION_ID).",
+  "KARZOUN_API_URL ليس رابطاً صالحاً.": "KARZOUN_API_URL is not a valid URL.",
+  "KARZOUN_API_URL يجب أن يكون https://<المساحة>.api.karzoun.chat/graphql.": "KARZOUN_API_URL must be https://<workspace>.api.karzoun.chat/graphql.",
+  "KARZOUN_API_KEY غير صالح (يبدأ بـ kz_live_ أو kz_test_).": "KARZOUN_API_KEY is not valid (it starts with kz_live_ or kz_test_).",
+  "KARZOUN_WA_INTEGRATION_ID غير صالح.": "KARZOUN_WA_INTEGRATION_ID is not valid.",
+};
+/** A readiness reason in English (the Arabic itself when it is not one of the known reasons). */
+export function readinessEn(ar: string): string {
+  return READY_EN[ar] ?? ar;
+}
+
 export function cloudConfig(env: Record<string, string | undefined> = process.env): { ok: true; config: CloudConfig } | { ok: false; reasonAr: string } {
   const token = env.WHATSAPP_CLOUD_TOKEN?.trim();
   const phoneNumberId = env.WHATSAPP_CLOUD_PHONE_NUMBER_ID?.trim();

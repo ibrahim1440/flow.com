@@ -12,7 +12,7 @@ import "@/components/shell/direction-2.1.css";
 import "@/components/d21/reference.css";
 import "../station.css";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StationCtx, clearStationDrafts, loginUrl, type StationInfo, type StationUser } from "./context";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { useLanguageSwitcher } from "@/lib/i18n/use-language-switcher";
@@ -47,12 +47,18 @@ function chosenStation(all: StationInfo[], fallback: StationInfo): StationInfo {
   } catch { return fallback; }
 }
 
+const noSubscribe = () => () => {};
+
 export function StationShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/station";
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ p: "loading" });
   const [roster, setRoster] = useState<RosterEntry[] | null>(null);
-  const lang: Lang = phase.p === "personal" ? (phase.user.preferredLanguage === "en" ? "en" : "ar") : phase.p === "in" ? phase.emp.preferredLanguage : "ar";
+  // Before anybody is signed in here (S1, a revoked or failed device, the PIN pad), the screen reads in
+  // the language the page was served in (the root layout: the browser's signed-in account, else the
+  // sign-in screen's last choice), not always Arabic. Read after mount: the server render stays Arabic.
+  const pageLang = useSyncExternalStore(noSubscribe, () => (document.documentElement.lang === "en" ? "en" : "ar") as Lang, () => "ar" as Lang);
+  const lang: Lang = phase.p === "personal" ? (phase.user.preferredLanguage === "en" ? "en" : "ar") : phase.p === "in" ? phase.emp.preferredLanguage : pageLang;
   const t = useCallback((k: Parameters<typeof st>[0], v?: Record<string, string | number>) => st(k, lang, v), [lang]);
   // The quick language switch, for a PERSONAL session only (W1: the person's own ERP session at
   // a browser — their profile language, saved as in the ERP). A shared device (W2) follows each

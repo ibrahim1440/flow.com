@@ -9,6 +9,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import type { SendMode } from "./send-mode";
+import { asMsgLang, type MsgLang } from "./employee-lang";
 export { effectiveMode, liveAllowed, type EffectiveMode, type SendMode } from "./send-mode";
 
 type Db = Prisma.TransactionClient | typeof prisma;
@@ -20,6 +21,8 @@ export type AutomationSettingsView = {
   testPhone: string | null;
   lastSweepAt: Date | null;
   updatedAt: Date | null;
+  /** Owner language decision 3: the language of messages to employees who have not chosen one (null = Arabic). */
+  employeeMessageLang: MsgLang | null;
 };
 
 export async function readSettings(db: Db = prisma): Promise<AutomationSettingsView> {
@@ -29,5 +32,6 @@ export async function readSettings(db: Db = prisma): Promise<AutomationSettingsV
     testPhone: row?.testPhone ?? null,
     lastSweepAt: row?.lastSweepAt ?? null,
     updatedAt: row?.updatedAt ?? null,
+    employeeMessageLang: asMsgLang(row?.employeeMessageLang),
   };
 }

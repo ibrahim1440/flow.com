@@ -621,7 +621,7 @@ export default function OrdersPage() {
                                   type="button"
                                   onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}
                                   className="px-2 py-2 text-brown/60 hover:text-[var(--status-danger)]"
-                                  aria-label="Remove line"
+                                  aria-label={lang === "ar" ? "حذف السطر" : "Remove line"}
                                 >
                                   <X size={16} />
                                 </button>

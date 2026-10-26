@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useContext } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef, useContext } from "react";
 import { useRouter } from "next/navigation";
 import { Languages, WifiOff } from "lucide-react";
 
@@ -11,7 +11,8 @@ import { SHOW_PIN_SIGN_IN } from "@/lib/simple-mode";
 import { BrandMark } from "@/components/brand/BrandMark";
 import "@/components/shell/direction-2.1.css";
 import "./login.css";
-import { LoginLangContext } from "./lang-context";
+import { LoginLangContext, LoginTaglineContext } from "./lang-context";
+import { taglineLines } from "@/lib/login-tagline";
 import { applyDocumentLang, toggleAriaLabel, writeLangCookie } from "@/lib/i18n/language-switch";
 
 // Owner security decision (16 Oct, Option A). Three ways in:
@@ -88,6 +89,7 @@ export default function LoginPage() {
   // The pre-sign-in language: the `hq_lang` cookie (read by the layout), else the older
   // localStorage choice, else Arabic. After sign-in the account's saved language wins.
   const savedLang = useContext(LoginLangContext);
+  const tagline = useContext(LoginTaglineContext);
   const [lang, setLang] = useState<Lang>(savedLang ?? "ar");
   // SIMPLE MODE: username + password is the only method shown, and the default (SHOW_PIN_SIGN_IN).
   const [mode, setMode] = useState<Mode>(SHOW_PIN_SIGN_IN ? "pin" : "password");
@@ -257,7 +259,10 @@ export default function LoginPage() {
           {/* The brand mark on the olive panel: the beige «ح» with the clay stroke (guideline v003). */}
           <span className="lg-mark"><BrandMark tone="olive" alt={lang === "ar" ? "حِقبة" : "Hiqbah"} /></span>
           <div className="lg-moment">
-            <p className="q" lang="ar" dir="rtl">كل عملية بوضوح.<br />كل تفصيل بإتقان.</p>
+            {/* Owner language decision 1: the line follows the screen's language; Settings › Organisation may replace it. */}
+            <p className="q" lang={lang} dir={lang === "ar" ? "rtl" : "ltr"} data-testid="login-tagline">
+              {taglineLines(tagline[lang]).map((line, i) => <Fragment key={i}>{i > 0 ? <br /> : null}{line}</Fragment>)}
+            </p>
             <i aria-hidden />
             <span>{t.system}</span>
           </div>

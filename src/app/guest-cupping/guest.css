@@ -16,8 +16,6 @@
 .gc-brand > div > span { display: block; font: 400 12.5px/20px var(--f-ui); color: var(--text-muted); }
 .gc-spacer { flex: 1 1 auto; }
 .gc-nologin { font: 400 12.5px/22px var(--f-ui); color: var(--text-muted); white-space: nowrap; }
-.gc-lang { appearance: none; height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); font: 500 12.5px/18px var(--f-ui); color: var(--text-primary); cursor: pointer; }
-.gc-lang:hover { background: var(--surface-hover); }
 
 .gc-main { width: 100%; max-width: 720px; margin: 0 auto; padding: 0 0 56px; display: flex; flex-direction: column; gap: 20px; }
 .gc-head { display: flex; flex-direction: column; gap: 12px; }

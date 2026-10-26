@@ -7,7 +7,8 @@ import type { ReactNode } from "react";
 import { StationShell } from "./_ui/shell";
 
 export const metadata: Metadata = {
-  title: "محطة حِقبة",
+  // Both names, like the ERP's own title: the tab reads in either language.
+  title: "Hiqbah Station | محطة حِقبة",
   manifest: "/station/manifest.webmanifest",
   appleWebApp: { capable: true, title: "محطة حقبة", statusBarStyle: "default" },
   // Older iPadOS reads only the Apple-prefixed tag to open a home-screen page without Safari's bars.

@@ -8,6 +8,7 @@
 // indistinguishable from one that does not exist (404). Nothing returned carries a session id, a
 // device id, an address hash or a credential: sessions and devices are named by one-way refs.
 import { prisma } from "@/lib/db";
+import { asMsgLang } from "@/lib/automation/employee-lang";
 import { SESSION_IDLE_MS } from "./session-policy";
 import { describeUserAgent, deviceKey, deviceRef, sessionRef, type DeviceInfo } from "./device";
 import { revokeSession, revokeSessions } from "./session";
@@ -88,7 +89,7 @@ export async function mySecurity(caller: Caller, opts: { activityLimit?: number;
   const activity: MyActivity[] = events.slice(0, limit).map((e) => ({ at: e.occurredAt.toISOString(), action: e.action, result: e.result, reasonCode: e.reasonCode, device: describeUserAgent(e.userAgent) }));
 
   // Account facts (UR-02 «نظرة عامة»).
-  const e = await prisma.employee.findUniqueOrThrow({ where: { id: caller.id }, select: { name: true, username: true, role: true, createdAt: true, password: true, phoneNumber: true, preferredLanguage: true, pinResetRequired: true } });
+  const e = await prisma.employee.findUniqueOrThrow({ where: { id: caller.id }, select: { name: true, username: true, role: true, createdAt: true, password: true, phoneNumber: true, preferredLanguage: true, whatsappLanguage: true, pinResetRequired: true } });
   const mfa = await prisma.authMfa.findUnique({ where: { employeeId: caller.id }, select: { enrolledAt: true } });
   const changed = await credentialChanges(caller.id);
 
@@ -100,6 +101,8 @@ export async function mySecurity(caller: Caller, opts: { activityLimit?: number;
       pinResetRequired: e.pinResetRequired,
       mfaEnrolledAt: mfa?.enrolledAt ? mfa.enrolledAt.toISOString() : null,
       phoneNumber: e.phoneNumber ?? "", preferredLanguage: e.preferredLanguage === "en" ? "en" : "ar",
+      // Owner language decision 3: the language automation WhatsApp messages reach this person in (null = the system's).
+      whatsappLanguage: asMsgLang(e.whatsappLanguage),
     },
     currentSignIn: current ? { at: current.createdAt.toISOString(), method: current.method, device: describeUserAgent(current.userAgent) } : null,
     previousSignIn: previous ? { at: previous.createdAt.toISOString(), method: previous.method, device: describeUserAgent(previous.userAgent) } : null,

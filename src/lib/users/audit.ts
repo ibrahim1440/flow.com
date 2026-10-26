@@ -8,7 +8,7 @@ export { AUDIT_ACTIONS, describe, parseFilters, type AuditCategory, type AuditEn
 
 
 /** The rows matching the filters, newest first (cursor: the last row's "<iso>|<id>"). */
-export async function queryAudit(f: AuditFilters, take = 50) {
+export async function queryAudit(f: AuditFilters, take = 50, lang: "ar" | "en" = "ar") {
   const actions = Object.entries(AUDIT_ACTIONS).filter(([, d]) => f.cat === "all" || !f.cat || d.cat === f.cat).map(([k]) => k);
   const where: Prisma.Sql[] = [Prisma.sql`action IN (${Prisma.join(actions)})`];
   // Sign-ins: successful and failed ones of known accounts; anonymous failures say nothing about a user.
@@ -33,7 +33,7 @@ export async function queryAudit(f: AuditFilters, take = 50) {
   const page = rows.slice(0, take);
   const actorIds = [...new Set(page.flatMap((r) => [r.userId, (r.metadata as Record<string, unknown> | null)?.targetEmployeeId as string | undefined]).filter((x): x is string => !!x))];
   const names = new Map((await prisma.employee.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
-  return { entries: page.map((r) => describe(r, names)), next: rows.length > take ? `${page[page.length - 1].occurredAt.toISOString()}|${page[page.length - 1].id}` : null };
+  return { entries: page.map((r) => describe(r, names, lang)), next: rows.length > take ? `${page[page.length - 1].occurredAt.toISOString()}|${page[page.length - 1].id}` : null };
 }
 
 const riyadh = (iso: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "medium", timeZone: "Asia/Riyadh", hourCycle: "h23" }).format(new Date(iso));

@@ -210,7 +210,7 @@ function AddPurchasePane({
           <div className="hr-stack" style={{ gap: 12, padding: 12, borderRadius: 9, background: "var(--surface-subtle)" }}>
             <span className="hr-label">{t("newSupplierSection")}</span>
             <Field label={`${t("supplierName")} *`}>
-              <input className="hr-input" value={form.newSupplierName} onChange={(e) => set("newSupplierName", e.target.value)} placeholder="مثال: شركة المحمصة للتوريد" />
+              <input className="hr-input" value={form.newSupplierName} onChange={(e) => set("newSupplierName", e.target.value)} placeholder={lang === "ar" ? "مثال: شركة المحمصة للتوريد" : "e.g. Roastery Supply Co."} />
             </Field>
             <Field label={t("supplierContact")}>
               <input className="hr-input" dir="ltr" value={form.newSupplierContact} onChange={(e) => set("newSupplierContact", e.target.value)} placeholder="+966 5x xxx xxxx" />

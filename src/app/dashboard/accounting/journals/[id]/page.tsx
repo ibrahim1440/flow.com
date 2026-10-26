@@ -7,7 +7,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { OpsLoading, Btn, Field } from "@/components/ops/ui";
 import { Dialog } from "@/components/hr/ui";
-import { AcctShell, Msg, StatusTag, STATUS_AR, TYPE_AR, money, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../../_ui/shell";
+import { AcctShell, Msg, StatusTag, STATUS_AR, TYPE_AR, money, sourceLabel, todayRiyadh, useApi, useLang, useWrite, type Setup } from "../../_ui/shell";
 import { JournalEditor } from "../../_ui/journal-editor";
 
 type Line = { id: string; lineNo: number | null; debit: string; credit: string; description: string | null; branchId: string | null; costCenterId: string | null; partyType: string | null; partyId: string | null; itemType: string | null; itemId: string | null; account: { id: string; code: string; nameAr: string | null; nameEn: string; controlType: string | null } };
@@ -80,7 +80,7 @@ export default function JournalPage({ params }: { params: Promise<{ id: string }
           <section className="acct-card">
             <dl className="acct-kv-grid">
               <div><dt>{L("الوصف", "Description")}</dt><dd>{e.description ?? "—"}</dd></div>
-              <div><dt>{L("المصدر", "Source")}</dt><dd>{e.sourceType ? (e.sourceHref ? <Link href={e.sourceHref} data-testid="je-source">{e.sourceType} · {e.sourceId}</Link> : <span className="acct-code">{e.sourceType} · {e.sourceId}</span>) : (e.sourceModule === "manual" ? L("قيد يدوي", "Manual journal") : e.sourceModule)}{e.sourceEvent ? <span className="acct-hint"> · {e.sourceEvent}</span> : null}</dd></div>
+              <div><dt>{L("المصدر", "Source")}</dt><dd>{e.sourceType ? (e.sourceHref ? <Link href={e.sourceHref} data-testid="je-source">{e.sourceType} · {e.sourceId}</Link> : <span className="acct-code">{e.sourceType} · {e.sourceId}</span>) : (e.sourceModule === "manual" ? L("قيد يدوي", "Manual journal") : sourceLabel(e.sourceModule, L))}{e.sourceEvent ? <span className="acct-hint"> · {e.sourceEvent}</span> : null}</dd></div>
               <div><dt>{L("أعدّه", "Prepared by")}</dt><dd>{who(e.createdBy)}</dd></div>
               <div><dt>{L("اعتمده", "Approved by")}</dt><dd>{who(e.approvedBy)}{e.sodBypass ? <span className="hr-flag tone-warning" style={{ marginInlineStart: 6 }}><span>{L("الوضع المبسّط: اعتمد المُعدّ قيده", "Simple mode: self-approved")}</span></span> : null}</dd></div>
               <div><dt>{L("رحّله", "Posted by")}</dt><dd>{who(e.postedBy)}</dd></div>

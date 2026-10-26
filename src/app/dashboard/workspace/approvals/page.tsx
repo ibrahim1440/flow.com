@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { Notice, OpsBanner, OpsEmpty, OpsError, OpsLoading, useL } from "@/components/ops/ui";
 import { ago } from "@/lib/workspace/format";
-import { TypeChip, WsPage, WsShell, useLang, useNow, useSelection, useWs, type ApprovalItem } from "../_components/kit";
+import { TypeChip, approvalTitle, WsPage, WsShell, useLang, useNow, useSelection, useWs, type ApprovalItem } from "../_components/kit";
 import { DecisionPane } from "../_components/approval-ui";
 
 type Inbox = { items: ApprovalItem[]; counts: Record<string, number>; total: number; unavailable: string[] };
@@ -43,7 +43,7 @@ export default function ApprovalsPage() {
               <li key={i.key} className={`ws-row${key === i.key ? " is-selected" : ""}`}>
                 <TypeChip type={i.type} />
                 <button type="button" className="ws-row-main" onClick={() => setKey(i.key)} aria-current={key === i.key || undefined} data-testid={`approval-${i.type}`}>
-                  <span className="ws-row-title">{i.title}{i.subject ? ` · ${i.subject}` : ""}</span>
+                  <span className="ws-row-title">{approvalTitle(i, lang)}</span>
                   <span className="ws-row-meta">
                     {i.requester ? <span>{i.requester}</span> : null}
                     <span>{ago(i.createdAt, lang, now)}</span>

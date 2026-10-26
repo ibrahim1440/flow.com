@@ -2,7 +2,8 @@
 
 import { useState, useEffect, use } from "react";
 import CuppingForm, { type CuppingFormData } from "@/app/dashboard/cupping/CuppingForm";
-import { GuestShell, type GuestLang } from "../GuestShell";
+import { GuestShell } from "../GuestShell";
+import { useGuestLang } from "@/app/guest-cupping/guest-lang";
 
 type SessionInfo = { id: string; name: string; status: string };
 
@@ -14,7 +15,8 @@ type Step = "loading" | "closed" | "not-found" | "name" | "form" | "done";
 export default function GuestCuppingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
 
-  const [lang, setLang] = useState<GuestLang>("ar");
+  // Owner language decision 2: the guest's browser language first; the toggle switches.
+  const [lang, setLang] = useGuestLang();
   const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [step, setStep] = useState<Step>("loading");

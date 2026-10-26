@@ -99,7 +99,7 @@ export default function ImportDialog({
           </h2>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={ar ? "إغلاق" : "Close"}
             className="text-oo-text-muted hover:text-oo-text-primary text-xl font-black px-2"
           >
             ×

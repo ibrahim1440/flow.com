@@ -36,7 +36,7 @@ type Device = { ref: string; current: boolean; device: DeviceInfo; firstSeenAt: 
 type Activity = { at: string; action: string; result: string; reasonCode: string | null; device: DeviceInfo };
 type SignIn = { at: string; method: string; device: DeviceInfo } | null;
 type Security = {
-  account: { name: string; username: string | null; role: string; createdAt: string; hasPassword: boolean; passwordChangedAt: string | null; pinChangedAt: string | null; mfaEnrolledAt: string | null; phoneNumber: string; preferredLanguage: "ar" | "en"; pinResetRequired?: boolean };
+  account: { name: string; username: string | null; role: string; createdAt: string; hasPassword: boolean; passwordChangedAt: string | null; pinChangedAt: string | null; mfaEnrolledAt: string | null; phoneNumber: string; preferredLanguage: "ar" | "en"; whatsappLanguage?: "ar" | "en" | null; pinResetRequired?: boolean };
   currentSignIn: SignIn; previousSignIn: SignIn;
   sessions: Session[]; devices: Device[]; activity: Activity[]; activityMore: boolean;
 };
@@ -89,6 +89,8 @@ export default function ProfilePage() {
   // ── Preferences (phone, language): same request and messages as before ───────────────────
   const [phoneNumber, setPhoneNumber] = useState("");
   const [preferredLanguage, setPreferredLanguage] = useState<"ar" | "en">(ar ? "ar" : "en");
+  // Owner language decision 3: the language automation WhatsApp messages reach me in.
+  const [waLang, setWaLang] = useState<"system" | "ar" | "en">("system");
   const prefsLoaded = useRef(false);
   const [infoSaving, setInfoSaving] = useState(false);
   const [infoMsg, setInfoMsg] = useState<Msg>(null);
@@ -104,6 +106,7 @@ export default function ProfilePage() {
           prefsLoaded.current = true;
           setPhoneNumber(d.account.phoneNumber ?? "");
           setPreferredLanguage(d.account.preferredLanguage);
+          setWaLang(d.account.whatsappLanguage ?? "system");
         }
       })
       .catch(() => setLoadError(true));
@@ -121,7 +124,7 @@ export default function ProfilePage() {
     setInfoSaving(true);
     setInfoMsg(null);
     try {
-      const res = await fetch("/api/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phoneNumber, preferredLanguage }) });
+      const res = await fetch("/api/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phoneNumber, preferredLanguage, whatsappLanguage: waLang === "system" ? null : waLang }) });
       const text = await res.text();
       let body: { error?: string } = {};
       try { body = text ? JSON.parse(text) : {}; } catch { /* not JSON */ }
@@ -393,6 +396,17 @@ export default function ProfilePage() {
                       </button>
                     ))}
                   </span>
+                </div>
+                <div className="hr-field">
+                  <span className="hr-label" id="pf-walang">{L("لغة رسائل واتساب", "WhatsApp message language")}</span>
+                  <span className="ops-seg pf-seg" role="group" aria-labelledby="pf-walang" data-testid="pf-walang">
+                    {(["system", "ar", "en"] as const).map((v) => (
+                      <button key={v} type="button" aria-pressed={waLang === v} lang={v === "system" ? undefined : v} onClick={() => setWaLang(v)} data-testid={`pf-walang-${v}`}>
+                        {v === "system" ? L("حسب إعداد النظام", "As the system setting") : v === "ar" ? "العربية" : "English"}
+                      </button>
+                    ))}
+                  </span>
+                  <span className="hr-caption">{L("لرسائل الأتمتة التي تصلك على واتساب", "For the automation messages you receive on WhatsApp")}</span>
                 </div>
                 {msg(infoMsg)}
                 <div className="pf-formacts">
