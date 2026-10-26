@@ -177,21 +177,35 @@ export async function reviewPeriod(periodId: string, note: unknown, ctx: AuditCo
   return { ...list, review: rec };
 }
 
+// The checklist of a soft / final close is computed AFTER the period row is locked FOR UPDATE (inside the callback A1's
+// lock / close runs under that lock) and recorded in the same transaction. An engine posting holds the period FOR
+// SHARE until it commits (posting-engine.ts openPeriodFor), so by the time the lock is held every posting of the month
+// has committed, and a later one waits — the recorded checklist sees exactly the books the period is locked with
+// (audit F-3 follow-up). The checklist's reads use their own pooled connections and need no lock, so they cannot
+// deadlock with the held period row.
+type Checklist = Awaited<ReturnType<typeof closeChecklist>>;
+
 /** Soft close: the checklist is recorded, then A1's lock (OPEN → LOCKED). Never blocked: it stops posting so the close can begin. */
 export async function softClosePeriod(periodId: string, note: unknown, ctx: AuditContext) {
-  const list = await closeChecklist(periodId);
+  let list!: Checklist;
   // The record and the lock commit together (a refused lock records nothing).
-  const period = await lockFiscalPeriod(periodId, ctx, (tx) => record(tx, periodId, "SOFT_CLOSE", list, ctx, noteOf(note)));
+  const period = await lockFiscalPeriod(periodId, ctx, async (tx) => {
+    list = await closeChecklist(periodId);
+    return record(tx, periodId, "SOFT_CLOSE", list, ctx, noteOf(note));
+  });
   return { ...list, period };
 }
 
 /** Final close: refused while a check FAILs; a WARN needs a note (recorded). Then A1's close (LOCKED → CLOSED). */
 export async function closePeriodWithChecklist(periodId: string, note: unknown, ctx: AuditContext) {
-  const list = await closeChecklist(periodId);
-  if (list.blocking) throw refuse("CLOSE_BLOCKED", `(${list.checks.filter((c) => c.status === "FAIL").map((c) => c.key).join(", ")})`);
   const n = noteOf(note);
-  if (list.warnings && !n) throw refuse("CLOSE_NOTE_REQUIRED");
-  const period = await closeFiscalPeriodA1(periodId, { ...ctx, reason: n }, (tx) => record(tx, periodId, "CLOSE", list, ctx, n));
+  let list!: Checklist;
+  const period = await closeFiscalPeriodA1(periodId, { ...ctx, reason: n }, async (tx) => {
+    list = await closeChecklist(periodId);
+    if (list.blocking) throw refuse("CLOSE_BLOCKED", `(${list.checks.filter((c) => c.status === "FAIL").map((c) => c.key).join(", ")})`);
+    if (list.warnings && !n) throw refuse("CLOSE_NOTE_REQUIRED");
+    return record(tx, periodId, "CLOSE", list, ctx, n);
+  });
   return { ...list, period };
 }
 
@@ -222,14 +236,18 @@ export async function closeYear(year: number, note: unknown, ctx: AuditContext) 
   if (fy.status === "CLOSED") throw refuse("YEAR_CLOSED");
   const dec = fy.periods.find((p) => p.periodNo === 12);
   if (fy.periods.length !== 12 || !dec || dec.status !== "LOCKED" || fy.periods.some((p) => p.status === "OPEN")) throw refuse("YEAR_NOT_READY");
-  const list = await closeChecklist(dec.id);
-  if (list.blocking) throw refuse("CLOSE_BLOCKED", `(${list.checks.filter((c) => c.status === "FAIL").map((c) => c.key).join(", ")})`);
   const n = noteOf(note);
-  if (list.warnings && !n) throw refuse("CLOSE_NOTE_REQUIRED");
   const accounts = await loadAccountInfo();
   const yearEnd = new Date(Date.UTC(year, 11, 31));
+  let list!: Checklist;
   const result = await prisma.$transaction(async (tx) => {
     await setAuditContext(tx, { ...ctx, reason: n ?? `year-end close ${year}` });
+    // December held first (as softClosePeriod does), then the checklist on the books it is closed with.
+    const held = await tx.$queryRaw<{ status: string }[]>`SELECT "status"::text AS status FROM "FiscalPeriod" WHERE "id" = ${dec.id} FOR UPDATE`;
+    if (held[0]?.status !== "LOCKED") throw refuse("YEAR_NOT_READY");
+    list = await closeChecklist(dec.id);
+    if (list.blocking) throw refuse("CLOSE_BLOCKED", `(${list.checks.filter((c) => c.status === "FAIL").map((c) => c.key).join(", ")})`);
+    if (list.warnings && !n) throw refuse("CLOSE_NOTE_REQUIRED");
     const [re] = [...(await resolveRoles(tx, ["RETAINED_EARNINGS"])).values()];
     // Every P&L account's cumulative balance to the year end (earlier years never closed are closed too).
     const rows = await tx.$queryRaw<{ accountId: string; v: Prisma.Decimal }[]>`

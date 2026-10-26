@@ -29,6 +29,9 @@ export const OPS_REFUSALS = {
   COST_UNIT_INVALID: { status: 400, en: "A unit cost is a decimal ≥ 0 with at most 6 decimals.", ar: "تكلفة الوحدة رقم عشري ≥ 0 بست خانات عشرية كحد أقصى." },
   COST_MOVE_IMMUTABLE: { status: 409, en: "The cost sub-ledger is append-only.", ar: "سجل التكلفة لا يُعدَّل ولا يُحذف." },
   AP_INVOICE_POSTED: { status: 409, en: "A posted supplier invoice is frozen.", ar: "فاتورة المورد المرحّلة مجمّدة." },
+  // Review L-3: the commission payable is kept per employee (party = the HR record), so the ledger refuses an accrual
+  // or a payout for a login that is not linked to an HR employee rather than post it with no party.
+  COMMISSION_NO_HR_PERSON: { status: 409, en: "This sales login is not linked to an employee record in HR, so its commission cannot be booked to the employee's commission payable. Link the login to its HR employee (HR › Employees), then retry.", ar: "حساب المندوب غير مرتبط بسجل موظف في الموارد البشرية، فلا تُقيَّد عمولته على ذمة الموظف. اربط الحساب بسجل الموظف (الموارد البشرية › الموظفون) ثم أعد المحاولة." },
 } satisfies Record<string, R>;
 
 export type OpsRefusalCode = keyof typeof OPS_REFUSALS;

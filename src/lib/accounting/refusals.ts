@@ -61,6 +61,9 @@ export const REFUSALS = {
   SOURCE_DOCUMENT_ENTRY: { status: 409, en: "This entry was posted from a source document: correct it from the document (credit note, cancel, void).", ar: "هذا القيد رُحّل من مستند مصدر؛ يُصحَّح من المستند نفسه (إشعار دائن أو إلغاء أو إبطال)." },
   CLOSING_FINAL: { status: 409, en: "The year-end closing entry is final: reopening a closed year is an owner decision.", ar: "قيد إقفال السنة نهائي؛ إعادة فتح سنة مقفلة قرار للمالك." },
   YEAR_CLOSED: { status: 409, en: "This fiscal year is closed already.", ar: "هذه السنة المالية مقفلة مسبقًا." },
+  // Accounting audit (Oct 2026): F-1 (a closed year takes no posting), F-2 (no TRUNCATE of the books), F-10.
+  YEAR_CLOSED_POSTING: { status: 409, en: "The fiscal year is closed: posting into it is refused.", ar: "السنة المالية مقفلة؛ الترحيل إليها مرفوض." },
+  REVERSAL_OF_REVERSAL: { status: 409, en: "A reversal entry is not reversed again: post the original event again (or a new entry) instead.", ar: "القيد العكسي لا يُعكس مرة أخرى؛ رحّل الحدث الأصلي من جديد أو قيدًا جديدًا." },
   LEDGER_DB: { status: 409, en: "The ledger refused the change.", ar: "رفض دفتر الأستاذ التغيير." },
 } satisfies Record<string, R>;
 
@@ -76,6 +79,7 @@ export function refuse(code: RefusalCode, detail?: string, detailAr?: string): A
 const DB: [RegExp, RefusalCode, string][] = [
   [/LEDGER: a posted journal entry balances/, "UNBALANCED", "قيد مرحّل غير متوازن."],
   [/LEDGER: the fiscal period is closed/, "PERIOD_CLOSED", ""],
+  [/LEDGER: the fiscal year is closed/, "YEAR_CLOSED_POSTING", ""],
   [/LEDGER: an engine entry is never dated before the accounting go-live date/, "BEFORE_GO_LIVE", ""],
   [/LEDGER: a journal line names an active, postable leaf account/, "ACCOUNT_NOT_POSTABLE", ""],
   [/LEDGER: a line on an AR \/ AP control account names its customer or supplier/, "PARTY_REQUIRED", ""],

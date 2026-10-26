@@ -548,13 +548,16 @@ export async function accrualLines(tx: Tx, runId: string): Promise<HrJournalLine
   const out: HrJournalLine[] = [];
   const desc = `Payroll ${run.periodMonth}`;
   // Review P1-B2: adjustments post by their CATEGORY (src/lib/hr/adjustment-categories.ts).
-  const adjItems = await tx.hrPayrollItem.findMany({ where: { line: { runId }, code: { in: ["ADJUSTMENT_EARNING", "ADJUSTMENT_DEDUCTION"] } }, select: { code: true, amount: true, sourceId: true } });
+  const adjItems = await tx.hrPayrollItem.findMany({ where: { line: { runId }, code: { in: ["ADJUSTMENT_EARNING", "ADJUSTMENT_DEDUCTION"] } }, select: { code: true, amount: true, sourceId: true, line: { select: { employeeId: true } } } });
   const cats = new Map((await tx.hrPayrollAdjustment.findMany({ where: { id: { in: adjItems.map((i) => i.sourceId).filter((x): x is string => !!x) } }, select: { id: true, category: true } })).map((a) => [a.id, a.category]));
   for (const i of adjItems) {
     if (i.amount.isZero()) continue;
     const kind = i.code === "ADJUSTMENT_EARNING" ? "EARNING" : "DEDUCTION";
     const cat = (i.sourceId && cats.get(i.sourceId)) || "OTHER_WITH_MEMO";
-    out.push(kind === "EARNING" ? { key: adjustmentPostingKey(kind, cat), debit: i.amount, description: `${desc} · ADJUSTMENT ${cat}` } : { key: adjustmentPostingKey(kind, cat), credit: i.amount, description: `${desc} · DEDUCTIONS ${cat}` });
+    const key = adjustmentPostingKey(kind, cat);
+    // Audit F-5: a commission line clears the employee's own commission payable, so it names the employee.
+    const party = key === "COMMISSION_EXPENSE" ? { party: { type: "EMPLOYEE" as const, id: i.line.employeeId } } : {};
+    out.push(kind === "EARNING" ? { key, debit: i.amount, description: `${desc} · ADJUSTMENT ${cat}`, ...party } : { key, credit: i.amount, description: `${desc} · DEDUCTIONS ${cat}`, ...party });
   }
   for (const g of items) {
     const amt = g._sum.amount ?? ZERO;
@@ -564,7 +567,7 @@ export async function accrualLines(tx: Tx, runId: string): Promise<HrJournalLine
     if (c === "BASIC") out.push({ key: "SALARY_EXPENSE", debit: amt, description: `${desc} · ${c}` });
     else if (c === "HOUSING" || c === "TRANSPORT" || c === "OTHER_ALLOWANCE") out.push({ key: "ALLOWANCE_EXPENSE", debit: amt, description: `${desc} · ${c}` });
     else if (c === "OVERTIME") out.push({ key: "OVERTIME_EXPENSE", debit: amt, description: `${desc} · OVERTIME` });
-    else if (c === "COMMISSION") out.push({ key: "COMMISSION_EXPENSE", debit: amt, description: `${desc} · COMMISSION` });
+    else if (c === "COMMISSION") continue; // per employee, below
     else if (c === "UNPAID_LEAVE") out.push({ key: "SALARY_EXPENSE", credit: amt, description: `${desc} · UNPAID_LEAVE` });
     else if (c === "ADVANCE_INSTALLMENT") out.push({ key: "ADVANCES_RECEIVABLE", credit: amt, description: `${desc} · ADVANCES` });
     else if (c.startsWith("CONTRIB_EE:")) out.push({ key: "CONTRIB_PAYABLE", credit: amt, description: `${desc} · ${c}` });
@@ -572,6 +575,18 @@ export async function accrualLines(tx: Tx, runId: string): Promise<HrJournalLine
       out.push({ key: "EMPLOYER_CONTRIB_EXPENSE", debit: amt, description: `${desc} · ${c}` });
       out.push({ key: "CONTRIB_PAYABLE", credit: amt, description: `${desc} · ${c}` });
     } else throw new HrError(`No posting rule for payroll item ${c}.`, 500);
+  }
+  // Audit F-5: commission paid through payroll clears the commission payable the commission module accrued PER EMPLOYEE
+  // (commissions-gl.ts, party = the HR employee), so each employee's commission is its own line naming that employee —
+  // one line in total left the payable open per employee (−X on each person, +ΣX on no one).
+  const commission = await tx.hrPayrollItem.findMany({ where: { line: { runId }, code: "COMMISSION" }, select: { amount: true, line: { select: { employeeId: true } } } });
+  const byEmployee = new Map<string, Prisma.Decimal>();
+  for (const i of commission) byEmployee.set(i.line.employeeId, (byEmployee.get(i.line.employeeId) ?? ZERO).plus(i.amount));
+  for (const [employeeId, amt] of [...byEmployee].sort(([a], [b]) => a.localeCompare(b))) {
+    if (amt.isZero()) continue;
+    out.push(amt.isNegative()
+      ? { key: "COMMISSION_EXPENSE", credit: amt.negated(), description: `${desc} · COMMISSION`, party: { type: "EMPLOYEE", id: employeeId } }
+      : { key: "COMMISSION_EXPENSE", debit: amt, description: `${desc} · COMMISSION`, party: { type: "EMPLOYEE", id: employeeId } });
   }
   if (run.totalNet.greaterThan(0)) out.push({ key: "SALARIES_PAYABLE", credit: run.totalNet, description: `${desc} · NET` });
   return out;

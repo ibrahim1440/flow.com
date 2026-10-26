@@ -8,7 +8,7 @@ import { assertRolesMapped } from "@/lib/accounting/posting-engine";
 import { getSettings } from "@/lib/accounting/setup";
 import { sodDecision, sodPolicy } from "@/lib/accounting/sod";
 import { emitAutomationEvent } from "@/lib/automation/emit";
-import { ZERO } from "@/lib/accounting/money";
+import { MoneyError, ZERO } from "@/lib/accounting/money";
 import {
   Decimal, addDays, issueProblems, parseBuyer, parseLines, priceInvoice, riyadhStamp, seriesFor,
   type BuyerParticulars, type CleanLine, type InvoiceFamily, type InvoiceKind, type NoteReason, NOTE_REASONS,
@@ -150,7 +150,14 @@ async function assertNotOverInvoiced(tx: Tx, lines: CleanLine[], orderId: string
 }
 
 function lineRows(lines: CleanLine[]) {
-  const priced = priceInvoice(lines);
+  let priced: ReturnType<typeof priceInvoice>;
+  try {
+    priced = priceInvoice(lines);
+  } catch (e) {
+    // Audit F-8: a line whose amounts exceed numeric(18,2) is a coded refusal, never a raw library error (a 500).
+    if (e instanceof MoneyError) throw refuseInv("LINES_INVALID", "A line amount is too large.", "مبلغ أحد البنود أكبر من المسموح.");
+    throw e;
+  }
   return {
     priced,
     rows: lines.map((l, i) => ({

@@ -13,6 +13,7 @@ import { refuse } from "./refusals";
 import { setAuditContext, type AuditContext } from "./audit";
 import { dayText, parseBusinessDay } from "./dates";
 import { ENGINE_MODULES } from "./posting-engine";
+import { payrollAlignment } from "./ops/payroll-alignment";
 
 type Tx = Prisma.TransactionClient;
 const SINGLETON = "singleton";
@@ -47,15 +48,18 @@ export type Readiness = {
   canActivate: boolean;
 };
 
+const PAYROLL_CHECK = { key: "payroll", ar: "حسابات الرواتب في الموارد البشرية مطابقة لأدوار الترحيل", en: "HR's payroll account map matches the posting roles" };
+
 export async function readiness(goLiveOverride?: string | null): Promise<Readiness> {
   const s = await getSettings();
   const goLive = goLiveOverride ? parseBusinessDay(goLiveOverride) : s.goLiveDate;
-  const [accounts, postable, maps, period, posted] = await Promise.all([
+  const [accounts, postable, maps, period, posted, alignment] = await Promise.all([
     prisma.account.count(),
     prisma.account.count({ where: { isActive: true, allowPosting: true, children: { none: {} } } }),
     prisma.accountRole.findMany({ include: { account: { select: { code: true, nameAr: true, nameEn: true } } } }),
     goLive ? prisma.fiscalPeriod.findFirst({ where: { startDate: { lte: goLive }, endDate: { gte: goLive } }, select: { id: true, status: true } }) : Promise.resolve(null),
     enginePosted(),
+    payrollAlignment(),
   ]);
   const byRole = new Map(maps.map((m) => [m.role, m]));
   const roles = ACCOUNT_ROLES.map((r) => {
@@ -70,6 +74,10 @@ export async function readiness(goLiveOverride?: string | null): Promise<Readine
     { key: "roles", ok: missingForActivation.length === 0, ar: "ربط أدوار المرحلة الأولى (فروقات التقريب، حقوق ملكية الأرصدة الافتتاحية)", en: "Phase A1 roles mapped (rounding, opening balance equity)" },
     { key: "goLive", ok: !!goLive, ar: "تاريخ بدء المحاسبة محدد", en: "A go-live date" },
     { key: "period", ok: !!period && period.status === "OPEN", ar: "فترة تاريخ البدء موجودة ومفتوحة", en: "The go-live date's period exists and is open" },
+    // Audit F-6: no HR posting key sits on an account other than its role's (payroll-alignment.ts). A misaligned key
+    // posts payroll where the ledger does not expect it — COMMISSION_EXPENSE off its payable expenses commission twice.
+    // An unmapped key is not a refusal here: HR refuses to post through it on its own.
+    { ...PAYROLL_CHECK, ok: !alignment.rows.some((r) => r.status === "MISALIGNED") },
   ];
   return {
     active: s.accountingActive,
@@ -159,6 +167,15 @@ export async function activate(goLive: string, ctx: AuditContext) {
   if (!r.canActivate) throw refuse("ACTIVATION_NOT_READY", `(${r.checks.filter((c) => !c.ok).map((c) => c.key).join(", ")})`, `(${r.checks.filter((c) => !c.ok).map((c) => c.ar).join("؛ ")})`);
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
+    // Review L-2: the readiness above ran outside this transaction. Hold the settings row and freeze the HR map and the
+    // role map (SHARE: no concurrent insert / update / delete until this commits), then re-check the payroll alignment
+    // on what this activation commits with: a map made MISALIGNED meanwhile rolls the activation back.
+    await tx.$queryRaw`SELECT "id" FROM "AccountingSettings" WHERE "id" = ${SINGLETON} FOR UPDATE`;
+    await tx.$executeRawUnsafe(`LOCK TABLE "HrAccountMap", "HrPayrollAccount", "AccountRole" IN SHARE MODE`);
+    if ((await payrollAlignment(tx)).rows.some((row) => row.status === "MISALIGNED")) {
+      const c = PAYROLL_CHECK;
+      throw refuse("ACTIVATION_NOT_READY", `(${c.key})`, `(${c.ar})`);
+    }
     const now = new Date();
     return tx.accountingSettings.upsert({
       where: { id: SINGLETON },

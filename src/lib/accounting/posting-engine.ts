@@ -235,6 +235,12 @@ export async function checkDimensions(tx: Tx, lines: Pick<NormalLine, "dims">[])
   }
 }
 
+/** The period's committed status, read FOR SHARE (held until the transaction ends). */
+async function lockPeriodShared(tx: Tx, periodId: string): Promise<string | null> {
+  const rows = await tx.$queryRaw<{ status: string }[]>`SELECT "status"::text AS status FROM "FiscalPeriod" WHERE "id" = ${periodId} FOR SHARE`;
+  return rows[0]?.status ?? null;
+}
+
 /**
  * The OPEN period of a business day (creating the Gregorian year on demand). Soft-closed / closed: refused, or —
  * `nextOpenPeriod` — the first day of the earliest OPEN period after it.
@@ -246,15 +252,19 @@ export async function openPeriodFor(tx: Tx, day: Date, policy: "reject" | "nextO
     p = await tx.fiscalPeriod.findFirst({ where: { startDate: { lte: day }, endDate: { gte: day } }, select: { id: true, status: true, endDate: true } });
     if (!p) throw refuse("PERIOD_MISSING", `(${dayText(day)})`, `(${dayText(day)})`);
   }
-  if (p.status === "OPEN" || (p.status === "LOCKED" && opts.allowSoftClosed)) return { id: p.id, day, moved: false };
+  // Audit F-3: hold the period until this transaction ends. A concurrent soft close / close (SELECT … FOR UPDATE in
+  // fiscal-years.ts) then waits for this posting to commit, and its checklist sees it; if the close got there first,
+  // this read waits for it and returns the status it committed.
+  const status = (await lockPeriodShared(tx, p.id)) ?? String(p.status);
+  if (status === "OPEN" || (status === "LOCKED" && opts.allowSoftClosed)) return { id: p.id, day, moved: false };
   if (policy === "nextOpenPeriod") {
     // A5 council fix: a soft-closed December must not stop the floor — the next year is created on demand, as the
     // engine already does for a missing year, so the operation posts on 1 January.
     if (!(await tx.fiscalPeriod.findFirst({ where: { status: "OPEN", startDate: { gt: day } }, select: { id: true } }))) await ensureFiscalYear(tx, day.getUTCFullYear() + 1);
     const next = await tx.fiscalPeriod.findFirst({ where: { status: "OPEN", startDate: { gt: day } }, orderBy: { startDate: "asc" }, select: { id: true, startDate: true } });
-    if (next) return { id: next.id, day: next.startDate, moved: true };
+    if (next && (await lockPeriodShared(tx, next.id)) === "OPEN") return { id: next.id, day: next.startDate, moved: true };
   }
-  throw p.status === "CLOSED" ? refuse("PERIOD_CLOSED", `(${dayText(day)})`, `(${dayText(day)})`) : refuse("PERIOD_SOFT_CLOSED", `(${dayText(day)})`, `(${dayText(day)})`);
+  throw status === "CLOSED" ? refuse("PERIOD_CLOSED", `(${dayText(day)})`, `(${dayText(day)})`) : refuse("PERIOD_SOFT_CLOSED", `(${dayText(day)})`, `(${dayText(day)})`);
 }
 
 /** The engine's switch: activated, and the day on / after the go-live date. */
@@ -366,6 +376,9 @@ export async function reverseEntry(tx: Tx, input: ReverseEntryInput): Promise<{ 
   if (!original.idempotencyKey || !(ENGINE_MODULES as readonly string[]).includes(original.sourceModule)) throw refuse("NOT_ENGINE_ENTRY");
   if (original.type === "OPENING") throw refuse("OPENING_FINAL");
   if (original.type === "CLOSING") throw refuse("CLOSING_FINAL"); // A5: the year-end close is final
+  // Audit F-10: a reversal is not reversed again (the original would stay REVERSED while its effect came back); the
+  // event is posted again under its own key instead.
+  if (original.type === "REVERSAL") throw refuse("REVERSAL_OF_REVERSAL");
   const key = `reversal:${original.id}`;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"je:" + key}, 0))`;
   const prior = await tx.journalEntry.findUnique({ where: { tenantId_idempotencyKey: { tenantId: "hiqbah", idempotencyKey: key } }, select: { id: true } });

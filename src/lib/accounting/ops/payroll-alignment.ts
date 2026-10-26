@@ -3,6 +3,7 @@
 // that flowcom_app never writes); A3 requires each of its account keys to sit on the account of the matching posting
 // role, so the payroll journals land where the rest of the ledger expects them. This is a READ-ONLY readiness check:
 // a mismatch is changed through HR's own account map (second-person approved), never from here.
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 
 /** HR posting key → the posting role whose account it must use (null: no A3 role — the accountant's choice). */
@@ -27,12 +28,12 @@ export const HR_KEY_ROLE: Record<string, { role: string | null; why: string }> =
 
 export type AlignmentRow = { key: string; role: string | null; why: string; hrAccount: { id: string; code: string; name: string } | null; roleAccount: { id: string; code: string; name: string } | null; status: "ALIGNED" | "MISALIGNED" | "HR_UNMAPPED" | "ROLE_UNMAPPED" | "NO_ROLE" };
 
-export async function payrollAlignment(): Promise<{ rows: AlignmentRow[]; aligned: boolean; hrAccountingEnabled: boolean }> {
-  const [maps, roles, hr] = await Promise.all([
-    prisma.hrAccountMap.findMany({ include: { account: { select: { id: true, code: true, nameAr: true, nameEn: true } } } }),
-    prisma.accountRole.findMany({ where: { tenantId: "hiqbah" }, include: { account: { select: { id: true, code: true, nameAr: true, nameEn: true } } } }),
-    prisma.hrSettings.findUnique({ where: { id: "singleton" }, select: { accountingEnabled: true } }),
-  ]);
+/** `db`: a transaction to read the map inside (the activation re-checks it under lock, setup.ts). Reads run in turn,
+ *  so the same transaction client can serve them. */
+export async function payrollAlignment(db: Prisma.TransactionClient | typeof prisma = prisma): Promise<{ rows: AlignmentRow[]; aligned: boolean; hrAccountingEnabled: boolean }> {
+  const maps = await db.hrAccountMap.findMany({ include: { account: { select: { id: true, code: true, nameAr: true, nameEn: true } } } });
+  const roles = await db.accountRole.findMany({ where: { tenantId: "hiqbah" }, include: { account: { select: { id: true, code: true, nameAr: true, nameEn: true } } } });
+  const hr = await db.hrSettings.findUnique({ where: { id: "singleton" }, select: { accountingEnabled: true } });
   const acc = (a: { id: string; code: string; nameAr: string | null; nameEn: string }) => ({ id: a.id, code: a.code, name: a.nameAr ?? a.nameEn });
   const hrOf = new Map(maps.map((m) => [m.key, acc(m.account)]));
   const roleOf = new Map(roles.map((r) => [r.role, acc(r.account)]));

@@ -56,7 +56,8 @@ const reasonOf = (r: unknown) => {
 async function withPeriod<T>(id: string, ctx: AuditContext, fn: (tx: Tx, p: { id: string; status: string; reopenCount: number }) => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await setAuditContext(tx, ctx);
-    // Locked for the decision: a concurrent post / close of the same period waits.
+    // Locked for the decision: a concurrent post / close of the same period waits (the engine holds the period FOR SHARE
+    // from the moment it reads its status: posting-engine.ts openPeriodFor).
     const rows = await tx.$queryRaw<{ id: string; status: string; reopenCount: number }[]>`
       SELECT "id", "status"::text AS status, "reopenCount" FROM "FiscalPeriod" WHERE "id" = ${id} FOR UPDATE`;
     if (!rows.length) throw refuse("NOT_FOUND");
@@ -78,6 +79,11 @@ export async function unlockFiscalPeriod(id: string, reason: unknown, ctx: Audit
   const why = reasonOf(reason);
   return withPeriod(id, { ...ctx, reason: why }, async (tx, p) => {
     if (p.status !== "LOCKED") throw refuse("PERIOD_STATE", `(${p.status})`);
+    // Audit F-1: the year-end close leaves January–November LOCKED; unlocking one of them would let P&L postings land
+    // after the closing entry. A month of a closed year stays shut, as for reopen below (the database refuses the
+    // posting too: ledger_closed_year_guard).
+    const fy = await tx.fiscalPeriod.findUnique({ where: { id }, select: { fiscalYear: { select: { status: true } } } });
+    if (fy?.fiscalYear?.status === "CLOSED") throw refuse("YEAR_CLOSED");
     return tx.fiscalPeriod.update({ where: { id }, data: { status: "OPEN" } });
   });
 }

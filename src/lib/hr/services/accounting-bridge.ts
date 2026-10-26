@@ -24,14 +24,32 @@ import { accountingOffRefusal, assertJournalIntact, externalAccountingTreatment,
 type Tx = Prisma.TransactionClient;
 const ZERO = new Prisma.Decimal(0);
 
-export type HrJournalLine = { key: AccountKey; debit?: Prisma.Decimal; credit?: Prisma.Decimal; description: string };
+/** `party`: the employee a line belongs to — today the COMMISSION_EXPENSE lines, which clear the commission payable the
+ *  commission module accrued per employee (audit F-5). Integrity checks compare per key / account / side, party aside. */
+export type HrJournalLine = { key: AccountKey; debit?: Prisma.Decimal; credit?: Prisma.Decimal; description: string; party?: { type: "EMPLOYEE"; id: string } };
+
+/**
+ * Audit F-6: once the accounting engine posts (activated, on / after go-live), the commission module expenses each
+ * approved commission itself (Dr COMMISSION_EXPENSE / Cr COMMISSION_PAYABLE, commissions-gl.ts). Payroll's
+ * COMMISSION_EXPENSE key must then sit on the COMMISSION_PAYABLE account, so the payout clears the payable; on any other
+ * account the same commission is expensed a second time. Refused here (and the activation checks the whole map:
+ * setup.ts readiness, payroll-alignment.ts).
+ */
+async function assertCommissionKeyAligned(tx: Tx, date: Date, mappedAccountId: string | undefined): Promise<void> {
+  const acc = await tx.accountingSettings.findUnique({ where: { id: "singleton" }, select: { accountingActive: true, goLiveDate: true } });
+  if (!acc?.accountingActive || !acc.goLiveDate || date < acc.goLiveDate) return;
+  const role = await tx.accountRole.findUnique({ where: { tenantId_role: { tenantId: "hiqbah", role: "COMMISSION_PAYABLE" } }, select: { accountId: true } });
+  if (role && mappedAccountId && role.accountId !== mappedAccountId) {
+    throw new HrError("The HR key COMMISSION_EXPENSE must use the commissions payable account while accounting posts (the commission was already expensed when approved): align the HR account map first.", 409, "ACCOUNT_MAP");
+  }
+}
 
 function wrap(e: unknown): never {
   if (e instanceof AccountingError) throw new HrError(`Accounting refused the posting: ${e.message}`, e.status === 409 ? 409 : 400, "ACCOUNTING");
   throw e;
 }
 
-/** Collapse to one line per (key, side, description) and drop zeros. */
+/** Collapse to one line per (key, side, description, party) and drop zeros. */
 export function consolidate(lines: HrJournalLine[]): HrJournalLine[] {
   const m = new Map<string, HrJournalLine>();
   for (const l of lines) {
@@ -40,12 +58,12 @@ export function consolidate(lines: HrJournalLine[]): HrJournalLine[] {
     if (debit.isZero() && credit.isZero()) continue;
     if (debit.greaterThan(0) && credit.greaterThan(0)) throw new HrError("A journal line is either a debit or a credit.", 500);
     const side = debit.greaterThan(0) ? "D" : "C";
-    const k = `${l.key}|${side}|${l.description}`;
+    const k = `${l.key}|${side}|${l.description}|${l.party?.id ?? ""}`;
     const cur = m.get(k);
     if (cur) {
       if (side === "D") cur.debit = (cur.debit ?? ZERO).plus(debit);
       else cur.credit = (cur.credit ?? ZERO).plus(credit);
-    } else m.set(k, { key: l.key, debit: side === "D" ? debit : undefined, credit: side === "C" ? credit : undefined, description: l.description });
+    } else m.set(k, { key: l.key, debit: side === "D" ? debit : undefined, credit: side === "C" ? credit : undefined, description: l.description, ...(l.party ? { party: l.party } : {}) });
   }
   return [...m.values()];
 }
@@ -65,6 +83,7 @@ export async function assertPostingReady(tx: Tx, input: { date: Date; keys: Acco
   const map = await tx.hrAccountMap.findMany({ where: { key: { in: keys } } });
   const missing = keys.filter((k) => !map.some((m) => m.key === k));
   if (missing.length) throw new HrError(`These HR posting keys are not mapped to accounts: ${missing.join(", ")}.`, 409, "ACCOUNT_MAP");
+  if (keys.includes("COMMISSION_EXPENSE")) await assertCommissionKeyAligned(tx, input.date, map.find((m) => m.key === "COMMISSION_EXPENSE")?.accountId);
   try {
     const period = await tx.fiscalPeriod.findFirst({ where: { startDate: { lte: input.date }, endDate: { gte: input.date } } });
     if (!period) throw new HrError(`No fiscal period covers ${dayString(input.date)}.`, 409, "ACCOUNTING");
@@ -117,8 +136,9 @@ export async function postHrJournal(
   const missing = keys.filter((k) => !map.some((m) => m.key === k));
   if (missing.length) throw new HrError(`These HR posting keys are not mapped to accounts: ${missing.join(", ")}.`, 409, "ACCOUNT_MAP");
   const accountOf = new Map(map.map((m) => [m.key, m.accountId]));
+  if (accountOf.has("COMMISSION_EXPENSE")) await assertCommissionKeyAligned(tx, input.date, accountOf.get("COMMISSION_EXPENSE"));
 
-  const jl = lines.map((l) => ({ accountId: accountOf.get(l.key) as string, debit: l.debit ?? ZERO, credit: l.credit ?? ZERO, description: l.description }));
+  const jl = lines.map((l) => ({ accountId: accountOf.get(l.key) as string, debit: l.debit ?? ZERO, credit: l.credit ?? ZERO, description: l.description, partyType: l.party?.type ?? null, partyId: l.party?.id ?? null }));
   try {
     for (const l of jl) assertLineExclusive(l);
     assertDebitEqualsCredit(jl);
@@ -135,7 +155,7 @@ export async function postHrJournal(
         entryDate: input.date, fiscalPeriodId: period.id, type: "AUTO", status: "POSTED", sourceModule: "hr", sourceDocumentId: input.sourceId,
         description: input.description, totalDebit: total, totalCredit: total, createdBy: input.actorId,
         approvedAt: now, approvedBy: input.actorId, postedAt: now, postedBy: input.actorId,
-        lines: { create: jl.map((l) => ({ accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description })) },
+        lines: { create: jl.map((l) => ({ accountId: l.accountId, debit: l.debit, credit: l.credit, description: l.description, partyType: l.partyType, partyId: l.partyId })) },
       },
     });
     const postedLines = postedLinesOf(lines, accountOf);
@@ -186,7 +206,7 @@ export async function reverseHrJournal(
         entryDate: input.date, fiscalPeriodId: period.id, type: "REVERSAL", status: "POSTED", sourceModule: "hr", sourceDocumentId: input.sourceId,
         description: `Reversal: ${original.description ?? ""}`.slice(0, 500), reversesEntryId: original.id, reversalReason: input.reason,
         totalDebit: original.totalCredit, totalCredit: original.totalDebit, createdBy: input.actorId, approvedAt: now, approvedBy: input.actorId, postedAt: now, postedBy: input.actorId,
-        lines: { create: original.lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit, description: l.description })) },
+        lines: { create: original.lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit, description: l.description, partyType: l.partyType, partyId: l.partyId })) },
       },
     });
     // Linked first, then the original is marked: the DB accepts REVERSED only with a linked reversal.

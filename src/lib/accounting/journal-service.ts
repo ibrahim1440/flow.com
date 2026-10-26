@@ -342,6 +342,7 @@ export async function reverseJournalEntry(id: string, who: string | AuditContext
     if (original.reversedByEntry) {
       throw new AccountingError("This journal entry has already been reversed.", 409);
     }
+    if (original.type === "REVERSAL") throw refuse("REVERSAL_OF_REVERSAL"); // audit F-10
     // A journal of the HR module is reversed only through HR (its linked reversal; the database
     // refuses anything else) — a refusal, never a 500 (independent review F7). While payroll is
     // locked it is PAYROLL_LOCKED, as is any journal on a payroll account.

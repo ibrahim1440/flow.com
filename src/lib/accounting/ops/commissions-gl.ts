@@ -2,7 +2,7 @@
 // this only books what it approved and what was paid:
 //   • ACCRUED — when a login's month is approved (no accrual left waiting), and again for every later correction of
 //     an approved month (an adjustment, a reversal against approved figures): Dr COMMISSION_EXPENSE / Cr
-//     COMMISSION_PAYABLE (party = the person, when the login is linked to an HR record) for the difference between
+//     COMMISSION_PAYABLE (party = the person's HR record — required: a login with no HR record is refused) for the difference between
 //     what is approved and what the ledger already holds. `commissions · COMMISSION · <login>:<yyyy-mm> · ACCRUED[.n]`.
 //   • PAID — a standalone payout: Dr COMMISSION_PAYABLE / Cr BANK. `… · PAID.<ledger entry>`.
 //     A payout through payroll posts nothing here: the payroll run's HR journal carries the commission line, and the
@@ -11,7 +11,8 @@
 // Approvals made while the engine posts nothing (before go-live) are recorded as the baseline of the month (part of
 // the opening balances, never posted later — no retro-posting).
 import type { Prisma } from "@/generated/prisma/client";
-import { postEntry } from "../posting-engine";
+import { engineState, postEntry } from "../posting-engine";
+import { opsRefuse } from "./refusals";
 import { Decimal, ZERO, roundMoney } from "../money";
 import { dayText, riyadhDay } from "../dates";
 
@@ -22,6 +23,19 @@ const monthOf = (periodStart: Date) => dayText(riyadhDay(periodStart)).slice(0, 
 async function partyOf(tx: Tx, loginId: string) {
   const p = await tx.hrEmployee.findUnique({ where: { accountId: loginId }, select: { id: true } });
   return p ? { type: "EMPLOYEE" as const, id: p.id } : null;
+}
+
+/**
+ * Review L-3: the employee the commission belongs to, required whenever the engine would post. The payable is kept per
+ * employee (payroll clears it per employee, audit F-5), so a login with no HR record is refused (COMMISSION_NO_HR_PERSON)
+ * instead of being booked with no party. While the engine posts nothing (inactive / before go-live) nothing is refused:
+ * the approval is the baseline of the opening balances, as before. How a commission is computed is unchanged.
+ */
+async function requireParty(tx: Tx, loginId: string) {
+  const party = await partyOf(tx, loginId);
+  if (party) return party;
+  if ((await engineState(tx, riyadhDay())).on) throw opsRefuse("COMMISSION_NO_HR_PERSON", `(${loginId})`);
+  return null;
 }
 
 /** Bring the ledger to the approved total of one login × month (no-op while any accrual awaits approval). */
@@ -35,7 +49,7 @@ export async function syncCommissionPeriod(tx: Tx, employeeId: string, periodSta
   const row = await tx.commissionGlSync.upsert({ where: { employeeId_periodStart: { employeeId, periodStart } }, create: { employeeId, periodStart }, update: {} });
   const delta = target.minus(row.postedTotal).minus(row.baselineTotal);
   if (delta.isZero()) return { posted: ZERO, skipped: ZERO };
-  const party = await partyOf(tx, employeeId);
+  const party = await requireParty(tx, employeeId);
   const month = monthOf(periodStart);
   const amt = delta.abs().toFixed(2);
   const dims = party ? { party } : undefined;
@@ -57,7 +71,7 @@ export async function syncCommissionPeriod(tx: Tx, employeeId: string, periodSta
 
 /** A standalone payout (the payout ledger entry): Dr COMMISSION_PAYABLE / Cr BANK. */
 export async function postCommissionPayout(tx: Tx, a: { ledgerEntryId: string; employeeId: string; periodStart: Date; amount: Decimal; actorId: string }) {
-  const party = await partyOf(tx, a.employeeId);
+  const party = await requireParty(tx, a.employeeId);
   const amt = roundMoney(a.amount).toFixed(2);
   return postEntry(tx, {
     source: { module: "commissions", type: "COMMISSION", id: `${a.employeeId}:${monthOf(a.periodStart)}`, event: `PAID.${a.ledgerEntryId}` },

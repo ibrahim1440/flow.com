@@ -160,9 +160,11 @@ export type CleanLine = InvoiceLineInput & {
 
 const txt = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max) : "");
 const idOrNull = (v: unknown) => (typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v) ? v : null);
-function dec(v: unknown, places: number): Decimal | null {
+/** `intDigits`: the whole digits the column holds (quantity numeric(12,3): 9) — a larger value is a line problem,
+ *  never a raw database error (audit F-8). */
+function dec(v: unknown, places: number, intDigits = 13): Decimal | null {
   const s = typeof v === "number" ? String(v) : typeof v === "string" ? arabicDigits(v).trim() : "";
-  if (!/^\d{1,13}(\.\d+)?$/.test(s)) return null;
+  if (!new RegExp(`^\\d{1,${intDigits}}(\\.\\d+)?$`).test(s)) return null;
   try {
     const d = toDecimal(s);
     return d.equals(d.toDecimalPlaces(places)) ? d : null;
@@ -183,7 +185,7 @@ export function parseLines(raw: unknown, opts: { forIssue?: boolean } = {}): { l
     const r = (r0 && typeof r0 === "object" ? r0 : {}) as RawLine;
     const description = txt(r.description, 300);
     if (!description) p(i, "DESCRIPTION", "اكتب وصف البند.", "Describe the line.");
-    const quantity = dec(r.quantity, 3);
+    const quantity = dec(r.quantity, 3, 9);
     if (!quantity || quantity.lessThanOrEqualTo(0)) p(i, "QUANTITY", "الكمية رقم أكبر من صفر (3 منازل عشرية على الأكثر).", "The quantity is a number above zero (at most 3 decimals).");
     const unitPrice = dec(r.unitPrice, 2);
     if (!unitPrice) p(i, "PRICE", "سعر الوحدة رقم موجب بمنزلتين عشريتين على الأكثر.", "The unit price is a positive number with at most 2 decimals.");
